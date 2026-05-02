@@ -1,0 +1,3 @@
+[workspace]
+resolver = "2"
+members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi"]

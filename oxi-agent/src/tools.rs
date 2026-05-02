@@ -1,64 +1,151 @@
 //! Agent tools system
+//!
+//! This module provides the tool abstraction layer and built-in tools.
 
 use crate::types::ToolDefinition;
-use std::collections::HashMap;
-use std::pin::Pin;
+use async_trait::async_trait;
+use serde_json::Value;
+use std::fmt;
 use std::sync::Arc;
-use parking_lot::RwLock;
+use tokio::sync::oneshot;
 
-/// Tool handler function type
-pub type ToolHandler = Arc<dyn Fn(String) -> Pin<Box<dyn std::future::Future<Output = String> + Send>> + Send + Sync>;
+/// Result type for tool execution
+pub type ToolError = String;
 
-/// Agent tool registry and execution
-#[derive(Default)]
+/// Result of tool execution
+#[derive(Debug)]
+pub struct AgentToolResult {
+    pub success: bool,
+    pub output: String,
+    pub metadata: Option<serde_json::Value>,
+}
+
+impl AgentToolResult {
+    pub fn success(output: impl Into<String>) -> Self {
+        Self {
+            success: true,
+            output: output.into(),
+            metadata: None,
+        }
+    }
+
+    pub fn error(output: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            output: output.into(),
+            metadata: None,
+        }
+    }
+
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
+}
+
+impl fmt::Display for AgentToolResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.output)
+    }
+}
+
+/// Core trait for all agent tools
+#[async_trait]
+pub trait AgentTool: Send + Sync {
+    /// Tool name (used in function calls)
+    fn name(&self) -> &str;
+
+    /// Human-readable label
+    fn label(&self) -> &str;
+
+    /// Description for the model
+    fn description(&self) -> &str;
+
+    /// JSON Schema for parameters
+    fn parameters_schema(&self) -> Value;
+
+    /// Execute the tool
+    async fn execute(
+        &self,
+        tool_call_id: &str,
+        params: Value,
+        signal: Option<oneshot::Receiver<()>>,
+    ) -> Result<AgentToolResult, ToolError>;
+
+    /// Convert to ToolDefinition
+    fn to_definition(&self) -> ToolDefinition {
+        ToolDefinition {
+            name: self.name().to_string(),
+            description: self.description().to_string(),
+            input_schema: serde_json::from_value(self.parameters_schema()).unwrap_or_default(),
+        }
+    }
+}
+
+// Built-in tools
+pub mod read;
+pub mod write;
+pub mod edit;
+pub mod bash;
+
+// Re-export for convenience
+pub use read::ReadTool;
+pub use write::WriteTool;
+pub use edit::EditTool;
+pub use bash::BashTool;
+
+/// Tool registry for managing available tools
+#[derive(Clone)]
 pub struct ToolRegistry {
-    tools: RwLock<HashMap<String, ToolDefinition>>,
-    handlers: RwLock<HashMap<String, ToolHandler>>,
+    tools: Arc<parking_lot::RwLock<std::collections::HashMap<String, Arc<dyn AgentTool>>>>,
+}
+
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            tools: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
+        }
     }
 
-    /// Register a tool with its handler
-    pub fn register<T>(&self, tool: ToolDefinition, handler: T)
-    where
-        T: Fn(String) -> Pin<Box<dyn std::future::Future<Output = String> + Send>> + Send + Sync + 'static,
-    {
-        let name = tool.name.clone();
-        let handler = Arc::new(handler) as ToolHandler;
-        self.tools.write().insert(name.clone(), tool);
-        self.handlers.write().insert(name, handler);
+    /// Register a tool
+    pub fn register(&self, tool: impl AgentTool + 'static) {
+        let name = tool.name().to_string();
+        self.tools.write().insert(name, Arc::new(tool));
     }
 
-    /// Register a simple sync tool
-    pub fn register_sync<F>(&self, name: String, description: String, handler: F)
-    where
-        F: Fn(String) -> String + Send + Sync + 'static,
-    {
-        let definition = ToolDefinition::new(name.clone(), description, HashMap::new());
-        let handler = Arc::new(move |_input: String| {
-            let result = handler(_input);
-            Box::pin(async move { result }) as Pin<Box<dyn std::future::Future<Output = String> + Send>>
-        }) as ToolHandler;
-        self.tools.write().insert(name.clone(), definition);
-        self.handlers.write().insert(name, handler);
+    /// Get a tool by name
+    pub fn get(&self, name: &str) -> Option<Arc<dyn AgentTool>> {
+        self.tools.read().get(name).cloned()
     }
 
-    /// Get all registered tools
-    pub fn get_tools(&self) -> Vec<ToolDefinition> {
+    /// List all registered tool names
+    pub fn names(&self) -> Vec<String> {
+        self.tools.read().keys().cloned().collect()
+    }
+
+    /// Get all tool definitions
+    pub fn definitions(&self) -> Vec<ToolDefinition> {
+        self.tools.read().values().map(|t| t.to_definition()).collect()
+    }
+
+    /// Get all tools as a slice
+    pub fn get_tools(&self) -> Vec<Arc<dyn AgentTool>> {
         self.tools.read().values().cloned().collect()
     }
 
-    /// Check if a tool is registered
-    pub fn has_tool(&self, name: &str) -> bool {
-        self.tools.read().contains_key(name)
-    }
-
-    /// Execute a tool by name
-    pub async fn execute(&self, name: &str, input: String) -> Option<String> {
-        let handler = self.handlers.read().get(name)?.clone();
-        Some(handler(input).await)
+    /// Create a registry with all built-in tools
+    pub fn with_builtins() -> Self {
+        let registry = Self::new();
+        registry.register(ReadTool);
+        registry.register(WriteTool);
+        registry.register(EditTool);
+        registry.register(BashTool);
+        registry
     }
 }

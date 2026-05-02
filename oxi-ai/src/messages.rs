@@ -269,6 +269,34 @@ impl ToolResultMessage {
             timestamp: chrono::Utc::now().timestamp_millis(),
         }
     }
+
+    pub fn text_content(&self) -> Result<String, crate::error::ProviderError> {
+        let mut result = String::new();
+        for block in &self.content {
+            match block {
+                ContentBlock::Text(t) => {
+                    result.push_str(&t.text);
+                    result.push('\n');
+                }
+                ContentBlock::Image(_) => {
+                    result.push_str("[Image]");
+                    result.push('\n');
+                }
+                ContentBlock::Thinking(t) => {
+                    result.push_str(&format!("[Thinking: {}]", t.thinking));
+                    result.push('\n');
+                }
+                ContentBlock::ToolCall(tc) => {
+                    result.push_str(&format!("[Tool: {}]", tc.name));
+                    result.push('\n');
+                }
+                ContentBlock::Unknown(_) => {
+                    // Skip unknown blocks
+                }
+            }
+        }
+        Ok(result.trim().to_string())
+    }
 }
 
 /// Message union
@@ -291,6 +319,46 @@ impl Message {
             Message::Assistant(m) => m.timestamp,
             Message::ToolResult(m) => m.timestamp,
         }
+    }
+
+    /// Get the text content of this message
+    pub fn text_content(&self) -> Result<String, crate::error::ProviderError> {
+        match self {
+            Message::User(m) => {
+                match &m.content {
+                    MessageContent::Text(s) => Ok(s.clone()),
+                    MessageContent::Blocks(blocks) => {
+                        let mut result = String::new();
+                        for block in blocks {
+                            match block {
+                                ContentBlock::Text(t) => {
+                                    result.push_str(&t.text);
+                                    result.push('\n');
+                                }
+                                ContentBlock::Image(_) => {
+                                    result.push_str("[Image]");
+                                    result.push('\n');
+                                }
+                                ContentBlock::Thinking(t) => {
+                                    result.push_str(&t.thinking);
+                                    result.push('\n');
+                                }
+                                ContentBlock::ToolCall(_) => {
+                                    result.push_str("[Tool Call]");
+                                    result.push('\n');
+                                }
+                                ContentBlock::Unknown(_) => {
+                                    result.push_str("[Unknown]");
+                                    result.push('\n');
+                                }
+                            }
+                        }
+                        Ok(result.trim().to_string())
+                    }
+                }
+            }
+            Message::Assistant(m) => Ok(m.text_content()),
+            Message::ToolResult(m) => m.text_content(),        }
     }
 }
 
