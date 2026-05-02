@@ -6,6 +6,7 @@
 //! When a skill is invoked, its content is appended to the system prompt,
 //! giving the agent additional context and instructions for that skill.
 
+pub mod agent_skill;
 pub mod autonomous_loop;
 pub mod brainstorming;
 pub mod context_builder;
@@ -17,7 +18,9 @@ pub mod planner;
 pub mod playwright_cli;
 pub mod reviewer;
 pub mod scout;
+pub mod shell;
 pub mod super_review;
+pub mod wasm;
 pub mod worktree;
 
 use anyhow::{Context, Result};
