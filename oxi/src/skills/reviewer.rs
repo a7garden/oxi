@@ -649,8 +649,11 @@ impl ReviewSession {
         let scope = self.scope.clone()
             .context("Review scope not set — call with_scope() first")?;
 
+        // Clone findings data to avoid borrow conflicts
+        let findings_snapshot: Vec<ReviewFinding> = self.findings.clone();
+
         // Count confirmed findings by severity
-        let confirmed: Vec<&ReviewFinding> = self.confirmed_findings();
+        let confirmed: Vec<&ReviewFinding> = findings_snapshot.iter().filter(|f| f.is_confirmed()).collect();
         let critical_count = confirmed.iter().filter(|f| f.severity == FindingSeverity::Critical).count();
         let important_count = confirmed.iter().filter(|f| f.severity == FindingSeverity::Important).count();
         let minor_count = confirmed.iter().filter(|f| f.severity == FindingSeverity::Minor).count();
@@ -712,7 +715,7 @@ impl ReviewSession {
         }
 
         // Build discarded list
-        let discarded: Vec<DiscardedFinding> = self.findings.iter()
+        let discarded: Vec<DiscardedFinding> = findings_snapshot.iter()
             .filter(|f| matches!(f.verdict, Some(FindingVerdict::FalsePositive) | Some(FindingVerdict::Deferred)))
             .map(|f| DiscardedFinding {
                 description: f.description.clone(),
@@ -734,7 +737,7 @@ impl ReviewSession {
             },
             scope,
             axis_summaries,
-            findings: self.findings.clone(),
+            findings: findings_snapshot,
             overall: OverallAssessment {
                 summary,
                 ready_to_ship,
