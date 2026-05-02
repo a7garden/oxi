@@ -59,12 +59,23 @@ impl Default for Color {
 }
 
 /// A single cell in the terminal grid.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Cell {
     pub char: char,
     pub fg: Color,
     pub bg: Color,
     pub attrs: Attributes,
+}
+
+impl Default for Cell {
+    fn default() -> Self {
+        Self {
+            char: ' ',
+            fg: Color::Default,
+            bg: Color::Default,
+            attrs: Attributes::new(),
+        }
+    }
 }
 
 impl Cell {

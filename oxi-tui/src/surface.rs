@@ -1,6 +1,6 @@
 //! Surface - a 2D grid of cells forming the render buffer.
 
-use crate::cell::{Cell, Color};
+use crate::cell::Cell;
 
 /// A rectangular area in the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

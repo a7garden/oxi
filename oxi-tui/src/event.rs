@@ -1,6 +1,5 @@
 //! Input events for the TUI.
 
-use std::time::Duration;
 
 /// Keyboard key codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

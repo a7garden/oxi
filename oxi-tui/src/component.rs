@@ -1,63 +1,103 @@
-/// Component trait for UI elements that can be rendered
-pub trait Component: Send + Sync {
-    /// Render the component to a vector of strings (one per line)
-    fn render(&self, width: usize) -> Vec<String>;
-    /// Handle input data, returns true if the input was consumed
-    fn handle_input(&mut self, _data: &str) -> bool { false }
-    /// Mark the component as needing re-render
-    fn invalidate(&mut self) {}
-}
+//! Component trait for UI building blocks.
 
-/// Focusable trait for components that can receive keyboard focus
-pub trait Focusable: Component {
-    /// Check if this component currently has focus
-    fn focused(&self) -> bool;
-    /// Set the focus state of this component
-    fn set_focused(&mut self, focused: bool);
-}
+use crate::{Event, Rect, Size, Surface};
 
-/// Container for managing multiple components
-pub struct ComponentContainer {
-    components: Vec<Box<dyn Component>>,
-}
-
-impl ComponentContainer {
-    pub fn new() -> Self {
-        Self {
-            components: Vec::new(),
-        }
+/// Component trait - all UI elements implement this.
+pub trait Component: Send {
+    /// Get the component's name for debugging.
+    fn name(&self) -> &str {
+        std::any::type_name::<Self>()
     }
 
-    pub fn add(&mut self, component: Box<dyn Component>) {
-        self.components.push(component);
+    /// Request a render on the next frame.
+    fn request_render(&mut self);
+
+    /// Check if this component has pending render requests.
+    fn is_dirty(&self) -> bool;
+
+    /// Clear the dirty flag.
+    fn clear_dirty(&mut self);
+
+    /// Handle an input event.
+    /// Returns true if the event was consumed.
+    fn handle_event(&mut self, event: &Event) -> bool;
+
+    /// Render this component into the given surface area.
+    fn render(&mut self, surface: &mut Surface, area: Rect);
+
+    /// Get the component's minimum size.
+    fn min_size(&self) -> Size;
+
+    /// Get desired size, may be larger than min_size.
+    fn desired_size(&self) -> Option<Size> {
+        None
     }
 
-    pub fn render(&self, width: usize) -> Vec<String> {
-        let mut lines = Vec::new();
-        for component in &self.components {
-            lines.extend(component.render(width));
-        }
-        lines
-    }
+    /// Called when this component gains focus.
+    fn on_focus(&mut self) {}
 
-    pub fn handle_input(&mut self, data: &str) -> bool {
-        for component in &mut self.components {
-            if component.handle_input(data) {
-                return true;
-            }
-        }
+    /// Called when this component loses focus.
+    fn on_unfocus(&mut self) {}
+
+    /// Check if this component is currently focused.
+    fn is_focused(&self) -> bool {
         false
     }
 
-    pub fn invalidate(&mut self) {
-        for component in &mut self.components {
-            component.invalidate();
-        }
+    /// Request focus for this component.
+    fn focus(&mut self) {
+        self.on_focus();
+    }
+
+    /// Remove focus from this component.
+    fn unfocus(&mut self) {
+        self.on_unfocus();
     }
 }
 
-impl Default for ComponentContainer {
-    fn default() -> Self {
-        Self::new()
+/// Blanket implementation for Box<dyn Component>.
+impl Component for Box<dyn Component> {
+    fn name(&self) -> &str {
+        self.as_ref().name()
+    }
+
+    fn request_render(&mut self) {
+        self.as_mut().request_render()
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.as_ref().is_dirty()
+    }
+
+    fn clear_dirty(&mut self) {
+        self.as_mut().clear_dirty()
+    }
+
+    fn handle_event(&mut self, event: &Event) -> bool {
+        self.as_mut().handle_event(event)
+    }
+
+    fn render(&mut self, surface: &mut Surface, area: Rect) {
+        self.as_mut().render(surface, area)
+    }
+
+    fn min_size(&self) -> Size {
+        self.as_ref().min_size()
+    }
+
+    fn desired_size(&self) -> Option<Size> {
+        self.as_ref().desired_size()
+    }
+
+    fn on_focus(&mut self) {
+        self.as_mut().on_focus()
+    }
+
+    fn on_unfocus(&mut self) {
+        self.as_mut().on_unfocus()
+    }
+
+    fn is_focused(&self) -> bool {
+        self.as_ref().is_focused()
     }
 }
