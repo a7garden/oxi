@@ -57,7 +57,7 @@ impl GrepTool {
             .map_err(|e| format!("Invalid regex pattern '{}': {}", pattern, e))?;
 
         let mut matches: Vec<String> = Vec::new();
-        Self::grep_walk(root, root, &re, include, &mut matches, max_results).await?;
+        Self::grep_walk(root, root, &re, include, max_results, &mut matches).await?;
 
         if matches.is_empty() {
             Ok("No matches found".to_string())
