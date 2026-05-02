@@ -192,18 +192,23 @@ impl App {
             SkillManager::load_from_dir(std::path::Path::new("/nonexistent")).unwrap()
         });
 
-        // Build agent config
+        // Build agent config from settings
         let system_prompt = build_system_prompt(settings.thinking_level, &[]);
+        let compaction_strategy = if settings.auto_compaction {
+            oxi_ai::CompactionStrategy::Threshold(0.8)
+        } else {
+            oxi_ai::CompactionStrategy::Disabled
+        };
         let config = AgentConfig {
             name: "oxi".to_string(),
             description: Some("oxi CLI agent".to_string()),
             model_id: model_id.clone(),
             system_prompt: Some(system_prompt),
             max_iterations: 10,
-            timeout_seconds: 300,
-            temperature: None,
-            max_tokens: None,
-            compaction_strategy: oxi_ai::CompactionStrategy::Disabled,
+            timeout_seconds: settings.tool_timeout_seconds,
+            temperature: settings.effective_temperature(),
+            max_tokens: settings.effective_max_tokens(),
+            compaction_strategy,
             compaction_instruction: None,
             context_window: 128_000,
         };

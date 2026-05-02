@@ -94,15 +94,9 @@ enum PkgCommands {
     },
 }
 
-/// Parse thinking level from string
+/// Parse thinking level from string (delegates to settings module)
 fn parse_thinking_level(s: &str) -> Option<oxi::settings::ThinkingLevel> {
-    match s.to_lowercase().as_str() {
-        "none" => Some(oxi::settings::ThinkingLevel::None),
-        "minimal" => Some(oxi::settings::ThinkingLevel::Minimal),
-        "standard" => Some(oxi::settings::ThinkingLevel::Standard),
-        "thorough" => Some(oxi::settings::ThinkingLevel::Thorough),
-        _ => None,
-    }
+    oxi::settings::parse_thinking_level(s)
 }
 
 #[tokio::main]
@@ -120,7 +114,7 @@ async fn main() -> Result<()> {
         return handle_subcommand(command).await;
     }
 
-    // Load settings
+    // Load settings (global + project + env layers)
     let mut settings = Settings::load().unwrap_or_default();
 
     // Apply CLI overrides
