@@ -8,6 +8,7 @@ pub mod tools;
 pub mod state;
 pub mod config;
 pub mod agent;
+pub mod compaction;
 
 pub use agent::Agent;
 pub use config::AgentConfig;
@@ -21,6 +22,7 @@ pub mod prelude {
     pub use crate::events::AgentEvent;
     pub use crate::state::{AgentState, SharedState};
     pub use crate::tools::{ToolRegistry, AgentTool, AgentToolResult, ReadTool, WriteTool, EditTool, BashTool};
+    pub use crate::compaction::{CompactedContext, CompactionEvent};
 }
 
 #[cfg(test)]

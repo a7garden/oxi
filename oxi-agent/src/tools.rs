@@ -128,6 +128,13 @@ impl ToolRegistry {
         self.tools.write().insert(name, Arc::new(tool));
     }
 
+    /// Register a tool that is already wrapped in an `Arc`.
+    /// This is the primary path for extensions that produce `Arc<dyn AgentTool>`.
+    pub fn register_arc(&self, tool: Arc<dyn AgentTool>) {
+        let name = tool.name().to_string();
+        self.tools.write().insert(name, tool);
+    }
+
     /// Get a tool by name
     pub fn get(&self, name: &str) -> Option<Arc<dyn AgentTool>> {
         self.tools.read().get(name).cloned()

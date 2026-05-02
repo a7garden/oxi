@@ -91,6 +91,17 @@ impl AgentState {
         self.output_tokens = 0;
     }
 
+    /// Replace all messages (used after compaction)
+    pub fn replace_messages(&mut self, messages: Vec<Message>) {
+        self.messages = messages;
+    }
+
+    /// Estimate token count of current messages
+    pub fn estimate_tokens(&self) -> usize {
+        let json = serde_json::to_string(&self.messages).unwrap_or_default();
+        json.len() / 4 // Rough approximation
+    }
+
     /// Check if state indicates completion
     pub fn is_complete(&self) -> bool {
         self.stop_reason.is_some()
