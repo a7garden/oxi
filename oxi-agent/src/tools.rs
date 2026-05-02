@@ -96,12 +96,18 @@ pub mod read;
 pub mod write;
 pub mod edit;
 pub mod bash;
+pub mod grep;
+pub mod find;
+pub mod ls;
 
 // Re-export for convenience
 pub use read::ReadTool;
 pub use write::WriteTool;
 pub use edit::EditTool;
 pub use bash::BashTool;
+pub use grep::GrepTool;
+pub use find::FindTool;
+pub use ls::LsTool;
 
 /// Tool registry for managing available tools
 #[derive(Clone)]
@@ -162,6 +168,9 @@ impl ToolRegistry {
         registry.register(WriteTool::new());
         registry.register(EditTool::new());
         registry.register(BashTool::new());
+        registry.register(GrepTool::new());
+        registry.register(FindTool::new());
+        registry.register(LsTool::new());
         registry
     }
 }

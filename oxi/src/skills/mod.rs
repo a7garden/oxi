@@ -6,6 +6,7 @@
 //! When a skill is invoked, its content is appended to the system prompt,
 //! giving the agent additional context and instructions for that skill.
 
+pub mod brainstorming;
 pub mod deep_research;
 
 use anyhow::{Context, Result};
