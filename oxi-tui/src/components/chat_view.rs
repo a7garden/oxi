@@ -58,6 +58,12 @@ pub enum ContentBlockDisplay {
         content: String,
         is_error: bool,
     },
+    /// An error message displayed prominently to the user.
+    Error {
+        title: String,
+        message: String,
+        retryable: bool,
+    },
 }
 
 /// Display representation of a single chat message.
@@ -294,11 +300,41 @@ impl ChatView {
     /// Finish streaming with an error.
     pub fn finish_streaming_error(&mut self, error: &str) {
         if let Some(ref mut state) = self.streaming {
-            state.message.content_blocks.push(ContentBlockDisplay::Text {
-                content: format!("\n⚠ Error: {}", error),
+            state.message.content_blocks.push(ContentBlockDisplay::Error {
+                title: "Error".into(),
+                message: error.into(),
+                retryable: false,
             });
         }
         self.finish_streaming();
+    }
+
+    /// Add a standalone error message to the chat.
+    ///
+    /// Use this for errors that happen outside of streaming (e.g. a failed
+    /// retry, a model fallback failure).
+    pub fn add_error(&mut self, title: impl Into<String>, message: impl Into<String>, retryable: bool) {
+        self.add_message(ChatMessageDisplay {
+            role: MessageRole::Assistant,
+            content_blocks: vec![ContentBlockDisplay::Error {
+                title: title.into(),
+                message: message.into(),
+                retryable,
+            }],
+            timestamp: chrono_now_millis(),
+        });
+    }
+
+    /// Stream an error block into the current streaming message.
+    pub fn stream_error(&mut self, title: impl Into<String>, message: impl Into<String>, retryable: bool) {
+        if let Some(ref mut state) = self.streaming {
+            state.message.content_blocks.push(ContentBlockDisplay::Error {
+                title: title.into(),
+                message: message.into(),
+                retryable,
+            });
+            self.dirty = true;
+        }
     }
 
     // ----- Query -----
@@ -381,31 +417,61 @@ impl ChatView {
     // ----- Internal rendering -----
 
     /// Ensure the rendered_lines cache is up to date.
+    ///
+    /// Optimisation: when only the streaming message is dirty (the common
+    /// case during typing), we re-render **only** the streaming portion
+    /// instead of the full message list.  Non-streaming messages are
+    /// cached until a structural change (add / remove / toggle) forces a
+    /// full reflow.
     fn reflow_if_needed(&mut self, width: u16) {
-        let needs_reflow = self.dirty || width != self.last_area_width;
-        if !needs_reflow && !self.rendered_lines_needs_update() {
+        let width_changed = width != self.last_area_width;
+
+        if !self.dirty && !width_changed && !self.rendered_lines_needs_update() {
             return;
         }
-        self.last_area_width = width;
-        self.rendered_lines.clear();
 
-        let mut total_height: u16 = 0;
-
-        for (mi, msg) in self.messages.iter().enumerate() {
-            let rendered = self.render_message(msg, mi, width);
-            total_height = total_height.saturating_add(rendered.lines.len() as u16);
-            self.rendered_lines.push(rendered);
+        if width_changed {
+            self.last_area_width = width;
         }
 
-        // Also render the streaming message if present.
-        if let Some(ref state) = self.streaming {
-            let rendered = self.render_message(&state.message, self.messages.len(), width);
-            total_height = total_height.saturating_add(rendered.lines.len() as u16);
-            self.rendered_lines.push(rendered);
-        }
+        if width_changed || self.dirty {
+            // Full reflow – clear and rebuild everything.
+            self.rendered_lines.clear();
+            let mut total_height: u16 = 0;
 
-        self.content_height = total_height.max(1);
-        self.dirty = false;
+            for (mi, msg) in self.messages.iter().enumerate() {
+                let rendered = self.render_message(msg, mi, width);
+                total_height = total_height.saturating_add(rendered.lines.len() as u16);
+                self.rendered_lines.push(rendered);
+            }
+
+            if let Some(ref state) = self.streaming {
+                let rendered = self.render_message(&state.message, self.messages.len(), width);
+                total_height = total_height.saturating_add(rendered.lines.len() as u16);
+                self.rendered_lines.push(rendered);
+            }
+
+            self.content_height = total_height.max(1);
+            self.dirty = false;
+        } else if self.streaming.is_some() {
+            // Incremental: only update the last entry (the streaming message).
+            // Remove the old streaming entry if it exists.
+            if !self.rendered_lines.is_empty() && self.streaming.is_some() {
+                // The streaming message is always the last rendered entry.
+                self.content_height = self
+                    .content_height
+                    .saturating_sub(self.rendered_lines.last().map(|r| r.lines.len() as u16).unwrap_or(0));
+                self.rendered_lines.pop();
+            }
+
+            if let Some(ref state) = self.streaming {
+                let rendered = self.render_message(&state.message, self.messages.len(), width);
+                self.content_height = self.content_height.saturating_add(rendered.lines.len() as u16);
+                self.rendered_lines.push(rendered);
+            }
+
+            self.content_height = self.content_height.max(1);
+        }
     }
 
     /// Check if rendered lines need update beyond dirty flag.
@@ -539,6 +605,13 @@ impl ChatView {
                 is_error,
             } => {
                 self.render_tool_result_block(tool_name, content, *is_error, max_width, lines);
+            }
+            ContentBlockDisplay::Error {
+                title,
+                message,
+                retryable,
+            } => {
+                self.render_error_block(title, message, *retryable, max_width, lines);
             }
         }
     }
@@ -743,7 +816,75 @@ impl ChatView {
         ));
     }
 
-    /// Helper: build a styled line with left margin.
+    /// Render an error block with prominent styling.
+    fn render_error_block(
+        &self,
+        title: &str,
+        message: &str,
+        retryable: bool,
+        max_width: usize,
+        lines: &mut Vec<RenderedLine>,
+    ) {
+        let error_fg = self.theme.colors.error;
+        let border_fg = self.theme.colors.error;
+        let muted_fg = self.theme.colors.muted;
+
+        // ┌─ ⚠ Error: title ──────
+        let header = format!("┌─ ⚠ {}", title);
+        lines.push(self.make_styled_line(
+            &header,
+            error_fg,
+            Color::Default,
+            self.theme.fonts.bold,
+            ASSISTANT_MARGIN,
+        ));
+
+        // Error message lines
+        for raw_line in message.lines().take(6) {
+            let truncated = if raw_line.len() > max_width.saturating_sub(4) {
+                format!("│ {}…", &raw_line[..max_width.saturating_sub(5)])
+            } else {
+                format!("│ {}", raw_line)
+            };
+            lines.push(self.make_styled_line(
+                &truncated,
+                muted_fg,
+                Color::Default,
+                Attributes::new(),
+                ASSISTANT_MARGIN,
+            ));
+        }
+        let total_lines = message.lines().count();
+        if total_lines > 6 {
+            lines.push(self.make_styled_line(
+                &format!("│ … ({} more lines)", total_lines - 6),
+                muted_fg,
+                Color::Default,
+                Attributes::new().with_italic(),
+                ASSISTANT_MARGIN,
+            ));
+        }
+
+        // Retry hint if applicable
+        if retryable {
+            lines.push(self.make_styled_line(
+                "│ ↻ This error may be temporary – you can retry.",
+                muted_fg,
+                Color::Default,
+                Attributes::new().with_italic(),
+                ASSISTANT_MARGIN,
+            ));
+        }
+
+        // └────────────────────────
+        lines.push(self.make_styled_line(
+            "└─",
+            border_fg,
+            Color::Default,
+            Attributes::new(),
+            ASSISTANT_MARGIN,
+        ));
+    }
     fn make_styled_line(
         &self,
         text: &str,
@@ -1215,13 +1356,14 @@ mod tests {
         assert!(!cv.is_streaming());
         assert_eq!(cv.message_count(), 1);
 
-        // Last block should contain error text
+        // Last block should contain an error block
         let msg = &cv.messages[0];
         let last_block = msg.content_blocks.last().unwrap();
-        if let ContentBlockDisplay::Text { content } = last_block {
-            assert!(content.contains("Error: Connection lost"));
+        if let ContentBlockDisplay::Error { title, message, retryable: _ } = last_block {
+            assert_eq!(title, "Error");
+            assert_eq!(message, "Connection lost");
         } else {
-            panic!("Expected Text block as last block");
+            panic!("Expected Error block as last block, got {:?}", last_block);
         }
     }
 
@@ -1269,5 +1411,76 @@ mod tests {
         );
         // Expanded: header + content + separator = 3 lines (single line content)
         assert!(lines_expanded.len() >= 3);
+    }
+
+    #[test]
+    fn add_error_message() {
+        let mut cv = ChatView::new(test_theme());
+        cv.add_error("Rate Limited", "Too many requests. Please wait.", true);
+        assert_eq!(cv.message_count(), 1);
+        let msg = &cv.messages[0];
+        assert_eq!(msg.content_blocks.len(), 1);
+        if let ContentBlockDisplay::Error { title, message, retryable } = &msg.content_blocks[0] {
+            assert_eq!(title, "Rate Limited");
+            assert_eq!(message, "Too many requests. Please wait.");
+            assert!(retryable);
+        } else {
+            panic!("Expected Error block");
+        }
+    }
+
+    #[test]
+    fn render_error_block_with_retry_hint() {
+        let cv = ChatView::new(test_theme());
+        let mut lines: Vec<RenderedLine> = Vec::new();
+        cv.render_error_block(
+            "Connection Error",
+            "Failed to connect to provider",
+            true, // retryable
+            80,
+            &mut lines,
+        );
+        // Header + message + retry hint + separator
+        assert!(lines.len() >= 3);
+        // Check that the retry hint is present
+        let has_retry_hint = lines.iter().any(|l| {
+            l.cells.iter().any(|c| c.ch == '↻')
+        });
+        assert!(has_retry_hint, "Expected retry hint in rendered error block");
+    }
+
+    #[test]
+    fn render_error_block_without_retry() {
+        let cv = ChatView::new(test_theme());
+        let mut lines: Vec<RenderedLine> = Vec::new();
+        cv.render_error_block(
+            "Fatal",
+            "Something went wrong",
+            false, // not retryable
+            80,
+            &mut lines,
+        );
+        // Header + message + separator
+        assert!(lines.len() >= 2);
+        let has_retry_hint = lines.iter().any(|l| {
+            l.cells.iter().any(|c| c.ch == '↻')
+        });
+        assert!(!has_retry_hint, "Should not have retry hint for non-retryable error");
+    }
+
+    #[test]
+    fn stream_error_into_streaming_message() {
+        let mut cv = ChatView::new(test_theme());
+        cv.start_streaming();
+        cv.stream_text_delta("Thinking...");
+        cv.stream_error("Timeout", "Request timed out", true);
+
+        // Should still be streaming
+        assert!(cv.is_streaming());
+
+        cv.finish_streaming();
+        assert_eq!(cv.message_count(), 1);
+        // Should have Text + Error
+        assert_eq!(cv.messages[0].content_blocks.len(), 2);
     }
 }

@@ -31,4 +31,16 @@ pub enum AgentEvent {
     Usage { input_tokens: usize, output_tokens: usize },
     /// Compaction event
     Compaction { event: CompactionEvent },
+    /// Retry attempt for a transient error
+    Retry {
+        attempt: usize,
+        max_retries: usize,
+        retry_after_secs: u64,
+        reason: String,
+    },
+    /// Falling back to a different model
+    Fallback {
+        from_model: String,
+        to_model: String,
+    },
 }
