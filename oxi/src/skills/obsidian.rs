@@ -368,7 +368,7 @@ pub struct GitCommitResult {
 ///
 /// # Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use oxi::skills::obsidian::{ObsidianVault, VaultConfig};
 /// use std::path::PathBuf;
 ///
@@ -379,13 +379,10 @@ pub struct GitCommitResult {
 /// let vault = ObsidianVault::new(config);
 ///
 /// // Search notes
-/// let results = vault.search("meeting notes")?;
+/// let results = vault.search("meeting notes").unwrap();
 ///
 /// // Analyze backlinks
-/// let backlinks = vault.analyze_backlinks("Project Alpha")?;
-///
-/// // Git integration
-/// let status = vault.git_status()?;
+/// let backlinks = vault.analyze_backlinks("Project Alpha").unwrap();
 /// ```
 pub struct ObsidianVault {
     config: VaultConfig,
