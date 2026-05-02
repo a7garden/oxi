@@ -385,7 +385,7 @@ impl Agent {
                 }
                 ProviderEvent::ToolCallEnd { tool_call, .. } => {
                     // Execute the tool and send results
-                    let tool_call_id = tool_call.id.clone();
+                    let _tool_call_id = tool_call.id.clone();
                     let tool_name = tool_call.name.clone();
                     
                     // Execute tool with progress callback
