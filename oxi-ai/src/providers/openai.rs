@@ -1,11 +1,12 @@
 //! OpenAI-compatible provider implementation
 
 use async_trait::async_trait;
-use std::pin::Pin;
-use futures::{Stream, StreamExt};
+use futures::Stream;
+use futures::stream::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::pin::Pin;
 
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, 
@@ -42,7 +43,7 @@ impl Default for OpenAiProvider {
 }
 
 #[async_trait]
-impl Provider<'_> for OpenAiProvider {
+impl Provider for OpenAiProvider {
     async fn stream(
         &self,
         model: &Model,
@@ -118,39 +119,29 @@ impl Provider<'_> for OpenAiProvider {
             return Err(ProviderError::HttpError(status.as_u16(), body));
         }
         
-        // Create event stream using a helper function
+        // Create event stream
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
-        let stream = OpenAiStream::new(response, provider_name, model_id);
+        
+        let stream = response.bytes_stream()
+            .flat_map(move |chunk| {
+                match chunk {
+                    Ok(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes);
+                        futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
+                    }
+                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                        reason: StopReason::Error,
+                        error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                    }]),
+                }
+            });
         
         Ok(Box::pin(stream))
     }
     
     fn name(&self) -> &str {
         "openai"
-    }
-}
-
-/// Helper struct to implement the stream
-struct OpenAiStream {
-    inner: futures::stream::FlatMap<
-        reqwest::upgrades::Upgrade<futures::StreamBox<impl std::any::Any + Send>>,
-        futures::stream::Iter<std::vec::IntoIter<ProviderEvent>>,
-        fn(std::result::Result<bytes::Bytes, reqwest::Error>) -> futures::stream::Iter<std::vec::IntoIter<ProviderEvent>>
-    >,
-}
-
-impl Stream for OpenAiStream {
-    type Item = ProviderEvent;
-    
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        // Delegate to inner stream
-        // This is a simplified implementation
-        // In practice, we'd need a more sophisticated stream wrapper
-        Pin::new(&mut self.get_mut().inner).poll_next(cx)
     }
 }
 
@@ -350,9 +341,6 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 // SSE chunk structure
 #[derive(Debug, Deserialize)]
 struct SSEChunk {
-    id: Option<String>,
-    #[serde(rename = "model")]
-    model: Option<String>,
     choices: Vec<Choice>,
     usage: Option<UsageInfo>,
 }
@@ -372,16 +360,11 @@ struct Delta {
 
 #[derive(Debug, Deserialize)]
 struct ToolCallDelta {
-    index: Option<usize>,
-    id: Option<String>,
-    #[serde(rename = "type")]
-    type_: Option<String>,
     function: Option<FunctionDelta>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FunctionDelta {
-    name: Option<String>,
     arguments: Option<String>,
 }
 
