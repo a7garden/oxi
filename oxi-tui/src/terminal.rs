@@ -1,8 +1,9 @@
-use std::io::{Write, stdout, stdin};
+use std::io::{Read, Write, stdout, stdin};
 use std::thread;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use crossterm::{execute, cursor, terminal, clear};
+use crossterm::{execute, cursor};
+use crossterm::terminal::{self, ClearType};
 
 /// Terminal trait for abstracting terminal I/O operations
 pub trait Terminal: Send + Sync {
@@ -91,18 +92,21 @@ impl Terminal for ProcessTerminal {
         });
 
         // Initial resize detection
-        let (cols, rows) = Self::detect_size();
-        columns.store(cols, Ordering::SeqCst);
-        rows.store(rows, Ordering::SeqCst);
+        let initial_cols = columns.clone();
+        let initial_rows = rows.clone();
+        let (init_cols, init_rows) = Self::detect_size();
+        initial_cols.store(init_cols, Ordering::SeqCst);
+        initial_rows.store(init_rows, Ordering::SeqCst);
 
         // Resize handler (check periodically)
-        let columns_clone = self.columns.clone();
-        let rows_clone = self.rows.clone();
+        let columns_clone = columns.clone();
+        let rows_clone = rows.clone();
+        let running_clone = running.clone();
         thread::spawn(move || {
             let mut last_cols = columns_clone.load(Ordering::SeqCst);
             let mut last_rows = rows_clone.load(Ordering::SeqCst);
 
-            loop {
+            while running_clone.load(Ordering::SeqCst) {
                 thread::sleep(std::time::Duration::from_millis(500));
                 let (new_cols, new_rows) = Self::detect_size();
 
@@ -148,12 +152,12 @@ impl Terminal for ProcessTerminal {
     }
 
     fn clear_line(&self) {
-        let _ = execute!(stdout(), clear::Clear(crossterm::terminal::ClearType::CurrentLine));
+        let _ = execute!(stdout(), terminal::Clear(ClearType::CurrentLine));
         let _ = stdout().flush();
     }
 
     fn clear_screen(&self) {
-        let _ = execute!(stdout(), clear::Clear(crossterm::terminal::ClearType::All));
+        let _ = execute!(stdout(), terminal::Clear(ClearType::All));
         let _ = stdout().flush();
     }
 }

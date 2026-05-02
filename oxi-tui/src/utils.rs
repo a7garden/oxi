@@ -1,4 +1,4 @@
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Marker string used to identify cursor position in rendered output
 pub const CURSOR_MARKER: &str = "\x1b_pi:c\x07";
@@ -7,7 +7,7 @@ pub const CURSOR_MARKER: &str = "\x1b_pi:c\x07";
 pub fn visible_width(s: &str) -> usize {
     // Strip ANSI escape sequences for width calculation
     let stripped = strip_ansi(s);
-    UnicodeWidthStr::width(&*stripped)
+    UnicodeWidthStr::width(&stripped)
 }
 
 /// Truncate a string to fit within the specified visible width
@@ -17,7 +17,7 @@ pub fn truncate_to_width(s: &str, width: usize) -> String {
     }
 
     let stripped = strip_ansi(s);
-    let visible = &*stripped;
+    let visible: &str = &stripped;
 
     if UnicodeWidthStr::width(visible) <= width {
         return s.to_string();
@@ -65,16 +65,6 @@ fn strip_ansi(s: &str) -> String {
     }
 
     result
-}
-
-trait UnicodeWidthChar {
-    fn width(c: char) -> Option<usize>;
-}
-
-impl UnicodeWidthChar for char {
-    fn width(c: char) -> Option<usize> {
-        Some(UnicodeWidthStr::width(&c.to_string()))
-    }
 }
 
 #[cfg(test)]

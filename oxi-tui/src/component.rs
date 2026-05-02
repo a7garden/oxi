@@ -1,8 +1,5 @@
-use std::thread;
-use std::sync::Arc;
-
 /// Component trait for UI elements that can be rendered
-pub trait Component: Send + dyn {
+pub trait Component: Send + Sync {
     /// Render the component to a vector of strings (one per line)
     fn render(&self, width: usize) -> Vec<String>;
     /// Handle input data, returns true if the input was consumed
