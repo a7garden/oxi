@@ -7,9 +7,8 @@ use anyhow::Result;
 use oxi_agent::{Agent, AgentEvent};
 use oxi_tui::{
     ChatMessageDisplay, ChatView, ContentBlockDisplay, Input, MessageRole,
-    Rect, Surface, Theme, TUI,
+    Surface, Theme,
 };
-use oxi_tui::event::KeyCode;
 use oxi_tui::component::Component;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -44,123 +43,142 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     // Channel for user input → agent execution
     let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
 
-    // Agent worker: runs inline via LocalSet since Agent futures are !Send.
-    let local_set = tokio::task::LocalSet::new();
-    let _agent_handle = local_set.spawn_local(async move {
-        while let Some(prompt) = prompt_rx.recv().await {
-            let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
+    // Spawn agent worker on a dedicated thread with its own LocalSet runtime.
+    // The agent uses non-Send futures internally, so it needs a single-threaded
+    // runtime with LocalSet.
+    let agent_for_thread: Arc<Agent> = Arc::clone(&agent);
+    let ui_tx_for_thread = ui_tx.clone();
+    let agent_handle = std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("Failed to build agent runtime");
+        rt.block_on(async {
+            let local = tokio::task::LocalSet::new();
+            local.run_until(async {
+                while let Some(prompt) = prompt_rx.recv().await {
+                    let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
 
-            // Forward agent events to UI
-            let ui_tx = ui_tx.clone();
-            let event_forwarder = tokio::task::spawn_local(async move {
-                while let Some(event) = event_rx.recv().await {
-                    let ui_event = match event {
-                        AgentEvent::Start { .. } => UiEvent::Start,
-                        AgentEvent::Thinking => UiEvent::Thinking,
-                        AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
-                        AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
-                            id: tool_call.id,
-                            name: tool_call.name,
-                            arguments: tool_call.arguments.to_string(),
-                        },
-                        AgentEvent::ToolStart { tool_name, .. } => UiEvent::TextDelta(
-                            format!("\nRunning: {}...\n", tool_name),
-                        ),
-                        AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
-                            tool_name: String::new(),
-                            content: result.content.chars().take(500).collect(),
-                            is_error: false,
-                        },
-                        AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
-                            tool_name: String::new(),
-                            content: error.clone(),
-                            is_error: true,
-                        },
-                        AgentEvent::Complete { .. } => UiEvent::Complete,
-                        AgentEvent::Error { message } => UiEvent::Error(message),
-                        _ => continue,
-                    };
-                    if ui_tx.send(ui_event).await.is_err() {
-                        break;
-                    }
+                    // Forward agent events to UI
+                    let ui_fwd = ui_tx_for_thread.clone();
+                    let event_forwarder = tokio::task::spawn_local(async move {
+                        while let Some(event) = event_rx.recv().await {
+                            let ui_event = match event {
+                                AgentEvent::Start { .. } => UiEvent::Start,
+                                AgentEvent::Thinking => UiEvent::Thinking,
+                                AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
+                                AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
+                                    id: tool_call.id,
+                                    name: tool_call.name,
+                                    arguments: tool_call.arguments.to_string(),
+                                },
+                                AgentEvent::ToolStart { tool_name, .. } => UiEvent::TextDelta(
+                                    format!("\n\u{2699} Running: {}...\n", tool_name),
+                                ),
+                                AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
+                                    tool_name: String::new(),
+                                    content: result.content.chars().take(500).collect(),
+                                    is_error: false,
+                                },
+                                AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
+                                    tool_name: String::new(),
+                                    content: error.clone(),
+                                    is_error: true,
+                                },
+                                AgentEvent::Complete { .. } => UiEvent::Complete,
+                                AgentEvent::Error { message } => UiEvent::Error(message),
+                                _ => continue,
+                            };
+                            if ui_fwd.send(ui_event).await.is_err() {
+                                break;
+                            }
+                        }
+                    });
+
+                    // Run agent with channel on the local set
+                    let a: Arc<Agent> = Arc::clone(&agent_for_thread);
+                    let _ = a.run_with_channel(prompt, event_tx).await;
+                    let _ = event_forwarder.await;
                 }
-            });
-
-            // Run agent with channel
-            let _ = agent.run_with_channel(prompt, event_tx).await;
-
-            let _ = event_forwarder.await;
-        }
+            }).await;
+        });
     });
 
-    // Build the TUI
-    let terminal = oxi_tui::CrosstermTerminal::new()?;
-    let _tui = TUI::new(terminal);
+    // Build TUI components
+    let mut chat_view = ChatView::new(theme.clone());
+    let mut input = Input::with_placeholder("Type a message... (Ctrl+C to quit)");
+    input.on_focus();
+    let mut is_agent_busy = false;
 
-    // Custom event loop that integrates agent events
     use std::io::{self, Write};
 
-    // Enter alternate screen manually so we control the loop
+    // Enter alternate screen
     crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
     crossterm::execute!(io::stdout(), crossterm::cursor::Hide)?;
     crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
 
-    // We'll manage rendering ourselves to handle the split layout
-    let mut chat_view = ChatView::new(theme.clone());
-    let mut input = Input::with_placeholder("Type a message... (Ctrl+C to quit)");
-    input.on_focus();
     let mut running = true;
-    let mut is_agent_busy = false;
-
-    // Helper to get terminal size
-    fn get_size() -> (u16, u16) {
-        crossterm::terminal::size().unwrap_or((80, 24))
-    }
 
     while running {
-        // Render the layout
-        let (width, height) = get_size();
-        let input_height: u16 = 3; // Input area + border
+        // Get terminal size
+        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        let input_height: u16 = 3;
         let chat_height = height.saturating_sub(input_height);
 
-        // Create surface and render
+        // Create surface and render layout
         let mut surface = Surface::new(width, height);
 
-        // Render chat view
-        let chat_area = Rect::new(0, 0, width, chat_height);
+        // Render chat view in upper area
+        let chat_area = oxi_tui::Rect::new(0, 0, width, chat_height);
         chat_view.render(&mut surface, chat_area);
 
-        // Render separator line
+        // Render separator
         if chat_height < height {
             let sep_y = chat_height;
             for col in 0..width {
-                let cell = oxi_tui::Cell::new('-').with_fg(theme.colors.border);
+                let cell = oxi_tui::Cell::new('\u{2500}').with_fg(theme.colors.border);
                 surface.set(sep_y, col, cell);
             }
 
+            // Render prompt indicator
+            surface.set(
+                chat_height + 1, 0,
+                oxi_tui::Cell::new('\u{276F}').with_fg(theme.colors.primary),
+            );
+
             // Render input area
-            let input_area = Rect::new(2, chat_height + 1, width.saturating_sub(4), 1);
+            let input_area = oxi_tui::Rect::new(2, chat_height + 1, width.saturating_sub(4), 1);
             input.render(&mut surface, input_area);
 
-            // Render prompt indicator
-            let prompt_cell = oxi_tui::Cell::new('>').with_fg(theme.colors.primary);
-            surface.set(chat_height + 1, 0, prompt_cell);
+            // Status indicator in bottom-right
+            let status_text = if is_agent_busy {
+                "\u{25CF} thinking..."
+            } else {
+                ""
+            };
+            let status_fg = if is_agent_busy {
+                theme.colors.warning
+            } else {
+                theme.colors.muted
+            };
+            for (i, ch) in status_text.chars().enumerate() {
+                let col = width as usize - status_text.len() + i;
+                if col < width as usize {
+                    surface.set(
+                        chat_height + 2, col as u16,
+                        oxi_tui::Cell::new(ch).with_fg(status_fg),
+                    );
+                }
+            }
         }
 
-        // Render the surface to terminal
+        // Render surface to terminal
         render_surface_to_terminal(&surface, width, height);
         io::stdout().flush()?;
 
-        // Poll for events (terminal + agent) with timeout
-        let timeout = std::time::Duration::from_millis(33); // ~30fps
+        // Poll for events with timeout (~30fps)
+        let timeout = std::time::Duration::from_millis(33);
 
-        // Drive the local set (agent worker) alongside the event loop
-        // Use run_until to poll the local set
-        // Note: we can't block on the local set here since we need to poll terminal events
-        // Instead, we rely on the async runtime to drive the local_set tasks
-        // The LocalSet tasks will be polled by the runtime when we .await other things
-
-        // Check for terminal input events
         if crossterm::event::poll(timeout)? {
             let event = crossterm::event::read()?;
             match event {
@@ -196,18 +214,6 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         {
                             running = false;
                         }
-                        crossterm::event::KeyCode::Up
-                            if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
-                        {
-                            // Scroll chat up
-                            chat_view.scroll_up(3);
-                        }
-                        crossterm::event::KeyCode::Down
-                            if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
-                        {
-                            // Scroll chat down
-                            chat_view.scroll_down(3);
-                        }
                         crossterm::event::KeyCode::PageUp => {
                             chat_view.scroll_up(10);
                         }
@@ -215,27 +221,36 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             chat_view.scroll_down(10);
                         }
                         _ => {
-                            // Forward to input component
-                            let tui_event = convert_crossterm_key(key);
-                            input.handle_event(&tui_event);
+                            // Forward keyboard events to input component
+                            if let Some(tui_event) = convert_key_event(key) {
+                                input.handle_event(&tui_event);
+                            }
                         }
                     }
                 }
                 crossterm::event::Event::Mouse(mouse) => {
-                    let tui_event = convert_crossterm_mouse(mouse);
-                    // Route mouse scroll to chat view
-                    if mouse.row < chat_height {
-                        chat_view.handle_event(&tui_event);
+                    match mouse.kind {
+                        crossterm::event::MouseEventKind::ScrollUp => {
+                            if mouse.row < chat_height {
+                                chat_view.scroll_up(3);
+                            }
+                        }
+                        crossterm::event::MouseEventKind::ScrollDown => {
+                            if mouse.row < chat_height {
+                                chat_view.scroll_down(3);
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 crossterm::event::Event::Resize(_, _) => {
-                    // Handled on next render cycle via get_size()
+                    // Handled on next render cycle via crossterm::terminal::size()
                 }
                 _ => {}
             }
         }
 
-        // Drain agent events
+        // Drain agent events from the channel
         while let Ok(ui_event) = ui_rx.try_recv() {
             match ui_event {
                 UiEvent::Start => {}
@@ -246,7 +261,6 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     chat_view.stream_text_delta(&text);
                 }
                 UiEvent::ToolCall { id, name, arguments } => {
-                    // End any current thinking block
                     chat_view.stream_thinking_end();
                     chat_view.stream_tool_call(id, name, arguments);
                 }
@@ -254,13 +268,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     chat_view.stream_tool_result(tool_name, content, is_error);
                 }
                 UiEvent::Complete => {
-                    // End thinking if active
                     chat_view.stream_thinking_end();
                     chat_view.finish_streaming();
                     is_agent_busy = false;
-
-                    // Re-render with markdown for the completed message
-                    enhance_last_message_with_markdown(&mut chat_view);
                 }
                 UiEvent::Error(msg) => {
                     chat_view.finish_streaming_error(&msg);
@@ -275,6 +285,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
     // Cleanup
     drop(prompt_tx);
+    let _ = agent_handle.join();
     crossterm::execute!(io::stdout(), crossterm::cursor::Show)?;
     crossterm::execute!(io::stdout(), crossterm::event::DisableMouseCapture)?;
     crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
@@ -283,22 +294,22 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     Ok(())
 }
 
-/// Enhance the last completed assistant message with markdown-parsed content blocks.
-fn enhance_last_message_with_markdown(chat_view: &mut ChatView) {
-    let _ = chat_view;
-}
+// ---------------------------------------------------------------------------
+// Surface rendering
+// ---------------------------------------------------------------------------
 
-/// Render a surface to the terminal using efficient diffing.
+/// Render a surface to the terminal using efficient SGR sequences.
 fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
-    // Begin synchronized update if supported
+    // Begin synchronized update
     print!("\x1b[?2026h");
-
-    // Move cursor to top-left
-    print!("\x1b[H");
+    print!("\x1b[H"); // Move to top-left
 
     let mut last_fg = oxi_tui::Color::Default;
     let mut last_bg = oxi_tui::Color::Default;
-    let mut last_attrs = oxi_tui::Attributes::new();
+    let mut last_bold = false;
+    let mut last_italic = false;
+    let mut last_underline = false;
+    let mut last_strike = false;
 
     for row in 0..height {
         if row > 0 {
@@ -306,16 +317,18 @@ fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
         }
         for col in 0..width {
             if let Some(cell) = surface.get(row, col) {
-                // Optimize: only emit SGR changes
+                // Check if style changed
                 let fg_changed = cell.fg != last_fg;
                 let bg_changed = cell.bg != last_bg;
-                let attrs_changed = cell.attrs != last_attrs;
+                let attrs_changed = cell.attrs.bold != last_bold
+                    || cell.attrs.italic != last_italic
+                    || cell.attrs.underline != last_underline
+                    || cell.attrs.strikethrough != last_strike;
 
                 if fg_changed || bg_changed || attrs_changed {
-                    // Reset to known state, then apply new styles
                     print!("\x1b[0m");
 
-                    // Apply foreground
+                    // Foreground
                     match cell.fg {
                         oxi_tui::Color::Default => {}
                         oxi_tui::Color::Black => print!("\x1b[30m"),
@@ -330,7 +343,7 @@ fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
                         oxi_tui::Color::Rgb(r, g, b) => print!("\x1b[38;2;{};{};{}m", r, g, b),
                     }
 
-                    // Apply background
+                    // Background
                     match cell.bg {
                         oxi_tui::Color::Default => {}
                         oxi_tui::Color::Black => print!("\x1b[40m"),
@@ -345,26 +358,19 @@ fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
                         oxi_tui::Color::Rgb(r, g, b) => print!("\x1b[48;2;{};{};{}m", r, g, b),
                     }
 
-                    // Apply attributes
-                    if cell.attrs.bold {
-                        print!("\x1b[1m");
-                    }
-                    if cell.attrs.italic {
-                        print!("\x1b[3m");
-                    }
-                    if cell.attrs.underline {
-                        print!("\x1b[4m");
-                    }
-                    if cell.attrs.strikethrough {
-                        print!("\x1b[9m");
-                    }
+                    if cell.attrs.bold { print!("\x1b[1m"); }
+                    if cell.attrs.italic { print!("\x1b[3m"); }
+                    if cell.attrs.underline { print!("\x1b[4m"); }
+                    if cell.attrs.strikethrough { print!("\x1b[9m"); }
 
                     last_fg = cell.fg;
                     last_bg = cell.bg;
-                    last_attrs = cell.attrs;
+                    last_bold = cell.attrs.bold;
+                    last_italic = cell.attrs.italic;
+                    last_underline = cell.attrs.underline;
+                    last_strike = cell.attrs.strikethrough;
                 }
 
-                // Write character
                 print!("{}", cell.char);
             } else {
                 print!(" ");
@@ -372,32 +378,39 @@ fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
         }
     }
 
-    // Reset styles
     print!("\x1b[0m");
-
-    // End synchronized update
-    print!("\x1b[?2026l");
+    print!("\x1b[?2026l"); // End synchronized update
 }
 
+// ---------------------------------------------------------------------------
+// Event conversion helpers
+// ---------------------------------------------------------------------------
+
 /// Convert a crossterm key event to an oxi-tui Event.
-fn convert_crossterm_key(key: crossterm::event::KeyEvent) -> oxi_tui::Event {
+/// Returns None for special keys handled separately (Enter, Ctrl+C).
+fn convert_key_event(key: crossterm::event::KeyEvent) -> Option<oxi_tui::Event> {
+    use oxi_tui::event::KeyCode as KC;
+
     let code = match key.code {
-        crossterm::event::KeyCode::Enter => KeyCode::Enter,
-        crossterm::event::KeyCode::Esc => KeyCode::Escape,
-        crossterm::event::KeyCode::Tab => KeyCode::Tab,
-        crossterm::event::KeyCode::Backspace => KeyCode::Backspace,
-        crossterm::event::KeyCode::Delete => KeyCode::Delete,
-        crossterm::event::KeyCode::Up => KeyCode::Up,
-        crossterm::event::KeyCode::Down => KeyCode::Down,
-        crossterm::event::KeyCode::Left => KeyCode::Left,
-        crossterm::event::KeyCode::Right => KeyCode::Right,
-        crossterm::event::KeyCode::Home => KeyCode::Home,
-        crossterm::event::KeyCode::End => KeyCode::End,
-        crossterm::event::KeyCode::PageUp => KeyCode::PageUp,
-        crossterm::event::KeyCode::PageDown => KeyCode::PageDown,
-        crossterm::event::KeyCode::Char(c) => KeyCode::Char(c),
-        crossterm::event::KeyCode::F(n) => KeyCode::F(n),
-        _ => KeyCode::Enter,
+        crossterm::event::KeyCode::Enter => return None,
+        crossterm::event::KeyCode::Char('c')
+            if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+        {
+            return None
+        }
+        crossterm::event::KeyCode::Esc => KC::Escape,
+        crossterm::event::KeyCode::Tab => KC::Tab,
+        crossterm::event::KeyCode::Backspace => KC::Backspace,
+        crossterm::event::KeyCode::Delete => KC::Delete,
+        crossterm::event::KeyCode::Up => KC::Up,
+        crossterm::event::KeyCode::Down => KC::Down,
+        crossterm::event::KeyCode::Left => KC::Left,
+        crossterm::event::KeyCode::Right => KC::Right,
+        crossterm::event::KeyCode::Home => KC::Home,
+        crossterm::event::KeyCode::End => KC::End,
+        crossterm::event::KeyCode::Char(c) => KC::Char(c),
+        crossterm::event::KeyCode::F(n) => KC::F(n),
+        _ => return None,
     };
 
     let modifiers = oxi_tui::KeyModifiers {
@@ -407,24 +420,7 @@ fn convert_crossterm_key(key: crossterm::event::KeyEvent) -> oxi_tui::Event {
         meta: key.modifiers.contains(crossterm::event::KeyModifiers::META),
     };
 
-    oxi_tui::Event::Key(oxi_tui::KeyEvent::with_modifiers(code, modifiers))
-}
-
-/// Convert a crossterm mouse event to an oxi-tui Event.
-fn convert_crossterm_mouse(mouse: crossterm::event::MouseEvent) -> oxi_tui::Event {
-    let kind = match mouse.kind {
-        crossterm::event::MouseEventKind::ScrollUp => oxi_tui::MouseEventKind::ScrollUp,
-        crossterm::event::MouseEventKind::ScrollDown => oxi_tui::MouseEventKind::ScrollDown,
-        crossterm::event::MouseEventKind::Down(_) => oxi_tui::MouseEventKind::Click,
-        _ => oxi_tui::MouseEventKind::Click,
-    };
-
-    oxi_tui::Event::Mouse(oxi_tui::MouseEvent {
-        kind,
-        button: oxi_tui::MouseButton::Left,
-        row: mouse.row,
-        col: mouse.column,
-    })
+    Some(oxi_tui::Event::Key(oxi_tui::KeyEvent::with_modifiers(code, modifiers)))
 }
 
 /// Get current timestamp in milliseconds.
