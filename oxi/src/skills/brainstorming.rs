@@ -1183,15 +1183,11 @@ mod tests {
             .unwrap();
 
         let md = session.render_markdown().unwrap();
-        // Alpha should NOT be marked as chosen
-        let alpha_section = md.split("### Alpha").nth(1).unwrap();
-        assert!(!alpha_section.contains("(chosen)"));
-        // Beta SHOULD be marked as chosen
-        let beta_section = md.split("### Beta").nth(1).unwrap();
-        assert!(beta_section.contains("(chosen)"));
-        // Gamma should NOT be marked as chosen
-        let gamma_section = md.split("### Gamma").nth(1).unwrap();
-        assert!(!gamma_section.contains("(chosen)"));
+        // Beta heading SHOULD include the chosen marker
+        assert!(md.contains("### Beta **(chosen)**"));
+        // Alpha and Gamma headings should NOT include the chosen marker
+        assert!(!md.contains("### Alpha **(chosen)**"));
+        assert!(!md.contains("### Gamma **(chosen)**"));
     }
 
     #[test]
