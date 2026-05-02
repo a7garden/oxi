@@ -423,14 +423,14 @@ impl<'a> InteractiveLoop<'a> {
         self.session.thinking
     }
 
-    /// Get session entries for tree navigation
-    pub fn entries(&self) -> &[session::SessionFileEntry] {
-        self.session.entries()
+    /// Get session file path (if persisting)
+    pub fn session_path(&self) -> Option<&std::path::Path> {
+        self.session.session_path()
     }
 
-    /// Get entry by ID
-    pub fn get_entry(&self, id: &str) -> Option<&session::SessionFileEntry> {
-        self.session.get_entry_by_id(id)
+    /// Flush session to disk
+    pub fn flush_session(&mut self) -> Result<()> {
+        self.session.flush_session()
     }
 
     /// Switch the model used for future LLM calls
