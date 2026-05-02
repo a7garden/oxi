@@ -5,8 +5,12 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use oxi::extensions::ExtensionRegistry;
+use oxi::packages::PackageManager;
 use oxi::session::{SessionManager, AgentMessage};
 use oxi::settings::Settings;
+use oxi::skills::SkillManager;
+use oxi::templates::TemplateManager;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -67,6 +71,27 @@ enum Commands {
         /// Session ID to delete
         session_id: String,
     },
+    /// Package management
+    Pkg {
+        #[command(subcommand)]
+        action: PkgCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum PkgCommands {
+    /// Install a package from a local path or npm:@scope/name
+    Install {
+        /// Package source: a local directory path or npm:@scope/name
+        source: String,
+    },
+    /// List installed packages
+    List,
+    /// Uninstall a package by name
+    Uninstall {
+        /// Package name to uninstall
+        name: String,
+    },
 }
 
 /// Parse thinking level from string
@@ -90,9 +115,9 @@ async fn main() -> Result<()> {
     // Parse arguments
     let args = Args::parse();
 
-    // Handle session commands
+    // Handle subcommands
     if let Some(command) = &args.command {
-        return handle_session_command(command).await;
+        return handle_subcommand(command).await;
     }
 
     // Load settings
@@ -153,21 +178,86 @@ async fn main() -> Result<()> {
 }
 
 /// Handle session-related commands
-async fn handle_session_command(command: &Commands) -> Result<()> {
-    let manager = SessionManager::new().await?;
-
+async fn handle_subcommand(command: &Commands) -> Result<()> {
     match command {
         Commands::Sessions => {
+            let manager = SessionManager::new().await?;
             list_sessions(&manager).await?;
         }
         Commands::Tree { session_id } => {
+            let manager = SessionManager::new().await?;
             show_tree(&manager, session_id).await?;
         }
         Commands::Fork { parent_id, entry_id } => {
+            let manager = SessionManager::new().await?;
             fork_session(&manager, parent_id, entry_id).await?;
         }
         Commands::Delete { session_id } => {
+            let manager = SessionManager::new().await?;
             delete_session(&manager, session_id).await?;
+        }
+        Commands::Pkg { action } => {
+            handle_pkg_command(action)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
+    let mut mgr = PackageManager::new()?;
+
+    match action {
+        PkgCommands::Install { source } => {
+            if source.starts_with("npm:") {
+                let name = source.strip_prefix("npm:").unwrap();
+                let manifest = mgr.install_npm(name)?;
+                println!(
+                    "Installed {} v{} from npm",
+                    manifest.name, manifest.version
+                );
+            } else {
+                let manifest = mgr.install(source)?;
+                println!("Installed {} v{}", manifest.name, manifest.version);
+            }
+        }
+        PkgCommands::List => {
+            let packages = mgr.list();
+            if packages.is_empty() {
+                println!("No packages installed.");
+            } else {
+                println!("{:<30} {:<10} {}", "NAME", "VERSION", "RESOURCES");
+                println!("{:-<30} {:-<10} {:-<20}", "", "", "");
+                for pkg in packages {
+                    let mut resources = Vec::new();
+                    if !pkg.extensions.is_empty() {
+                        resources.push(format!("{} ext", pkg.extensions.len()));
+                    }
+                    if !pkg.skills.is_empty() {
+                        resources.push(format!("{} skill", pkg.skills.len()));
+                    }
+                    if !pkg.prompts.is_empty() {
+                        resources.push(format!("{} prompt", pkg.prompts.len()));
+                    }
+                    if !pkg.themes.is_empty() {
+                        resources.push(format!("{} theme", pkg.themes.len()));
+                    }
+                    println!(
+                        "{:<30} {:<10} {}",
+                        pkg.name,
+                        pkg.version,
+                        if resources.is_empty() {
+                            "-".to_string()
+                        } else {
+                            resources.join(", ")
+                        }
+                    );
+                }
+            }
+        }
+        PkgCommands::Uninstall { name } => {
+            mgr.uninstall(name)?;
+            println!("Uninstalled {}", name);
         }
     }
 
@@ -299,8 +389,16 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
     let mut session = app.run_interactive().await?;
     let mut current_session_id: Option<Uuid> = None;
 
+    // Load prompt templates from ~/.oxi/templates/
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let templates_dir = home.join(".oxi").join("templates");
+    let template_manager = TemplateManager::load_from_dir(&templates_dir)?;
+    if !template_manager.is_empty() {
+        tracing::info!(count = template_manager.len(), "loaded prompt templates");
+    }
+
     println!("oxi CLI - type your message and press Enter. Ctrl+C or 'exit' to quit.");
-    println!("Commands: /sessions, /tree, /fork <entry_id>, /history, /help");
+    println!("Commands: /sessions, /tree, /fork <entry_id>, /model, /skill, /template, /history, /help");
     println!("---");
 
     loop {
@@ -319,7 +417,7 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
 
         // Handle commands
         if line.starts_with('/') {
-            match handle_command(line, &mut session_manager, &mut session, current_session_id).await? {
+            match handle_command(line, &mut session_manager, &mut session, current_session_id, &template_manager, &app).await? {
                 CommandResult::Handled => continue,
                 CommandResult::NewSession(id) => current_session_id = Some(id),
                 CommandResult::Quit => break,
@@ -340,11 +438,63 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
     Ok(())
 }
 
+/// Handle `/template <name> [key=value ...]` — expand a template and send as a message.
+async fn handle_template_expand(
+    line: &str,
+    templates: &TemplateManager,
+    session: &mut oxi::InteractiveLoop<'_>,
+) -> Result<CommandResult> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 2 {
+        println!("Usage: /template <name> [key=value ...]");
+        return Ok(CommandResult::Handled);
+    }
+
+    let name = parts[1];
+
+    // Parse key=value pairs from remaining args
+    let mut vars: HashMap<&str, &str> = HashMap::new();
+    for part in &parts[2..] {
+        if let Some((key, value)) = part.split_once('=') {
+            vars.insert(key, value);
+        } else {
+            println!("Invalid variable format: '{}' (expected key=value)", part);
+            return Ok(CommandResult::Handled);
+        }
+    }
+
+    match templates.render(name, vars) {
+        Ok(rendered) => {
+            println!("Expanded template '{}':", name);
+            println!("---");
+            println!("{}", rendered);
+            println!("---");
+
+            // Send the rendered template as a user message
+            session.send_message(rendered).await?;
+
+            // Print assistant response
+            for msg in session.messages() {
+                if msg.role == "assistant" {
+                    println!("\n◉ {}\n", msg.content);
+                }
+            }
+        }
+        Err(e) => {
+            println!("Template error: {}", e);
+        }
+    }
+
+    Ok(CommandResult::Handled)
+}
+
 async fn handle_command(
     line: &str,
     manager: &mut SessionManager,
     session: &mut oxi::InteractiveLoop<'_>,
     current_session_id: Option<Uuid>,
+    templates: &TemplateManager,
+    app: &oxi::App,
 ) -> Result<CommandResult> {
     match line {
         "/sessions" | "/sessions list" => {
@@ -389,13 +539,132 @@ async fn handle_command(
             }
             Ok(CommandResult::Handled)
         }
+        "/template" | "/templates" => {
+            let names = templates.template_names();
+            if names.is_empty() {
+                println!("No templates found. Add .md files to ~/.oxi/templates/");
+            } else {
+                println!("Templates:");
+                for name in &names {
+                    let tmpl = templates.get(name).unwrap();
+                    if tmpl.variables.is_empty() {
+                        println!("  {} (no variables)", name);
+                    } else {
+                        println!("  {} {{{}}}", name, tmpl.variables.join(", "));
+                    }
+                }
+                println!();
+                println!("Usage: /template <name> [key=value ...]");
+            }
+            Ok(CommandResult::Handled)
+        }
+        "/skill" | "/skills" => {
+            let skills = app.skills();
+            let all_skills = skills.all();
+            if all_skills.is_empty() {
+                println!("No skills found. Add skill directories to ~/.oxi/skills/<name>/SKILL.md");
+            } else {
+                let active = app.active_skills();
+                println!("Skills:");
+                for skill in &all_skills {
+                    let marker = if active.iter().any(|a| a == &skill.name) {
+                        "✓"
+                    } else {
+                        " "
+                    };
+                    println!("  {} {} — {}", marker, skill.name, skill.description);
+                }
+                println!();
+                println!("Usage: /skill <name>     — activate a skill");
+                println!("       /skill off <name> — deactivate a skill");
+            }
+            Ok(CommandResult::Handled)
+        }
         "/help" => {
             println!("Commands:");
-            println!("  /sessions      - List all sessions");
-            println!("  /tree           - Show current session tree");
-            println!("  /fork <id>      - Fork from an entry");
-            println!("  /history        - Show conversation history");
-            println!("  /help           - Show this help");
+            println!("  /sessions       - List all sessions");
+            println!("  /tree            - Show current session tree");
+            println!("  /fork <id>       - Fork from an entry");
+            println!("  /model           - Show current model");
+            println!("  /model <id>      - Switch model (e.g. openai/gpt-4o, anthropic/claude-sonnet-4-20250514)");
+            println!("  /models          - List available models");
+            println!("  /skill           - List available skills");
+            println!("  /skill <name>    - Activate a skill");
+            println!("  /skill off <name> - Deactivate a skill");
+            println!("  /template        - List prompt templates");
+            println!("  /template <name> [key=val ...] - Expand a template");
+            println!("  /history         - Show conversation history");
+            println!("  /help            - Show this help");
+            Ok(CommandResult::Handled)
+        }
+        _ if line.starts_with("/skill off ") => {
+            let name = line["/skill off ".len()..].trim();
+            if name.is_empty() {
+                println!("Usage: /skill off <name>");
+            } else {
+                app.deactivate_skill(name);
+                println!("Deactivated skill: {}", name);
+                let active = app.active_skills();
+                if active.is_empty() {
+                    println!("No active skills.");
+                } else {
+                    println!("Active skills: {}", active.join(", "));
+                }
+            }
+            Ok(CommandResult::Handled)
+        }
+        _ if line.starts_with("/skill ") => {
+            let name = line["/skill ".len()..].trim();
+            if name.is_empty() {
+                println!("Usage: /skill <name>");
+            } else {
+                match app.activate_skill(name) {
+                    Ok(()) => {
+                        println!("Activated skill: {}", name);
+                        let active = app.active_skills();
+                        println!("Active skills: {}", active.join(", "));
+                    }
+                    Err(e) => println!("Error: {}", e),
+                }
+            }
+            Ok(CommandResult::Handled)
+        }
+        _ if line.starts_with("/template ") => {
+            handle_template_expand(line, templates, session).await
+        }
+        "/model" => {
+            let current = session.model_id();
+            println!("Current model: {}", current);
+            Ok(CommandResult::Handled)
+        }
+        _ if line.starts_with("/model ") => {
+            let model_id = line["/model ".len()..].trim();
+            if model_id.is_empty() {
+                println!("Usage: /model <provider/model>");
+                println!("Example: /model openai/gpt-4o");
+            } else {
+                match session.switch_model(model_id) {
+                    Ok(()) => {
+                        println!("Switched model to: {}", model_id);
+                    }
+                    Err(e) => {
+                        println!("Error switching model: {}", e);
+                    }
+                }
+            }
+            Ok(CommandResult::Handled)
+        }
+        "/models" => {
+            let providers = oxi_ai::get_providers();
+            for provider in &providers {
+                let models = oxi_ai::get_models(provider);
+                if !models.is_empty() {
+                    println!("\n{}:", provider);
+                    for model in models {
+                        println!("  {}/{}", provider, model.id);
+                    }
+                }
+            }
             Ok(CommandResult::Handled)
         }
         _ if line.starts_with("/fork ") => {
