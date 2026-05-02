@@ -4,10 +4,9 @@ use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-use tokio::sync::Mutex;
 
 pub struct ReadTool {
     progress_callback: Arc<Mutex<Option<ProgressCallback>>>,
@@ -139,7 +138,7 @@ impl AgentTool for ReadTool {
             .and_then(|v: &Value| v.as_str())
             .ok_or_else(|| "Missing required parameter: path".to_string())?;
 
-        let progress_cb = self.progress_callback.lock().await.clone();
+        let progress_cb = self.progress_callback.lock().unwrap().clone();
         match Self::read_file_impl(path, &progress_cb).await {
             Ok(content) => Ok(AgentToolResult::success(content)),
             Err(e) => Ok(AgentToolResult::error(e)),
@@ -148,9 +147,7 @@ impl AgentTool for ReadTool {
 
     fn on_progress(&self, callback: ProgressCallback) {
         let cb = self.progress_callback.clone();
-        tokio::spawn(async move {
-            let mut guard = cb.lock().await;
-            *guard = Some(callback);
-        });
+        let mut guard = cb.lock().unwrap();
+        *guard = Some(callback);
     }
 }

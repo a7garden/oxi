@@ -5,19 +5,19 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio as StdStdio, Output};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::fs;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::oneshot;
 
 pub struct BashTool {
-    progress_callback: Arc<Mutex<Option<ProgressCallback>>>,
+    progress_callback: Arc<std::sync::Mutex<Option<ProgressCallback>>>,
 }
 
 impl BashTool {
     pub fn new() -> Self {
         Self {
-            progress_callback: Arc::new(Mutex::new(None)),
+            progress_callback: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -184,7 +184,7 @@ impl AgentTool for BashTool {
         let working_dir = params.get("working_dir").and_then(|v: &Value| v.as_str());
         let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
 
-        let progress_cb = self.progress_callback.lock().await.clone();
+        let progress_cb = self.progress_callback.lock().unwrap().clone();
 
         match Self::run_command_impl(command, working_dir, timeout, &progress_cb).await {
             Ok(output) => Ok(AgentToolResult::success(output)),
@@ -194,9 +194,7 @@ impl AgentTool for BashTool {
 
     fn on_progress(&self, callback: ProgressCallback) {
         let cb = self.progress_callback.clone();
-        tokio::spawn(async move {
-            let mut guard = cb.lock().await;
-            *guard = Some(callback);
-        });
+        let mut guard = cb.lock().unwrap();
+        *guard = Some(callback);
     }
 }
