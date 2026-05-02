@@ -2,6 +2,7 @@
 
 use crate::compaction::{CompactedContext as AgentCompactedContext, CompactionEvent};
 use crate::config::AgentConfig;
+use crate::error::AgentError;
 use crate::events::AgentEvent;
 use crate::state::{AgentState, SharedState};
 use crate::tools::{ToolRegistry, AgentTool, AgentToolResult};
@@ -14,8 +15,17 @@ use oxi_ai::{
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+
+/// Maximum retries for transient / rate-limit errors.
+const MAX_RETRIES: usize = 3;
+
+/// Base delay in seconds for exponential back-off.
+const BACKOFF_BASE_SECS: u64 = 2;
+
+/// Default fallback model used when the primary model fails.
+const DEFAULT_FALLBACK_MODEL: &str = "openai/gpt-4o-mini";
 
 /// Mutable agent internals protected by a read-write lock.
 struct AgentInner {
@@ -359,8 +369,51 @@ impl Agent {
 
         let mut stream = {
             let inner = self.config();
-            inner.provider.stream(&model, &context, Some(stream_options)).await
-                .map_err(|e| Error::msg(e.to_string()))?
+            match Self::stream_with_retry(
+                inner.provider.as_ref(),
+                &model,
+                &context,
+                Some(stream_options),
+                &tx,
+            )
+            .await
+            {
+                Ok(s) => s,
+                Err(primary_err) => {
+                    // Retry exhausted – try fallback model
+                    let _ = tx
+                        .send(AgentEvent::Error {
+                            message: format!(
+                                "Primary model failed: {}",
+                                primary_err.user_friendly()
+                            ),
+                        })
+                        .await;
+
+                    let inner2 = self.config();
+                    match self
+                        .try_fallback(
+                            &model,
+                            &context,
+                            Some(StreamOptions {
+                                temperature: inner2.config.temperature,
+                                max_tokens: inner2.config.max_tokens,
+                                ..Default::default()
+                            }),
+                            &tx,
+                            primary_err.to_string(),
+                        )
+                        .await
+                    {
+                        Ok(s) => s,
+                        Err(fallback_err) => {
+                            let msg = fallback_err.user_friendly();
+                            let _ = tx.send(AgentEvent::Error { message: msg.clone() }).await;
+                            return Err(Error::msg(msg));
+                        }
+                    }
+                }
+            }
         };
 
         let mut response_text = String::new();
@@ -420,9 +473,14 @@ impl Agent {
                     });
                 }
                 ProviderEvent::Error { error, .. } => {
-                    let msg = error.text_content();
-                    let _ = tx_clone.send(AgentEvent::Error { message: msg.clone() }).await;
-                    return Err(Error::msg(msg));
+                    let raw_msg = error.text_content();
+                    let friendly = if raw_msg.is_empty() {
+                        "Unknown provider error".to_string()
+                    } else {
+                        raw_msg
+                    };
+                    let _ = tx_clone.send(AgentEvent::Error { message: format!("⚠ {}", friendly) }).await;
+                    return Err(Error::msg(friendly));
                 }
                 _ => {}
             }
@@ -506,5 +564,136 @@ impl Agent {
             on_event(event);
         }
         result
+    }
+
+    // -----------------------------------------------------------------------
+    // Retry & fallback helpers
+    // -----------------------------------------------------------------------
+
+    /// Attempt to stream from the provider with retry + exponential back-off.
+    ///
+    /// On persistent rate-limit or transient errors the method retries up to
+    /// [`MAX_RETRIES`] times with `2^attempt` seconds delay. If all retries
+    /// fail, the error is returned to the caller.
+    async fn stream_with_retry(
+        provider: &dyn Provider,
+        model: &oxi_ai::Model,
+        context: &Context,
+        options: Option<StreamOptions>,
+        tx: &mpsc::Sender<AgentEvent>,
+    ) -> std::result::Result<
+        futures::stream::BoxStream<'static, ProviderEvent>,
+        AgentError,
+    > {
+        let mut last_err: Option<String> = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            match provider.stream(model, context, options.clone()).await {
+                Ok(stream) => return Ok(stream.boxed()),
+                Err(e) => {
+                    let msg = e.to_string();
+                    let is_rate_limit = matches!(
+                        e,
+                        oxi_ai::ProviderError::HttpError(429, _)
+                    );
+
+                    if !is_rate_limit && attempt == 0 {
+                        // Non-retryable, bail immediately.
+                        return Err(AgentError::Stream(msg));
+                    }
+
+                    last_err = Some(msg.clone());
+
+                    if attempt < MAX_RETRIES {
+                        let delay = BACKOFF_BASE_SECS.pow(attempt as u32 + 1);
+                        let _ = tx.send(AgentEvent::Retry {
+                            attempt: attempt + 1,
+                            max_retries: MAX_RETRIES,
+                            retry_after_secs: delay,
+                            reason: msg.clone(),
+                        }).await;
+                        tokio::time::sleep(Duration::from_secs(delay)).await;
+                    }
+                }
+            }
+        }
+
+        Err(AgentError::RetriesExhausted {
+            attempts: MAX_RETRIES,
+            last_error: last_err.unwrap_or_default(),
+        })
+    }
+
+    /// Try a fallback model when the primary model fails.
+    ///
+    /// Returns the streaming response from the fallback, or the combined
+    /// [`AgentError::FallbackFailed`] if both models fail.
+    async fn try_fallback(
+        &self,
+        model: &oxi_ai::Model,
+        context: &Context,
+        options: Option<StreamOptions>,
+        tx: &mpsc::Sender<AgentEvent>,
+        primary_error: String,
+    ) -> std::result::Result<
+        futures::stream::BoxStream<'static, ProviderEvent>,
+        AgentError,
+    > {
+        // Resolve fallback model
+        let fallback_id = DEFAULT_FALLBACK_MODEL;
+        let parts: Vec<&str> = fallback_id.split('/').collect();
+        let fallback_model = if parts.len() >= 2 {
+            get_model(parts[0], &parts[1..].join("/"))
+        } else {
+            None
+        };
+
+        let fallback_model = match fallback_model {
+            Some(m) => m,
+            None => {
+                return Err(AgentError::FallbackFailed {
+                    primary_model: format!("{}/{}", model.provider, model.id),
+                    primary_error,
+                    fallback_model: fallback_id.to_string(),
+                    fallback_error: "Model not found in registry".into(),
+                });
+            }
+        };
+
+        let fallback_provider = match oxi_ai::get_provider(&fallback_model.provider) {
+            Some(p) => p,
+            None => {
+                return Err(AgentError::FallbackFailed {
+                    primary_model: format!("{}/{}", model.provider, model.id),
+                    primary_error,
+                    fallback_model: fallback_id.to_string(),
+                    fallback_error: "Provider not available".into(),
+                });
+            }
+        };
+
+        let _ = tx.send(AgentEvent::Fallback {
+            from_model: format!("{}/{}", model.provider, model.id),
+            to_model: fallback_id.to_string(),
+        }).await;
+
+        // Try streaming with the fallback provider
+        match Self::stream_with_retry(
+            fallback_provider.as_ref(),
+            fallback_model,
+            context,
+            options,
+            tx,
+        )
+        .await
+        {
+            Ok(stream) => Ok(stream),
+            Err(fallback_err) => Err(AgentError::FallbackFailed {
+                primary_model: format!("{}/{}", model.provider, model.id),
+                primary_error,
+                fallback_model: fallback_id.to_string(),
+                fallback_error: fallback_err.to_string(),
+            }),
+        }
     }
 }

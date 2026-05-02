@@ -4,6 +4,7 @@
 
 pub mod types;
 pub mod events;
+pub mod error;
 pub mod tools;
 pub mod state;
 pub mod config;
@@ -12,6 +13,7 @@ pub mod compaction;
 
 pub use agent::Agent;
 pub use config::AgentConfig;
+pub use error::AgentError;
 pub use events::AgentEvent;
 pub use state::{AgentState, SharedState};
 pub use tools::{ToolRegistry, AgentTool, AgentToolResult, ReadTool, WriteTool, EditTool, BashTool};
