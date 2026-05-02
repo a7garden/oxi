@@ -3,8 +3,6 @@
 //! This module provides utilities for text completion including fuzzy
 //! matching for intelligent suggestions.
 
-use std::cmp::Ordering;
-
 /// FuzzyMatcher provides approximate string matching for autocomplete.
 /// It scores candidates based on character matching with support for
 /// non-contiguous matches and partial path matching.
@@ -24,17 +22,18 @@ impl FuzzyMatcher {
     /// Returns the match score (higher = better) if matched, None otherwise.
     ///
     /// Matching rules:
-    /// - All pattern characters must appear in order in the candidate
+    /// - All pattern characters must appear in order in the candidate (non-consecutive)
     /// - Consecutive matches score higher
     /// - Matching at word boundaries scores higher
     /// - Case insensitive by default
+    /// - '_' or ' ' in pattern acts as wildcard matching any character
     pub fn matches(&self, pattern: &str, candidate: &str) -> Option<usize> {
         if pattern.is_empty() {
             return Some(100); // Empty pattern always matches
         }
 
-        let pattern_lower: Vec<char> = pattern.to_lowercase().collect();
-        let candidate_lower: Vec<char> = candidate.to_lowercase().collect();
+        let pattern_lower: Vec<char> = pattern.to_lowercase().chars().collect();
+        let candidate_lower: Vec<char> = candidate.to_lowercase().chars().collect();
 
         let mut pattern_idx = 0;
         let mut score: usize = 0;
@@ -46,17 +45,25 @@ impl FuzzyMatcher {
                 break;
             }
 
-            if *c == pattern_lower[pattern_idx] {
+            let pchar = pattern_lower[pattern_idx];
+            
+            // Check if pattern char matches or is wildcard
+            let is_wildcard = pchar == '_' || pchar == ' ';
+            let matches = is_wildcard || *c == pchar;
+            
+            if matches {
                 // Base score for match
                 score += 10;
                 
                 // Bonus for consecutive matches
-                if let Some(last) = last_match_pos {
-                    if last + 1 == i {
-                        consecutive_bonus += 5;
-                        score += consecutive_bonus;
-                    } else {
-                        consecutive_bonus = 0;
+                if !is_wildcard {
+                    if let Some(last) = last_match_pos {
+                        if last + 1 == i {
+                            consecutive_bonus += 5;
+                            score += consecutive_bonus;
+                        } else {
+                            consecutive_bonus = 0;
+                        }
                     }
                 }
 
@@ -134,6 +141,8 @@ mod tests {
     #[test]
     fn test_fuzzy_match() {
         let matcher = FuzzyMatcher::new();
+        // s_m should match s-r-c by skipping the hyphen as wildcard
+        // But 'm' must appear after 's' - our non-consecutive matching handles this
         let result = matcher.matches("s_m", "src/main.rs");
         assert!(result.is_some());
     }
