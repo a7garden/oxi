@@ -332,7 +332,7 @@ impl Message {
                         for block in blocks {
                             match block {
                                 ContentBlock::Text(t) => {
-                                    result.push_str(&t.text);
+                                    result.push_str(&t.thinking);
                                     result.push('\n');
                                 }
                                 ContentBlock::Image(_) => {
