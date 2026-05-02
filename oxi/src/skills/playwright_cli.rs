@@ -1833,7 +1833,7 @@ mod tests {
     fn test_parse_test_output_from_stderr() {
         let stdout = "";
         let stderr = "3 passed (1.5s)";
-        let (passed, failed, skipped, timed_out, duration_ms) =
+        let (passed, _failed, _skipped, _timed_out, duration_ms) =
             PlaywrightCli::parse_test_output(stdout, stderr);
         assert_eq!(passed, 3);
         assert_eq!(duration_ms, 1500);

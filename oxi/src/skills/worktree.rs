@@ -21,11 +21,13 @@
 //!     let mgr = WorktreeManager::for_current_repo()?;
 //!
 //!     // Create a worktree for a feature branch
-//!     let wt = mgr.create("feat/auth", "../auth-worktree").await?;
+//!     let opts = WorktreeCreateOpts::feature_branch("feat/auth", &std::path::PathBuf::from("."));
+//!     let wt = mgr.create(&opts).await?;
 //!     println!("Created worktree at {}", wt.path.display());
 //!
 //!     // List all worktrees
-//!     for wt in mgr.list().await? {
+//!     let list = mgr.list().await?;
+//!     for wt in &list.worktrees {
 //!         println!("{} [{}] at {}", wt.branch(), wt.commit_short(), wt.path.display());
 //!     }
 //!

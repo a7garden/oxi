@@ -9,7 +9,10 @@ use tokio::fs;
 /// Create a temp directory for test files. Returns the path.
 /// Caller is responsible for cleanup.
 async fn create_temp_dir(name: &str) -> String {
-    let path = format!("/tmp/oxi_tool_test_{}", name);
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = format!("/tmp/oxi_tool_test_{}_{}", name, id);
     let _ = fs::remove_dir_all(&path).await;
     fs::create_dir_all(&path).await.unwrap();
     path

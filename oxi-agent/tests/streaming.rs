@@ -2,7 +2,6 @@
 
 use oxi_agent::prelude::*;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 /// Test that ReadTool emits progress updates for large files
 #[tokio::test]
