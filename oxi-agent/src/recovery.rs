@@ -66,20 +66,15 @@ impl CircuitBreaker {
     }
 
     /// Check if a request is allowed to proceed.
-    ///
-    /// Returns `Ok(())` if the circuit is closed or half-open,
-    /// `Err(CircuitOpenError)` if the circuit is open.
     pub fn allow_request(&self) -> Result<(), CircuitOpenError> {
         let state = self.load_state();
         match state {
             CircuitState::Closed => Ok(()),
             CircuitState::Open => {
-                // Check if cooldown has elapsed
                 let opened_at = self.opened_at.lock();
                 if let Some(t) = *opened_at {
                     if t.elapsed() >= self.config.open_duration {
                         drop(opened_at);
-                        // Transition to half-open
                         self.state.store(CircuitState::HalfOpen as u8, Ordering::SeqCst);
                         self.consecutive_successes.store(0, Ordering::SeqCst);
                         return Ok(());
@@ -105,7 +100,6 @@ impl CircuitBreaker {
             CircuitState::HalfOpen => {
                 let prev = self.consecutive_successes.fetch_add(1, Ordering::SeqCst);
                 if prev + 1 >= self.config.half_open_successes as u64 {
-                    // Close the circuit
                     self.state.store(CircuitState::Closed as u8, Ordering::SeqCst);
                     self.consecutive_failures.store(0, Ordering::SeqCst);
                 }
@@ -121,13 +115,11 @@ impl CircuitBreaker {
             CircuitState::Closed => {
                 let prev = self.consecutive_failures.fetch_add(1, Ordering::SeqCst);
                 if prev + 1 >= self.config.failure_threshold as u64 {
-                    // Open the circuit
                     self.state.store(CircuitState::Open as u8, Ordering::SeqCst);
                     *self.opened_at.lock() = Some(Instant::now());
                 }
             }
             CircuitState::HalfOpen => {
-                // Re-open on failure
                 self.state.store(CircuitState::Open as u8, Ordering::SeqCst);
                 *self.opened_at.lock() = Some(Instant::now());
             }
@@ -287,10 +279,10 @@ mod tests {
 
         cb.record_failure();
         cb.record_failure();
-        assert!(cb.allow_request().is_ok()); // Still closed at 2
+        assert!(cb.allow_request().is_ok());
 
         cb.record_failure();
-        assert!(cb.allow_request().is_err()); // Open at 3
+        assert!(cb.allow_request().is_err());
     }
 
     #[test]
@@ -312,7 +304,7 @@ mod tests {
         pr.push_text("Hello ");
         pr.push_text("world");
         assert_eq!(pr.text(), "Hello world");
-        assert!(pr.take_text().is_empty() == false);
+        assert!(!pr.take_text().is_empty());
         assert!(pr.text().is_empty());
     }
 
