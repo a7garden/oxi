@@ -1,21 +1,26 @@
 //! Read file tool
 
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
+use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncReadExt;
-use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 
-pub struct ReadTool;
+pub struct ReadTool {
+    progress_callback: Arc<Mutex<Option<ProgressCallback>>>,
+}
 
 impl ReadTool {
     pub fn new() -> Self {
-        Self
+        Self {
+            progress_callback: Arc::new(Mutex::new(None)),
+        }
     }
 
-    async fn read_file_impl(path: &str) -> Result<String, ToolError> {
+    async fn read_file_impl(path: &str, progress_cb: &Option<ProgressCallback>) -> Result<String, ToolError> {
         let path = Path::new(path);
 
         // Security: prevent path traversal
@@ -37,15 +42,54 @@ impl ReadTool {
             _ => {}
         }
 
-        // Read file content
+        let file_size = fs::File::open(path)
+            .await
+            .map_err(|e| format!("Cannot open file: {}", e))?
+            .metadata()
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        if let Some(cb) = progress_cb {
+            cb(format!("Reading file: {} ({} bytes)", path.display(), file_size));
+        }
+
+        // Read file content in chunks for progress tracking
         let mut file = fs::File::open(path)
             .await
             .map_err(|e| format!("Cannot open file: {}", e))?;
 
         let mut content = String::new();
-        file.read_to_string(&mut content)
-            .await
-            .map_err(|e| format!("Cannot read file: {}", e))?;
+        let mut buffer = vec![0u8; 8192];
+        let mut bytes_read: u64 = 0;
+
+        loop {
+            let n = file.read(&mut buffer).await.map_err(|e| format!("Cannot read file: {}", e))?;
+            if n == 0 {
+                break;
+            }
+            
+            // Convert bytes to string, handling partial UTF-8
+            let chunk = String::from_utf8_lossy(&buffer[..n]);
+            content.push_str(&chunk);
+            bytes_read += n as u64;
+
+            // Emit progress for large files (> 1KB)
+            if file_size > 1024 {
+                let progress = if file_size > 0 {
+                    (bytes_read as f64 / file_size as f64 * 100.0) as u32
+                } else {
+                    100
+                };
+                if let Some(cb) = progress_cb {
+                    cb(format!("Reading: {}% ({}/{} bytes)", progress, bytes_read, file_size));
+                }
+            }
+        }
+
+        if let Some(cb) = progress_cb {
+            cb(format!("Completed reading {} bytes", content.len()));
+        }
 
         Ok(content)
     }
@@ -88,16 +132,28 @@ impl AgentTool for ReadTool {
         &self,
         _tool_call_id: &str,
         params: Value,
-        _signal: Option<oneshot::Receiver<()>>,
+        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
     ) -> Result<AgentToolResult, ToolError> {
         let path = params
             .get("path")
             .and_then(|v: &Value| v.as_str())
             .ok_or_else(|| "Missing required parameter: path".to_string())?;
 
-        match Self::read_file_impl(path).await {
+        let progress_cb = self.progress_callback.lock().await.clone();
+        match Self::read_file_impl(path, &progress_cb).await {
             Ok(content) => Ok(AgentToolResult::success(content)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }
+    }
+
+    fn on_progress(&self, callback: ProgressCallback) {
+        // Store the callback for use during execution via interior mutability
+        let progress_cb = Arc::new(callback);
+        // Clone the Arc and store it
+        let cb = self.progress_callback.clone();
+        tokio::spawn(async move {
+            let mut guard = cb.lock().await;
+            *guard = Some(progress_cb);
+        });
     }
 }

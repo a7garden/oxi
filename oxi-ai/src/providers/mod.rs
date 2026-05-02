@@ -38,7 +38,18 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
 
 /// Get all available provider names
 pub fn provider_names() -> Vec<&'static str> {
-    vec!["openai", "anthropic"]
+    vec![
+        "openai",
+        "anthropic",
+        "google",
+        "deepseek",
+        "mistral",
+        "groq",
+        "cerebras",
+        "xai",
+        "openrouter",
+        "azure-openai",
+    ]
 }
 
 /// Get all available providers with names
@@ -46,6 +57,14 @@ pub fn providers() -> Vec<(&'static str, &'static str)> {
     vec![
         ("openai", "OpenAI"),
         ("anthropic", "Anthropic"),
+        ("google", "Google"),
+        ("deepseek", "DeepSeek"),
+        ("mistral", "Mistral"),
+        ("groq", "Groq"),
+        ("cerebras", "Cerebras"),
+        ("xai", "xAI"),
+        ("openrouter", "OpenRouter"),
+        ("azure-openai", "Azure OpenAI"),
     ]
 }
 
