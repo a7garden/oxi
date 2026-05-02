@@ -178,7 +178,6 @@ enum Block {
         items: Vec<String>,
     },
     HorizontalRule,
-    BlankLine,
 }
 
 // ---------------------------------------------------------------------------
@@ -414,7 +413,7 @@ fn parse_inline_runs(text: &str, base_fg: Color, base_bg: Color, base_attrs: Att
     let len = chars.len();
     let mut i = 0;
 
-    let mut push_run = |runs: &mut Vec<InlineRun>, content: &str, fg: Color, bg: Color, attrs: Attributes| {
+    let push_run = |runs: &mut Vec<InlineRun>, content: &str, fg: Color, bg: Color, attrs: Attributes| {
         if !content.is_empty() {
             runs.push(InlineRun { text: content.to_string(), fg, bg, attrs });
         }
@@ -1003,10 +1002,6 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
                     }
                 }
                 lines.push(StyledLine::new()); // blank after
-            }
-
-            Block::BlankLine => {
-                lines.push(StyledLine::new());
             }
         }
     }

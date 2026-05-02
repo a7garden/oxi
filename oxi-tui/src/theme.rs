@@ -543,13 +543,7 @@ mod tests {
 
     #[test]
     fn theme_file_from_json() {
-        let json = r#"{
-            "name": "test",
-            "colors": {
-                "foreground": "#ffffff",
-                "background": "#000000"
-            }
-        }"#;
+        let json = r##"{"name":"test","colors":{"foreground":"#ffffff","background":"#000000"}}"##;
         let file: ThemeFile = serde_json::from_str(json).unwrap();
         let theme = file.into_theme();
         assert_eq!(theme.name, "test");
@@ -563,7 +557,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let json_path = dir.join("test_theme.json");
-        std::fs::write(&json_path, r#"{"name":"mytheme","colors":{"primary":"#ff0000"}}"#).unwrap();
+        std::fs::write(&json_path, r##"{"name":"mytheme","colors":{"primary":"#ff0000"}}"##).unwrap();
         let file = ThemeFile::load(&json_path).unwrap();
         let theme = file.into_theme();
         assert_eq!(theme.name, "mytheme");
