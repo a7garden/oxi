@@ -117,6 +117,7 @@ fn validate_args_internal(schema: &JsonValue, args: &JsonValue) -> Result<JsonVa
 }
 
 /// Create a JSON Schema from a TypeScript-like definition
+#[allow(dead_code)]
 pub fn create_schema(fields: &[(&str, &str, &str)]) -> JsonValue {
     let mut properties = serde_json::Map::new();
     let mut required: Vec<&str> = Vec::new();
