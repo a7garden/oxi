@@ -1197,14 +1197,8 @@ const {{ chromium }} = require('playwright');
         // Pattern: "Nms"
         if let Some(pos) = text.find("ms") {
             let before = &text[..pos];
-            let num: String = before
-                .chars()
-                .rev()
-                .take_while(|c| c.is_ascii_digit())
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
+            let reversed: String = before.chars().rev().skip_while(|c| c.is_whitespace()).collect();
+            let num: String = reversed.chars().take_while(|c| c.is_ascii_digit()).collect();
             if let Ok(n) = num.parse::<u64>() {
                 return Some(n);
             }
