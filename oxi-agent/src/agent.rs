@@ -3,7 +3,7 @@
 use crate::config::AgentConfig;
 use crate::events::AgentEvent;
 use crate::state::{AgentState, SharedState};
-use crate::tools::ToolRegistry;
+use crate::tools::{ToolRegistry, AgentTool};
 use crate::types::{StopReason, Response};
 use anyhow::{Error, Result};
 use futures::StreamExt;
@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 pub struct Agent {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
-    tools: ToolRegistry,
+    tools: Arc<ToolRegistry>,
     state: SharedState,
 }
 
@@ -25,7 +25,7 @@ impl Agent {
         Self {
             provider,
             config,
-            tools: ToolRegistry::new(),
+            tools: Arc::new(ToolRegistry::new()),
             state: SharedState::new(),
         }
     }
@@ -36,8 +36,8 @@ impl Agent {
     }
 
     /// Get the tool registry
-    pub fn tools(&self) -> &ToolRegistry {
-        &self.tools
+    pub fn tools(&self) -> Arc<ToolRegistry> {
+        Arc::clone(&self.tools)
     }
 
     /// Get a clone of the current state
@@ -51,20 +51,8 @@ impl Agent {
     }
 
     /// Add a tool to the agent
-    pub fn add_tool<F, Fut>(&self, name: String, description: String, handler: F)
-    where
-        F: Fn(String) -> Fut + Send + Sync + 'static,
-        Fut: std::future::Future<Output = String> + Send + 'static,
-    {
-        let definition = crate::types::ToolDefinition::new(
-            name,
-            description,
-            std::collections::HashMap::new(),
-        );
-        let handler = move |input: String| {
-            Box::pin(handler(input)) as std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>>
-        };
-        self.tools.register(definition, handler);
+    pub fn add_tool<T: AgentTool + 'static>(&self, tool: T) {
+        self.tools.register(tool);
     }
 
     /// Run the agent with a prompt, returning events via a channel
@@ -109,15 +97,14 @@ impl Agent {
         }
 
         // Add tools to context
-        let tools = self.tools.get_tools();
-        if !tools.is_empty() {
+        let tool_defs = self.tools.definitions();
+        if !tool_defs.is_empty() {
             let mut oxi_tools = Vec::new();
-            for tool in &tools {
-                let schema = serde_json::json!({
-                    "type": "object",
-                    "properties": {},
+            for def in &tool_defs {
+                let schema = serde_json::to_value(&def.input_schema).unwrap_or_else(|_| {
+                    serde_json::json!({"type": "object", "properties": {}})
                 });
-                oxi_tools.push(oxi_ai::Tool::new(&tool.name, &tool.description, schema));
+                oxi_tools.push(oxi_ai::Tool::new(&def.name, &def.description, schema));
             }
             context.set_tools(oxi_tools);
         }
