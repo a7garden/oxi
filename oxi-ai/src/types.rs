@@ -6,7 +6,7 @@ use std::fmt;
 use std::hash::Hash;
 
 /// Provider API identifier
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Api {
     #[serde(rename = "openai-completions")]
     OpenAiCompletions,

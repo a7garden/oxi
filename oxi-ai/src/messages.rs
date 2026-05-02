@@ -413,3 +413,115 @@ impl From<ContentBlock> for MessageContent {
         MessageContent::Blocks(vec![block])
     }
 }
+
+/// Transform messages for cross-provider compatibility.
+///
+/// When switching models mid-conversation, message history may contain
+/// provider-specific content (e.g. thinking blocks from Anthropic) that
+/// the new provider cannot handle. This function converts messages so
+/// they are compatible with the target provider's API.
+///
+/// Key transformations:
+/// - Thinking blocks → wrapped in `<thinking>` tags as plain text
+/// - Tool calls and tool results are preserved unchanged
+/// - User/assistant message structure is preserved
+pub fn transform_for_provider(
+    messages: &[Message],
+    _from_api: &super::Api,
+    to_api: &super::Api,
+) -> Vec<Message> {
+    messages
+        .iter()
+        .map(|msg| match msg {
+            Message::Assistant(a) => {
+                let mut new_msg = AssistantMessage::new(*to_api, &a.provider, &a.model);
+                new_msg.content = transform_content_blocks(&a.content, to_api);
+                new_msg.usage = a.usage.clone();
+                new_msg.stop_reason = a.stop_reason;
+                new_msg.error_message = a.error_message.clone();
+                new_msg.response_id = a.response_id.clone();
+                new_msg.timestamp = a.timestamp;
+                Message::Assistant(new_msg)
+            }
+            Message::User(u) => Message::User(u.clone()),
+            Message::ToolResult(t) => Message::ToolResult(t.clone()),
+        })
+        .collect()
+}
+
+/// Transform content blocks for a target provider.
+///
+/// Converts provider-specific blocks (like thinking) into formats
+/// the target provider can understand.
+fn transform_content_blocks(blocks: &[ContentBlock], to_api: &super::Api) -> Vec<ContentBlock> {
+    match to_api {
+        // Anthropic natively supports thinking blocks — keep as-is
+        super::Api::AnthropicMessages => blocks.to_vec(),
+
+        // OpenAI-compatible and other providers: convert thinking to text
+        _ => {
+            let mut transformed = Vec::with_capacity(blocks.len());
+            for block in blocks {
+                match block {
+                    ContentBlock::Thinking(t) => {
+                        // Convert thinking block to text wrapped in tags
+                        let text = format!(
+                            "<thinking>\n{}\n</thinking>",
+                            t.thinking
+                        );
+                        transformed.push(ContentBlock::Text(TextContent::new(text)));
+                    }
+                    ContentBlock::Text(t) => {
+                        transformed.push(ContentBlock::Text(t.clone()));
+                    }
+                    ContentBlock::ToolCall(tc) => {
+                        transformed.push(ContentBlock::ToolCall(tc.clone()));
+                    }
+                    ContentBlock::Image(img) => {
+                        transformed.push(ContentBlock::Image(img.clone()));
+                    }
+                    ContentBlock::Unknown(v) => {
+                        // Try to extract text from unknown blocks
+                        if let Some(text) = v.get("text").and_then(|t| t.as_str()) {
+                            transformed.push(ContentBlock::Text(TextContent::new(text)));
+                        }
+                        // Otherwise silently drop unknown blocks
+                    }
+                }
+            }
+            // Merge adjacent text blocks
+            merge_adjacent_text_blocks(transformed)
+        }
+    }
+}
+
+/// Merge adjacent `ContentBlock::Text` blocks into a single block.
+fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
+    let mut result = Vec::with_capacity(blocks.len());
+    let mut pending_text = String::new();
+
+    for block in blocks {
+        match block {
+            ContentBlock::Text(t) => {
+                if !pending_text.is_empty() {
+                    pending_text.push('\n');
+                }
+                pending_text.push_str(&t.text);
+            }
+            other => {
+                if !pending_text.is_empty() {
+                    result.push(ContentBlock::Text(TextContent::new(
+                        std::mem::take(&mut pending_text),
+                    )));
+                }
+                result.push(other);
+            }
+        }
+    }
+
+    if !pending_text.is_empty() {
+        result.push(ContentBlock::Text(TextContent::new(pending_text)));
+    }
+
+    result
+}

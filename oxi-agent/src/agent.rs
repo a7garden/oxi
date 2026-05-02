@@ -9,17 +9,23 @@ use crate::types::{StopReason, Response};
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
-    get_model, CompactionManager, CompactionStrategy, Context, LlmCompactor, 
-    Message, Provider, ProviderEvent, StreamOptions, ToolCall, progress_callback,
+    get_model, transform_for_provider, CompactionManager, CompactionStrategy, Context,
+    LlmCompactor, Message, Provider, ProviderEvent, StreamOptions, ToolCall, progress_callback,
 };
+use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
-/// Agent runtime
-pub struct Agent {
+/// Mutable agent internals protected by a read-write lock.
+struct AgentInner {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
+}
+
+/// Agent runtime
+pub struct Agent {
+    inner: RwLock<AgentInner>,
     tools: Arc<ToolRegistry>,
     state: SharedState,
     compaction_manager: CompactionManager,
@@ -52,17 +58,127 @@ impl Agent {
         }
         
         Self {
-            provider,
-            config,
+            inner: RwLock::new(AgentInner { config, provider }),
             tools: Arc::new(ToolRegistry::new()),
             state: SharedState::new(),
             compaction_manager,
         }
     }
 
-    /// Get the agent configuration
-    pub fn config(&self) -> &AgentConfig {
-        &self.config
+    /// Get the agent configuration (read guard)
+    fn config(&self) -> parking_lot::RwLockReadGuard<'_, AgentInner> {
+        self.inner.read()
+    }
+
+    /// Get a write guard for the agent inner state
+    fn inner_mut(&self) -> parking_lot::RwLockWriteGuard<'_, AgentInner> {
+        self.inner.write()
+    }
+
+    /// Get the current model ID
+    pub fn model_id(&self) -> String {
+        self.config().config.model_id.clone()
+    }
+
+    /// Switch the model used for future LLM calls.
+    ///
+    /// If the new model uses a different provider API, the conversation
+    /// history is automatically transformed for cross-provider compatibility
+    /// (e.g. thinking blocks are converted to `<thinking>` tags).
+    ///
+    /// # Arguments
+    /// * `model_id` - New model ID in `provider/model` format
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or an error if the model/provider is unknown
+    pub fn switch_model(&self, model_id: &str) -> Result<()> {
+        let parts: Vec<&str> = model_id.split('/').collect();
+        let (provider_name, model_name) = if parts.len() >= 2 {
+            (parts[0], parts[1..].join("/"))
+        } else {
+            return Err(Error::msg(format!(
+                "Invalid model ID '{}'. Expected format: provider/model",
+                model_id
+            )));
+        };
+
+        // Look up the new model
+        let new_model = get_model(provider_name, &model_name)
+            .ok_or_else(|| Error::msg(format!("Model '{}' not found", model_id)))?;
+
+        // Create the new provider
+        let new_provider = oxi_ai::get_provider(&new_model.provider)
+            .ok_or_else(|| Error::msg(format!(
+                "Provider '{}' not found",
+                new_model.provider
+            )))?;
+
+        // Detect API change and transform messages if needed
+        {
+            let inner = self.config();
+            let old_model_id = &inner.config.model_id;
+            let old_parts: Vec<&str> = old_model_id.split('/').collect();
+            let old_api = if old_parts.len() >= 2 {
+                get_model(old_parts[0], &old_parts[1..].join("/"))
+                    .map(|m| m.api)
+                    .unwrap_or(oxi_ai::Api::AnthropicMessages)
+            } else {
+                oxi_ai::Api::AnthropicMessages
+            };
+
+            if old_api != new_model.api {
+                // Transform existing messages for the new provider
+                let messages = self.state.get_state().messages.clone();
+                let transformed = transform_for_provider(&messages, &old_api, &new_model.api);
+                self.state.update(|s| {
+                    s.replace_messages(transformed);
+                });
+            }
+        }
+
+        // Update config and provider atomically
+        let mut inner = self.inner_mut();
+        inner.config.model_id = model_id.to_string();
+        inner.provider = Arc::from(new_provider);
+
+        Ok(())
+    }
+
+    /// Switch the model using a pre-resolved `Model` object.
+    ///
+    /// This is useful when the caller has already looked up the model
+    /// and optionally created the provider.
+    pub fn switch_to_model(&self, model: &oxi_ai::Model) -> Result<()> {
+        let model_id = format!("{}/{}", model.provider, model.id);
+        let new_provider = oxi_ai::get_provider(&model.provider)
+            .ok_or_else(|| Error::msg(format!("Provider '{}' not found", model.provider)))?;
+
+        // Detect API change and transform messages if needed
+        {
+            let inner = self.config();
+            let old_parts: Vec<&str> = inner.config.model_id.split('/').collect();
+            let old_api = if old_parts.len() >= 2 {
+                get_model(old_parts[0], &old_parts[1..].join("/"))
+                    .map(|m| m.api)
+                    .unwrap_or(oxi_ai::Api::AnthropicMessages)
+            } else {
+                oxi_ai::Api::AnthropicMessages
+            };
+
+            if old_api != model.api {
+                let messages = self.state.get_state().messages.clone();
+                let transformed = transform_for_provider(&messages, &old_api, &model.api);
+                self.state.update(|s| {
+                    s.replace_messages(transformed);
+                });
+            }
+        }
+
+        let mut inner = self.inner_mut();
+        inner.config.model_id = model_id;
+        inner.provider = Arc::from(new_provider);
+
+        Ok(())
     }
 
     /// Get the tool registry
@@ -83,6 +199,11 @@ impl Agent {
     /// Add a tool to the agent
     pub fn add_tool<T: AgentTool + 'static>(&self, tool: T) {
         self.tools.register(tool);
+    }
+
+    /// Update the system prompt for future interactions.
+    pub fn set_system_prompt(&self, prompt: String) {
+        self.inner_mut().config.system_prompt = Some(prompt);
     }
 
     /// Get the compaction manager
@@ -111,13 +232,17 @@ impl Agent {
         });
 
         let model = {
-            let parts: Vec<&str> = self.config.model_id.split('/').collect();
+            let inner = self.config();
+            let parts: Vec<&str> = inner.config.model_id.split('/').collect();
             if parts.len() == 2 {
                 get_model(parts[0], parts[1])
             } else {
-                get_model("anthropic", &self.config.model_id)
+                get_model("anthropic", &inner.config.model_id)
             }
-        }.ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))?;
+        }.ok_or_else(|| {
+            let inner = self.config();
+            Error::msg(format!("Model not found: {}", inner.config.model_id))
+        })?;
         
         // Check for compaction at the start of each iteration
         let messages = &self.state.get_state().messages;
@@ -141,7 +266,10 @@ impl Agent {
             
             match self.compaction_manager.compact_if_needed(
                 &messages_to_compact,
-                self.config.compaction_instruction.as_deref(),
+                {
+                    let inner = self.config();
+                    inner.config.compaction_instruction.clone().as_deref()
+                },
                 context_tokens,
                 iteration,
             ).await {
@@ -192,8 +320,11 @@ impl Agent {
         let mut context = Context::new();
         
         // Add system prompt
-        if let Some(ref system_prompt) = self.config.system_prompt {
-            context.set_system_prompt(system_prompt.clone());
+        {
+            let inner = self.config();
+            if let Some(ref system_prompt) = inner.config.system_prompt {
+                context.set_system_prompt(system_prompt.clone());
+            }
         }
         
         // Add previous messages
@@ -215,13 +346,22 @@ impl Agent {
         }
 
         let stream_options = StreamOptions {
-            temperature: self.config.temperature,
-            max_tokens: self.config.max_tokens,
+            temperature: {
+                let inner = self.config();
+                inner.config.temperature
+            },
+            max_tokens: {
+                let inner = self.config();
+                inner.config.max_tokens
+            },
             ..Default::default()
         };
 
-        let mut stream = self.provider.stream(&model, &context, Some(stream_options)).await
-            .map_err(|e| Error::msg(e.to_string()))?;
+        let mut stream = {
+            let inner = self.config();
+            inner.provider.stream(&model, &context, Some(stream_options)).await
+                .map_err(|e| Error::msg(e.to_string()))?
+        };
 
         let mut response_text = String::new();
         let tx_clone = tx.clone();
