@@ -832,7 +832,8 @@ fn tokenize_syntax(source: &str, lang: &str) -> Vec<SyntaxSpan> {
 /// at a given width. Word-wrapping is applied to paragraphs and list items.
 fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownTheme) -> Vec<StyledLine> {
     let w = max_width as usize;
-    let mut lines: Vec<StyledLine> = Vec::new();
+    // Pre-allocate: each block produces at least 2 lines (content + blank separator)
+    let mut lines: Vec<StyledLine> = Vec::with_capacity(blocks.len() * 3);
 
     for block in blocks {
         match block {
