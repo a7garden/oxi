@@ -16,14 +16,14 @@ pub use config::AgentConfig;
 pub use error::AgentError;
 pub use events::AgentEvent;
 pub use state::{AgentState, SharedState};
-pub use tools::{ToolRegistry, AgentTool, AgentToolResult, ReadTool, WriteTool, EditTool, BashTool};
+pub use tools::{ToolRegistry, AgentTool, AgentToolResult, ReadTool, WriteTool, EditTool, BashTool, GrepTool, FindTool, LsTool};
 
 pub mod prelude {
     pub use crate::agent::Agent;
     pub use crate::config::AgentConfig;
     pub use crate::events::AgentEvent;
     pub use crate::state::{AgentState, SharedState};
-    pub use crate::tools::{ToolRegistry, AgentTool, AgentToolResult, ReadTool, WriteTool, EditTool, BashTool};
+    pub use crate::tools::{ToolRegistry, AgentTool, AgentToolResult, ReadTool, WriteTool, EditTool, BashTool, GrepTool, FindTool, LsTool};
     pub use crate::compaction::{CompactedContext, CompactionEvent};
 }
 
