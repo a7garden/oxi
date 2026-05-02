@@ -9,9 +9,12 @@
 pub mod autonomous_loop;
 pub mod brainstorming;
 pub mod deep_research;
+pub mod obsidian;
 pub mod playwright_cli;
 pub mod design_farmer;
+pub mod scout;
 pub mod super_review;
+pub mod worktree;
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
