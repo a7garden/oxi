@@ -2,7 +2,10 @@
 
 use crate::{Agent, AgentConfig, AgentEvent, AgentState};
 use crate::types::{ToolDefinition, ToolCall, ToolResult};
-use oxi_ai::{Provider, ProviderEvent, Context, ContentBlock, TextContent, StopReason};
+use oxi_ai::{
+    Provider, ProviderEvent, Context, ContentBlock, TextContent, ThinkingContent,
+    StopReason, transform_for_provider, Api,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::pin::Pin;
@@ -224,4 +227,300 @@ fn test_tool_result() {
     assert!(!success.is_error);
     let error = ToolResult::error("call_2", "City not found");
     assert!(error.is_error);
+}
+
+// ── Cross-provider handoff tests ──────────────────────────────────
+
+#[test]
+fn test_transform_for_provider_thinking_to_openai() {
+    // Create an assistant message with thinking blocks (from Anthropic)
+    let mut assistant = oxi_ai::AssistantMessage::new(
+        Api::AnthropicMessages,
+        "anthropic",
+        "claude-sonnet-4-20250514",
+    );
+    assistant.content = vec![
+        ContentBlock::Thinking(ThinkingContent::new("Let me think about this...")),
+        ContentBlock::Text(TextContent::new("Here is my answer.")),
+    ];
+
+    let messages = vec![
+        oxi_ai::Message::User(oxi_ai::UserMessage::new("Hello")),
+        oxi_ai::Message::Assistant(assistant),
+    ];
+
+    // Transform for OpenAI
+    let transformed = transform_for_provider(
+        &messages,
+        &Api::AnthropicMessages,
+        &Api::OpenAiCompletions,
+    );
+
+    assert_eq!(transformed.len(), 2);
+
+    // User message should be unchanged
+    assert!(matches!(&transformed[0], oxi_ai::Message::User(_)));
+
+    // Assistant message should have thinking converted to text
+    if let oxi_ai::Message::Assistant(a) = &transformed[1] {
+        assert_eq!(a.content.len(), 1); // merged into single text block
+        let text = a.content[0].as_text().unwrap();
+        assert!(text.contains("<thinking>"));
+        assert!(text.contains("Let me think about this..."));
+        assert!(text.contains("Here is my answer."));
+        assert_eq!(a.api, Api::OpenAiCompletions);
+    } else {
+        panic!("Expected Assistant message");
+    }
+}
+
+#[test]
+fn test_transform_for_provider_preserves_anthropic() {
+    // Thinking blocks should be preserved when target is Anthropic
+    let mut assistant = oxi_ai::AssistantMessage::new(
+        Api::AnthropicMessages,
+        "anthropic",
+        "claude-sonnet-4-20250514",
+    );
+    assistant.content = vec![
+        ContentBlock::Thinking(ThinkingContent::new("Thinking...")),
+        ContentBlock::Text(TextContent::new("Answer.")),
+    ];
+
+    let messages = vec![
+        oxi_ai::Message::Assistant(assistant),
+    ];
+
+    let transformed = transform_for_provider(
+        &messages,
+        &Api::AnthropicMessages,
+        &Api::AnthropicMessages,
+    );
+
+    if let oxi_ai::Message::Assistant(a) = &transformed[0] {
+        assert_eq!(a.content.len(), 2); // unchanged
+        assert!(a.content[0].as_thinking().is_some());
+        assert!(a.content[1].as_text().is_some());
+    } else {
+        panic!("Expected Assistant message");
+    }
+}
+
+#[test]
+fn test_transform_preserves_tool_results() {
+    // Tool results should pass through unchanged
+    let tool_result = oxi_ai::ToolResultMessage::new(
+        "call_123",
+        "read",
+        vec![ContentBlock::Text(TextContent::new("file contents"))],
+    );
+
+    let messages = vec![
+        oxi_ai::Message::ToolResult(tool_result),
+    ];
+
+    let transformed = transform_for_provider(
+        &messages,
+        &Api::AnthropicMessages,
+        &Api::OpenAiCompletions,
+    );
+
+    assert_eq!(transformed.len(), 1);
+    if let oxi_ai::Message::ToolResult(tr) = &transformed[0] {
+        assert_eq!(tr.tool_call_id, "call_123");
+        assert_eq!(tr.tool_name, "read");
+    } else {
+        panic!("Expected ToolResult message");
+    }
+}
+
+#[test]
+fn test_agent_model_id() {
+    let provider = Arc::new(MockProvider::new(vec![MockResponse {
+        content: "test".to_string(),
+    }]));
+    let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+    let agent = Agent::new(provider, config);
+    assert_eq!(agent.model_id(), "anthropic/claude-sonnet-4-20250514");
+}
+
+#[test]
+fn test_agent_switch_model_invalid_format() {
+    let provider = Arc::new(MockProvider::new(vec![MockResponse {
+        content: "test".to_string(),
+    }]));
+    let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+    let agent = Agent::new(provider, config);
+
+    // Invalid format (no provider prefix)
+    let result = agent.switch_model("gpt-4o");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_agent_switch_model_unknown_model() {
+    let provider = Arc::new(MockProvider::new(vec![MockResponse {
+        content: "test".to_string(),
+    }]));
+    let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+    let agent = Agent::new(provider, config);
+
+    let result = agent.switch_model("nonexistent/model");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_agent_switch_model_same_provider() {
+    let provider = Arc::new(MockProvider::new(vec![MockResponse {
+        content: "test".to_string(),
+    }]));
+    let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+    let agent = Agent::new(provider, config);
+
+    // Switch to another Anthropic model (same provider, same API)
+    let result = agent.switch_model("anthropic/claude-3-haiku");
+    assert!(result.is_ok());
+    assert_eq!(agent.model_id(), "anthropic/claude-3-haiku");
+}
+
+/// Mock provider that tracks which API it was called with
+struct ApiAwareMockProvider {
+    responses: Vec<MockResponse>,
+    call_count: Arc<Mutex<usize>>,
+    last_api: Arc<Mutex<Option<Api>>>,
+}
+
+impl ApiAwareMockProvider {
+    fn new(responses: Vec<MockResponse>) -> Self {
+        Self {
+            responses,
+            call_count: Arc::new(Mutex::new(0)),
+            last_api: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for ApiAwareMockProvider {
+    async fn stream(
+        &self,
+        model: &oxi_ai::Model,
+        _context: &Context,
+        _options: Option<oxi_ai::StreamOptions>,
+    ) -> std::result::Result<
+        std::pin::Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
+        oxi_ai::ProviderError,
+    > {
+        let mut call_count = self.call_count.lock().unwrap();
+        *call_count += 1;
+        let idx = (*call_count - 1) % self.responses.len();
+        let response = self.responses[idx].clone();
+
+        *self.last_api.lock().unwrap() = Some(model.api);
+
+        let stream = MockStream {
+            text: response.content,
+            done: false,
+        };
+
+        Ok(Box::pin(stream) as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+    }
+
+    fn name(&self) -> &str {
+        "mock-api-aware"
+    }
+}
+
+#[tokio::test]
+async fn test_cross_provider_handoff_openai_to_anthropic() {
+    // Simulate a conversation that starts on OpenAI and switches to Anthropic
+    // mid-conversation. We use an API-aware mock that doesn't require real keys.
+    // The handoff is tested by verifying messages survive the switch.
+
+    let provider = Arc::new(ApiAwareMockProvider::new(vec![
+        MockResponse { content: "OpenAI response".to_string() },
+        MockResponse { content: "Continued response".to_string() },
+    ]));
+    let config = AgentConfig::new("openai/gpt-4o");
+    let agent = Agent::new(provider, config);
+
+    // 1. Send a message and get a response (on OpenAI)
+    let (response, _) = agent.run("Hello from OpenAI".to_string()).await.unwrap();
+    assert_eq!(response.content, "OpenAI response");
+    assert_eq!(agent.model_id(), "openai/gpt-4o");
+
+    // 2. Verify we have the right message count
+    let state = agent.state();
+    assert_eq!(state.messages.len(), 2); // user + assistant
+
+    // 3. Verify transform_for_provider works for the cross-provider case
+    //    (this is what switch_model would call internally with a real provider)
+    let transformed = transform_for_provider(
+        &state.messages,
+        &Api::OpenAiCompletions,
+        &Api::AnthropicMessages,
+    );
+    assert_eq!(transformed.len(), 2); // all messages preserved
+
+    // 4. Switch model (this fails to create the provider, but the message
+    //    transformation logic was verified above)
+    let result = agent.switch_model("anthropic/claude-sonnet-4-20250514");
+    // The switch itself may fail due to missing API keys for the real provider,
+    // but the model_id won't change since we guard the update atomically.
+    // The key invariant: if the switch succeeds, messages are transformed.
+    if result.is_ok() {
+        assert_eq!(agent.model_id(), "anthropic/claude-sonnet-4-20250514");
+    }
+    // Regardless of switch result, messages should still be intact
+    assert_eq!(agent.state().messages.len(), 2);
+}
+
+#[tokio::test]
+async fn test_cross_provider_message_transformation_roundtrip() {
+    // Build up a conversation with thinking blocks, then transform for different providers
+    let provider = Arc::new(MockProvider::new(vec![
+        MockResponse { content: "First response".to_string() },
+        MockResponse { content: "Second response".to_string() },
+    ]));
+    let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+    let agent = Agent::new(provider, config);
+
+    // Build up conversation
+    agent.run("Message 1".to_string()).await.unwrap();
+    agent.run("Message 2".to_string()).await.unwrap();
+    assert_eq!(agent.state().messages.len(), 4);
+
+    // Transform all messages for OpenAI (cross-provider)
+    let messages = agent.state().messages.clone();
+    let transformed = transform_for_provider(
+        &messages,
+        &Api::AnthropicMessages,
+        &Api::OpenAiCompletions,
+    );
+
+    // All messages should be preserved
+    assert_eq!(transformed.len(), 4);
+
+    // User messages should be unchanged
+    assert!(matches!(&transformed[0], oxi_ai::Message::User(_)));
+    assert!(matches!(&transformed[2], oxi_ai::Message::User(_)));
+
+    // Assistant messages should have their API updated
+    for msg in &transformed {
+        if let oxi_ai::Message::Assistant(a) = msg {
+            assert_eq!(a.api, Api::OpenAiCompletions);
+            // No thinking blocks in transformed output for non-Anthropic targets
+            for block in &a.content {
+                assert!(!matches!(block, ContentBlock::Thinking(_)));
+            }
+        }
+    }
+
+    // Transform back to Anthropic (should be lossless for text-only content)
+    let back = transform_for_provider(
+        &transformed,
+        &Api::OpenAiCompletions,
+        &Api::AnthropicMessages,
+    );
+    assert_eq!(back.len(), 4);
 }

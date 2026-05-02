@@ -276,7 +276,10 @@ mod tests {
     fn test_load_extension_wrong_extension() {
         let result = load_extension(Path::new("something.txt"));
         assert!(result.is_err());
-        let msg = result.unwrap_err().to_string();
+        let msg = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("Expected error"),
+        };
         assert!(msg.contains("Unsupported extension file format"));
     }
 
