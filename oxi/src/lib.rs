@@ -173,6 +173,9 @@ impl App {
             timeout_seconds: 300,
             temperature: None,
             max_tokens: None,
+            compaction_strategy: oxi_ai::CompactionStrategy::Disabled,
+            compaction_instruction: None,
+            context_window: 128_000,
         };
 
         let agent = Arc::new(Agent::new(Arc::from(provider), config));
