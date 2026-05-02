@@ -33,7 +33,7 @@ pub type ToolFuture = Pin<Box<dyn std::future::Future<Output = Result<AgentToolR
 ///     fn label(&self) -> &str { "Calculator" }
 ///     fn description(&self) -> &str { "Perform mathematical calculations" }
 ///     fn parameters_schema(&self) -> &JsonValue {
-///         &json!({
+///         static SCHEMA: JsonValue = json!({
 ///             "type": "object",
 ///             "properties": {
 ///                 "expression": {
@@ -42,7 +42,8 @@ pub type ToolFuture = Pin<Box<dyn std::future::Future<Output = Result<AgentToolR
 ///                 }
 ///             },
 ///             "required": ["expression"]
-///         })
+///         });
+///         &SCHEMA
 ///     }
 ///
 ///     fn execute(

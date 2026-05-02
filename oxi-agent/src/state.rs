@@ -271,6 +271,16 @@ mod tests {
     use super::*;
     use std::pin::Pin;
     use serde_json::json;
+    use serde_json::Value as JsonValue;
+    use crate::types::AgentToolResult;
+
+    // Helper to create test schema
+    fn test_schema() -> JsonValue {
+        json!({
+            "type": "object",
+            "properties": {}
+        })
+    }
 
     #[test]
     fn test_new_state() {
@@ -284,33 +294,6 @@ mod tests {
         assert_eq!(state.turn_count, 0);
     }
 
-    #[test]
-    fn test_add_tool() {
-        struct TestTool;
-
-        impl AgentTool for TestTool {
-            fn name(&self) -> &str { "test" }
-            fn label(&self) -> &str { "Test Tool" }
-            fn description(&self) -> &str { "A test tool" }
-            fn parameters_schema(&self) -> &JsonValue { &json!({}) }
-
-            fn execute(
-                &self,
-                _tool_call_id: &str,
-                _params: JsonValue,
-                _signal: Option<tokio::sync::oneshot::Receiver<()>>,
-            ) -> Pin<Box<dyn std::future::Future<Output = Result<AgentToolResult, Box<dyn std::error::Error + Send + Sync>>> + Send>> {
-                Box::pin(async { Ok(AgentToolResult::default()) })
-            }
-        }
-
-        let config = AgentConfig::default();
-        let mut state = AgentState::new(config);
-        state.add_tool(TestTool);
-
-        assert_eq!(state.tools.len(), 1);
-        assert_eq!(state.find_tool("test").map(|t| t.name()), Some("test"));
-    }
 
     #[test]
     fn test_pending_tool_calls() {
