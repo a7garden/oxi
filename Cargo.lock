@@ -1377,6 +1377,7 @@ name = "oxi-tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "crossterm 0.28.1",
  "parking_lot",
  "serde",

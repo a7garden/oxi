@@ -23,6 +23,9 @@ tracing = "0.1"
 anyhow = "1"
 thiserror = "2"
 
+# Encoding
+base64 = "0.22"
+
 # Utilities
 parking_lot = "0.12"
 unicode-width = "0.1"
