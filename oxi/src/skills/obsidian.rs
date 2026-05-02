@@ -1188,7 +1188,11 @@ impl ObsidianVault {
                     .collect();
 
                 // Tags need at least 2 chars and shouldn't be hex colors
-                if tag.len() >= 2 && !tag.chars().all(|c| c.is_ascii_hexdigit()) {
+                // Hex colors are exactly 3 or 6 hex chars (e.g., #fff, #aabbcc)
+                let is_hex_color = (tag.len() == 3 || tag.len() == 6)
+                    && tag.chars().all(|c| c.is_ascii_hexdigit());
+
+                if tag.len() >= 2 && !is_hex_color {
                     tags.insert(tag.to_lowercase());
                 }
             }
@@ -1636,11 +1640,11 @@ mod tests {
 
     #[test]
     fn test_extract_tags_minimum_length() {
-        let content = "#a #ab #abc";
+        let content = "#a #ab #my-tag";
         let tags = ObsidianVault::extract_tags(content);
         assert!(!tags.contains("a")); // too short
         assert!(tags.contains("ab"));
-        assert!(tags.contains("abc"));
+        assert!(tags.contains("my-tag"));
     }
 
     #[test]
