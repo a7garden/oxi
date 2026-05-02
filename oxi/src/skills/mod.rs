@@ -8,10 +8,14 @@
 
 pub mod autonomous_loop;
 pub mod brainstorming;
+pub mod context_builder;
 pub mod deep_research;
-pub mod obsidian;
-pub mod playwright_cli;
 pub mod design_farmer;
+pub mod obsidian;
+pub mod oracle;
+pub mod planner;
+pub mod playwright_cli;
+pub mod reviewer;
 pub mod scout;
 pub mod super_review;
 pub mod worktree;
