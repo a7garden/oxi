@@ -6,73 +6,53 @@ mod options;
 mod openai;
 mod anthropic;
 
-pub use trait_def::{Provider, ProviderError};
-pub use event::{ProviderEvent, AssistantMessage};
-pub use options::{StreamOptions, CacheRetention};
-pub use openai::OpenAiProvider;
-pub use anthropic::AnthropicProvider;
+use std::pin::Pin;
+use futures::Stream;
 
-// Provider registry
-use std::collections::HashMap;
-use once_cell::sync::Lazy;
-use super::Model;
+pub use trait_def::Provider;
+pub use event::ProviderEvent;
+pub use options::StreamOptions;
+pub use crate::CacheRetention;
+pub use crate::Context;
+pub use crate::Model;
+pub use crate::error::ProviderError;
 
-/// Global provider registry
-static PROVIDERS: Lazy<HashMap<String, ProviderRegistryEntry>> = Lazy::new(|| {
-    let mut map = HashMap::new();
-    
-    // Register built-in providers
-    map.insert("openai".to_string(), ProviderRegistryEntry {
-        name: "OpenAI".to_string(),
-        create: Box::new(|| Box::new(OpenAiProvider::new()) as Box<dyn Provider>),
-    });
-    
-    map.insert("anthropic".to_string(), ProviderRegistryEntry {
-        name: "Anthropic".to_string(),
-        create: Box::new(|| Box::new(AnthropicProvider::new()) as Box<dyn Provider>),
-    });
-    
-    map
-});
-
-struct ProviderRegistryEntry {
-    name: String,
-    create: Box<dyn Fn() -> Box<dyn Provider> + Send + Sync>,
-}
+/// Provider factory functions
 
 /// Get a provider by name
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
-    PROVIDERS.get(name).map(|entry| (entry.create)())
+    match name {
+        "openai" | "azure-openai" | "deepseek" | "groq" | "cerebras" | "xai" | "mistral" | "openrouter" | "fireworks" | "huggingface" => {
+            Some(Box::new(openai::OpenAiProvider::new()))
+        }
+        "anthropic" => {
+            Some(Box::new(anthropic::AnthropicProvider::new()))
+        }
+        _ => None,
+    }
 }
 
 /// Get all available provider names
-pub fn provider_names() -> Vec<String> {
-    PROVIDERS.keys().cloned().collect()
+pub fn provider_names() -> Vec<&'static str> {
+    vec!["openai", "anthropic"]
 }
 
-/// Get all available providers
+/// Get all available providers with names
 pub fn providers() -> Vec<(&'static str, &'static str)> {
-    PROVIDERS
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.name.as_str()))
-        .collect()
+    vec![
+        ("openai", "OpenAI"),
+        ("anthropic", "Anthropic"),
+    ]
 }
 
 /// Create a stream for a model using the appropriate provider
 pub async fn stream(
     model: &Model,
-    context: &super::Context,
+    context: &Context,
     options: Option<StreamOptions>,
-) -> Result<impl futures::Stream<Item = ProviderEvent> + Send + 'static, ProviderError> {
-    let provider = match model.provider.as_str() {
-        "openai" => get_provider("openai"),
-        "anthropic" => get_provider("anthropic"),
-        _ => get_provider(&model.provider),
-    };
-    
-    let provider = provider.ok_or_else(|| {
-        ProviderError::UnknownProvider(model.provider.clone())
-    })?;
+) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send + 'static>>, ProviderError> {
+    let provider = get_provider(&model.provider)
+        .ok_or_else(|| ProviderError::UnknownProvider(model.provider.clone()))?;
     
     provider.stream(model, context, options).await
 }
