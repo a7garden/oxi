@@ -50,7 +50,7 @@ impl fmt::Display for AgentToolResult {
 }
 
 /// Callback type for progress updates
-pub type ProgressCallback = Box<dyn Fn(String) + Send + Sync>;
+pub type ProgressCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Core trait for all agent tools
 #[async_trait]
@@ -151,10 +151,10 @@ impl ToolRegistry {
     /// Create a registry with all built-in tools
     pub fn with_builtins() -> Self {
         let registry = Self::new();
-        registry.register(ReadTool);
-        registry.register(WriteTool);
-        registry.register(EditTool);
-        registry.register(BashTool);
+        registry.register(ReadTool::new());
+        registry.register(WriteTool::new());
+        registry.register(EditTool::new());
+        registry.register(BashTool::new());
         registry
     }
 }

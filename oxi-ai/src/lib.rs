@@ -24,7 +24,7 @@ pub mod prelude {
 pub use types::*;
 pub use messages::*;
 pub use context::Context;
-pub use tools::{Tool, validate_args, ValidationError};
+pub use tools::{Tool, validate_args, ValidationError, ProgressCallback, progress_callback};
 pub use providers::{Provider, ProviderEvent, StreamOptions, get_provider};
 pub use providers::CacheRetention;
 pub use crate::error::ProviderError;

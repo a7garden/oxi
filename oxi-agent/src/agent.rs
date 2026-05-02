@@ -3,11 +3,11 @@
 use crate::config::AgentConfig;
 use crate::events::AgentEvent;
 use crate::state::{AgentState, SharedState};
-use crate::tools::{ToolRegistry, AgentTool};
+use crate::tools::{ToolRegistry, AgentTool, AgentToolResult};
 use crate::types::{StopReason, Response};
 use anyhow::{Error, Result};
 use futures::StreamExt;
-use oxi_ai::{get_model, Provider, ProviderEvent, StreamOptions};
+use oxi_ai::{get_model, Provider, ProviderEvent, StreamOptions, ToolCall, progress_callback};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -119,16 +119,47 @@ impl Agent {
             .map_err(|e| Error::msg(e.to_string()))?;
 
         let mut response_text = String::new();
+        let tx_clone = tx.clone();
+
+        // Clone tools for async task
+        let tools = self.tools.clone();
 
         while let Some(event) = stream.next().await {
             match event {
                 ProviderEvent::TextDelta { delta, .. } => {
                     response_text.push_str(&delta);
-                    let _ = tx.send(AgentEvent::TextChunk { text: delta }).await;
+                    let _ = tx_clone.send(AgentEvent::TextChunk { text: delta }).await;
+                }
+                ProviderEvent::ToolCallStart { tool_call, .. } => {
+                    // Track tool start
+                    let _ = tx_clone.send(AgentEvent::ToolStart {
+                        tool_call_id: tool_call.id.clone(),
+                        tool_name: tool_call.name.clone(),
+                    }).await;
+                }
+                ProviderEvent::ToolCallEnd { tool_call, .. } => {
+                    // Execute the tool and send results
+                    let tool_call_id = tool_call.id.clone();
+                    let tool_name = tool_call.name.clone();
+                    
+                    // Execute tool with progress callback
+                    let tool_result = self.execute_tool(&tools, &tool_call, tx_clone.clone()).await;
+                    
+                    // Send result
+                    let _ = tx_clone.send(AgentEvent::ToolComplete { result: tool_result.clone() }).await;
+                    
+                    // Add tool result to context for next turn
+                    context.add_message(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+                        format!("Tool {} returned: {}", tool_name, tool_result.content)
+                    )));
+                    
+                    // Continue streaming for the next response
+                    // Note: This is a simplified loop - a real implementation would handle
+                    // continuing the conversation after tool results
                 }
                 ProviderEvent::Done { message, .. } => {
                     let content = message.text_content();
-                    let _ = tx.send(AgentEvent::Complete {
+                    let _ = tx_clone.send(AgentEvent::Complete {
                         content: content.clone(),
                         stop_reason: format!("{:?}", message.stop_reason),
                     }).await;
@@ -136,7 +167,7 @@ impl Agent {
                         s.add_assistant_message(content.clone());
                         s.increment_iteration();
                     });
-                    let _ = tx.send(AgentEvent::Iteration { number: self.state.get_state().iteration }).await;
+                    let _ = tx_clone.send(AgentEvent::Iteration { number: self.state.get_state().iteration }).await;
                     return Ok(Response {
                         content,
                         stop_reason: StopReason::Stop,
@@ -144,7 +175,7 @@ impl Agent {
                 }
                 ProviderEvent::Error { error, .. } => {
                     let msg = error.text_content();
-                    let _ = tx.send(AgentEvent::Error { message: msg.clone() }).await;
+                    let _ = tx_clone.send(AgentEvent::Error { message: msg.clone() }).await;
                     return Err(Error::msg(msg));
                 }
                 _ => {}
@@ -155,6 +186,66 @@ impl Agent {
             content: response_text,
             stop_reason: StopReason::Stop,
         })
+    }
+
+    /// Execute a tool with progress streaming
+    async fn execute_tool(
+        &self,
+        tools: &Arc<ToolRegistry>,
+        tool_call: &ToolCall,
+        tx: mpsc::Sender<AgentEvent>,
+    ) -> oxi_ai::ToolResult {
+        let tool_call_id = tool_call.id.clone();
+        let tool_name = tool_call.name.clone();
+        
+        let tool = match tools.get(&tool_name) {
+            Some(t) => t,
+            None => {
+                return oxi_ai::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    content: format!("Error: Unknown tool '{}'", tool_name),
+                    status: "error".to_string(),
+                };
+            }
+        };
+        
+        // Set up progress callback that emits to the channel
+        let tool_call_id_clone = tool_call_id.clone();
+        let tx_clone = tx.clone();
+        let progress_cb = progress_callback(move |msg: String| {
+            let tx = tx_clone.clone();
+            let tool_call_id = tool_call_id_clone.clone();
+            tokio::spawn(async move {
+                let _ = tx.send(AgentEvent::ToolProgress {
+                    tool_call_id,
+                    message: msg,
+                }).await;
+            });
+        });
+        
+        // Set the callback on the tool
+        tool.on_progress(progress_cb);
+        
+        // tool_call.arguments is already JsonValue, use it directly
+        let params = tool_call.arguments.clone();
+        
+        // Execute the tool
+        match tool.execute(&tool_call_id, params, None).await {
+            Ok(AgentToolResult { success, output, .. }) => {
+                oxi_ai::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    content: output,
+                    status: if success { "success".to_string() } else { "error".to_string() },
+                }
+            }
+            Err(e) => {
+                oxi_ai::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    content: e,
+                    status: "error".to_string(),
+                }
+            }
+        }
     }
 
     /// Run agent with streaming callback

@@ -187,6 +187,36 @@ pub enum ThinkingFormat {
     QwenChatTemplate,
 }
 
+// Tool result (for agent tool execution results)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolResult {
+    pub tool_call_id: String,
+    pub content: String,
+    pub status: String,
+}
+
+impl ToolResult {
+    pub fn success(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            tool_call_id: tool_call_id.into(),
+            content: content.into(),
+            status: "success".to_string(),
+        }
+    }
+
+    pub fn error(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            tool_call_id: tool_call_id.into(),
+            content: content.into(),
+            status: "error".to_string(),
+        }
+    }
+
+    pub fn is_error(&self) -> bool {
+        self.status == "error"
+    }
+}
+
 /// LLM model definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {

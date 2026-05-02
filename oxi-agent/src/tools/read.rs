@@ -148,12 +148,10 @@ impl AgentTool for ReadTool {
 
     fn on_progress(&self, callback: ProgressCallback) {
         // Store the callback for use during execution via interior mutability
-        let progress_cb = Arc::new(callback);
-        // Clone the Arc and store it
         let cb = self.progress_callback.clone();
         tokio::spawn(async move {
             let mut guard = cb.lock().await;
-            *guard = Some(progress_cb);
+            *guard = Some(callback);
         });
     }
 }

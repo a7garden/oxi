@@ -15,6 +15,8 @@ pub enum AgentEvent {
     ToolCall { tool_call: ToolCall },
     /// Tool execution started
     ToolStart { tool_call_id: String, tool_name: String },
+    /// Tool execution in progress with progress update
+    ToolProgress { tool_call_id: String, message: String },
     /// Tool execution completed
     ToolComplete { result: ToolResult },
     /// Tool execution failed
