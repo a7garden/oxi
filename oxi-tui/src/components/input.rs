@@ -1,198 +1,78 @@
-//! Input component for single-line text input with cursor support.
+//! Input component - text input field.
 
-use std::string::String;
+use crate::{Cell, Color, Component, Event, KeyCode, Rect, Surface, Size};
 
-/// A single-line text input component with cursor positioning and keyboard handling.
+/// Input field configuration.
+#[derive(Debug, Clone)]
+pub struct InputOptions {
+    /// Placeholder text.
+    pub placeholder: Option<String>,
+    /// Text color when not focused.
+    pub fg_color: Option<Color>,
+    /// Background color.
+    pub bg_color: Option<Color>,
+    /// Maximum input length.
+    pub max_length: Option<usize>,
+}
+
+impl Default for InputOptions {
+    fn default() -> Self {
+        Self {
+            placeholder: None,
+            fg_color: None,
+            bg_color: None,
+            max_length: None,
+        }
+    }
+}
+
+/// A text input component.
 pub struct Input {
-    /// The current input buffer content.
-    buffer: String,
-    /// The cursor position within the buffer (0 = before first char).
-    cursor: usize,
-    /// Maximum length of the input (0 = unlimited).
-    max_length: usize,
-    /// Placeholder text shown when empty.
+    value: String,
     placeholder: String,
-    /// Whether the input is focused/active.
+    cursor_pos: usize,
+    options: InputOptions,
     focused: bool,
+    dirty: bool,
 }
 
 impl Input {
-    /// Creates a new Input component.
     pub fn new() -> Self {
         Self {
-            buffer: String::new(),
-            cursor: 0,
-            max_length: 0,
-            placeholder: String::new(),
+            value: String::new(),
+            placeholder: String::from(""),
+            cursor_pos: 0,
+            options: InputOptions::default(),
             focused: false,
+            dirty: true,
         }
     }
 
-    /// Sets the initial value of the input.
-    pub fn value(mut self, value: impl Into<String>) -> Self {
-        self.buffer = value.into();
-        self.cursor = self.buffer.len();
-        self
-    }
-
-    /// Sets the maximum length of the input.
-    pub fn max_length(mut self, max: usize) -> Self {
-        self.max_length = max;
-        self
-    }
-
-    /// Sets the placeholder text.
-    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
-        self.placeholder = placeholder.into();
-        self
-    }
-
-    /// Sets whether the input is focused.
-    pub fn focused(mut self, focused: bool) -> Self {
-        self.focused = focused;
-        self
-    }
-
-    /// Gets the current buffer content.
-    pub fn get_value(&self) -> &str {
-        &self.buffer
-    }
-
-    /// Gets the cursor position.
-    pub fn cursor(&self) -> usize {
-        self.cursor
-    }
-
-    /// Gets whether the input is focused.
-    pub fn is_focused(&self) -> bool {
-        self.focused
-    }
-
-    /// Inserts a character at the current cursor position.
-    pub fn insert_char(&mut self, c: char) {
-        if self.max_length > 0 && self.buffer.len() >= self.max_length {
-            return;
-        }
-        self.buffer.insert(self.cursor, c);
-        self.cursor += 1;
-    }
-
-    /// Inserts a string at the current cursor position.
-    pub fn insert_str(&mut self, s: &str) {
-        for c in s.chars() {
-            if self.max_length > 0 && self.buffer.len() >= self.max_length {
-                return;
-            }
-            self.insert_char(c);
+    pub fn with_placeholder(placeholder: &str) -> Self {
+        Self {
+            value: String::new(),
+            placeholder: placeholder.to_string(),
+            cursor_pos: 0,
+            options: InputOptions::default(),
+            focused: false,
+            dirty: true,
         }
     }
 
-    /// Deletes the character before the cursor (backspace).
-    pub fn backspace(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-            self.buffer.remove(self.cursor);
-        }
+    pub fn value(&self) -> &str {
+        &self.value
     }
 
-    /// Deletes the character after the cursor (delete).
-    pub fn delete(&mut self) {
-        if self.cursor < self.buffer.len() {
-            self.buffer.remove(self.cursor);
-        }
+    pub fn set_value(&mut self, value: &str) {
+        self.value = value.to_string();
+        self.cursor_pos = self.value.len().min(self.cursor_pos);
+        self.dirty = true;
     }
 
-    /// Moves the cursor one position to the left.
-    pub fn move_cursor_left(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-        }
-    }
-
-    /// Moves the cursor one position to the right.
-    pub fn move_cursor_right(&mut self) {
-        if self.cursor < self.buffer.len() {
-            self.cursor += 1;
-        }
-    }
-
-    /// Moves the cursor to the start of the line.
-    pub fn move_cursor_to_start(&mut self) {
-        self.cursor = 0;
-    }
-
-    /// Moves the cursor to the end of the line.
-    pub fn move_cursor_to_end(&mut self) {
-        self.cursor = self.buffer.len();
-    }
-
-    /// Clears the input buffer.
     pub fn clear(&mut self) {
-        self.buffer.clear();
-        self.cursor = 0;
-    }
-
-    /// Handles a key event.
-    /// Returns Some(String) if Enter was pressed with the submitted value.
-    pub fn handle_key(&mut self, key: KeyEvent) -> Option<String> {
-        match key {
-            KeyEvent::Char(c) => {
-                self.insert_char(c);
-                None
-            }
-            KeyEvent::Backspace => {
-                self.backspace();
-                None
-            }
-            KeyEvent::Delete => {
-                self.delete();
-                None
-            }
-            KeyEvent::Left => {
-                self.move_cursor_left();
-                None
-            }
-            KeyEvent::Right => {
-                self.move_cursor_right();
-                None
-            }
-            KeyEvent::Home => {
-                self.move_cursor_to_start();
-                None
-            }
-            KeyEvent::End => {
-                self.move_cursor_to_end();
-                None
-            }
-            KeyEvent::Enter => {
-                let value = self.buffer.clone();
-                self.clear();
-                Some(value)
-            }
-            KeyEvent::Ctrl('a') => {
-                self.move_cursor_to_start();
-                None
-            }
-            KeyEvent::Ctrl('e') => {
-                self.move_cursor_to_end();
-                None
-            }
-            KeyEvent::Ctrl('k') => {
-                // Kill to end of line
-                let remaining = self.buffer.len() - self.cursor;
-                for _ in 0..remaining {
-                    self.buffer.pop();
-                }
-                None
-            }
-            KeyEvent::Ctrl('u') => {
-                // Kill to start of line
-                self.buffer.drain(0..self.cursor);
-                self.cursor = 0;
-                None
-            }
-            _ => None,
-        }
+        self.value.clear();
+        self.cursor_pos = 0;
+        self.dirty = true;
     }
 }
 
@@ -202,76 +82,151 @@ impl Default for Input {
     }
 }
 
-/// A key event for input handling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KeyEvent {
-    /// A printable character.
-    Char(char),
-    /// Backspace key.
-    Backspace,
-    /// Delete key.
-    Delete,
-    /// Left arrow key.
-    Left,
-    /// Right arrow key.
-    Right,
-    /// Up arrow key.
-    Up,
-    /// Down arrow key.
-    Down,
-    /// Home key.
-    Home,
-    /// End key.
-    End,
-    /// Enter key.
-    Enter,
-    /// Escape key.
-    Escape,
-    /// Tab key.
-    Tab,
-    /// Ctrl + key combination.
-    Ctrl(char),
-    /// Unknown key.
-    Unknown,
-}
+impl Component for Input {
+    fn name(&self) -> &str {
+        "Input"
+    }
 
-/// Renders the input component to a single line with cursor.
-pub trait Render {
-    fn render(&self, width: usize) -> Vec<String>;
-}
+    fn request_render(&mut self) {
+        self.dirty = true;
+    }
 
-impl Render for Input {
-    fn render(&self, width: usize) -> Vec<String> {
-        use unicode_width::UnicodeWidthStr;
+    fn is_dirty(&self) -> bool {
+        self.dirty
+    }
 
-        let display_text = if self.buffer.is_empty() {
+    fn clear_dirty(&mut self) {
+        self.dirty = false;
+    }
+
+    fn handle_event(&mut self, event: &Event) -> bool {
+        if !self.focused {
+            return false;
+        }
+
+        if let Event::Key(key) = event {
+            match key.code {
+                KeyCode::Char(c) => {
+                    // Check max length
+                    if let Some(max) = self.options.max_length {
+                        if self.value.len() >= max {
+                            return true;
+                        }
+                    }
+                    // Insert character at cursor
+                    self.value.insert(self.cursor_pos, c);
+                    self.cursor_pos += 1;
+                    self.dirty = true;
+                    true
+                }
+                KeyCode::Backspace => {
+                    if self.cursor_pos > 0 {
+                        self.cursor_pos -= 1;
+                        self.value.remove(self.cursor_pos);
+                        self.dirty = true;
+                    }
+                    true
+                }
+                KeyCode::Delete => {
+                    if self.cursor_pos < self.value.len() {
+                        self.value.remove(self.cursor_pos);
+                        self.dirty = true;
+                    }
+                    true
+                }
+                KeyCode::Left => {
+                    if self.cursor_pos > 0 {
+                        self.cursor_pos -= 1;
+                        self.dirty = true;
+                    }
+                    true
+                }
+                KeyCode::Right => {
+                    if self.cursor_pos < self.value.len() {
+                        self.cursor_pos += 1;
+                        self.dirty = true;
+                    }
+                    true
+                }
+                KeyCode::Home => {
+                    self.cursor_pos = 0;
+                    self.dirty = true;
+                    true
+                }
+                KeyCode::End => {
+                    self.cursor_pos = self.value.len();
+                    self.dirty = true;
+                    true
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
+    }
+
+    fn render(&mut self, surface: &mut Surface, area: Rect) {
+        // Get display text (placeholder or value)
+        let display = if self.value.is_empty() {
             &self.placeholder
         } else {
-            &self.buffer
+            &self.value
         };
 
-        // Calculate visual width of text before cursor
-        let text_before_cursor = self.buffer[..self.cursor.min(self.buffer.len())].to_string();
-        let cursor_offset = UnicodeWidthStr::width(text_before_cursor.as_str());
-
-        let placeholder_colored = if self.buffer.is_empty() {
-            format!("{}{}{}", &self.placeholder, " ".repeat(width.saturating_sub(UnicodeWidthStr::width(self.placeholder.as_str()))), " ".repeat(width))
+        // Calculate visible portion
+        let max_width = area.width as usize;
+        let start_offset = if self.cursor_pos >= max_width {
+            self.cursor_pos - max_width + 1
         } else {
-            format!("{}{}", display_text, " ".repeat(width.saturating_sub(UnicodeWidthStr::width(display_text.as_str()))))
+            0
         };
 
-        let line = if self.focused {
-            // Show cursor
-            format!(
-                "{}{}{}",
-                &placeholder_colored[..cursor_offset.min(width)],
-                " ",
-                &placeholder_colored[(cursor_offset + 1).min(width)..]
-            )
-        } else {
-            placeholder_colored
-        };
+        let visible = &display[start_offset..display.len().min(start_offset + max_width)];
 
-        vec![line]
+        // Render text
+        let mut x = area.x;
+        for c in visible.chars() {
+            let mut cell = Cell::new(c);
+            if let Some(fg) = self.options.fg_color {
+                cell.fg = fg;
+            }
+            surface.set(area.y, x, cell);
+            x += 1;
+        }
+
+        // Render cursor if focused
+        if self.focused && area.x + ((self.cursor_pos - start_offset) as u16) < area.x + area.width {
+            let cursor_col = area.x + (self.cursor_pos - start_offset) as u16;
+            let mut cursor_cell = surface.get(area.y, cursor_col).cloned().unwrap_or_default();
+            cursor_cell.fg = Color::Indexed(0); // Black on white
+            cursor_cell.bg = Color::Indexed(15);
+            surface.set(area.y, cursor_col, cursor_cell);
+        }
+
+        // Clear remainder of area
+        for col in x..area.x + area.width {
+            let mut cell = Cell::new(' ');
+            if let Some(bg) = self.options.bg_color {
+                cell.bg = bg;
+            }
+            surface.set(area.y, col, cell);
+        }
+    }
+
+    fn min_size(&self) -> Size {
+        Size {
+            width: 10, // Minimum input width
+            height: 1,
+        }
+    }
+
+    fn on_focus(&mut self) {
+        self.focused = true;
+        self.dirty = true;
+    }
+
+    fn on_unfocus(&mut self) {
+        self.focused = false;
+        self.dirty = true;
     }
 }

@@ -1,113 +1,123 @@
-//! Text component for displaying text content with padding.
+//! Text component - displays static or dynamic text.
 
-use std::string::String;
+use crate::{Cell, Color, Component, Event, Rect, Surface, Size};
 
-/// A text component that displays content with configurable padding.
+/// Text component configuration.
+#[derive(Debug, Clone)]
+pub struct TextOptions {
+    /// Text color.
+    pub fg_color: Option<Color>,
+    /// Background color.
+    pub bg_color: Option<Color>,
+    /// Alignment.
+    pub align: TextAlign,
+}
+
+impl Default for TextOptions {
+    fn default() -> Self {
+        Self {
+            fg_color: None,
+            bg_color: None,
+            align: TextAlign::Left,
+        }
+    }
+}
+
+/// Text alignment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+/// A simple text component.
 pub struct Text {
-    /// The text content to display.
     content: String,
-    /// Horizontal padding (left and right).
-    padding_x: usize,
-    /// Vertical padding (top and bottom).
-    padding_y: usize,
+    options: TextOptions,
+    dirty: bool,
 }
 
 impl Text {
-    /// Creates a new Text component with the given content.
-    pub fn new(content: impl Into<String>) -> Self {
+    pub fn new(content: &str) -> Self {
         Self {
-            content: content.into(),
-            padding_x: 0,
-            padding_y: 0,
+            content: content.to_string(),
+            options: TextOptions::default(),
+            dirty: true,
         }
     }
 
-    /// Sets the horizontal padding.
-    pub fn padding_x(mut self, padding: usize) -> Self {
-        self.padding_x = padding;
-        self
+    pub fn with_options(content: &str, options: TextOptions) -> Self {
+        Self {
+            content: content.to_string(),
+            options,
+            dirty: true,
+        }
     }
 
-    /// Sets the vertical padding.
-    pub fn padding_y(mut self, padding: usize) -> Self {
-        self.padding_y = padding;
-        self
+    pub fn set_text(&mut self, content: &str) {
+        if self.content != content {
+            self.content = content.to_string();
+            self.dirty = true;
+        }
     }
 
-    /// Sets both horizontal and vertical padding.
-    pub fn padding(mut self, padding: usize) -> Self {
-        self.padding_x = padding;
-        self.padding_y = padding;
-        self
-    }
-
-    /// Gets the content of the text.
-    pub fn content(&self) -> &str {
+    pub fn text(&self) -> &str {
         &self.content
     }
 }
 
-/// Trait for rendering components to a width.
-pub trait Render {
-    /// Render the component to lines of output with the given width.
-    fn render(&self, width: usize) -> Vec<String>;
-}
-
-impl Render for Text {
-    fn render(&self, width: usize) -> Vec<String> {
-        use unicode_width::UnicodeWidthStr;
-
-        let inner_width = width.saturating_sub(self.padding_x * 2);
-        let mut lines = Vec::new();
-
-        // Top padding
-        for _ in 0..self.padding_y {
-            lines.push(" ".repeat(width));
-        }
-
-        // Content with word wrapping
-        let words: Vec<&str> = self.content.split_whitespace().collect();
-        let mut current_line = String::new();
-        let mut line_width: usize = 0;
-
-        for word in words {
-            let word_width = UnicodeWidthStr::width(word);
-            let space_width = if current_line.is_empty() { 0 } else { 1 };
-
-            if line_width + space_width + word_width > inner_width {
-                if !current_line.is_empty() {
-                    let padding = " ".repeat(self.padding_x);
-                    lines.push(format!("{}{}{}", padding, current_line, " ".repeat(inner_width.saturating_sub(UnicodeWidthStr::width(current_line.as_str())))));
-                    current_line.clear();
-                    line_width = 0;
-                }
-            }
-
-            if !current_line.is_empty() {
-                current_line.push(' ');
-                line_width += 1;
-            }
-            current_line.push_str(word);
-            line_width += word_width;
-        }
-
-        // Remaining content
-        if !current_line.is_empty() {
-            let padding = " ".repeat(self.padding_x);
-            lines.push(format!("{}{}{}", padding, current_line, " ".repeat(inner_width.saturating_sub(UnicodeWidthStr::width(current_line.as_str())))));
-        }
-
-        // Bottom padding
-        for _ in 0..self.padding_y {
-            lines.push(" ".repeat(width));
-        }
-
-        lines
+impl Component for Text {
+    fn name(&self) -> &str {
+        "Text"
     }
-}
 
-impl Default for Text {
-    fn default() -> Self {
-        Self::new("")
+    fn request_render(&mut self) {
+        self.dirty = true;
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    fn clear_dirty(&mut self) {
+        self.dirty = false;
+    }
+
+    fn handle_event(&mut self, _event: &Event) -> bool {
+        false
+    }
+
+    fn render(&mut self, surface: &mut Surface, area: Rect) {
+        // Calculate alignment offset
+        let text_width = self.content.len() as u16;
+        let x_offset = match self.options.align {
+            TextAlign::Left => 0,
+            TextAlign::Center => (area.width.saturating_sub(text_width)) / 2,
+            TextAlign::Right => area.width.saturating_sub(text_width),
+        };
+
+        // Write text
+        let start_col = area.x + x_offset;
+        for (i, c) in self.content.chars().enumerate() {
+            let col = start_col + i as u16;
+            if col < area.x + area.width {
+                let mut cell = Cell::new(c);
+                if let Some(fg) = self.options.fg_color {
+                    cell.fg = fg;
+                }
+                if let Some(bg) = self.options.bg_color {
+                    cell.bg = bg;
+                }
+                surface.set(area.y, col, cell);
+            }
+        }
+    }
+
+    fn min_size(&self) -> Size {
+        Size {
+            width: self.content.len() as u16,
+            height: 1,
+        }
     }
 }
