@@ -3,7 +3,6 @@ use crate::surface::Surface;
 use std::io::{self, Write};
 
 /// ANSI escape codes for text attributes.
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct SGR {
     bold: bool,
     italic: bool,
@@ -40,113 +39,67 @@ impl SGR {
         }
     }
 
-    /// Write SGR escape sequence directly into a String buffer.
-    /// Avoids intermediate Vec allocation and per-code format!() calls.
-    fn write_sgr_to(&self, buf: &mut String) {
+    /// Generate SGR sequence string.
+    fn to_sgr(&self) -> String {
         use crate::cell::Color;
 
-        buf.push_str("\x1b[");
+        let mut codes = Vec::new();
 
-        let mut first = true;
+        // Reset
+        codes.push(0);
 
-        let emit = |buf: &mut String, code: u16, first: &mut bool| {
-            if !*first {
-                buf.push(';');
-            }
-            *first = false;
-            write_u16(buf, code);
-        };
-
-        // Reset is always first
-        emit(buf, 0, &mut first);
-
-        if self.bold { emit(buf, 1, &mut first); }
-        if self.italic { emit(buf, 3, &mut first); }
-        if self.underline { emit(buf, 4, &mut first); }
-        if self.strikethrough { emit(buf, 9, &mut first); }
+        if self.bold {
+            codes.push(1);
+        }
+        if self.italic {
+            codes.push(3);
+        }
+        if self.underline {
+            codes.push(4);
+        }
+        if self.strikethrough {
+            codes.push(9);
+        }
 
         // Foreground color
         if let Some(fg) = &self.fg {
             match fg {
-                Color::Default => emit(buf, 39, &mut first),
-                Color::Black => emit(buf, 30, &mut first),
-                Color::Red => emit(buf, 31, &mut first),
-                Color::Green => emit(buf, 32, &mut first),
-                Color::Yellow => emit(buf, 33, &mut first),
-                Color::Blue => emit(buf, 34, &mut first),
-                Color::Magenta => emit(buf, 35, &mut first),
-                Color::Cyan => emit(buf, 36, &mut first),
-                Color::White => emit(buf, 37, &mut first),
-                Color::Indexed(n) => {
-                    emit(buf, 38, &mut first);
-                    emit(buf, 5, &mut first);
-                    emit(buf, *n as u16, &mut first);
-                }
-                Color::Rgb(r, g, b) => {
-                    emit(buf, 38, &mut first);
-                    emit(buf, 2, &mut first);
-                    emit(buf, *r as u16, &mut first);
-                    emit(buf, *g as u16, &mut first);
-                    emit(buf, *b as u16, &mut first);
-                }
+                Color::Default => codes.extend_from_slice(&[39]),
+                Color::Black => codes.push(30),
+                Color::Red => codes.push(31),
+                Color::Green => codes.push(32),
+                Color::Yellow => codes.push(33),
+                Color::Blue => codes.push(34),
+                Color::Magenta => codes.push(35),
+                Color::Cyan => codes.push(36),
+                Color::White => codes.push(37),
+                Color::Indexed(n) => codes.extend_from_slice(&[38, 5, *n as u8]),
+                Color::Rgb(r, g, b) => codes.extend_from_slice(&[38, 2, *r as u8, *g as u8, *b as u8]),
             }
         }
 
         // Background color
         if let Some(bg) = &self.bg {
             match bg {
-                Color::Default => emit(buf, 49, &mut first),
-                Color::Black => emit(buf, 40, &mut first),
-                Color::Red => emit(buf, 41, &mut first),
-                Color::Green => emit(buf, 42, &mut first),
-                Color::Yellow => emit(buf, 43, &mut first),
-                Color::Blue => emit(buf, 44, &mut first),
-                Color::Magenta => emit(buf, 45, &mut first),
-                Color::Cyan => emit(buf, 46, &mut first),
-                Color::White => emit(buf, 47, &mut first),
-                Color::Indexed(n) => {
-                    emit(buf, 48, &mut first);
-                    emit(buf, 5, &mut first);
-                    emit(buf, *n as u16, &mut first);
-                }
-                Color::Rgb(r, g, b) => {
-                    emit(buf, 48, &mut first);
-                    emit(buf, 2, &mut first);
-                    emit(buf, *r as u16, &mut first);
-                    emit(buf, *g as u16, &mut first);
-                    emit(buf, *b as u16, &mut first);
-                }
+                Color::Default => codes.extend_from_slice(&[49]),
+                Color::Black => codes.push(40),
+                Color::Red => codes.push(41),
+                Color::Green => codes.push(42),
+                Color::Yellow => codes.push(43),
+                Color::Blue => codes.push(44),
+                Color::Magenta => codes.push(45),
+                Color::Cyan => codes.push(46),
+                Color::White => codes.push(47),
+                Color::Indexed(n) => codes.extend_from_slice(&[48, 5, *n as u8]),
+                Color::Rgb(r, g, b) => codes.extend_from_slice(&[48, 2, *r as u8, *g as u8, *b as u8]),
             }
         }
 
-        buf.push('m');
-    }
-
-    /// Generate SGR sequence string (kept for backward compat).
-    #[allow(dead_code)]
-    fn to_sgr(&self) -> String {
-        let mut buf = String::with_capacity(32);
-        self.write_sgr_to(&mut buf);
-        buf
-    }
-}
-
-/// Write a u16 value to a String buffer without using format!().
-#[inline]
-fn write_u16(buf: &mut String, mut n: u16) {
-    if n == 0 {
-        buf.push('0');
-        return;
-    }
-    let mut digits = [0u8; 5];
-    let mut i = 0;
-    while n > 0 {
-        digits[i] = (n % 10) as u8;
-        n /= 10;
-        i += 1;
-    }
-    for j in (0..i).rev() {
-        buf.push((b'0' + digits[j]) as char);
+        codes
+            .iter()
+            .map(|c| format!("{}", c))
+            .collect::<Vec<_>>()
+            .join(";")
     }
 }
 
@@ -184,22 +137,15 @@ impl Renderer {
         io::stdout().flush()
     }
 
-    /// Move cursor to position. Uses direct buffer writing instead of format!().
-    #[inline]
+    /// Move cursor to position.
     fn move_cursor(&self, row: u16, col: u16) {
-        let mut buf = String::with_capacity(16);
-        buf.push_str("\x1b[");
-        write_u16(&mut buf, row + 1);
-        buf.push(';');
-        write_u16(&mut buf, col + 1);
-        buf.push('H');
-        print!("{}", buf);
+        print!("\x1b[{};{}H", row + 1, col + 1);
     }
 
-    /// Apply SGR codes — optimized to compare SGR structs directly
-    /// and write to a pre-allocated buffer.
-    #[inline]
+    /// Apply SGR codes.
     fn apply_sgr(&mut self, cell: &Cell) -> Option<String> {
+        
+
         let new_sgr = SGR {
             bold: cell.attrs.bold,
             italic: cell.attrs.italic,
@@ -210,14 +156,12 @@ impl Renderer {
             bg: Some(cell.bg),
         };
 
-        if new_sgr == self.current_sgr {
+        if new_sgr.to_sgr() == self.current_sgr.to_sgr() {
             return None; // No change needed
         }
 
         self.current_sgr = new_sgr;
-        let mut buf = String::with_capacity(32);
-        self.current_sgr.write_sgr_to(&mut buf);
-        Some(buf)
+        Some(format!("\x1b[{}m", self.current_sgr.to_sgr()))
     }
 
     /// Clear from cursor to end of line.
@@ -277,8 +221,8 @@ impl Renderer {
             self.write_str(&sgr);
         }
 
-        // Write character — avoid allocating a String for a single char
-        print!("{}", cell.char);
+        // Write character
+        self.write_str(&cell.char.to_string());
     }
 
     /// Render a single cell at a position and clear to end of line.
@@ -293,7 +237,7 @@ impl Renderer {
         }
 
         // Write character
-        print!("{}", cell.char);
+        self.write_str(&cell.char.to_string());
 
         // Clear to end of line
         self.clear_to_eol();
@@ -333,7 +277,7 @@ impl Renderer {
                         self.write_str(&sgr);
                     }
                     // Write character
-                    print!("{}", cell.char);
+                    self.write_str(&cell.char.to_string());
                 }
             }
 
@@ -363,6 +307,8 @@ pub trait RenderToSurface {
 
 impl RenderToSurface for Cell {
     fn to_ansi(&self) -> String {
+        
+
         let sgr = SGR {
             bold: self.attrs.bold,
             italic: self.attrs.italic,
@@ -372,10 +318,6 @@ impl RenderToSurface for Cell {
             fg: Some(self.fg),
             bg: Some(self.bg),
         };
-        let mut buf = String::with_capacity(48);
-        sgr.write_sgr_to(&mut buf);
-        buf.push(self.char);
-        buf.push_str("\x1b[0m");
-        buf
+        format!("\x1b[{}m{}\x1b[0m", sgr.to_sgr(), self.char)
     }
 }

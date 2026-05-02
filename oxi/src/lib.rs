@@ -2,8 +2,6 @@
 //!
 //! This crate provides the main application logic for the oxi CLI.
 
-pub mod context;
-pub mod export;
 pub mod extensions;
 pub mod packages;
 pub mod session;
@@ -20,6 +18,7 @@ use settings::{Settings, ThinkingLevel};
 use skills::SkillManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Application state and entry point
 pub struct App {
@@ -56,16 +55,12 @@ impl ChatMessage {
 }
 
 /// Interactive session state
-///
-/// Manages in-memory conversation state and integrates with the JSONL
-/// session persistence system for crash-safe auto-save.
 pub struct InteractiveSession {
     pub messages: Vec<ChatMessage>,
     pub thinking: bool,
     pub current_response: String,
-    pub session_id: Option<String>,
-    /// Persistent session handle (JSONL auto-save)
-    session_handle: Option<session::SessionHandle>,
+    pub session_id: Option<Uuid>,
+    pub entries: Vec<session::SessionEntry>,
 }
 
 impl Default for InteractiveSession {
@@ -75,7 +70,7 @@ impl Default for InteractiveSession {
             thinking: false,
             current_response: String::new(),
             session_id: None,
-            session_handle: None,
+            entries: Vec::new(),
         }
     }
 }
@@ -85,28 +80,18 @@ impl InteractiveSession {
         Self::default()
     }
 
-    /// Create with a persistent session handle for auto-save.
-    pub fn with_handle(handle: session::SessionHandle) -> Self {
-        let id = handle.session_id().to_string();
-        Self {
-            session_id: Some(id),
-            session_handle: Some(handle),
-            ..Self::default()
-        }
-    }
-
     pub fn add_user_message(&mut self, content: String) {
         self.messages.push(ChatMessage::user(content.clone()));
-        if let Some(ref mut handle) = self.session_handle {
-            handle.append_user_message(content);
-        }
+        // Also add to entries for session persistence
+        let entry = session::SessionEntry::new(session::AgentMessage::User { content });
+        self.entries.push(entry);
     }
 
     pub fn add_assistant_message(&mut self, content: String) {
         self.messages.push(ChatMessage::assistant(content.clone()));
-        if let Some(ref mut handle) = self.session_handle {
-            handle.append_assistant_message(content, None, None);
-        }
+        // Also add to entries for session persistence
+        let entry = session::SessionEntry::new(session::AgentMessage::Assistant { content });
+        self.entries.push(entry);
         self.current_response.clear();
     }
 
@@ -121,17 +106,24 @@ impl InteractiveSession {
         }
     }
 
-    /// Get the session file path (if persisting)
-    pub fn session_path(&self) -> Option<&std::path::Path> {
-        self.session_handle.as_ref().map(|h| h.file_path())
+    /// Get all entries in the session
+    pub fn entries(&self) -> &[session::SessionEntry] {
+        &self.entries
     }
 
-    /// Force-flush session to disk.
-    pub fn flush_session(&mut self) -> Result<()> {
-        if let Some(ref mut handle) = self.session_handle {
-            handle.flush()?;
-        }
-        Ok(())
+    /// Get entry at a specific index
+    pub fn get_entry(&self, index: usize) -> Option<&session::SessionEntry> {
+        self.entries.get(index)
+    }
+
+    /// Get entry by ID
+    pub fn get_entry_by_id(&self, id: Uuid) -> Option<&session::SessionEntry> {
+        self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Truncate entries at a given index (for branching)
+    pub fn truncate_at(&mut self, index: usize) {
+        self.entries.truncate(index + 1);
     }
 }
 
@@ -423,14 +415,14 @@ impl<'a> InteractiveLoop<'a> {
         self.session.thinking
     }
 
-    /// Get session file path (if persisting)
-    pub fn session_path(&self) -> Option<&std::path::Path> {
-        self.session.session_path()
+    /// Get session entries for tree navigation
+    pub fn entries(&self) -> &[session::SessionEntry] {
+        self.session.entries()
     }
 
-    /// Flush session to disk
-    pub fn flush_session(&mut self) -> Result<()> {
-        self.session.flush_session()
+    /// Get entry by ID
+    pub fn get_entry(&self, id: Uuid) -> Option<&session::SessionEntry> {
+        self.session.get_entry_by_id(id)
     }
 
     /// Switch the model used for future LLM calls
