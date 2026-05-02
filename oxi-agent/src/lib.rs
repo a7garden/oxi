@@ -10,6 +10,7 @@ pub mod state;
 pub mod config;
 pub mod agent;
 pub mod compaction;
+pub mod recovery;
 
 pub use agent::Agent;
 pub use config::AgentConfig;
@@ -17,6 +18,7 @@ pub use error::AgentError;
 pub use events::AgentEvent;
 pub use state::{AgentState, SharedState};
 pub use tools::{ToolRegistry, AgentTool, AgentToolResult, ReadTool, WriteTool, EditTool, BashTool, GrepTool, FindTool, LsTool};
+pub use recovery::{CircuitBreaker, CircuitBreakerConfig, CircuitOpenError, PartialResponse, FallbackChain};
 
 pub mod prelude {
     pub use crate::agent::Agent;

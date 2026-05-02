@@ -29,3 +29,11 @@ base64 = "0.22"
 # Utilities
 parking_lot = "0.12"
 unicode-width = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "tui_rendering"
+harness = false

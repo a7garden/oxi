@@ -70,6 +70,26 @@ enum Commands {
         /// Session ID to delete
         session_id: String,
     },
+    /// Export a session to HTML or JSON
+    Export {
+        /// Session ID to export (default: most recent)
+        #[arg(default_value = "")]
+        session_id: String,
+        /// Output file path (default: session-<id>.html or .json)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Export as JSON instead of HTML
+        #[arg(long)]
+        json: bool,
+    },
+    /// Share a session as a secret GitHub gist
+    Share {
+        /// Session ID to share (default: most recent)
+        #[arg(default_value = "")]
+        session_id: String,
+    },
+    /// Show loaded context files (AGENTS.md, CLAUDE.md)
+    Context,
     /// Package management
     Pkg {
         #[command(subcommand)]
@@ -235,6 +255,17 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         Commands::Delete { session_id } => {
             let manager = SessionManager::new().await?;
             delete_session(&manager, session_id).await?;
+        }
+        Commands::Export { session_id, output, json } => {
+            let manager = SessionManager::new().await?;
+            export_session_cmd(&manager, session_id, output.as_deref(), *json).await?;
+        }
+        Commands::Share { session_id } => {
+            let manager = SessionManager::new().await?;
+            share_session_cmd(&manager, session_id).await?;
+        }
+        Commands::Context => {
+            show_context_cmd()?;
         }
         Commands::Pkg { action } => {
             handle_pkg_command(action)?;
@@ -682,6 +713,94 @@ async fn delete_session(manager: &SessionManager, session_id: &str) -> Result<()
     Ok(())
 }
 
+async fn export_session_cmd(
+    manager: &SessionManager,
+    session_id: &str,
+    output: Option<&Path>,
+    as_json: bool,
+) -> Result<()> {
+    let id = resolve_session_id(manager, session_id).await?;
+
+    let path = if as_json {
+        oxi::export::export_session_json(manager, id, output).await?
+    } else {
+        oxi::export::export_session_html(manager, id, output).await?
+    };
+
+    println!("Session exported to: {}", path);
+    Ok(())
+}
+
+async fn share_session_cmd(manager: &SessionManager, session_id: &str) -> Result<()> {
+    let id = resolve_session_id(manager, session_id).await?;
+
+    println!("Sharing session {}...", id);
+    let gist_url = oxi::export::share_as_gist(manager, id).await?;
+
+    println!("Gist created: {}", gist_url);
+
+    // Show the HTML preview URL if possible
+    if let Some(gist_id) = gist_url.split('/').last() {
+        println!("Preview: https://htmlpreview.github.io/?{}", gist_url);
+        println!("Gist ID: {}", gist_id);
+    }
+
+    Ok(())
+}
+
+fn show_context_cmd() -> Result<()> {
+    let cwd = std::env::current_dir()?;
+    let agent_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".oxi");
+
+    let context_files = oxi::context::load_context_files(&cwd, &agent_dir)?;
+
+    if context_files.is_empty() {
+        println!("No context files found.");
+        println!();
+        println!("Context files are loaded from:");
+        println!("  - ~/.oxi/AGENTS.md or ~/.oxi/CLAUDE.md (global)");
+        println!("  - <project>/AGENTS.md or <project>/CLAUDE.md (project-level)");
+        println!();
+        println!("Files closer to the working directory take precedence.");
+        return Ok(());
+    }
+
+    println!("Loaded context files ({}):", context_files.len());
+    println!();
+    for (i, file) in context_files.iter().enumerate() {
+        let size = file.content.len();
+        println!("  {}. {} ({} bytes)", i + 1, file.path.display(), size);
+        // Show first few lines
+        for line in file.content.lines().take(3) {
+            println!("     {}", truncate(line, 70));
+        }
+        if file.content.lines().count() > 3 {
+            println!("     ...");
+        }
+        println!();
+    }
+
+    println!("Context is included in the system prompt for every LLM call.");
+
+    Ok(())
+}
+
+/// Resolve a session ID string, defaulting to the most recent session if empty.
+async fn resolve_session_id(manager: &SessionManager, session_id: &str) -> Result<Uuid> {
+    if session_id.is_empty() {
+        let sessions = manager.list_sessions().await?;
+        match sessions.first() {
+            Some(s) => Ok(s.id),
+            None => anyhow::bail!("No sessions found."),
+        }
+    } else {
+        Uuid::parse_str(session_id)
+            .map_err(|e| anyhow::anyhow!("Invalid session ID '{}': {}", session_id, e))
+    }
+}
+
 fn truncate(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
         s.to_string()
@@ -731,7 +850,7 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
     }
 
     println!("oxi CLI - type your message and press Enter. Ctrl+C or 'exit' to quit.");
-    println!("Commands: /sessions, /tree, /fork <entry_id>, /model, /skill, /template, /history, /help");
+    println!("Commands: /sessions, /tree, /fork <entry_id>, /model, /skill, /template, /export, /share, /context, /history, /help");
     println!("---");
 
     loop {
@@ -920,6 +1039,9 @@ async fn handle_command(
             println!("  /sessions       - List all sessions");
             println!("  /tree            - Show current session tree");
             println!("  /fork <id>       - Fork from an entry");
+            println!("  /export [path]   - Export session to HTML (default) or JSON (.json)");
+            println!("  /share           - Share session as a secret GitHub gist");
+            println!("  /context         - Show loaded context files (AGENTS.md, CLAUDE.md)");
             println!("  /model           - Show current model");
             println!("  /model <id>      - Switch model (e.g. openai/gpt-4o, anthropic/claude-sonnet-4-20250514)");
             println!("  /models          - List available models");

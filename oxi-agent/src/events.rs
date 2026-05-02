@@ -9,6 +9,8 @@ pub enum AgentEvent {
     Start { prompt: String },
     /// Thinking started
     Thinking,
+    /// Thinking delta (streaming thinking content)
+    ThinkingDelta { text: String },
     /// Text chunk received (for streaming)
     TextChunk { text: String },
     /// Tool call requested
@@ -43,4 +45,8 @@ pub enum AgentEvent {
         from_model: String,
         to_model: String,
     },
+    /// Streaming was cancelled by the user
+    Cancelled,
+    /// Partial response recovered after error (best-effort delivery)
+    PartialResponse { content: String },
 }
