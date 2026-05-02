@@ -9,7 +9,7 @@ pub enum AgentEvent {
     Start { prompt: String },
     /// Thinking started
     Thinking,
-    /// Thinking delta (streaming thinking content)
+    /// Thinking delta (streaming thinking content, pi-mono inspired)
     ThinkingDelta { text: String },
     /// Text chunk received (for streaming)
     TextChunk { text: String },

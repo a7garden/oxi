@@ -169,11 +169,12 @@ impl Surface {
     }
 
     /// Clear the surface with default cells.
-    /// Optimized: uses bulk fill instead of per-cell reset + mark_dirty.
     pub fn clear(&mut self) {
-        for row in &mut self.cells {
-            for cell in row.iter_mut() {
-                cell.reset();
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let mut c = Cell::default();
+                c.reset();
+                self.cells[row as usize][col as usize] = c;
             }
         }
         self.clear_dirty();
@@ -213,7 +214,9 @@ impl Surface {
     /// Clear the dirty tracking.
     pub fn clear_dirty(&mut self) {
         for row in &mut self.dirty_cells {
-            row.fill(false);
+            for cell in row.iter_mut() {
+                *cell = false;
+            }
         }
         self.first_dirty_row = None;
         self.last_dirty_row = None;
@@ -221,8 +224,10 @@ impl Surface {
 
     /// Mark entire surface as dirty.
     pub fn mark_all_dirty(&mut self) {
-        for row in &mut self.dirty_cells {
-            row.fill(true);
+        for row in 0..self.height {
+            for col in 0..self.width {
+                self.dirty_cells[row as usize][col as usize] = true;
+            }
         }
         self.first_dirty_row = Some(0);
         self.last_dirty_row = Some(self.height.saturating_sub(1));
