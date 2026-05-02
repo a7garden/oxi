@@ -24,7 +24,11 @@ pub struct Command {
 }
 
 impl Command {
-    pub fn new(name: impl Into<String>, description: impl Into<String>, usage: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        usage: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
@@ -161,10 +165,7 @@ pub fn load_extension(path: &Path) -> Result<Arc<dyn Extension>> {
 
 fn load_extension_inner(path: &Path) -> Result<Arc<dyn Extension>> {
     // Validate file extension
-    let ext = path
-        .extension()
-        .and_then(OsStr::to_str)
-        .unwrap_or("");
+    let ext = path.extension().and_then(OsStr::to_str).unwrap_or("");
 
     let valid = matches!(ext, "so" | "dylib" | "dll");
     if !valid {
@@ -185,9 +186,12 @@ fn load_extension_inner(path: &Path) -> Result<Arc<dyn Extension>> {
     };
 
     let create: Symbol<CreateFn> = unsafe {
-        library
-            .get(ENTRY_SYMBOL)
-            .with_context(|| format!("Symbol `oxi_extension_create` not found in {}", path.display()))?
+        library.get(ENTRY_SYMBOL).with_context(|| {
+            format!(
+                "Symbol `oxi_extension_create` not found in {}",
+                path.display()
+            )
+        })?
     };
 
     let raw_ptr = unsafe { create() };
@@ -208,7 +212,9 @@ pub fn load_extensions(paths: &[&Path]) -> (Vec<Arc<dyn Extension>>, Vec<anyhow:
     for &path in paths {
         match load_extension(path) {
             Ok(ext) => loaded.push(ext),
-            Err(e) => errors.push(e.context(format!("Failed to load extension: {}", path.display()))),
+            Err(e) => {
+                errors.push(e.context(format!("Failed to load extension: {}", path.display())))
+            }
         }
     }
 
