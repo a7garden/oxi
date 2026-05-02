@@ -17,7 +17,7 @@ pub mod tui;
 pub use autocomplete::FuzzyMatcher;
 pub use cell::{Attributes, Cell, CellBuilder, Color};
 pub use component::Component;
-pub use components::{AutocompleteProvider, Completion, Editor, EditorOptions, FileCompleter, Input, InputOptions, Markdown, MarkdownTheme, Mention, Text};
+pub use components::{AutocompleteProvider, ChatMessageDisplay, ChatView, Completion, ContentBlockDisplay, Editor, EditorOptions, FileCompleter, Image, ImageProtocol, Input, InputOptions, Markdown, MarkdownTheme, Mention, MessageRole, StreamingState, Text};
 pub use event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent};
 pub use overlay::{OverlayBox, OverlayContent, OverlayHandle, OverlayOptions};
 pub use renderer::Renderer;
