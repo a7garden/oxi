@@ -1,6 +1,6 @@
 //! Text component - displays static or dynamic text.
 
-use crate::{Cell, Color, Component, Event, Rect, Surface, Size};
+use crate::{Cell, Color, Component, Event, Rect, Surface, Size, Theme};
 
 /// Text component configuration.
 #[derive(Debug, Clone)]
@@ -11,6 +11,8 @@ pub struct TextOptions {
     pub bg_color: Option<Color>,
     /// Alignment.
     pub align: TextAlign,
+    /// When set, theme colors are used as defaults (overridden by explicit fg/bg).
+    pub theme: Option<Theme>,
 }
 
 impl Default for TextOptions {
@@ -19,6 +21,19 @@ impl Default for TextOptions {
             fg_color: None,
             bg_color: None,
             align: TextAlign::Left,
+            theme: None,
+        }
+    }
+}
+
+impl TextOptions {
+    /// Create options pre-filled from a theme.
+    pub fn from_theme(theme: &Theme) -> Self {
+        Self {
+            fg_color: Some(theme.colors.foreground),
+            bg_color: Some(theme.colors.background),
+            align: TextAlign::Left,
+            theme: Some(theme.clone()),
         }
     }
 }
@@ -53,6 +68,19 @@ impl Text {
             options,
             dirty: true,
         }
+    }
+
+    /// Set the theme; colors from the theme are used unless explicitly overridden.
+    pub fn set_theme(&mut self, theme: &Theme) {
+        self.options.theme = Some(theme.clone());
+        // Only override if user hasn't set explicit colors
+        if self.options.fg_color.is_none() {
+            self.options.fg_color = Some(theme.colors.foreground);
+        }
+        if self.options.bg_color.is_none() {
+            self.options.bg_color = Some(theme.colors.background);
+        }
+        self.dirty = true;
     }
 
     pub fn set_text(&mut self, content: &str) {

@@ -1,7 +1,7 @@
 //! Input component - text input field with autocomplete support.
 
 use std::path::PathBuf;
-use crate::{Cell, Color, Component, Event, KeyCode, KeyEvent, KeyModifiers, Rect, Size, Surface};
+use crate::{Cell, Color, Component, Event, KeyCode, KeyEvent, KeyModifiers, Rect, Size, Surface, Theme};
 use crate::components::{Completion, FileCompleter};
 
 /// Input field configuration.
@@ -19,6 +19,8 @@ pub struct InputOptions {
     pub enable_file_completion: bool,
     /// Enable @ mention completion.
     pub enable_mention_completion: bool,
+    /// Theme reference for default colors.
+    pub theme: Option<Theme>,
 }
 
 impl Default for InputOptions {
@@ -30,6 +32,19 @@ impl Default for InputOptions {
             max_length: None,
             enable_file_completion: true,
             enable_mention_completion: true,
+            theme: None,
+        }
+    }
+}
+
+impl InputOptions {
+    /// Create options pre-filled from a theme.
+    pub fn from_theme(theme: &Theme) -> Self {
+        Self {
+            fg_color: Some(theme.colors.foreground),
+            bg_color: Some(theme.colors.background),
+            theme: Some(theme.clone()),
+            ..InputOptions::default()
         }
     }
 }
@@ -94,7 +109,19 @@ impl Input {
         }
     }
 
-    /// Get the current value.
+    /// Set the theme; colors from the theme are used unless explicitly overridden.
+    pub fn set_theme(&mut self, theme: &Theme) {
+        self.options.theme = Some(theme.clone());
+        if self.options.fg_color.is_none() {
+            self.options.fg_color = Some(theme.colors.foreground);
+        }
+        if self.options.bg_color.is_none() {
+            self.options.bg_color = Some(theme.colors.background);
+        }
+        self.dirty = true;
+    }
+
+    /// Get current value.
     pub fn value(&self) -> &str {
         &self.value
     }
