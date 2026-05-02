@@ -19,7 +19,6 @@ pub use crate::CacheRetention;
 pub use crate::ThinkingLevel;
 pub use crate::Context;
 pub use crate::Model;
-pub use crate::messages::AssistantMessage;
 
 /// Provider factory functions
 
@@ -37,6 +36,7 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
 }
 
 /// Get all available provider names
+#[allow(dead_code)]
 pub fn provider_names() -> Vec<&'static str> {
     vec![
         "openai",
@@ -53,6 +53,7 @@ pub fn provider_names() -> Vec<&'static str> {
 }
 
 /// Get all available providers with names
+#[allow(dead_code)]
 pub fn providers() -> Vec<(&'static str, &'static str)> {
     vec![
         ("openai", "OpenAI"),

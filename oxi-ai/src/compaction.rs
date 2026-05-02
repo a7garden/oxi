@@ -120,6 +120,7 @@ pub trait Compactor: Send + Sync {
 /// LLM-based compactor that uses the model itself to summarize
 pub struct LlmCompactor {
     model: Model,
+    #[allow(dead_code)]
     provider: Arc<dyn Provider>,
     /// How many recent messages to always keep (not compacted)
     keep_recent: usize,
