@@ -664,23 +664,24 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
 }
 
 async fn fork_session(manager: &SessionManager, parent_id_str: &str, entry_id_str: &str) -> Result<()> {
-    let sessions = manager.list_sessions()?;
-    let info = sessions.iter().find(|s| s.id.starts_with(parent_id_str))
+    let sessions = manager.list_sessions().await?;
+    let info = sessions.iter().find(|s| s.id.to_string().starts_with(parent_id_str))
         .ok_or_else(|| anyhow::anyhow!("Session not found: {}", parent_id_str))?;
-    let cwd = std::env::current_dir()?.to_string_lossy().to_string();
-    let new_handle = manager.fork_session(&info.path, entry_id_str, &cwd).await?;
-    println!("Created forked session: {}", new_handle.session_id());
-    println!("File: {}", new_handle.file_path().display());
-
+    let entry_id = Uuid::parse_str(entry_id_str)
+        .map_err(|_| anyhow::anyhow!("Invalid entry ID: {}", entry_id_str))?;
+    let (new_session_id, _) = manager.branch_from(info.id, entry_id).await?;
+    println!("Created forked session: {}", new_session_id);
+    println!("File: {}", manager.session_path(&new_session_id).display());
     Ok(())
 }
 
 async fn delete_session(manager: &SessionManager, session_id: &str) -> Result<()> {
-    let sessions = manager.list_sessions()?;
-    let info = sessions.iter().find(|s| s.id.starts_with(session_id))
+    let sessions = manager.list_sessions().await?;
+    let info = sessions.iter().find(|s| s.id.to_string().starts_with(session_id))
         .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
-    manager.delete_session(&info.path).await?;
-    println!("Deleted session: {}", info.path.display());
+    let path = manager.session_path(&info.id);
+    manager.delete(info.id).await?;
+    println!("Deleted session: {}", path.display());
     Ok(())
 }
 
@@ -752,9 +753,9 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
 
         // Handle commands
         if line.starts_with('/') {
-            match handle_command(line, &mut session_manager, &mut session, current_session_id, &template_manager, &app).await? {
+            match handle_command(line, &mut session_manager, &mut session, &mut current_session_id, &template_manager, &app).await? {
                 CommandResult::Handled => continue,
-                CommandResult::NewSession(id) => current_session_id = Some(id),
+                CommandResult::NewSession(id) => current_session_id = Some(id.to_string()),
                 CommandResult::Quit => break,
             }
         }
@@ -829,31 +830,36 @@ async fn handle_command(
     line: &str,
     manager: &mut SessionManager,
     session: &mut oxi::InteractiveLoop<'_>,
-    current_session_id: Option<String>,
+    current_session_id: &mut Option<String>,
     templates: &TemplateManager,
     app: &oxi::App,
 ) -> Result<CommandResult> {
     match line {
         "/sessions" | "/sessions list" => {
-            let sessions = manager.list_sessions()?;
+            let sessions = manager.list_sessions().await?;
             if sessions.is_empty() {
                 println!("No sessions found.");
             } else {
                 println!("Sessions:");
                 for info in &sessions {
+                    let modified = chrono::DateTime::from_timestamp_millis(info.updated_at)
+                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                        .unwrap_or_else(|| "N/A".to_string());
                     println!(
-                        "  {:.8}  {}  [{} msgs]",
+                        "  {:.8}  {}  [root: {}]",
                         info.id,
-                        info.modified.format("%Y-%m-%d %H:%M"),
-                        info.message_count
+                        modified,
+                        if info.root_id.is_some() { "branched" } else { "root" }
                     );
                 }
             }
             Ok(CommandResult::Handled)
         }
         "/tree" | "/tree view" => {
-            if let Some(id) = current_session_id {
-                let tree = manager.get_tree(id).await?;
+            if let Some(ref id) = current_session_id {
+                let session_uuid = Uuid::parse_str(id)
+                    .map_err(|_| anyhow::anyhow!("Invalid session ID: {}", id))?;
+                let tree = manager.get_tree(session_uuid).await?;
                 if tree.is_empty() {
                     println!("No entries in session.");
                 } else {
@@ -1005,14 +1011,13 @@ async fn handle_command(
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
                 if let Ok(entry_id) = Uuid::parse_str(parts[1]) {
-                    if let Some(session_id) = current_session_id {
-                        let sessions = manager.list_sessions()?;
-                        if let Some(info) = sessions.iter().find(|s| s.id.starts_with(session_id.as_str())) {
-                            let cwd = std::env::current_dir().map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
-                            match manager.fork_session(&info.path, entry_id, &cwd).await {
-                                Ok(new_handle) => {
-                                    println!("Created forked session: {}", new_handle.session_id());
-                                    return Ok(CommandResult::NewSession(new_handle.session_id().to_string()));
+                    if let Some(ref session_id) = current_session_id {
+                        let sessions = manager.list_sessions().await?;
+                        if let Some(info) = sessions.iter().find(|s| s.id.to_string().starts_with(session_id.as_str())) {
+                            match manager.branch_from(info.id, entry_id).await {
+                                Ok((new_id, _)) => {
+                                    println!("Created forked session: {}", new_id);
+                                    return Ok(CommandResult::NewSession(new_id));
                                 }
                                 Err(e) => println!("Error forking: {}", e),
                             }
@@ -1026,7 +1031,10 @@ async fn handle_command(
                     println!("Usage: /fork <entry_id>");
                 }
                 Ok(CommandResult::Handled)
+            } else {
+                Ok(CommandResult::Handled)
             }
+        }
         "/history" => {
             for msg in session.messages() {
                 let prefix = match msg.role.as_str() {
