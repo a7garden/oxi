@@ -1,26 +1,19 @@
-//! oxi-agent: Agent runtime layer built on oxi-ai
+//! oxi-agent: Agent runtime for oxi
 //!
-//! This crate implements agent functionality built on top of oxi-ai,
-//! providing tool execution, state management, and event handling.
+//! This crate provides an agent runtime that integrates with oxi-ai providers.
 
-mod types;
-mod events;
-mod tools;
-mod state;
+pub mod types;
+pub mod events;
+pub mod tools;
+pub mod state;
+pub mod config;
+pub mod agent;
 
-// Re-exports - be selective to avoid ambiguity
-pub use types::{
-    AgentConfig, AgentMessage, AgentToolResult, ContentBlock, ToolExecutionMode,
-    ImageSource,
-};
-pub use events::{AgentEvent, AgentEndReason, MessageDelta, ToolUseDelta};
-pub use tools::{AgentTool, AgentToolExt, ToolFuture, ToolValidationError};
+pub use agent::Agent;
+pub use config::AgentConfig;
+pub use events::AgentEvent;
 pub use state::AgentState;
+pub use tools::ToolRegistry;
 
-// Re-export prelude for convenience
-pub mod prelude {
-    pub use crate::types::*;
-    pub use crate::events::*;
-    pub use crate::tools::*;
-    pub use crate::state::*;
-}
+#[cfg(test)]
+mod tests;
