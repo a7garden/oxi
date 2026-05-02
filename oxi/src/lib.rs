@@ -72,14 +72,14 @@ impl InteractiveSession {
     }
 
     pub fn add_user_message(&mut self, content: String) {
-        self.messages.push(ChatMessage::user(content));
+        self.messages.push(ChatMessage::user(content.clone()));
         // Also add to entries for session persistence
         let entry = session::SessionEntry::new(session::AgentMessage::User { content });
         self.entries.push(entry);
     }
 
     pub fn add_assistant_message(&mut self, content: String) {
-        self.messages.push(ChatMessage::assistant(content));
+        self.messages.push(ChatMessage::assistant(content.clone()));
         // Also add to entries for session persistence
         let entry = session::SessionEntry::new(session::AgentMessage::Assistant { content });
         self.entries.push(entry);

@@ -4,12 +4,10 @@ use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::process::{Command as StdCommand, Stdio as StdStdio};
+use std::process::{Command as StdCommand, Stdio as StdStdio, Output};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::fs;
-use tokio::io::AsyncReadExt;
-use tokio::process::{Command, Stdio};
 use tokio::sync::{Mutex, oneshot};
 
 pub struct BashTool {
@@ -23,17 +21,9 @@ impl BashTool {
         }
     }
 
-    async fn run_command_impl(
-        command: &str,
-        working_dir: Option<&str>,
-        timeout_secs: Option<u64>,
-        progress_cb: &Option<ProgressCallback>,
-    ) -> Result<String, ToolError> {
-        if let Some(cb) = progress_cb {
-            cb(format!("Executing: {}", command));
-        }
-
-        // Use blocking std Command for simplicity
+    fn run_sync(command: &str, working_dir: Option<&str>, timeout_secs: Option<u64>) 
+        -> Result<Output, String> 
+    {
         let mut cmd = StdCommand::new("sh");
         cmd.arg("-c").arg(command);
         cmd.stdout(StdStdio::piped());
@@ -45,17 +35,54 @@ impl BashTool {
             }
         }
 
-        // Execute with optional timeout
-        let output = if let Some(timeout) = timeout_secs {
-            let result = std::thread::spawn(move || {
-                std::time::timeout(Duration::from_secs(timeout), cmd.output())
-            }).join().unwrap_or(Ok(Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut, "timeout thread panicked"
-            )))?}
-            .map_err(|e| format!("Command timed out: {}", e))?
-        } else {
-            cmd.output().map_err(|e| format!("Command failed: {}", e))?
-        };
+        match timeout_secs {
+            Some(timeout) => {
+                let start = Instant::now();
+                let handle = std::thread::spawn(move || {
+                    // Poll the child process until it completes or timeout
+                    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
+                    let wait_duration = Duration::from_secs(timeout);
+                    
+                    while start.elapsed() < wait_duration {
+                        match child.try_wait() {
+                            Ok(Some(status)) => return child.wait_with_output().map_err(|e| e.to_string()),
+                            Ok(None) => {
+                                std::thread::sleep(Duration::from_millis(10));
+                            }
+                            Err(e) => return Err(e.to_string()),
+                        }
+                    }
+                    let _ = child.kill();
+                    Err("Command timed out".to_string())
+                });
+                match handle.join() {
+                    Ok(Ok(out)) => Ok(out),
+                    Ok(Err(e)) => Err(e),
+                    _ => Err("Thread panic".to_string()),
+                }
+            }
+            None => cmd.output().map_err(|e| format!("Command failed: {}", e)),
+        }
+    }
+
+    async fn run_command_impl(
+        command: &str,
+        working_dir: Option<&str>,
+        timeout_secs: Option<u64>,
+        progress_cb: &Option<ProgressCallback>,
+    ) -> Result<String, ToolError> {
+        if let Some(cb) = progress_cb {
+            cb(format!("Executing: {}", command));
+        }
+
+        // Run blocking command in a separate thread
+        let cmd = command.to_string();
+        let dir = working_dir.map(String::from);
+        let timeout = timeout_secs;
+        
+        let output = tokio::task::spawn_blocking(move || {
+            Self::run_sync(&cmd, dir.as_deref(), timeout)
+        }).await.map_err(|e| format!("Task join error: {}", e))??;
 
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -166,11 +193,10 @@ impl AgentTool for BashTool {
     }
 
     fn on_progress(&self, callback: ProgressCallback) {
-        let progress_cb = Arc::new(callback);
         let cb = self.progress_callback.clone();
         tokio::spawn(async move {
             let mut guard = cb.lock().await;
-            *guard = Some(progress_cb);
+            *guard = Some(callback);
         });
     }
 }

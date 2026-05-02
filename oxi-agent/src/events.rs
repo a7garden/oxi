@@ -1,7 +1,5 @@
 //! Agent event system
 
-use crate::types::{ToolCall, ToolResult};
-
 /// Agent events emitted during agent execution
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
@@ -12,13 +10,13 @@ pub enum AgentEvent {
     /// Text chunk received (for streaming)
     TextChunk { text: String },
     /// Tool call requested
-    ToolCall { tool_call: ToolCall },
+    ToolCall { tool_call: oxi_ai::ToolCall },
     /// Tool execution started
     ToolStart { tool_call_id: String, tool_name: String },
     /// Tool execution in progress with progress update
     ToolProgress { tool_call_id: String, message: String },
     /// Tool execution completed
-    ToolComplete { result: ToolResult },
+    ToolComplete { result: oxi_ai::ToolResult },
     /// Tool execution failed
     ToolError { tool_call_id: String, error: String },
     /// Response generation completed

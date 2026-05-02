@@ -147,7 +147,6 @@ impl AgentTool for ReadTool {
     }
 
     fn on_progress(&self, callback: ProgressCallback) {
-        // Store the callback for use during execution via interior mutability
         let cb = self.progress_callback.clone();
         tokio::spawn(async move {
             let mut guard = cb.lock().await;

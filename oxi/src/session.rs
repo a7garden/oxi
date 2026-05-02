@@ -49,6 +49,17 @@ pub enum AgentMessage {
     System { content: String },
 }
 
+impl AgentMessage {
+    /// Get the content of the message
+    pub fn content(&self) -> &str {
+        match self {
+            AgentMessage::User { content } => content,
+            AgentMessage::Assistant { content } => content,
+            AgentMessage::System { content } => content,
+        }
+    }
+}
+
 /// Session metadata stored separately from entries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMeta {
