@@ -9,6 +9,8 @@
 pub mod autonomous_loop;
 pub mod brainstorming;
 pub mod deep_research;
+pub mod playwright_cli;
+pub mod design_farmer;
 pub mod super_review;
 
 use anyhow::{Context, Result};
