@@ -258,7 +258,7 @@ async fn run_single_prompt(app: oxi::App, prompt: &str) -> Result<()> {
 
 enum CommandResult {
     Handled,
-    NewSession(Option<Uuid>),
+    NewSession(Uuid),
     Quit,
 }
 
@@ -314,7 +314,7 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
 async fn handle_command(
     line: &str,
     manager: &mut SessionManager,
-    session: &mut oxi::InteractiveLoop,
+    session: &mut oxi::InteractiveLoop<'_>,
     current_session_id: Option<Uuid>,
 ) -> Result<CommandResult> {
     match line {
@@ -378,7 +378,7 @@ async fn handle_command(
                             Ok((new_id, entries)) => {
                                 println!("Created forked session: {}", new_id);
                                 println!("Copied {} entries", entries.len());
-                                return Ok(CommandResult::NewSession(Some(new_id)));
+                                return Ok(CommandResult::NewSession(new_id));
                             }
                             Err(e) => println!("Error forking: {}", e),
                         }
