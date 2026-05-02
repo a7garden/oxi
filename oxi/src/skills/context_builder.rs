@@ -1007,7 +1007,7 @@ mod tests {
     fn sample_entity(name: &str) -> Entity {
         Entity {
             name: name.to_string(),
-            description: format!("{} entity".to_string(), name),
+            description: format!("{} entity", name),
             attributes: vec![EntityAttribute {
                 name: "id".to_string(),
                 attr_type: "string".to_string(),
@@ -1316,7 +1316,7 @@ mod tests {
 
         session.add_constraint(Constraint {
             description: "Passwords must be hashed with bcrypt".to_string(),
-            constraint_type: ConstraintType::Security,
+            constraint_type: ConstraintType::Regulatory,
             source: Some("REQ-001".to_string()),
         });
 
@@ -1355,7 +1355,7 @@ mod tests {
         assert!(md.contains("Session (1:N)"));
         assert!(md.contains("## Constraints"));
         assert!(md.contains("bcrypt"));
-        assert!(md.contains("security"));
+        assert!(md.contains("regulatory"));
         assert!(md.contains("## Codebase Cross-References"));
         assert!(md.contains("`src/auth.rs`"));
         assert!(md.contains("Middleware pattern"));
