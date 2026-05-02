@@ -1,29 +1,34 @@
-//! OpenAI-compatible provider implementation
+//! DeepSeek provider implementation
+//!
+//! DeepSeek uses an OpenAI-compatible API with additional reasoning support.
 
 use async_trait::async_trait;
-use std::pin::Pin;
-use futures::{Stream, StreamExt};
+use futures::Stream;
+use futures::stream::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::collections::HashMap;
+use std::pin::Pin;
 
+use super::{Provider, ProviderEvent, ProviderError, StreamOptions};
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider, 
-    error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, StopReason, TextContent,
+    ThinkingContent, ToolCall, Usage,
 };
 
-/// OpenAI-compatible provider
+/// DeepSeek provider
 #[derive(Clone)]
-pub struct OpenAiProvider {
+pub struct DeepSeekProvider {
     client: Client,
     api_key: Option<String>,
 }
 
-impl OpenAiProvider {
+impl DeepSeekProvider {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            api_key: std::env::var("OPENAI_API_KEY").ok(),
+            api_key: std::env::var("DEEPSEEK_API_KEY").ok(),
         }
     }
     
@@ -35,14 +40,14 @@ impl OpenAiProvider {
     }
 }
 
-impl Default for OpenAiProvider {
+impl Default for DeepSeekProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl Provider<'_> for OpenAiProvider {
+impl Provider for DeepSeekProvider {
     async fn stream(
         &self,
         model: &Model,
@@ -83,6 +88,14 @@ impl Provider<'_> for OpenAiProvider {
             body["tools"] = build_tools(&context.tools)?;
         }
         
+        // Add reasoning parameters for DeepSeek models that support it
+        if model.reasoning {
+            body["thinking"] = serde_json::json!({
+                "type": "enabled",
+                "budget_tokens": options.max_tokens.unwrap_or(8000).min(16000),
+            });
+        }
+        
         // Build headers
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -118,39 +131,29 @@ impl Provider<'_> for OpenAiProvider {
             return Err(ProviderError::HttpError(status.as_u16(), body));
         }
         
-        // Create event stream using a helper function
+        // Create event stream
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
-        let stream = OpenAiStream::new(response, provider_name, model_id);
+        
+        let stream = response.bytes_stream()
+            .flat_map(move |chunk| {
+                match chunk {
+                    Ok(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes);
+                        futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
+                    }
+                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                        reason: StopReason::Error,
+                        error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                    }]),
+                }
+            });
         
         Ok(Box::pin(stream))
     }
     
     fn name(&self) -> &str {
-        "openai"
-    }
-}
-
-/// Helper struct to implement the stream
-struct OpenAiStream {
-    inner: futures::stream::FlatMap<
-        reqwest::upgrades::Upgrade<futures::StreamBox<impl std::any::Any + Send>>,
-        futures::stream::Iter<std::vec::IntoIter<ProviderEvent>>,
-        fn(std::result::Result<bytes::Bytes, reqwest::Error>) -> futures::stream::Iter<std::vec::IntoIter<ProviderEvent>>
-    >,
-}
-
-impl Stream for OpenAiStream {
-    type Item = ProviderEvent;
-    
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        // Delegate to inner stream
-        // This is a simplified implementation
-        // In practice, we'd need a more sophisticated stream wrapper
-        Pin::new(&mut self.get_mut().inner).poll_next(cx)
+        "deepseek"
     }
 }
 
@@ -211,37 +214,20 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
         }
     }
     
-    let items: Result<Vec<_>, _> = blocks.iter().map(|block| {
+    let mut parts = Vec::new();
+    for block in blocks {
         match block {
-            ContentBlock::Text(t) => Ok(serde_json::json!({
-                "type": "text",
-                "text": t.text,
-            })),
-            ContentBlock::ToolCall(tc) => Ok(serde_json::json!({
-                "type": "function",
-                "id": tc.id,
-                "function": {
-                    "name": tc.name,
-                    "arguments": tc.arguments.to_string(),
-                },
-            })),
-            ContentBlock::Thinking(th) => Ok(serde_json::json!({
-                "type": "thinking",
-                "thinking": th.thinking,
-            })),
-            ContentBlock::Image(img) => Ok(serde_json::json!({
-                "type": "image_url",
-                "image_url": {
-                    "url": format!("data:{};base64,{}", img.mime_type, img.data),
-                },
-            })),
-            ContentBlock::Unknown(_) => {
-                Err(ProviderError::InvalidResponse("Unknown content block type".into()))
+            ContentBlock::Text(t) => parts.push(t.text.clone()),
+            ContentBlock::Thinking(th) => parts.push(format!("[Thinking: {}]", th.thinking)),
+            ContentBlock::ToolCall(tc) => {
+                parts.push(format!("[Tool {}: {} - {}]", tc.id, tc.name, tc.arguments));
             }
+            ContentBlock::Image(_) => parts.push("[Image]".to_string()),
+            ContentBlock::Unknown(_) => {}
         }
-    }).collect();
+    }
     
-    Ok(serde_json::json!(items?))
+    Ok(JsonValue::String(parts.join("\n")))
 }
 
 /// Build tools array
@@ -275,9 +261,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
         }
         
         if let Some(data) = line.strip_prefix("data: ") {
-            // Parse JSON chunk
             if let Ok(chunk) = serde_json::from_str::<SSEChunk>(data) {
-                // Process choices
                 for choice in &chunk.choices {
                     if let Some(delta) = &choice.delta {
                         if let Some(content) = &delta.content {

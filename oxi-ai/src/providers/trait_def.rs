@@ -2,9 +2,9 @@
 
 use async_trait::async_trait;
 use futures::Stream;
-use std::sync::Arc;
-use super::{Model, Context, StreamOptions, ProviderEvent, ProviderError};
-use crate::AssistantMessage;
+use std::pin::Pin;
+use crate::error::ProviderError;
+use crate::{Model, Context, StreamOptions, ProviderEvent};
 
 /// LLM provider trait
 ///
@@ -17,25 +17,8 @@ pub trait Provider: Send + Sync + 'static {
         model: &Model,
         context: &Context,
         options: Option<StreamOptions>,
-    ) -> Result<impl Stream<Item = ProviderEvent> + Send, ProviderError>;
+    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send + 'static>>, ProviderError>;
     
     /// Get the provider name
     fn name(&self) -> &str;
-}
-
-/// Get a boxed provider for a model
-pub fn provider_for_model(model: &Model) -> Result<Box<dyn Provider>, ProviderError> {
-    match model.provider.as_str() {
-        "openai" | "azure-openai" | "deepseek" | "groq" | "cerebras" | "xai" | "mistral" | "openrouter" | "fireworks" | "huggingface" => {
-            Ok(Box::new(super::openai::OpenAiProvider::new()))
-        }
-        "anthropic" => {
-            Ok(Box::new(super::anthropic::AnthropicProvider::new()))
-        }
-        "google" | "google-vertex" => {
-            // TODO: Implement Google provider
-            Err(ProviderError::NotImplemented(format!("Provider '{}' not yet implemented", model.provider)))
-        }
-        _ => Err(ProviderError::UnknownProvider(model.provider.clone())),
-    }
 }

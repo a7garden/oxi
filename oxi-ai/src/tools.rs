@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use serde_json::json;
 use jsonschema::Validator;
 use thiserror::Error;
 
@@ -36,16 +37,23 @@ impl Tool {
         param_description: impl Into<String>,
     ) -> Self {
         let param_name = param_name.into();
-        let params = serde_json::json!({
-            "type": "object",
-            "properties": {
-                param_name: {
-                    "type": "string",
-                    "description": param_description
-                }
-            },
-            "required": [param_name]
-        });
+        let param_description = param_description.into();
+        
+        // Build properties manually to avoid borrow issues
+        let mut properties = serde_json::Map::new();
+        properties.insert("type".to_string(), json!("object"));
+        
+        let mut obj_properties = serde_json::Map::new();
+        obj_properties.insert(param_name.clone(), json!({
+            "type": "string",
+            "description": param_description
+        }));
+        properties.insert("properties".to_string(), serde_json::Value::Object(obj_properties));
+        
+        let required_arr = serde_json::Value::Array(vec![serde_json::Value::String(param_name.clone())]);
+        properties.insert("required".to_string(), required_arr);
+        
+        let params = serde_json::Value::Object(properties);
         Self::new(name, description, params)
     }
 
@@ -89,17 +97,14 @@ fn validate_args_internal(schema: &JsonValue, args: &JsonValue) -> Result<JsonVa
     
     let validation_result = validator.validate(args);
     
-    if let Some(errors) = validation_result {
-        let error_messages: Vec<String> = errors
-            .map(|e| e.to_string())
-            .collect();
-        
-        if !error_messages.is_empty() {
-            return Err(ValidationError::SchemaValidation(error_messages.join("; ")));
+    match validation_result {
+        Ok(()) => Ok(args.clone()),
+        Err(errors) => {
+            // jsonschema returns an error with formatted message
+            let error_msg = format!("{}", errors);
+            Err(ValidationError::SchemaValidation(error_msg))
         }
     }
-    
-    Ok(args.clone())
 }
 
 /// Create a JSON Schema from a TypeScript-like definition

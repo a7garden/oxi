@@ -315,12 +315,16 @@ impl MessageContent {
     }
 }
 
-impl<T> From<T> for MessageContent
-where
-    T: Into<String>,
-{
-    fn from(text: T) -> Self {
-        MessageContent::Text(text.into())
+// String conversion for MessageContent
+impl From<String> for MessageContent {
+    fn from(text: String) -> Self {
+        MessageContent::Text(text)
+    }
+}
+
+impl From<&str> for MessageContent {
+    fn from(text: &str) -> Self {
+        MessageContent::Text(text.to_string())
     }
 }
 
@@ -333,5 +337,11 @@ impl From<Vec<ContentBlock>> for MessageContent {
 impl From<TextContent> for MessageContent {
     fn from(block: TextContent) -> Self {
         MessageContent::Blocks(vec![ContentBlock::Text(block)])
+    }
+}
+
+impl From<ContentBlock> for MessageContent {
+    fn from(block: ContentBlock) -> Self {
+        MessageContent::Blocks(vec![block])
     }
 }

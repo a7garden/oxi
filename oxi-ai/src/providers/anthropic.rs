@@ -1,19 +1,19 @@
 //! Anthropic provider implementation
 
 use async_trait::async_trait;
-use futures::Stream;
+use std::pin::Pin;
+use futures::{Stream, StreamExt};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
 
-use super::{Provider, ProviderEvent, ProviderError, StreamOptions};
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, StopReason, TextContent,
-    ThinkingContent, ToolCall, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider, 
+    error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
 /// Anthropic provider
+#[derive(Clone)]
 pub struct AnthropicProvider {
     client: Client,
     api_key: Option<String>,
@@ -48,7 +48,7 @@ impl Provider for AnthropicProvider {
         model: &Model,
         context: &Context,
         options: Option<StreamOptions>,
-    ) -> Result<impl Stream<Item = ProviderEvent> + Send, ProviderError> {
+    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
         let options = options.unwrap_or_default();
         
         // Build the request
@@ -89,19 +89,24 @@ impl Provider for AnthropicProvider {
         }
         
         // Build headers
-        let mut headers = HashMap::new();
-        headers.insert("x-api-key".to_string(), api_key.clone());
-        headers.insert("content-type".to_string(), "application/json".to_string());
-        headers.insert("anthropic-version".to_string(), "2023-06-01".to_string());
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("x-api-key", api_key.parse().unwrap());
+        headers.insert("content-type", "application/json".parse().unwrap());
+        headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
         
         for (k, v) in &options.headers {
-            headers.insert(k.clone(), v.clone());
+            if let (Ok(name), Ok(value)) = (
+                k.parse::<reqwest::header::HeaderName>(),
+                v.parse::<reqwest::header::HeaderValue>(),
+            ) {
+                headers.insert(name, value);
+            }
         }
         
         // Make request
         let response = self.client
             .post(&url)
-            .headers(convert_headers(&headers))
+            .headers(headers)
             .json(&body)
             .send()
             .await
@@ -109,27 +114,28 @@ impl Provider for AnthropicProvider {
         
         if !response.status().is_success() {
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
+            let body: String = response.text().await.unwrap_or_default();
             return Err(ProviderError::HttpError(status.as_u16(), body));
         }
         
         // Create event stream
+        let model_name = model.id.clone();
+        
         let stream = response.bytes_stream()
-            .map(|chunk| {
+            .flat_map(move |chunk| {
                 match chunk {
                     Ok(bytes) => {
                         let text = String::from_utf8_lossy(&bytes);
-                        parse_anthropic_events(&text, model)
+                        futures::stream::iter(parse_anthropic_events(&text, &model_name))
                     }
-                    Err(e) => vec![ProviderEvent::Error {
+                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
                         reason: StopReason::Error,
                         error: create_error_message(&e.to_string()),
-                    }],
+                    }]),
                 }
-            })
-            .flatten();
+            });
         
-        Ok(stream)
+        Ok(Box::pin(stream))
     }
     
     fn name(&self) -> &str {
@@ -241,12 +247,14 @@ fn build_anthropic_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderErr
 }
 
 /// Parse Anthropic SSE event stream
-fn parse_anthropic_events(text: &str, model: &Model) -> Vec<ProviderEvent> {
+fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
+    
+    
     let mut events = Vec::new();
     let mut partial_message = AssistantMessage::new(
         Api::AnthropicMessages,
-        &model.provider,
-        &model.id,
+        "anthropic",
+        model_id,
     );
     
     for line in text.lines() {
@@ -256,7 +264,9 @@ fn parse_anthropic_events(text: &str, model: &Model) -> Vec<ProviderEvent> {
         
         if let Some(data) = line.strip_prefix("data: ") {
             if let Ok(event) = serde_json::from_str::<AnthropicEvent>(data) {
-                match event.clone_type.as_deref() {
+                let event_type = event.type_.as_deref();
+                
+                match event_type {
                     Some("message_start") => {
                         events.push(ProviderEvent::Start {
                             partial: partial_message.clone(),
@@ -372,20 +382,6 @@ fn create_error_message(msg: &str) -> AssistantMessage {
     message
 }
 
-/// Convert headers map to reqwest header type
-fn convert_headers(headers: &HashMap<String, String>) -> reqwest::header::HeaderMap {
-    let mut h = reqwest::header::HeaderMap::new();
-    for (k, v) in headers {
-        if let (Ok(name), Ok(value)) = (
-            k.parse::<reqwest::header::HeaderName>(),
-            v.parse::<reqwest::header::HeaderValue>(),
-        ) {
-            h.insert(name, value);
-        }
-    }
-    h
-}
-
 // Anthropic event structure
 #[derive(Debug, Deserialize)]
 struct AnthropicEvent {
@@ -412,6 +408,8 @@ struct Delta {
     text: Option<String>,
     thinking: Option<String>,
     partial_json: Option<String>,
+    #[serde(rename = "stop_reason")]
+    stop_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -424,10 +422,4 @@ struct AnthropicUsage {
     cache_read: usize,
     #[serde(rename = "cache_creation")]
     cache_creation: usize,
-}
-
-impl AnthropicEvent {
-    fn clone_type(&self) -> Option<String> {
-        self.type_.clone()
-    }
 }

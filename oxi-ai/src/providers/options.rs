@@ -1,8 +1,8 @@
 //! Stream options for providers
 
+use crate::{CacheRetention, ThinkingLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use super::{CacheRetention, ThinkingLevel};
 
 /// Options for streaming requests
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -121,5 +121,3 @@ impl ThinkingBudgets {
         self
     }
 }
-
-pub use super::CacheRetention;

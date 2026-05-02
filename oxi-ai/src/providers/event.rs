@@ -1,12 +1,10 @@
 //! Provider streaming events
 
-use serde::{Deserialize, Serialize};
-use super::{ContentBlock, Usage, StopReason};
-
-/// Assistant message partially constructed during streaming
-pub type AssistantMessage = super::AssistantMessage;
+use crate::{StopReason, AssistantMessage, ToolCall};
 
 /// Streaming events emitted by providers
+///
+/// Note: We use crate::AssistantMessage directly to avoid type alias conflicts
 #[derive(Debug, Clone)]
 pub enum ProviderEvent {
     /// Stream started
@@ -70,7 +68,7 @@ pub enum ProviderEvent {
     /// Tool call block ended
     ToolCallEnd {
         content_index: usize,
-        tool_call: super::ToolCall,
+        tool_call: ToolCall,
         partial: AssistantMessage,
     },
     
