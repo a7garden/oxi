@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use oxi::extensions::ExtensionRegistry;
 use oxi::session::{SessionManager, AgentMessage};
 use oxi::settings::Settings;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// CLI arguments

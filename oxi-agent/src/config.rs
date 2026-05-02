@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use oxi_ai::CompactionStrategy;
 
+fn default_context_window() -> usize { 128_000 }
+
 /// Agent runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -29,6 +31,7 @@ pub struct AgentConfig {
     #[serde(default)]
     pub compaction_instruction: Option<String>,
     /// Model context window size (used for threshold-based compaction)
+    #[serde(default = "default_context_window")]
     pub context_window: usize,
 }
 
