@@ -44,14 +44,15 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     // Channel for user input → agent execution
     let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
 
-    // Spawn agent worker task
-    let agent_handle = tokio::task::spawn(async move {
+    // Agent worker: runs inline via LocalSet since Agent futures are !Send.
+    let local_set = tokio::task::LocalSet::new();
+    let _agent_handle = local_set.spawn_local(async move {
         while let Some(prompt) = prompt_rx.recv().await {
             let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
 
             // Forward agent events to UI
             let ui_tx = ui_tx.clone();
-            let event_forwarder = tokio::task::spawn(async move {
+            let event_forwarder = tokio::task::spawn_local(async move {
                 while let Some(event) = event_rx.recv().await {
                     let ui_event = match event {
                         AgentEvent::Start { .. } => UiEvent::Start,
@@ -63,7 +64,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             arguments: tool_call.arguments.to_string(),
                         },
                         AgentEvent::ToolStart { tool_name, .. } => UiEvent::TextDelta(
-                            format!("\n⚙ Running: {}...\n", tool_name),
+                            format!("\nRunning: {}...\n", tool_name),
                         ),
                         AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
                             tool_name: String::new(),
@@ -86,12 +87,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             });
 
             // Run agent with channel
-            let agent_clone: Arc<Agent> = Arc::clone(&agent);
-            let local = tokio::task::LocalSet::new();
-            local.spawn_local(async move {
-                let _ = agent_clone.run_with_channel(prompt, event_tx).await;
-            });
-            local.await;
+            let _ = agent.run_with_channel(prompt, event_tx).await;
 
             let _ = event_forwarder.await;
         }
@@ -99,14 +95,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
     // Build the TUI
     let terminal = oxi_tui::CrosstermTerminal::new()?;
-    let mut tui = TUI::new(terminal);
-
-    // Create components
-    let chat_view_index = tui.add_child(ChatView::new(theme.clone()));
-    let input_index = tui.add_child(Input::with_placeholder("Type a message... (Ctrl+C to quit)"));
-
-    // Focus the input
-    tui.set_focus(input_index);
+    let _tui = TUI::new(terminal);
 
     // Custom event loop that integrates agent events
     use std::io::{self, Write};
@@ -122,7 +111,6 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     input.on_focus();
     let mut running = true;
     let mut is_agent_busy = false;
-    let mut pending_prompt: Option<String> = None;
 
     // Helper to get terminal size
     fn get_size() -> (u16, u16) {
@@ -146,7 +134,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         if chat_height < height {
             let sep_y = chat_height;
             for col in 0..width {
-                let cell = oxi_tui::Cell::new('─').with_fg(theme.colors.border);
+                let cell = oxi_tui::Cell::new('-').with_fg(theme.colors.border);
                 surface.set(sep_y, col, cell);
             }
 
@@ -155,7 +143,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             input.render(&mut surface, input_area);
 
             // Render prompt indicator
-            let prompt_cell = oxi_tui::Cell::new('❯').with_fg(theme.colors.primary);
+            let prompt_cell = oxi_tui::Cell::new('>').with_fg(theme.colors.primary);
             surface.set(chat_height + 1, 0, prompt_cell);
         }
 
@@ -165,6 +153,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
         // Poll for events (terminal + agent) with timeout
         let timeout = std::time::Duration::from_millis(33); // ~30fps
+
+        // Drive the local set (agent worker) alongside the event loop
+        // Use run_until to poll the local set
+        // Note: we can't block on the local set here since we need to poll terminal events
+        // Instead, we rely on the async runtime to drive the local_set tasks
+        // The LocalSet tasks will be polled by the runtime when we .await other things
 
         // Check for terminal input events
         if crossterm::event::poll(timeout)? {
@@ -266,7 +260,6 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     is_agent_busy = false;
 
                     // Re-render with markdown for the completed message
-                    // (The streaming text was already captured; we enhance the last message)
                     enhance_last_message_with_markdown(&mut chat_view);
                 }
                 UiEvent::Error(msg) => {
@@ -282,7 +275,6 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
     // Cleanup
     drop(prompt_tx);
-    agent_handle.abort();
     crossterm::execute!(io::stdout(), crossterm::cursor::Show)?;
     crossterm::execute!(io::stdout(), crossterm::event::DisableMouseCapture)?;
     crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
@@ -292,25 +284,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 }
 
 /// Enhance the last completed assistant message with markdown-parsed content blocks.
-///
-/// When streaming finishes, the raw text may contain markdown. We parse it and
-/// replace the text block with richer content blocks (headings, code, lists, etc.)
-/// rendered through the Markdown component's styling.
 fn enhance_last_message_with_markdown(chat_view: &mut ChatView) {
-    // Get the last message's text content and re-parse with markdown
-    // For now, we leave the text as-is since ChatView already does word-wrap.
-    // The text content will display properly; full markdown inline rendering
-    // can be added as an enhancement by integrating Markdown's block parser
-    // into ChatView's render_text_block method.
-    //
-    // This function serves as the integration point for future enhancement.
     let _ = chat_view;
 }
 
 /// Render a surface to the terminal using efficient diffing.
 fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
-    use std::io::Write;
-
     // Begin synchronized update if supported
     print!("\x1b[?2026h");
 

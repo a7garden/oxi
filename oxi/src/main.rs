@@ -368,6 +368,7 @@ async fn run_single_prompt(app: oxi::App, prompt: &str) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 enum CommandResult {
     Handled,
     NewSession(Uuid),
@@ -375,7 +376,8 @@ enum CommandResult {
     Quit,
 }
 
-/// Interactive mode (simple readline-based)
+/// Interactive mode (simple readline-based fallback)
+#[allow(dead_code)]
 async fn interactive_mode(app: oxi::App) -> Result<()> {
     use std::io::{self, Write};
 
@@ -433,6 +435,7 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
 }
 
 /// Handle `/template <name> [key=value ...]` — expand a template and send as a message.
+#[allow(dead_code)]
 async fn handle_template_expand(
     line: &str,
     templates: &TemplateManager,
@@ -482,6 +485,7 @@ async fn handle_template_expand(
     Ok(CommandResult::Handled)
 }
 
+#[allow(dead_code)]
 async fn handle_command(
     line: &str,
     manager: &mut SessionManager,
