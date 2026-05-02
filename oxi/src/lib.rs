@@ -3,13 +3,18 @@
 //! This crate provides the main application logic for the oxi CLI.
 
 pub mod extensions;
-pub mod settings;
+pub mod packages;
 pub mod session;
+pub mod settings;
+pub mod skills;
+pub mod templates;
 
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use oxi_ai::{get_model, get_provider};
+use parking_lot::RwLock;
 use settings::{Settings, ThinkingLevel};
+use skills::SkillManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -18,6 +23,8 @@ use uuid::Uuid;
 pub struct App {
     agent: Arc<Agent>,
     settings: Settings,
+    skills: RwLock<SkillManager>,
+    active_skills: RwLock<Vec<String>>,
 }
 
 /// Chat message for display
@@ -119,9 +126,12 @@ impl InteractiveSession {
     }
 }
 
-/// Build the system prompt based on thinking level
-fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
-    match thinking_level {
+/// Build the system prompt based on thinking level and active skills
+fn build_system_prompt(
+    thinking_level: ThinkingLevel,
+    skill_contents: &[String],
+) -> String {
+    let mut prompt = match thinking_level {
         ThinkingLevel::None => String::from(
             "You are a helpful AI assistant. Provide direct, concise answers.",
         ),
@@ -137,7 +147,15 @@ fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
              analyze problems, consider edge cases, and provide comprehensive \
              solutions with explanations. Think deeply before responding.",
         ),
+    };
+
+    // Append active skill content
+    for content in skill_contents {
+        prompt.push_str("\n\n---\n# Active Skill\n\n");
+        prompt.push_str(content);
     }
+
+    prompt
 }
 
 impl App {
@@ -162,8 +180,20 @@ impl App {
         let provider = get_provider(&provider_name)
             .ok_or_else(|| Error::msg(format!("Provider '{}' not found", provider_name)))?;
 
+        // Load skills
+        let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(".oxi")
+                .join("skills")
+        });
+        let skills = SkillManager::load_from_dir(&skills_dir).unwrap_or_else(|e| {
+            tracing::debug!("Skills not loaded: {}", e);
+            SkillManager::load_from_dir(std::path::Path::new("/nonexistent")).unwrap()
+        });
+
         // Build agent config
-        let system_prompt = build_system_prompt(settings.thinking_level);
+        let system_prompt = build_system_prompt(settings.thinking_level, &[]);
         let config = AgentConfig {
             name: "oxi".to_string(),
             description: Some("oxi CLI agent".to_string()),
@@ -180,7 +210,12 @@ impl App {
 
         let agent = Arc::new(Agent::new(Arc::from(provider), config));
 
-        Ok(Self { agent, settings })
+        Ok(Self {
+            agent,
+            settings,
+            skills: RwLock::new(skills),
+            active_skills: RwLock::new(Vec::new()),
+        })
     }
 
     /// Get the current settings
@@ -191,6 +226,57 @@ impl App {
     /// Get the tool registry (for registering extension tools)
     pub fn agent_tools(&self) -> Arc<oxi_agent::ToolRegistry> {
         self.agent.tools()
+    }
+
+    /// Get a reference to the skill manager
+    pub fn skills(&self) -> parking_lot::RwLockReadGuard<'_, SkillManager> {
+        self.skills.read()
+    }
+
+    /// Activate a skill by name. Returns an error string if not found.
+    pub fn activate_skill(&self, name: &str) -> Result<(), String> {
+        {
+            let skills = self.skills.read();
+            if skills.get(name).is_none() {
+                return Err(format!("Skill '{}' not found", name));
+            }
+        }
+        let name_lower = name.to_lowercase();
+        {
+            let mut active = self.active_skills.write();
+            if !active.contains(&name_lower) {
+                active.push(name_lower);
+            }
+        }
+        self.rebuild_system_prompt();
+        Ok(())
+    }
+
+    /// Deactivate a skill by name.
+    pub fn deactivate_skill(&self, name: &str) {
+        let name_lower = name.to_lowercase();
+        {
+            let mut active = self.active_skills.write();
+            active.retain(|n| n != &name_lower);
+        }
+        self.rebuild_system_prompt();
+    }
+
+    /// List currently active skill names
+    pub fn active_skills(&self) -> Vec<String> {
+        self.active_skills.read().clone()
+    }
+
+    /// Rebuild the system prompt with current active skills
+    fn rebuild_system_prompt(&self) {
+        let active = self.active_skills.read();
+        let skills = self.skills.read();
+        let contents: Vec<String> = active
+            .iter()
+            .filter_map(|name| skills.get(name).map(|s| s.content.clone()))
+            .collect();
+        let prompt = build_system_prompt(self.settings.thinking_level, &contents);
+        self.agent.set_system_prompt(prompt);
     }
 
     /// Get a clone of the current state
@@ -233,6 +319,18 @@ impl App {
     pub fn reset(&self) {
         self.agent.reset();
     }
+
+    /// Switch the model used for future LLM calls.
+    ///
+    /// See [`Agent::switch_model`] for details.
+    pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
+        self.agent.switch_model(model_id)
+    }
+
+    /// Get the current model ID
+    pub fn model_id(&self) -> String {
+        self.agent.model_id()
+    }
 }
 
 /// Interactive loop handle
@@ -250,10 +348,16 @@ impl<'a> InteractiveLoop<'a> {
 
         // Run agent with channel
         let (tx, mut rx) = mpsc::channel::<AgentEvent>(100);
-        
-        // Spawn the agent
+
+        // Run the agent — we execute inline instead of spawning because
+        // the agent's internal RwLockReadGuard is not Send-safe across
+        // await points. We use a select-like approach: run the agent in a
+        // local task that doesn't require Send.
         let agent = Arc::clone(&self.app.agent);
-        let handle = tokio::spawn(async move {
+
+        // Use LocalSet to spawn a non-Send future
+        let local = tokio::task::LocalSet::new();
+        local.spawn_local(async move {
             let _ = agent.run_with_channel(prompt, tx).await;
         });
 
@@ -279,8 +383,8 @@ impl<'a> InteractiveLoop<'a> {
             }
         }
 
-        // Wait for agent to finish
-        let _ = handle.await;
+        // Run local set to completion (drain remaining agent work)
+        local.await;
 
         Ok(())
     }
@@ -308,5 +412,15 @@ impl<'a> InteractiveLoop<'a> {
     /// Get entry by ID
     pub fn get_entry(&self, id: Uuid) -> Option<&session::SessionEntry> {
         self.session.get_entry_by_id(id)
+    }
+
+    /// Switch the model used for future LLM calls
+    pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
+        self.app.switch_model(model_id)
+    }
+
+    /// Get the current model ID
+    pub fn model_id(&self) -> String {
+        self.app.model_id()
     }
 }
