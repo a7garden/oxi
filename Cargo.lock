@@ -1340,6 +1340,7 @@ dependencies = [
  "futures",
  "oxi-ai",
  "parking_lot",
+ "regex",
  "serde",
  "serde_json",
  "tokio",
