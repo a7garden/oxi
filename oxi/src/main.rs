@@ -4,8 +4,10 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use oxi::extensions::ExtensionRegistry;
 use oxi::session::{SessionManager, AgentMessage};
 use oxi::settings::Settings;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 /// CLI arguments
@@ -36,6 +38,11 @@ struct Args {
     /// Thinking level (none, minimal, standard, thorough)
     #[arg(long)]
     thinking: Option<String>,
+
+    /// Load an extension from a shared library (.so / .dll / .dylib).
+    /// Can be specified multiple times.
+    #[arg(short = 'e', long = "extension", value_name = "PATH")]
+    extensions: Vec<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -106,11 +113,33 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Load extensions
+    let mut ext_registry = ExtensionRegistry::new();
+    if !args.extensions.is_empty() {
+        let paths: Vec<&Path> = args.extensions.iter().map(|p| p.as_path()).collect();
+        let (loaded, errors) = oxi::extensions::load_extensions(&paths);
+        for ext in loaded {
+            ext_registry.register(ext);
+        }
+        for err in &errors {
+            tracing::warn!("{}", err);
+        }
+        if !errors.is_empty() {
+            anyhow::bail!("{} extension(s) failed to load", errors.len());
+        }
+    }
+
     // Build initial prompt if provided
     let prompt = args.prompt.join(" ");
 
     // Create app
     let app = oxi::App::new(settings).await?;
+
+    // Register extension tools with the agent
+    let tools = app.agent_tools();
+    for tool in ext_registry.all_tools() {
+        tools.register_arc(tool);
+    }
 
     if prompt.is_empty() || args.interactive {
         // Interactive mode

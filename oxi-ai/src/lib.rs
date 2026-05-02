@@ -10,6 +10,7 @@ mod tools;
 mod providers;
 mod error;
 mod high_level;
+mod compaction;
 
 pub mod prelude {
     pub use crate::types::*;
@@ -18,6 +19,7 @@ pub mod prelude {
     pub use crate::tools::{Tool, validate_args};
     pub use crate::providers::{Provider, ProviderEvent, StreamOptions};
     pub use crate::error::{Error, Result};
+    pub use crate::compaction::{Compactor, CompactionStrategy, CompactionManager, CompactedContext, LlmCompactor};
 }
 
 // Re-export main types
@@ -33,6 +35,9 @@ pub use error::{Error, Result};
 // High-level API
 pub use high_level::{complete, estimate_tokens};
 pub use high_level::tokens::{estimate, estimate_words, context_usage};
+
+// Context compaction
+pub use compaction::{Compactor, CompactionStrategy, CompactionManager, CompactedContext, LlmCompactor};
 
 // Model registry
 mod model_registry;

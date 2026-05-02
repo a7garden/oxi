@@ -42,3 +42,6 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 parking_lot = "0.12"
 crossterm = "0.27"
+
+# Dynamic loading for extensions
+libloading = "0.8"

@@ -2,6 +2,7 @@
 //!
 //! This crate provides the main application logic for the oxi CLI.
 
+pub mod extensions;
 pub mod settings;
 pub mod session;
 
@@ -182,6 +183,11 @@ impl App {
     /// Get the current settings
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// Get the tool registry (for registering extension tools)
+    pub fn agent_tools(&self) -> Arc<oxi_agent::ToolRegistry> {
+        self.agent.tools()
     }
 
     /// Get a clone of the current state

@@ -1,6 +1,7 @@
 //! Agent configuration
 
 use serde::{Deserialize, Serialize};
+use oxi_ai::CompactionStrategy;
 
 /// Agent runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +22,14 @@ pub struct AgentConfig {
     pub temperature: Option<f64>,
     /// Maximum tokens to generate
     pub max_tokens: Option<usize>,
+    /// Compaction strategy for long conversations
+    #[serde(default)]
+    pub compaction_strategy: CompactionStrategy,
+    /// Custom instruction passed to the compactor
+    #[serde(default)]
+    pub compaction_instruction: Option<String>,
+    /// Model context window size (used for threshold-based compaction)
+    pub context_window: usize,
 }
 
 impl Default for AgentConfig {
@@ -34,6 +43,9 @@ impl Default for AgentConfig {
             timeout_seconds: 300,
             temperature: None,
             max_tokens: None,
+            compaction_strategy: CompactionStrategy::default(),
+            compaction_instruction: None,
+            context_window: 128_000,
         }
     }
 }
@@ -63,6 +75,16 @@ impl AgentConfig {
 
     pub fn with_timeout(mut self, seconds: u64) -> Self {
         self.timeout_seconds = seconds;
+        self
+    }
+
+    pub fn with_compaction_strategy(mut self, strategy: CompactionStrategy) -> Self {
+        self.compaction_strategy = strategy;
+        self
+    }
+
+    pub fn with_compaction_instruction(mut self, instruction: impl Into<String>) -> Self {
+        self.compaction_instruction = Some(instruction.into());
         self
     }
 }

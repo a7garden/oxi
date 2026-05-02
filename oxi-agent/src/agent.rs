@@ -1,5 +1,6 @@
 //! Core agent implementation
 
+use crate::compaction::{CompactedContext as AgentCompactedContext, CompactionEvent};
 use crate::config::AgentConfig;
 use crate::events::AgentEvent;
 use crate::state::{AgentState, SharedState};
@@ -7,8 +8,12 @@ use crate::tools::{ToolRegistry, AgentTool, AgentToolResult};
 use crate::types::{StopReason, Response};
 use anyhow::{Error, Result};
 use futures::StreamExt;
-use oxi_ai::{get_model, Provider, ProviderEvent, StreamOptions, ToolCall, progress_callback};
+use oxi_ai::{
+    get_model, CompactionManager, CompactionStrategy, Context, LlmCompactor, 
+    Message, Provider, ProviderEvent, StreamOptions, ToolCall, progress_callback,
+};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 
 /// Agent runtime
@@ -17,16 +22,41 @@ pub struct Agent {
     provider: Arc<dyn Provider>,
     tools: Arc<ToolRegistry>,
     state: SharedState,
+    compaction_manager: CompactionManager,
 }
 
 impl Agent {
     /// Create a new agent with the given provider and config
     pub fn new(provider: Arc<dyn Provider>, config: AgentConfig) -> Self {
+        let mut compaction_manager = CompactionManager::new(
+            config.compaction_strategy.clone(),
+            config.context_window,
+        );
+        
+        // Pre-initialize the LLM compactor if compaction is enabled
+        if config.compaction_strategy != CompactionStrategy::Disabled {
+            let model_id = config.model_id.clone();
+            let model = {
+                let parts: Vec<&str> = model_id.split('/').collect();
+                if parts.len() == 2 {
+                    get_model(parts[0], parts[1])
+                } else {
+                    get_model("anthropic", &model_id)
+                }
+            };
+            
+            if let Some(model) = model {
+                let llm_compactor = Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
+                compaction_manager.set_compactor(llm_compactor);
+            }
+        }
+        
         Self {
             provider,
             config,
             tools: Arc::new(ToolRegistry::new()),
             state: SharedState::new(),
+            compaction_manager,
         }
     }
 
@@ -53,6 +83,11 @@ impl Agent {
     /// Add a tool to the agent
     pub fn add_tool<T: AgentTool + 'static>(&self, tool: T) {
         self.tools.register(tool);
+    }
+
+    /// Get the compaction manager
+    pub fn compaction_manager(&self) -> &CompactionManager {
+        &self.compaction_manager
     }
 
     /// Run the agent with a prompt, returning events via a channel
@@ -84,7 +119,77 @@ impl Agent {
             }
         }.ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))?;
         
-        let mut context = oxi_ai::Context::new();
+        // Check for compaction at the start of each iteration
+        let messages = &self.state.get_state().messages;
+        let iteration = self.state.get_state().iteration;
+        
+        // Estimate token count
+        let context_text = serde_json::to_string(messages).unwrap_or_default();
+        let context_tokens = oxi_ai::estimate_tokens(&context_text);
+        
+        // Try to compact if needed
+        if self.compaction_manager.should_compact(context_tokens, iteration) {
+            let _ = tx.send(AgentEvent::Compaction { 
+                event: CompactionEvent::Triggered { 
+                    context_tokens, 
+                    iteration 
+                }
+            }).await;
+            
+            // Clone messages for compaction since compact_if_needed takes a reference
+            let messages_to_compact: Vec<Message> = messages.iter().cloned().collect();
+            
+            match self.compaction_manager.compact_if_needed(
+                &messages_to_compact,
+                self.config.compaction_instruction.as_deref(),
+                context_tokens,
+                iteration,
+            ).await {
+                Ok(Some(compacted)) => {
+                    let start = Instant::now();
+                    let message_count = compacted.compacted_count;
+                    let _ = tx.send(AgentEvent::Compaction { 
+                        event: CompactionEvent::Started { 
+                            message_count 
+                        }
+                    }).await;
+                    
+                    // Extract data before moving
+                    let kept_messages = compacted.kept_messages;
+                    let summary = compacted.summary;
+                    let compacted_count = compacted.compacted_count;
+                    
+                    // Replace old messages with compacted context
+                    self.state.update(|s| {
+                        s.replace_messages(kept_messages);
+                    });
+                    
+                    let compacted_ctx = AgentCompactedContext {
+                        summary,
+                        kept_messages: Vec::new(), // Already moved to state
+                        compacted_count,
+                    };
+                    let _ = tx.send(AgentEvent::Compaction { 
+                        event: CompactionEvent::Completed { 
+                            result: compacted_ctx,
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        }
+                    }).await;
+                }
+                Ok(None) => {
+                    // No compaction needed
+                }
+                Err(e) => {
+                    let _ = tx.send(AgentEvent::Compaction { 
+                        event: CompactionEvent::Failed { 
+                            error: e.to_string() 
+                        }
+                    }).await;
+                }
+            }
+        }
+        
+        let mut context = Context::new();
         
         // Add system prompt
         if let Some(ref system_prompt) = self.config.system_prompt {
@@ -150,7 +255,7 @@ impl Agent {
                     let _ = tx_clone.send(AgentEvent::ToolComplete { result: tool_result.clone() }).await;
                     
                     // Add tool result to context for next turn
-                    context.add_message(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+                    context.add_message(Message::User(oxi_ai::UserMessage::new(
                         format!("Tool {} returned: {}", tool_name, tool_result.content)
                     )));
                     

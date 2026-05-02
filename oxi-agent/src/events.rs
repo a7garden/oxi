@@ -1,5 +1,7 @@
 //! Agent event system
 
+use crate::compaction::CompactionEvent;
+
 /// Agent events emitted during agent execution
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
@@ -27,4 +29,6 @@ pub enum AgentEvent {
     Iteration { number: usize },
     /// Token usage update
     Usage { input_tokens: usize, output_tokens: usize },
+    /// Compaction event
+    Compaction { event: CompactionEvent },
 }
