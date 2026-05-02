@@ -247,127 +247,148 @@ fn build_anthropic_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderErr
     Ok(serde_json::json!(items))
 }
 
-/// Parse Anthropic SSE event stream
+/// Parse Anthropic SSE event stream.
+///
+/// Optimizations:
+/// - Fast-line splitting via `split('\n')`.
+/// - Early exit on terminal events.
+/// - Pre-allocated events vector.
+/// - Accumulated usage tracked separately, only cloned into Done message.
 fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
-    
-    
     let mut events = Vec::new();
-    let mut partial_message = AssistantMessage::new(
+    let partial_message = AssistantMessage::new(
         Api::AnthropicMessages,
         "anthropic",
         model_id,
     );
-    
-    for line in text.lines() {
-        if line.is_empty() || line == "data: [DONE]" {
+
+    // Pre-allocate based on data-line count
+    let estimated = text.split('\n').filter(|l| l.starts_with("data: ")).count();
+    events.reserve(estimated);
+
+    let mut accumulated_usage = Usage::default();
+
+    for line in text.split('\n') {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
             continue;
         }
-        
-        if let Some(data) = line.strip_prefix("data: ") {
-            if let Ok(event) = serde_json::from_str::<AnthropicEvent>(data) {
-                let event_type = event.type_.as_deref();
-                
-                match event_type {
-                    Some("message_start") => {
-                        events.push(ProviderEvent::Start {
-                            partial: partial_message.clone(),
-                        });
-                    }
-                    Some("content_block_start") => {
-                        if let Some(block) = &event.content_block {
-                            match block.type_.as_deref() {
-                                Some("text") => {
-                                    events.push(ProviderEvent::TextStart {
-                                        content_index: block.index.unwrap_or(0),
-                                        partial: partial_message.clone(),
-                                    });
-                                }
-                                Some("thinking") => {
-                                    events.push(ProviderEvent::ThinkingStart {
-                                        content_index: block.index.unwrap_or(0),
-                                        partial: partial_message.clone(),
-                                    });
-                                }
-                                Some("tool_use") => {
-                                    events.push(ProviderEvent::ToolCallStart {
-                                        content_index: block.index.unwrap_or(0),
-                                        partial: partial_message.clone(),
-                                    });
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Some("content_block_delta") => {
-                        if let Some(delta) = &event.delta {
-                            match delta.type_.as_deref() {
-                                Some("text_delta") => {
-                                    if let Some(text) = &delta.text {
-                                        events.push(ProviderEvent::TextDelta {
-                                            content_index: event.index.unwrap_or(0),
-                                            delta: text.clone(),
-                                            partial: partial_message.clone(),
-                                        });
-                                    }
-                                }
-                                Some("thinking_delta") => {
-                                    if let Some(text) = &delta.thinking {
-                                        events.push(ProviderEvent::ThinkingDelta {
-                                            content_index: event.index.unwrap_or(0),
-                                            delta: text.clone(),
-                                            partial: partial_message.clone(),
-                                        });
-                                    }
-                                }
-                                Some("input_json_delta") => {
-                                    if let Some(args) = &delta.partial_json {
-                                        events.push(ProviderEvent::ToolCallDelta {
-                                            content_index: event.index.unwrap_or(0),
-                                            delta: args.clone(),
-                                            partial: partial_message.clone(),
-                                        });
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    Some("message_delta") => {
-                        if let Some(delta) = &event.delta {
-                            let reason = match delta.stop_reason.as_deref() {
-                                Some("end_turn") => StopReason::Stop,
-                                Some("max_tokens") => StopReason::Length,
-                                Some("stop_sequence") => StopReason::Stop,
-                                _ => StopReason::Stop,
-                            };
-                            
-                            events.push(ProviderEvent::Done {
-                                reason,
-                                message: partial_message.clone(),
+
+        if !line.starts_with("data: ") {
+            continue;
+        }
+
+        let data = &line[6..];
+
+        if data == "[DONE]" || data.is_empty() {
+            continue;
+        }
+
+        let event = match serde_json::from_str::<AnthropicEvent>(data) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let event_type = event.type_.as_deref();
+
+        match event_type {
+            Some("message_start") => {
+                events.push(ProviderEvent::Start {
+                    partial: partial_message.clone(),
+                });
+            }
+            Some("content_block_start") => {
+                if let Some(block) = &event.content_block {
+                    match block.type_.as_deref() {
+                        Some("text") => {
+                            events.push(ProviderEvent::TextStart {
+                                content_index: block.index.unwrap_or(0),
+                                partial: partial_message.clone(),
                             });
                         }
+                        Some("thinking") => {
+                            events.push(ProviderEvent::ThinkingStart {
+                                content_index: block.index.unwrap_or(0),
+                                partial: partial_message.clone(),
+                            });
+                        }
+                        Some("tool_use") => {
+                            events.push(ProviderEvent::ToolCallStart {
+                                content_index: block.index.unwrap_or(0),
+                                partial: partial_message.clone(),
+                            });
+                        }
+                        _ => {}
                     }
-                    Some("message_stop") => {
-                        // Message complete
-                    }
-                    _ => {}
-                }
-                
-                // Update usage
-                if let Some(usage) = &event.usage {
-                    partial_message.usage = Usage {
-                        input: usage.input_tokens,
-                        output: usage.output_tokens,
-                        cache_read: usage.cache_read,
-                        cache_write: usage.cache_creation,
-                        total_tokens: usage.input_tokens + usage.output_tokens,
-                        cost: Default::default(),
-                    };
                 }
             }
+            Some("content_block_delta") => {
+                if let Some(delta) = &event.delta {
+                    match delta.type_.as_deref() {
+                        Some("text_delta") => {
+                            if let Some(text) = &delta.text {
+                                events.push(ProviderEvent::TextDelta {
+                                    content_index: event.index.unwrap_or(0),
+                                    delta: text.clone(),
+                                    partial: partial_message.clone(),
+                                });
+                            }
+                        }
+                        Some("thinking_delta") => {
+                            if let Some(text) = &delta.thinking {
+                                events.push(ProviderEvent::ThinkingDelta {
+                                    content_index: event.index.unwrap_or(0),
+                                    delta: text.clone(),
+                                    partial: partial_message.clone(),
+                                });
+                            }
+                        }
+                        Some("input_json_delta") => {
+                            if let Some(args) = &delta.partial_json {
+                                events.push(ProviderEvent::ToolCallDelta {
+                                    content_index: event.index.unwrap_or(0),
+                                    delta: args.clone(),
+                                    partial: partial_message.clone(),
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Some("message_delta") => {
+                if let Some(delta) = &event.delta {
+                    let reason = match delta.stop_reason.as_deref() {
+                        Some("end_turn") => StopReason::Stop,
+                        Some("max_tokens") => StopReason::Length,
+                        Some("stop_sequence") => StopReason::Stop,
+                        _ => StopReason::Stop,
+                    };
+
+                    let mut done_msg = partial_message.clone();
+                    done_msg.usage = accumulated_usage.clone();
+                    events.push(ProviderEvent::Done {
+                        reason,
+                        message: done_msg,
+                    });
+                }
+            }
+            Some("message_stop") => {
+                // Message complete – no event needed
+            }
+            _ => {}
+        }
+
+        // Accumulate usage
+        if let Some(usage) = event.usage {
+            accumulated_usage.input = usage.input_tokens;
+            accumulated_usage.output = usage.output_tokens;
+            accumulated_usage.cache_read = usage.cache_read;
+            accumulated_usage.cache_write = usage.cache_creation;
+            accumulated_usage.total_tokens = usage.input_tokens + usage.output_tokens;
         }
     }
-    
+
     events
 }
 

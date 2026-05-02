@@ -8,6 +8,7 @@ pub mod session;
 pub mod settings;
 pub mod skills;
 pub mod templates;
+pub mod tui_interactive;
 
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
@@ -226,6 +227,11 @@ impl App {
     /// Get the current settings
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// Get a reference to the underlying agent.
+    pub fn agent(&self) -> Arc<Agent> {
+        Arc::clone(&self.agent)
     }
 
     /// Get the tool registry (for registering extension tools)

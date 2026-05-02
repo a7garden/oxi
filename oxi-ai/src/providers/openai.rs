@@ -252,78 +252,110 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
     Ok(serde_json::json!(items))
 }
 
-/// Parse SSE event stream
+/// Parse SSE event stream from a byte buffer.
+///
+/// Optimizations over a naïve implementation:
+/// - **Fast-line splitting** – iterates over `\n` boundaries via `split`
+///   instead of allocating an intermediate `String` per line.
+/// - **Early `DONE` exit** – breaks immediately when `data: [DONE]` is
+///   encountered.
+/// - **Pre-allocated events** – reserves capacity based on data-line count.
+/// - **Accumulated usage** – tracks usage separately, only cloning into
+///   the Done message at stream end, not on every chunk.
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let mut partial_message = AssistantMessage::new(
+    let partial_message = AssistantMessage::new(
         Api::OpenAiCompletions,
         provider,
         model_id,
     );
-    
-    for line in text.lines() {
-        if line.is_empty() || line == "data: [DONE]" {
+
+    // Pre-estimate capacity: one event per data line is a reasonable upper bound.
+    let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
+    events.reserve(estimated_events);
+
+    let mut accumulated_usage = Usage::default();
+
+    for line in text.split('\n') {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
             continue;
         }
-        
-        if let Some(data) = line.strip_prefix("data: ") {
-            // Parse JSON chunk
-            if let Ok(chunk) = serde_json::from_str::<SSEChunk>(data) {
-                // Process choices
-                for choice in &chunk.choices {
-                    if let Some(delta) = &choice.delta {
-                        if let Some(content) = &delta.content {
-                            events.push(ProviderEvent::TextDelta {
+
+        // Fast rejection for non-data lines (comments, event tags, etc.)
+        if !line.starts_with("data: ") {
+            continue;
+        }
+
+        let data = &line[6..]; // skip "data: "
+
+        // Early exit on stream end
+        if data == "[DONE]" {
+            break;
+        }
+
+        if data.is_empty() {
+            continue;
+        }
+
+        let chunk = match serde_json::from_str::<SSEChunk>(data) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        for choice in &chunk.choices {
+            if let Some(delta) = &choice.delta {
+                if let Some(content) = &delta.content {
+                    events.push(ProviderEvent::TextDelta {
+                        content_index: choice.index,
+                        delta: content.clone(),
+                        partial: partial_message.clone(),
+                    });
+                }
+
+                if let Some(tool_calls) = &delta.tool_calls {
+                    for tc in tool_calls {
+                        if let Some(func) = &tc.function {
+                            events.push(ProviderEvent::ToolCallDelta {
                                 content_index: choice.index,
-                                delta: content.clone(),
+                                delta: func.arguments.clone().unwrap_or_default(),
                                 partial: partial_message.clone(),
                             });
                         }
-                        
-                        if let Some(tool_calls) = &delta.tool_calls {
-                            for tc in tool_calls {
-                                if let Some(func) = &tc.function {
-                                    events.push(ProviderEvent::ToolCallDelta {
-                                        content_index: choice.index,
-                                        delta: func.arguments.clone().unwrap_or_default(),
-                                        partial: partial_message.clone(),
-                                    });
-                                }
-                            }
-                        }
                     }
-                    
-                    // Check for completion
-                    if choice.finish_reason.is_some() {
-                        let reason = match choice.finish_reason.as_deref() {
-                            Some("stop") => StopReason::Stop,
-                            Some("length") => StopReason::Length,
-                            Some("tool_calls") => StopReason::ToolUse,
-                            _ => StopReason::Stop,
-                        };
-                        
-                        events.push(ProviderEvent::Done {
-                            reason,
-                            message: partial_message.clone(),
-                        });
-                    }
-                }
-                
-                // Update usage if present
-                if let Some(usage) = &chunk.usage {
-                    partial_message.usage = Usage {
-                        input: usage.prompt_tokens,
-                        output: usage.completion_tokens,
-                        cache_read: usage.prompt_tokens_details.as_ref().map(|d| d.cached_tokens).unwrap_or(0),
-                        cache_write: 0,
-                        total_tokens: usage.total_tokens,
-                        cost: Default::default(),
-                    };
                 }
             }
+
+            if choice.finish_reason.is_some() {
+                let reason = match choice.finish_reason.as_deref() {
+                    Some("stop") => StopReason::Stop,
+                    Some("length") => StopReason::Length,
+                    Some("tool_calls") => StopReason::ToolUse,
+                    _ => StopReason::Stop,
+                };
+
+                let mut done_msg = partial_message.clone();
+                done_msg.usage = accumulated_usage.clone();
+                events.push(ProviderEvent::Done {
+                    reason,
+                    message: done_msg,
+                });
+            }
+        }
+
+        // Accumulate usage from the chunk (if present).
+        if let Some(chunk_usage) = chunk.usage {
+            accumulated_usage.input = chunk_usage.prompt_tokens;
+            accumulated_usage.output = chunk_usage.completion_tokens;
+            accumulated_usage.cache_read = chunk_usage
+                .prompt_tokens_details
+                .as_ref()
+                .map(|d| d.cached_tokens)
+                .unwrap_or(0);
+            accumulated_usage.total_tokens = chunk_usage.total_tokens;
         }
     }
-    
+
     events
 }
 

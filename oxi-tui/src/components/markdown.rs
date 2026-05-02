@@ -1202,12 +1202,18 @@ impl Markdown {
     }
 
     /// Ensure the layout is up to date for the given width.
+    ///
+    /// Only re-parses and re-renders when the content or width has
+    /// actually changed – subsequent calls with the same width are a
+    /// no-op.
     fn ensure_layout(&mut self, width: u16) {
-        if width != self.cached_width {
-            let blocks = parse_blocks(&self.content);
-            self.styled_lines = render_blocks_to_lines(&blocks, width, &self.theme);
-            self.cached_width = width;
+        if width == self.cached_width && !self.dirty {
+            return;
         }
+        let blocks = parse_blocks(&self.content);
+        self.styled_lines = render_blocks_to_lines(&blocks, width, &self.theme);
+        self.cached_width = width;
+        self.dirty = false;
     }
 }
 
