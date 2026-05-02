@@ -1,0 +1,2 @@
+stream::stream::flatten::Flatten<futures::stream::Map<impl Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>>, {closure@src/providers/openai.rs:130:17: 130:82}>, Vec<ProviderEvent>>
+Pin<Box<futures::stream::Flatten<futures::stream::Map<impl Stream<Item = std::result::Result<bytes::Bytes, reqwest::Error>>, {closure@src/providers/openai.rs:130:17: 130:82}>>>>

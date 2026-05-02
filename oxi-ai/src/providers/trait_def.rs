@@ -17,7 +17,7 @@ pub trait Provider: Send + Sync + 'static {
         model: &Model,
         context: &Context,
         options: Option<StreamOptions>,
-    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send + 'static>>, ProviderError>;
+    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>;
     
     /// Get the provider name
     fn name(&self) -> &str;

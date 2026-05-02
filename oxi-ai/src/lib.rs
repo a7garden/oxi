@@ -25,7 +25,11 @@ pub use types::*;
 pub use messages::*;
 pub use context::Context;
 pub use tools::{Tool, validate_args, ValidationError};
-pub use providers::{Provider, ProviderEvent, StreamOptions, CacheRetention, ProviderError};
+pub use providers::Provider;
+pub use providers::ProviderEvent;
+pub use providers::StreamOptions;
+pub use providers::CacheRetention;
+pub use crate::error::ProviderError;
 pub use error::{Error, Result};
 
 // High-level API

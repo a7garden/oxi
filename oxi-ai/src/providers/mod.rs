@@ -11,11 +11,15 @@ use futures::Stream;
 
 pub use trait_def::Provider;
 pub use event::ProviderEvent;
-pub use options::StreamOptions;
+use crate::error::ProviderError;
+pub use options::{StreamOptions, ThinkingBudgets};
+pub use openai::OpenAiProvider;
+pub use anthropic::AnthropicProvider;
 pub use crate::CacheRetention;
+pub use crate::ThinkingLevel;
 pub use crate::Context;
 pub use crate::Model;
-pub use crate::error::ProviderError;
+pub use crate::messages::AssistantMessage;
 
 /// Provider factory functions
 
@@ -50,7 +54,7 @@ pub async fn stream(
     model: &Model,
     context: &Context,
     options: Option<StreamOptions>,
-) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send + 'static>>, ProviderError> {
+) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
     let provider = get_provider(&model.provider)
         .ok_or_else(|| ProviderError::UnknownProvider(model.provider.clone()))?;
     
