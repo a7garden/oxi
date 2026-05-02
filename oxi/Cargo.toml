@@ -1,6 +1,6 @@
 [package]
 name = "oxi"
-version = "0.1.0"
+version = "0.1.0-alpha"
 edition = "2021"
 description = "CLI coding harness for oxi"
 readme = "README.md"
@@ -12,9 +12,9 @@ name = "oxi"
 path = "src/main.rs"
 
 [dependencies]
-oxi-ai = { path = "../oxi-ai" }
-oxi-agent = { path = "../oxi-agent" }
-oxi-tui = { path = "../oxi-tui" }
+oxi-ai = { version = "0.1.0-alpha", path = "../oxi-ai" }
+oxi-agent = { version = "0.1.0-alpha", path = "../oxi-agent" }
+oxi-tui = { version = "0.1.0-alpha", path = "../oxi-tui" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

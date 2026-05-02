@@ -1,6 +1,6 @@
 [package]
 name = "oxi-tui"
-version = "0.1.0"
+version = "0.1.0-alpha"
 edition = "2021"
 description = "Terminal UI for oxi"
 readme = "README.md"

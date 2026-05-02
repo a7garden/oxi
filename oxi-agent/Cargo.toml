@@ -1,12 +1,14 @@
 [package]
 name = "oxi-agent"
-version = "0.1.0"
+version = "0.1.0-alpha"
 edition = "2021"
 description = "Agent runtime layer built on oxi-ai"
+readme = "README.md"
 license = "MIT"
+authors = ["oxi contributors"]
 
 [dependencies]
-oxi-ai = { path = "../oxi-ai" }
+oxi-ai = { version = "0.1.0-alpha", path = "../oxi-ai" }
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 serde = { version = "1", features = ["derive"] }
