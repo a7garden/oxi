@@ -1,0 +1,42 @@
+[package]
+name = "oxi"
+version = "0.1.0"
+edition = "2021"
+description = "CLI coding harness for oxi"
+readme = "README.md"
+license = "MIT"
+authors = ["oxi contributors"]
+
+[[bin]]
+name = "oxi"
+path = "src/main.rs"
+
+[dependencies]
+oxi-ai = { path = "../oxi-ai" }
+oxi-agent = { path = "../oxi-agent" }
+oxi-tui = { path = "../oxi-tui" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+parking_lot = "0.12"

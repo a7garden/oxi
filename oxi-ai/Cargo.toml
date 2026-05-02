@@ -1,0 +1,42 @@
+[package]
+name = "oxi-ai"
+version = "0.1.0"
+edition = "2021"
+description = "Unified LLM API for oxi"
+readme = "README.md"
+license = "MIT"
+authors = ["oxi contributors"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# JSON Schema validation
+jsonschema = "0.26"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+once_cell = "1"
+parking_lot = "0.12"
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockito = "1"
