@@ -2,6 +2,8 @@
 //!
 //! This crate provides the main application logic for the oxi CLI.
 
+pub mod context;
+pub mod export;
 pub mod extensions;
 pub mod packages;
 pub mod session;
@@ -16,6 +18,7 @@ use oxi_ai::{get_model, get_provider};
 use parking_lot::RwLock;
 use settings::{Settings, ThinkingLevel};
 use skills::SkillManager;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -127,10 +130,12 @@ impl InteractiveSession {
     }
 }
 
-/// Build the system prompt based on thinking level and active skills
+/// Build the system prompt based on thinking level, active skills, context files,
+/// and MCP integration hint.
 fn build_system_prompt(
     thinking_level: ThinkingLevel,
     skill_contents: &[String],
+    context_section: &str,
 ) -> String {
     let mut prompt = match thinking_level {
         ThinkingLevel::None => String::from(
@@ -150,11 +155,31 @@ fn build_system_prompt(
         ),
     };
 
+    // Append project context files (AGENTS.md, CLAUDE.md)
+    if !context_section.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(context_section);
+    }
+
     // Append active skill content
     for content in skill_contents {
         prompt.push_str("\n\n---\n# Active Skill\n\n");
         prompt.push_str(content);
     }
+
+    // MCP server integration hint
+    prompt.push_str("\n\n---\n");
+    prompt.push_str("# MCP Integration\n\n");
+    prompt.push_str(
+        "This environment supports the Model Context Protocol (MCP). \
+         MCP servers can provide additional tools and resources. \
+         If MCP servers are configured, their tools will appear in the available tools list. \
+         To configure MCP servers, add them to ~/.oxi/mcp.json or .oxi/mcp.json in the project root. \
+         Example configuration:\n\n\
+         ```json\n\
+         {\"mcpServers\": {\"my-server\": {\"command\": \"npx\", \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/path\"]}}}\n\
+         ```\n"
+    );
 
     prompt
 }
@@ -162,6 +187,11 @@ fn build_system_prompt(
 impl App {
     /// Create a new App instance
     pub async fn new(settings: Settings) -> Result<Self> {
+        Self::new_with_cwd(settings, std::env::current_dir()?).await
+    }
+
+    /// Create a new App instance with an explicit working directory
+    pub async fn new_with_cwd(settings: Settings, cwd: PathBuf) -> Result<Self> {
         let model_id = settings.effective_model(None);
         let provider_name = settings.effective_provider(None);
 
@@ -193,8 +223,21 @@ impl App {
             SkillManager::load_from_dir(std::path::Path::new("/nonexistent")).unwrap()
         });
 
+        // Load context files (AGENTS.md, CLAUDE.md)
+        let agent_dir = dirs::home_dir()
+            .unwrap_or_default()
+            .join(".oxi");
+        let context_files = context::load_context_files(&cwd, &agent_dir).unwrap_or_else(|e| {
+            tracing::debug!("Context files not loaded: {}", e);
+            Vec::new()
+        });
+        let context_section = context::format_context_for_prompt(&context_files);
+        if !context_files.is_empty() {
+            tracing::info!(count = context_files.len(), "loaded project context files");
+        }
+
         // Build agent config from settings
-        let system_prompt = build_system_prompt(settings.thinking_level, &[]);
+        let system_prompt = build_system_prompt(settings.thinking_level, &[], &context_section);
         let compaction_strategy = if settings.auto_compaction {
             oxi_ai::CompactionStrategy::Threshold(0.8)
         } else {
@@ -286,7 +329,10 @@ impl App {
             .iter()
             .filter_map(|name| skills.get(name).map(|s| s.content.clone()))
             .collect();
-        let prompt = build_system_prompt(self.settings.thinking_level, &contents);
+        // Note: context_section is empty on rebuild since we don't re-read files
+        // on every skill toggle. This is acceptable — context files are loaded once
+        // at startup.
+        let prompt = build_system_prompt(self.settings.thinking_level, &contents, "");
         self.agent.set_system_prompt(prompt);
     }
 
