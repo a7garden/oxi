@@ -5,44 +5,11 @@
 //! default keys and descriptions, and can be overridden via a JSON config
 //! file (`~/.oxi/keybindings.json`).
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
 /// Unique identifier for a keybinding action.
 pub type ActionId = &'static str;
-
-/// A resolved keybinding: action → keys.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Keybinding {
-    /// Human-readable description.
-    pub description: &'static str,
-    /// Default key sequences (e.g. `"ctrl+c"`, `"escape"`).
-    pub default_keys: &'static [ &'static str ],
-    /// User-overridden keys (loaded from config file).
-    #[serde(skip)]
-    pub user_keys: Option<Vec<String>>,
-}
-
-/// Full set of keybinding definitions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeybindingDefinition {
-    pub action: ActionId,
-    pub description: &'static str,
-    pub default_keys: &'static [ &'static str ],
-}
-
-/// Keyboard shortcut registry.
-pub struct KeybindingRegistry {
-    bindings: HashMap<ActionId, KeybindingEntry>,
-}
-
-/// Internal storage for a single binding.
-struct KeybindingEntry {
-    description: &'static str,
-    default_keys: &'static [ &'static str ],
-    user_keys: Option<Vec<String>>,
-}
 
 /// Parsed key sequence (single key).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -178,61 +145,65 @@ pub mod actions {
 }
 
 // ---------------------------------------------------------------------------
-// Default bindings table
+// Binding definition
 // ---------------------------------------------------------------------------
 
+/// A single keybinding definition.
+struct BindingDef {
+    description: &'static str,
+    default_keys: &'static [&'static str],
+    user_keys: Option<Vec<String>>,
+}
+
+/// Keyboard shortcut registry.
+pub struct KeybindingRegistry {
+    bindings: HashMap<ActionId, BindingDef>,
+}
+
 /// All built-in keybinding definitions.
-const DEFAULT_BINDINGS: &[KeybindingDefinition] = &[
+const DEFAULT_BINDINGS: &[(&str, &[&str], &str)] = &[
     // Input
-    KeybindingDefinition { action: actions::INPUT_SUBMIT, description: "Submit input", default_keys: &["enter"] },
-    KeybindingDefinition { action: actions::INPUT_NEWLINE, description: "Insert new line", default_keys: &["alt+enter"] },
-    KeybindingDefinition { action: actions::INPUT_TAB, description: "Tab completion", default_keys: &["tab"] },
-
+    (actions::INPUT_SUBMIT, &["enter"], "Submit input"),
+    (actions::INPUT_NEWLINE, &["alt+enter"], "Insert new line"),
+    (actions::INPUT_TAB, &["tab"], "Tab completion"),
     // Application control
-    KeybindingDefinition { action: actions::INTERRUPT, description: "Cancel or abort", default_keys: &["escape"] },
-    KeybindingDefinition { action: actions::CLEAR, description: "Clear editor", default_keys: &["ctrl+c"] },
-    KeybindingDefinition { action: actions::EXIT, description: "Exit when editor is empty", default_keys: &["ctrl+d"] },
-    KeybindingDefinition { action: actions::SUSPEND, description: "Suspend to background", default_keys: &["ctrl+z"] },
-
+    (actions::INTERRUPT, &["escape"], "Cancel or abort"),
+    (actions::CLEAR, &["ctrl+c"], "Clear editor"),
+    (actions::EXIT, &["ctrl+d"], "Exit when editor is empty"),
+    (actions::SUSPEND, &["ctrl+z"], "Suspend to background"),
     // Model / thinking
-    KeybindingDefinition { action: actions::CYCLE_THINKING, description: "Cycle thinking level", default_keys: &["shift+tab"] },
-    KeybindingDefinition { action: actions::TOGGLE_THINKING, description: "Toggle thinking blocks", default_keys: &["ctrl+t"] },
-    KeybindingDefinition { action: actions::CYCLE_MODEL_FWD, description: "Cycle to next model", default_keys: &["ctrl+p"] },
-    KeybindingDefinition { action: actions::CYCLE_MODEL_BWD, description: "Cycle to previous model", default_keys: &["shift+ctrl+p"] },
-    KeybindingDefinition { action: actions::SELECT_MODEL, description: "Open model selector", default_keys: &["ctrl+l"] },
-
+    (actions::CYCLE_THINKING, &["shift+tab"], "Cycle thinking level"),
+    (actions::TOGGLE_THINKING, &["ctrl+t"], "Toggle thinking blocks"),
+    (actions::CYCLE_MODEL_FWD, &["ctrl+p"], "Cycle to next model"),
+    (actions::CYCLE_MODEL_BWD, &["shift+ctrl+p"], "Cycle to previous model"),
+    (actions::SELECT_MODEL, &["ctrl+l"], "Open model selector"),
     // Session
-    KeybindingDefinition { action: actions::NEW_SESSION, description: "Start a new session", default_keys: &[] },
-    KeybindingDefinition { action: actions::RESUME_SESSION, description: "Resume a session", default_keys: &[] },
-    KeybindingDefinition { action: actions::TREE_SESSION, description: "Open session tree", default_keys: &[] },
-    KeybindingDefinition { action: actions::FORK_SESSION, description: "Fork current session", default_keys: &[] },
-
+    (actions::NEW_SESSION, &[], "Start a new session"),
+    (actions::RESUME_SESSION, &[], "Resume a session"),
+    (actions::TREE_SESSION, &[], "Open session tree"),
+    (actions::FORK_SESSION, &[], "Fork current session"),
     // Tools
-    KeybindingDefinition { action: actions::EXPAND_TOOLS, description: "Toggle tool output", default_keys: &["ctrl+o"] },
-
+    (actions::EXPAND_TOOLS, &["ctrl+o"], "Toggle tool output"),
     // Clipboard
-    KeybindingDefinition { action: actions::PASTE_IMAGE, description: "Paste image from clipboard", default_keys: &["ctrl+v"] },
-
+    (actions::PASTE_IMAGE, &["ctrl+v"], "Paste image from clipboard"),
     // Editor
-    KeybindingDefinition { action: actions::EXTERNAL_EDITOR, description: "Open external editor", default_keys: &["ctrl+g"] },
-
+    (actions::EXTERNAL_EDITOR, &["ctrl+g"], "Open external editor"),
     // Messages
-    KeybindingDefinition { action: actions::FOLLOW_UP, description: "Queue follow-up message", default_keys: &["alt+enter"] },
-    KeybindingDefinition { action: actions::DEQUEUE, description: "Restore queued messages", default_keys: &["alt+up"] },
-
+    (actions::FOLLOW_UP, &["alt+enter"], "Queue follow-up message"),
+    (actions::DEQUEUE, &["alt+up"], "Restore queued messages"),
     // Scrolling
-    KeybindingDefinition { action: actions::SCROLL_UP, description: "Scroll up", default_keys: &["pageup"] },
-    KeybindingDefinition { action: actions::SCROLL_DOWN, description: "Scroll down", default_keys: &["pagedown"] },
+    (actions::SCROLL_UP, &["pageup"], "Scroll up"),
+    (actions::SCROLL_DOWN, &["pagedown"], "Scroll down"),
 ];
 
 impl KeybindingRegistry {
     /// Create a registry with all default bindings.
     pub fn new() -> Self {
         let mut bindings = HashMap::new();
-        for def in DEFAULT_BINDINGS {
-            bindings.insert(def.action, KeybindingEntry {
-                description: def.description,
-                default_keys: def.default_keys,
+        for &(action, keys, desc) in DEFAULT_BINDINGS {
+            bindings.insert(action, BindingDef {
+                description: desc,
+                default_keys: keys,
                 user_keys: None,
             });
         }
@@ -258,8 +229,8 @@ impl KeybindingRegistry {
         };
 
         for (action, keys) in map {
-            // Only apply overrides for known actions
-            if !self.bindings.contains_key(action.as_str()) {
+            let action: &str = &action;
+            if !self.bindings.contains_key(action) {
                 continue;
             }
 
@@ -273,7 +244,7 @@ impl KeybindingRegistry {
                 _ => continue,
             };
 
-            if let Some(entry) = self.bindings.get_mut(action.as_str()) {
+            if let Some(entry) = self.bindings.get_mut(action) {
                 entry.user_keys = Some(user_keys);
             }
         }
@@ -282,8 +253,6 @@ impl KeybindingRegistry {
     }
 
     /// Get the effective key sequences for an action.
-    ///
-    /// Returns user-overridden keys if set, otherwise the defaults.
     pub fn keys_for(&self, action: ActionId) -> Vec<KeySequence> {
         let entry = match self.bindings.get(action) {
             Some(e) => e,
@@ -335,7 +304,7 @@ impl KeybindingRegistry {
             let keys = entry.user_keys.clone().unwrap_or_else(|| {
                 entry.default_keys.iter().map(|s| s.to_string()).collect()
             });
-            result.insert(action, keys);
+            result.insert(*action, keys);
         }
         result
     }

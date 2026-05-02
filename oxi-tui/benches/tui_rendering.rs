@@ -8,9 +8,7 @@
 //! - Renderer render_to_string (full render without terminal I/O)
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use oxi_tui::{
-    Attributes, Cell, CellBuilder, Color, Rect, Renderer, Surface,
-};
+use oxi_tui::{Cell, CellBuilder, Color, Surface};
 
 // ---------------------------------------------------------------------------
 // Surface benchmarks
@@ -54,15 +52,13 @@ fn bench_surface_clear(c: &mut Criterion) {
 fn bench_surface_write_string(c: &mut Criterion) {
     let mut group = c.benchmark_group("surface_write_string");
 
-    let mut surface = Surface::new(120, 40);
     let short = "Hello, world!";
     let medium = "The quick brown fox jumps over the lazy dog. This is a test string.";
-    let long = std::iter::repeat("abcde ")
-        .take(20)
-        .collect::<String>(); // 120 chars, fills one row
+    let long: String = std::iter::repeat("abcde ").take(20).collect(); // 120 chars
 
     group.throughput(Throughput::Bytes(short.len() as u64));
     group.bench_function("short_13chars", |b| {
+        let mut surface = Surface::new(120, 40);
         b.iter(|| {
             surface.write_string(black_box(0), black_box(0), black_box(short));
         });
@@ -70,6 +66,7 @@ fn bench_surface_write_string(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(medium.len() as u64));
     group.bench_function("medium_70chars", |b| {
+        let mut surface = Surface::new(120, 40);
         b.iter(|| {
             surface.write_string(black_box(0), black_box(0), black_box(medium));
         });
@@ -77,8 +74,9 @@ fn bench_surface_write_string(c: &mut Criterion) {
 
     group.throughput(Throughput::Bytes(long.len() as u64));
     group.bench_function("long_120chars", |b| {
+        let mut surface = Surface::new(120, 40);
         b.iter(|| {
-            surface.write_string(black_box(0), black_box(0), black_box(long));
+            surface.write_string(black_box(0), black_box(0), black_box(&long));
         });
     });
 
@@ -109,9 +107,8 @@ fn bench_surface_diff(c: &mut Criterion) {
         let cell_count = (w as u64) * (h as u64);
 
         // Create two surfaces with ~10% cells different
-        let mut a = Surface::new(w, h);
+        let a = Surface::new(w, h);
         let mut b = Surface::new(w, h);
-        // Change ~10% of cells
         let changes = (w as usize * h as usize) / 10;
         for i in 0..changes {
             let row = (i % (h as usize)) as u16;
@@ -122,13 +119,17 @@ fn bench_surface_diff(c: &mut Criterion) {
         }
 
         group.throughput(Throughput::Elements(cell_count));
-        group.bench_with_input(BenchmarkId::new("diff_10pct", &label), &(a, b), |b, (a, b)| {
-            b.iter(|| {
-                let mut s = a.clone();
-                s.diff_from(black_box(b));
-                black_box(&s);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("diff_10pct", &label),
+            &(a, b),
+            |bencher, (a, b)| {
+                bencher.iter(|| {
+                    let mut s = a.clone();
+                    s.diff_from(black_box(b));
+                    black_box(&s);
+                });
+            },
+        );
     }
 
     group.finish();
@@ -138,7 +139,7 @@ fn bench_surface_diff(c: &mut Criterion) {
 // Renderer benchmarks (render to buffer, not stdout)
 // ---------------------------------------------------------------------------
 
-/// A buffer-rendering renderer that collects output into a String instead of stdout.
+/// A buffer-rendering renderer that collects ANSI output into a String.
 /// This lets us benchmark the SGR computation without needing a real terminal.
 struct BenchRenderer {
     output: String,
@@ -176,7 +177,7 @@ impl BenchRenderer {
 
                     if new_state != self.current_sgr_state {
                         self.current_sgr_state = new_state;
-                        self.output.push_str("\x1b[0m"); // Reset then apply
+                        self.output.push_str("\x1b[0m");
                         self.apply_sgr_inline(cell);
                     }
 
@@ -187,44 +188,52 @@ impl BenchRenderer {
     }
 
     fn apply_sgr_inline(&mut self, cell: &Cell) {
-        let mut codes = Vec::with_capacity(8);
-        if cell.attrs.bold { codes.push("1"); }
-        if cell.attrs.italic { codes.push("3"); }
-        if cell.attrs.underline { codes.push("4"); }
-        if cell.attrs.strikethrough { codes.push("9"); }
+        let mut buf = String::with_capacity(32);
+        buf.push_str("\x1b[");
+
+        let mut first = true;
+
+        let mut push_code = |buf: &mut String, code: &str, first: &mut bool| {
+            if !*first { buf.push(';'); }
+            *first = false;
+            buf.push_str(code);
+        };
+
+        if cell.attrs.bold { push_code(&mut buf, "1", &mut first); }
+        if cell.attrs.italic { push_code(&mut buf, "3", &mut first); }
+        if cell.attrs.underline { push_code(&mut buf, "4", &mut first); }
+        if cell.attrs.strikethrough { push_code(&mut buf, "9", &mut first); }
 
         match cell.fg {
             Color::Default => {}
-            Color::Black => codes.push("30"),
-            Color::Red => codes.push("31"),
-            Color::Green => codes.push("32"),
-            Color::Yellow => codes.push("33"),
-            Color::Blue => codes.push("34"),
-            Color::Magenta => codes.push("35"),
-            Color::Cyan => codes.push("36"),
-            Color::White => codes.push("37"),
+            Color::Black => push_code(&mut buf, "30", &mut first),
+            Color::Red => push_code(&mut buf, "31", &mut first),
+            Color::Green => push_code(&mut buf, "32", &mut first),
+            Color::Yellow => push_code(&mut buf, "33", &mut first),
+            Color::Blue => push_code(&mut buf, "34", &mut first),
+            Color::Magenta => push_code(&mut buf, "35", &mut first),
+            Color::Cyan => push_code(&mut buf, "36", &mut first),
+            Color::White => push_code(&mut buf, "37", &mut first),
             Color::Indexed(n) => {
-                codes.push("38");
-                codes.push("5");
-                codes.push(&n.to_string());
+                push_code(&mut buf, "38", &mut first);
+                push_code(&mut buf, "5", &mut first);
+                let s = n.to_string();
+                push_code(&mut buf, &s, &mut first);
             }
             Color::Rgb(r, g, b) => {
-                codes.push("38");
-                codes.push("2");
-                codes.push(&r.to_string());
-                codes.push(&g.to_string());
-                codes.push(&b.to_string());
+                push_code(&mut buf, "38", &mut first);
+                push_code(&mut buf, "2", &mut first);
+                let rs = r.to_string();
+                push_code(&mut buf, &rs, &mut first);
+                let gs = g.to_string();
+                push_code(&mut buf, &gs, &mut first);
+                let bs = b.to_string();
+                push_code(&mut buf, &bs, &mut first);
             }
         }
 
-        if !codes.is_empty() {
-            self.output.push_str("\x1b[");
-            for (i, code) in codes.iter().enumerate() {
-                if i > 0 { self.output.push(';'); }
-                self.output.push_str(code);
-            }
-            self.output.push('m');
-        }
+        buf.push('m');
+        self.output.push_str(&buf);
     }
 }
 
