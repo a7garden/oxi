@@ -12,6 +12,7 @@ use crate::Size;
 use crate::Rect;
 use crate::autocomplete::FuzzyMatcher;
 use crate::components::{Completion, FileCompleter};
+use crate::Theme;
 
 /// Editor content with cursor tracking.
 #[derive(Debug, Clone)]
@@ -89,6 +90,8 @@ pub struct EditorOptions {
     pub max_history: usize,
     /// Show line numbers.
     pub show_line_numbers: bool,
+    /// Theme reference for default colors.
+    pub theme: Option<Theme>,
 }
 
 impl Default for EditorOptions {
@@ -102,6 +105,20 @@ impl Default for EditorOptions {
             enable_mention_completion: true,
             max_history: 100,
             show_line_numbers: false,
+            theme: None,
+        }
+    }
+}
+
+impl EditorOptions {
+    /// Create options pre-filled from a theme.
+    pub fn from_theme(theme: &Theme) -> Self {
+        Self {
+            prompt_color: Some(theme.colors.primary),
+            text_color: Some(theme.colors.foreground),
+            bg_color: Some(theme.colors.background),
+            theme: Some(theme.clone()),
+            ..EditorOptions::default()
         }
     }
 }
@@ -203,6 +220,21 @@ impl Editor {
         self.file_completer = Some(FileCompleter::new(base_dir));
         self.options.enable_file_completion = true;
         self
+    }
+
+    /// Set the theme; colors from the theme are used unless explicitly overridden.
+    pub fn set_theme(&mut self, theme: &Theme) {
+        self.options.theme = Some(theme.clone());
+        if self.options.prompt_color.is_none() {
+            self.options.prompt_color = Some(theme.colors.primary);
+        }
+        if self.options.text_color.is_none() {
+            self.options.text_color = Some(theme.colors.foreground);
+        }
+        if self.options.bg_color.is_none() {
+            self.options.bg_color = Some(theme.colors.background);
+        }
+        self.dirty = true;
     }
 
     /// Add mention candidates (files, users, etc).
