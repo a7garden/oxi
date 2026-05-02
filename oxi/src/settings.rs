@@ -19,6 +19,7 @@ use std::path::PathBuf;
 const SETTINGS_VERSION: u32 = 1;
 
 /// Environment variable prefix for oxi settings.
+#[allow(dead_code)]
 const ENV_PREFIX: &str = "OXI_";
 
 /// Thinking level for agent responses

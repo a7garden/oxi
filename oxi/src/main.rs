@@ -8,7 +8,6 @@ use oxi::extensions::ExtensionRegistry;
 use oxi::packages::PackageManager;
 use oxi::session::{SessionManager, AgentMessage};
 use oxi::settings::Settings;
-use oxi::skills::SkillManager;
 use oxi::templates::TemplateManager;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -161,8 +160,8 @@ async fn main() -> Result<()> {
     }
 
     if prompt.is_empty() || args.interactive {
-        // Interactive mode
-        interactive_mode(app).await?;
+        // TUI interactive mode
+        oxi::tui_interactive::run_tui_interactive(app).await?;
     } else {
         // Single prompt mode
         run_single_prompt(app, &prompt).await?;
@@ -311,7 +310,7 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
     println!();
 
     // Show tree structure
-    for (session_id, entry) in &tree {
+    for (_session_id, entry) in &tree {
         let role_marker = match &entry.message {
             AgentMessage::User { .. } => "👤",
             AgentMessage::Assistant { .. } => "🤖",
@@ -372,6 +371,7 @@ async fn run_single_prompt(app: oxi::App, prompt: &str) -> Result<()> {
 enum CommandResult {
     Handled,
     NewSession(Uuid),
+    #[allow(dead_code)]
     Quit,
 }
 

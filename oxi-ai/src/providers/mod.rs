@@ -12,10 +12,14 @@ use futures::Stream;
 pub use trait_def::Provider;
 pub use event::ProviderEvent;
 use crate::error::ProviderError;
+#[allow(unused_imports)]
 pub use options::{StreamOptions, ThinkingBudgets};
+#[allow(unused_imports)]
 pub use openai::OpenAiProvider;
+#[allow(unused_imports)]
 pub use anthropic::AnthropicProvider;
 pub use crate::CacheRetention;
+#[allow(unused_imports)]
 pub use crate::ThinkingLevel;
 pub use crate::Context;
 pub use crate::Model;

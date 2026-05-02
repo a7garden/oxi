@@ -8,6 +8,7 @@ struct SGR {
     italic: bool,
     underline: bool,
     strikethrough: bool,
+    #[allow(dead_code)]
     reversed: bool,
     fg: Option<crate::cell::Color>,
     bg: Option<crate::cell::Color>,
@@ -225,6 +226,7 @@ impl Renderer {
     }
 
     /// Render a single cell at a position and clear to end of line.
+    #[allow(dead_code)]
     fn render_cell_at(&mut self, row: u16, col: u16, cell: &Cell) {
         // Move cursor
         self.move_cursor(row, col);

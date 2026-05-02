@@ -210,7 +210,11 @@ impl AssistantMessage {
     }
 
     pub fn text_content(&self) -> String {
-        let mut result = String::new();
+        // Pre-compute capacity to avoid reallocations.
+        let estimated_len: usize = self.content.iter()
+            .map(|b| b.as_text().map(|t| t.len()).unwrap_or(0))
+            .sum();
+        let mut result = String::with_capacity(estimated_len);
         for block in &self.content {
             if let Some(text) = block.as_text() {
                 result.push_str(text);
@@ -271,7 +275,17 @@ impl ToolResultMessage {
     }
 
     pub fn text_content(&self) -> Result<String, crate::error::ProviderError> {
-        let mut result = String::new();
+        // Pre-compute capacity estimate.
+        let estimated_len: usize = self.content.iter()
+            .map(|b| match b {
+                ContentBlock::Text(t) => t.text.len() + 1,
+                ContentBlock::Image(_) => 7,
+                ContentBlock::Thinking(t) => t.thinking.len() + 12,
+                ContentBlock::ToolCall(tc) => tc.name.len() + 8,
+                ContentBlock::Unknown(_) => 0,
+            })
+            .sum();
+        let mut result = String::with_capacity(estimated_len);
         for block in &self.content {
             match block {
                 ContentBlock::Text(t) => {
@@ -279,16 +293,13 @@ impl ToolResultMessage {
                     result.push('\n');
                 }
                 ContentBlock::Image(_) => {
-                    result.push_str("[Image]");
-                    result.push('\n');
+                    result.push_str("[Image]\n");
                 }
                 ContentBlock::Thinking(t) => {
-                    result.push_str(&format!("[Thinking: {}]", t.thinking));
-                    result.push('\n');
+                    result.push_str(&format!("[Thinking: {}]\n", t.thinking));
                 }
                 ContentBlock::ToolCall(tc) => {
-                    result.push_str(&format!("[Tool: {}]", tc.name));
-                    result.push('\n');
+                    result.push_str(&format!("[Tool: {}]\n", tc.name));
                 }
                 ContentBlock::Unknown(_) => {
                     // Skip unknown blocks
@@ -328,7 +339,16 @@ impl Message {
                 match &m.content {
                     MessageContent::Text(s) => Ok(s.clone()),
                     MessageContent::Blocks(blocks) => {
-                        let mut result = String::new();
+                        let estimated_len: usize = blocks.iter()
+                            .map(|b| match b {
+                                ContentBlock::Text(t) => t.text.len() + 1,
+                                ContentBlock::Image(_) => 8,
+                                ContentBlock::Thinking(t) => t.thinking.len() + 1,
+                                ContentBlock::ToolCall(_) => 12,
+                                ContentBlock::Unknown(_) => 10,
+                            })
+                            .sum();
+                        let mut result = String::with_capacity(estimated_len);
                         for block in blocks {
                             match block {
                                 ContentBlock::Text(t) => {
@@ -336,20 +356,17 @@ impl Message {
                                     result.push('\n');
                                 }
                                 ContentBlock::Image(_) => {
-                                    result.push_str("[Image]");
-                                    result.push('\n');
+                                    result.push_str("[Image]\n");
                                 }
                                 ContentBlock::Thinking(t) => {
                                     result.push_str(&t.thinking);
                                     result.push('\n');
                                 }
                                 ContentBlock::ToolCall(_) => {
-                                    result.push_str("[Tool Call]");
-                                    result.push('\n');
+                                    result.push_str("[Tool Call]\n");
                                 }
                                 ContentBlock::Unknown(_) => {
-                                    result.push_str("[Unknown]");
-                                    result.push('\n');
+                                    result.push_str("[Unknown]\n");
                                 }
                             }
                         }
@@ -358,7 +375,8 @@ impl Message {
                 }
             }
             Message::Assistant(m) => Ok(m.text_content()),
-            Message::ToolResult(m) => m.text_content(),        }
+            Message::ToolResult(m) => m.text_content(),
+        }
     }
 }
 
