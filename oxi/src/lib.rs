@@ -3,6 +3,7 @@
 //! This crate provides the main application logic for the oxi CLI.
 
 pub mod settings;
+pub mod session;
 
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
@@ -10,6 +11,7 @@ use oxi_ai::{get_model, get_provider};
 use settings::{Settings, ThinkingLevel};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use uuid::Uuid;
 
 /// Application state and entry point
 pub struct App {
@@ -48,6 +50,8 @@ pub struct InteractiveSession {
     pub messages: Vec<ChatMessage>,
     pub thinking: bool,
     pub current_response: String,
+    pub session_id: Option<Uuid>,
+    pub entries: Vec<session::SessionEntry>,
 }
 
 impl Default for InteractiveSession {
@@ -56,6 +60,8 @@ impl Default for InteractiveSession {
             messages: Vec::new(),
             thinking: false,
             current_response: String::new(),
+            session_id: None,
+            entries: Vec::new(),
         }
     }
 }
@@ -67,10 +73,16 @@ impl InteractiveSession {
 
     pub fn add_user_message(&mut self, content: String) {
         self.messages.push(ChatMessage::user(content));
+        // Also add to entries for session persistence
+        let entry = session::SessionEntry::new(session::AgentMessage::User { content });
+        self.entries.push(entry);
     }
 
     pub fn add_assistant_message(&mut self, content: String) {
         self.messages.push(ChatMessage::assistant(content));
+        // Also add to entries for session persistence
+        let entry = session::SessionEntry::new(session::AgentMessage::Assistant { content });
+        self.entries.push(entry);
         self.current_response.clear();
     }
 
@@ -83,6 +95,26 @@ impl InteractiveSession {
             let response = std::mem::take(&mut self.current_response);
             self.add_assistant_message(response);
         }
+    }
+
+    /// Get all entries in the session
+    pub fn entries(&self) -> &[session::SessionEntry] {
+        &self.entries
+    }
+
+    /// Get entry at a specific index
+    pub fn get_entry(&self, index: usize) -> Option<&session::SessionEntry> {
+        self.entries.get(index)
+    }
+
+    /// Get entry by ID
+    pub fn get_entry_by_id(&self, id: Uuid) -> Option<&session::SessionEntry> {
+        self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Truncate entries at a given index (for branching)
+    pub fn truncate_at(&mut self, index: usize) {
+        self.entries.truncate(index + 1);
     }
 }
 
@@ -257,5 +289,15 @@ impl<'a> InteractiveLoop<'a> {
     /// Check if currently thinking
     pub fn is_thinking(&self) -> bool {
         self.session.thinking
+    }
+
+    /// Get session entries for tree navigation
+    pub fn entries(&self) -> &[session::SessionEntry] {
+        self.session.entries()
+    }
+
+    /// Get entry by ID
+    pub fn get_entry(&self, id: Uuid) -> Option<&session::SessionEntry> {
+        self.session.get_entry_by_id(id)
     }
 }

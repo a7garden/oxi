@@ -4,7 +4,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use serde_json::json;
 use jsonschema::Validator;
+use std::sync::Arc;
 use thiserror::Error;
+
+/// Callback type for progress updates
+pub type ProgressCallback = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Create a progress callback from a closure
+pub fn progress_callback<F: Fn(String) + Send + Sync + 'static>(f: F) -> ProgressCallback {
+    Arc::new(f)
+}
 
 /// Tool definition with JSON Schema parameters
 #[derive(Debug, Clone, Serialize, Deserialize)]

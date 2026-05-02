@@ -1,74 +1,79 @@
 //! Bash tool - execute shell commands
 
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command as StdCommand, Stdio as StdStdio};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::fs;
-use tokio::process::Command;
-use tokio::sync::oneshot;
+use tokio::io::AsyncReadExt;
+use tokio::process::{Command, Stdio};
+use tokio::sync::{Mutex, oneshot};
 
-pub struct BashTool;
+pub struct BashTool {
+    progress_callback: Arc<Mutex<Option<ProgressCallback>>>,
+}
 
 impl BashTool {
     pub fn new() -> Self {
-        Self
+        Self {
+            progress_callback: Arc::new(Mutex::new(None)),
+        }
     }
 
     async fn run_command_impl(
         command: &str,
         working_dir: Option<&str>,
         timeout_secs: Option<u64>,
+        progress_cb: &Option<ProgressCallback>,
     ) -> Result<String, ToolError> {
-        // Build the command
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(command);
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
+        if let Some(cb) = progress_cb {
+            cb(format!("Executing: {}", command));
+        }
 
-        // Set working directory if specified
+        // Use blocking std Command for simplicity
+        let mut cmd = StdCommand::new("sh");
+        cmd.arg("-c").arg(command);
+        cmd.stdout(StdStdio::piped());
+        cmd.stderr(StdStdio::piped());
+
         if let Some(dir) = working_dir {
-            let path = Path::new(dir);
-            // Security: prevent path traversal
-            if dir.contains("..") {
-                return Err("Path traversal not allowed in working directory".to_string());
-            }
-            if path.exists() {
+            if !dir.contains("..") && Path::new(dir).exists() {
                 cmd.current_dir(dir);
             }
         }
 
-        // Set timeout if specified
-        let timeout = timeout_secs.map(Duration::from_secs);
-
-        // Execute with timeout
-        let output = if let Some(timeout) = timeout {
-            tokio::time::timeout(timeout, cmd.output())
-                .await
-                .map_err(|_| "Command timed out")?
-                .map_err(|e| format!("Command execution failed: {}", e))?
+        // Execute with optional timeout
+        let output = if let Some(timeout) = timeout_secs {
+            let result = std::thread::spawn(move || {
+                std::time::timeout(Duration::from_secs(timeout), cmd.output())
+            }).join().unwrap_or(Ok(Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut, "timeout thread panicked"
+            )))?}
+            .map_err(|e| format!("Command timed out: {}", e))?
         } else {
-            cmd.output()
-                .await
-                .map_err(|e| format!("Command execution failed: {}", e))?
+            cmd.output().map_err(|e| format!("Command failed: {}", e))?
         };
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+        if let Some(cb) = progress_cb {
+            cb(format!("Process exited with code: {}", output.status.code().unwrap_or(-1)));
+        }
 
         if output.status.success() {
             if stdout.is_empty() && stderr.is_empty() {
                 Ok("(no output)".to_string())
             } else {
-                Ok(stdout.to_string())
+                Ok(stdout)
             }
         } else {
-            let exit_code = output.status.code().unwrap_or(-1);
             Err(format!(
                 "Command failed with exit code {}: {}",
-                exit_code,
+                output.status.code().unwrap_or(-1),
                 if stderr.is_empty() { &stdout } else { &stderr }
             ))
         }
@@ -77,7 +82,6 @@ impl BashTool {
     async fn read_dir_impl(path: &str) -> Result<String, ToolError> {
         let path = Path::new(path);
 
-        // Security: prevent path traversal
         if path.components().any(|c| c.as_os_str() == "..") {
             return Err("Path traversal not allowed".to_string());
         }
@@ -132,7 +136,7 @@ impl AgentTool for BashTool {
                 },
                 "timeout": {
                     "type": "integer",
-                    "description": "Optional timeout in seconds (default: 60)"
+                    "description": "Optional timeout in seconds"
                 }
             },
             "required": ["command"]
@@ -153,9 +157,20 @@ impl AgentTool for BashTool {
         let working_dir = params.get("working_dir").and_then(|v: &Value| v.as_str());
         let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
 
-        match Self::run_command_impl(command, working_dir, timeout).await {
+        let progress_cb = self.progress_callback.lock().await.clone();
+
+        match Self::run_command_impl(command, working_dir, timeout, &progress_cb).await {
             Ok(output) => Ok(AgentToolResult::success(output)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }
+    }
+
+    fn on_progress(&self, callback: ProgressCallback) {
+        let progress_cb = Arc::new(callback);
+        let cb = self.progress_callback.clone();
+        tokio::spawn(async move {
+            let mut guard = cb.lock().await;
+            *guard = Some(progress_cb);
+        });
     }
 }
