@@ -41,3 +41,12 @@ parking_lot = "0.12"
 [dev-dependencies]
 tokio-test = "0.4"
 mockito = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "token_estimation"
+harness = false
+
+[[bench]]
+name = "sse_parsing"
+harness = false
