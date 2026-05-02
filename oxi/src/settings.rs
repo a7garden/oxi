@@ -97,6 +97,23 @@ pub struct Settings {
     /// Timeout in seconds for tool execution
     #[serde(default = "default_tool_timeout")]
     pub tool_timeout_seconds: u64,
+
+    // ── Resource lists (managed by `oxi config`) ────────────────────
+    /// List of extension paths or npm package sources to load
+    #[serde(default)]
+    pub extensions: Vec<String>,
+
+    /// List of skill paths or npm package sources to load
+    #[serde(default)]
+    pub skills: Vec<String>,
+
+    /// List of prompt template paths to load
+    #[serde(default)]
+    pub prompts: Vec<String>,
+
+    /// List of theme paths to load
+    #[serde(default)]
+    pub themes: Vec<String>,
 }
 
 fn default_theme() -> String {
@@ -133,6 +150,10 @@ impl Default for Settings {
             extensions_enabled: true,
             auto_compaction: true,
             tool_timeout_seconds: default_tool_timeout(),
+            extensions: Vec::new(),
+            skills: Vec::new(),
+            prompts: Vec::new(),
+            themes: Vec::new(),
         }
     }
 }
@@ -488,6 +509,37 @@ mod tests {
     use super::*;
     use std::io::Write as IoWrite;
 
+    /// RAII guard that removes listed env vars on creation and restores them on drop.
+    /// This prevents parallel test races where one test sets an env var that leaks into another.
+    struct EnvGuard {
+        saved: Vec<(String, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        fn new(vars: &[&str]) -> Self {
+            let saved = vars
+                .iter()
+                .map(|&name| {
+                    let old = env::var(name).ok();
+                    env::remove_var(name);
+                    (name.to_string(), old)
+                })
+                .collect();
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, old) in self.saved.drain(..) {
+                match old {
+                    Some(val) => env::set_var(&name, val),
+                    None => env::remove_var(&name),
+                }
+            }
+        }
+    }
+
     // ── Struct tests ─────────────────────────────────────────────────
 
     #[test]
@@ -566,6 +618,18 @@ theme = "dracula"
 
     #[test]
     fn test_load_from_dir_no_config() {
+        // Clean env vars that load_from() reads via apply_env()
+        let _guard = EnvGuard::new(&[
+            "OXI_MODEL",
+            "OXI_PROVIDER",
+            "OXI_THEME",
+            "OXI_TOOL_TIMEOUT",
+            "OXI_TEMPERATURE",
+            "OXI_MAX_TOKENS",
+            "OXI_SESSION_DIR",
+            "OXI_STREAM",
+            "OXI_EXTENSIONS_ENABLED",
+        ]);
         let tmp = tempfile::tempdir().unwrap();
         let settings = Settings::load_from(tmp.path()).unwrap();
         // Falls back to defaults
@@ -577,6 +641,11 @@ theme = "dracula"
 
     #[test]
     fn test_from_env() {
+        let _guard = EnvGuard::new(&[
+            "OXI_MODEL",
+            "OXI_THEME",
+            "OXI_TOOL_TIMEOUT",
+        ]);
         env::set_var("OXI_MODEL", "anthropic/claude-haiku-4-20250414");
         env::set_var("OXI_THEME", "nord");
         env::set_var("OXI_TOOL_TIMEOUT", "60");
@@ -585,15 +654,11 @@ theme = "dracula"
         assert_eq!(settings.default_model, Some("anthropic/claude-haiku-4-20250414".to_string()));
         assert_eq!(settings.theme, "nord");
         assert_eq!(settings.tool_timeout_seconds, 60);
-
-        // Clean up
-        env::remove_var("OXI_MODEL");
-        env::remove_var("OXI_THEME");
-        env::remove_var("OXI_TOOL_TIMEOUT");
     }
 
     #[test]
     fn test_apply_env_boolish() {
+        let _guard = EnvGuard::new(&["OXI_STREAM", "OXI_EXTENSIONS_ENABLED"]);
         env::set_var("OXI_STREAM", "false");
         env::set_var("OXI_EXTENSIONS_ENABLED", "0");
 
@@ -601,28 +666,21 @@ theme = "dracula"
         settings.apply_env();
         assert!(!settings.stream_responses);
         assert!(!settings.extensions_enabled);
-
-        env::remove_var("OXI_STREAM");
-        env::remove_var("OXI_EXTENSIONS_ENABLED");
     }
 
     #[test]
     fn test_apply_env_temperature() {
+        let _guard = EnvGuard::new(&["OXI_TEMPERATURE"]);
         env::set_var("OXI_TEMPERATURE", "0.7");
 
         let mut settings = Settings::default();
         settings.apply_env();
         assert_eq!(settings.default_temperature, Some(0.7));
-
-        env::remove_var("OXI_TEMPERATURE");
     }
 
     #[test]
     fn test_env_does_not_override_when_unset() {
-        // Make sure these are not set in the test environment
-        env::remove_var("OXI_MODEL");
-        env::remove_var("OXI_PROVIDER");
-
+        let _guard = EnvGuard::new(&["OXI_MODEL", "OXI_PROVIDER"]);
         let settings = Settings::from_env();
         assert!(settings.default_model.is_none());
         assert!(settings.default_provider.is_none());

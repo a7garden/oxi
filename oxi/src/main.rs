@@ -5,7 +5,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use oxi::extensions::ExtensionRegistry;
-use oxi::packages::PackageManager;
+use oxi::packages::{PackageManager, ResourceKind};
 use oxi::session::{SessionManager, AgentMessage};
 use oxi::settings::Settings;
 use oxi::templates::TemplateManager;
@@ -75,6 +75,11 @@ enum Commands {
         #[command(subcommand)]
         action: PkgCommands,
     },
+    /// Configuration management
+    Config {
+        #[command(subcommand)]
+        action: ConfigCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -90,6 +95,48 @@ enum PkgCommands {
     Uninstall {
         /// Package name to uninstall
         name: String,
+    },
+    /// Update a package to the latest version
+    Update {
+        /// Package name to update (updates all if omitted)
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigCommands {
+    /// Show current configuration
+    Show,
+    /// List all enabled resources
+    List {
+        /// Resource type filter (extensions, skills, prompts, themes)
+        resource_type: Option<String>,
+    },
+    /// Enable a resource (extension, skill, prompt, or theme)
+    Enable {
+        /// Resource type: extension, skill, prompt, or theme
+        resource_type: String,
+        /// Resource path or name
+        name: String,
+    },
+    /// Disable a resource
+    Disable {
+        /// Resource type: extension, skill, prompt, or theme
+        resource_type: String,
+        /// Resource path or name
+        name: String,
+    },
+    /// Set a configuration value
+    Set {
+        /// Setting key (e.g. theme, default_model, thinking_level)
+        key: String,
+        /// Setting value
+        value: String,
+    },
+    /// Get a configuration value
+    Get {
+        /// Setting key
+        key: String,
     },
 }
 
@@ -192,6 +239,9 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         Commands::Pkg { action } => {
             handle_pkg_command(action)?;
         }
+        Commands::Config { action } => {
+            handle_config_command(action)?;
+        }
     }
 
     Ok(())
@@ -205,13 +255,18 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
             if source.starts_with("npm:") {
                 let name = source.strip_prefix("npm:").unwrap();
                 let manifest = mgr.install_npm(name)?;
+                let counts = mgr.resource_counts(&manifest.name).unwrap_or_default();
                 println!(
-                    "Installed {} v{} from npm",
-                    manifest.name, manifest.version
+                    "Installed {} v{} ({})",
+                    manifest.name, manifest.version, counts
                 );
             } else {
                 let manifest = mgr.install(source)?;
-                println!("Installed {} v{}", manifest.name, manifest.version);
+                let counts = mgr.resource_counts(&manifest.name).unwrap_or_default();
+                println!(
+                    "Installed {} v{} ({})",
+                    manifest.name, manifest.version, counts
+                );
             }
         }
         PkgCommands::List => {
@@ -219,32 +274,25 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
             if packages.is_empty() {
                 println!("No packages installed.");
             } else {
-                println!("{:<30} {:<10} {}", "NAME", "VERSION", "RESOURCES");
-                println!("{:-<30} {:-<10} {:-<20}", "", "", "");
+                println!("{:<30} {:<10} {:<15} {}", "NAME", "VERSION", "RESOURCES", "INSTALL DIR");
+                println!("{:-<30} {:-<10} {:-<15} {:-<40}", "", "", "", "");
                 for pkg in packages {
-                    let mut resources = Vec::new();
-                    if !pkg.extensions.is_empty() {
-                        resources.push(format!("{} ext", pkg.extensions.len()));
-                    }
-                    if !pkg.skills.is_empty() {
-                        resources.push(format!("{} skill", pkg.skills.len()));
-                    }
-                    if !pkg.prompts.is_empty() {
-                        resources.push(format!("{} prompt", pkg.prompts.len()));
-                    }
-                    if !pkg.themes.is_empty() {
-                        resources.push(format!("{} theme", pkg.themes.len()));
-                    }
+                    let counts = mgr.resource_counts(&pkg.name).unwrap_or_default();
+                    let install_dir = mgr
+                        .get_install_dir(&pkg.name)
+                        .map(|d| d.display().to_string())
+                        .unwrap_or_else(|| "-".to_string());
                     println!(
-                        "{:<30} {:<10} {}",
-                        pkg.name,
-                        pkg.version,
-                        if resources.is_empty() {
-                            "-".to_string()
-                        } else {
-                            resources.join(", ")
-                        }
+                        "{:<30} {:<10} {:<15} {}",
+                        pkg.name, pkg.version, counts, install_dir
                     );
+
+                    // Show discovered resources
+                    if let Ok(resources) = mgr.discover_resources(&pkg.name) {
+                        for r in &resources {
+                            println!("    {} {}", r.kind, r.relative_path);
+                        }
+                    }
                 }
             }
         }
@@ -252,10 +300,299 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
             mgr.uninstall(name)?;
             println!("Uninstalled {}", name);
         }
+        PkgCommands::Update { name } => {
+            match name {
+                Some(pkg_name) => {
+                    let manifest = mgr.update(pkg_name)?;
+                    println!("Updated {} to v{}", manifest.name, manifest.version);
+                }
+                None => {
+                    let packages: Vec<String> = mgr.list().iter().map(|p| p.name.clone()).collect();
+                    if packages.is_empty() {
+                        println!("No packages to update.");
+                    } else {
+                        for pkg_name in &packages {
+                            match mgr.update(pkg_name) {
+                                Ok(manifest) => {
+                                    println!("Updated {} to v{}", manifest.name, manifest.version);
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to update {}: {}", pkg_name, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
 }
+
+/// Parse a resource type string into a ResourceKind
+fn parse_resource_type(s: &str) -> Option<ResourceKind> {
+    match s.to_lowercase().as_str() {
+        "extension" | "extensions" | "ext" => Some(ResourceKind::Extension),
+        "skill" | "skills" => Some(ResourceKind::Skill),
+        "prompt" | "prompts" => Some(ResourceKind::Prompt),
+        "theme" | "themes" => Some(ResourceKind::Theme),
+        _ => None,
+    }
+}
+
+/// Parse a boolean value from a config string
+fn parse_config_bool(s: &str) -> Result<bool> {
+    match s.to_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => anyhow::bail!("Invalid boolean value: '{}'. Use true/false, yes/no, on/off, or 1/0", s),
+    }
+}
+
+fn handle_config_command(action: &ConfigCommands) -> Result<()> {
+    match action {
+        ConfigCommands::Show => {
+            let settings = Settings::load()?;
+            println!("oxi configuration:");
+            println!("  Settings file: {}", Settings::settings_path()?.display());
+            println!();
+            println!("  Model: {}", settings.effective_model(None));
+            println!("  Provider: {}", settings.effective_provider(None));
+            println!("  Theme: {}", settings.theme);
+            println!("  Thinking: {:?}", settings.thinking_level);
+            println!("  Extensions enabled: {}", settings.extensions_enabled);
+            println!("  Stream responses: {}", settings.stream_responses);
+            println!("  Auto-compaction: {}", settings.auto_compaction);
+            println!("  Tool timeout: {}s", settings.tool_timeout_seconds);
+
+            let resource_types = [
+                ("Extensions", &settings.extensions),
+                ("Skills", &settings.skills),
+                ("Prompts", &settings.prompts),
+                ("Themes", &settings.themes),
+            ];
+
+            for (label, list) in &resource_types {
+                if list.is_empty() {
+                    println!("  {}: (none)", label);
+                } else {
+                    println!("  {}:", label);
+                    for item in list.iter() {
+                        println!("    - {}", item);
+                    }
+                }
+            }
+        }
+
+        ConfigCommands::List { resource_type } => {
+            let settings = Settings::load()?;
+
+            let resource_types: Vec<(&str, &Vec<String>, ResourceKind)> = vec![
+                ("extensions", &settings.extensions, ResourceKind::Extension),
+                ("skills", &settings.skills, ResourceKind::Skill),
+                ("prompts", &settings.prompts, ResourceKind::Prompt),
+                ("themes", &settings.themes, ResourceKind::Theme),
+            ];
+
+            let filtered: Vec<_> = if let Some(rt) = resource_type {
+                let kind = parse_resource_type(rt)
+                    .ok_or_else(|| anyhow::anyhow!(
+                        "Unknown resource type '{}'. Valid: extension, skill, prompt, theme",
+                        rt
+                    ))?;
+                resource_types.into_iter().filter(|(_, _, k)| *k == kind).collect()
+            } else {
+                resource_types
+            };
+
+            for (label, list, _) in &filtered {
+                if list.is_empty() {
+                    println!("No {} configured.", label);
+                } else {
+                    println!("{}:", label);
+                    for (i, item) in list.iter().enumerate() {
+                        println!("  {}. {}", i + 1, item);
+                    }
+                }
+                println!();
+            }
+
+            // Also show resources from installed packages
+            let mgr = PackageManager::new()?;
+            let packages = mgr.list();
+            if !packages.is_empty() {
+                println!("Package resources:");
+                for pkg in packages {
+                    if let Ok(resources) = mgr.discover_resources(&pkg.name) {
+                        for r in &resources {
+                            // Filter by requested type if specified
+                            if let Some(rt) = resource_type {
+                                if let Some(kind) = parse_resource_type(rt) {
+                                    if r.kind != kind {
+                                        continue;
+                                    }
+                                }
+                            }
+                            println!("  {} [{}] {}", pkg.name, r.kind, r.relative_path);
+                        }
+                    }
+                }
+            }
+        }
+
+        ConfigCommands::Enable { resource_type, name } => {
+            let kind = parse_resource_type(resource_type)
+                .ok_or_else(|| anyhow::anyhow!(
+                    "Unknown resource type '{}'. Valid: extension, skill, prompt, theme",
+                    resource_type
+                ))?;
+
+            let mut settings = Settings::load()?;
+
+            let list = match kind {
+                ResourceKind::Extension => &mut settings.extensions,
+                ResourceKind::Skill => &mut settings.skills,
+                ResourceKind::Prompt => &mut settings.prompts,
+                ResourceKind::Theme => &mut settings.themes,
+            };
+
+            if list.iter().any(|item| item == name) {
+                println!("{} '{}' is already enabled.", kind, name);
+                return Ok(());
+            }
+
+            list.push(name.clone());
+            settings.save()?;
+            println!("Enabled {} '{}'", kind, name);
+        }
+
+        ConfigCommands::Disable { resource_type, name } => {
+            let kind = parse_resource_type(resource_type)
+                .ok_or_else(|| anyhow::anyhow!(
+                    "Unknown resource type '{}'. Valid: extension, skill, prompt, theme",
+                    resource_type
+                ))?;
+
+            let mut settings = Settings::load()?;
+
+            let list = match kind {
+                ResourceKind::Extension => &mut settings.extensions,
+                ResourceKind::Skill => &mut settings.skills,
+                ResourceKind::Prompt => &mut settings.prompts,
+                ResourceKind::Theme => &mut settings.themes,
+            };
+
+            let original_len = list.len();
+            list.retain(|item| item != name);
+
+            if list.len() == original_len {
+                println!("{} '{}' was not enabled.", kind, name);
+                return Ok(());
+            }
+
+            settings.save()?;
+            println!("Disabled {} '{}'", kind, name);
+        }
+
+        ConfigCommands::Set { key, value } => {
+            let mut settings = Settings::load()?;
+
+            match key.as_str() {
+                "theme" => {
+                    settings.theme = value.clone();
+                }
+                "default_model" | "model" => {
+                    settings.default_model = Some(value.clone());
+                }
+                "default_provider" | "provider" => {
+                    settings.default_provider = Some(value.clone());
+                }
+                "thinking_level" | "thinking" => {
+                    let level = oxi::settings::parse_thinking_level(value)
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "Invalid thinking level: '{}'. Valid: none, minimal, standard, thorough",
+                            value
+                        ))?;
+                    settings.thinking_level = level;
+                }
+                "extensions_enabled" => {
+                    settings.extensions_enabled = parse_config_bool(value)?;
+                }
+                "stream_responses" | "stream" => {
+                    settings.stream_responses = parse_config_bool(value)?;
+                }
+                "auto_compaction" => {
+                    settings.auto_compaction = parse_config_bool(value)?;
+                }
+                "tool_timeout" | "tool_timeout_seconds" => {
+                    settings.tool_timeout_seconds = value.parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid timeout: '{}'", value))?;
+                }
+                "max_tokens" => {
+                    settings.max_tokens = Some(value.parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid max_tokens: '{}'", value))?);
+                }
+                "temperature" => {
+                    settings.default_temperature = Some(value.parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid temperature: '{}'", value))?);
+                }
+                "session_history_size" => {
+                    settings.session_history_size = value.parse()
+                        .map_err(|_| anyhow::anyhow!("Invalid session_history_size: '{}'", value))?;
+                }
+                _ => {
+                    anyhow::bail!(
+                        "Unknown setting: '{}'. Valid keys: theme, default_model, default_provider, \
+                         thinking_level, extensions_enabled, stream_responses, auto_compaction, \
+                         tool_timeout, max_tokens, temperature, session_history_size",
+                        key
+                    );
+                }
+            }
+
+            settings.save()?;
+            println!("Set {} = {}", key, value);
+        }
+
+        ConfigCommands::Get { key } => {
+            let settings = Settings::load()?;
+
+            let value = match key.as_str() {
+                "theme" => settings.theme.clone(),
+                "default_model" | "model" => settings.default_model.clone().unwrap_or_else(|| "(not set)".to_string()),
+                "default_provider" | "provider" => settings.default_provider.clone().unwrap_or_else(|| "(not set)".to_string()),
+                "thinking_level" | "thinking" => format!("{:?}", settings.thinking_level).to_lowercase(),
+                "extensions_enabled" => settings.extensions_enabled.to_string(),
+                "stream_responses" | "stream" => settings.stream_responses.to_string(),
+                "auto_compaction" => settings.auto_compaction.to_string(),
+                "tool_timeout" | "tool_timeout_seconds" => format!("{}s", settings.tool_timeout_seconds),
+                "max_tokens" => settings.max_tokens.map(|t| t.to_string()).unwrap_or_else(|| "(not set)".to_string()),
+                "temperature" => settings.effective_temperature().map(|t| t.to_string()).unwrap_or_else(|| "(not set)".to_string()),
+                "session_history_size" => settings.session_history_size.to_string(),
+                "extensions" => format!("{:?}", settings.extensions),
+                "skills" => format!("{:?}", settings.skills),
+                "prompts" => format!("{:?}", settings.prompts),
+                "themes" => format!("{:?}", settings.themes),
+                _ => {
+                    anyhow::bail!(
+                        "Unknown setting: '{}'. Valid keys: theme, default_model, default_provider, \
+                         thinking_level, extensions_enabled, stream_responses, auto_compaction, \
+                         tool_timeout, max_tokens, temperature, session_history_size, \
+                         extensions, skills, prompts, themes",
+                        key
+                    );
+                }
+            };
+
+            println!("{} = {}", key, value);
+        }
+    }
+
+    Ok(())
+}
+
+
 
 async fn list_sessions(manager: &SessionManager) -> Result<()> {
     let sessions = manager.list_sessions().await?;
