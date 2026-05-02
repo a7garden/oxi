@@ -1,0 +1,5 @@
+/Volumes/MERCURY/PROJECTS/pi2oxi/oxi-ai/target/debug/build/parking_lot_core-512e9030690c5695/build_script_build-512e9030690c5695.d: /Users/won/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/parking_lot_core-0.9.12/build.rs
+
+/Volumes/MERCURY/PROJECTS/pi2oxi/oxi-ai/target/debug/build/parking_lot_core-512e9030690c5695/build_script_build-512e9030690c5695: /Users/won/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/parking_lot_core-0.9.12/build.rs
+
+/Users/won/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/parking_lot_core-0.9.12/build.rs:
