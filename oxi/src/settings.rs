@@ -526,7 +526,7 @@ mod tests {
 default_model = "openai/gpt-4o"
 theme = "dracula"
 "#;
-        tmp.as_file().write_all(toml_content).unwrap();
+        tmp.as_file().write_all(toml_content.as_bytes()).unwrap();
 
         let merged = Settings::layer_file(&base, tmp.path()).unwrap();
         assert_eq!(merged.default_model, Some("openai/gpt-4o".to_string()));
@@ -544,7 +544,7 @@ theme = "dracula"
         let tmp = tempfile::NamedTempFile::new().unwrap();
         // Only override theme — provider should remain
         let toml_content = "theme = \"monokai\"\n";
-        tmp.as_file().write_all(toml_content).unwrap();
+        tmp.as_file().write_all(toml_content.as_bytes()).unwrap();
 
         let merged = Settings::layer_file(&base, tmp.path()).unwrap();
         assert_eq!(merged.theme, "monokai");
