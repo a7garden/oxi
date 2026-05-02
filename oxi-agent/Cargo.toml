@@ -2,34 +2,21 @@
 name = "oxi-agent"
 version = "0.1.0"
 edition = "2021"
-description = "Agent runtime for oxi"
-readme = "README.md"
+description = "Agent runtime layer built on oxi-ai"
 license = "MIT"
-authors = ["oxi contributors"]
 
 [dependencies]
 oxi-ai = { path = "../oxi-ai" }
-
-# Async runtime
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
-async-trait = "0.1"
-
-# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
-# Logging
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Error handling
-anyhow = "1"
-thiserror = "2"
-
-# Utilities
 parking_lot = "0.12"
-chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
 
 [dev-dependencies]
 tokio-test = "0.4"
+async-stream = "0.3"

@@ -7,7 +7,7 @@ use crate::tools::ToolRegistry;
 use crate::types::{StopReason, ToolCall, ToolResult, Response};
 use anyhow::{Error, Result};
 use futures::StreamExt;
-use oxi_ai::{Context, Message, get_model, Provider, ProviderEvent, StreamOptions};
+use oxi_ai::{Context, get_model, Provider, ProviderEvent, StreamOptions};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
