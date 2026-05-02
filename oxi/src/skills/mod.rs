@@ -6,8 +6,10 @@
 //! When a skill is invoked, its content is appended to the system prompt,
 //! giving the agent additional context and instructions for that skill.
 
+pub mod autonomous_loop;
 pub mod brainstorming;
 pub mod deep_research;
+pub mod super_review;
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
