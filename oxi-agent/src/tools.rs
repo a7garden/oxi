@@ -49,6 +49,9 @@ impl fmt::Display for AgentToolResult {
     }
 }
 
+/// Callback type for progress updates
+pub type ProgressCallback = Box<dyn Fn(String) + Send + Sync>;
+
 /// Core trait for all agent tools
 #[async_trait]
 pub trait AgentTool: Send + Sync {
@@ -71,6 +74,12 @@ pub trait AgentTool: Send + Sync {
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
     ) -> Result<AgentToolResult, ToolError>;
+
+    /// Called with progress updates during execution.
+    /// Tools can override this to emit streaming updates.
+    fn on_progress(&self, _callback: ProgressCallback) {
+        // Default no-op
+    }
 
     /// Convert to ToolDefinition
     fn to_definition(&self) -> ToolDefinition {
