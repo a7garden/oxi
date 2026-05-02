@@ -20,7 +20,6 @@ use settings::{Settings, ThinkingLevel};
 use skills::SkillManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 /// Application state and entry point
 pub struct App {
