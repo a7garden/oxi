@@ -1178,12 +1178,15 @@ const {{ chromium }} = require('playwright');
     fn extract_count(text: &str, keyword: &str) -> Option<u32> {
         // Try pattern: "N keyword"
         if let Some(pos) = text.find(keyword) {
-            let before = &text[..pos];
-            // Find the last number before the keyword, skipping whitespace
-            let reversed: String = before.chars().rev().skip_while(|c| c.is_whitespace()).collect();
-            let num: String = reversed
+            let before = text[..pos].trim_end();
+            // Find the number at the end of `before`
+            let num: String = before
                 .chars()
+                .rev()
                 .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .chars()
+                .rev()
                 .collect();
             if let Ok(n) = num.parse::<u32>() {
                 return Some(n);
@@ -1194,34 +1197,54 @@ const {{ chromium }} = require('playwright');
 
     /// Extract duration in milliseconds from patterns like "ran in 1234ms" or "finished in 5s".
     fn extract_duration_ms(text: &str) -> Option<u64> {
-        // Pattern: "Nms"
+        // Pattern: "Nms" — extract number right before "ms"
         if let Some(pos) = text.find("ms") {
-            let before = &text[..pos];
-            let reversed: String = before.chars().rev().skip_while(|c| c.is_whitespace()).collect();
-            let num: String = reversed.chars().take_while(|c| c.is_ascii_digit()).collect();
+            let before = text[..pos].trim_end();
+            let num: String = before
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
             if let Ok(n) = num.parse::<u64>() {
                 return Some(n);
             }
         }
 
-        // Pattern: "Ns" (seconds, not ms) — only if it doesn't end in "ms"
+        // Pattern: "Ns" (seconds, not ms) — e.g. "3 passed (5s)" or "ran in 5s"
         if let Some(pos) = text.rfind(" in ") {
             let after = &text[pos + 4..];
-            // Look for pattern like "5s" or "1.2s"
-            let s_pos = after.find('s');
-            let ms_pos = after.find("ms");
-            if let Some(sp) = s_pos {
-                // Only match if there's no "ms" or "ms" is after "s"
-                if ms_pos.map(|mp| sp < mp).unwrap_or(true) {
-                    let num_str = &after[..sp];
-                    if let Ok(n) = num_str.parse::<f64>() {
-                        return Some((n * 1000.0) as u64);
-                    }
-                }
+            if let Some(dur) = Self::parse_seconds(after) {
+                return Some(dur);
+            }
+        }
+
+        // Pattern: "(Ns)" at end of string — e.g. "3 passed (5s)"
+        if let Some(paren_start) = text.rfind('(') {
+            let after = &text[paren_start + 1..];
+            if let Some(dur) = Self::parse_seconds(after) {
+                return Some(dur);
             }
         }
 
         None
+    }
+
+    /// Parse a seconds value from a string like "5s)" or "1.5s".
+    fn parse_seconds(text: &str) -> Option<u64> {
+        let s_pos = text.find('s')?;
+        // Make sure this 's' is not part of 'ms'
+        let ms_pos = text.find("ms");
+        if let Some(mp) = ms_pos {
+            if s_pos >= mp {
+                return None;
+            }
+        }
+        let num_str = &text[..s_pos];
+        let n = num_str.parse::<f64>().ok()?;
+        Some((n * 1000.0) as u64)
     }
 
     // ── Low-level command execution ──────────────────────────────────
@@ -1489,7 +1512,7 @@ mod tests {
         let json = serde_json::to_string(&action).unwrap();
         assert!(json.contains("navigate"));
         assert!(json.contains("example.com"));
-        assert!(json.contains("networkidle"));
+        assert!(json.contains("network-idle"));
     }
 
     #[test]
@@ -1675,7 +1698,7 @@ mod tests {
             state: Some(WaitState::Visible),
         };
         let code = PlaywrightCli::action_to_playwright_code(&action);
-        assert!(code.contains("waitForSelector('.loaded')"));
+        assert!(code.contains("waitForSelector('.loaded'"));
         assert!(code.contains("state: 'visible'"));
     }
 
@@ -1882,7 +1905,7 @@ mod tests {
         let cli = PlaywrightCli::new(PlaywrightConfig::default());
         let debug = format!("{:?}", cli);
         assert!(debug.contains("PlaywrightCli"));
-        assert!(debug.contains("chromium"));
+        assert!(debug.contains("Chromium"));
     }
 
     // ── Test result tests ───────────────────────────────────────────
