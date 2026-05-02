@@ -1,8 +1,8 @@
 //! OpenAI-compatible provider implementation
 
 use async_trait::async_trait;
-use futures::Stream;
-use futures::stream::StreamExt;
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -124,10 +124,10 @@ impl Provider for OpenAiProvider {
         let model_id = model.id.clone();
         
         let stream = response.bytes_stream()
-            .flat_map(move |chunk| {
+            .flat_map(move |chunk: Result<Bytes, reqwest::Error>| {
                 match chunk {
                     Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
+                        let text = String::from_utf8_lossy(&bytes).to_string();
                         futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
                     }
                     Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
@@ -341,6 +341,9 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 // SSE chunk structure
 #[derive(Debug, Deserialize)]
 struct SSEChunk {
+    id: Option<String>,
+    #[serde(rename = "model")]
+    model: Option<String>,
     choices: Vec<Choice>,
     usage: Option<UsageInfo>,
 }
@@ -360,11 +363,16 @@ struct Delta {
 
 #[derive(Debug, Deserialize)]
 struct ToolCallDelta {
+    index: Option<usize>,
+    id: Option<String>,
+    #[serde(rename = "type")]
+    type_: Option<String>,
     function: Option<FunctionDelta>,
 }
 
 #[derive(Debug, Deserialize)]
 struct FunctionDelta {
+    name: Option<String>,
     arguments: Option<String>,
 }
 
