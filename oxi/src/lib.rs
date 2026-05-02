@@ -180,7 +180,7 @@ impl App {
     }
 
     /// Run in interactive mode, returning an event stream
-    pub async fn run_interactive(&self) -> Result<InteractiveLoop> {
+    pub async fn run_interactive(&self) -> Result<InteractiveLoop<'_>> {
         let session = InteractiveSession::new();
         Ok(InteractiveLoop {
             app: self,
