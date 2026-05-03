@@ -224,6 +224,11 @@ impl BashTool {
         match result {
             Ok(status) => {
                 let exit_code = status.code();
+                if let Some(code) = exit_code {
+                    if let Some(cb) = progress_cb {
+                        cb(format!("Process exited with code {}", code));
+                    }
+                }
                 let combined = if stderr_str.is_empty() {
                     stdout_str.clone()
                 } else if stdout_str.is_empty() {
