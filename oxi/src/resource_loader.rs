@@ -686,24 +686,111 @@ impl ResourceLoader {
 }
 
 // ============================================================================
-// Re-exports from original module
+// Re-exports from original module (for compatibility)
 // ============================================================================
 
-pub use super::super::resource_loader::{
-    load_skill, load_skills_from_dir, load_theme, load_themes_from_dir,
-    load_prompt, load_prompts_from_dir, load_all_resources, default_resource_dir,
-    skills_dir, extensions_dir, themes_dir, prompts_dir, resolve_path,
-    is_valid_resource_path, ResourceType, Resource, LoadResult, LoadError,
+// Re-export types that this module now provides
+pub use crate::resource_loader_compat::{
+    ResourceType, Resource, LoadResult, LoadError,
     ResourceDiagnostic, DiagnosticSeverity, ResourcePaths, ResourceWatcher,
-    ResourceChange, ChangeKind, Skill, Theme, Prompt, LoadAllResourcesResult,
+    ResourceChange, ChangeKind, LoadAllResourcesResult,
 };
+
+// ============================================================================
+// Functions from original resource_loader module
+// ============================================================================
+
+/// Resolve the default resource directory
+pub fn default_resource_dir() -> std::path::PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("oxi")
+}
+
+/// Get the skills directory
+pub fn skills_dir(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("skills")
+}
+
+/// Get the extensions directory  
+pub fn extensions_dir(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("extensions")
+}
+
+/// Get the themes directory
+pub fn themes_dir(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("themes")
+}
+
+/// Get the prompts directory
+pub fn prompts_dir(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("prompts")
+}
+
+/// Load skills from a directory
+pub fn load_skills_from_dir(dir: &std::path::Path) -> LoadResult<Skill> {
+    crate::resource_loader_compat::load_skills_from_dir_impl(dir)
+}
+
+/// Load a single skill
+pub fn load_skill(path: &std::path::Path) -> Result<Skill, String> {
+    crate::resource_loader_compat::load_skill_impl(path)
+}
+
+/// Load themes from a directory
+pub fn load_themes_from_dir(dir: &std::path::Path) -> LoadResult<Theme> {
+    crate::resource_loader_compat::load_themes_from_dir_impl(dir)
+}
+
+/// Load a single theme  
+pub fn load_theme(path: &std::path::Path) -> Result<Theme, String> {
+    crate::resource_loader_compat::load_theme_impl(path)
+}
+
+/// Load prompts from a directory
+pub fn load_prompts_from_dir(dir: &std::path::Path) -> LoadResult<Prompt> {
+    crate::resource_loader_compat::load_prompts_from_dir_impl(dir)
+}
+
+/// Load a single prompt
+pub fn load_prompt(path: &std::path::Path) -> Result<Prompt, String> {
+    crate::resource_loader_compat::load_prompt_impl(path)
+}
+
+/// Load all resources from default locations
+pub fn load_all_resources(base_dir: &std::path::Path) -> LoadAllResourcesResult {
+    crate::resource_loader_compat::load_all_resources_impl(base_dir)
+}
+
+/// Resolve a path with ~ expansion
+pub fn resolve_path(path: &std::path::Path) -> std::path::PathBuf {
+    let path_str = path.to_string_lossy();
+    if path_str.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(path_str.strip_prefix("~/").unwrap());
+        }
+    }
+    path.to_path_buf()
+}
+
+/// Check if a path exists and is a valid resource
+pub fn is_valid_resource_path(path: &std::path::Path, resource_type: ResourceType) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    match resource_type {
+        ResourceType::Skill => path.is_dir() || path.extension().map(|e| e == "md").unwrap_or(false),
+        ResourceType::Theme => path.extension().map(|e| e == "json").unwrap_or(false),
+        ResourceType::Prompt => path.extension().map(|e| e == "md").unwrap_or(false),
+        ResourceType::Extension => path.extension().map(|e| e == "js" || e == "ts").unwrap_or(false),
+    }
+}
 
 // ============================================================================
 // Thread-safe wrapper
 // ============================================================================
 
 use parking_lot::RwLock;
-use std::collections::HashSet;
 
 // ============================================================================
 // Tests
@@ -712,6 +799,7 @@ use std::collections::HashSet;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     use tempfile::tempdir;
 
     #[test]
@@ -968,6 +1056,3 @@ mod tests {
         assert_eq!(paths.len(), unique.len());
     }
 }
-
-// Need HashSet import for test
-use std::collections::HashSet;

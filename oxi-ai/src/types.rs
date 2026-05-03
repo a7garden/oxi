@@ -87,6 +87,7 @@ pub enum InputModality {
 
 /// Cost structure
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Cost {
     #[serde(default)]
     pub input: f64, // $/million tokens

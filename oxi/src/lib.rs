@@ -33,7 +33,9 @@ pub mod diagnostics;
 pub mod error_recovery;
 
 // Re-exports for extension hooks
-pub use crate::error_recovery::{RetryConfig, RetryableError, RetryStrategy};
+pub use crate::error_recovery::{RetryConfig, RetryableError};
+
+// Note: RetryStrategy is available in error_recovery::RetryStrategy
 
 /// Context for compaction operations, passed to extension hooks
 #[derive(Debug, Clone)]
@@ -78,8 +80,9 @@ pub mod git_utils;
 pub mod keybindings;
 pub mod messages;
 pub mod model_resolver;
-pub mod output_guard;
 pub mod resource_loader;
+pub mod resource_loader_compat;
+pub mod output_guard;
 pub mod tmux_detect;
 pub mod version_check;
 
