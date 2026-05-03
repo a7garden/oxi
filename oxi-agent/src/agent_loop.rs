@@ -1361,4 +1361,170 @@ mod tests {
 
         assert!(result.is_ok());
     }
+
+    // =====================================================================
+    // NEW TESTS FOR PROXY, DYNAMIC API KEY, PENDING QUEUE, CONTEXT TRANSFORM
+    // =====================================================================
+
+    #[test]
+    fn test_pending_message_queue_drain_all() {
+        let mut queue = PendingMessageQueue::new(QueueDrainMode::All);
+        queue.push(Message::User(UserMessage::new("msg1")));
+        queue.push(Message::User(UserMessage::new("msg2")));
+        queue.push(Message::User(UserMessage::new("msg3")));
+
+        assert_eq!(queue.len(), 3);
+
+        let drained = queue.drain();
+        assert_eq!(drained.len(), 3);
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn test_pending_message_queue_drain_one_at_a_time() {
+        let mut queue = PendingMessageQueue::new(QueueDrainMode::OneAtATime);
+        queue.push(Message::User(UserMessage::new("msg1")));
+        queue.push(Message::User(UserMessage::new("msg2")));
+        queue.push(Message::User(UserMessage::new("msg3")));
+
+        assert_eq!(queue.len(), 3);
+
+        let first = queue.drain();
+        assert_eq!(first.len(), 1);
+        assert_eq!(queue.len(), 2);
+
+        let second = queue.drain();
+        assert_eq!(second.len(), 1);
+        assert_eq!(queue.len(), 1);
+
+        let third = queue.drain();
+        assert_eq!(third.len(), 1);
+        assert!(queue.is_empty());
+
+        let empty = queue.drain();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn test_pending_message_queue_mode_change() {
+        let mut queue = PendingMessageQueue::new(QueueDrainMode::All);
+        queue.push(Message::User(UserMessage::new("msg1")));
+        queue.push(Message::User(UserMessage::new("msg2")));
+
+        // Drain all
+        assert_eq!(queue.drain().len(), 2);
+
+        // Change mode
+        queue.push(Message::User(UserMessage::new("msg3")));
+        queue.set_mode(QueueDrainMode::OneAtATime);
+        assert_eq!(queue.mode(), QueueDrainMode::OneAtATime);
+
+        // Drain one
+        assert_eq!(queue.drain().len(), 1);
+        assert_eq!(queue.len(), 0);
+    }
+
+    #[test]
+    fn test_queue_drain_mode_default() {
+        assert_eq!(QueueDrainMode::default(), QueueDrainMode::All);
+    }
+
+    #[tokio::test]
+    async fn test_agent_loop_pending_queue_integration() {
+        let loop_instance = create_test_loop();
+
+        // Add messages to pending queue
+        loop_instance.push_pending(Message::User(UserMessage::new("pending1")));
+        loop_instance.push_pending(Message::User(UserMessage::new("pending2")));
+
+        let drained = loop_instance.drain_pending_queue();
+        assert_eq!(drained.len(), 2);
+
+        assert!(loop_instance.drain_pending_queue().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_agent_loop_pending_queue_mode() {
+        let loop_instance = create_test_loop();
+
+        loop_instance.push_pending(Message::User(UserMessage::new("msg1")));
+        loop_instance.push_pending(Message::User(UserMessage::new("msg2")));
+
+        // Set to OneAtATime mode
+        loop_instance.set_pending_queue_mode(QueueDrainMode::OneAtATime);
+
+        let first = loop_instance.drain_pending_queue();
+        assert_eq!(first.len(), 1);
+
+        let second = loop_instance.drain_pending_queue();
+        assert_eq!(second.len(), 1);
+
+        assert!(loop_instance.drain_pending_queue().is_empty());
+    }
+
+    #[test]
+    fn test_agent_loop_config_api_key_resolution() {
+        let get_key = Arc::new(|_provider: &str| -> Result<Option<String>> {
+            Ok(Some("resolved_key".to_string()))
+        });
+
+        let config = AgentLoopConfig {
+            model_id: "anthropic/claude-3-5-sonnet".to_string(),
+            system_prompt: None,
+            temperature: 0.7,
+            max_tokens: 4096,
+            max_iterations: 10,
+            tool_execution: ToolExecutionMode::Parallel,
+            compaction_strategy: CompactionStrategy::Disabled,
+            context_window: 100000,
+            compaction_instruction: None,
+            session_id: None,
+            transport: None,
+            compact_on_start: false,
+            max_retry_delay_ms: None,
+            api_key: Some("fallback_key".to_string()),
+            proxy_config: None,
+            get_api_key: Some(get_key),
+            transform_context: None,
+            queue_drain_mode: QueueDrainMode::default(),
+        };
+
+        assert!(config.get_api_key.is_some());
+        assert!(config.api_key.is_some());
+    }
+
+    #[test]
+    fn test_agent_loop_config_transform_context() {
+        let transform_fn = Arc::new(|messages: Vec<Message>, _signal| {
+            Box::pin(async move {
+                // Simple transform: limit to last 5 messages
+                let transformed: Vec<Message> = messages.into_iter().rev().take(5).rev().collect();
+                Ok(transformed)
+            })
+                as std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Message>>> + Send>>
+        });
+
+        let config = AgentLoopConfig {
+            model_id: "anthropic/claude-3-5-sonnet".to_string(),
+            system_prompt: None,
+            temperature: 0.7,
+            max_tokens: 4096,
+            max_iterations: 10,
+            tool_execution: ToolExecutionMode::Parallel,
+            compaction_strategy: CompactionStrategy::Disabled,
+            context_window: 100000,
+            compaction_instruction: None,
+            session_id: None,
+            transport: None,
+            compact_on_start: false,
+            max_retry_delay_ms: None,
+            api_key: None,
+            proxy_config: None,
+            get_api_key: None,
+            transform_context: Some(transform_fn),
+            queue_drain_mode: QueueDrainMode::default(),
+        };
+
+        assert!(config.transform_context.is_some());
+    }
 }
