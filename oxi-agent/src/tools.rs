@@ -99,6 +99,9 @@ pub mod bash;
 pub mod grep;
 pub mod find;
 pub mod ls;
+pub mod truncate;
+pub mod edit_diff;
+pub mod file_mutation_queue;
 
 // Re-export for convenience
 pub use read::ReadTool;
