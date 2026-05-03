@@ -2,6 +2,7 @@
 //!
 //! This crate provides the main application logic for the oxi CLI.
 
+pub mod export;
 pub mod extensions;
 pub mod packages;
 pub mod session;
