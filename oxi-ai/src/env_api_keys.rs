@@ -7,7 +7,6 @@ use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::path::Path;
 
 /// Cache for Vertex ADC credentials check (expensive fs check)
 static VERTEX_ADC_CHECK: Lazy<bool> = Lazy::new(check_vertex_adc_credentials);
@@ -37,6 +36,7 @@ fn get_env(key: &str) -> Option<String> {
 /// Bun/Linux sandbox fallback: read from /proc/self/environ
 #[allow(dead_code)]
 fn get_proc_env(_key: &str) -> Option<String> {
+    #[allow(unused_imports)]
     use std::os::unix::ffi::OsStrExt;
 
     // Only try this on Linux where Bun sandbox may empty process.env

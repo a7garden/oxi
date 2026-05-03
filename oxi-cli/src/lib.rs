@@ -87,6 +87,16 @@ pub mod output_guard;
 pub mod tmux_detect;
 pub mod version_check;
 
+// Core modules ported from pi-mono
+pub mod defaults;
+pub mod provider_display_names;
+pub mod session_cwd;
+pub mod slash_commands;
+pub mod source_info;
+pub mod system_prompt;
+pub mod telemetry;
+pub mod timings;
+
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use oxi_ai::{get_model, get_provider};

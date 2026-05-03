@@ -4,9 +4,8 @@
 //! Queues messages during compaction and resumes processing afterward.
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use oxi_ai::{
-    Api, AssistantMessage, ContentBlock, Message, Model, Provider, TextContent, UserMessage,
+    Model, Provider, TextContent, UserMessage,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;

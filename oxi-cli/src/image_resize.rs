@@ -4,8 +4,8 @@
 //! Uses the `image` crate for decoding and resizing.
 
 use anyhow::{Context, Result};
-use image::io::Reader as ImageReader;
-use image::{imageops::FilterType, DynamicImage, GenericImageView, ImageBuffer, Rgba, RgbaImage};
+use image::ImageReader;
+use image::{imageops::FilterType, DynamicImage, GenericImageView};
 use std::io::Cursor;
 
 /// Options for image resizing

@@ -1,0 +1,297 @@
+//! System prompt construction and project context loading.
+//!
+//! Ported from `pi-mono/packages/coding-agent/src/core/system-prompt.ts`.
+
+use chrono::Local;
+
+/// A skill that can be included in the system prompt.
+#[derive(Debug, Clone)]
+pub struct Skill {
+    pub name: String,
+    pub content: String,
+}
+
+/// A pre-loaded context file.
+#[derive(Debug, Clone)]
+pub struct ContextFile {
+    pub path: String,
+    pub content: String,
+}
+
+/// Options for building the system prompt.
+#[derive(Debug, Clone)]
+pub struct BuildSystemPromptOptions {
+    /// Custom system prompt (replaces default).
+    pub custom_prompt: Option<String>,
+    /// Tools to include in prompt. Default: ["read", "bash", "edit", "write"].
+    pub selected_tools: Vec<String>,
+    /// Optional one-line tool snippets keyed by tool name.
+    pub tool_snippets: std::collections::HashMap<String, String>,
+    /// Additional guideline bullets appended to the default system prompt guidelines.
+    pub prompt_guidelines: Vec<String>,
+    /// Text to append to system prompt.
+    pub append_system_prompt: Option<String>,
+    /// Working directory.
+    pub cwd: String,
+    /// Pre-loaded context files.
+    pub context_files: Vec<ContextFile>,
+    /// Pre-loaded skills.
+    pub skills: Vec<Skill>,
+    /// Path to README documentation.
+    pub readme_path: Option<String>,
+    /// Path to additional docs.
+    pub docs_path: Option<String>,
+    /// Path to examples.
+    pub examples_path: Option<String>,
+}
+
+impl Default for BuildSystemPromptOptions {
+    fn default() -> Self {
+        Self {
+            custom_prompt: None,
+            selected_tools: vec![
+                "read".into(),
+                "bash".into(),
+                "edit".into(),
+                "write".into(),
+            ],
+            tool_snippets: std::collections::HashMap::new(),
+            prompt_guidelines: Vec::new(),
+            append_system_prompt: None,
+            cwd: String::new(),
+            context_files: Vec::new(),
+            skills: Vec::new(),
+            readme_path: None,
+            docs_path: None,
+            examples_path: None,
+        }
+    }
+}
+
+/// Format skills for inclusion in the system prompt.
+fn format_skills_for_prompt(skills: &[Skill]) -> String {
+    if skills.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("\n\n# Skills\n\n");
+    for skill in skills {
+        out.push_str(&format!("## {}\n\n{}\n\n", skill.name, skill.content));
+    }
+    out
+}
+
+/// Build the system prompt with tools, guidelines, and context.
+pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
+    let prompt_cwd = options.cwd.replace('\\', "/");
+    let date = Local::now().format("%Y-%m-%d").to_string();
+
+    let append_section = options
+        .append_system_prompt
+        .as_deref()
+        .map(|s| format!("\n\n{}", s))
+        .unwrap_or_default();
+
+    // If a custom prompt is provided, use it as the base
+    if let Some(ref custom) = options.custom_prompt {
+        let mut prompt = custom.clone();
+
+        prompt.push_str(&append_section);
+
+        // Append project context files
+        if !options.context_files.is_empty() {
+            prompt.push_str("\n\n# Project Context\n\n");
+            prompt.push_str("Project-specific instructions and guidelines:\n\n");
+            for cf in &options.context_files {
+                prompt.push_str(&format!("## {}\n\n{}\n\n", cf.path, cf.content));
+            }
+        }
+
+        // Append skills section (only if read tool is available)
+        let custom_has_read =
+            options.selected_tools.is_empty() || options.selected_tools.contains(&"read".to_string());
+        if custom_has_read && !options.skills.is_empty() {
+            prompt.push_str(&format_skills_for_prompt(&options.skills));
+        }
+
+        // Add date and working directory last
+        prompt.push_str(&format!("\nCurrent date: {}", date));
+        prompt.push_str(&format!("\nCurrent working directory: {}", prompt_cwd));
+
+        return prompt;
+    }
+
+    // Build default prompt
+    let readme_path = options
+        .readme_path
+        .as_deref()
+        .unwrap_or("(docs not available)");
+    let docs_path = options
+        .docs_path
+        .as_deref()
+        .unwrap_or("(docs not available)");
+    let examples_path = options
+        .examples_path
+        .as_deref()
+        .unwrap_or("(examples not available)");
+
+    // Build tools list — a tool appears in Available tools only when a snippet is provided
+    let visible_tools: Vec<&str> = options
+        .selected_tools
+        .iter()
+        .filter(|name| options.tool_snippets.contains_key(name.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    let tools_list = if visible_tools.is_empty() {
+        "(none)".to_string()
+    } else {
+        visible_tools
+            .iter()
+            .map(|name| {
+                let snippet = options.tool_snippets.get(*name).map(|s| s.as_str()).unwrap_or("");
+                format!("- {}: {}", name, snippet)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    // Build guidelines based on which tools are actually available
+    let mut guidelines: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut add_guideline = |g: &str| {
+        if seen.insert(g.to_string()) {
+            guidelines.push(g.to_string());
+        }
+    };
+
+    let has_bash = options.selected_tools.contains(&"bash".to_string());
+    let has_grep = options.selected_tools.contains(&"grep".to_string());
+    let has_find = options.selected_tools.contains(&"find".to_string());
+    let has_ls = options.selected_tools.contains(&"ls".to_string());
+    let has_read = options.selected_tools.contains(&"read".to_string());
+
+    // File exploration guidelines
+    if has_bash && !has_grep && !has_find && !has_ls {
+        add_guideline("Use bash for file operations like ls, rg, find");
+    } else if has_bash && (has_grep || has_find || has_ls) {
+        add_guideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
+    }
+
+    // User-provided guidelines
+    for g in &options.prompt_guidelines {
+        let trimmed = g.trim();
+        if !trimmed.is_empty() {
+            add_guideline(trimmed);
+        }
+    }
+
+    // Always include these
+    add_guideline("Be concise in your responses");
+    add_guideline("Show file paths clearly when working with files");
+
+    let guidelines_text = guidelines
+        .iter()
+        .map(|g| format!("- {}", g))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let mut prompt = format!(
+        "You are an expert coding assistant operating inside oxi, a coding agent harness. \
+         You help users by reading files, executing commands, editing code, and writing new files.\n\n\
+         Available tools:\n{}\n\n\
+         In addition to the tools above, you may have access to other custom tools depending on the project.\n\n\
+         Guidelines:\n{}\n\n\
+         Oxi documentation (read only when the user asks about oxi itself, its SDK, extensions, themes, skills, or TUI):\n\
+         - Main documentation: {}\n\
+         - Additional docs: {}\n\
+         - Examples: {} (extensions, custom tools, SDK)\n\
+         - When asked about: extensions (docs/extensions.md, examples/extensions/), themes (docs/themes.md), \
+           skills (docs/skills.md), prompt templates (docs/prompt-templates.md), TUI components (docs/tui.md), \
+           keybindings (docs/keybindings.md), SDK integrations (docs/sdk.md), custom providers (docs/custom-provider.md), \
+           adding models (docs/models.md), oxi packages (docs/packages.md)\n\
+         - When working on oxi topics, read the docs and examples, and follow .md cross-references before implementing\n\
+         - Always read oxi .md files completely and follow links to related docs (e.g., tui.md for TUI API details)",
+        tools_list, guidelines_text, readme_path, docs_path, examples_path,
+    );
+
+    prompt.push_str(&append_section);
+
+    // Append project context files
+    if !options.context_files.is_empty() {
+        prompt.push_str("\n\n# Project Context\n\n");
+        prompt.push_str("Project-specific instructions and guidelines:\n\n");
+        for cf in &options.context_files {
+            prompt.push_str(&format!("## {}\n\n{}\n\n", cf.path, cf.content));
+        }
+    }
+
+    // Append skills section (only if read tool is available)
+    if has_read && !options.skills.is_empty() {
+        prompt.push_str(&format_skills_for_prompt(&options.skills));
+    }
+
+    // Add date and working directory last
+    prompt.push_str(&format!("\nCurrent date: {}", date));
+    prompt.push_str(&format!("\nCurrent working directory: {}", prompt_cwd));
+
+    prompt
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_prompt_contains_key_sections() {
+        let opts = BuildSystemPromptOptions {
+            cwd: "/home/user/project".into(),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(prompt.contains("expert coding assistant"));
+        assert!(prompt.contains("Available tools:"));
+        assert!(prompt.contains("Guidelines:"));
+        assert!(prompt.contains("Be concise"));
+        assert!(prompt.contains("Current working directory: /home/user/project"));
+        assert!(prompt.contains("Current date:"));
+    }
+
+    #[test]
+    fn custom_prompt_used_as_base() {
+        let opts = BuildSystemPromptOptions {
+            custom_prompt: Some("Custom prompt here.".into()),
+            cwd: "/tmp".into(),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(prompt.starts_with("Custom prompt here."));
+        assert!(prompt.contains("Current working directory: /tmp"));
+    }
+
+    #[test]
+    fn context_files_appended() {
+        let opts = BuildSystemPromptOptions {
+            custom_prompt: Some("Base".into()),
+            cwd: "/tmp".into(),
+            context_files: vec![ContextFile {
+                path: "STYLE.md".into(),
+                content: "Use 4-space indent".into(),
+            }],
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(prompt.contains("Project Context"));
+        assert!(prompt.contains("STYLE.md"));
+        assert!(prompt.contains("Use 4-space indent"));
+    }
+
+    #[test]
+    fn append_section_included() {
+        let opts = BuildSystemPromptOptions {
+            append_system_prompt: Some("Extra rules".into()),
+            cwd: "/tmp".into(),
+            ..Default::default()
+        };
+        let prompt = build_system_prompt(&opts);
+        assert!(prompt.contains("Extra rules"));
+    }
+}
