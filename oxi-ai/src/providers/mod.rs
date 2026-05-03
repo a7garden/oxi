@@ -8,8 +8,11 @@ mod anthropic;
 mod google;
 mod vertex;
 mod deepseek;
+mod mistral;
 mod bedrock;
 mod azure;
+mod copilot;
+mod cloudflare;
 
 use std::pin::Pin;
 use futures::Stream;
@@ -25,6 +28,10 @@ pub use openai::OpenAiProvider;
 pub use anthropic::AnthropicProvider;
 #[allow(unused_imports)]
 pub use azure::AzureProvider;
+#[allow(unused_imports)]
+pub use copilot::CopilotProvider;
+#[allow(unused_imports)]
+pub use cloudflare::CloudflareProvider;
 pub use crate::CacheRetention;
 #[allow(unused_imports)]
 pub use crate::ThinkingLevel;
@@ -55,13 +62,16 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
             Some(Box::new(deepseek::DeepSeekProvider::new()))
         }
         "mistral" => {
-            // Mistral is OpenAI-compatible with minor differences
-            Some(Box::new(deepseek::DeepSeekProvider::with_api_key(
-                std::env::var("MISTRAL_API_KEY").unwrap_or_default()
-            )))
+            Some(Box::new(mistral::MistralProvider::new()))
         }
         "bedrock" | "amazon-bedrock" | "aws-bedrock" => {
             Some(Box::new(bedrock::BedrockProvider::new()))
+        }
+        "cloudflare" | "workers-ai" => {
+            Some(Box::new(cloudflare::CloudflareProvider::new()))
+        }
+        "copilot" | "github-copilot" => {
+            Some(Box::new(copilot::CopilotProvider::new()))
         }
         _ => None,
     }
@@ -83,6 +93,8 @@ pub fn provider_names() -> Vec<&'static str> {
         "azure",
         "vertex",
         "bedrock",
+        "cloudflare",
+        "copilot",
     ]
 }
 
@@ -102,6 +114,8 @@ pub fn providers() -> Vec<(&'static str, &'static str)> {
         ("azure", "Azure OpenAI"),
         ("vertex", "Google Vertex AI"),
         ("bedrock", "Amazon Bedrock"),
+        ("cloudflare", "Cloudflare Workers AI"),
+        ("copilot", "GitHub Copilot"),
     ]
 }
 
