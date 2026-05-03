@@ -2,10 +2,13 @@
 name = "oxi-ai"
 version = "0.1.0-alpha"
 edition = "2021"
-description = "Unified LLM API for oxi"
+description = "Unified LLM API — multi-provider streaming interface for AI coding assistants"
 readme = "README.md"
 license = "MIT"
-authors = ["oxi contributors"]
+authors = ["Won <won@mariozechner.com>"]
+repository = "https://github.com/a7garden/oxi"
+keywords = ["ai", "llm", "openai", "anthropic", "claude"]
+categories = ["api-bindings", "asynchronous"]
 
 [dependencies]
 # Async runtime
