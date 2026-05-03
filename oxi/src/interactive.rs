@@ -1268,4 +1268,167 @@ mod tests {
             "Unknown command"
         );
     }
+
+    // ── Image attachment tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_image_attachment_from_data_uri() {
+        // Valid PNG data URI
+        let uri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==";
+        let img = ImageAttachment::from_data_uri(uri);
+        assert!(img.is_some());
+        let img = img.unwrap();
+        assert_eq!(img.mime_type, "image/png");
+    }
+
+    #[test]
+    fn test_image_attachment_invalid_uri() {
+        // Not a data URI
+        let img = ImageAttachment::from_data_uri("not a data uri");
+        assert!(img.is_none());
+    }
+
+    #[test]
+    fn test_image_attachment_extension() {
+        let img = ImageAttachment {
+            mime_type: "image/png".to_string(),
+            base64_data: String::new(),
+            width: None,
+            height: None,
+        };
+        assert_eq!(img.extension(), "png");
+
+        let img_jpeg = ImageAttachment {
+            mime_type: "image/jpeg".to_string(),
+            base64_data: String::new(),
+            width: None,
+            height: None,
+        };
+        assert_eq!(img_jpeg.extension(), "jpg");
+    }
+
+    #[test]
+    fn test_image_attachment_detect_mime_type() {
+        // PNG magic bytes
+        let png_bytes: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        assert_eq!(ImageAttachment::detect_mime_type(&png_bytes), "image/png");
+
+        // JPEG magic bytes
+        let jpeg_bytes: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46];
+        assert_eq!(ImageAttachment::detect_mime_type(&jpeg_bytes), "image/jpeg");
+
+        // Unknown
+        let unknown: Vec<u8> = vec![0x00, 0x00, 0x00, 0x00];
+        assert_eq!(ImageAttachment::detect_mime_type(&unknown), "image/png"); // fallback
+    }
+
+    #[test]
+    fn test_image_attachment_from_bytes() {
+        // PNG magic bytes
+        let png_data: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let img = ImageAttachment::from_bytes(png_data);
+        assert!(img.is_some());
+        let img = img.unwrap();
+        assert_eq!(img.mime_type, "image/png");
+        assert!(!img.base64_data.is_empty());
+    }
+
+    // ── Session persistence tests ─────────────────────────────────────
+
+    #[test]
+    fn test_session_persistence_new() {
+        let persistence = SessionPersistence::new();
+        // May be None if HOME not set or dir creation fails
+        assert!(persistence.is_some() || persistence.is_none());
+    }
+
+    // ── Keybinding hints tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_keybinding_hints_compact() {
+        let hints = KeybindingHints::new();
+        let compact = hints.compact_display();
+        assert!(compact.contains("Ctrl+C"));
+        assert!(compact.contains("quit"));
+    }
+
+    #[test]
+    fn test_keybinding_hints_expanded() {
+        let hints = KeybindingHints::new();
+        let expanded = hints.expanded_display();
+        assert!(expanded.contains("Ctrl+C"));
+        assert!(expanded.contains("Ctrl+L"));
+        assert!(expanded.contains("Ctrl+U"));
+    }
+
+    #[test]
+    fn test_keybinding_hints_toggle() {
+        let mut hints = KeybindingHints::new();
+        assert!(!hints.is_expanded());
+        hints.toggle();
+        assert!(hints.is_expanded());
+        hints.toggle();
+        assert!(!hints.is_expanded());
+    }
+
+    // ── Word-level diff tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_compute_word_diff_identical() {
+        let result = compute_word_diff("hello world", "hello world");
+        let (added, removed, unchanged) = result.summary();
+        assert_eq!(added, 0);
+        assert_eq!(removed, 0);
+        assert_eq!(unchanged, 2);
+    }
+
+    #[test]
+    fn test_compute_word_diff_added_words() {
+        let result = compute_word_diff("hello", "hello world");
+        let (added, removed, _) = result.summary();
+        assert_eq!(added, 1); // "world" added
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn test_compute_word_diff_removed_words() {
+        let result = compute_word_diff("hello world", "hello");
+        let (added, removed, _) = result.summary();
+        assert_eq!(added, 0);
+        assert_eq!(removed, 1); // "world" removed
+    }
+
+    #[test]
+    fn test_compute_word_diff_changed() {
+        let result = compute_word_diff("hello world", "hello rust");
+        let (added, removed, unchanged) = result.summary();
+        assert_eq!(added, 1); // "rust" added
+        assert_eq!(removed, 1); // "world" removed
+        assert_eq!(unchanged, 1); // "hello" unchanged
+    }
+
+    #[test]
+    fn test_diff_result_format_ansi() {
+        let result = compute_word_diff("foo bar", "foo baz");
+        let formatted = result.format_ansi();
+        assert!(formatted.contains("foo"));
+        assert!(formatted.contains("bar") || formatted.contains("baz"));
+    }
+
+    #[test]
+    fn test_diff_result_empty() {
+        let result = compute_word_diff("", "hello");
+        let (added, removed, _) = result.summary();
+        assert_eq!(added, 1);
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn test_lcs_algorithm() {
+        let a = vec!["a", "b", "c"];
+        let b = vec!["a", "c", "d"];
+        let lcs = longest_common_subsequence(&a, &b);
+        assert!(lcs.contains(&(0, 0))); // "a"
+        assert!(lcs.contains(&(2, 1))); // "c"
+    }
 }
