@@ -1495,6 +1495,7 @@ dependencies = [
  "anyhow",
  "async-stream",
  "async-trait",
+ "base64",
  "futures",
  "oxi-ai",
  "parking_lot",
