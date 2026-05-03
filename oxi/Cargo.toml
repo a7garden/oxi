@@ -2,10 +2,13 @@
 name = "oxi"
 version = "0.1.0-alpha"
 edition = "2021"
-description = "CLI coding harness for oxi"
+description = "Terminal-based AI coding assistant — multi-provider, streaming-first, extensible"
 readme = "README.md"
 license = "MIT"
-authors = ["oxi contributors"]
+authors = ["Won <won@mariozechner.com>"]
+repository = "https://github.com/a7garden/oxi"
+keywords = ["ai", "coding", "assistant", "llm", "cli"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "oxi"

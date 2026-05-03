@@ -2,10 +2,13 @@
 name = "oxi-agent"
 version = "0.1.0-alpha"
 edition = "2021"
-description = "Agent runtime layer built on oxi-ai"
+description = "Agent runtime with tool-calling loop for AI coding assistants"
 readme = "README.md"
 license = "MIT"
-authors = ["oxi contributors"]
+authors = ["Won <won@mariozechner.com>"]
+repository = "https://github.com/a7garden/oxi"
+keywords = ["ai", "agent", "tools", "llm"]
+categories = ["development-tools", "asynchronous"]
 
 [dependencies]
 oxi-ai = { version = "0.1.0-alpha", path = "../oxi-ai" }

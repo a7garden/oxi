@@ -2,10 +2,13 @@
 name = "oxi-tui"
 version = "0.1.0-alpha"
 edition = "2021"
-description = "Terminal UI for oxi"
+description = "Terminal UI framework with differential rendering, themes, and components"
 readme = "README.md"
 license = "MIT"
-authors = ["oxi contributors"]
+authors = ["Won <won@mariozechner.com>"]
+repository = "https://github.com/a7garden/oxi"
+keywords = ["tui", "terminal", "ui", "rendering"]
+categories = ["command-line-interface", "gui"]
 
 [dependencies]
 # Terminal UI
