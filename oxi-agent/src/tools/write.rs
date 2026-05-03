@@ -62,10 +62,7 @@ impl WriteTool {
         let file_path = Path::new(path);
 
         // Security: prevent path traversal
-        if file_path
-            .components()
-            .any(|c| c.as_os_str() == "..")
-        {
+        if file_path.components().any(|c| c.as_os_str() == "..") {
             return Err("Path traversal not allowed".to_string());
         }
 

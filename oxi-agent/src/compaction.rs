@@ -5,11 +5,23 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CompactionEvent {
-    Triggered { context_tokens: usize, iteration: usize },
-    Started { message_count: usize },
-    Completed { result: CompactedContext, duration_ms: u64 },
-    Skipped { reason: String },
-    Failed { error: String },
+    Triggered {
+        context_tokens: usize,
+        iteration: usize,
+    },
+    Started {
+        message_count: usize,
+    },
+    Completed {
+        result: CompactedContext,
+        duration_ms: u64,
+    },
+    Skipped {
+        reason: String,
+    },
+    Failed {
+        error: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

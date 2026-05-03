@@ -6,10 +6,7 @@ use std::fmt;
 #[derive(Debug)]
 pub enum AgentError {
     /// Tool execution error
-    Tool {
-        tool_name: String,
-        message: String,
-    },
+    Tool { tool_name: String, message: String },
     /// Stream / provider communication error
     Stream(String),
     /// State management error
@@ -17,23 +14,13 @@ pub enum AgentError {
     /// Configuration error
     Config(String),
     /// Model not found or unavailable
-    Model {
-        model_id: String,
-        message: String,
-    },
+    Model { model_id: String, message: String },
     /// Maximum iterations reached
-    MaxIterations {
-        iterations: usize,
-    },
+    MaxIterations { iterations: usize },
     /// Rate limited – retry after N seconds
-    RateLimited {
-        retry_after_secs: u64,
-    },
+    RateLimited { retry_after_secs: u64 },
     /// A retriable error that failed after exhausting retries
-    RetriesExhausted {
-        attempts: usize,
-        last_error: String,
-    },
+    RetriesExhausted { attempts: usize, last_error: String },
     /// Fallback failed – both primary and fallback model errored
     FallbackFailed {
         primary_model: String,
@@ -61,7 +48,10 @@ impl fmt::Display for AgentError {
             Self::RateLimited { retry_after_secs } => {
                 write!(f, "Rate limited – retry after {}s", retry_after_secs)
             }
-            Self::RetriesExhausted { attempts, last_error } => {
+            Self::RetriesExhausted {
+                attempts,
+                last_error,
+            } => {
                 write!(f, "Failed after {} retries: {}", attempts, last_error)
             }
             Self::FallbackFailed {
@@ -104,12 +94,18 @@ impl AgentError {
                 format!("Model '{}' error: {}", model_id, message)
             }
             Self::MaxIterations { iterations } => {
-                format!("Reached the iteration limit ({}). Try simplifying your request.", iterations)
+                format!(
+                    "Reached the iteration limit ({}). Try simplifying your request.",
+                    iterations
+                )
             }
             Self::RateLimited { retry_after_secs } => {
                 format!("Rate limited – will retry in {}s", retry_after_secs)
             }
-            Self::RetriesExhausted { attempts, last_error } => {
+            Self::RetriesExhausted {
+                attempts,
+                last_error,
+            } => {
                 format!("Failed after {} attempts: {}", attempts, last_error)
             }
             Self::FallbackFailed {

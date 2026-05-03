@@ -67,11 +67,11 @@ impl Default for TruncationOptions {
 pub fn truncate_head(content: &str, options: &TruncationOptions) -> TruncationResult {
     let max_lines = options.max_lines.unwrap_or(usize::MAX);
     let max_bytes = options.max_bytes.unwrap_or(usize::MAX);
-    
+
     let total_bytes = content.len();
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
-    
+
     // Check if already within limits
     if total_lines <= max_lines && total_bytes <= max_bytes {
         return TruncationResult {
@@ -86,17 +86,20 @@ pub fn truncate_head(content: &str, options: &TruncationOptions) -> TruncationRe
             first_line_exceeds_limit: false,
         };
     }
-    
+
     // Check if first line exceeds byte limit
     let first_line_bytes = lines.first().map(|l| l.len()).unwrap_or(0);
     let first_line_exceeds_limit = first_line_bytes > max_bytes;
-    
+
     if first_line_exceeds_limit {
         // Can only include a partial first line
         let truncated_line = truncate_to_bytes(lines[0], max_bytes);
         let output_bytes = truncated_line.len();
         return TruncationResult {
-            content: format!("{}\n\n... [truncated: first line exceeds byte limit]", truncated_line),
+            content: format!(
+                "{}\n\n... [truncated: first line exceeds byte limit]",
+                truncated_line
+            ),
             truncated: true,
             truncated_by: TruncatedBy::Bytes,
             total_lines,
@@ -107,12 +110,12 @@ pub fn truncate_head(content: &str, options: &TruncationOptions) -> TruncationRe
             first_line_exceeds_limit: true,
         };
     }
-    
+
     // Accumulate lines until we hit either limit
     let mut output_lines_vec: Vec<&str> = Vec::new();
     let mut output_bytes = 0;
     let mut truncated_by = TruncatedBy::None;
-    
+
     for line in &lines {
         let line_bytes = line.len() + 1; // +1 for newline
         if output_lines_vec.len() >= max_lines {
@@ -126,10 +129,10 @@ pub fn truncate_head(content: &str, options: &TruncationOptions) -> TruncationRe
         output_lines_vec.push(line);
         output_bytes += line_bytes;
     }
-    
+
     let output_lines_count = output_lines_vec.len();
     let mut content = output_lines_vec.join("\n");
-    
+
     // Add truncation notice
     let remaining_lines = total_lines.saturating_sub(output_lines_count);
     let remaining_bytes = total_bytes.saturating_sub(output_bytes);
@@ -138,7 +141,7 @@ pub fn truncate_head(content: &str, options: &TruncationOptions) -> TruncationRe
         remaining_lines,
         format_bytes(remaining_bytes)
     ));
-    
+
     TruncationResult {
         content,
         truncated: true,
@@ -157,11 +160,11 @@ pub fn truncate_head(content: &str, options: &TruncationOptions) -> TruncationRe
 pub fn truncate_tail(content: &str, options: &TruncationOptions) -> TruncationResult {
     let max_lines = options.max_lines.unwrap_or(usize::MAX);
     let max_bytes = options.max_bytes.unwrap_or(usize::MAX);
-    
+
     let total_bytes = content.len();
     let lines: Vec<&str> = content.lines().collect();
     let total_lines = lines.len();
-    
+
     // Check if already within limits
     if total_lines <= max_lines && total_bytes <= max_bytes {
         return TruncationResult {
@@ -176,18 +179,18 @@ pub fn truncate_tail(content: &str, options: &TruncationOptions) -> TruncationRe
             first_line_exceeds_limit: false,
         };
     }
-    
+
     // Take lines from the end
     let start = total_lines.saturating_sub(max_lines);
     let mut output_lines_vec: Vec<&str> = lines[start..].to_vec();
     let mut output_bytes: usize = output_lines_vec.iter().map(|l| l.len() + 1).sum();
-    
+
     // If still over byte limit, trim from the front
     let mut last_line_partial = false;
     while output_bytes > max_bytes && !output_lines_vec.is_empty() {
         let first = output_lines_vec.first().unwrap();
         let first_bytes = first.len() + 1;
-        
+
         if output_bytes - first_bytes <= max_bytes {
             // Partial first line - truncate it
             let keep_bytes = max_bytes.saturating_sub(output_bytes - first_bytes);
@@ -213,23 +216,27 @@ pub fn truncate_tail(content: &str, options: &TruncationOptions) -> TruncationRe
                 };
             }
         }
-        
+
         output_bytes -= first_bytes;
         output_lines_vec.remove(0);
         last_line_partial = true;
     }
-    
+
     let output_lines_count = output_lines_vec.len();
     let mut result = output_lines_vec.join("\n");
-    
+
     if last_line_partial || start > 0 {
         result = format!("... [truncated]\n{}", result);
     }
-    
+
     TruncationResult {
         content: result,
         truncated: true,
-        truncated_by: if output_bytes >= max_bytes { TruncatedBy::Bytes } else { TruncatedBy::Lines },
+        truncated_by: if output_bytes >= max_bytes {
+            TruncatedBy::Bytes
+        } else {
+            TruncatedBy::Lines
+        },
         total_lines,
         total_bytes,
         output_lines: output_lines_count,
@@ -245,7 +252,7 @@ pub fn truncate_line(line: &str, max_chars: usize) -> String {
     if line.chars().count() <= max_chars {
         return line.to_string();
     }
-    
+
     let truncated: String = line.chars().take(max_chars).collect();
     format!("{}... [truncated]", truncated)
 }
@@ -255,7 +262,7 @@ fn truncate_to_bytes(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
         return s;
     }
-    
+
     let mut end = max_bytes;
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
@@ -268,7 +275,7 @@ fn truncate_string_to_bytes_from_end(s: &str, max_bytes: usize) -> String {
     if s.len() <= max_bytes {
         return s.to_string();
     }
-    
+
     let start = s.len() - max_bytes;
     // Find valid UTF-8 boundary
     let mut start = start;
@@ -296,10 +303,13 @@ mod tests {
     #[test]
     fn test_truncate_head_within_limits() {
         let content = "line1\nline2\nline3";
-        let result = truncate_head(content, &TruncationOptions {
-            max_lines: Some(10),
-            max_bytes: Some(1000),
-        });
+        let result = truncate_head(
+            content,
+            &TruncationOptions {
+                max_lines: Some(10),
+                max_bytes: Some(1000),
+            },
+        );
         assert!(!result.truncated);
         assert_eq!(result.total_lines, 3);
     }
@@ -307,10 +317,13 @@ mod tests {
     #[test]
     fn test_truncate_head_by_lines() {
         let content = "line1\nline2\nline3\nline4\nline5";
-        let result = truncate_head(content, &TruncationOptions {
-            max_lines: Some(2),
-            max_bytes: Some(1000),
-        });
+        let result = truncate_head(
+            content,
+            &TruncationOptions {
+                max_lines: Some(2),
+                max_bytes: Some(1000),
+            },
+        );
         assert!(result.truncated);
         assert_eq!(result.output_lines, 2);
         assert!(result.content.contains("truncated"));
@@ -319,10 +332,13 @@ mod tests {
     #[test]
     fn test_truncate_head_by_bytes() {
         let content = "short\nthis is a much longer line that should push us over the byte limit";
-        let result = truncate_head(content, &TruncationOptions {
-            max_lines: Some(100),
-            max_bytes: Some(20),
-        });
+        let result = truncate_head(
+            content,
+            &TruncationOptions {
+                max_lines: Some(100),
+                max_bytes: Some(20),
+            },
+        );
         assert!(result.truncated);
     }
 
@@ -355,20 +371,26 @@ mod tests {
     #[test]
     fn test_truncate_tail_within_limits() {
         let content = "line1\nline2\nline3";
-        let result = truncate_tail(content, &TruncationOptions {
-            max_lines: Some(10),
-            max_bytes: Some(1000),
-        });
+        let result = truncate_tail(
+            content,
+            &TruncationOptions {
+                max_lines: Some(10),
+                max_bytes: Some(1000),
+            },
+        );
         assert!(!result.truncated);
     }
 
     #[test]
     fn test_truncate_tail_by_lines() {
         let content = "line1\nline2\nline3\nline4\nline5";
-        let result = truncate_tail(content, &TruncationOptions {
-            max_lines: Some(2),
-            max_bytes: Some(1000),
-        });
+        let result = truncate_tail(
+            content,
+            &TruncationOptions {
+                max_lines: Some(2),
+                max_bytes: Some(1000),
+            },
+        );
         assert!(result.truncated);
         assert!(result.content.contains("line4"));
         assert!(result.content.contains("line5"));

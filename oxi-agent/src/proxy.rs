@@ -12,8 +12,8 @@ use crate::state::Message;
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
-    AssistantMessage, ContentBlock, Provider, ProviderEvent, StreamOptions,
-    StopReason, TextContent, ThinkingContent, ToolCall, ToolResult,
+    AssistantMessage, ContentBlock, Provider, ProviderEvent, StopReason, StreamOptions,
+    TextContent, ThinkingContent, ToolCall, ToolResult,
 };
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -41,25 +41,13 @@ pub enum ProxyAssistantMessageEvent {
         content_type: ContentType,
     },
     /// Text delta received.
-    TextDelta {
-        content_index: usize,
-        delta: String,
-    },
+    TextDelta { content_index: usize, delta: String },
     /// Thinking delta received.
-    ThinkingDelta {
-        content_index: usize,
-        delta: String,
-    },
+    ThinkingDelta { content_index: usize, delta: String },
     /// Tool call delta received.
-    ToolCallDelta {
-        content_index: usize,
-        delta: String,
-    },
+    ToolCallDelta { content_index: usize, delta: String },
     /// Stream completed.
-    Done {
-        reason: String,
-        usage: ProxyUsage,
-    },
+    Done { reason: String, usage: ProxyUsage },
     /// Stream error.
     Error {
         reason: String,
@@ -194,11 +182,7 @@ pub struct ProxyStreamOptions {
 
 impl ProxyStreamOptions {
     /// Create new proxy stream options.
-    pub fn new(
-        model: oxi_ai::Model,
-        auth_token: String,
-        proxy_url: String,
-    ) -> Self {
+    pub fn new(model: oxi_ai::Model, auth_token: String, proxy_url: String) -> Self {
         ProxyStreamOptions {
             model,
             auth_token,
@@ -229,27 +213,23 @@ impl ProxyStream {
         let (events_tx, events_rx) = mpsc::channel(100);
         let (cancel_tx, cancel_rx) = oneshot::channel();
         let (result_tx, result_rx) = oneshot::channel();
-        
+
         let proxy_url = options.proxy_url.clone();
         let auth_token = options.auth_token.clone();
         let timeout = Duration::from_secs(120);
-        
+
         // Spawn the proxy connection task
         tokio::spawn(async move {
             let result = Self::connect_and_stream(
-                proxy_url,
-                auth_token,
-                options,
-                cancel_rx,
-                events_tx,
-                result_tx,
-            ).await;
-            
+                proxy_url, auth_token, options, cancel_rx, events_tx, result_tx,
+            )
+            .await;
+
             if let Err(e) = result {
                 tracing::error!("Proxy stream error: {}", e);
             }
         });
-        
+
         Ok((
             ProxyStream {
                 events: events_rx,
@@ -258,7 +238,7 @@ impl ProxyStream {
             result_rx,
         ))
     }
-    
+
     async fn connect_and_stream(
         proxy_url: String,
         auth_token: String,
@@ -279,11 +259,11 @@ impl ProxyStream {
                 metadata: options.metadata,
             },
         };
-        
+
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(120))
             .build()?;
-        
+
         let response = client
             .post(format!("{}/api/stream", proxy_url))
             .header("Authorization", format!("Bearer {}", auth_token))
@@ -291,17 +271,20 @@ impl ProxyStream {
             .json(&request)
             .send()
             .await?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::msg(format!("Proxy error {}: {}", status, error_text)));
+            return Err(Error::msg(format!(
+                "Proxy error {}: {}",
+                status, error_text
+            )));
         }
-        
+
         // Read streaming response and convert to events
         let mut stream = response.bytes_stream();
         let mut buffer = Vec::new();
-        
+
         loop {
             tokio::select! {
                 _ = cancel_rx => {
@@ -311,12 +294,12 @@ impl ProxyStream {
                     match item {
                         Some(Ok(chunk)) => {
                             buffer.extend_from_slice(&chunk);
-                            
+
                             // Process complete lines
                             while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
                                 let line = buffer.drain(..=pos).collect::<Vec<_>>();
                                 let line_str = String::from_utf8_lossy(&line);
-                                
+
                                 if line_str.starts_with("data: ") {
                                     let data = line_str.trim_start_matches("data: ");
                                     if let Ok(proxy_event) = serde_json::from_str::<serde_json::Value>(data) {
@@ -339,18 +322,18 @@ impl ProxyStream {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     fn parse_proxy_event(value: &serde_json::Value) -> Option<ProxyEvent> {
         let event_type = value.get("type")?.as_str()?;
-        
+
         match event_type {
             "start" => {
                 let content_index = value.get("contentIndex")?.as_u64()? as usize;
                 let content_type_str = value.get("contentType")?.as_str()?;
-                
+
                 let content_type = match content_type_str {
                     "text" => ContentType::Text,
                     "thinking" => ContentType::Thinking,
@@ -361,88 +344,114 @@ impl ProxyStream {
                     }
                     _ => return None,
                 };
-                
+
                 Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::Start { content_index, content_type }
+                    ProxyAssistantMessageEvent::Start {
+                        content_index,
+                        content_type,
+                    },
                 ))
             }
             "text_delta" => {
                 let content_index = value.get("contentIndex")?.as_u64()? as usize;
                 let delta = value.get("delta")?.as_str()?.to_string();
-                
+
                 Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::TextDelta { content_index, delta }
+                    ProxyAssistantMessageEvent::TextDelta {
+                        content_index,
+                        delta,
+                    },
                 ))
             }
             "thinking_delta" => {
                 let content_index = value.get("contentIndex")?.as_u64()? as usize;
                 let delta = value.get("delta")?.as_str()?.to_string();
-                
+
                 Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::ThinkingDelta { content_index, delta }
+                    ProxyAssistantMessageEvent::ThinkingDelta {
+                        content_index,
+                        delta,
+                    },
                 ))
             }
             "toolcall_delta" => {
                 let content_index = value.get("contentIndex")?.as_u64()? as usize;
                 let delta = value.get("delta")?.as_str()?.to_string();
-                
+
                 Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::ToolCallDelta { content_index, delta }
+                    ProxyAssistantMessageEvent::ToolCallDelta {
+                        content_index,
+                        delta,
+                    },
                 ))
             }
             "done" => {
                 let reason = value.get("reason")?.as_str()?.to_string();
-                let usage = value.get("usage").map(|u| {
-                    ProxyUsage {
+                let usage = value
+                    .get("usage")
+                    .map(|u| ProxyUsage {
                         input: u.get("input").and_then(|v| v.as_u64()).unwrap_or(0),
                         output: u.get("output").and_then(|v| v.as_u64()).unwrap_or(0),
                         cache_read: u.get("cacheRead").and_then(|v| v.as_u64()).unwrap_or(0),
                         cache_write: u.get("cacheWrite").and_then(|v| v.as_u64()).unwrap_or(0),
                         total_tokens: u.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0),
                         cost: ProxyCost::default(),
-                    }
-                }).unwrap_or_default();
-                
+                    })
+                    .unwrap_or_default();
+
                 Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::Done { reason, usage }
+                    ProxyAssistantMessageEvent::Done { reason, usage },
                 ))
             }
             "error" => {
                 let reason = value.get("reason")?.as_str()?.to_string();
-                let error_message = value.get("errorMessage").and_then(|v| v.as_str()).map(String::from);
-                let usage = value.get("usage").map(|u| {
-                    ProxyUsage {
+                let error_message = value
+                    .get("errorMessage")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                let usage = value
+                    .get("usage")
+                    .map(|u| ProxyUsage {
                         input: u.get("input").and_then(|v| v.as_u64()).unwrap_or(0),
                         output: u.get("output").and_then(|v| v.as_u64()).unwrap_or(0),
                         cache_read: u.get("cacheRead").and_then(|v| v.as_u64()).unwrap_or(0),
                         cache_write: u.get("cacheWrite").and_then(|v| v.as_u64()).unwrap_or(0),
                         total_tokens: u.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0),
                         cost: ProxyCost::default(),
-                    }
-                }).unwrap_or_default();
-                
+                    })
+                    .unwrap_or_default();
+
                 Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::Error { reason, error_message, usage }
+                    ProxyAssistantMessageEvent::Error {
+                        reason,
+                        error_message,
+                        usage,
+                    },
                 ))
             }
-            "tool_execution_start" => {
-                Some(ProxyEvent::ToolCall(ToolCallEvent {
-                    tool_call_id: value.get("toolCallId")?.as_str()?.to_string(),
-                    tool_name: value.get("toolName")?.as_str()?.to_string(),
-                    args: value.get("args").cloned().unwrap_or(serde_json::Value::Null),
-                    result: None,
-                    is_error: false,
-                }))
-            }
-            "tool_execution_end" => {
-                Some(ProxyEvent::ToolCall(ToolCallEvent {
-                    tool_call_id: value.get("toolCallId")?.as_str()?.to_string(),
-                    tool_name: value.get("toolName")?.as_str()?.to_string(),
-                    args: serde_json::Value::Null,
-                    result: value.get("result").and_then(|v| v.as_str()).map(String::from),
-                    is_error: value.get("isError").and_then(|v| v.as_bool()).unwrap_or(false),
-                }))
-            }
+            "tool_execution_start" => Some(ProxyEvent::ToolCall(ToolCallEvent {
+                tool_call_id: value.get("toolCallId")?.as_str()?.to_string(),
+                tool_name: value.get("toolName")?.as_str()?.to_string(),
+                args: value
+                    .get("args")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                result: None,
+                is_error: false,
+            })),
+            "tool_execution_end" => Some(ProxyEvent::ToolCall(ToolCallEvent {
+                tool_call_id: value.get("toolCallId")?.as_str()?.to_string(),
+                tool_name: value.get("toolName")?.as_str()?.to_string(),
+                args: serde_json::Value::Null,
+                result: value
+                    .get("result")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                is_error: value
+                    .get("isError")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            })),
             _ => None,
         }
     }
@@ -450,7 +459,7 @@ impl ProxyStream {
 
 impl futures::Stream for ProxyStream {
     type Item = ProxyEvent;
-    
+
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
@@ -467,33 +476,35 @@ pub struct ProxyEventReconstructor {
 }
 
 enum ContentState {
-    Text { text: String },
-    Thinking { thinking: String },
-    ToolCall { id: String, name: String, partial_json: String },
+    Text {
+        text: String,
+    },
+    Thinking {
+        thinking: String,
+    },
+    ToolCall {
+        id: String,
+        name: String,
+        partial_json: String,
+    },
 }
 
 impl ProxyEventReconstructor {
     /// Create a new reconstructor for the given model info.
     pub fn new(provider: &str, model: &str) -> Self {
-        let mut partial = AssistantMessage::new(
-            oxi_ai::Api::AnthropicMessages,
-            provider,
-            model,
-        );
+        let mut partial = AssistantMessage::new(oxi_ai::Api::AnthropicMessages, provider, model);
         partial.content = Vec::new();
-        
+
         ProxyEventReconstructor {
             partial,
             content_states: HashMap::new(),
         }
     }
-    
+
     /// Process a proxy event and return reconstructed ProviderEvents.
     pub fn process(&mut self, event: ProxyEvent) -> Vec<ProviderEvent> {
         match event {
-            ProxyEvent::AssistantMessage(proxy_event) => {
-                self.process_assistant_event(proxy_event)
-            }
+            ProxyEvent::AssistantMessage(proxy_event) => self.process_assistant_event(proxy_event),
             ProxyEvent::ToolCall(tool_event) => {
                 vec![ProviderEvent::ToolCallEnd {
                     tool_call: ToolCall {
@@ -511,18 +522,29 @@ impl ProxyEventReconstructor {
             }
         }
     }
-    
+
     fn process_assistant_event(&mut self, event: ProxyAssistantMessageEvent) -> Vec<ProviderEvent> {
         match event {
-            ProxyAssistantMessageEvent::Start { content_index, content_type } => {
+            ProxyAssistantMessageEvent::Start {
+                content_index,
+                content_type,
+            } => {
                 let state = match content_type {
                     ContentType::Text => {
-                        self.partial.content.push(ContentBlock::Text(TextContent::new(String::new())));
-                        ContentState::Text { text: String::new() }
+                        self.partial
+                            .content
+                            .push(ContentBlock::Text(TextContent::new(String::new())));
+                        ContentState::Text {
+                            text: String::new(),
+                        }
                     }
                     ContentType::Thinking => {
-                        self.partial.content.push(ContentBlock::Thinking(ThinkingContent::new(String::new())));
-                        ContentState::Thinking { thinking: String::new() }
+                        self.partial
+                            .content
+                            .push(ContentBlock::Thinking(ThinkingContent::new(String::new())));
+                        ContentState::Thinking {
+                            thinking: String::new(),
+                        }
                     }
                     ContentType::ToolCall { id, name } => {
                         self.partial.content.push(ContentBlock::ToolCall(ToolCall {
@@ -530,25 +552,34 @@ impl ProxyEventReconstructor {
                             name,
                             arguments: serde_json::Map::new(),
                         }));
-                        ContentState::ToolCall { id, name, partial_json: String::new() }
+                        ContentState::ToolCall {
+                            id,
+                            name,
+                            partial_json: String::new(),
+                        }
                     }
                 };
-                
+
                 self.content_states.insert(content_index, state);
-                vec![ProviderEvent::Start { partial: self.partial.clone() }]
+                vec![ProviderEvent::Start {
+                    partial: self.partial.clone(),
+                }]
             }
-            
-            ProxyAssistantMessageEvent::TextDelta { content_index, delta } => {
+
+            ProxyAssistantMessageEvent::TextDelta {
+                content_index,
+                delta,
+            } => {
                 if let Some(state) = self.content_states.get_mut(&content_index) {
                     if let ContentState::Text { text } = state {
                         text.push_str(&delta);
-                        
+
                         if let Some(block) = self.partial.content.get_mut(content_index) {
                             if let ContentBlock::Text(t) = block {
                                 t.text.push_str(&delta);
                             }
                         }
-                        
+
                         return vec![ProviderEvent::TextDelta {
                             content_index,
                             delta,
@@ -558,18 +589,21 @@ impl ProxyEventReconstructor {
                 }
                 vec![]
             }
-            
-            ProxyAssistantMessageEvent::ThinkingDelta { content_index, delta } => {
+
+            ProxyAssistantMessageEvent::ThinkingDelta {
+                content_index,
+                delta,
+            } => {
                 if let Some(state) = self.content_states.get_mut(&content_index) {
                     if let ContentState::Thinking { thinking } = state {
                         thinking.push_str(&delta);
-                        
+
                         if let Some(block) = self.partial.content.get_mut(content_index) {
                             if let ContentBlock::Thinking(t) = block {
                                 t.thinking.push_str(&delta);
                             }
                         }
-                        
+
                         return vec![ProviderEvent::ThinkingDelta {
                             content_index,
                             delta,
@@ -579,22 +613,25 @@ impl ProxyEventReconstructor {
                 }
                 vec![]
             }
-            
-            ProxyAssistantMessageEvent::ToolCallDelta { content_index, delta } => {
+
+            ProxyAssistantMessageEvent::ToolCallDelta {
+                content_index,
+                delta,
+            } => {
                 if let Some(state) = self.content_states.get_mut(&content_index) {
                     if let ContentState::ToolCall { partial_json, .. } = state {
                         partial_json.push_str(&delta);
-                        
+
                         // Parse partial JSON
-                        let arguments: serde_json::Map<String, serde_json::Value> = 
+                        let arguments: serde_json::Map<String, serde_json::Value> =
                             serde_json::from_str(partial_json).unwrap_or_default();
-                        
+
                         if let Some(block) = self.partial.content.get_mut(content_index) {
                             if let ContentBlock::ToolCall(tc) = block {
                                 tc.arguments = arguments;
                             }
                         }
-                        
+
                         return vec![ProviderEvent::ToolCallDelta {
                             content_index,
                             delta,
@@ -604,7 +641,7 @@ impl ProxyEventReconstructor {
                 }
                 vec![]
             }
-            
+
             ProxyAssistantMessageEvent::Done { reason, usage } => {
                 // Update stop reason and usage
                 self.partial.stop_reason = match reason.as_str() {
@@ -615,7 +652,7 @@ impl ProxyEventReconstructor {
                     "aborted" => StopReason::Aborted,
                     _ => StopReason::Stop,
                 };
-                
+
                 self.partial.usage.input = usage.input;
                 self.partial.usage.output = usage.output;
                 self.partial.usage.cache_read = usage.cache_read;
@@ -626,45 +663,48 @@ impl ProxyEventReconstructor {
                 self.partial.usage.cost.cache_read = usage.cost.cache_read;
                 self.partial.usage.cost.cache_write = usage.cost.cache_write;
                 self.partial.usage.cost.total = usage.cost.total;
-                
+
                 // Clean up content states
                 self.content_states.clear();
-                
+
                 vec![ProviderEvent::Done {
                     reason: self.partial.stop_reason,
                     message: self.partial.clone(),
                 }]
             }
-            
-            ProxyAssistantMessageEvent::Error { reason, error_message, usage } => {
+
+            ProxyAssistantMessageEvent::Error {
+                reason,
+                error_message,
+                usage,
+            } => {
                 self.partial.stop_reason = match reason.as_str() {
                     "error" => StopReason::Error,
                     "aborted" => StopReason::Aborted,
                     _ => StopReason::Error,
                 };
                 self.partial.error_message = error_message;
-                
+
                 vec![ProviderEvent::Error {
                     error: oxi_ai::ProviderError::Other(
-                        self.partial.error_message.clone().unwrap_or_else(|| "Unknown error".to_string())
+                        self.partial
+                            .error_message
+                            .clone()
+                            .unwrap_or_else(|| "Unknown error".to_string()),
                     ),
                 }]
             }
         }
     }
-    
+
     /// Get the current partial message.
     pub fn partial(&self) -> &AssistantMessage {
         &self.partial
     }
-    
+
     /// Reset the reconstructor for a new message.
     pub fn reset(&mut self, provider: &str, model: &str) {
-        self.partial = AssistantMessage::new(
-            oxi_ai::Api::AnthropicMessages,
-            provider,
-            model,
-        );
+        self.partial = AssistantMessage::new(oxi_ai::Api::AnthropicMessages, provider, model);
         self.partial.content = Vec::new();
         self.content_states.clear();
     }
@@ -678,7 +718,13 @@ pub struct ProxyServerConfig {
     /// Bind address.
     pub bind_address: String,
     /// Handler for incoming requests.
-    pub request_handler: Arc<dyn Fn(ProxyServerRequest) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>>> + Send>> + Send + Sync>,
+    pub request_handler: Arc<
+        dyn Fn(
+                ProxyServerRequest,
+            ) -> Pin<Box<dyn std::future::Future<Output = Result<Vec<u8>>> + Send>>
+            + Send
+            + Sync,
+    >,
 }
 
 impl Default for ProxyServerConfig {
@@ -686,9 +732,7 @@ impl Default for ProxyServerConfig {
         ProxyServerConfig {
             port: 8080,
             bind_address: "127.0.0.1".to_string(),
-            request_handler: Arc::new(|_| {
-                Box::pin(async { Ok(Vec::new()) })
-            }),
+            request_handler: Arc::new(|_| Box::pin(async { Ok(Vec::new()) })),
         }
     }
 }
@@ -741,7 +785,7 @@ impl ProxyEventStripper {
             in_content: false,
         }
     }
-    
+
     /// Strip a provider event to proxy event format.
     pub fn strip(&mut self, event: &ProviderEvent) -> Option<ProxyAssistantMessageEvent> {
         match event {
@@ -757,7 +801,7 @@ impl ProxyEventStripper {
                         },
                     };
                     self.in_content = true;
-                    
+
                     return Some(ProxyAssistantMessageEvent::Start {
                         content_index: 0,
                         content_type: self.content_type.clone(),
@@ -765,8 +809,11 @@ impl ProxyEventStripper {
                 }
                 None
             }
-            
-            ProviderEvent::TextStart { content_index, partial } => {
+
+            ProviderEvent::TextStart {
+                content_index,
+                partial,
+            } => {
                 self.content_index = *content_index;
                 if let Some(block) = partial.content.get(*content_index) {
                     self.content_type = match block {
@@ -779,40 +826,49 @@ impl ProxyEventStripper {
                     };
                 }
                 self.in_content = true;
-                
+
                 Some(ProxyAssistantMessageEvent::Start {
                     content_index: *content_index,
                     content_type: self.content_type.clone(),
                 })
             }
-            
-            ProviderEvent::TextDelta { content_index, delta, .. } => {
+
+            ProviderEvent::TextDelta {
+                content_index,
+                delta,
+                ..
+            } => {
                 self.content_index = *content_index;
                 Some(ProxyAssistantMessageEvent::TextDelta {
                     content_index: *content_index,
                     delta: delta.clone(),
                 })
             }
-            
+
             ProviderEvent::ThinkingStart { content_index, .. } => {
                 self.content_index = *content_index;
                 self.content_type = ContentType::Thinking;
                 self.in_content = true;
-                
+
                 Some(ProxyAssistantMessageEvent::Start {
                     content_index: *content_index,
                     content_type: ContentType::Thinking,
                 })
             }
-            
-            ProviderEvent::ThinkingDelta { content_index, delta, .. } => {
-                Some(ProxyAssistantMessageEvent::ThinkingDelta {
-                    content_index: *content_index,
-                    delta: delta.clone(),
-                })
-            }
-            
-            ProviderEvent::ToolCallStart { content_index, partial } => {
+
+            ProviderEvent::ThinkingDelta {
+                content_index,
+                delta,
+                ..
+            } => Some(ProxyAssistantMessageEvent::ThinkingDelta {
+                content_index: *content_index,
+                delta: delta.clone(),
+            }),
+
+            ProviderEvent::ToolCallStart {
+                content_index,
+                partial,
+            } => {
                 self.content_index = *content_index;
                 if let Some(block) = partial.content.get(*content_index) {
                     if let ContentBlock::ToolCall(tc) = block {
@@ -823,20 +879,22 @@ impl ProxyEventStripper {
                     }
                 }
                 self.in_content = true;
-                
+
                 Some(ProxyAssistantMessageEvent::Start {
                     content_index: *content_index,
                     content_type: self.content_type.clone(),
                 })
             }
-            
-            ProviderEvent::ToolCallDelta { content_index, delta, .. } => {
-                Some(ProxyAssistantMessageEvent::ToolCallDelta {
-                    content_index: *content_index,
-                    delta: delta.clone(),
-                })
-            }
-            
+
+            ProviderEvent::ToolCallDelta {
+                content_index,
+                delta,
+                ..
+            } => Some(ProxyAssistantMessageEvent::ToolCallDelta {
+                content_index: *content_index,
+                delta: delta.clone(),
+            }),
+
             ProviderEvent::Done { reason, message } => {
                 self.in_content = false;
                 Some(ProxyAssistantMessageEvent::Done {
@@ -844,23 +902,24 @@ impl ProxyEventStripper {
                     usage: ProxyUsage::from(&message.usage),
                 })
             }
-            
-            ProviderEvent::Error { error } => {
-                Some(ProxyAssistantMessageEvent::Error {
-                    reason: "error".to_string(),
-                    error_message: Some(error.text_content()),
-                    usage: ProxyUsage::default(),
-                })
-            }
-            
+
+            ProviderEvent::Error { error } => Some(ProxyAssistantMessageEvent::Error {
+                reason: "error".to_string(),
+                error_message: Some(error.text_content()),
+                usage: ProxyUsage::default(),
+            }),
+
             _ => None,
         }
     }
-    
+
     /// Serialize a proxy event to JSON bytes.
     pub fn serialize(event: &ProxyAssistantMessageEvent) -> Vec<u8> {
         let json = match event {
-            ProxyAssistantMessageEvent::Start { content_index, content_type } => {
+            ProxyAssistantMessageEvent::Start {
+                content_index,
+                content_type,
+            } => {
                 let mut obj = serde_json::json!({
                     "type": match content_type.as_str() {
                         "text" => "start",
@@ -870,30 +929,39 @@ impl ProxyEventStripper {
                     },
                     "contentIndex": content_index,
                 });
-                
+
                 if let ContentType::ToolCall { id, name } = content_type {
                     obj["id"] = serde_json::json!(id);
                     obj["toolName"] = serde_json::json!(name);
                 }
-                
+
                 obj["contentType"] = serde_json::json!(content_type.as_str());
                 obj
             }
-            ProxyAssistantMessageEvent::TextDelta { content_index, delta } => {
+            ProxyAssistantMessageEvent::TextDelta {
+                content_index,
+                delta,
+            } => {
                 serde_json::json!({
                     "type": "text_delta",
                     "contentIndex": content_index,
                     "delta": delta,
                 })
             }
-            ProxyAssistantMessageEvent::ThinkingDelta { content_index, delta } => {
+            ProxyAssistantMessageEvent::ThinkingDelta {
+                content_index,
+                delta,
+            } => {
                 serde_json::json!({
                     "type": "thinking_delta",
                     "contentIndex": content_index,
                     "delta": delta,
                 })
             }
-            ProxyAssistantMessageEvent::ToolCallDelta { content_index, delta } => {
+            ProxyAssistantMessageEvent::ToolCallDelta {
+                content_index,
+                delta,
+            } => {
                 serde_json::json!({
                     "type": "toolcall_delta",
                     "contentIndex": content_index,
@@ -913,7 +981,11 @@ impl ProxyEventStripper {
                     },
                 })
             }
-            ProxyAssistantMessageEvent::Error { reason, error_message, usage } => {
+            ProxyAssistantMessageEvent::Error {
+                reason,
+                error_message,
+                usage,
+            } => {
                 serde_json::json!({
                     "type": "error",
                     "reason": reason,
@@ -928,10 +1000,10 @@ impl ProxyEventStripper {
                 })
             }
         };
-        
+
         format!("data: {}\n\n", json.to_string()).into_bytes()
     }
-    
+
     /// Reset the stripper state.
     pub fn reset(&mut self) {
         self.content_index = 0;
@@ -950,7 +1022,7 @@ impl Default for ProxyEventStripper {
 mod tests {
     use super::*;
     use oxi_ai::Api;
-    
+
     #[test]
     fn test_proxy_config_default() {
         let config = ProxyConfig::default();
@@ -958,17 +1030,21 @@ mod tests {
         assert_eq!(config.timeout_secs, 120);
         assert_eq!(config.max_retries, 3);
     }
-    
+
     #[test]
     fn test_content_type_as_str() {
         assert_eq!(ContentType::Text.as_str(), "text");
         assert_eq!(ContentType::Thinking.as_str(), "thinking");
         assert_eq!(
-            ContentType::ToolCall { id: "123".to_string(), name: "test".to_string() }.as_str(),
+            ContentType::ToolCall {
+                id: "123".to_string(),
+                name: "test".to_string()
+            }
+            .as_str(),
             "toolcall"
         );
     }
-    
+
     #[test]
     fn test_proxy_usage_from_oxi_usage() {
         let oxi_usage = oxi_ai::Usage {
@@ -985,20 +1061,20 @@ mod tests {
                 total: 0.33,
             },
         };
-        
+
         let proxy_usage = ProxyUsage::from(&oxi_usage);
         assert_eq!(proxy_usage.input, 100);
         assert_eq!(proxy_usage.output, 50);
         assert_eq!(proxy_usage.total_tokens, 165);
         assert_eq!(proxy_usage.cost.total, 0.33);
     }
-    
+
     #[test]
     fn test_event_stripper_new() {
         let stripper = ProxyEventStripper::new();
         assert!(!stripper.in_content);
     }
-    
+
     #[test]
     fn test_proxy_stream_options_new() {
         let model = oxi_ai::Model {
@@ -1018,38 +1094,38 @@ mod tests {
             context_window: 200000,
             max_tokens: 8192,
         };
-        
+
         let options = ProxyStreamOptions::new(
             model.clone(),
             "test_token".to_string(),
             "http://localhost:8080".to_string(),
         );
-        
+
         assert_eq!(options.auth_token, "test_token");
         assert_eq!(options.proxy_url, "http://localhost:8080");
     }
-    
+
     #[test]
     fn test_proxy_event_serialization() {
         let event = ProxyAssistantMessageEvent::TextDelta {
             content_index: 0,
             delta: "Hello".to_string(),
         };
-        
+
         let serialized = ProxyEventStripper::serialize(&event);
         let text = String::from_utf8_lossy(&serialized);
-        
+
         assert!(text.contains("data:"));
         assert!(text.contains("text_delta"));
         assert!(text.contains("Hello"));
     }
-    
+
     #[test]
     fn test_reconstructor_new() {
         let reconstructor = ProxyEventReconstructor::new("anthropic", "claude-3-5-sonnet");
         assert!(reconstructor.partial().content.is_empty());
     }
-    
+
     #[test]
     fn test_reconstructor_reset() {
         let mut reconstructor = ProxyEventReconstructor::new("anthropic", "claude-3-5-sonnet");
@@ -1057,40 +1133,40 @@ mod tests {
         assert_eq!(reconstructor.partial().provider, "openai");
         assert_eq!(reconstructor.partial().model, "gpt-4");
     }
-    
+
     #[test]
     fn test_reconstructor_process_text_delta() {
         let mut reconstructor = ProxyEventReconstructor::new("anthropic", "claude-3-5-sonnet");
-        
+
         let events = reconstructor.process(ProxyEvent::AssistantMessage(
             ProxyAssistantMessageEvent::Start {
                 content_index: 0,
                 content_type: ContentType::Text,
-            }
+            },
         ));
-        
+
         assert!(!events.is_empty());
-        
+
         let events = reconstructor.process(ProxyEvent::AssistantMessage(
             ProxyAssistantMessageEvent::TextDelta {
                 content_index: 0,
                 delta: "Hello ".to_string(),
-            }
+            },
         ));
-        
+
         assert!(!events.is_empty());
-        
+
         // Verify content was updated
         let partial = reconstructor.partial();
         if let Some(ContentBlock::Text(t)) = partial.content.get(0) {
             assert!(t.text.contains("Hello"));
         }
     }
-    
+
     #[test]
     fn test_reconstructor_process_tool_call() {
         let mut reconstructor = ProxyEventReconstructor::new("anthropic", "claude-3-5-sonnet");
-        
+
         let events = reconstructor.process(ProxyEvent::AssistantMessage(
             ProxyAssistantMessageEvent::Start {
                 content_index: 0,
@@ -1098,11 +1174,11 @@ mod tests {
                     id: "tool_123".to_string(),
                     name: "get_weather".to_string(),
                 },
-            }
+            },
         ));
-        
+
         assert!(!events.is_empty());
-        
+
         let events = reconstructor.process(ProxyEvent::ToolCall(ToolCallEvent {
             tool_call_id: "tool_123".to_string(),
             tool_name: "get_weather".to_string(),
@@ -1110,22 +1186,22 @@ mod tests {
             result: Some("Sunny".to_string()),
             is_error: false,
         }));
-        
+
         assert!(!events.is_empty());
     }
-    
+
     #[test]
     fn test_proxy_server_config_default() {
         let config = ProxyServerConfig::default();
         assert_eq!(config.port, 8080);
         assert_eq!(config.bind_address, "127.0.0.1");
     }
-    
+
     #[test]
     fn test_proxy_request_options_deserialize() {
         let json = r#"{"temperature": 0.7, "maxTokens": 1000, "sessionId": "abc123"}"#;
         let options: ProxyRequestOptions = serde_json::from_str(json).unwrap();
-        
+
         assert_eq!(options.temperature, Some(0.7));
         assert_eq!(options.max_tokens, Some(1000));
         assert_eq!(options.session_id, Some("abc123".to_string()));

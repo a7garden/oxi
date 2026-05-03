@@ -1,16 +1,18 @@
 //! Agent loop implementation
 
 use crate::{
+    error::AgentError,
+    events::AgentEvent,
+    state::SharedState,
+    tools::{AgentTool, ToolRegistry},
     AgentToolResult,
-    error::AgentError, events::AgentEvent,
-    state::SharedState, tools::{ToolRegistry, AgentTool},
 };
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
-    Context, ContentBlock, Message, Provider, ProviderEvent, StreamOptions,
-    StopReason, TextContent, ToolCall, UserMessage, CompactionStrategy,
-    CompactionManager as OxCompactionManager, AssistantMessage,
+    AssistantMessage, CompactionManager as OxCompactionManager, CompactionStrategy, ContentBlock,
+    Context, Message, Provider, ProviderEvent, StopReason, StreamOptions, TextContent, ToolCall,
+    UserMessage,
 };
 use parking_lot::RwLock;
 use serde_json::Value;
@@ -50,13 +52,23 @@ impl Default for ToolExecutionMode {
 }
 
 pub type BeforeToolCallHook = Arc<
-    dyn Fn(&str, &Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
-        + Send + Sync,
+    dyn Fn(
+            &str,
+            &Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Option<AgentToolResult>, Error>> + Send>,
+        > + Send
+        + Sync,
 >;
 
 pub type AfterToolCallHook = Arc<
-    dyn Fn(&str, &AgentToolResult) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
-        + Send + Sync,
+    dyn Fn(
+            &str,
+            &AgentToolResult,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Option<AgentToolResult>, Error>> + Send>,
+        > + Send
+        + Sync,
 >;
 
 type EmitFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
@@ -81,11 +93,9 @@ impl AgentLoop {
         tools: Arc<ToolRegistry>,
         state: SharedState,
     ) -> Self {
-        let compaction_manager = OxCompactionManager::new(
-            config.compaction_strategy.clone(),
-            config.context_window,
-        );
-        
+        let compaction_manager =
+            OxCompactionManager::new(config.compaction_strategy.clone(), config.context_window);
+
         Self {
             provider,
             config: config.clone(),
@@ -157,18 +167,20 @@ impl AgentLoop {
         emit: EmitFn,
     ) -> Result<Vec<AgentEvent>> {
         let mut all_events = Vec::new();
-        
+
         let state_messages = self.state.get_state().messages.clone();
         let mut all_messages = state_messages;
         all_messages.extend(prompts.clone());
-        
-        emit(AgentEvent::AgentStart { prompts: prompts.clone() });
+
+        emit(AgentEvent::AgentStart {
+            prompts: prompts.clone(),
+        });
         all_events.push(AgentEvent::AgentStart { prompts });
-        
+
         let (result_messages, events) = self.run_loop(prompts, emit.clone()).await?;
-        
+
         all_events.extend(events);
-        
+
         let stop_reason = result_messages.last().and_then(|m| {
             if let Message::Assistant(a) = m {
                 Some(format!("{:?}", a.stop_reason))
@@ -176,16 +188,16 @@ impl AgentLoop {
                 None
             }
         });
-        
-        emit(AgentEvent::AgentEnd { 
-            messages: result_messages.clone(), 
+
+        emit(AgentEvent::AgentEnd {
+            messages: result_messages.clone(),
             stop_reason: stop_reason.clone(),
         });
-        all_events.push(AgentEvent::AgentEnd { 
-            messages: result_messages.clone(), 
+        all_events.push(AgentEvent::AgentEnd {
+            messages: result_messages.clone(),
             stop_reason,
         });
-        
+
         Ok(all_events)
     }
 
@@ -195,14 +207,14 @@ impl AgentLoop {
     ) -> Result<Vec<AgentEvent>> {
         let emit = Arc::new(emit);
         let mut all_events = Vec::new();
-        
+
         emit(AgentEvent::AgentStart { prompts: vec![] });
         all_events.push(AgentEvent::AgentStart { prompts: vec![] });
-        
+
         let (result_messages, events) = self.run_loop(vec![], emit.clone()).await?;
-        
+
         all_events.extend(events);
-        
+
         let stop_reason = result_messages.last().and_then(|m| {
             if let Message::Assistant(a) = m {
                 Some(format!("{:?}", a.stop_reason))
@@ -210,16 +222,16 @@ impl AgentLoop {
                 None
             }
         });
-        
-        emit(AgentEvent::AgentEnd { 
-            messages: result_messages.clone(), 
+
+        emit(AgentEvent::AgentEnd {
+            messages: result_messages.clone(),
             stop_reason: stop_reason.clone(),
         });
-        all_events.push(AgentEvent::AgentEnd { 
-            messages: result_messages.clone(), 
+        all_events.push(AgentEvent::AgentEnd {
+            messages: result_messages.clone(),
             stop_reason,
         });
-        
+
         Ok(all_events)
     }
 
@@ -230,17 +242,17 @@ impl AgentLoop {
     ) -> Result<(Vec<Message>, Vec<AgentEvent>)> {
         let mut messages = self.state.get_state().messages.clone();
         messages.extend(initial_prompts.clone());
-        
+
         let mut new_messages: Vec<Message> = initial_prompts;
         let mut events = Vec::new();
         let mut turn_number: u32 = 0;
         let mut first_turn = true;
-        
+
         let mut pending_messages: Vec<Message> = self.drain_steering_queue();
-        
+
         loop {
             let mut has_more_tool_calls = true;
-            
+
             while has_more_tool_calls || !pending_messages.is_empty() {
                 if !first_turn {
                     turn_number += 1;
@@ -252,93 +264,111 @@ impl AgentLoop {
                     emit(AgentEvent::TurnStart { turn_number });
                     events.push(AgentEvent::TurnStart { turn_number });
                 }
-                
+
                 if !pending_messages.is_empty() {
                     for message in pending_messages.drain(..) {
-                        emit(AgentEvent::SteeringMessage { message: message.clone() });
-                        emit(AgentEvent::MessageStart { message: message.clone() });
-                        emit(AgentEvent::MessageEnd { message: message.clone() });
-                        events.push(AgentEvent::SteeringMessage { message: message.clone() });
-                        events.push(AgentEvent::MessageStart { message: message.clone() });
-                        events.push(AgentEvent::MessageEnd { message: message.clone() });
+                        emit(AgentEvent::SteeringMessage {
+                            message: message.clone(),
+                        });
+                        emit(AgentEvent::MessageStart {
+                            message: message.clone(),
+                        });
+                        emit(AgentEvent::MessageEnd {
+                            message: message.clone(),
+                        });
+                        events.push(AgentEvent::SteeringMessage {
+                            message: message.clone(),
+                        });
+                        events.push(AgentEvent::MessageStart {
+                            message: message.clone(),
+                        });
+                        events.push(AgentEvent::MessageEnd {
+                            message: message.clone(),
+                        });
                         messages.push(message.clone());
                         new_messages.push(message);
                     }
                     pending_messages = Vec::new();
                 }
-                
-                let assistant_message = match self.stream_assistant_response(&mut messages, &emit).await {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        let err_msg = format!("{:?}", e);
-                        emit(AgentEvent::Error { message: err_msg.clone() });
-                        events.push(AgentEvent::Error { message: err_msg });
-                        return Err(Error::msg(e));
-                    }
-                };
-                
+
+                let assistant_message =
+                    match self.stream_assistant_response(&mut messages, &emit).await {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            let err_msg = format!("{:?}", e);
+                            emit(AgentEvent::Error {
+                                message: err_msg.clone(),
+                            });
+                            events.push(AgentEvent::Error { message: err_msg });
+                            return Err(Error::msg(e));
+                        }
+                    };
+
                 new_messages.push(Message::Assistant(assistant_message.clone()));
-                
-                if matches!(assistant_message.stop_reason, StopReason::Error | StopReason::Aborted) {
-                    emit(AgentEvent::TurnEnd { 
-                        turn_number, 
+
+                if matches!(
+                    assistant_message.stop_reason,
+                    StopReason::Error | StopReason::Aborted
+                ) {
+                    emit(AgentEvent::TurnEnd {
+                        turn_number,
                         assistant_message: Message::Assistant(assistant_message.clone()),
                         tool_results: vec![],
                     });
-                    events.push(AgentEvent::TurnEnd { 
-                        turn_number, 
+                    events.push(AgentEvent::TurnEnd {
+                        turn_number,
                         assistant_message: Message::Assistant(assistant_message.clone()),
                         tool_results: vec![],
                     });
                     return Ok((messages, events));
                 }
-                
+
                 let tool_calls = self.extract_tool_calls(&assistant_message);
-                
+
                 let mut tool_results: Vec<oxi_ai::ToolResultMessage> = Vec::new();
                 has_more_tool_calls = false;
-                
+
                 if !tool_calls.is_empty() {
                     let executed_batch = self
                         .execute_tool_calls(&mut messages, &assistant_message, tool_calls, &emit)
                         .await?;
-                    
+
                     tool_results = executed_batch.messages;
                     has_more_tool_calls = !executed_batch.terminate;
-                    
+
                     for result in &tool_results {
                         messages.push(Message::ToolResult(result.clone()));
                         new_messages.push(Message::ToolResult(result.clone()));
                     }
                 }
-                
-                emit(AgentEvent::TurnEnd { 
-                    turn_number, 
+
+                emit(AgentEvent::TurnEnd {
+                    turn_number,
                     assistant_message: Message::Assistant(assistant_message.clone()),
                     tool_results: tool_results.clone(),
                 });
-                events.push(AgentEvent::TurnEnd { 
-                    turn_number, 
+                events.push(AgentEvent::TurnEnd {
+                    turn_number,
                     assistant_message: Message::Assistant(assistant_message.clone()),
                     tool_results: tool_results.clone(),
                 });
-                
+
                 if self.should_stop_after_turn(&messages, &assistant_message) {
                     return Ok((messages, events));
                 }
-                
+
                 pending_messages = self.drain_steering_queue();
             }
-            
+
             let follow_up_messages = self.drain_follow_up_queue();
             if !follow_up_messages.is_empty() {
                 pending_messages = follow_up_messages;
                 continue;
             }
-            
+
             break;
         }
-        
+
         Ok((messages, events))
     }
 
@@ -348,40 +378,41 @@ impl AgentLoop {
         emit: &EmitFn,
     ) -> Result<AssistantMessage> {
         let model = self.resolve_model()?;
-        
+
         let mut context = Context::new();
-        
+
         if let Some(ref system_prompt) = self.config.system_prompt {
             context.set_system_prompt(system_prompt.clone());
         }
-        
+
         for msg in messages.iter() {
             context.add_message(msg.clone());
         }
-        
+
         let tool_defs = self.tools.definitions();
         if !tool_defs.is_empty() {
             let mut oxi_tools = Vec::new();
             for def in &tool_defs {
-                let schema = serde_json::to_value(&def.input_schema).unwrap_or_else(|_| {
-                    serde_json::json!({"type": "object", "properties": {}})
-                });
+                let schema = serde_json::to_value(&def.input_schema)
+                    .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
                 oxi_tools.push(oxi_ai::Tool::new(&def.name, &def.description, schema));
             }
             context.set_tools(oxi_tools);
         }
-        
+
         let stream_options = StreamOptions {
             temperature: Some(self.config.temperature as f64),
             max_tokens: Some(self.config.max_tokens as usize),
             ..Default::default()
         };
-        
-        let stream = self.stream_with_retry(&model, &context, Some(stream_options), emit).await?;
-        
+
+        let stream = self
+            .stream_with_retry(&model, &context, Some(stream_options), emit)
+            .await?;
+
         let mut partial_message: Option<AssistantMessage> = None;
         let mut added_partial = false;
-        
+
         let mut rx = stream;
         while let Some(event) = rx.next().await {
             match event {
@@ -389,9 +420,11 @@ impl AgentLoop {
                     partial_message = Some(partial.clone());
                     messages.push(Message::Assistant(partial.clone()));
                     added_partial = true;
-                    emit(AgentEvent::MessageStart { message: messages.last().unwrap().clone() });
+                    emit(AgentEvent::MessageStart {
+                        message: messages.last().unwrap().clone(),
+                    });
                 }
-                
+
                 ProviderEvent::TextDelta { delta, partial, .. } => {
                     if let Some(ref mut partial) = partial_message {
                         if let Some(last) = partial.content.last_mut() {
@@ -399,23 +432,27 @@ impl AgentLoop {
                                 t.text.push_str(&delta);
                             }
                         } else {
-                            partial.content.push(ContentBlock::Text(TextContent::new(delta.clone())));
+                            partial
+                                .content
+                                .push(ContentBlock::Text(TextContent::new(delta.clone())));
                         }
-                        emit(AgentEvent::MessageUpdate { 
+                        emit(AgentEvent::MessageUpdate {
                             message: Message::Assistant(partial.clone()),
                             delta: Some(delta.clone()),
                         });
                     }
                     let _ = partial;
                 }
-                
+
                 ProviderEvent::ThinkingStart { partial, .. } => {
                     if let Some(ref mut partial) = partial_message {
-                        partial.content.push(ContentBlock::Thinking(oxi_ai::ThinkingContent::new("")));
+                        partial
+                            .content
+                            .push(ContentBlock::Thinking(oxi_ai::ThinkingContent::new("")));
                     }
                     let _ = partial;
                 }
-                
+
                 ProviderEvent::ThinkingDelta { delta, partial, .. } => {
                     if let Some(ref mut partial) = partial_message {
                         if let Some(last) = partial.content.last_mut() {
@@ -426,20 +463,22 @@ impl AgentLoop {
                     }
                     let _ = partial;
                 }
-                
+
                 ProviderEvent::ToolCallStart { partial, .. } => {
                     // Tool call will be completed in ToolCallEnd
                     let _ = partial;
                 }
-                
-                ProviderEvent::ToolCallEnd { tool_call, partial, .. } => {
+
+                ProviderEvent::ToolCallEnd {
+                    tool_call, partial, ..
+                } => {
                     // Tool call finished
                     if let Some(ref mut partial) = partial_message {
                         partial.content.push(ContentBlock::ToolCall(tool_call));
                     }
                     let _ = partial;
                 }
-                
+
                 ProviderEvent::Done { message, .. } => {
                     if added_partial {
                         let last_idx = messages.len() - 1;
@@ -449,10 +488,12 @@ impl AgentLoop {
                     } else {
                         messages.push(Message::Assistant(message.clone()));
                     }
-                    emit(AgentEvent::MessageEnd { message: Message::Assistant(message.clone()) });
+                    emit(AgentEvent::MessageEnd {
+                        message: Message::Assistant(message.clone()),
+                    });
                     return Ok(message);
                 }
-                
+
                 ProviderEvent::Error { error, .. } => {
                     let raw_msg = error.text_content();
                     let friendly = if raw_msg.is_empty() {
@@ -460,13 +501,15 @@ impl AgentLoop {
                     } else {
                         raw_msg
                     };
-                    emit(AgentEvent::Error { message: format!("⚠ {}", friendly) });
+                    emit(AgentEvent::Error {
+                        message: format!("⚠ {}", friendly),
+                    });
                     return Err(Error::msg(friendly));
                 }
-                
+
                 _ => {}
             }
-            
+
             if let Some(ref partial) = partial_message {
                 let last_idx = messages.len() - 1;
                 if let Message::Assistant(ref mut m) = messages[last_idx] {
@@ -474,7 +517,7 @@ impl AgentLoop {
                 }
             }
         }
-        
+
         let final_message = messages
             .last()
             .and_then(|m| match m {
@@ -482,8 +525,10 @@ impl AgentLoop {
                 _ => None,
             })
             .ok_or_else(|| Error::msg("No assistant message in context"))?;
-        
-        emit(AgentEvent::MessageEnd { message: Message::Assistant(final_message.clone()) });
+
+        emit(AgentEvent::MessageEnd {
+            message: Message::Assistant(final_message.clone()),
+        });
         Ok(final_message)
     }
 
@@ -495,9 +540,11 @@ impl AgentLoop {
         emit: &EmitFn,
     ) -> Result<ExecutedToolCallBatch> {
         if self.config.tool_execution == ToolExecutionMode::Sequential {
-            self.execute_tool_calls_sequential(messages, assistant_message, tool_calls, emit).await
+            self.execute_tool_calls_sequential(messages, assistant_message, tool_calls, emit)
+                .await
         } else {
-            self.execute_tool_calls_parallel(messages, assistant_message, tool_calls, emit).await
+            self.execute_tool_calls_parallel(messages, assistant_message, tool_calls, emit)
+                .await
         }
     }
 
@@ -510,16 +557,16 @@ impl AgentLoop {
     ) -> Result<ExecutedToolCallBatch> {
         let mut finalized_calls = Vec::new();
         let mut tool_result_messages = Vec::new();
-        
+
         for tool_call in tool_calls {
             emit(AgentEvent::ToolExecutionStart {
                 tool_call_id: tool_call.id.clone(),
                 tool_name: tool_call.name.clone(),
                 args: tool_call.arguments.clone(),
             });
-            
+
             let prepared = self.prepare_tool_call(&tool_call).await;
-            
+
             let finalized = if let Some(result) = prepared.immediate_result {
                 FinalizedToolCall {
                     tool_call,
@@ -528,43 +575,51 @@ impl AgentLoop {
                 }
             } else {
                 let executed = self.execute_prepared_tool_call(&prepared, emit).await;
-                
+
                 let mut result = executed.result;
                 let mut is_error = executed.is_error;
-                
+
                 if let Some(ref hook) = self.after_tool_call {
                     if let Some(modified) = hook(&tool_call.name, &result).await.ok().flatten() {
                         result = modified;
                         is_error = !result.success;
                     }
                 }
-                
+
                 FinalizedToolCall {
                     tool_call,
                     result,
                     is_error,
                 }
             };
-            
+
             emit(AgentEvent::ToolExecutionEnd {
                 tool_call_id: finalized.tool_call.id.clone(),
                 tool_name: finalized.tool_call.name.clone(),
                 result: oxi_ai::ToolResult {
                     tool_call_id: finalized.tool_call.id.clone(),
                     content: finalized.result.output.clone(),
-                    status: if finalized.is_error { "error".to_string() } else { "success".to_string() },
+                    status: if finalized.is_error {
+                        "error".to_string()
+                    } else {
+                        "success".to_string()
+                    },
                 },
                 is_error: finalized.is_error,
             });
-            
+
             let tool_result_message = create_tool_result_message(&finalized);
-            emit(AgentEvent::MessageStart { message: Message::ToolResult(tool_result_message.clone()) });
-            emit(AgentEvent::MessageEnd { message: Message::ToolResult(tool_result_message.clone()) });
-            
+            emit(AgentEvent::MessageStart {
+                message: Message::ToolResult(tool_result_message.clone()),
+            });
+            emit(AgentEvent::MessageEnd {
+                message: Message::ToolResult(tool_result_message.clone()),
+            });
+
             finalized_calls.push(finalized);
             tool_result_messages.push(tool_result_message);
         }
-        
+
         Ok(ExecutedToolCallBatch {
             messages: tool_result_messages,
             terminate: should_terminate_batch(&finalized_calls),
@@ -579,48 +634,53 @@ impl AgentLoop {
         emit: &EmitFn,
     ) -> Result<ExecutedToolCallBatch> {
         let mut finalized_calls: Vec<FinalizedToolCallEntry> = Vec::new();
-        
+
         for tool_call in tool_calls {
             emit(AgentEvent::ToolExecutionStart {
                 tool_call_id: tool_call.id.clone(),
                 tool_name: tool_call.name.clone(),
                 args: tool_call.arguments.clone(),
             });
-            
+
             let prepared = self.prepare_tool_call(&tool_call).await;
-            
+
             if let Some(result) = prepared.immediate_result {
                 let finalized = FinalizedToolCall {
                     tool_call,
                     result,
                     is_error: prepared.is_error,
                 };
-                
+
                 emit(AgentEvent::ToolExecutionEnd {
                     tool_call_id: finalized.tool_call.id.clone(),
                     tool_name: finalized.tool_call.name.clone(),
                     result: oxi_ai::ToolResult {
                         tool_call_id: finalized.tool_call.id.clone(),
                         content: finalized.result.output.clone(),
-                        status: if finalized.is_error { "error".to_string() } else { "success".to_string() },
+                        status: if finalized.is_error {
+                            "error".to_string()
+                        } else {
+                            "success".to_string()
+                        },
                     },
                     is_error: finalized.is_error,
                 });
-                
+
                 finalized_calls.push(FinalizedToolCallEntry::Immediate(finalized));
             } else {
                 let before_hook = self.before_tool_call.clone();
                 let after_hook = self.after_tool_call.clone();
                 let emit_clone = emit.clone();
-                
+
                 finalized_calls.push(FinalizedToolCallEntry::Future(Box::pin(async move {
                     let executed = Self::execute_prepared_tool_call_static(
                         tool_call.clone(),
                         before_hook.clone(),
                         after_hook.clone(),
                         emit_clone.clone(),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     FinalizedToolCall {
                         tool_call,
                         result: executed.result,
@@ -629,7 +689,7 @@ impl AgentLoop {
                 })));
             }
         }
-        
+
         let mut ordered_finalized_calls = Vec::new();
         for entry in finalized_calls {
             match entry {
@@ -637,15 +697,19 @@ impl AgentLoop {
                 FinalizedToolCallEntry::Future(f) => ordered_finalized_calls.push(f.await),
             }
         }
-        
+
         let mut tool_result_messages = Vec::new();
         for finalized in &ordered_finalized_calls {
             let tool_result_message = create_tool_result_message(finalized);
-            emit(AgentEvent::MessageStart { message: Message::ToolResult(tool_result_message.clone()) });
-            emit(AgentEvent::MessageEnd { message: Message::ToolResult(tool_result_message.clone()) });
+            emit(AgentEvent::MessageStart {
+                message: Message::ToolResult(tool_result_message.clone()),
+            });
+            emit(AgentEvent::MessageEnd {
+                message: Message::ToolResult(tool_result_message.clone()),
+            });
             tool_result_messages.push(tool_result_message);
         }
-        
+
         Ok(ExecutedToolCallBatch {
             messages: tool_result_messages,
             terminate: should_terminate_batch(&ordered_finalized_calls),
@@ -660,7 +724,7 @@ impl AgentLoop {
     ) -> ExecutedToolCallOutcome {
         let tool_call_id = tool_call.id.clone();
         let tool_name = tool_call.name.clone();
-        
+
         emit(AgentEvent::ToolExecutionEnd {
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.clone(),
@@ -671,9 +735,9 @@ impl AgentLoop {
             },
             is_error: false,
         });
-        
-        ExecutedToolCallOutcome { 
-            result: AgentToolResult::success(""), 
+
+        ExecutedToolCallOutcome {
+            result: AgentToolResult::success(""),
             is_error: false,
         }
     }
@@ -695,9 +759,9 @@ impl AgentLoop {
                 };
             }
         };
-        
+
         let validated_args = tool_call.arguments.clone();
-        
+
         if let Some(ref hook) = self.before_tool_call {
             if let Some(blocked) = hook(&tool_call.name, &validated_args).await.ok().flatten() {
                 return PreparedToolCallOutcome {
@@ -710,7 +774,7 @@ impl AgentLoop {
                 };
             }
         }
-        
+
         PreparedToolCallOutcome {
             kind: PreparedToolCallKind::Prepared,
             immediate_result: None,
@@ -728,25 +792,29 @@ impl AgentLoop {
     ) -> ExecutedToolCallOutcome {
         let tool_call_id = prepared.tool_call.id.clone();
         let tool_name = prepared.tool_call.name.clone();
-        
+
         let mut result = AgentToolResult::success("");
         let mut is_error = false;
-        
+
         if let Some(ref tool) = prepared.tool {
             let tool_call_id_clone = tool_call_id.clone();
             let emit_clone = emit.clone();
-            
-            let progress_cb: Option<Arc<dyn Fn(String) + Send + Sync>> = Some(Arc::new(move |msg: String| {
-                emit_clone(AgentEvent::ToolExecutionUpdate {
-                    tool_call_id: tool_call_id_clone.clone(),
-                    tool_name: tool_name.clone(),
-                    partial_result: msg,
-                });
-            }));
-            
+
+            let progress_cb: Option<Arc<dyn Fn(String) + Send + Sync>> =
+                Some(Arc::new(move |msg: String| {
+                    emit_clone(AgentEvent::ToolExecutionUpdate {
+                        tool_call_id: tool_call_id_clone.clone(),
+                        tool_name: tool_name.clone(),
+                        partial_result: msg,
+                    });
+                }));
+
             let _ = progress_cb;
-            
-            match tool.execute(&tool_call_id, prepared.args.clone(), None).await {
+
+            match tool
+                .execute(&tool_call_id, prepared.args.clone(), None)
+                .await
+            {
                 Ok(r) => result = r,
                 Err(e) => {
                     result = AgentToolResult::error(e);
@@ -754,7 +822,7 @@ impl AgentLoop {
                 }
             }
         }
-        
+
         ExecutedToolCallOutcome { result, is_error }
     }
 
@@ -765,17 +833,24 @@ impl AgentLoop {
         } else {
             oxi_ai::get_model("anthropic", &self.config.model_id)
         };
-        
+
         model.ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
     }
 
-    fn should_stop_after_turn(&self, messages: &[Message], assistant_message: &AssistantMessage) -> bool {
-        let current_iteration = messages.iter().filter(|m| matches!(m, Message::Assistant(_))).count();
-        
+    fn should_stop_after_turn(
+        &self,
+        messages: &[Message],
+        assistant_message: &AssistantMessage,
+    ) -> bool {
+        let current_iteration = messages
+            .iter()
+            .filter(|m| matches!(m, Message::Assistant(_)))
+            .count();
+
         if current_iteration >= self.config.max_iterations {
             return true;
         }
-        
+
         match assistant_message.stop_reason {
             StopReason::Stop | StopReason::Length => true,
             _ => false,
@@ -784,13 +859,13 @@ impl AgentLoop {
 
     fn extract_tool_calls(&self, message: &AssistantMessage) -> Vec<ToolCall> {
         let mut tool_calls = Vec::new();
-        
+
         for block in &message.content {
             if let ContentBlock::ToolCall(tc) = block {
                 tool_calls.push(tc.clone());
             }
         }
-        
+
         tool_calls
     }
 
@@ -805,7 +880,10 @@ impl AgentLoop {
 
         for attempt in 0..=MAX_RETRIES {
             match self.provider.stream(model, context, options.clone()).await {
-                Ok(stream) => return Ok(Box::pin(stream) as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>),
+                Ok(stream) => {
+                    return Ok(Box::pin(stream)
+                        as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+                }
                 Err(e) => {
                     let msg = e.to_string();
                     let is_rate_limit = matches!(e, oxi_ai::ProviderError::HttpError(429, _));
@@ -818,13 +896,13 @@ impl AgentLoop {
 
                     if attempt < MAX_RETRIES {
                         let delay = BACKOFF_BASE_SECS.pow(attempt as u32 + 1);
-                        
+
                         let final_delay = if let Some(max_delay) = self.config.max_retry_delay_ms {
                             delay.min(max_delay)
                         } else {
                             delay
                         };
-                        
+
                         emit(AgentEvent::Retry {
                             attempt: attempt + 1,
                             max_retries: MAX_RETRIES,
@@ -840,7 +918,8 @@ impl AgentLoop {
         Err(AgentError::RetriesExhausted {
             attempts: MAX_RETRIES,
             last_error: last_err.unwrap_or_default(),
-        }.into())
+        }
+        .into())
     }
 }
 
@@ -887,9 +966,11 @@ fn create_tool_result_message(finalized: &FinalizedToolCall) -> oxi_ai::ToolResu
     let content_blocks = if let Some(ref blocks) = finalized.result.content_blocks {
         blocks.clone()
     } else {
-        vec![ContentBlock::Text(TextContent::new(finalized.result.output.clone()))]
+        vec![ContentBlock::Text(TextContent::new(
+            finalized.result.output.clone(),
+        ))]
     };
-    
+
     oxi_ai::ToolResultMessage::new(
         finalized.tool_call.id.clone(),
         &finalized.tool_call.name,
@@ -900,18 +981,18 @@ fn create_tool_result_message(finalized: &FinalizedToolCall) -> oxi_ai::ToolResu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::ToolRegistry;
     use crate::state::SharedState;
-    use oxi_ai::Provider;
-    use std::sync::{Arc, Mutex};
-    use futures::Stream;
-    use std::pin::Pin;
+    use crate::tools::ToolRegistry;
     use async_trait::async_trait;
-    
+    use futures::Stream;
+    use oxi_ai::Provider;
+    use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
+
     struct MockProvider {
         response: String,
     }
-    
+
     #[async_trait]
     impl Provider for MockProvider {
         async fn stream(
@@ -923,33 +1004,30 @@ mod tests {
             Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>,
             oxi_ai::ProviderError,
         > {
-            let mut assistant = oxi_ai::AssistantMessage::new(
-                oxi_ai::Api::AnthropicMessages,
-                "mock",
-                "mock-model",
-            );
+            let mut assistant =
+                oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
             assistant.content = vec![ContentBlock::Text(TextContent::new(self.response.clone()))];
-            
+
             let stream = futures::stream::once(async move {
-                ProviderEvent::Done { 
+                ProviderEvent::Done {
                     reason: StopReason::Stop,
-                    message: assistant, 
+                    message: assistant,
                 }
             });
-            
+
             Ok(Box::pin(stream))
         }
-        
+
         fn name(&self) -> &str {
             "mock"
         }
     }
-    
+
     fn create_test_loop() -> AgentLoop {
         let provider = Arc::new(MockProvider {
             response: "Test response".to_string(),
         });
-        
+
         let config = AgentLoopConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
             system_prompt: None,
@@ -965,32 +1043,42 @@ mod tests {
             compact_on_start: false,
             max_retry_delay_ms: None,
         };
-        
+
         let tools = Arc::new(ToolRegistry::new());
         let state = SharedState::new();
-        
+
         AgentLoop::new(provider, config, tools, state)
     }
-    
+
     #[tokio::test]
     async fn test_agent_loop_basic_run() {
         let loop_instance = create_test_loop();
         let mut events = Vec::new();
-        
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
-        
+
+        let result = loop_instance
+            .run("Hello".to_string(), |e| events.push(e))
+            .await;
+
         assert!(result.is_ok());
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::TurnStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::TurnEnd { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentStart { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnStart { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnEnd { .. })));
     }
-    
+
     #[test]
     fn test_tool_execution_mode_default() {
         assert_eq!(ToolExecutionMode::default(), ToolExecutionMode::Parallel);
     }
-    
+
     #[test]
     fn test_agent_loop_config_defaults() {
         let config = AgentLoopConfig {
@@ -1008,60 +1096,73 @@ mod tests {
             compact_on_start: false,
             max_retry_delay_ms: None,
         };
-        
+
         assert_eq!(config.max_iterations, 10);
         assert_eq!(config.tool_execution, ToolExecutionMode::Parallel);
     }
-    
+
     #[tokio::test]
     async fn test_agent_loop_steering_queue() {
         let loop_instance = create_test_loop();
-        
+
         loop_instance.steer(Message::User(UserMessage::new("Steering message 1")));
         loop_instance.steer(Message::User(UserMessage::new("Steering message 2")));
-        
+
         let mut events = Vec::new();
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
-        
+        let result = loop_instance
+            .run("Hello".to_string(), |e| events.push(e))
+            .await;
+
         assert!(result.is_ok());
-        
-        let steering_count = events.iter().filter(|e| matches!(e, AgentEvent::SteeringMessage { .. })).count();
+
+        let steering_count = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
+            .count();
         assert_eq!(steering_count, 2);
     }
-    
+
     #[test]
     fn test_clear_queues() {
         let loop_instance = create_test_loop();
-        
+
         loop_instance.steer(Message::User(UserMessage::new("steer")));
         loop_instance.follow_up(Message::User(UserMessage::new("follow")));
-        
+
         loop_instance.clear_steering_queue();
         loop_instance.clear_follow_up_queue();
     }
-    
+
     #[tokio::test]
     async fn test_agent_loop_message_events() {
         let loop_instance = create_test_loop();
         let mut events = Vec::new();
-        
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
-        
+
+        let result = loop_instance
+            .run("Hello".to_string(), |e| events.push(e))
+            .await;
+
         assert!(result.is_ok());
-        
-        let message_starts = events.iter().filter(|e| matches!(e, AgentEvent::MessageStart { .. })).count();
-        let message_ends = events.iter().filter(|e| matches!(e, AgentEvent::MessageEnd { .. })).count();
-        
+
+        let message_starts = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::MessageStart { .. }))
+            .count();
+        let message_ends = events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::MessageEnd { .. }))
+            .count();
+
         assert!(message_starts >= 1);
         assert!(message_ends >= 1);
     }
-    
+
     #[tokio::test]
     async fn test_agent_loop_sequential_mode() {
         let provider = Arc::new(MockProvider {
             response: "Response".to_string(),
         });
-        
+
         let config = AgentLoopConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
             system_prompt: None,
@@ -1077,44 +1178,57 @@ mod tests {
             compact_on_start: false,
             max_retry_delay_ms: None,
         };
-        
+
         let tools = Arc::new(ToolRegistry::new());
         let state = SharedState::new();
-        
+
         let loop_instance = AgentLoop::new(provider, config, tools, state);
         let mut events = Vec::new();
-        
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
-        
+
+        let result = loop_instance
+            .run("Hello".to_string(), |e| events.push(e))
+            .await;
+
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_turn_start_event_type() {
         let event = AgentEvent::TurnStart { turn_number: 1 };
         assert_eq!(event.type_name(), "turn_start");
     }
-    
+
     #[test]
     fn test_agent_end_event_type() {
-        let event = AgentEvent::AgentEnd { messages: vec![], stop_reason: None };
+        let event = AgentEvent::AgentEnd {
+            messages: vec![],
+            stop_reason: None,
+        };
         assert_eq!(event.type_name(), "agent_end");
         assert!(event.is_terminal());
     }
-    
+
     #[test]
     fn test_non_terminal_events() {
         assert!(!AgentEvent::TurnStart { turn_number: 1 }.is_terminal());
         let user_msg = Message::User(UserMessage::new("test"));
-        assert!(!AgentEvent::TurnEnd { turn_number: 1, assistant_message: user_msg.clone(), tool_results: vec![] }.is_terminal());
-        assert!(!AgentEvent::MessageStart { message: user_msg.clone() }.is_terminal());
+        assert!(!AgentEvent::TurnEnd {
+            turn_number: 1,
+            assistant_message: user_msg.clone(),
+            tool_results: vec![]
+        }
+        .is_terminal());
+        assert!(!AgentEvent::MessageStart {
+            message: user_msg.clone()
+        }
+        .is_terminal());
         assert!(!AgentEvent::MessageEnd { message: user_msg }.is_terminal());
     }
-    
+
     #[tokio::test]
     async fn test_agent_loop_error_handling() {
         struct ErrorProvider;
-        
+
         #[async_trait]
         impl Provider for ErrorProvider {
             async fn stream(
@@ -1128,14 +1242,14 @@ mod tests {
             > {
                 Err(oxi_ai::ProviderError::Other("Test error".to_string()))
             }
-            
+
             fn name(&self) -> &str {
                 "error"
             }
         }
-        
+
         let provider = Arc::new(ErrorProvider);
-        
+
         let config = AgentLoopConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
             system_prompt: None,
@@ -1151,22 +1265,24 @@ mod tests {
             compact_on_start: false,
             max_retry_delay_ms: None,
         };
-        
+
         let tools = Arc::new(ToolRegistry::new());
         let state = SharedState::new();
-        
+
         let loop_instance = AgentLoop::new(provider, config, tools, state);
         let mut events = Vec::new();
-        
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
-        
+
+        let result = loop_instance
+            .run("Hello".to_string(), |e| events.push(e))
+            .await;
+
         assert!(events.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
     }
-    
+
     #[tokio::test]
     async fn test_agent_loop_max_iterations() {
         struct InfiniteProvider;
-        
+
         #[async_trait]
         impl Provider for InfiniteProvider {
             async fn stream(
@@ -1185,24 +1301,24 @@ mod tests {
                 );
                 assistant.content = vec![ContentBlock::Text(TextContent::new("Response"))];
                 assistant.stop_reason = StopReason::Stop;
-                
+
                 let stream = futures::stream::once(async move {
-                    ProviderEvent::Done { 
+                    ProviderEvent::Done {
                         reason: StopReason::Stop,
-                        message: assistant, 
+                        message: assistant,
                     }
                 });
-                
+
                 Ok(Box::pin(stream))
             }
-            
+
             fn name(&self) -> &str {
                 "infinite"
             }
         }
-        
+
         let provider = Arc::new(InfiniteProvider);
-        
+
         let config = AgentLoopConfig {
             model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
             system_prompt: None,
@@ -1218,27 +1334,31 @@ mod tests {
             compact_on_start: false,
             max_retry_delay_ms: None,
         };
-        
+
         let tools = Arc::new(ToolRegistry::new());
         let state = SharedState::new();
-        
+
         let loop_instance = AgentLoop::new(provider, config, tools, state);
         let mut events = Vec::new();
-        
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
-        
+
+        let result = loop_instance
+            .run("Hello".to_string(), |e| events.push(e))
+            .await;
+
         assert!(result.is_ok());
     }
-    
+
     #[tokio::test]
     async fn test_agent_loop_follow_up_queue() {
         let loop_instance = create_test_loop();
-        
+
         loop_instance.follow_up(Message::User(UserMessage::new("Follow-up message")));
-        
+
         let mut events = Vec::new();
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
-        
+        let result = loop_instance
+            .run("Hello".to_string(), |e| events.push(e))
+            .await;
+
         assert!(result.is_ok());
     }
 }
