@@ -15,6 +15,9 @@ pub mod templates;
 pub mod tui_components;
 pub mod tui_interactive;
 
+// RPC mode for headless operation
+pub mod rpc_mode;
+
 // Utility modules
 pub mod auth_storage;
 pub mod auto_compaction;
