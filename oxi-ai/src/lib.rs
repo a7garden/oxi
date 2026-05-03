@@ -13,6 +13,8 @@ mod high_level;
 mod compaction;
 mod transform;
 pub mod oauth;
+pub mod env_api_keys;
+pub mod provider_registry;
 
 pub mod prelude {
     pub use crate::types::*;
@@ -51,6 +53,12 @@ pub use model_registry::{ModelRegistry, get_model, get_providers, get_models};
 // Static model database (comprehensive, auto-generated from pi-mono)
 pub mod model_db;
 pub use model_db::{ModelEntry, get_model_entry, get_provider_models, get_all_models, model_count, search_models, get_reasoning_models, get_vision_models, get_cheapest_models};
+
+// Environment-based API key resolution
+pub use env_api_keys::{get_env_api_key, find_env_keys, get_all_env_keys};
+
+// Provider authentication registry
+pub use provider_registry::{ProviderAuthRegistry, ProviderAuth, OAuthTokenInfo};
 
 /// Re-export AssistantMessage from messages
 pub use messages::AssistantMessage;

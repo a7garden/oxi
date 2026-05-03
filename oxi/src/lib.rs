@@ -27,6 +27,12 @@ pub mod bash_executor;
 pub mod diagnostics;
 pub mod resource_loader;
 pub mod footer_data;
+pub mod clipboard_image;
+pub mod clipboard_write;
+pub mod image_resize;
+pub mod image_convert;
+pub mod frontmatter;
+pub mod file_processor;
 
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
