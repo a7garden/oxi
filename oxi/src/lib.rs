@@ -9,6 +9,7 @@ pub mod settings;
 pub mod skills;
 pub mod templates;
 pub mod tui_interactive;
+pub mod tui_components;
 
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
