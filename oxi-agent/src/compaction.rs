@@ -1,50 +1,21 @@
 //! Context compaction events
-//!
-//! Events emitted during the compaction process.
 
 use oxi_ai::CompactedContext as AiCompactedContext;
+use serde::{Deserialize, Serialize};
 
-/// Event emitted during compaction
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CompactionEvent {
-    /// Compaction was triggered
-    Triggered {
-        /// Estimated context tokens at trigger time
-        context_tokens: usize,
-        /// Current iteration
-        iteration: usize,
-    },
-    /// Compaction started
-    Started {
-        /// Number of messages being compacted
-        message_count: usize,
-    },
-    /// Compaction completed
-    Completed {
-        /// The compacted context
-        result: CompactedContext,
-        /// Time taken in milliseconds
-        duration_ms: u64,
-    },
-    /// Compaction was skipped (no compactor configured)
-    Skipped {
-        reason: String,
-    },
-    /// Compaction failed
-    Failed {
-        /// Error message
-        error: String,
-    },
+    Triggered { context_tokens: usize, iteration: usize },
+    Started { message_count: usize },
+    Completed { result: CompactedContext, duration_ms: u64 },
+    Skipped { reason: String },
+    Failed { error: String },
 }
 
-/// Compacted context wrapper for oxi-agent
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactedContext {
-    /// Summary of the compacted messages
     pub summary: String,
-    /// Messages that were kept (typically recent ones)
     pub kept_messages: Vec<oxi_ai::Message>,
-    /// Number of messages that were compacted
     pub compacted_count: usize,
 }
 
