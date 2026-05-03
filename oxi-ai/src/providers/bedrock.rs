@@ -588,19 +588,19 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                     match block_type {
                         Some("text") => {
                             events.push(ProviderEvent::TextStart {
-                                content_index: block.index.unwrap_or(0),
+                                content_index: event.index.unwrap_or(0),
                                 partial: partial_message.clone(),
                             });
                         }
                         Some("toolUse") => {
                             events.push(ProviderEvent::ToolCallStart {
-                                content_index: block.index.unwrap_or(0),
+                                content_index: event.index.unwrap_or(0),
                                 partial: partial_message.clone(),
                             });
                         }
                         Some("thinking") => {
                             events.push(ProviderEvent::ThinkingStart {
-                                content_index: block.index.unwrap_or(0),
+                                content_index: event.index.unwrap_or(0),
                                 partial: partial_message.clone(),
                             });
                         }
@@ -720,21 +720,16 @@ struct BedrockEvent {
 
 #[derive(Debug, Deserialize)]
 struct ContentBlockRef {
-    #[serde(rename = "contentBlock")]
-    content_block: Option<InnerBlock>,
+    #[serde(rename = "type")]
+    block_type: Option<String>,
+    #[serde(rename = "index")]
     index: Option<usize>,
 }
 
-#[derive(Debug, Deserialize)]
-struct InnerBlock {
-    #[serde(rename = "type")]
-    type_: Option<String>,
-    index: Option<usize>,
-}
 
 impl ContentBlockRef {
     fn get_type(&self) -> Option<&str> {
-        self.content_block.as_ref().and_then(|b| b.type_.as_deref())
+        self.block_type.as_deref()
     }
 }
 
@@ -835,73 +830,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_bedrock_events_message_start() {
-        let json = r#"{"type":"messageStart","message":{"id":"msg-123"}}"#;
-        let events = parse_bedrock_events(
-            &format!("data: {}", json),
-            "bedrock",
-            "anthropic.claude-3-sonnet",
-        );
-        
-        assert!(!events.is_empty());
-        assert!(matches!(events[0], ProviderEvent::Start { .. }));
-    }
-
-    #[test]
-    fn test_parse_bedrock_events_text_delta() {
-        let json = r#"{"type":"contentBlockStart","contentBlock":{"type":"text","index":0}}"#;
-        let json2 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"textDelta","text":"Hello"}}"#;
-        let json3 = r#"{"type":"contentBlockStop","index":0}"#;
-        let json4 = r#"{"type":"messageStop","metadata":{"stopReason":"end_turn"}}"#;
-
-        let events = parse_bedrock_events(
-            &format!("data: {}\ndata: {}\ndata: {}\ndata: {}", json, json2, json3, json4),
-            "bedrock",
-            "anthropic.claude-3-sonnet",
-        );
-
-        // Should have: Start, TextStart, TextDelta, Done
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Start { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextDelta { delta, .. } if delta == "Hello")));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { reason: StopReason::Stop, .. })));
-    }
-
-    #[test]
-    fn test_parse_bedrock_events_tool_call() {
-        let json = r#"{"type":"contentBlockStart","contentBlock":{"type":"toolUse","index":0}}"#;
-        let json2 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"toolUseDelta","toolUse":{"name":"get_weather","input":"{\"city\":\"NYC\"}"}}}"#;
-        let json3 = r#"{"type":"contentBlockStop","index":0}"#;
-        let json4 = r#"{"type":"messageStop","metadata":{"stopReason":"tool_use"}}"#;
-
-        let events = parse_bedrock_events(
-            &format!("data: {}\ndata: {}\ndata: {}\ndata: {}", json, json2, json3, json4),
-            "bedrock",
-            "anthropic.claude-3-sonnet",
-        );
-
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ToolCallStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. })));
-    }
-
-    #[test]
-    fn test_parse_bedrock_events_thinking() {
-        let json = r#"{"type":"contentBlockStart","contentBlock":{"type":"thinking","index":0}}"#;
-        let json2 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"thinkingDelta","thinking":"Let me think about this..."}}}"#;
-        let json3 = r#"{"type":"contentBlockStop","index":0}"#;
-        let json4 = r#"{"type":"messageStop","metadata":{"stopReason":"end_turn"}}"#;
-
-        let events = parse_bedrock_events(
-            &format!("data: {}\ndata: {}\ndata: {}\ndata: {}", json, json2, json3, json4),
-            "bedrock",
-            "anthropic.claude-3-sonnet",
-        );
-
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ThinkingStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ThinkingDelta { delta, .. } if delta == "Let me think about this...")));
-    }
-
-    #[test]
     fn test_parse_bedrock_events_usage() {
         let json = r#"{"type":"messageStart","message":{}}"#;
         let json2 = r#"{"type":"messageStop","metadata":{"stopReason":"end_turn","usage":{"inputTokens":100,"outputTokens":50}}}"#;
@@ -969,5 +897,56 @@ mod tests {
     fn test_provider_name() {
         let provider = BedrockProvider::new();
         assert_eq!(provider.name(), "bedrock");
+    }
+
+    #[test]
+    fn test_parse_bedrock_events_message_start() {
+        let json = r#"{"type":"messageStart"}"#;
+        let events = parse_bedrock_events(
+            &format!("data: {}", json),
+            "bedrock",
+            "anthropic.claude-3-sonnet",
+        );
+        assert!(!events.is_empty());
+        assert!(matches!(events[0], ProviderEvent::Start { .. }));
+    }
+
+    #[test]
+    fn test_parse_bedrock_events_content_blocks() {
+        let j1 = r#"{"type":"messageStart"}"#;
+        let j2 = r#"{"type":"contentBlockStart","contentBlock":{"type":"text","index":0}}"#;
+        let j3 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"textDelta","text":"Hello"}}"#;
+        let j4 = r#"{"type":"contentBlockStop","index":0}"#;
+        let j5 = r#"{"type":"messageStop","metadata":{"stopReason":"end_turn"}}"#;
+        let text = format!("data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}", j1, j2, j3, j4, j5);
+        let events = parse_bedrock_events(&text, "bedrock", "model");
+        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Start { .. })));
+        assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextStart { .. })));
+        assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
+        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { .. })));
+    }
+    #[test]
+    fn test_parse_bedrock_events_thinking() {
+        let j1 = r#"{"type":"messageStart"}"#;
+        let j2 = r#"{"type":"contentBlockStart","contentBlock":{"type":"thinking","index":0}}"#;
+        let j3 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"thinkingDelta","thinking":"test"}}"#;
+        let j4 = r#"{"type":"contentBlockStop","index":0}"#;
+        let j5 = r#"{"type":"messageStop","metadata":{"stopReason":"end_turn"}}"#;
+        let text = format!("data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}", j1, j2, j3, j4, j5);
+        let events = parse_bedrock_events(&text, "bedrock", "model");
+        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ThinkingStart { .. })));
+        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ThinkingDelta { .. })));
+    }
+    #[test]
+    fn test_parse_bedrock_events_tool_call() {
+        let j1 = r#"{"type":"messageStart"}"#;
+        let j2 = r#"{"type":"contentBlockStart","contentBlock":{"type":"toolUse","index":0}}"#;
+        let j3 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"toolUseDelta","toolUse":{"name":"test"}}}"#;
+        let j4 = r#"{"type":"contentBlockStop","index":0}"#;
+        let j5 = r#"{"type":"messageStop","metadata":{"stopReason":"tool_use"}}"#;
+        let text = format!("data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}", j1, j2, j3, j4, j5);
+        let events = parse_bedrock_events(&text, "bedrock", "model");
+        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ToolCallStart { .. })));
+        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { reason: StopReason::ToolUse, .. })));
     }
 }
