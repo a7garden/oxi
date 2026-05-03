@@ -49,7 +49,9 @@ async fn test_read_file_basic() {
 async fn test_read_file_multiline() {
     let dir = create_temp_dir("read_multiline").await;
     let file_path = format!("{}/multi.txt", dir);
-    fs::write(&file_path, "line 1\nline 2\nline 3").await.unwrap();
+    fs::write(&file_path, "line 1\nline 2\nline 3")
+        .await
+        .unwrap();
 
     let tool = ReadTool::new();
     let result = execute_tool(&tool, json!({ "path": file_path })).await;
@@ -64,7 +66,13 @@ async fn test_read_file_multiline() {
 #[tokio::test]
 async fn test_read_file_not_found() {
     let tool = ReadTool::new();
-    let result = tool.execute("test_call", json!({ "path": "/tmp/oxi_nonexistent_file_12345.txt" }), None).await;
+    let result = tool
+        .execute(
+            "test_call",
+            json!({ "path": "/tmp/oxi_nonexistent_file_12345.txt" }),
+            None,
+        )
+        .await;
     // ReadTool returns Err for file not found
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -75,7 +83,9 @@ async fn test_read_file_not_found() {
 async fn test_read_directory_error() {
     let dir = create_temp_dir("read_dir_error").await;
     let tool = ReadTool::new();
-    let result = tool.execute("test_call", json!({ "path": dir }), None).await;
+    let result = tool
+        .execute("test_call", json!({ "path": dir }), None)
+        .await;
     // ReadTool returns Err for directory
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -87,7 +97,9 @@ async fn test_read_directory_error() {
 #[tokio::test]
 async fn test_read_path_traversal_blocked() {
     let tool = ReadTool::new();
-    let result = tool.execute("test_call", json!({ "path": "../../etc/passwd" }), None).await;
+    let result = tool
+        .execute("test_call", json!({ "path": "../../etc/passwd" }), None)
+        .await;
     // ReadTool returns Err for path traversal
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("traversal"));
@@ -124,10 +136,14 @@ async fn test_write_file_basic() {
     let file_path = format!("{}/output.txt", dir);
 
     let tool = WriteTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": file_path,
-        "content": "Hello from write tool"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": file_path,
+            "content": "Hello from write tool"
+        }),
+    )
+    .await;
     assert!(result.success);
 
     // Verify content
@@ -143,10 +159,14 @@ async fn test_write_creates_parent_dirs() {
     let file_path = format!("{}/a/b/c/deep.txt", dir);
 
     let tool = WriteTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": file_path,
-        "content": "deeply nested"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": file_path,
+            "content": "deeply nested"
+        }),
+    )
+    .await;
     assert!(result.success);
 
     let content = fs::read_to_string(&file_path).await.unwrap();
@@ -162,10 +182,14 @@ async fn test_write_overwrites_existing() {
     fs::write(&file_path, "original").await.unwrap();
 
     let tool = WriteTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": file_path,
-        "content": "replaced"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": file_path,
+            "content": "replaced"
+        }),
+    )
+    .await;
     assert!(result.success);
 
     let content = fs::read_to_string(&file_path).await.unwrap();
@@ -181,11 +205,15 @@ async fn test_write_append_mode() {
     fs::write(&file_path, "line 1\n").await.unwrap();
 
     let tool = WriteTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": file_path,
-        "content": "line 2\n",
-        "append": true
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": file_path,
+            "content": "line 2\n",
+            "append": true
+        }),
+    )
+    .await;
     assert!(result.success);
 
     let content = fs::read_to_string(&file_path).await.unwrap();
@@ -197,10 +225,14 @@ async fn test_write_append_mode() {
 #[tokio::test]
 async fn test_write_path_traversal_blocked() {
     let tool = WriteTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": "../../tmp/evil.txt",
-        "content": "bad"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": "../../tmp/evil.txt",
+            "content": "bad"
+        }),
+    )
+    .await;
     assert!(!result.success);
     assert!(result.output.contains("traversal"));
 }
@@ -208,7 +240,9 @@ async fn test_write_path_traversal_blocked() {
 #[tokio::test]
 async fn test_write_missing_content_param() {
     let tool = WriteTool::new();
-    let result = tool.execute("test_call", json!({ "path": "/tmp/test.txt" }), None).await;
+    let result = tool
+        .execute("test_call", json!({ "path": "/tmp/test.txt" }), None)
+        .await;
     assert!(result.is_err());
 }
 
@@ -220,14 +254,20 @@ async fn test_write_missing_content_param() {
 async fn test_edit_basic_replacement() {
     let dir = create_temp_dir("edit_basic").await;
     let file_path = format!("{}/code.rs", dir);
-    fs::write(&file_path, "fn main() {\n    println!(\"hello\");\n}").await.unwrap();
+    fs::write(&file_path, "fn main() {\n    println!(\"hello\");\n}")
+        .await
+        .unwrap();
 
     let tool = EditTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": file_path,
-        "old_text": "hello",
-        "new_text": "world"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": file_path,
+            "old_text": "hello",
+            "new_text": "world"
+        }),
+    )
+    .await;
     assert!(result.success);
 
     let content = fs::read_to_string(&file_path).await.unwrap();
@@ -241,14 +281,20 @@ async fn test_edit_basic_replacement() {
 async fn test_edit_multiline_replacement() {
     let dir = create_temp_dir("edit_multiline").await;
     let file_path = format!("{}/file.txt", dir);
-    fs::write(&file_path, "old line 1\nold line 2\nold line 3").await.unwrap();
+    fs::write(&file_path, "old line 1\nold line 2\nold line 3")
+        .await
+        .unwrap();
 
     let tool = EditTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": file_path,
-        "old_text": "old line 1\nold line 2",
-        "new_text": "new line 1\nnew line 2"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": file_path,
+            "old_text": "old line 1\nold line 2",
+            "new_text": "new line 1\nnew line 2"
+        }),
+    )
+    .await;
     assert!(result.success);
 
     let content = fs::read_to_string(&file_path).await.unwrap();
@@ -266,11 +312,15 @@ async fn test_edit_text_not_found() {
     fs::write(&file_path, "some content").await.unwrap();
 
     let tool = EditTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": file_path,
-        "old_text": "nonexistent text",
-        "new_text": "replacement"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": file_path,
+            "old_text": "nonexistent text",
+            "new_text": "replacement"
+        }),
+    )
+    .await;
     assert!(!result.success);
     assert!(result.output.contains("not found"));
 
@@ -284,12 +334,16 @@ async fn test_edit_dry_run() {
     fs::write(&file_path, "original content").await.unwrap();
 
     let tool = EditTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": file_path,
-        "old_text": "original",
-        "new_text": "modified",
-        "dry_run": true
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": file_path,
+            "old_text": "original",
+            "new_text": "modified",
+            "dry_run": true
+        }),
+    )
+    .await;
     assert!(result.success);
 
     // File should NOT be changed
@@ -302,11 +356,15 @@ async fn test_edit_dry_run() {
 #[tokio::test]
 async fn test_edit_path_traversal() {
     let tool = EditTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": "../../etc/passwd",
-        "old_text": "root",
-        "new_text": "hacked"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": "../../etc/passwd",
+            "old_text": "root",
+            "new_text": "hacked"
+        }),
+    )
+    .await;
     assert!(!result.success);
     assert!(result.output.contains("traversal"));
 }
@@ -314,11 +372,15 @@ async fn test_edit_path_traversal() {
 #[tokio::test]
 async fn test_edit_file_not_found() {
     let tool = EditTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": "/tmp/oxi_nonexistent_12345.txt",
-        "old_text": "a",
-        "new_text": "b"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": "/tmp/oxi_nonexistent_12345.txt",
+            "old_text": "a",
+            "new_text": "b"
+        }),
+    )
+    .await;
     assert!(!result.success);
 }
 
@@ -352,9 +414,13 @@ async fn test_bash_stderr_captured() {
 #[tokio::test]
 async fn test_bash_pipe_and_chain() {
     let tool = BashTool::new();
-    let result = execute_tool(&tool, json!({
-        "command": "echo -e 'apple\\nbanana\\ncherry' | grep -c 'a'"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "command": "echo -e 'apple\\nbanana\\ncherry' | grep -c 'a'"
+        }),
+    )
+    .await;
     assert!(result.success);
     // Output may include timing info, but the count should be there
     assert!(result.output.contains("2"));
@@ -363,10 +429,14 @@ async fn test_bash_pipe_and_chain() {
 #[tokio::test]
 async fn test_bash_working_dir() {
     let tool = BashTool::new();
-    let result = execute_tool(&tool, json!({
-        "command": "pwd",
-        "cwd": "/tmp"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "command": "pwd",
+            "cwd": "/tmp"
+        }),
+    )
+    .await;
     assert!(result.success);
     // Output includes timing info, check for /tmp somewhere in the output
     assert!(result.output.contains("/tmp"));
@@ -396,13 +466,19 @@ async fn test_bash_missing_command_param() {
 async fn test_grep_find_pattern_in_file() {
     let dir = create_temp_dir("grep_basic").await;
     let file_path = format!("{}/test.txt", dir);
-    fs::write(&file_path, "hello world\nfoo bar\nhello again").await.unwrap();
+    fs::write(&file_path, "hello world\nfoo bar\nhello again")
+        .await
+        .unwrap();
 
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "hello",
-        "path": dir
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "hello",
+            "path": dir
+        }),
+    )
+    .await;
     assert!(result.success);
     assert!(result.output.contains("hello world"));
     assert!(result.output.contains("hello again"));
@@ -418,11 +494,15 @@ async fn test_grep_case_insensitive() {
     fs::write(&file_path, "Hello World").await.unwrap();
 
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "hello",
-        "path": dir,
-        "case_insensitive": true
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "hello",
+            "path": dir,
+            "case_insensitive": true
+        }),
+    )
+    .await;
     assert!(result.success);
     assert!(result.output.contains("Hello World"));
 
@@ -436,10 +516,14 @@ async fn test_grep_case_sensitive_default() {
     fs::write(&file_path, "Hello World").await.unwrap();
 
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "hello",
-        "path": dir
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "hello",
+            "path": dir
+        }),
+    )
+    .await;
     assert!(result.success);
     assert_eq!(result.output, "No matches found");
 
@@ -453,10 +537,14 @@ async fn test_grep_no_matches() {
     fs::write(&file_path, "hello world").await.unwrap();
 
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "nonexistent",
-        "path": dir
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "nonexistent",
+            "path": dir
+        }),
+    )
+    .await;
     assert!(result.success);
     assert_eq!(result.output, "No matches found");
 
@@ -468,14 +556,22 @@ async fn test_grep_recursive() {
     let dir = create_temp_dir("grep_recursive").await;
     let sub_dir = format!("{}/sub", dir);
     fs::create_dir_all(&sub_dir).await.unwrap();
-    fs::write(format!("{}/a.txt", dir), "pattern match A").await.unwrap();
-    fs::write(format!("{}/b.txt", sub_dir), "pattern match B").await.unwrap();
+    fs::write(format!("{}/a.txt", dir), "pattern match A")
+        .await
+        .unwrap();
+    fs::write(format!("{}/b.txt", sub_dir), "pattern match B")
+        .await
+        .unwrap();
 
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "pattern match",
-        "path": dir
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "pattern match",
+            "path": dir
+        }),
+    )
+    .await;
     assert!(result.success);
     assert!(result.output.contains("match A"));
     assert!(result.output.contains("match B"));
@@ -492,11 +588,15 @@ async fn test_grep_max_results() {
     fs::write(&file_path, content.join("\n")).await.unwrap();
 
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "match",
-        "path": dir,
-        "max_results": 5
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "match",
+            "path": dir,
+            "max_results": 5
+        }),
+    )
+    .await;
     assert!(result.success);
     // Should have at most 5 match lines
     let match_count = result.output.matches("match line").count();
@@ -509,13 +609,19 @@ async fn test_grep_max_results() {
 async fn test_grep_line_numbers() {
     let dir = create_temp_dir("grep_lines").await;
     let file_path = format!("{}/test.txt", dir);
-    fs::write(&file_path, "first\nsecond\nthird match").await.unwrap();
+    fs::write(&file_path, "first\nsecond\nthird match")
+        .await
+        .unwrap();
 
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "match",
-        "path": dir
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "match",
+            "path": dir
+        }),
+    )
+    .await;
     assert!(result.success);
     // Should include line number 3
     assert!(result.output.contains(":3:"));
@@ -526,10 +632,14 @@ async fn test_grep_line_numbers() {
 #[tokio::test]
 async fn test_grep_path_traversal() {
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "test",
-        "path": "../../etc"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "test",
+            "path": "../../etc"
+        }),
+    )
+    .await;
     assert!(!result.success);
     assert!(result.output.contains("traversal"));
 }
@@ -538,10 +648,14 @@ async fn test_grep_path_traversal() {
 async fn test_grep_invalid_regex() {
     let dir = create_temp_dir("grep_badregex").await;
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "[invalid",
-        "path": dir
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "[invalid",
+            "path": dir
+        }),
+    )
+    .await;
     assert!(!result.success);
     assert!(result.output.contains("Invalid pattern") || result.output.contains("Invalid regex"));
 
@@ -551,10 +665,14 @@ async fn test_grep_invalid_regex() {
 #[tokio::test]
 async fn test_grep_path_not_found() {
     let tool = GrepTool::new();
-    let result = execute_tool(&tool, json!({
-        "pattern": "test",
-        "path": "/tmp/oxi_nonexistent_dir_12345"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "pattern": "test",
+            "path": "/tmp/oxi_nonexistent_dir_12345"
+        }),
+    )
+    .await;
     assert!(!result.success);
     assert!(result.output.contains("not found"));
 }
@@ -569,7 +687,9 @@ async fn test_find_all_files() {
     fs::write(format!("{}/a.txt", dir), "").await.unwrap();
     fs::write(format!("{}/b.rs", dir), "").await.unwrap();
     fs::create_dir(format!("{}/subdir", dir)).await.unwrap();
-    fs::write(format!("{}/subdir/c.txt", dir), "").await.unwrap();
+    fs::write(format!("{}/subdir/c.txt", dir), "")
+        .await
+        .unwrap();
 
     let tool = FindTool::new();
     let result = execute_tool(&tool, json!({ "path": dir })).await;
@@ -591,10 +711,14 @@ async fn test_find_by_name_pattern() {
     fs::write(format!("{}/lib.rs", dir), "").await.unwrap();
 
     let tool = FindTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": dir,
-        "name": "*.rs"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": dir,
+            "name": "*.rs"
+        }),
+    )
+    .await;
     assert!(result.success);
     assert!(result.output.contains("main.rs"));
     assert!(result.output.contains("mod.rs"));
@@ -609,13 +733,19 @@ async fn test_find_directories_only() {
     let dir = create_temp_dir("find_dirs").await;
     fs::write(format!("{}/file.txt", dir), "").await.unwrap();
     fs::create_dir(format!("{}/mydir", dir)).await.unwrap();
-    fs::write(format!("{}/mydir/nested.txt", dir), "").await.unwrap();
+    fs::write(format!("{}/mydir/nested.txt", dir), "")
+        .await
+        .unwrap();
 
     let tool = FindTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": dir,
-        "type": "dir"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": dir,
+            "type": "dir"
+        }),
+    )
+    .await;
     assert!(result.success);
     assert!(result.output.contains("mydir"));
     assert!(!result.output.contains("file.txt"));
@@ -630,10 +760,14 @@ async fn test_find_files_only() {
     fs::create_dir(format!("{}/mydir", dir)).await.unwrap();
 
     let tool = FindTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": dir,
-        "type": "file"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": dir,
+            "type": "file"
+        }),
+    )
+    .await;
     assert!(result.success);
     assert!(result.output.contains("file.txt"));
     assert!(!result.output.contains("mydir"));
@@ -645,15 +779,25 @@ async fn test_find_files_only() {
 async fn test_find_max_depth() {
     let dir = create_temp_dir("find_depth").await;
     fs::create_dir_all(format!("{}/a/b/c", dir)).await.unwrap();
-    fs::write(format!("{}/a/level1.txt", dir), "").await.unwrap();
-    fs::write(format!("{}/a/b/level2.txt", dir), "").await.unwrap();
-    fs::write(format!("{}/a/b/c/level3.txt", dir), "").await.unwrap();
+    fs::write(format!("{}/a/level1.txt", dir), "")
+        .await
+        .unwrap();
+    fs::write(format!("{}/a/b/level2.txt", dir), "")
+        .await
+        .unwrap();
+    fs::write(format!("{}/a/b/c/level3.txt", dir), "")
+        .await
+        .unwrap();
 
     let tool = FindTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": dir,
-        "max_depth": 1
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": dir,
+            "max_depth": 1
+        }),
+    )
+    .await;
     assert!(result.success);
     assert!(result.output.contains("a/"));
     assert!(!result.output.contains("level2.txt"));
@@ -666,17 +810,27 @@ async fn test_find_max_depth() {
 async fn test_find_max_results() {
     let dir = create_temp_dir("find_max").await;
     for i in 0..20 {
-        fs::write(format!("{}/file_{:02}.txt", dir, i), "").await.unwrap();
+        fs::write(format!("{}/file_{:02}.txt", dir, i), "")
+            .await
+            .unwrap();
     }
 
     let tool = FindTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": dir,
-        "max_results": 5
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": dir,
+            "max_results": 5
+        }),
+    )
+    .await;
     assert!(result.success);
     // Count lines (excluding header)
-    let lines: Vec<&str> = result.output.lines().filter(|l| !l.is_empty() && !l.starts_with("Found")).collect();
+    let lines: Vec<&str> = result
+        .output
+        .lines()
+        .filter(|l| !l.is_empty() && !l.starts_with("Found"))
+        .collect();
     assert!(lines.len() <= 5);
 
     cleanup(&dir).await;
@@ -699,9 +853,13 @@ async fn test_find_not_a_directory() {
 #[tokio::test]
 async fn test_find_path_not_found() {
     let tool = FindTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": "/tmp/oxi_nonexistent_12345"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": "/tmp/oxi_nonexistent_12345"
+        }),
+    )
+    .await;
     assert!(!result.success);
     assert!(result.output.contains("not found"));
 }
@@ -719,7 +877,9 @@ async fn test_find_skips_hidden() {
     let dir = create_temp_dir("find_hidden").await;
     fs::write(format!("{}/visible.txt", dir), "").await.unwrap();
     fs::write(format!("{}/.hidden", dir), "").await.unwrap();
-    fs::create_dir(format!("{}/.hidden_dir", dir)).await.unwrap();
+    fs::create_dir(format!("{}/.hidden_dir", dir))
+        .await
+        .unwrap();
 
     let tool = FindTool::new();
     let result = execute_tool(&tool, json!({ "path": dir })).await;
@@ -772,10 +932,14 @@ async fn test_ls_all_shows_hidden() {
     fs::write(format!("{}/.hidden", dir), "").await.unwrap();
 
     let tool = LsTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": dir,
-        "all": true
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": dir,
+            "all": true
+        }),
+    )
+    .await;
     assert!(result.success);
     assert!(result.output.contains("visible.txt"));
     assert!(result.output.contains(".hidden"));
@@ -786,14 +950,20 @@ async fn test_ls_all_shows_hidden() {
 #[tokio::test]
 async fn test_ls_long_format() {
     let dir = create_temp_dir("ls_long").await;
-    fs::write(format!("{}/file.txt", dir), "hello world").await.unwrap();
+    fs::write(format!("{}/file.txt", dir), "hello world")
+        .await
+        .unwrap();
     fs::create_dir(format!("{}/subdir", dir)).await.unwrap();
 
     let tool = LsTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": dir,
-        "long": true
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": dir,
+            "long": true
+        }),
+    )
+    .await;
     assert!(result.success);
     // Should show size for files
     assert!(result.output.contains("11")); // "hello world" = 11 bytes
@@ -821,9 +991,13 @@ async fn test_ls_empty_directory() {
 #[tokio::test]
 async fn test_ls_path_not_found() {
     let tool = LsTool::new();
-    let result = execute_tool(&tool, json!({
-        "path": "/tmp/oxi_nonexistent_12345"
-    })).await;
+    let result = execute_tool(
+        &tool,
+        json!({
+            "path": "/tmp/oxi_nonexistent_12345"
+        }),
+    )
+    .await;
     assert!(!result.success);
     assert!(result.output.contains("not found"));
 }
@@ -904,9 +1078,15 @@ fn test_registry_custom_tool() {
 
     #[async_trait]
     impl AgentTool for CustomTool {
-        fn name(&self) -> &str { "custom" }
-        fn label(&self) -> &str { "Custom" }
-        fn description(&self) -> &str { "A custom test tool" }
+        fn name(&self) -> &str {
+            "custom"
+        }
+        fn label(&self) -> &str {
+            "Custom"
+        }
+        fn description(&self) -> &str {
+            "A custom test tool"
+        }
         fn parameters_schema(&self) -> Value {
             json!({ "type": "object", "properties": {} })
         }
@@ -943,9 +1123,21 @@ fn test_all_tools_have_valid_schemas() {
     let registry = ToolRegistry::with_builtins();
     for tool in registry.get_tools() {
         let schema = tool.parameters_schema();
-        assert!(schema.is_object(), "{} should have object schema", tool.name());
+        assert!(
+            schema.is_object(),
+            "{} should have object schema",
+            tool.name()
+        );
         let obj = schema.as_object().unwrap();
-        assert!(obj.contains_key("type"), "{} schema missing type", tool.name());
-        assert!(obj.contains_key("properties"), "{} schema missing properties", tool.name());
+        assert!(
+            obj.contains_key("type"),
+            "{} schema missing type",
+            tool.name()
+        );
+        assert!(
+            obj.contains_key("properties"),
+            "{} schema missing properties",
+            tool.name()
+        );
     }
 }

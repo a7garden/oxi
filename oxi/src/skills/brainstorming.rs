@@ -396,7 +396,10 @@ impl BrainstormSession {
 
     /// Get unanswered questions.
     pub fn unanswered_questions(&self) -> Vec<&ClarifyingQuestion> {
-        self.questions.iter().filter(|q| q.answer.is_none()).collect()
+        self.questions
+            .iter()
+            .filter(|q| q.answer.is_none())
+            .collect()
     }
 
     // ── Phase 3: Approaches ──────────────────────────────────────────
@@ -469,9 +472,7 @@ impl BrainstormSession {
         self.questions
             .iter()
             .filter(|q| {
-                q.category == "goals"
-                    || q.category == "requirements"
-                    || q.category == "scope"
+                q.category == "goals" || q.category == "requirements" || q.category == "scope"
             })
             .filter_map(|q| q.answer.as_ref())
             .cloned()
@@ -520,9 +521,8 @@ impl BrainstormSession {
                 let date = &doc.created_at[..10]; // YYYY-MM-DD
                 let slug = slugify(&doc.title);
                 let design_dir = root.join("docs").join("design");
-                std::fs::create_dir_all(&design_dir).with_context(|| {
-                    format!("Failed to create {}", design_dir.display())
-                })?;
+                std::fs::create_dir_all(&design_dir)
+                    .with_context(|| format!("Failed to create {}", design_dir.display()))?;
                 design_dir.join(format!("{date}-{slug}.md"))
             }
         };
@@ -531,13 +531,15 @@ impl BrainstormSession {
 
         // Ensure parent directory exists.
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create {}", parent.display())
-            })?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
 
         std::fs::write(&output_path, &markdown).with_context(|| {
-            format!("Failed to write design document to {}", output_path.display())
+            format!(
+                "Failed to write design document to {}",
+                output_path.display()
+            )
         })?;
 
         Ok(output_path)
@@ -633,10 +635,7 @@ fn render_design_markdown(doc: &DesignDocument) -> String {
         }
         md.push('\n');
 
-        md.push_str(&format!(
-            "**Complexity:** {}",
-            approach.complexity
-        ));
+        md.push_str(&format!("**Complexity:** {}", approach.complexity));
         if let Some(ref effort) = approach.estimated_effort {
             md.push_str(&format!(" | **Effort:** {}", effort));
         }
@@ -1036,7 +1035,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
 
         // Create some project files
-        std::fs::write(tmp.path().join("README.md"), "# My Project\nA cool project.").unwrap();
+        std::fs::write(
+            tmp.path().join("README.md"),
+            "# My Project\nA cool project.",
+        )
+        .unwrap();
         std::fs::write(
             tmp.path().join("Cargo.toml"),
             "[package]\nname = \"test\"\nversion = \"0.1.0\"\n",
@@ -1061,11 +1064,7 @@ mod tests {
     #[test]
     fn test_gather_project_context_truncation() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("README.md"),
-            "x".repeat(5000),
-        )
-        .unwrap();
+        std::fs::write(tmp.path().join("README.md"), "x".repeat(5000)).unwrap();
 
         let session = BrainstormSession::new("test").with_project_root(tmp.path());
         let context = session.gather_project_context(100).unwrap();
@@ -1195,7 +1194,15 @@ mod tests {
         let mut session = BrainstormSession::new("Empty Design");
         session.add_approach(sample_approach("Only Option"));
         session
-            .finalize_design(0, "Only one option", "Simple", vec![], "N/A", vec![], vec![])
+            .finalize_design(
+                0,
+                "Only one option",
+                "Simple",
+                vec![],
+                "N/A",
+                vec![],
+                vec![],
+            )
             .unwrap();
 
         let md = session.render_markdown().unwrap();

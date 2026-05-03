@@ -91,7 +91,10 @@ impl Component for Spacer {
 
     fn min_size(&self) -> Size {
         if self.flex {
-            Size { width: 0, height: 0 }
+            Size {
+                width: 0,
+                height: 0,
+            }
         } else {
             Size {
                 width: self.width,
@@ -103,7 +106,10 @@ impl Component for Spacer {
     fn desired_size(&self) -> Option<Size> {
         if self.flex {
             // Request a large size to fill available space
-            Some(Size { width: 1000, height: 1000 })
+            Some(Size {
+                width: 1000,
+                height: 1000,
+            })
         } else {
             Some(Size {
                 width: self.width,

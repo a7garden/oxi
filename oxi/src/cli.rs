@@ -375,13 +375,8 @@ mod tests {
 
     #[test]
     fn test_parse_with_multiple_files() {
-        let args = parse_args_from([
-            "oxi",
-            "--file", "file1.txt",
-            "--file", "file2.txt",
-            "Hello",
-        ])
-        .unwrap();
+        let args = parse_args_from(["oxi", "--file", "file1.txt", "--file", "file2.txt", "Hello"])
+            .unwrap();
         assert_eq!(args.file_args.len(), 2);
     }
 
@@ -411,8 +406,8 @@ mod tests {
 
     #[test]
     fn test_parse_install_command() {
-        let args = parse_args_from(["oxi", "install", "git:https://github.com/example/ext"])
-            .unwrap();
+        let args =
+            parse_args_from(["oxi", "install", "git:https://github.com/example/ext"]).unwrap();
         match args.command {
             Some(Commands::Install(install_args)) => {
                 assert_eq!(install_args.source, "git:https://github.com/example/ext");
@@ -456,9 +451,15 @@ mod tests {
 
     #[test]
     fn test_thinking_level_from_str() {
-        assert_eq!("high".parse::<ThinkingLevel>().unwrap(), ThinkingLevel::High);
+        assert_eq!(
+            "high".parse::<ThinkingLevel>().unwrap(),
+            ThinkingLevel::High
+        );
         assert_eq!("off".parse::<ThinkingLevel>().unwrap(), ThinkingLevel::Off);
-        assert_eq!("xhigh".parse::<ThinkingLevel>().unwrap(), ThinkingLevel::XHigh);
+        assert_eq!(
+            "xhigh".parse::<ThinkingLevel>().unwrap(),
+            ThinkingLevel::XHigh
+        );
         assert!("invalid".parse::<ThinkingLevel>().is_err());
     }
 

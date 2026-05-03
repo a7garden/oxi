@@ -213,7 +213,10 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
             "name": tool_call.name,
             "arguments": tool_call.arguments.to_string(),
         }),
-        AgentEvent::ToolStart { tool_name, tool_call_id } => serde_json::json!({
+        AgentEvent::ToolStart {
+            tool_name,
+            tool_call_id,
+        } => serde_json::json!({
             "type": "tool_start",
             "tool_name": tool_name,
             "tool_call_id": tool_call_id,
@@ -223,7 +226,10 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
             "content": result.content.chars().take(2000).collect::<String>(),
             "is_error": result.is_error(),
         }),
-        AgentEvent::ToolError { error, tool_call_id } => serde_json::json!({
+        AgentEvent::ToolError {
+            error,
+            tool_call_id,
+        } => serde_json::json!({
             "type": "tool_error",
             "error": error,
             "tool_call_id": tool_call_id,

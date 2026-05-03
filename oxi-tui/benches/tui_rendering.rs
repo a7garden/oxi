@@ -162,7 +162,8 @@ impl BenchRenderer {
             for col in 0..surface.width() {
                 if let Some(cell) = surface.get(row, col) {
                     // Move cursor
-                    self.output.push_str(&format!("\x1b[{};{}H", row + 1, col + 1));
+                    self.output
+                        .push_str(&format!("\x1b[{};{}H", row + 1, col + 1));
 
                     // Apply SGR if changed
                     let new_state = (
@@ -194,15 +195,25 @@ impl BenchRenderer {
         let mut first = true;
 
         let mut push_code = |buf: &mut String, code: &str, first: &mut bool| {
-            if !*first { buf.push(';'); }
+            if !*first {
+                buf.push(';');
+            }
             *first = false;
             buf.push_str(code);
         };
 
-        if cell.attrs.bold { push_code(&mut buf, "1", &mut first); }
-        if cell.attrs.italic { push_code(&mut buf, "3", &mut first); }
-        if cell.attrs.underline { push_code(&mut buf, "4", &mut first); }
-        if cell.attrs.strikethrough { push_code(&mut buf, "9", &mut first); }
+        if cell.attrs.bold {
+            push_code(&mut buf, "1", &mut first);
+        }
+        if cell.attrs.italic {
+            push_code(&mut buf, "3", &mut first);
+        }
+        if cell.attrs.underline {
+            push_code(&mut buf, "4", &mut first);
+        }
+        if cell.attrs.strikethrough {
+            push_code(&mut buf, "9", &mut first);
+        }
 
         match cell.fg {
             Color::Default => {}

@@ -161,7 +161,10 @@ pub fn visible_width(text: &str) -> usize {
     };
 
     // Sum grapheme widths via unicode-width
-    clean.graphemes(true).map(|g| grapheme_visible_width(g)).sum()
+    clean
+        .graphemes(true)
+        .map(|g| grapheme_visible_width(g))
+        .sum()
 }
 
 /// Return the visible terminal width of a single grapheme cluster.
@@ -213,10 +216,18 @@ pub fn truncate_to_width(
 ) -> String {
     let ellipsis = ellipsis.unwrap_or("...");
     if max_width == 0 {
-        return if pad { " ".repeat(max_width) } else { String::new() };
+        return if pad {
+            " ".repeat(max_width)
+        } else {
+            String::new()
+        };
     }
     if text.is_empty() {
-        return if pad { " ".repeat(max_width) } else { String::new() };
+        return if pad {
+            " ".repeat(max_width)
+        } else {
+            String::new()
+        };
     }
 
     let text_w = visible_width(text);
@@ -281,7 +292,9 @@ pub fn truncate_to_width(
         for g in run.graphemes(true) {
             let gw = grapheme_visible_width(g);
             if kept_width + gw > target {
-                return finalize_truncation(&result, kept_width, ellipsis, ellipsis_w, max_width, pad);
+                return finalize_truncation(
+                    &result, kept_width, ellipsis, ellipsis_w, max_width, pad,
+                );
             }
             if !pending_ansi.is_empty() {
                 result.push_str(&pending_ansi);
@@ -545,10 +558,7 @@ fn collect_active_ansi_codes(text: &str) -> String {
         if let Some(seq) = extract_ansi_code(text, i) {
             if seq.code.ends_with('m') {
                 // Parse SGR parameters
-                let inner = seq
-                    .code
-                    .trim_start_matches("\x1b[")
-                    .trim_end_matches('m');
+                let inner = seq.code.trim_start_matches("\x1b[").trim_end_matches('m');
                 if inner.is_empty() || inner == "0" {
                     bold = false;
                     dim = false;
@@ -582,8 +592,16 @@ fn collect_active_ansi_codes(text: &str) -> String {
                             24 => underline = false,
                             38 | 48 => {
                                 // 256-color or RGB
-                                if pi + 1 < parts.len() && parts[pi + 1] == "5" && pi + 2 < parts.len() {
-                                    let color = format!("{};{};{}", parts[pi], parts[pi + 1], parts[pi + 2]);
+                                if pi + 1 < parts.len()
+                                    && parts[pi + 1] == "5"
+                                    && pi + 2 < parts.len()
+                                {
+                                    let color = format!(
+                                        "{};{};{}",
+                                        parts[pi],
+                                        parts[pi + 1],
+                                        parts[pi + 2]
+                                    );
                                     if code == 38 {
                                         fg = Some(color);
                                     } else {
@@ -591,10 +609,17 @@ fn collect_active_ansi_codes(text: &str) -> String {
                                     }
                                     pi += 3;
                                     continue;
-                                } else if pi + 1 < parts.len() && parts[pi + 1] == "2" && pi + 4 < parts.len() {
+                                } else if pi + 1 < parts.len()
+                                    && parts[pi + 1] == "2"
+                                    && pi + 4 < parts.len()
+                                {
                                     let color = format!(
                                         "{};{};{};{};{}",
-                                        parts[pi], parts[pi + 1], parts[pi + 2], parts[pi + 3], parts[pi + 4]
+                                        parts[pi],
+                                        parts[pi + 1],
+                                        parts[pi + 2],
+                                        parts[pi + 3],
+                                        parts[pi + 4]
                                     );
                                     if code == 38 {
                                         fg = Some(color);
@@ -626,12 +651,24 @@ fn collect_active_ansi_codes(text: &str) -> String {
     }
 
     let mut codes: Vec<String> = Vec::new();
-    if bold { codes.push("1".to_string()); }
-    if dim { codes.push("2".to_string()); }
-    if italic { codes.push("3".to_string()); }
-    if underline { codes.push("4".to_string()); }
-    if let Some(ref c) = fg { codes.push(c.clone()); }
-    if let Some(ref c) = bg { codes.push(c.clone()); }
+    if bold {
+        codes.push("1".to_string());
+    }
+    if dim {
+        codes.push("2".to_string());
+    }
+    if italic {
+        codes.push("3".to_string());
+    }
+    if underline {
+        codes.push("4".to_string());
+    }
+    if let Some(ref c) = fg {
+        codes.push(c.clone());
+    }
+    if let Some(ref c) = bg {
+        codes.push(c.clone());
+    }
 
     if codes.is_empty() {
         String::new()
@@ -993,20 +1030,34 @@ pub fn is_punctuation_char(ch: char) -> bool {
     matches!(
         ch,
         '(' | ')'
-            | '{' | '}'
-            | '[' | ']'
-            | '<' | '>'
-            | '.' | ','
-            | ';' | ':'
-            | '\'' | '"'
-            | '!' | '?'
-            | '+' | '-'
-            | '=' | '*'
-            | '/' | '\\'
-            | '|' | '&'
-            | '%' | '^'
-            | '$' | '#'
-            | '@' | '~'
+            | '{'
+            | '}'
+            | '['
+            | ']'
+            | '<'
+            | '>'
+            | '.'
+            | ','
+            | ';'
+            | ':'
+            | '\''
+            | '"'
+            | '!'
+            | '?'
+            | '+'
+            | '-'
+            | '='
+            | '*'
+            | '/'
+            | '\\'
+            | '|'
+            | '&'
+            | '%'
+            | '^'
+            | '$'
+            | '#'
+            | '@'
+            | '~'
             | '`'
     )
 }

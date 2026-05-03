@@ -354,14 +354,14 @@ impl Scout {
 
         for file in files {
             if let Some(lang) = self.ext_to_language(&file.ext) {
-                let stats = lang_map.entry(lang.to_string()).or_insert_with(|| {
-                    LanguageStats {
+                let stats = lang_map
+                    .entry(lang.to_string())
+                    .or_insert_with(|| LanguageStats {
                         language: lang.to_string(),
                         file_count: 0,
                         total_bytes: 0,
                         extensions: BTreeSet::new(),
-                    }
-                });
+                    });
                 stats.file_count += 1;
                 stats.total_bytes += file.size;
                 stats.extensions.insert(file.ext.clone());
@@ -684,10 +684,7 @@ impl Scout {
                 if let Some((key, value)) = trimmed.split_once('=') {
                     let key = key.trim();
                     if key == "dependencies" {
-                        let cleaned = value
-                            .trim()
-                            .trim_start_matches('[')
-                            .trim_end_matches(']');
+                        let cleaned = value.trim().trim_start_matches('[').trim_end_matches(']');
                         for dep in cleaned.split(',') {
                             let dep = dep.trim().trim_matches('"').trim_matches('\'');
                             if !dep.is_empty() {
@@ -916,8 +913,7 @@ impl Scout {
 
         // Monorepo / workspace
         if file_names.contains("Cargo.toml") {
-            let cargo_content =
-                fs::read_to_string(root.join("Cargo.toml")).unwrap_or_default();
+            let cargo_content = fs::read_to_string(root.join("Cargo.toml")).unwrap_or_default();
             if cargo_content.contains("[workspace]") {
                 patterns.push(Pattern {
                     name: "Rust workspace (monorepo)".to_string(),
@@ -952,9 +948,7 @@ impl Scout {
         let mod_dirs: Vec<&FileEntry> = files
             .iter()
             .filter(|f| {
-                f.ext == ".rs"
-                    && f.rel_path.starts_with("src/")
-                    && f.rel_path.ends_with("/mod.rs")
+                f.ext == ".rs" && f.rel_path.starts_with("src/") && f.rel_path.ends_with("/mod.rs")
             })
             .collect();
         if mod_dirs.len() >= 3 {
@@ -1170,10 +1164,7 @@ impl Scout {
             out.push_str("## Key Files\n\n");
             for kf in &snapshot.key_files {
                 if let Some(ref summary) = kf.summary {
-                    out.push_str(&format!(
-                        "- `{}` [{}] — {}\n",
-                        kf.path, kf.role, summary
-                    ));
+                    out.push_str(&format!("- `{}` [{}] — {}\n", kf.path, kf.role, summary));
                 } else {
                     out.push_str(&format!("- `{}` [{}]\n", kf.path, kf.role));
                 }
@@ -1311,10 +1302,7 @@ impl Scout {
             md.push_str("|------|------|--------|\n");
             for kf in &snapshot.key_files {
                 let summary = kf.summary.as_deref().unwrap_or("—");
-                md.push_str(&format!(
-                    "| `{}` | {} | {} |\n",
-                    kf.path, kf.role, summary
-                ));
+                md.push_str(&format!("| `{}` | {} | {} |\n", kf.path, kf.role, summary));
             }
             md.push('\n');
         }
@@ -1461,10 +1449,7 @@ anyhow = "1"
 
         assert!(snapshot.total_files >= 3);
         assert!(snapshot.languages.iter().any(|l| l.language == "Rust"));
-        assert!(snapshot
-            .dependencies
-            .iter()
-            .any(|d| d.contains("serde")));
+        assert!(snapshot.dependencies.iter().any(|d| d.contains("serde")));
         assert!(snapshot.patterns.iter().any(|p| p.name == "Rust"));
         assert!(snapshot
             .patterns
@@ -1530,10 +1515,7 @@ requests = "^2.31"
 
         assert!(snapshot.languages.iter().any(|l| l.language == "Python"));
         assert!(snapshot.patterns.iter().any(|p| p.name == "Flask"));
-        assert!(snapshot
-            .dependencies
-            .iter()
-            .any(|d| d.contains("flask")));
+        assert!(snapshot.dependencies.iter().any(|d| d.contains("flask")));
     }
 
     #[test]
@@ -1544,7 +1526,11 @@ requests = "^2.31"
             "module example.com/test\n\ngo 1.22\n\nrequire (\n\tgithub.com/gin-gonic/gin v1.9.1\n)\n",
         )
         .unwrap();
-        fs::write(tmp.path().join("main.go"), "package main\n\nfunc main() {}\n").unwrap();
+        fs::write(
+            tmp.path().join("main.go"),
+            "package main\n\nfunc main() {}\n",
+        )
+        .unwrap();
 
         let scout = Scout::new(tmp.path());
         let snapshot = scout.scan().unwrap();
@@ -1872,14 +1858,8 @@ requests = "^2.31"
         let snapshot = scout.scan().unwrap();
 
         assert!(snapshot.total_files >= 5);
-        assert!(snapshot
-            .dependencies
-            .iter()
-            .any(|d| d.contains("serde")));
-        assert!(snapshot
-            .dependencies
-            .iter()
-            .any(|d| d.contains("tokio")));
+        assert!(snapshot.dependencies.iter().any(|d| d.contains("serde")));
+        assert!(snapshot.dependencies.iter().any(|d| d.contains("tokio")));
         assert!(snapshot
             .patterns
             .iter()
@@ -1921,11 +1901,7 @@ requests = "^2.31"
 
         fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
         fs::write(src.join("main.rs"), "fn main() {}").unwrap();
-        fs::write(
-            frontend.join("App.tsx"),
-            "export default function App() {}",
-        )
-        .unwrap();
+        fs::write(frontend.join("App.tsx"), "export default function App() {}").unwrap();
         fs::write(
             scripts.join("build.py"),
             "#!/usr/bin/env python3\nprint('hi')\n",

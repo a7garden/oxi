@@ -1,15 +1,15 @@
 //! Anthropic provider implementation
 
 use async_trait::async_trait;
-use std::pin::Pin;
 use futures::{Stream, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::pin::Pin;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider, 
-    error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
+    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
+    ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
 /// Anthropic provider
@@ -26,7 +26,7 @@ impl AnthropicProvider {
             api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
         }
     }
-    
+
     #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
@@ -51,50 +51,52 @@ impl Provider for AnthropicProvider {
         options: Option<StreamOptions>,
     ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
         let options = options.unwrap_or_default();
-        
+
         // Build the request
         let url = format!("{}/v1/messages", model.base_url);
-        
+
         // Get API key
-        let api_key = options.api_key.as_ref()
+        let api_key = options
+            .api_key
+            .as_ref()
             .or(self.api_key.as_ref())
             .ok_or_else(|| ProviderError::MissingApiKey)?;
-        
+
         // Build messages
         let messages = build_anthropic_messages(context)?;
-        
+
         // Build request body
         let mut body = serde_json::json!({
             "model": model.id,
             "messages": messages,
             "stream": true,
         });
-        
+
         // Add system prompt
         if let Some(ref prompt) = context.system_prompt {
             body["system"] = serde_json::json!(prompt);
         }
-        
+
         // Add optional parameters
         if let Some(temp) = options.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
-        
+
         if let Some(max) = options.max_tokens {
             body["max_tokens"] = serde_json::json!(max);
         }
-        
+
         // Add tools if present
         if !context.tools.is_empty() {
             body["tools"] = build_anthropic_tools(&context.tools)?;
         }
-        
+
         // Build headers
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("x-api-key", api_key.parse().unwrap());
         headers.insert("content-type", "application/json".parse().unwrap());
         headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
-        
+
         for (k, v) in &options.headers {
             if let (Ok(name), Ok(value)) = (
                 k.parse::<reqwest::header::HeaderName>(),
@@ -103,42 +105,40 @@ impl Provider for AnthropicProvider {
                 headers.insert(name, value);
             }
         }
-        
+
         // Make request
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .headers(headers)
             .json(&body)
             .send()
             .await
             .map_err(ProviderError::RequestFailed)?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
             return Err(ProviderError::HttpError(status.as_u16(), body));
         }
-        
+
         // Create event stream
         let model_name = model.id.clone();
-        
-        let stream = response.bytes_stream()
-            .flat_map(move |chunk| {
-                match chunk {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        futures::stream::iter(parse_anthropic_events(&text, &model_name))
-                    }
-                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(&e.to_string()),
-                    }]),
-                }
-            });
-        
+
+        let stream = response.bytes_stream().flat_map(move |chunk| match chunk {
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                futures::stream::iter(parse_anthropic_events(&text, &model_name))
+            }
+            Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                reason: StopReason::Error,
+                error: create_error_message(&e.to_string()),
+            }]),
+        });
+
         Ok(Box::pin(stream))
     }
-    
+
     fn name(&self) -> &str {
         "anthropic"
     }
@@ -147,7 +147,7 @@ impl Provider for AnthropicProvider {
 /// Build messages in Anthropic format
 fn build_anthropic_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
     let mut messages = Vec::new();
-    
+
     for msg in &context.messages {
         match msg {
             crate::Message::User(u) => {
@@ -156,9 +156,7 @@ fn build_anthropic_messages(context: &Context) -> Result<Vec<JsonValue>, Provide
                         "type": "text",
                         "text": s,
                     })],
-                    crate::MessageContent::Blocks(blocks) => {
-                        blocks_to_anthropic_content(blocks)?
-                    }
+                    crate::MessageContent::Blocks(blocks) => blocks_to_anthropic_content(blocks)?,
                 };
                 messages.push(serde_json::json!({
                     "role": "user",
@@ -185,14 +183,14 @@ fn build_anthropic_messages(context: &Context) -> Result<Vec<JsonValue>, Provide
             }
         }
     }
-    
+
     Ok(messages)
 }
 
 /// Convert content blocks to Anthropic format
 fn blocks_to_anthropic_content(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>, ProviderError> {
     let mut items = Vec::new();
-    
+
     for block in blocks {
         match block {
             ContentBlock::Text(t) => {
@@ -230,20 +228,23 @@ fn blocks_to_anthropic_content(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>
             }
         }
     }
-    
+
     Ok(items)
 }
 
 /// Build tools in Anthropic format
 fn build_anthropic_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
-    let items: Vec<_> = tools.iter().map(|tool| {
-        serde_json::json!({
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.parameters,
+    let items: Vec<_> = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.parameters,
+            })
         })
-    }).collect();
-    
+        .collect();
+
     Ok(serde_json::json!(items))
 }
 
@@ -256,11 +257,7 @@ fn build_anthropic_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderErr
 /// - Accumulated usage tracked separately, only cloned into Done message.
 fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(
-        Api::AnthropicMessages,
-        "anthropic",
-        model_id,
-    );
+    let partial_message = AssistantMessage::new(Api::AnthropicMessages, "anthropic", model_id);
 
     // Pre-allocate based on data-line count
     let estimated = text.split('\n').filter(|l| l.starts_with("data: ")).count();
@@ -394,11 +391,7 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
 
 /// Create error assistant message
 fn create_error_message(msg: &str) -> AssistantMessage {
-    let mut message = AssistantMessage::new(
-        Api::AnthropicMessages,
-        "anthropic",
-        "unknown",
-    );
+    let mut message = AssistantMessage::new(Api::AnthropicMessages, "anthropic", "unknown");
     message.stop_reason = StopReason::Error;
     message.error_message = Some(msg.to_string());
     message

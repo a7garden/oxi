@@ -81,7 +81,10 @@ impl CrosstermTerminal {
 
     fn get_size() -> Result<Size> {
         let (cols, rows) = crossterm::terminal::size()?;
-        Ok(Size { width: cols, height: rows })
+        Ok(Size {
+            width: cols,
+            height: rows,
+        })
     }
 }
 
@@ -111,19 +114,27 @@ impl Terminal for CrosstermTerminal {
 
     fn set_cursor_visibility(&mut self, visibility: CursorVisibility) -> Result<()> {
         match visibility {
-            CursorVisibility::Visible => crossterm::execute!(io::stdout(), crossterm::cursor::Show)?,
+            CursorVisibility::Visible => {
+                crossterm::execute!(io::stdout(), crossterm::cursor::Show)?
+            }
             CursorVisibility::Hidden => crossterm::execute!(io::stdout(), crossterm::cursor::Hide)?,
         }
         Ok(())
     }
 
     fn clear_screen(&mut self) -> Result<()> {
-        crossterm::execute!(io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;
+        crossterm::execute!(
+            io::stdout(),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::All)
+        )?;
         Ok(())
     }
 
     fn clear_line(&mut self) -> Result<()> {
-        crossterm::execute!(io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine))?;
+        crossterm::execute!(
+            io::stdout(),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::CurrentLine)
+        )?;
         Ok(())
     }
 

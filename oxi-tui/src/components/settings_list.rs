@@ -113,7 +113,9 @@ impl SettingsList {
         let key = self.settings[self.selected].key.clone();
         let old = &self.settings[self.selected].value;
         let new_value = match old {
-            SettingValue::Number(_) => self.edit_buffer.parse::<i64>()
+            SettingValue::Number(_) => self
+                .edit_buffer
+                .parse::<i64>()
                 .map(SettingValue::Number)
                 .unwrap_or_else(|_| SettingValue::Number(0)),
             _ => SettingValue::Text(self.edit_buffer.clone()),
@@ -206,28 +208,41 @@ impl Component for SettingsList {
         }
 
         match event {
-            Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Up, ..
+            }) => {
                 self.navigate_prev();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }) => {
                 self.navigate_next();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Char('k'), modifiers })
-                if !modifiers.ctrl && !modifiers.alt =>
-            {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers,
+            }) if !modifiers.ctrl && !modifiers.alt => {
                 self.navigate_prev();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Char('j'), modifiers })
-                if !modifiers.ctrl && !modifiers.alt =>
-            {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers,
+            }) if !modifiers.ctrl && !modifiers.alt => {
                 self.navigate_next();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Enter, .. })
-            | Event::Key(KeyEvent { code: KeyCode::Char(' '), .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            })
+            | Event::Key(KeyEvent {
+                code: KeyCode::Char(' '),
+                ..
+            }) => {
                 self.activate();
                 true
             }
@@ -247,10 +262,7 @@ impl Component for SettingsList {
 
             match sr {
                 SettingsRow::Group(name) => {
-                    let text: String = format!("── {} ──", name)
-                        .chars()
-                        .take(max_width)
-                        .collect();
+                    let text: String = format!("── {} ──", name).chars().take(max_width).collect();
                     for (i, c) in text.chars().enumerate() {
                         let col = area.x + i as u16;
                         if col < area.x + area.width {
@@ -277,7 +289,13 @@ impl Component for SettingsList {
                     };
 
                     let indicator = if is_selected { ">" } else { " " };
-                    surface.set(row, area.x, Cell::new(indicator.chars().next().unwrap()).with_fg(fg).with_bg(bg));
+                    surface.set(
+                        row,
+                        area.x,
+                        Cell::new(indicator.chars().next().unwrap())
+                            .with_fg(fg)
+                            .with_bg(bg),
+                    );
 
                     let key_max = max_width.saturating_sub(2).min(20);
                     let key_str: String = entry.key.chars().take(key_max).collect();
@@ -319,7 +337,11 @@ impl Component for SettingsList {
                     if self.editing && is_selected {
                         let cursor_col = val_start + val_str.len() as u16;
                         if cursor_col < area.x + area.width {
-                            surface.set(row, cursor_col, Cell::new(' ').with_fg(Color::Black).with_bg(Color::White));
+                            surface.set(
+                                row,
+                                cursor_col,
+                                Cell::new(' ').with_fg(Color::Black).with_bg(Color::White),
+                            );
                         }
                     }
 

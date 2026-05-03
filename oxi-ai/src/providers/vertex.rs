@@ -4,18 +4,15 @@
 //! to access Vertex AI models via the Gemini API.
 
 use async_trait::async_trait;
-use futures::Stream;
 use futures::stream::StreamExt;
+use futures::Stream;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
-use super::{Provider, ProviderEvent, ProviderError, StreamOptions};
-use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, StopReason,
-    Usage,
-};
+use super::{Provider, ProviderError, ProviderEvent, StreamOptions};
+use crate::{Api, AssistantMessage, ContentBlock, Context, Model, StopReason, Usage};
 
 /// Google Vertex AI provider
 ///
@@ -84,25 +81,24 @@ impl VertexProvider {
             }
         }
 
-        Err(ProviderError::IoError(
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "gcloud token not available",
-            ),
-        ))
+        Err(ProviderError::IoError(io::Error::new(
+            io::ErrorKind::NotFound,
+            "gcloud token not available",
+        )))
     }
 
     /// Get access token from service account credentials JSON
-    async fn get_token_from_service_account(credentials_path: &str) -> Result<String, ProviderError> {
+    async fn get_token_from_service_account(
+        credentials_path: &str,
+    ) -> Result<String, ProviderError> {
         use std::fs;
         use tokio::time::{sleep, Duration};
 
         // Read credentials file
-        let creds_json = fs::read_to_string(credentials_path)
-            .map_err(ProviderError::IoError)?;
+        let creds_json = fs::read_to_string(credentials_path).map_err(ProviderError::IoError)?;
 
-        let creds: ServiceAccountCreds = serde_json::from_str(&creds_json)
-            .map_err(|_| ProviderError::InvalidApiKey)?;
+        let creds: ServiceAccountCreds =
+            serde_json::from_str(&creds_json).map_err(|_| ProviderError::InvalidApiKey)?;
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -169,8 +165,7 @@ impl VertexProvider {
 
     /// Get Google Cloud region
     fn get_region() -> String {
-        std::env::var("GOOGLE_CLOUD_REGION")
-            .unwrap_or_else(|_| "us-central1".to_string())
+        std::env::var("GOOGLE_CLOUD_REGION").unwrap_or_else(|_| "us-central1".to_string())
     }
 }
 
@@ -241,7 +236,8 @@ impl Provider for VertexProvider {
         }
 
         // Make request with Bearer token
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", access_token))
             .header("Content-Type", "application/json")
@@ -259,19 +255,16 @@ impl Provider for VertexProvider {
         // Create event stream
         let model_name = model.id.clone();
 
-        let stream = response.bytes_stream()
-            .flat_map(move |chunk| {
-                match chunk {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes);
-                        futures::stream::iter(parse_vertex_events(&text, &model_name))
-                    }
-                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(&e.to_string()),
-                    }]),
-                }
-            });
+        let stream = response.bytes_stream().flat_map(move |chunk| match chunk {
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                futures::stream::iter(parse_vertex_events(&text, &model_name))
+            }
+            Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                reason: StopReason::Error,
+                error: create_error_message(&e.to_string()),
+            }]),
+        });
 
         Ok(Box::pin(stream))
     }
@@ -363,15 +356,18 @@ fn blocks_to_vertex_parts(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>, Pro
 
 /// Build tools in Vertex AI format (Google functionDeclarations)
 fn build_vertex_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
-    let declarations: Vec<_> = tools.iter().map(|tool| {
-        serde_json::json!({
-            "functionDeclarations": [{
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            }]
+    let declarations: Vec<_> = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "functionDeclarations": [{
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }]
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(serde_json::json!(declarations))
 }
@@ -379,11 +375,7 @@ fn build_vertex_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError>
 /// Parse Vertex AI SSE event stream (same as Google provider)
 fn parse_vertex_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let mut partial_message = AssistantMessage::new(
-        Api::GoogleVertex,
-        "vertex",
-        model_id,
-    );
+    let mut partial_message = AssistantMessage::new(Api::GoogleVertex, "vertex", model_id);
 
     for line in text.lines() {
         if line.is_empty() || line == "data: [DONE]" {
@@ -408,7 +400,8 @@ fn parse_vertex_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                             if let Some(function_call) = &part.function_call {
                                 events.push(ProviderEvent::ToolCallDelta {
                                     content_index: index,
-                                    delta: serde_json::to_string(&function_call.args).unwrap_or_default(),
+                                    delta: serde_json::to_string(&function_call.args)
+                                        .unwrap_or_default(),
                                     partial: partial_message.clone(),
                                 });
                             }
@@ -429,7 +422,11 @@ fn parse_vertex_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                 }
 
                 // Check if done
-                if let Some(ref finish_reason) = response.candidates.first().and_then(|c| c.finish_reason.clone()) {
+                if let Some(ref finish_reason) = response
+                    .candidates
+                    .first()
+                    .and_then(|c| c.finish_reason.clone())
+                {
                     let reason = match finish_reason.as_str() {
                         "STOP" => StopReason::Stop,
                         "MAX_TOKENS" => StopReason::Length,
@@ -453,11 +450,7 @@ fn parse_vertex_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
 
 /// Create error assistant message
 fn create_error_message(msg: &str) -> AssistantMessage {
-    let mut message = AssistantMessage::new(
-        Api::GoogleVertex,
-        "vertex",
-        "unknown",
-    );
+    let mut message = AssistantMessage::new(Api::GoogleVertex, "vertex", "unknown");
     message.stop_reason = StopReason::Error;
     message.error_message = Some(msg.to_string());
     message
@@ -472,26 +465,30 @@ fn base64_url_encode(value: &serde_json::Value) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 
-fn sign_rs256(header_b64: &str, claims_b64: &str, private_key_pem: &str) -> Result<String, ProviderError> {
+fn sign_rs256(
+    header_b64: &str,
+    claims_b64: &str,
+    private_key_pem: &str,
+) -> Result<String, ProviderError> {
     use base64::Engine as _;
     use pkcs8::DecodePrivateKey;
     use rsa::pkcs1v15::SigningKey;
     use rsa::RsaPrivateKey;
     use sha2::Sha256;
-    use signature::{Signer, SignatureEncoding};
+    use signature::{SignatureEncoding, Signer};
 
     // Construct the message to sign: header.claims
     let message = format!("{}.{}", header_b64, claims_b64);
-    
-    let key = RsaPrivateKey::from_pkcs8_pem(private_key_pem)
-        .map_err(|_| ProviderError::InvalidApiKey)?;
+
+    let key =
+        RsaPrivateKey::from_pkcs8_pem(private_key_pem).map_err(|_| ProviderError::InvalidApiKey)?;
     let signing_key = SigningKey::<Sha256>::new_unprefixed(key);
     let signature = signing_key.sign(message.as_bytes());
     let sig_bytes = signature.to_bytes();
-    
+
     // Encode signature using base64 with URL-safe encoding (no padding)
     let sig_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&sig_bytes);
-    
+
     // Return the complete JWT: header.claims.signature
     Ok(format!("{}.{}", message, sig_b64))
 }
@@ -582,10 +579,10 @@ mod tests {
     fn test_build_vertex_contents_with_text() {
         let mut ctx = Context::new();
         ctx.add_message(Message::user("Hello, world!"));
-        
+
         let contents = build_vertex_contents(&ctx).unwrap();
         assert_eq!(contents.len(), 1);
-        
+
         let content = &contents[0];
         assert_eq!(content["role"], "user");
         assert_eq!(content["parts"][0]["text"], "Hello, world!");
@@ -600,7 +597,7 @@ mod tests {
             "vertex",
             "gemini-1.5-pro",
         )));
-        
+
         let contents = build_vertex_contents(&ctx).unwrap();
         assert_eq!(contents.len(), 2);
         assert_eq!(contents[1]["role"], "model");
@@ -622,9 +619,9 @@ mod tests {
                 "required": ["location"]
             }),
         }];
-        
+
         let tools_json = build_vertex_tools(&tools).unwrap();
-        
+
         // Check that the tool is properly formatted with functionDeclarations
         let declarations = tools_json[0]["functionDeclarations"].as_array().unwrap();
         assert_eq!(declarations.len(), 1);
@@ -635,9 +632,9 @@ mod tests {
     #[test]
     fn test_parse_vertex_events_basic_text() {
         let sse_data = r#"data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}"#;
-        
+
         let events = parse_vertex_events(sse_data, "gemini-1.5-pro");
-        
+
         assert!(!events.is_empty());
         if let ProviderEvent::TextDelta { delta, .. } = &events[0] {
             assert_eq!(delta, "Hello");
@@ -649,21 +646,25 @@ mod tests {
     #[test]
     fn test_parse_vertex_events_with_usage() {
         let sse_data = r#"data: {"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30}}"#;
-        
+
         let events = parse_vertex_events(sse_data, "gemini-1.5-pro");
-        
+
         // Should have a Done event
-        let done_events: Vec<_> = events.iter().filter(|e| matches!(e, ProviderEvent::Done { .. })).collect();
+        let done_events: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, ProviderEvent::Done { .. }))
+            .collect();
         assert!(!done_events.is_empty());
     }
 
     #[test]
     fn test_parse_vertex_events_with_function_call() {
         let sse_data = r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"Boston"}}}]}}]}"#;
-        
+
         let events = parse_vertex_events(sse_data, "gemini-1.5-pro");
-        
-        let tool_call_events: Vec<_> = events.iter()
+
+        let tool_call_events: Vec<_> = events
+            .iter()
             .filter(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }))
             .collect();
         assert!(!tool_call_events.is_empty());
@@ -673,7 +674,7 @@ mod tests {
     fn test_get_region_default() {
         // Clear environment variables
         std::env::remove_var("GOOGLE_CLOUD_REGION");
-        
+
         let region = VertexProvider::get_region();
         assert_eq!(region, "us-central1");
     }
@@ -685,7 +686,7 @@ mod tests {
             "my_function",
             serde_json::json!({"arg1": "value1"}),
         ));
-        
+
         let parts = blocks_to_vertex_parts(&[tool_call]).unwrap();
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0]["functionCall"]["name"], "my_function");
@@ -694,11 +695,8 @@ mod tests {
 
     #[test]
     fn test_blocks_to_vertex_parts_with_image() {
-        let image = ContentBlock::Image(ImageContent::new(
-            "base64data",
-            "image/png",
-        ));
-        
+        let image = ContentBlock::Image(ImageContent::new("base64data", "image/png"));
+
         let parts = blocks_to_vertex_parts(&[image]).unwrap();
         assert_eq!(parts.len(), 1);
         assert_eq!(parts[0]["inlineData"]["mimeType"], "image/png");
@@ -708,7 +706,7 @@ mod tests {
     #[test]
     fn test_create_error_message() {
         let msg = create_error_message("Something went wrong");
-        
+
         assert_eq!(msg.provider, "vertex");
         assert_eq!(msg.api, Api::GoogleVertex);
         assert_eq!(msg.stop_reason, StopReason::Error);

@@ -9,8 +9,8 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
+    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
+    ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
 /// Cloudflare Workers AI provider
@@ -42,7 +42,7 @@ impl CloudflareProvider {
     }
 
     /// Create a model configuration for Cloudflare Workers AI
-    /// 
+    ///
     /// The model_id should be the name of the model to use (e.g., "@cf/meta/llama-3.1-8b-instruct").
     /// If gateway_id is provided, uses the Cloudflare AI Gateway endpoint.
     /// Otherwise uses direct Workers AI endpoint.
@@ -78,7 +78,13 @@ impl CloudflareProvider {
             account_id, gateway_id
         );
 
-        Some(Model::new(&id, &id, Api::OpenAiCompletions, "cloudflare", &base_url))
+        Some(Model::new(
+            &id,
+            &id,
+            Api::OpenAiCompletions,
+            "cloudflare",
+            &base_url,
+        ))
     }
 }
 
@@ -102,7 +108,9 @@ impl Provider for CloudflareProvider {
         let url = format!("{}/chat/completions", model.base_url);
 
         // Get API token
-        let api_token = options.api_key.as_ref()
+        let api_token = options
+            .api_key
+            .as_ref()
             .or(self.api_token.as_ref())
             .ok_or_else(|| ProviderError::MissingApiKey)?;
 
@@ -151,7 +159,8 @@ impl Provider for CloudflareProvider {
         }
 
         // Make request
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .headers(headers)
             .json(&body)
@@ -169,19 +178,18 @@ impl Provider for CloudflareProvider {
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
 
-        let stream = response.bytes_stream()
-            .flat_map(move |chunk: Result<Bytes, reqwest::Error>| {
-                match chunk {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes).to_string();
-                        futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
-                    }
-                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                    }]),
+        let stream = response.bytes_stream().flat_map(
+            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
+                Ok(bytes) => {
+                    let text = String::from_utf8_lossy(&bytes).to_string();
+                    futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
                 }
-            });
+                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                    reason: StopReason::Error,
+                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                }]),
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -209,9 +217,7 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
             crate::Message::User(u) => {
                 let content: String = match &u.content {
                     crate::MessageContent::Text(s) => s.clone(),
-                    crate::MessageContent::Blocks(blocks) => {
-                        blocks_to_content(blocks)?.to_string()
-                    }
+                    crate::MessageContent::Blocks(blocks) => blocks_to_content(blocks)?.to_string(),
                 };
                 messages.push(serde_json::json!({
                     "role": "user",
@@ -248,8 +254,9 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
         }
     }
 
-    let items: Result<Vec<_>, _> = blocks.iter().map(|block| {
-        match block {
+    let items: Result<Vec<_>, _> = blocks
+        .iter()
+        .map(|block| match block {
             ContentBlock::Text(t) => Ok(serde_json::json!({
                 "type": "text",
                 "text": t.text,
@@ -272,27 +279,30 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
                     "url": format!("data:{};base64,{}", img.mime_type, img.data),
                 },
             })),
-            ContentBlock::Unknown(_) => {
-                Err(ProviderError::InvalidResponse("Unknown content block type".into()))
-            }
-        }
-    }).collect();
+            ContentBlock::Unknown(_) => Err(ProviderError::InvalidResponse(
+                "Unknown content block type".into(),
+            )),
+        })
+        .collect();
 
     Ok(serde_json::json!(items?))
 }
 
 /// Build tools array
 fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
-    let items: Vec<_> = tools.iter().map(|tool| {
-        serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            },
+    let items: Vec<_> = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(serde_json::json!(items))
 }
@@ -300,11 +310,7 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
 /// Parse SSE event stream from a byte buffer.
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(
-        Api::OpenAiCompletions,
-        provider,
-        model_id,
-    );
+    let partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
 
     // Pre-estimate capacity
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
@@ -399,11 +405,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
 
 /// Create error assistant message
 fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantMessage {
-    let mut message = AssistantMessage::new(
-        Api::OpenAiCompletions,
-        provider,
-        model_id,
-    );
+    let mut message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
     message.stop_reason = StopReason::Error;
     message.error_message = Some(msg.to_string());
     message
@@ -482,10 +484,7 @@ mod tests {
     // Test 2: Provider creation with explicit credentials
     #[test]
     fn test_provider_with_credentials() {
-        let provider = CloudflareProvider::with_credentials(
-            "test-api-token",
-            "test-account-id",
-        );
+        let provider = CloudflareProvider::with_credentials("test-api-token", "test-account-id");
         assert_eq!(provider.api_token.as_deref(), Some("test-api-token"));
         assert_eq!(provider.account_id.as_deref(), Some("test-account-id"));
     }
@@ -493,10 +492,7 @@ mod tests {
     // Test 3: Model creation without account ID (direct Workers AI)
     #[test]
     fn test_model_direct_workers_ai() {
-        let provider = CloudflareProvider::with_credentials(
-            "test-api-token",
-            "",
-        );
+        let provider = CloudflareProvider::with_credentials("test-api-token", "");
         let model = provider.model("@cf/meta/llama-3.1-8b-instruct");
         assert_eq!(model.provider, "cloudflare");
         assert_eq!(model.id, "@cf/meta/llama-3.1-8b-instruct");
@@ -506,10 +502,7 @@ mod tests {
     // Test 4: Model creation with account ID
     #[test]
     fn test_model_with_account_id() {
-        let provider = CloudflareProvider::with_credentials(
-            "test-api-token",
-            "abc123account",
-        );
+        let provider = CloudflareProvider::with_credentials("test-api-token", "abc123account");
         let model = provider.model("@cf/meta/llama-3.1-8b-instruct");
         assert!(model.base_url.contains("accounts/abc123account"));
     }
@@ -517,14 +510,8 @@ mod tests {
     // Test 5: Model creation with AI Gateway
     #[test]
     fn test_model_with_gateway() {
-        let provider = CloudflareProvider::with_credentials(
-            "test-api-token",
-            "abc123account",
-        );
-        let model = provider.model_with_gateway(
-            "@cf/meta/llama-3.1-8b-instruct",
-            "my-gateway",
-        );
+        let provider = CloudflareProvider::with_credentials("test-api-token", "abc123account");
+        let model = provider.model_with_gateway("@cf/meta/llama-3.1-8b-instruct", "my-gateway");
         assert!(model.is_some());
         let model = model.unwrap();
         assert!(model.base_url.contains("ai/gateways/my-gateway/v1"));
@@ -534,10 +521,7 @@ mod tests {
     #[test]
     fn test_model_with_gateway_no_account_id() {
         let provider = CloudflareProvider::with_credentials("test-api-token", "");
-        let model = provider.model_with_gateway(
-            "@cf/meta/llama-3.1-8b-instruct",
-            "my-gateway",
-        );
+        let model = provider.model_with_gateway("@cf/meta/llama-3.1-8b-instruct", "my-gateway");
         assert!(model.is_none());
     }
 
@@ -545,11 +529,11 @@ mod tests {
     #[test]
     fn test_build_messages() {
         use crate::Message;
-        
+
         let mut context = Context::new();
         context.set_system_prompt("You are a helpful assistant");
         context.add_message(Message::user("Hello"));
-        
+
         let messages = build_messages(&context).unwrap();
         assert_eq!(messages.len(), 2); // system + user
         assert_eq!(messages[0]["role"], "system");
@@ -561,7 +545,7 @@ mod tests {
     #[test]
     fn test_build_messages_with_tool_result() {
         use crate::Message;
-        
+
         let context = Context::new();
         let messages = build_messages(&context).unwrap();
         // Empty context should produce empty messages (no system prompt, no messages)
@@ -571,24 +555,25 @@ mod tests {
     // Test 9: Build tools array
     #[test]
     fn test_build_tools() {
-        let tools = vec![
-            crate::Tool {
-                name: "get_weather".to_string(),
-                description: "Get weather for a location".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "location": {"type": "string"}
-                    },
-                    "required": ["location"]
-                }),
-            },
-        ];
-        
+        let tools = vec![crate::Tool {
+            name: "get_weather".to_string(),
+            description: "Get weather for a location".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"}
+                },
+                "required": ["location"]
+            }),
+        }];
+
         let tools_json = build_tools(&tools).unwrap();
         assert_eq!(tools_json[0]["type"], "function");
         assert_eq!(tools_json[0]["function"]["name"], "get_weather");
-        assert_eq!(tools_json[0]["function"]["description"], "Get weather for a location");
+        assert_eq!(
+            tools_json[0]["function"]["description"],
+            "Get weather for a location"
+        );
     }
 
     // Test 10: Default implementation
@@ -603,10 +588,12 @@ mod tests {
     fn test_parse_sse_text_delta() {
         let data = r#"data: {"id":"1","model":"test","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#;
         let events = parse_sse_events(data, "cloudflare", "test-model");
-        
+
         assert!(!events.is_empty());
         // Check that we get a TextDelta event
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
     }
 
     // Test 12: SSE parsing with done event
@@ -614,12 +601,13 @@ mod tests {
     fn test_parse_sse_done_event() {
         let data = r#"data: {"id":"1","model":"test","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#;
         let events = parse_sse_events(data, "cloudflare", "test-model");
-        
-        let done_events: Vec<_> = events.iter()
+
+        let done_events: Vec<_> = events
+            .iter()
             .filter(|e| matches!(e, ProviderEvent::Done { .. }))
             .collect();
         assert!(!done_events.is_empty());
-        
+
         if let ProviderEvent::Done { reason, message } = &done_events[0] {
             assert_eq!(*reason, StopReason::Stop);
             assert_eq!(message.usage.total_tokens, 15);
@@ -631,8 +619,10 @@ mod tests {
     fn test_parse_sse_tool_call_delta() {
         let data = r#"data: {"id":"1","model":"test","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_1","function":{"name":"get_weather","arguments":"{\"location\":\"NYC\"}"}}]},"finish_reason":null}]}"#;
         let events = parse_sse_events(data, "cloudflare", "test-model");
-        
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. })));
+
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. })));
     }
 
     // Test 14: SSE parsing with [DONE] sentinel
@@ -641,7 +631,7 @@ mod tests {
         let data = r#"data: {"id":"1","model":"test","choices":[{"index":0,"delta":{"content":"Done"},"finish_reason":"stop"}]}
 data: [DONE]"#;
         let events = parse_sse_events(data, "cloudflare", "test-model");
-        
+
         // Should parse the first chunk but stop at [DONE]
         assert!(!events.is_empty());
     }
@@ -652,9 +642,10 @@ data: [DONE]"#;
         let data = r#"data: {"id":"1","model":"test","choices":[{"index":0,"delta":{"content":"Hello "},"finish_reason":null}]}
 data: {"id":"2","model":"test","choices":[{"index":0,"delta":{"content":"world"},"finish_reason":"stop"}]}"#;
         let events = parse_sse_events(data, "cloudflare", "test-model");
-        
+
         // Should have text delta for "Hello " and another for "world"
-        let text_deltas: Vec<_> = events.iter()
+        let text_deltas: Vec<_> = events
+            .iter()
             .filter_map(|e| match e {
                 ProviderEvent::TextDelta { delta, .. } => Some(delta.clone()),
                 _ => None,
@@ -668,12 +659,12 @@ data: {"id":"2","model":"test","choices":[{"index":0,"delta":{"content":"world"}
     #[test]
     fn test_blocks_to_content_multiple() {
         use crate::TextContent;
-        
+
         let blocks = vec![
             ContentBlock::Text(TextContent::new("Hello")),
             ContentBlock::Text(TextContent::new(" world")),
         ];
-        
+
         let content = blocks_to_content(&blocks).unwrap();
         // When multiple blocks, it becomes an array
         assert!(content.is_array());
@@ -684,9 +675,9 @@ data: {"id":"2","model":"test","choices":[{"index":0,"delta":{"content":"world"}
     #[test]
     fn test_blocks_to_content_single_text() {
         use crate::TextContent;
-        
+
         let blocks = vec![ContentBlock::Text(TextContent::new("Just text"))];
-        
+
         let content = blocks_to_content(&blocks).unwrap();
         // Single text becomes a string
         assert!(content.is_string());

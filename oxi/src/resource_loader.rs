@@ -513,7 +513,10 @@ pub fn is_valid_resource_path(path: &Path, resource_type: ResourceType) -> bool 
         }
         ResourceType::Theme => path.extension().map(|e| e == "json").unwrap_or(false),
         ResourceType::Prompt => path.extension().map(|e| e == "md").unwrap_or(false),
-        ResourceType::Extension => path.extension().map(|e| e == "js" || e == "ts").unwrap_or(false),
+        ResourceType::Extension => path
+            .extension()
+            .map(|e| e == "js" || e == "ts")
+            .unwrap_or(false),
     }
 }
 
@@ -541,8 +544,14 @@ name: Test Skill
 description: A test skill
 ---
 # Content"#;
-        assert_eq!(extract_yaml_field(content, "name"), Some("Test Skill".to_string()));
-        assert_eq!(extract_yaml_field(content, "description"), Some("A test skill".to_string()));
+        assert_eq!(
+            extract_yaml_field(content, "name"),
+            Some("Test Skill".to_string())
+        );
+        assert_eq!(
+            extract_yaml_field(content, "description"),
+            Some("A test skill".to_string())
+        );
         assert_eq!(extract_yaml_field(content, "nonexistent"), None);
     }
 
@@ -567,7 +576,10 @@ description: A test skill
 
     #[test]
     fn test_is_valid_resource_path() {
-        assert!(!is_valid_resource_path(Path::new("/nonexistent"), ResourceType::Skill));
+        assert!(!is_valid_resource_path(
+            Path::new("/nonexistent"),
+            ResourceType::Skill
+        ));
     }
 
     #[test]
@@ -597,7 +609,11 @@ description: A test skill
         // Create skills dir
         let skills_dir = base.join("skills");
         fs::create_dir_all(&skills_dir).unwrap();
-        fs::write(skills_dir.join("test.md"), "---\nname: Test\n---\nTest content").unwrap();
+        fs::write(
+            skills_dir.join("test.md"),
+            "---\nname: Test\n---\nTest content",
+        )
+        .unwrap();
 
         let result = load_all_resources(base);
 

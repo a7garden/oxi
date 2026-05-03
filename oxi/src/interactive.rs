@@ -12,10 +12,11 @@
 
 use crate::InteractiveSession;
 use anyhow::Result;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use oxi_agent::{Agent, AgentEvent};
 use oxi_tui::{
-    ChatMessageDisplay, ChatView, Component, ContentBlockDisplay, Input, MessageRole, Rect, Surface, Theme,
+    ChatMessageDisplay, ChatView, Component, ContentBlockDisplay, Input, MessageRole, Rect,
+    Surface, Theme,
 };
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -53,7 +54,12 @@ impl ImageAttachment {
         if BASE64.decode(&base64_data).is_err() {
             return None;
         }
-        Some(Self { mime_type, base64_data, width: None, height: None })
+        Some(Self {
+            mime_type,
+            base64_data,
+            width: None,
+            height: None,
+        })
     }
 
     /// Get the file extension for the mime type
@@ -70,10 +76,18 @@ impl ImageAttachment {
     /// Detect mime type from magic bytes
     pub fn detect_mime_type(data: &[u8]) -> &'static str {
         if data.len() >= 8 {
-            if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) { return "image/png"; }
-            if data.starts_with(&[0xFF, 0xD8, 0xFF]) { return "image/jpeg"; }
-            if data.starts_with(&[0x47, 0x49, 0x46]) { return "image/gif"; }
-            if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" { return "image/webp"; }
+            if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                return "image/png";
+            }
+            if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+                return "image/jpeg";
+            }
+            if data.starts_with(&[0x47, 0x49, 0x46]) {
+                return "image/gif";
+            }
+            if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+                return "image/webp";
+            }
         }
         "image/png"
     }
@@ -82,7 +96,12 @@ impl ImageAttachment {
     pub fn from_bytes(data: Vec<u8>) -> Option<Self> {
         let mime_type = Self::detect_mime_type(&data);
         let base64_data = BASE64.encode(&data);
-        Some(Self { mime_type: mime_type.to_string(), base64_data, width: None, height: None })
+        Some(Self {
+            mime_type: mime_type.to_string(),
+            base64_data,
+            width: None,
+            height: None,
+        })
     }
 }
 
@@ -111,22 +130,34 @@ impl SessionPersistence {
     }
 
     /// Save a user message to the session file
-    pub fn save_user_message(&self, session_id: &str, content: &str, timestamp: i64) -> Result<(), std::io::Error> {
+    pub fn save_user_message(
+        &self,
+        session_id: &str,
+        content: &str,
+        timestamp: i64,
+    ) -> Result<(), std::io::Error> {
         use std::io::Write;
         let path = self.session_file_path(session_id);
         let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-        let entry = serde_json::json!({"type": "user", "content": content, "timestamp": timestamp });
+        let entry =
+            serde_json::json!({"type": "user", "content": content, "timestamp": timestamp });
         writeln!(file, "{}", entry)?;
         *self.last_save.write().unwrap() = Instant::now();
         Ok(())
     }
 
     /// Save an assistant message to the session file
-    pub fn save_assistant_message(&self, session_id: &str, content: &str, timestamp: i64) -> Result<(), std::io::Error> {
+    pub fn save_assistant_message(
+        &self,
+        session_id: &str,
+        content: &str,
+        timestamp: i64,
+    ) -> Result<(), std::io::Error> {
         use std::io::Write;
         let path = self.session_file_path(session_id);
         let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-        let entry = serde_json::json!({"type": "assistant", "content": content, "timestamp": timestamp });
+        let entry =
+            serde_json::json!({"type": "assistant", "content": content, "timestamp": timestamp });
         writeln!(file, "{}", entry)?;
         *self.last_save.write().unwrap() = Instant::now();
         Ok(())
@@ -189,35 +220,63 @@ impl KeybindingHints {
     /// Get the compact hints string (shown at startup)
     pub fn compact_display(&self) -> String {
         let hints = vec![
-            ("Ctrl+C", "quit"), ("/clear", "clear"), ("/", "commands"), ("!", "bash"),
+            ("Ctrl+C", "quit"),
+            ("/clear", "clear"),
+            ("/", "commands"),
+            ("!", "bash"),
         ];
-        hints.iter().map(|(key, desc)| format!("[{}] {}", key, desc)).collect::<Vec<_>>().join(" • ")
+        hints
+            .iter()
+            .map(|(key, desc)| format!("[{}] {}", key, desc))
+            .collect::<Vec<_>>()
+            .join(" • ")
     }
 
     /// Get the expanded hints string (shown on demand)
     pub fn expanded_display(&self) -> String {
         let hints = vec![
-            ("Ctrl+C", "quit"), ("Ctrl+L", "clear screen"), ("Ctrl+U", "clear line"),
-            ("Ctrl+A", "go to line start"), ("Ctrl+E", "go to line end"),
-            ("/model", "select model"), ("/clear", "clear chat"), ("/compact", "compact context"),
-            ("/undo", "undo"), ("/redo", "redo"), ("/session", "session info"),
-            ("/export", "export session"), ("/settings", "show settings"),
-            ("/help", "show help"), ("/new", "new session"),
-            ("!", "bash command"), ("!!", "bash (excluded)"),
-            ("PageUp/Down", "scroll chat"), ("Mouse", "scroll chat"),
+            ("Ctrl+C", "quit"),
+            ("Ctrl+L", "clear screen"),
+            ("Ctrl+U", "clear line"),
+            ("Ctrl+A", "go to line start"),
+            ("Ctrl+E", "go to line end"),
+            ("/model", "select model"),
+            ("/clear", "clear chat"),
+            ("/compact", "compact context"),
+            ("/undo", "undo"),
+            ("/redo", "redo"),
+            ("/session", "session info"),
+            ("/export", "export session"),
+            ("/settings", "show settings"),
+            ("/help", "show help"),
+            ("/new", "new session"),
+            ("!", "bash command"),
+            ("!!", "bash (excluded)"),
+            ("PageUp/Down", "scroll chat"),
+            ("Mouse", "scroll chat"),
         ];
-        hints.iter().map(|(key, desc)| format!("  {:20} {}", key, desc)).collect::<Vec<_>>().join("\n")
+        hints
+            .iter()
+            .map(|(key, desc)| format!("  {:20} {}", key, desc))
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     /// Toggle expanded state
-    pub fn toggle(&mut self) { self.expanded = !self.expanded; }
+    pub fn toggle(&mut self) {
+        self.expanded = !self.expanded;
+    }
 
     /// Check if expanded
-    pub fn is_expanded(&self) -> bool { self.expanded }
+    pub fn is_expanded(&self) -> bool {
+        self.expanded
+    }
 }
 
 impl Default for KeybindingHints {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Auto-save interval in seconds
@@ -482,7 +541,9 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                 InteractiveState::ToolExecution => "\u{2699} executing...",
                 InteractiveState::Display | InteractiveState::Input => "",
             };
-            let status_fg = if state == InteractiveState::Thinking || state == InteractiveState::ToolExecution {
+            let status_fg = if state == InteractiveState::Thinking
+                || state == InteractiveState::ToolExecution
+            {
                 theme.colors.warning
             } else {
                 theme.colors.muted
@@ -534,9 +595,11 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                 let help_text = format_help();
                                                 chat_view.add_message(ChatMessageDisplay {
                                                     role: MessageRole::Assistant,
-                                                    content_blocks: vec![ContentBlockDisplay::Text {
-                                                        content: help_text,
-                                                    }],
+                                                    content_blocks: vec![
+                                                        ContentBlockDisplay::Text {
+                                                            content: help_text,
+                                                        },
+                                                    ],
                                                     timestamp: now_millis(),
                                                 });
                                                 input.clear();
@@ -552,18 +615,20 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                     // Attempt to switch model directly
                                                     match app.switch_model(&query) {
                                                         Ok(()) => {
-                                                            chat_view.add_message(ChatMessageDisplay {
-                                                                role: MessageRole::Assistant,
-                                                                content_blocks: vec![
-                                                                    ContentBlockDisplay::Text {
-                                                                        content: format!(
+                                                            chat_view.add_message(
+                                                                ChatMessageDisplay {
+                                                                    role: MessageRole::Assistant,
+                                                                    content_blocks: vec![
+                                                                        ContentBlockDisplay::Text {
+                                                                            content: format!(
                                                                             "Switched to model: {}",
                                                                             query
                                                                         ),
-                                                                    },
-                                                                ],
-                                                                timestamp: now_millis(),
-                                                            });
+                                                                        },
+                                                                    ],
+                                                                    timestamp: now_millis(),
+                                                                },
+                                                            );
                                                         }
                                                         Err(e) => {
                                                             chat_view.add_message(ChatMessageDisplay {
@@ -606,7 +671,9 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                 input.clear();
                                                 continue;
                                             }
-                                            SlashCommand::Compact { custom_instructions } => {
+                                            SlashCommand::Compact {
+                                                custom_instructions,
+                                            } => {
                                                 // Compact is a hint; show message
                                                 let msg = if let Some(ci) = &custom_instructions {
                                                     format!(
@@ -634,12 +701,18 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                 if session.messages.len() >= 2 {
                                                     let last_assistant = session.messages.pop();
                                                     let last_user = session.messages.pop();
-                                                    if let (Some(u), Some(a)) = (last_user, last_assistant) {
+                                                    if let (Some(u), Some(a)) =
+                                                        (last_user, last_assistant)
+                                                    {
                                                         undo_stack.push(u);
                                                         undo_stack.push(a);
                                                     }
                                                     // Rebuild chat view from remaining messages
-                                                    rebuild_chat_view(&mut chat_view, &session, &theme);
+                                                    rebuild_chat_view(
+                                                        &mut chat_view,
+                                                        &session,
+                                                        &theme,
+                                                    );
                                                 }
                                                 input.clear();
                                                 continue;
@@ -649,11 +722,17 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                     let user_msg = undo_stack.pop();
                                                     let assistant_msg = undo_stack.pop();
                                                     // Push in correct order: user first, then assistant
-                                                    if let (Some(a), Some(u)) = (assistant_msg, user_msg) {
+                                                    if let (Some(a), Some(u)) =
+                                                        (assistant_msg, user_msg)
+                                                    {
                                                         session.messages.push(u);
                                                         session.messages.push(a);
                                                     }
-                                                    rebuild_chat_view(&mut chat_view, &session, &theme);
+                                                    rebuild_chat_view(
+                                                        &mut chat_view,
+                                                        &session,
+                                                        &theme,
+                                                    );
                                                 }
                                                 input.clear();
                                                 continue;
@@ -676,9 +755,10 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                             }
                                             SlashCommand::Export { path } => {
                                                 let json = export_session_json(&session);
-                                                let export_path = path
-                                                    .clone()
-                                                    .unwrap_or_else(|| "oxi-session.json".to_string());
+                                                let export_path =
+                                                    path.clone().unwrap_or_else(|| {
+                                                        "oxi-session.json".to_string()
+                                                    });
                                                 match std::fs::write(&export_path, &json) {
                                                     Ok(()) => {
                                                         chat_view.add_message(ChatMessageDisplay {
@@ -722,7 +802,8 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                      Tool Timeout: {}s",
                                                     app.settings().effective_model(None),
                                                     app.settings().thinking_level,
-                                                    app.settings().effective_temperature()
+                                                    app.settings()
+                                                        .effective_temperature()
                                                         .map(|t| t.to_string())
                                                         .unwrap_or_else(|| "default".to_string()),
                                                     app.settings()
@@ -895,7 +976,11 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                 UiEvent::TextDelta(text) => {
                     chat_view.stream_text_delta(&text);
                 }
-                UiEvent::ToolCall { id, name, arguments } => {
+                UiEvent::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => {
                     chat_view.stream_thinking_end();
                     chat_view.stream_tool_call(id, name, arguments);
                     state = InteractiveState::ToolExecution;
@@ -1069,8 +1154,12 @@ fn convert_key_event(key: crossterm::event::KeyEvent) -> Option<oxi_tui::Event> 
     };
 
     let modifiers = oxi_tui::KeyModifiers {
-        shift: key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT),
-        ctrl: key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL),
+        shift: key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::SHIFT),
+        ctrl: key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL),
         alt: key.modifiers.contains(crossterm::event::KeyModifiers::ALT),
         meta: key.modifiers.contains(crossterm::event::KeyModifiers::META),
     };
@@ -1109,7 +1198,8 @@ Keybindings:
   Ctrl+C             Quit
   PageUp/PageDown    Scroll chat history
   Mouse scroll       Scroll chat history
-"#.to_string()
+"#
+    .to_string()
 }
 
 /// Format session info.
@@ -1204,7 +1294,10 @@ fn run_bash_command(command: &str) -> String {
         result.push_str(&String::from_utf8_lossy(&output.stderr));
     }
     if !output.status.success() {
-        result.push_str(&format!("\nExit code: {}", output.status.code().unwrap_or(-1)));
+        result.push_str(&format!(
+            "\nExit code: {}",
+            output.status.code().unwrap_or(-1)
+        ));
     }
     result
 }
@@ -1254,8 +1347,11 @@ fn longest_common_subsequence<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<(usize, u
 
     for i in 1..=m {
         for j in 1..=n {
-            if a[i - 1] == b[j - 1] { dp[i][j] = dp[i - 1][j - 1] + 1; }
-            else { dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]); }
+            if a[i - 1] == b[j - 1] {
+                dp[i][j] = dp[i - 1][j - 1] + 1;
+            } else {
+                dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]);
+            }
         }
     }
 
@@ -1267,8 +1363,11 @@ fn longest_common_subsequence<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<(usize, u
             lcs.push((i - 1, j - 1));
             i -= 1;
             j -= 1;
-        } else if dp[i - 1][j] > dp[i][j - 1] { i -= 1; }
-        else { j -= 1; }
+        } else if dp[i - 1][j] > dp[i][j - 1] {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
     }
     lcs.reverse();
     lcs
@@ -1295,9 +1394,15 @@ impl DiffResult {
         let mut result = String::new();
         for change in &self.changes {
             match change {
-                DiffChange::Unchanged(s) => { write!(&mut result, "{} ", s).unwrap(); }
-                DiffChange::Added(s) => { write!(&mut result, "\x1b[32m{}\x1b[0m ", s).unwrap(); }
-                DiffChange::Removed(s) => { write!(&mut result, "\x1b[31m{}\x1b[0m ", s).unwrap(); }
+                DiffChange::Unchanged(s) => {
+                    write!(&mut result, "{} ", s).unwrap();
+                }
+                DiffChange::Added(s) => {
+                    write!(&mut result, "\x1b[32m{}\x1b[0m ", s).unwrap();
+                }
+                DiffChange::Removed(s) => {
+                    write!(&mut result, "\x1b[31m{}\x1b[0m ", s).unwrap();
+                }
             }
         }
         result.trim_end().to_string()
@@ -1570,12 +1675,21 @@ mod tests {
             SlashCommand::Model { search: None }.description(),
             "Select model"
         );
-        assert_eq!(SlashCommand::Clear.description(), "Clear conversation history");
+        assert_eq!(
+            SlashCommand::Clear.description(),
+            "Clear conversation history"
+        );
         assert_eq!(SlashCommand::Undo.description(), "Undo last exchange");
-        assert_eq!(SlashCommand::Redo.description(), "Redo last undone exchange");
+        assert_eq!(
+            SlashCommand::Redo.description(),
+            "Redo last undone exchange"
+        );
         assert_eq!(SlashCommand::Quit.description(), "Quit oxi");
         assert_eq!(
-            SlashCommand::Unknown { raw: "/x".to_string() }.description(),
+            SlashCommand::Unknown {
+                raw: "/x".to_string()
+            }
+            .description(),
             "Unknown command"
         );
     }

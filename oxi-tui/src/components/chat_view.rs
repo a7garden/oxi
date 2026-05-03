@@ -38,14 +38,9 @@ pub enum MessageRole {
 #[derive(Debug, Clone)]
 pub enum ContentBlockDisplay {
     /// Ordinary text / markdown content.
-    Text {
-        content: String,
-    },
+    Text { content: String },
     /// Thinking / reasoning content (collapsible).
-    Thinking {
-        content: String,
-        collapsed: bool,
-    },
+    Thinking { content: String, collapsed: bool },
     /// A tool call made by the assistant.
     ToolCall {
         id: String,
@@ -214,9 +209,12 @@ impl ChatView {
             {
                 content.push_str(delta);
             } else {
-                state.message.content_blocks.push(ContentBlockDisplay::Text {
-                    content: delta.to_string(),
-                });
+                state
+                    .message
+                    .content_blocks
+                    .push(ContentBlockDisplay::Text {
+                        content: delta.to_string(),
+                    });
             }
             self.dirty = true;
         }
@@ -225,10 +223,13 @@ impl ChatView {
     /// Start a new thinking block in the streaming message.
     pub fn stream_thinking_start(&mut self) {
         if let Some(ref mut state) = self.streaming {
-            state.message.content_blocks.push(ContentBlockDisplay::Thinking {
-                content: String::new(),
-                collapsed: false,
-            });
+            state
+                .message
+                .content_blocks
+                .push(ContentBlockDisplay::Thinking {
+                    content: String::new(),
+                    collapsed: false,
+                });
             state.active_content_index = state.message.content_blocks.len() - 1;
             self.dirty = true;
         }
@@ -237,8 +238,9 @@ impl ChatView {
     /// Append a thinking delta to the streaming message.
     pub fn stream_thinking_delta(&mut self, delta: &str) {
         if let Some(ref mut state) = self.streaming {
-            if let Some(ContentBlockDisplay::Thinking { ref mut content, .. }) =
-                state.message.content_blocks.last_mut()
+            if let Some(ContentBlockDisplay::Thinking {
+                ref mut content, ..
+            }) = state.message.content_blocks.last_mut()
             {
                 content.push_str(delta);
                 self.dirty = true;
@@ -263,28 +265,29 @@ impl ChatView {
     /// Add a tool call to the streaming message.
     pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String) {
         if let Some(ref mut state) = self.streaming {
-            state.message.content_blocks.push(ContentBlockDisplay::ToolCall {
-                id,
-                name,
-                arguments,
-            });
+            state
+                .message
+                .content_blocks
+                .push(ContentBlockDisplay::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                });
             self.dirty = true;
         }
     }
 
     /// Add a tool result to the streaming message.
-    pub fn stream_tool_result(
-        &mut self,
-        tool_name: String,
-        content: String,
-        is_error: bool,
-    ) {
+    pub fn stream_tool_result(&mut self, tool_name: String, content: String, is_error: bool) {
         if let Some(ref mut state) = self.streaming {
-            state.message.content_blocks.push(ContentBlockDisplay::ToolResult {
-                tool_name,
-                content,
-                is_error,
-            });
+            state
+                .message
+                .content_blocks
+                .push(ContentBlockDisplay::ToolResult {
+                    tool_name,
+                    content,
+                    is_error,
+                });
             self.dirty = true;
         }
     }
@@ -300,11 +303,14 @@ impl ChatView {
     /// Finish streaming with an error.
     pub fn finish_streaming_error(&mut self, error: &str) {
         if let Some(ref mut state) = self.streaming {
-            state.message.content_blocks.push(ContentBlockDisplay::Error {
-                title: "Error".into(),
-                message: error.into(),
-                retryable: false,
-            });
+            state
+                .message
+                .content_blocks
+                .push(ContentBlockDisplay::Error {
+                    title: "Error".into(),
+                    message: error.into(),
+                    retryable: false,
+                });
         }
         self.finish_streaming();
     }
@@ -313,7 +319,12 @@ impl ChatView {
     ///
     /// Use this for errors that happen outside of streaming (e.g. a failed
     /// retry, a model fallback failure).
-    pub fn add_error(&mut self, title: impl Into<String>, message: impl Into<String>, retryable: bool) {
+    pub fn add_error(
+        &mut self,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        retryable: bool,
+    ) {
         self.add_message(ChatMessageDisplay {
             role: MessageRole::Assistant,
             content_blocks: vec![ContentBlockDisplay::Error {
@@ -326,13 +337,21 @@ impl ChatView {
     }
 
     /// Stream an error block into the current streaming message.
-    pub fn stream_error(&mut self, title: impl Into<String>, message: impl Into<String>, retryable: bool) {
+    pub fn stream_error(
+        &mut self,
+        title: impl Into<String>,
+        message: impl Into<String>,
+        retryable: bool,
+    ) {
         if let Some(ref mut state) = self.streaming {
-            state.message.content_blocks.push(ContentBlockDisplay::Error {
-                title: title.into(),
-                message: message.into(),
-                retryable,
-            });
+            state
+                .message
+                .content_blocks
+                .push(ContentBlockDisplay::Error {
+                    title: title.into(),
+                    message: message.into(),
+                    retryable,
+                });
             self.dirty = true;
         }
     }
@@ -458,15 +477,20 @@ impl ChatView {
             // Remove the old streaming entry if it exists.
             if !self.rendered_lines.is_empty() && self.streaming.is_some() {
                 // The streaming message is always the last rendered entry.
-                self.content_height = self
-                    .content_height
-                    .saturating_sub(self.rendered_lines.last().map(|r| r.lines.len() as u16).unwrap_or(0));
+                self.content_height = self.content_height.saturating_sub(
+                    self.rendered_lines
+                        .last()
+                        .map(|r| r.lines.len() as u16)
+                        .unwrap_or(0),
+                );
                 self.rendered_lines.pop();
             }
 
             if let Some(ref state) = self.streaming {
                 let rendered = self.render_message(&state.message, self.messages.len(), width);
-                self.content_height = self.content_height.saturating_add(rendered.lines.len() as u16);
+                self.content_height = self
+                    .content_height
+                    .saturating_add(rendered.lines.len() as u16);
                 self.rendered_lines.push(rendered);
             }
 
@@ -499,7 +523,12 @@ impl ChatView {
         match msg.role {
             MessageRole::User => {
                 // Render user messages with a label
-                lines.push(self.make_label_line(" You", self.theme.colors.primary, Color::Default, self.theme.fonts.bold));
+                lines.push(self.make_label_line(
+                    " You",
+                    self.theme.colors.primary,
+                    Color::Default,
+                    self.theme.fonts.bold,
+                ));
                 for block in &msg.content_blocks {
                     self.render_text_block(block, max_content_width, &mut lines, ASSISTANT_MARGIN);
                 }
@@ -508,9 +537,20 @@ impl ChatView {
             }
             MessageRole::Assistant => {
                 // Render assistant messages with a label
-                lines.push(self.make_label_line(" Assistant", self.theme.colors.accent, Color::Default, self.theme.fonts.bold));
+                lines.push(self.make_label_line(
+                    " Assistant",
+                    self.theme.colors.accent,
+                    Color::Default,
+                    self.theme.fonts.bold,
+                ));
                 for (bi, block) in msg.content_blocks.iter().enumerate() {
-                    self.render_content_block(block, message_index, bi, max_content_width, &mut lines);
+                    self.render_content_block(
+                        block,
+                        message_index,
+                        bi,
+                        max_content_width,
+                        &mut lines,
+                    );
                 }
                 // Blank separator
                 lines.push(empty_line());
@@ -523,7 +563,13 @@ impl ChatView {
                         is_error,
                     } = block
                     {
-                        self.render_tool_result_block(tool_name, content, *is_error, max_content_width, &mut lines);
+                        self.render_tool_result_block(
+                            tool_name,
+                            content,
+                            *is_error,
+                            max_content_width,
+                            &mut lines,
+                        );
                     }
                 }
             }
@@ -539,7 +585,12 @@ impl ChatView {
         let mut line = RenderedLine { cells: Vec::new() };
         // Add left margin
         for _ in 0..ASSISTANT_MARGIN {
-            line.cells.push(StyledCell::new(' ', Color::Default, Color::Default, Attributes::new()));
+            line.cells.push(StyledCell::new(
+                ' ',
+                Color::Default,
+                Color::Default,
+                Attributes::new(),
+            ));
         }
         for ch in text.chars() {
             line.cells.push(StyledCell::new(ch, fg, bg, attrs));
@@ -565,7 +616,15 @@ impl ChatView {
                 lines.push(margin_line(margin));
                 continue;
             }
-            wrap_text(raw_line, max_width, self.theme.colors.foreground, Color::Default, Attributes::new(), margin, lines);
+            wrap_text(
+                raw_line,
+                max_width,
+                self.theme.colors.foreground,
+                Color::Default,
+                Attributes::new(),
+                margin,
+                lines,
+            );
         }
         // If text ends without newline, still fine – we already wrapped all lines.
         if text.is_empty() {
@@ -586,11 +645,15 @@ impl ChatView {
             ContentBlockDisplay::Text { content: _ } => {
                 self.render_text_block(block, max_width, lines, ASSISTANT_MARGIN);
             }
-            ContentBlockDisplay::Thinking {
-                content,
-                collapsed,
-            } => {
-                self.render_thinking_block(content, *collapsed, message_index, block_index, max_width, lines);
+            ContentBlockDisplay::Thinking { content, collapsed } => {
+                self.render_thinking_block(
+                    content,
+                    *collapsed,
+                    message_index,
+                    block_index,
+                    max_width,
+                    lines,
+                );
             }
             ContentBlockDisplay::ToolCall {
                 id: _,
@@ -783,7 +846,10 @@ impl ChatView {
         let content_lines: Vec<&str> = content.lines().take(TOOL_RESULT_PREVIEW_LINES).collect();
         for raw_line in content_lines {
             let truncated = if raw_line.len() > TOOL_RESULT_MAX_CHARS {
-                format!("│ {}…", &raw_line[..TOOL_RESULT_MAX_CHARS.saturating_sub(1)])
+                format!(
+                    "│ {}…",
+                    &raw_line[..TOOL_RESULT_MAX_CHARS.saturating_sub(1)]
+                )
             } else {
                 format!("│ {}", raw_line)
             };
@@ -798,7 +864,10 @@ impl ChatView {
         let total_lines = content.lines().count();
         if total_lines > TOOL_RESULT_PREVIEW_LINES {
             lines.push(self.make_styled_line(
-                &format!("│ … ({} more lines)", total_lines - TOOL_RESULT_PREVIEW_LINES),
+                &format!(
+                    "│ … ({} more lines)",
+                    total_lines - TOOL_RESULT_PREVIEW_LINES
+                ),
                 content_fg,
                 Color::Default,
                 Attributes::new().with_italic(),
@@ -895,7 +964,12 @@ impl ChatView {
     ) -> RenderedLine {
         let mut line = RenderedLine { cells: Vec::new() };
         for _ in 0..margin {
-            line.cells.push(StyledCell::new(' ', Color::Default, Color::Default, Attributes::new()));
+            line.cells.push(StyledCell::new(
+                ' ',
+                Color::Default,
+                Color::Default,
+                Attributes::new(),
+            ));
         }
         for ch in text.chars() {
             line.cells.push(StyledCell::new(ch, fg, bg, attrs));
@@ -975,7 +1049,9 @@ fn wrap_text(
                 // Word is longer than max_width – hard-wrap
                 for ch in word.chars() {
                     if current_len >= max_width {
-                        lines.push(RenderedLine { cells: std::mem::take(&mut current_line) });
+                        lines.push(RenderedLine {
+                            cells: std::mem::take(&mut current_line),
+                        });
                         current_line = margin_prefix(margin);
                         current_len = 0;
                     }
@@ -992,7 +1068,9 @@ fn wrap_text(
             current_len += 1 + word_len;
         } else {
             // Wrap to next line
-            lines.push(RenderedLine { cells: std::mem::take(&mut current_line) });
+            lines.push(RenderedLine {
+                cells: std::mem::take(&mut current_line),
+            });
             current_line = margin_prefix(margin);
             current_len = 0;
             if word_len <= max_width {
@@ -1003,7 +1081,9 @@ fn wrap_text(
             } else {
                 for ch in word.chars() {
                     if current_len >= max_width {
-                        lines.push(RenderedLine { cells: std::mem::take(&mut current_line) });
+                        lines.push(RenderedLine {
+                            cells: std::mem::take(&mut current_line),
+                        });
                         current_line = margin_prefix(margin);
                         current_len = 0;
                     }
@@ -1015,14 +1095,21 @@ fn wrap_text(
     }
 
     if current_len > 0 || text.is_empty() {
-        lines.push(RenderedLine { cells: current_line });
+        lines.push(RenderedLine {
+            cells: current_line,
+        });
     }
 }
 
 fn margin_prefix(margin: u16) -> Vec<StyledCell> {
     let mut cells = Vec::with_capacity(margin as usize);
     for _ in 0..margin {
-        cells.push(StyledCell::new(' ', Color::Default, Color::Default, Attributes::new()));
+        cells.push(StyledCell::new(
+            ' ',
+            Color::Default,
+            Color::Default,
+            Attributes::new(),
+        ));
     }
     cells
 }
@@ -1129,7 +1216,10 @@ impl Component for ChatView {
         self.reflow_if_needed(area.width);
 
         // If content fits within viewport or we were at the bottom, pin to bottom.
-        let max_offset = self.content_height.saturating_sub(area.height).saturating_sub(1);
+        let max_offset = self
+            .content_height
+            .saturating_sub(area.height)
+            .saturating_sub(1);
         if was_at_bottom || self.content_height <= area.height {
             self.scroll_offset = max_offset;
         }
@@ -1245,11 +1335,7 @@ mod tests {
             "read_file".into(),
             r#"{"path": "/tmp/test.txt"}"#.into(),
         );
-        cv.stream_tool_result(
-            "read_file".into(),
-            "File contents here".into(),
-            false,
-        );
+        cv.stream_tool_result("read_file".into(), "File contents here".into(), false);
         cv.stream_text_delta("I read the file.");
         cv.finish_streaming();
 
@@ -1340,7 +1426,10 @@ mod tests {
         // Check that something was rendered (not all default cells)
         let has_content = (0..10).any(|row| {
             (0..40).any(|col| {
-                surface.get(row, col).map(|c| c.char != ' ').unwrap_or(false)
+                surface
+                    .get(row, col)
+                    .map(|c| c.char != ' ')
+                    .unwrap_or(false)
             })
         });
         assert!(has_content, "Expected some non-space cells to be rendered");
@@ -1359,7 +1448,12 @@ mod tests {
         // Last block should contain an error block
         let msg = &cv.messages[0];
         let last_block = msg.content_blocks.last().unwrap();
-        if let ContentBlockDisplay::Error { title, message, retryable: _ } = last_block {
+        if let ContentBlockDisplay::Error {
+            title,
+            message,
+            retryable: _,
+        } = last_block
+        {
             assert_eq!(title, "Error");
             assert_eq!(message, "Connection lost");
         } else {
@@ -1395,8 +1489,10 @@ mod tests {
         let mut lines_collapsed: Vec<RenderedLine> = Vec::new();
         cv.render_thinking_block(
             "Some deep thinking content here",
-            true,  // collapsed
-            0, 0, 80,
+            true, // collapsed
+            0,
+            0,
+            80,
             &mut lines_collapsed,
         );
         // Collapsed: header + 1 preview + separator = 3 lines
@@ -1406,7 +1502,9 @@ mod tests {
         cv.render_thinking_block(
             "Some deep thinking content here",
             false, // expanded
-            0, 0, 80,
+            0,
+            0,
+            80,
             &mut lines_expanded,
         );
         // Expanded: header + content + separator = 3 lines (single line content)
@@ -1420,7 +1518,12 @@ mod tests {
         assert_eq!(cv.message_count(), 1);
         let msg = &cv.messages[0];
         assert_eq!(msg.content_blocks.len(), 1);
-        if let ContentBlockDisplay::Error { title, message, retryable } = &msg.content_blocks[0] {
+        if let ContentBlockDisplay::Error {
+            title,
+            message,
+            retryable,
+        } = &msg.content_blocks[0]
+        {
             assert_eq!(title, "Rate Limited");
             assert_eq!(message, "Too many requests. Please wait.");
             assert!(retryable);
@@ -1443,10 +1546,11 @@ mod tests {
         // Header + message + retry hint + separator
         assert!(lines.len() >= 3);
         // Check that the retry hint is present
-        let has_retry_hint = lines.iter().any(|l| {
-            l.cells.iter().any(|c| c.ch == '↻')
-        });
-        assert!(has_retry_hint, "Expected retry hint in rendered error block");
+        let has_retry_hint = lines.iter().any(|l| l.cells.iter().any(|c| c.ch == '↻'));
+        assert!(
+            has_retry_hint,
+            "Expected retry hint in rendered error block"
+        );
     }
 
     #[test]
@@ -1462,10 +1566,11 @@ mod tests {
         );
         // Header + message + separator
         assert!(lines.len() >= 2);
-        let has_retry_hint = lines.iter().any(|l| {
-            l.cells.iter().any(|c| c.ch == '↻')
-        });
-        assert!(!has_retry_hint, "Should not have retry hint for non-retryable error");
+        let has_retry_hint = lines.iter().any(|l| l.cells.iter().any(|c| c.ch == '↻'));
+        assert!(
+            !has_retry_hint,
+            "Should not have retry hint for non-retryable error"
+        );
     }
 
     #[test]

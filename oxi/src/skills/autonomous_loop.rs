@@ -21,7 +21,7 @@ use anyhow::{bail, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -458,7 +458,10 @@ impl VerificationResult {
 
     /// Count issues by severity.
     pub fn issue_count_by_severity(&self, severity: IssueSeverity) -> usize {
-        self.issues.iter().filter(|i| i.severity == severity).count()
+        self.issues
+            .iter()
+            .filter(|i| i.severity == severity)
+            .count()
     }
 
     /// Count confirmed issues that still need fixing.
@@ -526,10 +529,7 @@ impl LoopStatus {
             .filter(|b| b.status == TaskStatus::Done)
             .count();
         let total_count = self.batches.len();
-        s.push_str(&format!(
-            "Batches: {} / {} done\n",
-            done_count, total_count
-        ));
+        s.push_str(&format!("Batches: {} / {} done\n", done_count, total_count));
         for batch in &self.batches {
             let task_ids: Vec<&str> = batch.tasks.iter().map(|t| t.id.as_str()).collect();
             let mode = if batch.has_conflicts {
@@ -538,12 +538,12 @@ impl LoopStatus {
                 "parallel"
             };
             s.push_str(&format!(
-            "  Batch {}: [{}] ({}) — {}\n",
-            batch.index,
-            task_ids.join(", "),
-            mode,
-            batch.status
-        ));
+                "  Batch {}: [{}] ({}) — {}\n",
+                batch.index,
+                task_ids.join(", "),
+                mode,
+                batch.status
+            ));
         }
 
         // Issue summary
@@ -712,7 +712,10 @@ impl AutonomousLoop {
             bail!("Loop has not been started");
         }
         if self.emergency_stopped {
-            bail!("Loop was emergency-stopped: {}", self.blocker.as_deref().unwrap_or("unknown"));
+            bail!(
+                "Loop was emergency-stopped: {}",
+                self.blocker.as_deref().unwrap_or("unknown")
+            );
         }
 
         let next = match self.phase {
@@ -826,7 +829,8 @@ impl AutonomousLoop {
                 if !task_ids.contains(dep.as_str()) {
                     bail!(
                         "Task '{}' depends on '{}' which does not exist",
-                        task.id, dep
+                        task.id,
+                        dep
                     );
                 }
                 *in_degree.entry(task.id.as_str()).or_insert(0) += 1;
@@ -920,7 +924,9 @@ impl AutonomousLoop {
 
     /// Get the next pending batch, if any.
     pub fn next_pending_batch(&self) -> Option<&TaskBatch> {
-        self.batches.iter().find(|b| b.status == TaskStatus::Pending)
+        self.batches
+            .iter()
+            .find(|b| b.status == TaskStatus::Pending)
     }
 
     /// Get a mutable reference to a batch by index.
@@ -930,7 +936,10 @@ impl AutonomousLoop {
 
     /// Count completed batches.
     pub fn completed_batch_count(&self) -> usize {
-        self.batches.iter().filter(|b| b.status == TaskStatus::Done).count()
+        self.batches
+            .iter()
+            .filter(|b| b.status == TaskStatus::Done)
+            .count()
     }
 
     /// Count total batches.
@@ -948,10 +957,7 @@ impl AutonomousLoop {
 
     /// Get all confirmed, unfixed issues.
     pub fn confirmed_issues(&self) -> Vec<&Issue> {
-        self.issues
-            .iter()
-            .filter(|i| i.needs_fix())
-            .collect()
+        self.issues.iter().filter(|i| i.needs_fix()).collect()
     }
 
     /// Count issues by verdict.
@@ -1044,17 +1050,17 @@ impl AutonomousLoop {
 
         s.push_str("═══ AUTONOMOUS LOOP DIAGNOSTIC ═══\n\n");
         s.push_str(&format!("Task: {}\n", self.task));
-        s.push_str(&format!("Iterations used: {} / {}\n", self.iteration, self.max_iterations));
+        s.push_str(&format!(
+            "Iterations used: {} / {}\n",
+            self.iteration, self.max_iterations
+        ));
         s.push_str(&format!("Phase at stop: {}\n", self.phase));
 
         if let Some(ref blocker) = self.blocker {
             s.push_str(&format!("Blocker: {}\n", blocker));
         }
 
-        s.push_str(&format!(
-            "Emergency stopped: {}\n",
-            self.emergency_stopped
-        ));
+        s.push_str(&format!("Emergency stopped: {}\n", self.emergency_stopped));
 
         // Batch progress
         s.push_str("\n── Batches ──\n");
@@ -1069,9 +1075,7 @@ impl AutonomousLoop {
             for task in &batch.tasks {
                 s.push_str(&format!(
                     "    {}: {} [{}]\n",
-                    task.id,
-                    task.description,
-                    task.status
+                    task.id, task.description, task.status
                 ));
             }
         }
@@ -1106,13 +1110,22 @@ impl AutonomousLoop {
         // Verification history
         if let Some(ref v) = self.last_verification {
             s.push_str("\n── Last Verification ──\n");
-            s.push_str(&format!("  Build: {}\n", if v.build_passed { "✅" } else { "❌" }));
-            s.push_str(&format!("  Tests: {}\n", if v.tests_passed { "✅" } else { "❌" }));
+            s.push_str(&format!(
+                "  Build: {}\n",
+                if v.build_passed { "✅" } else { "❌" }
+            ));
+            s.push_str(&format!(
+                "  Tests: {}\n",
+                if v.tests_passed { "✅" } else { "❌" }
+            ));
             s.push_str(&format!(
                 "  Type check: {}\n",
                 if v.type_check_passed { "✅" } else { "❌" }
             ));
-            s.push_str(&format!("  Lint: {}\n", if v.lint_passed { "✅" } else { "❌" }));
+            s.push_str(&format!(
+                "  Lint: {}\n",
+                if v.lint_passed { "✅" } else { "❌" }
+            ));
         }
 
         s.push('\n');
@@ -1583,10 +1596,15 @@ mod tests {
 
     #[test]
     fn test_issue_builder() {
-        let issue = Issue::new(1, "Build fails on ARM64", IssueSeverity::Critical, "src/build.rs:42")
-            .with_evidence("error: unsupported target")
-            .reproducible(true)
-            .fix_approach("Add ARM64 target detection");
+        let issue = Issue::new(
+            1,
+            "Build fails on ARM64",
+            IssueSeverity::Critical,
+            "src/build.rs:42",
+        )
+        .with_evidence("error: unsupported target")
+        .reproducible(true)
+        .fix_approach("Add ARM64 target detection");
 
         assert_eq!(issue.number, 1);
         assert_eq!(issue.severity, IssueSeverity::Critical);
@@ -1613,7 +1631,10 @@ mod tests {
     #[test]
     fn test_issue_false_positive() {
         let mut issue = Issue::new(1, "Test", IssueSeverity::Nit, "main.rs");
-        issue.set_verdict(IssueVerdict::FalsePositive, "Internal function, callers trusted");
+        issue.set_verdict(
+            IssueVerdict::FalsePositive,
+            "Internal function, callers trusted",
+        );
         assert!(!issue.needs_fix());
         assert!(!issue.is_actionable());
     }
@@ -1686,7 +1707,9 @@ mod tests {
             issues: vec![],
             timestamp: Utc::now().to_rfc3339(),
         };
-        result.issues.push(Issue::new(1, "Bug", IssueSeverity::Minor, "main.rs"));
+        result
+            .issues
+            .push(Issue::new(1, "Bug", IssueSeverity::Minor, "main.rs"));
         assert!(!result.is_clean());
     }
 
@@ -1706,9 +1729,15 @@ mod tests {
     #[test]
     fn test_verification_issue_count_by_severity() {
         let mut result = VerificationResult::new();
-        result.issues.push(Issue::new(1, "A", IssueSeverity::Critical, "a.rs"));
-        result.issues.push(Issue::new(2, "B", IssueSeverity::Critical, "b.rs"));
-        result.issues.push(Issue::new(3, "C", IssueSeverity::Minor, "c.rs"));
+        result
+            .issues
+            .push(Issue::new(1, "A", IssueSeverity::Critical, "a.rs"));
+        result
+            .issues
+            .push(Issue::new(2, "B", IssueSeverity::Critical, "b.rs"));
+        result
+            .issues
+            .push(Issue::new(3, "C", IssueSeverity::Minor, "c.rs"));
         assert_eq!(result.issue_count_by_severity(IssueSeverity::Critical), 2);
         assert_eq!(result.issue_count_by_severity(IssueSeverity::Minor), 1);
         assert_eq!(result.issue_count_by_severity(IssueSeverity::Nit), 0);
@@ -1765,7 +1794,10 @@ mod tests {
         al.start().unwrap();
         al.emergency_stop("Build is broken beyond repair");
         assert!(al.emergency_stopped);
-        assert_eq!(al.blocker, Some("Build is broken beyond repair".to_string()));
+        assert_eq!(
+            al.blocker,
+            Some("Build is broken beyond repair".to_string())
+        );
     }
 
     #[test]
@@ -1944,8 +1976,13 @@ mod tests {
         let mut al = AutonomousLoop::new("Test");
         al.add_task(LoopTask::new("T1", "Create module"));
 
-        al.get_task_mut("T1").unwrap().complete(Some("abc".to_string()));
-        assert_eq!(al.get_task("T1").unwrap().commit_hash, Some("abc".to_string()));
+        al.get_task_mut("T1")
+            .unwrap()
+            .complete(Some("abc".to_string()));
+        assert_eq!(
+            al.get_task("T1").unwrap().commit_hash,
+            Some("abc".to_string())
+        );
     }
 
     // ── Batch computation tests ────────────────────────────────────
@@ -1984,12 +2021,8 @@ mod tests {
     fn test_compute_batches_sequential() {
         let mut al = AutonomousLoop::new("Test");
         al.add_task(LoopTask::new("T1", "Foundation"));
-        al.add_task(
-            LoopTask::new("T2", "Build on foundation").depends_on("T1"),
-        );
-        al.add_task(
-            LoopTask::new("T3", "Final layer").depends_on("T2"),
-        );
+        al.add_task(LoopTask::new("T2", "Build on foundation").depends_on("T1"));
+        al.add_task(LoopTask::new("T3", "Final layer").depends_on("T2"));
 
         al.compute_batches().unwrap();
 
@@ -2006,12 +2039,8 @@ mod tests {
         al.add_task(LoopTask::new("T1", "Independent 1"));
         al.add_task(LoopTask::new("T2", "Independent 2"));
         // T3 depends on T1, T4 depends on T2 → batch 1
-        al.add_task(
-            LoopTask::new("T3", "After T1").depends_on("T1"),
-        );
-        al.add_task(
-            LoopTask::new("T4", "After T2").depends_on("T2"),
-        );
+        al.add_task(LoopTask::new("T3", "After T1").depends_on("T1"));
+        al.add_task(LoopTask::new("T4", "After T2").depends_on("T2"));
         // T5 depends on T3, T4 → batch 2
         al.add_task(
             LoopTask::new("T5", "After T3 and T4")
@@ -2030,12 +2059,8 @@ mod tests {
     #[test]
     fn test_compute_batches_file_conflicts() {
         let mut al = AutonomousLoop::new("Test");
-        al.add_task(
-            LoopTask::new("T1", "Touch lib").touches("src/lib.rs"),
-        );
-        al.add_task(
-            LoopTask::new("T2", "Also touch lib").touches("src/lib.rs"),
-        );
+        al.add_task(LoopTask::new("T1", "Touch lib").touches("src/lib.rs"));
+        al.add_task(LoopTask::new("T2", "Also touch lib").touches("src/lib.rs"));
 
         al.compute_batches().unwrap();
 
@@ -2047,16 +2072,15 @@ mod tests {
     #[test]
     fn test_compute_batches_circular_dependency() {
         let mut al = AutonomousLoop::new("Test");
-        al.add_task(
-            LoopTask::new("T1", "Circular 1").depends_on("T2"),
-        );
-        al.add_task(
-            LoopTask::new("T2", "Circular 2").depends_on("T1"),
-        );
+        al.add_task(LoopTask::new("T1", "Circular 1").depends_on("T2"));
+        al.add_task(LoopTask::new("T2", "Circular 2").depends_on("T1"));
 
         let result = al.compute_batches();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("circular dependency"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("circular dependency"));
     }
 
     #[test]
@@ -2279,7 +2303,12 @@ mod tests {
         let mut al = AutonomousLoop::new("Test");
         al.start().unwrap();
 
-        let mut issue = Issue::new(1, "Critical build failure", IssueSeverity::Critical, "build.rs:1");
+        let mut issue = Issue::new(
+            1,
+            "Critical build failure",
+            IssueSeverity::Critical,
+            "build.rs:1",
+        );
         issue.set_verdict(IssueVerdict::Confirmed, "Build won't compile");
         issue.set_verdict(IssueVerdict::Confirmed, "Still broken");
         al.add_issue(issue);
@@ -2369,13 +2398,10 @@ mod tests {
             tests_passed: false,
             type_check_passed: true,
             lint_passed: true,
-            issues: vec![Issue::new(
-                1,
-                "Build fails",
-                IssueSeverity::Critical,
-                "main.rs:10",
-            )
-            .with_evidence("undefined variable")],
+            issues: vec![
+                Issue::new(1, "Build fails", IssueSeverity::Critical, "main.rs:10")
+                    .with_evidence("undefined variable"),
+            ],
             timestamp: Utc::now().to_rfc3339(),
         });
         assert!(!al.is_clean());
@@ -2458,7 +2484,12 @@ mod tests {
             tests_passed: false,
             type_check_passed: true,
             lint_passed: false,
-            issues: vec![Issue::new(1, "Test fail", IssueSeverity::Important, "test.rs")],
+            issues: vec![Issue::new(
+                1,
+                "Test fail",
+                IssueSeverity::Important,
+                "test.rs",
+            )],
             timestamp: Utc::now().to_rfc3339(),
         };
 

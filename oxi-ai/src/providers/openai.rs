@@ -9,8 +9,8 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider, 
-    error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
+    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
+    ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
 /// OpenAI-compatible provider
@@ -27,7 +27,7 @@ impl OpenAiProvider {
             api_key: std::env::var("OPENAI_API_KEY").ok(),
         }
     }
-    
+
     #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
@@ -52,39 +52,41 @@ impl Provider for OpenAiProvider {
         options: Option<StreamOptions>,
     ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
         let options = options.unwrap_or_default();
-        
+
         // Build the request
         let url = format!("{}/chat/completions", model.base_url);
-        
+
         // Get API key
-        let api_key = options.api_key.as_ref()
+        let api_key = options
+            .api_key
+            .as_ref()
             .or(self.api_key.as_ref())
             .ok_or_else(|| ProviderError::MissingApiKey)?;
-        
+
         // Build messages
         let messages = build_messages(context)?;
-        
+
         // Build request body
         let mut body = serde_json::json!({
             "model": model.id,
             "messages": messages,
             "stream": true,
         });
-        
+
         // Add optional parameters
         if let Some(temp) = options.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
-        
+
         if let Some(max) = options.max_tokens {
             body["max_tokens"] = serde_json::json!(max);
         }
-        
+
         // Add tools if present
         if !context.tools.is_empty() {
             body["tools"] = build_tools(&context.tools)?;
         }
-        
+
         // Build headers
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -95,7 +97,7 @@ impl Provider for OpenAiProvider {
             reqwest::header::CONTENT_TYPE,
             "application/json".parse().unwrap(),
         );
-        
+
         for (k, v) in &options.headers {
             if let (Ok(name), Ok(value)) = (
                 k.parse::<reqwest::header::HeaderName>(),
@@ -104,43 +106,43 @@ impl Provider for OpenAiProvider {
                 headers.insert(name, value);
             }
         }
-        
+
         // Make request
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .headers(headers)
             .json(&body)
             .send()
             .await
             .map_err(ProviderError::RequestFailed)?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
             return Err(ProviderError::HttpError(status.as_u16(), body));
         }
-        
+
         // Create event stream
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
-        
-        let stream = response.bytes_stream()
-            .flat_map(move |chunk: Result<Bytes, reqwest::Error>| {
-                match chunk {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes).to_string();
-                        futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
-                    }
-                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                    }]),
+
+        let stream = response.bytes_stream().flat_map(
+            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
+                Ok(bytes) => {
+                    let text = String::from_utf8_lossy(&bytes).to_string();
+                    futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
                 }
-            });
-        
+                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                    reason: StopReason::Error,
+                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                }]),
+            },
+        );
+
         Ok(Box::pin(stream))
     }
-    
+
     fn name(&self) -> &str {
         "openai"
     }
@@ -149,7 +151,7 @@ impl Provider for OpenAiProvider {
 /// Build messages array from context
 fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
     let mut messages = Vec::new();
-    
+
     // System prompt
     if let Some(ref prompt) = context.system_prompt {
         messages.push(serde_json::json!({
@@ -157,16 +159,14 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
             "content": prompt,
         }));
     }
-    
+
     // Conversation messages
     for msg in &context.messages {
         match msg {
             crate::Message::User(u) => {
                 let content: String = match &u.content {
                     crate::MessageContent::Text(s) => s.clone(),
-                    crate::MessageContent::Blocks(blocks) => {
-                        blocks_to_content(blocks)?.to_string()
-                    }
+                    crate::MessageContent::Blocks(blocks) => blocks_to_content(blocks)?.to_string(),
                 };
                 messages.push(serde_json::json!({
                     "role": "user",
@@ -191,7 +191,7 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
             }
         }
     }
-    
+
     Ok(messages)
 }
 
@@ -202,9 +202,10 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
             return Ok(JsonValue::String(text.to_string()));
         }
     }
-    
-    let items: Result<Vec<_>, _> = blocks.iter().map(|block| {
-        match block {
+
+    let items: Result<Vec<_>, _> = blocks
+        .iter()
+        .map(|block| match block {
             ContentBlock::Text(t) => Ok(serde_json::json!({
                 "type": "text",
                 "text": t.text,
@@ -227,28 +228,31 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
                     "url": format!("data:{};base64,{}", img.mime_type, img.data),
                 },
             })),
-            ContentBlock::Unknown(_) => {
-                Err(ProviderError::InvalidResponse("Unknown content block type".into()))
-            }
-        }
-    }).collect();
-    
+            ContentBlock::Unknown(_) => Err(ProviderError::InvalidResponse(
+                "Unknown content block type".into(),
+            )),
+        })
+        .collect();
+
     Ok(serde_json::json!(items?))
 }
 
 /// Build tools array
 fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
-    let items: Vec<_> = tools.iter().map(|tool| {
-        serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            },
+    let items: Vec<_> = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
+            })
         })
-    }).collect();
-    
+        .collect();
+
     Ok(serde_json::json!(items))
 }
 
@@ -264,11 +268,7 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
 ///   the Done message at stream end, not on every chunk.
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(
-        Api::OpenAiCompletions,
-        provider,
-        model_id,
-    );
+    let partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
 
     // Pre-estimate capacity: one event per data line is a reasonable upper bound.
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
@@ -361,11 +361,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
 
 /// Create error assistant message
 fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantMessage {
-    let mut message = AssistantMessage::new(
-        Api::OpenAiCompletions,
-        provider,
-        model_id,
-    );
+    let mut message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
     message.stop_reason = StopReason::Error;
     message.error_message = Some(msg.to_string());
     message

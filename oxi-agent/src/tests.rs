@@ -1,17 +1,17 @@
 //! Integration tests for oxi-agent
 
+use crate::types::{ToolCall, ToolDefinition, ToolResult};
 use crate::{Agent, AgentConfig, AgentEvent, AgentState};
-use crate::types::{ToolDefinition, ToolCall, ToolResult};
+use async_trait::async_trait;
+use futures::Stream;
 use oxi_ai::{
-    Provider, ProviderEvent, Context, ContentBlock, TextContent, ThinkingContent,
-    StopReason, transform_for_provider, Api,
+    transform_for_provider, Api, ContentBlock, Context, Provider, ProviderEvent, StopReason,
+    TextContent, ThinkingContent,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::pin::Pin;
-use futures::Stream;
-use std::task::{Poll, Context as TaskContext};
-use async_trait::async_trait;
+use std::sync::{Arc, Mutex};
+use std::task::{Context as TaskContext, Poll};
 
 /// Mock provider for testing
 struct MockProvider {
@@ -54,7 +54,10 @@ impl Provider for MockProvider {
             done: false,
         };
 
-        Ok(Box::pin(stream) as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+        Ok(Box::pin(stream)
+            as Pin<
+                Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
+            >)
     }
 
     fn name(&self) -> &str {
@@ -69,22 +72,19 @@ struct MockStream {
 
 impl Stream for MockStream {
     type Item = ProviderEvent;
-    
+
     fn poll_next(mut self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
         if self.done {
             return Poll::Ready(None);
         }
-        
+
         self.done = true;
-        
+
         // Create assistant message with text content
-        let mut assistant = oxi_ai::AssistantMessage::new(
-            oxi_ai::Api::AnthropicMessages,
-            "mock",
-            "mock-model",
-        );
+        let mut assistant =
+            oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
         assistant.content = vec![ContentBlock::Text(TextContent::new(self.text.clone()))];
-        
+
         Poll::Ready(Some(ProviderEvent::Done {
             reason: StopReason::Stop,
             message: assistant,
@@ -174,16 +174,18 @@ async fn test_agent_with_mock_provider() {
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "Hello! How can I help you?".to_string(),
     }]));
-    
+
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
     let agent = Agent::new(provider.clone(), config);
-    
+
     let (response, events) = agent.run("Hi".to_string()).await.unwrap();
-    
+
     assert_eq!(response.content, "Hello! How can I help you?");
     assert_eq!(*provider.call_count.lock().unwrap(), 1);
     assert!(events.iter().any(|e| matches!(e, AgentEvent::Start { .. })));
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Complete { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Complete { .. })));
 }
 
 #[tokio::test]
@@ -191,24 +193,32 @@ async fn test_agent_events_sequence() {
     let provider = Arc::new(MockProvider::new(vec![MockResponse {
         content: "Test response".to_string(),
     }]));
-    
+
     let config = AgentConfig::default();
     let agent = Agent::new(provider, config);
-    
+
     let (_, events) = agent.run("Test prompt".to_string()).await.unwrap();
-    
-    assert!(events.first().map(|e| matches!(e, AgentEvent::Start { .. })).unwrap_or(false));
+
+    assert!(events
+        .first()
+        .map(|e| matches!(e, AgentEvent::Start { .. }))
+        .unwrap_or(false));
     assert!(events.iter().any(|e| matches!(e, AgentEvent::Thinking)));
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Complete { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Complete { .. })));
 }
 
 #[test]
 fn test_tool_definition() {
     let mut schema = HashMap::new();
-    schema.insert("query".to_string(), serde_json::json!({
-        "type": "string",
-        "description": "Search query"
-    }));
+    schema.insert(
+        "query".to_string(),
+        serde_json::json!({
+            "type": "string",
+            "description": "Search query"
+        }),
+    );
     let tool = ToolDefinition::new("search", "Search the web", schema);
     assert_eq!(tool.name, "search");
     assert!(tool.input_schema.contains_key("query"));
@@ -250,11 +260,8 @@ fn test_transform_for_provider_thinking_to_openai() {
     ];
 
     // Transform for OpenAI
-    let transformed = transform_for_provider(
-        &messages,
-        &Api::AnthropicMessages,
-        &Api::OpenAiCompletions,
-    );
+    let transformed =
+        transform_for_provider(&messages, &Api::AnthropicMessages, &Api::OpenAiCompletions);
 
     assert_eq!(transformed.len(), 2);
 
@@ -287,15 +294,10 @@ fn test_transform_for_provider_preserves_anthropic() {
         ContentBlock::Text(TextContent::new("Answer.")),
     ];
 
-    let messages = vec![
-        oxi_ai::Message::Assistant(assistant),
-    ];
+    let messages = vec![oxi_ai::Message::Assistant(assistant)];
 
-    let transformed = transform_for_provider(
-        &messages,
-        &Api::AnthropicMessages,
-        &Api::AnthropicMessages,
-    );
+    let transformed =
+        transform_for_provider(&messages, &Api::AnthropicMessages, &Api::AnthropicMessages);
 
     if let oxi_ai::Message::Assistant(a) = &transformed[0] {
         assert_eq!(a.content.len(), 2); // unchanged
@@ -315,15 +317,10 @@ fn test_transform_preserves_tool_results() {
         vec![ContentBlock::Text(TextContent::new("file contents"))],
     );
 
-    let messages = vec![
-        oxi_ai::Message::ToolResult(tool_result),
-    ];
+    let messages = vec![oxi_ai::Message::ToolResult(tool_result)];
 
-    let transformed = transform_for_provider(
-        &messages,
-        &Api::AnthropicMessages,
-        &Api::OpenAiCompletions,
-    );
+    let transformed =
+        transform_for_provider(&messages, &Api::AnthropicMessages, &Api::OpenAiCompletions);
 
     assert_eq!(transformed.len(), 1);
     if let oxi_ai::Message::ToolResult(tr) = &transformed[0] {
@@ -423,7 +420,10 @@ impl Provider for ApiAwareMockProvider {
             done: false,
         };
 
-        Ok(Box::pin(stream) as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+        Ok(Box::pin(stream)
+            as Pin<
+                Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
+            >)
     }
 
     fn name(&self) -> &str {
@@ -438,8 +438,12 @@ async fn test_cross_provider_handoff_openai_to_anthropic() {
     // The handoff is tested by verifying messages survive the switch.
 
     let provider = Arc::new(ApiAwareMockProvider::new(vec![
-        MockResponse { content: "OpenAI response".to_string() },
-        MockResponse { content: "Continued response".to_string() },
+        MockResponse {
+            content: "OpenAI response".to_string(),
+        },
+        MockResponse {
+            content: "Continued response".to_string(),
+        },
     ]));
     let config = AgentConfig::new("openai/gpt-4o");
     let agent = Agent::new(provider, config);
@@ -479,8 +483,12 @@ async fn test_cross_provider_handoff_openai_to_anthropic() {
 async fn test_cross_provider_message_transformation_roundtrip() {
     // Build up a conversation with thinking blocks, then transform for different providers
     let provider = Arc::new(MockProvider::new(vec![
-        MockResponse { content: "First response".to_string() },
-        MockResponse { content: "Second response".to_string() },
+        MockResponse {
+            content: "First response".to_string(),
+        },
+        MockResponse {
+            content: "Second response".to_string(),
+        },
     ]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
     let agent = Agent::new(provider, config);
@@ -492,11 +500,8 @@ async fn test_cross_provider_message_transformation_roundtrip() {
 
     // Transform all messages for OpenAI (cross-provider)
     let messages = agent.state().messages.clone();
-    let transformed = transform_for_provider(
-        &messages,
-        &Api::AnthropicMessages,
-        &Api::OpenAiCompletions,
-    );
+    let transformed =
+        transform_for_provider(&messages, &Api::AnthropicMessages, &Api::OpenAiCompletions);
 
     // All messages should be preserved
     assert_eq!(transformed.len(), 4);

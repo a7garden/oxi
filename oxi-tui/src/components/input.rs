@@ -1,8 +1,10 @@
 //! Input component - text input field with autocomplete support.
 
-use std::path::PathBuf;
-use crate::{Cell, Color, Component, Event, KeyCode, KeyEvent, KeyModifiers, Rect, Size, Surface, Theme};
 use crate::components::{Completion, FileCompleter};
+use crate::{
+    Cell, Color, Component, Event, KeyCode, KeyEvent, KeyModifiers, Rect, Size, Surface, Theme,
+};
+use std::path::PathBuf;
 
 /// Input field configuration.
 #[derive(Debug, Clone)]
@@ -148,7 +150,10 @@ impl Input {
     }
 
     /// Enable file path completion with a base directory.
-    pub fn with_file_completion(mut self, base_dir: impl Into<PathBuf> + AsRef<std::path::Path>) -> Self {
+    pub fn with_file_completion(
+        mut self,
+        base_dir: impl Into<PathBuf> + AsRef<std::path::Path>,
+    ) -> Self {
         self.completer = Some(FileCompleter::new(base_dir.as_ref()));
         self.options.enable_file_completion = true;
         self
@@ -198,10 +203,7 @@ impl Input {
 
     /// Find the trigger character before cursor (searches backwards).
     fn find_trigger(&self) -> Option<(usize, char)> {
-        let chars: Vec<(usize, char)> = self.value
-            .chars()
-            .enumerate()
-            .collect();
+        let chars: Vec<(usize, char)> = self.value.chars().enumerate().collect();
 
         // Look for the last @ or / before cursor
         let mut trigger_pos = None;
@@ -258,25 +260,25 @@ impl Input {
         }
 
         let completion = &self.completions[self.completion_index];
-        
+
         // Find the start position of the prefix being completed
         let (trigger_pos, _) = self.find_trigger().unwrap_or((0, '/'));
-        
+
         // Replace the prefix with the completion
         let _prefix_len = self.cursor_pos - trigger_pos;
         let suffix = self.value[self.cursor_pos..].to_string();
-        
+
         self.value = format!(
             "{}{}{}",
             &self.value[..trigger_pos],
             completion.text.clone(),
             suffix
         );
-        
+
         // Position cursor after the completed text
         let new_cursor = trigger_pos + completion.text.len();
         self.cursor_pos = new_cursor.min(self.value.len());
-        
+
         self.clear_completions();
         self.dirty = true;
         true
@@ -349,27 +351,46 @@ impl Component for Input {
         // Handle completion navigation
         if self.completion_active {
             match event {
-                Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Tab, ..
+                }) => {
                     self.next_completion();
                     return true;
                 }
-                Event::Key(KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers { shift: true, .. }, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Up,
+                    modifiers: KeyModifiers { shift: true, .. },
+                    ..
+                }) => {
                     self.prev_completion();
                     return true;
                 }
-                Event::Key(KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers { shift: true, .. }, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Down,
+                    modifiers: KeyModifiers { shift: true, .. },
+                    ..
+                }) => {
                     self.next_completion();
                     return true;
                 }
-                Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                }) => {
                     return self.accept_completion();
                 }
-                Event::Key(KeyEvent { code: KeyCode::Escape, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Escape,
+                    ..
+                }) => {
                     self.clear_completions();
                     self.dirty = true;
                     return true;
                 }
-                Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Backspace,
+                    ..
+                }) => {
                     self.clear_completions();
                     // Let the normal backspace handling occur
                 }
@@ -483,7 +504,8 @@ impl Component for Input {
         }
 
         // Render cursor if focused
-        if self.focused && area.x + ((self.cursor_pos - start_offset) as u16) < area.x + area.width {
+        if self.focused && area.x + ((self.cursor_pos - start_offset) as u16) < area.x + area.width
+        {
             let cursor_col = area.x + (self.cursor_pos - start_offset) as u16;
             let mut cursor_cell = surface.get(area.y, cursor_col).cloned().unwrap_or_default();
             cursor_cell.fg = Color::Indexed(0); // Black on white

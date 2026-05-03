@@ -9,8 +9,8 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
+    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
+    ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
 /// Azure OpenAI provider
@@ -61,18 +61,20 @@ impl AzureProvider {
         // Priority: model.base_url > resource_name env > fallback
         if !model.base_url.is_empty() && model.base_url != "https://api.openai.com" {
             // Use the provided base URL directly (already includes deployment)
-            return Ok(format!("{}/chat/completions?api-version=2024-02-15-preview", 
-                model.base_url.trim_end_matches('/')));
+            return Ok(format!(
+                "{}/chat/completions?api-version=2024-02-15-preview",
+                model.base_url.trim_end_matches('/')
+            ));
         }
 
         // Fallback to constructing from environment variables
-        let resource = self.resource_name
-            .as_ref()
-            .ok_or_else(|| ProviderError::InvalidResponse("AZURE_OPENAI_RESOURCE_NAME not set".into()))?;
+        let resource = self.resource_name.as_ref().ok_or_else(|| {
+            ProviderError::InvalidResponse("AZURE_OPENAI_RESOURCE_NAME not set".into())
+        })?;
 
-        let deployment = self.deployment_name
-            .as_ref()
-            .ok_or_else(|| ProviderError::InvalidResponse("AZURE_OPENAI_DEPLOYMENT_NAME not set".into()))?;
+        let deployment = self.deployment_name.as_ref().ok_or_else(|| {
+            ProviderError::InvalidResponse("AZURE_OPENAI_DEPLOYMENT_NAME not set".into())
+        })?;
 
         let url = format!(
             "https://{}.openai.azure.com/openai/deployments/{}/chat/completions?api-version=2024-02-15-preview",
@@ -93,14 +95,15 @@ impl AzureProvider {
     }
 
     /// Build request headers with Azure-specific api-key authentication
-    fn build_headers(&self, api_key: &str, options: &Option<StreamOptions>) -> reqwest::header::HeaderMap {
+    fn build_headers(
+        &self,
+        api_key: &str,
+        options: &Option<StreamOptions>,
+    ) -> reqwest::header::HeaderMap {
         let mut headers = reqwest::header::HeaderMap::new();
-        
+
         // Azure uses api-key header instead of Bearer token
-        headers.insert(
-            "api-key",
-            api_key.parse().unwrap(),
-        );
+        headers.insert("api-key", api_key.parse().unwrap());
         headers.insert(
             reqwest::header::CONTENT_TYPE,
             "application/json".parse().unwrap(),
@@ -138,13 +141,13 @@ impl Provider for AzureProvider {
     ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
         // Build URL
         let url = self.build_url(model)?;
-        
+
         // Get API key
         let api_key = self.get_api_key(&options)?;
-        
+
         // Build messages
         let messages = build_messages(context)?;
-        
+
         // Build request body
         let mut body = serde_json::json!({
             "messages": messages,
@@ -155,62 +158,62 @@ impl Provider for AzureProvider {
         if model.id != "default" && model.id != "azure" {
             body["model"] = serde_json::json!(model.id);
         }
-        
+
         // Add optional parameters
         if let Some(ref opts) = options {
             if let Some(temp) = opts.temperature {
                 body["temperature"] = serde_json::json!(temp);
             }
-            
+
             if let Some(max) = opts.max_tokens {
                 body["max_tokens"] = serde_json::json!(max);
             }
         }
-        
+
         // Add tools if present
         if !context.tools.is_empty() {
             body["tools"] = build_tools(&context.tools)?;
         }
-        
+
         // Build headers
         let headers = self.build_headers(&api_key, &options);
-        
+
         // Make request
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .headers(headers)
             .json(&body)
             .send()
             .await
             .map_err(ProviderError::RequestFailed)?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
             return Err(ProviderError::HttpError(status.as_u16(), body));
         }
-        
+
         // Create event stream
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
-        
-        let stream = response.bytes_stream()
-            .flat_map(move |chunk: Result<Bytes, reqwest::Error>| {
-                match chunk {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes).to_string();
-                        futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
-                    }
-                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                    }]),
+
+        let stream = response.bytes_stream().flat_map(
+            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
+                Ok(bytes) => {
+                    let text = String::from_utf8_lossy(&bytes).to_string();
+                    futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
                 }
-            });
-        
+                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                    reason: StopReason::Error,
+                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                }]),
+            },
+        );
+
         Ok(Box::pin(stream))
     }
-    
+
     fn name(&self) -> &str {
         "azure"
     }
@@ -219,7 +222,7 @@ impl Provider for AzureProvider {
 /// Build messages array from context
 fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
     let mut messages = Vec::new();
-    
+
     // System prompt
     if let Some(ref prompt) = context.system_prompt {
         messages.push(serde_json::json!({
@@ -227,16 +230,14 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
             "content": prompt,
         }));
     }
-    
+
     // Conversation messages
     for msg in &context.messages {
         match msg {
             crate::Message::User(u) => {
                 let content: String = match &u.content {
                     crate::MessageContent::Text(s) => s.clone(),
-                    crate::MessageContent::Blocks(blocks) => {
-                        blocks_to_content(blocks)?.to_string()
-                    }
+                    crate::MessageContent::Blocks(blocks) => blocks_to_content(blocks)?.to_string(),
                 };
                 messages.push(serde_json::json!({
                     "role": "user",
@@ -261,7 +262,7 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
             }
         }
     }
-    
+
     Ok(messages)
 }
 
@@ -272,9 +273,10 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
             return Ok(JsonValue::String(text.to_string()));
         }
     }
-    
-    let items: Result<Vec<_>, _> = blocks.iter().map(|block| {
-        match block {
+
+    let items: Result<Vec<_>, _> = blocks
+        .iter()
+        .map(|block| match block {
             ContentBlock::Text(t) => Ok(serde_json::json!({
                 "type": "text",
                 "text": t.text,
@@ -297,28 +299,31 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
                     "url": format!("data:{};base64,{}", img.mime_type, img.data),
                 },
             })),
-            ContentBlock::Unknown(_) => {
-                Err(ProviderError::InvalidResponse("Unknown content block type".into()))
-            }
-        }
-    }).collect();
-    
+            ContentBlock::Unknown(_) => Err(ProviderError::InvalidResponse(
+                "Unknown content block type".into(),
+            )),
+        })
+        .collect();
+
     Ok(serde_json::json!(items?))
 }
 
 /// Build tools array
 fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
-    let items: Vec<_> = tools.iter().map(|tool| {
-        serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            },
+    let items: Vec<_> = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                },
+            })
         })
-    }).collect();
-    
+        .collect();
+
     Ok(serde_json::json!(items))
 }
 
@@ -327,11 +332,7 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
 /// This is identical to the OpenAI provider's SSE parsing logic.
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(
-        Api::OpenAiCompletions,
-        provider,
-        model_id,
-    );
+    let partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
 
     // Pre-estimate capacity: one event per data line is a reasonable upper bound.
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
@@ -403,7 +404,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                 };
 
                 let mut done_msg = partial_message.clone();
-                
+
                 // Use current chunk's usage if present, otherwise accumulated
                 if let Some(usage) = this_chunk_usage {
                     done_msg.usage.input = usage.prompt_tokens;
@@ -417,7 +418,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                 } else {
                     done_msg.usage = accumulated_usage.clone();
                 }
-                
+
                 events.push(ProviderEvent::Done {
                     reason,
                     message: done_msg,
@@ -443,11 +444,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
 
 /// Create error assistant message
 fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantMessage {
-    let mut message = AssistantMessage::new(
-        Api::OpenAiCompletions,
-        provider,
-        model_id,
-    );
+    let mut message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
     message.stop_reason = StopReason::Error;
     message.error_message = Some(msg.to_string());
     message
@@ -531,7 +528,7 @@ mod tests {
             "gpt-4o",
             "https://my-resource.openai.azure.com/openai/deployments/gpt-4o",
         );
-        
+
         let url = provider.build_url(&model).unwrap();
         assert!(url.contains("api-version=2024-02-15-preview"));
         assert!(url.contains("my-resource"));
@@ -546,9 +543,9 @@ mod tests {
             resource_name: None,
             deployment_name: Some("gpt-4o".to_string()),
         };
-        
+
         let model = make_test_model("default", "");
-        
+
         let result = provider.build_url(&model);
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -567,9 +564,9 @@ mod tests {
             resource_name: Some("my-resource".to_string()),
             deployment_name: None,
         };
-        
+
         let model = make_test_model("default", "");
-        
+
         let result = provider.build_url(&model);
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -588,9 +585,9 @@ mod tests {
             resource_name: Some("my-resource".to_string()),
             deployment_name: Some("gpt-4o".to_string()),
         };
-        
+
         let model = make_test_model("default", "");
-        
+
         let url = provider.build_url(&model).unwrap();
         assert_eq!(url, "https://my-resource.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview");
     }
@@ -604,16 +601,16 @@ data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890
 data: [DONE]"#;
 
         let events = parse_sse_events(sse_data, "azure", "gpt-4o");
-        
+
         // Should have text delta events and a done event
         assert!(events.len() >= 3);
-        
+
         // Check first text delta
         match &events[0] {
             ProviderEvent::TextDelta { delta, .. } => assert_eq!(delta, "Hello"),
             _ => panic!("Expected TextDelta event"),
         }
-        
+
         // Check done event
         match &events[events.len() - 1] {
             ProviderEvent::Done { reason, .. } => assert_eq!(*reason, StopReason::Stop),
@@ -632,14 +629,19 @@ data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890
 data: [DONE]"#;
 
         let events = parse_sse_events(sse_data, "azure", "gpt-4o");
-        
+
         // Should have tool call delta events and a done event
         assert!(events.len() >= 4);
-        
+
         // Check for tool call delta
-        let has_tool_call = events.iter().any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }));
-        assert!(has_tool_call, "Should have at least one ToolCallDelta event");
-        
+        let has_tool_call = events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }));
+        assert!(
+            has_tool_call,
+            "Should have at least one ToolCallDelta event"
+        );
+
         // Check done event
         match &events[events.len() - 1] {
             ProviderEvent::Done { reason, .. } => assert_eq!(*reason, StopReason::ToolUse),
@@ -654,11 +656,13 @@ data: [DONE]"#;
 data: [DONE]"#;
 
         let events = parse_sse_events(sse_data, "azure", "gpt-4o");
-        
+
         // Find the done event and check usage
-        let done_event = events.iter().find(|e| matches!(e, ProviderEvent::Done { .. }));
+        let done_event = events
+            .iter()
+            .find(|e| matches!(e, ProviderEvent::Done { .. }));
         assert!(done_event.is_some());
-        
+
         if let ProviderEvent::Done { message, .. } = done_event.unwrap() {
             assert_eq!(message.usage.input, 10);
             assert_eq!(message.usage.output, 5);
@@ -670,14 +674,14 @@ data: [DONE]"#;
     fn test_build_headers_includes_api_key() {
         let provider = AzureProvider::new();
         let api_key = "test-api-key-12345";
-        
+
         let headers = provider.build_headers(api_key, &None);
-        
+
         // Check api-key header is present
         let api_key_header = headers.get("api-key");
         assert!(api_key_header.is_some());
         assert_eq!(api_key_header.unwrap().to_str().unwrap(), api_key);
-        
+
         // Check content-type is present
         let content_type = headers.get(reqwest::header::CONTENT_TYPE);
         assert!(content_type.is_some());
@@ -687,25 +691,24 @@ data: [DONE]"#;
     fn test_build_headers_no_bearer_token() {
         let provider = AzureProvider::new();
         let api_key = "test-api-key-12345";
-        
+
         let headers = provider.build_headers(api_key, &None);
-        
+
         // Azure should NOT use Authorization header with Bearer token
         let auth_header = headers.get(reqwest::header::AUTHORIZATION);
-        assert!(auth_header.is_none(), "Azure should not use Bearer token authentication");
+        assert!(
+            auth_header.is_none(),
+            "Azure should not use Bearer token authentication"
+        );
     }
 
     #[test]
     fn test_with_config_constructor() {
-        let provider = AzureProvider::with_config(
-            "my-api-key",
-            "my-resource",
-            "gpt-4o",
-        );
-        
+        let provider = AzureProvider::with_config("my-api-key", "my-resource", "gpt-4o");
+
         // Verify the internal state through build_url
         let model = make_test_model("default", "");
-        
+
         let url = provider.build_url(&model).unwrap();
         assert!(url.contains("my-resource"));
         assert!(url.contains("gpt-4o"));
@@ -719,10 +722,10 @@ data: [DONE]"#;
             resource_name: Some("my-resource".to_string()),
             deployment_name: Some("gpt-4-turbo".to_string()),
         };
-        
+
         let model = make_test_model("default", "");
         let url = provider.build_url(&model).unwrap();
-        
+
         // Verify the complete Azure endpoint format
         assert!(url.starts_with("https://"));
         assert!(url.contains(".openai.azure.com"));

@@ -113,7 +113,12 @@ impl ShellSession {
     }
 
     /// Record a command in history.
-    pub fn record_command(&mut self, command: impl Into<String>, exit_code: i32, working_dir: impl Into<PathBuf>) {
+    pub fn record_command(
+        &mut self,
+        command: impl Into<String>,
+        exit_code: i32,
+        working_dir: impl Into<PathBuf>,
+    ) {
         self.history.push(HistoryEntry {
             command: command.into(),
             exit_code,
@@ -147,7 +152,9 @@ impl ShellSession {
     }
 
     /// History length.
-    pub fn history_len(&self) -> usize { self.history.len() }
+    pub fn history_len(&self) -> usize {
+        self.history.len()
+    }
 
     /// Build full PATH.
     pub fn full_path(&self) -> String {
@@ -170,7 +177,9 @@ impl ShellSession {
     }
 
     /// Clear history.
-    pub fn clear_history(&mut self) { self.history.clear(); }
+    pub fn clear_history(&mut self) {
+        self.history.clear();
+    }
 
     /// Export environment as shell script.
     pub fn export_env_script(&self) -> String {
@@ -179,7 +188,12 @@ impl ShellSession {
             script.push_str(&format!("export {}={}\n", key, shell_escape(value)));
         }
         if !self.path_entries.is_empty() {
-            let path_additions = self.path_entries.iter().map(|e| shell_escape(e)).collect::<Vec<_>>().join(" ");
+            let path_additions = self
+                .path_entries
+                .iter()
+                .map(|e| shell_escape(e))
+                .collect::<Vec<_>>()
+                .join(" ");
             script.push_str(&format!("export PATH=\"{}:$PATH\"\n", path_additions));
         }
         script
@@ -188,7 +202,8 @@ impl ShellSession {
     /// Save to file.
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("Failed to create {}", parent.display()))?;
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
         let json = serde_json::to_string_pretty(self).context("Failed to serialize")?;
         fs::write(path, json).with_context(|| format!("Failed to write {}", path.display()))?;
@@ -197,8 +212,10 @@ impl ShellSession {
 
     /// Load from file.
     pub fn load_from_file(path: &Path) -> Result<Self> {
-        let content = fs::read_to_string(path).with_context(|| format!("Failed to read {}", path.display()))?;
-        serde_json::from_str(&content).with_context(|| format!("Failed to parse {}", path.display()))
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse {}", path.display()))
     }
 }
 
@@ -228,11 +245,17 @@ pub struct TemplateVariable {
     pub required: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl CommandTemplate {
     /// Create a new command template.
-    pub fn new(name: impl Into<String>, description: impl Into<String>, template: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        template: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
@@ -245,32 +268,61 @@ impl CommandTemplate {
 
     /// Add a required variable.
     pub fn required_var(mut self, name: impl Into<String>, description: impl Into<String>) -> Self {
-        self.variables.push(TemplateVariable { name: name.into(), description: description.into(), default: None, required: true });
+        self.variables.push(TemplateVariable {
+            name: name.into(),
+            description: description.into(),
+            default: None,
+            required: true,
+        });
         self
     }
 
     /// Add an optional variable.
-    pub fn optional_var(mut self, name: impl Into<String>, description: impl Into<String>, default: impl Into<String>) -> Self {
-        self.variables.push(TemplateVariable { name: name.into(), description: description.into(), default: Some(default.into()), required: false });
+    pub fn optional_var(
+        mut self,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        default: impl Into<String>,
+    ) -> Self {
+        self.variables.push(TemplateVariable {
+            name: name.into(),
+            description: description.into(),
+            default: Some(default.into()),
+            required: false,
+        });
         self
     }
 
     /// Mark as destructive.
-    pub fn destructive(mut self) -> Self { self.destructive = true; self }
+    pub fn destructive(mut self) -> Self {
+        self.destructive = true;
+        self
+    }
 
     /// Add a tag.
-    pub fn tag(mut self, tag: impl Into<String>) -> Self { self.tags.push(tag.into()); self }
+    pub fn tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.push(tag.into());
+        self
+    }
 
     /// Render the command with variable values.
     pub fn render(&self, vars: &HashMap<String, String>) -> Result<String> {
         for var in &self.variables {
             if var.required && !vars.contains_key(&var.name) && var.default.is_none() {
-                bail!("Missing required variable '{}' for template '{}'", var.name, self.name);
+                bail!(
+                    "Missing required variable '{}' for template '{}'",
+                    var.name,
+                    self.name
+                );
             }
         }
         let mut result = self.template.clone();
         for var in &self.variables {
-            let value = vars.get(&var.name).or(var.default.as_ref()).cloned().unwrap_or_default();
+            let value = vars
+                .get(&var.name)
+                .or(var.default.as_ref())
+                .cloned()
+                .unwrap_or_default();
             let placeholder = format!("{{{{{}}}}}", var.name);
             result = result.replace(&placeholder, &value);
         }
@@ -330,8 +382,12 @@ impl EnvironmentProfile {
 
     /// Apply to session.
     pub fn apply_to(&self, session: &mut ShellSession) {
-        for (key, value) in &self.env_vars { session.set_env(key, value); }
-        for entry in &self.path_entries { session.add_to_path(entry); }
+        for (key, value) in &self.env_vars {
+            session.set_env(key, value);
+        }
+        for entry in &self.path_entries {
+            session.add_to_path(entry);
+        }
         session.profile = Some(self.name.clone());
     }
 
@@ -403,17 +459,31 @@ pub struct SafetyCheck;
 
 impl SafetyCheck {
     const DESTRUCTIVE_PATTERNS: &'static [&'static str] = &[
-        "rm -rf", "rm -r", "rm -f", "rmdir", "del /", "format", "mkfs", "dd if=", ":(){:|:&};:", "> /dev/sd", "dd of=/dev",
+        "rm -rf",
+        "rm -r",
+        "rm -f",
+        "rmdir",
+        "del /",
+        "format",
+        "mkfs",
+        "dd if=",
+        ":(){:|:&};:",
+        "> /dev/sd",
+        "dd of=/dev",
     ];
 
     #[allow(dead_code)]
     const DANGEROUS_PIPE_PATTERNS: &'static [&'static str] = &[
-        "curl | sh", "curl | bash", "wget | sh", "wget | bash", "curl | sudo", "wget | sudo",
+        "curl | sh",
+        "curl | bash",
+        "wget | sh",
+        "wget | bash",
+        "curl | sudo",
+        "wget | sudo",
     ];
 
-    const PROTECTED_PATTERNS: &'static [&'static str] = &[
-        "/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/root/",
-    ];
+    const PROTECTED_PATTERNS: &'static [&'static str] =
+        &["/etc/", "/usr/", "/bin/", "/sbin/", "/boot/", "/root/"];
 
     /// Assess the risk level of a command.
     pub fn assess(command: &str) -> SafetyCheckResult {
@@ -425,7 +495,10 @@ impl SafetyCheck {
                     risk_level: RiskLevel::Critical,
                     allowed: false,
                     reason: format!("Destructive command pattern: {}", pattern),
-                    suggestions: vec!["Use --dry-run first".to_string(), "Verify target paths".to_string()],
+                    suggestions: vec![
+                        "Use --dry-run first".to_string(),
+                        "Verify target paths".to_string(),
+                    ],
                 };
             }
         }
@@ -479,11 +552,33 @@ impl SafetyCheck {
         }
 
         let safe_commands = [
-            "ls", "cat", "head", "tail", "grep", "find", "which", "echo",
-            "pwd", "whoami", "date", "uname", "env", "printenv", "type",
-            "git status", "git log", "git diff", "git branch", "git show",
-            "cargo check", "cargo test", "cargo build", "cargo clippy",
-            "npm test", "npm run", "npm list",
+            "ls",
+            "cat",
+            "head",
+            "tail",
+            "grep",
+            "find",
+            "which",
+            "echo",
+            "pwd",
+            "whoami",
+            "date",
+            "uname",
+            "env",
+            "printenv",
+            "type",
+            "git status",
+            "git log",
+            "git diff",
+            "git branch",
+            "git show",
+            "cargo check",
+            "cargo test",
+            "cargo build",
+            "cargo clippy",
+            "npm test",
+            "npm run",
+            "npm list",
         ];
 
         for safe_cmd in &safe_commands {
@@ -511,7 +606,9 @@ impl SafetyCheck {
 pub struct ShellSkill;
 
 impl ShellSkill {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
     pub fn skill_prompt() -> String {
         r#"# Shell Skill
 
@@ -551,18 +648,34 @@ Before executing commands, assess risk level:
 }
 
 impl Default for ShellSkill {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl fmt::Debug for ShellSkill {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.debug_struct("ShellSkill").finish() }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShellSkill").finish()
+    }
 }
 
 fn shell_escape(s: &str) -> String {
-    if s.is_empty() { return "''".to_string(); }
-    let safe = s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/');
-    if safe { return s.to_string(); }
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('$', "\\$").replace('`', "\\`"))
+    if s.is_empty() {
+        return "''".to_string();
+    }
+    let safe = s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/');
+    if safe {
+        return s.to_string();
+    }
+    format!(
+        "\"{}\"",
+        s.replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`")
+    )
 }
 
 #[cfg(test)]
@@ -611,7 +724,9 @@ mod tests {
     #[test]
     fn test_session_recent() {
         let mut session = ShellSession::new("test");
-        for i in 0..10 { session.record_command(format!("cmd {}", i), 0, "/tmp"); }
+        for i in 0..10 {
+            session.record_command(format!("cmd {}", i), 0, "/tmp");
+        }
         let recent = session.recent_commands(3);
         assert_eq!(recent.len(), 3);
         assert_eq!(recent[2].command, "cmd 9");
@@ -674,7 +789,10 @@ mod tests {
     fn test_profile_rust() {
         let profile = EnvironmentProfile::rust();
         assert_eq!(profile.name, "rust");
-        assert_eq!(profile.env_vars.get("RUST_BACKTRACE"), Some(&"1".to_string()));
+        assert_eq!(
+            profile.env_vars.get("RUST_BACKTRACE"),
+            Some(&"1".to_string())
+        );
     }
 
     #[test]

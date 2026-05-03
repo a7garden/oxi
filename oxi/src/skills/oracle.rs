@@ -385,8 +385,7 @@ impl DecisionRecord {
 
     /// Write the ADR to a file.
     pub fn write_to_file(&self, dir: &Path) -> Result<PathBuf> {
-        fs::create_dir_all(dir)
-            .with_context(|| format!("Failed to create {}", dir.display()))?;
+        fs::create_dir_all(dir).with_context(|| format!("Failed to create {}", dir.display()))?;
 
         let slug = slugify(&self.title);
         let filename = format!("ADR-{:04}-{}.md", self.number, slug);
@@ -496,7 +495,12 @@ impl OracleSession {
     }
 
     /// Add a criterion.
-    pub fn add_criterion(&mut self, name: impl Into<String>, description: impl Into<String>, weight: u8) {
+    pub fn add_criterion(
+        &mut self,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        weight: u8,
+    ) {
         self.criteria.push(Criterion {
             name: name.into(),
             description: description.into(),
@@ -529,9 +533,10 @@ impl OracleSession {
 
     /// Finalize the decision record.
     pub fn finalize(&mut self, status: DecisionStatus) -> Result<()> {
-        let ctx = self.context.clone()
-            .context("Decision context not set")?;
-        let ruling = self.ruling.clone()
+        let ctx = self.context.clone().context("Decision context not set")?;
+        let ruling = self
+            .ruling
+            .clone()
             .context("Ruling not set — call set_ruling() first")?;
 
         // Determine ADR number
@@ -559,7 +564,9 @@ impl OracleSession {
 
     /// Write the ADR to disk.
     pub fn write_record(&self, explicit_path: Option<&Path>) -> Result<PathBuf> {
-        let record = self.record.as_ref()
+        let record = self
+            .record
+            .as_ref()
             .context("Record not finalized — call finalize() first")?;
 
         if let Some(path) = explicit_path {
@@ -572,7 +579,9 @@ impl OracleSession {
                 .with_context(|| format!("Failed to write ADR to {}", path.display()))?;
             Ok(path.to_path_buf())
         } else {
-            let root = self.project_root.as_deref()
+            let root = self
+                .project_root
+                .as_deref()
                 .context("No project root and no explicit path")?;
             let adr_dir = root.join("docs").join("decisions");
             record.write_to_file(&adr_dir)
@@ -875,7 +884,10 @@ mod tests {
 
         assert!(session.ruling.is_some());
         assert_eq!(session.ruling.as_ref().unwrap().chosen, "HashMap");
-        assert_eq!(session.ruling.as_ref().unwrap().confidence, Confidence::High);
+        assert_eq!(
+            session.ruling.as_ref().unwrap().confidence,
+            Confidence::High
+        );
     }
 
     #[test]
@@ -900,8 +912,8 @@ mod tests {
     #[test]
     fn test_finalize_and_write() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut session = OracleSession::new("Which data structure for cache?")
-            .with_project_root(tmp.path());
+        let mut session =
+            OracleSession::new("Which data structure for cache?").with_project_root(tmp.path());
 
         session.set_context(DecisionContext {
             question: "Which data structure for cache?".to_string(),
@@ -986,10 +998,7 @@ mod tests {
 
     #[test]
     fn test_next_number_nonexistent_dir() {
-        assert_eq!(
-            DecisionRecord::next_number(Path::new("/nonexistent")),
-            1
-        );
+        assert_eq!(DecisionRecord::next_number(Path::new("/nonexistent")), 1);
     }
 
     #[test]
@@ -1079,8 +1088,7 @@ mod tests {
         fs::create_dir_all(&adr_dir).unwrap();
         fs::write(adr_dir.join("ADR-0001-test.md"), "").unwrap();
 
-        let mut session = OracleSession::new("REST vs gRPC?")
-            .with_project_root(tmp.path());
+        let mut session = OracleSession::new("REST vs gRPC?").with_project_root(tmp.path());
 
         // Phase 1: LoadContext
         session.set_context(DecisionContext {

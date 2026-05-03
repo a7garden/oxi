@@ -16,8 +16,8 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
+    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
+    ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
 /// OpenAI Responses API provider
@@ -148,8 +148,8 @@ impl Provider for OpenAiResponsesProvider {
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
 
-        let stream = response.bytes_stream().flat_map(move |chunk: Result<Bytes, reqwest::Error>| {
-            match chunk {
+        let stream = response.bytes_stream().flat_map(
+            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes).to_string();
                     futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
@@ -158,8 +158,8 @@ impl Provider for OpenAiResponsesProvider {
                     reason: StopReason::Error,
                     error: create_error_message(&e.to_string(), &provider_name, &model_id),
                 }]),
-            }
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -312,9 +312,14 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
             let event_name = line[7..].trim();
             // Track current event type for data line processing
             match event_name {
-                "response.created" | "response.output_item.added" | "response.content_part.added"
-                | "response.output_text.delta" | "response.function_call_arguments.delta"
-                | "response.completed" | "response.output_text.done" | "response.reasoning.done" => {
+                "response.created"
+                | "response.output_item.added"
+                | "response.content_part.added"
+                | "response.output_text.delta"
+                | "response.function_call_arguments.delta"
+                | "response.completed"
+                | "response.output_text.done"
+                | "response.reasoning.done" => {
                     // Event type tracked in data lines
                 }
                 _ => {}
@@ -400,7 +405,9 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         current_text_index = Some(content_idx);
                     }
                 }
-                ResponsesEvent::FunctionCallArgumentsDelta { function_call: delta } => {
+                ResponsesEvent::FunctionCallArgumentsDelta {
+                    function_call: delta,
+                } => {
                     // Use the index from the delta if available
                     let content_idx = delta.content_index.or(current_tool_call_index).unwrap_or(0);
                     events.push(ProviderEvent::ToolCallDelta {
@@ -443,7 +450,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                 ResponsesEvent::ResponseWithUsage { response } => {
                     // Check if this is incomplete or completed
                     let is_incomplete = response.incomplete_details.is_some();
-                    
+
                     // Update usage if available
                     if let Some(usage) = response.usage {
                         accumulated_usage.input = usage.input_tokens;
@@ -763,7 +770,8 @@ mod tests {
     #[test]
     fn test_parse_response_created_event() {
         // Data-only format
-        let sse_data = r#"data: {"response":{"id":"resp_123","status":"in_progress","model":"gpt-4o"}}"#;
+        let sse_data =
+            r#"data: {"response":{"id":"resp_123","status":"in_progress","model":"gpt-4o"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         assert!(!events.is_empty());
@@ -779,7 +787,9 @@ mod tests {
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         // Should contain a ToolCallStart event
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ToolCallStart { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ToolCallStart { .. })));
     }
 
     #[test]
@@ -788,7 +798,9 @@ mod tests {
         let sse_data = r#"data: {"output_text":{"content_index":0,"slice":"Hello"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
     }
 
     #[test]
@@ -797,7 +809,9 @@ mod tests {
         let sse_data = r#"data: {"function_call":{"content_index":0,"arguments":"{\"location"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. })));
     }
 
     #[test]
@@ -806,7 +820,13 @@ mod tests {
         let sse_data = r#"data: {"response":{"id":"resp_123","status":"completed","usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150}}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { reason: StopReason::Stop, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            ProviderEvent::Done {
+                reason: StopReason::Stop,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -815,7 +835,9 @@ mod tests {
         let sse_data = r#"data: {"reasoning":{"content_index":0,"summary":[{"type":"summary_text","text":"Thinking process..."}]}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ThinkingEnd { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ThinkingEnd { .. })));
     }
 
     #[test]
@@ -866,6 +888,12 @@ data: [DONE]"#;
         let sse_data = r#"data: {"response":{"id":"resp_123","incomplete_details":{"reason":"max_output_tokens"}}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { reason: StopReason::Length, .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            ProviderEvent::Done {
+                reason: StopReason::Length,
+                ..
+            }
+        )));
     }
 }

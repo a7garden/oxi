@@ -13,8 +13,8 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderError,
-    ProviderEvent, StopReason, StreamOptions, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderError, ProviderEvent,
+    StopReason, StreamOptions, Usage,
 };
 
 /// Mistral AI provider
@@ -68,7 +68,11 @@ impl MistralProvider {
 
         // If we don't have enough chars, pad with zeros
         if normalized.len() < MISTRAL_TOOL_CALL_ID_LENGTH {
-            format!("{}{}", normalized, "0".repeat(MISTRAL_TOOL_CALL_ID_LENGTH - normalized.len()))
+            format!(
+                "{}{}",
+                normalized,
+                "0".repeat(MISTRAL_TOOL_CALL_ID_LENGTH - normalized.len())
+            )
         } else {
             normalized
         }
@@ -170,8 +174,8 @@ impl Provider for MistralProvider {
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
 
-        let stream = response.bytes_stream().flat_map(move |chunk: Result<Bytes, reqwest::Error>| {
-            match chunk {
+        let stream = response.bytes_stream().flat_map(
+            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes).to_string();
                     futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
@@ -180,8 +184,8 @@ impl Provider for MistralProvider {
                     reason: StopReason::Error,
                     error: create_error_message(&e.to_string(), &provider_name, &model_id),
                 }]),
-            }
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -209,9 +213,7 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
             crate::Message::User(u) => {
                 let content: String = match &u.content {
                     crate::MessageContent::Text(s) => s.clone(),
-                    crate::MessageContent::Blocks(blocks) => {
-                        blocks_to_content(blocks)?.to_string()
-                    }
+                    crate::MessageContent::Blocks(blocks) => blocks_to_content(blocks)?.to_string(),
                 };
                 messages.push(serde_json::json!({
                     "role": "user",
@@ -279,9 +281,9 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
                     "url": format!("data:{};base64,{}", img.mime_type, img.data),
                 },
             })),
-            ContentBlock::Unknown(_) => {
-                Err(ProviderError::InvalidResponse("Unknown content block type".into()))
-            }
+            ContentBlock::Unknown(_) => Err(ProviderError::InvalidResponse(
+                "Unknown content block type".into(),
+            )),
         })
         .collect();
 
@@ -314,8 +316,7 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
 /// - Handles Mistral's streaming format (OpenAI-compatible)
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message =
-        AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
+    let partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
 
     // Pre-estimate capacity
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
@@ -498,7 +499,10 @@ mod tests {
     #[test]
     fn test_normalize_tool_call_id_exact_length() {
         // Exactly 9 characters should pass through
-        assert_eq!(MistralProvider::normalize_tool_call_id("123456789"), "123456789");
+        assert_eq!(
+            MistralProvider::normalize_tool_call_id("123456789"),
+            "123456789"
+        );
         assert_eq!(
             MistralProvider::normalize_tool_call_id("abcdefghi"),
             "abcdefghi"
@@ -530,7 +534,7 @@ mod tests {
         let short_id = "a-b-c";
         let result = MistralProvider::normalize_tool_call_id(short_id);
         assert_eq!(result, "a-b-c");
-        
+
         // Long IDs with special chars get normalized
         let long_with_special = "call-abc-def-ghi-jkl";
         let result = MistralProvider::normalize_tool_call_id(long_with_special);
@@ -560,7 +564,7 @@ mod tests {
     fn test_parse_sse_text_delta() {
         let sse_data = r#"data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#;
         let events = parse_sse_events(sse_data, "mistral", "mistral-small");
-        
+
         assert!(!events.is_empty());
         match &events[0] {
             ProviderEvent::TextDelta { delta, .. } => {
@@ -574,12 +578,14 @@ mod tests {
     fn test_parse_sse_done_event() {
         let sse_data = r#"data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}"#;
         let events = parse_sse_events(sse_data, "mistral", "mistral-small");
-        
+
         assert!(!events.is_empty());
         // Find the Done event
-        let done_event = events.iter().find(|e| matches!(e, ProviderEvent::Done { .. }));
+        let done_event = events
+            .iter()
+            .find(|e| matches!(e, ProviderEvent::Done { .. }));
         assert!(done_event.is_some());
-        
+
         if let Some(ProviderEvent::Done { reason, message }) = done_event {
             assert_eq!(*reason, StopReason::Stop);
             assert_eq!(message.usage.input, 10);
@@ -599,10 +605,12 @@ mod tests {
     fn test_parse_sse_tool_call() {
         let sse_data = r#"data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_abc","function":{"name":"get_weather","arguments":"{\"city\":\"NYC\"}"}}]},"finish_reason":"tool_calls"}]}"#;
         let events = parse_sse_events(sse_data, "mistral", "mistral-small");
-        
+
         // Should have tool call delta and done event
         assert!(events.len() >= 2);
-        let has_tool_call = events.iter().any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }));
+        let has_tool_call = events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }));
         assert!(has_tool_call);
     }
 
@@ -623,7 +631,7 @@ mod tests {
         let result = build_tools(&[tool]).unwrap();
         let tools_array = result.as_array().unwrap();
         assert_eq!(tools_array.len(), 1);
-        
+
         let first_tool = &tools_array[0];
         assert_eq!(first_tool["type"], "function");
         assert_eq!(first_tool["function"]["name"], "get_weather");
@@ -631,7 +639,7 @@ mod tests {
 
     #[test]
     fn test_build_messages_with_tool_result() {
-        use crate::{Message, ToolResultMessage, ContentBlock, TextContent};
+        use crate::{ContentBlock, Message, TextContent, ToolResultMessage};
 
         let mut context = Context::new();
         context.add_message(Message::ToolResult(ToolResultMessage::new(
@@ -642,7 +650,7 @@ mod tests {
 
         let messages = build_messages(&context).unwrap();
         assert_eq!(messages.len(), 1);
-        
+
         // Verify tool call ID was normalized to 9 chars
         let msg = &messages[0];
         let tool_call_id = msg["tool_call_id"].as_str().unwrap();

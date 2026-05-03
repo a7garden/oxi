@@ -4,9 +4,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::fmt;
 use std::path::Path;
+use std::path::PathBuf;
 
 /// Keybinding action identifiers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -231,18 +231,14 @@ pub fn load_user_keybindings(path: &Path) -> Option<UserKeybindings> {
 
 /// Save user keybindings to a file
 pub fn save_user_keybindings(path: &Path, bindings: &UserKeybindings) -> std::io::Result<()> {
-    let content = serde_json::to_string_pretty(bindings).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })?;
+    let content = serde_json::to_string_pretty(bindings)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     std::fs::write(path, content)
 }
 
 /// Get the default keybindings configuration file path
 pub fn default_keybindings_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|p| {
-        p.join("oxi")
-            .join("keybindings.json")
-    })
+    dirs::config_dir().map(|p| p.join("oxi").join("keybindings.json"))
 }
 
 /// Vim-style keybindings
@@ -255,15 +251,27 @@ pub fn vim_keybindings() -> HashMap<String, KeyBinding> {
     );
     bindings.insert(
         "tui.editor.cursorDown".to_string(),
-        KeyBinding::new("tui.editor.cursorDown", vec!["j", "Down"], "Move cursor down"),
+        KeyBinding::new(
+            "tui.editor.cursorDown",
+            vec!["j", "Down"],
+            "Move cursor down",
+        ),
     );
     bindings.insert(
         "tui.editor.cursorLeft".to_string(),
-        KeyBinding::new("tui.editor.cursorLeft", vec!["h", "Left"], "Move cursor left"),
+        KeyBinding::new(
+            "tui.editor.cursorLeft",
+            vec!["h", "Left"],
+            "Move cursor left",
+        ),
     );
     bindings.insert(
         "tui.editor.cursorRight".to_string(),
-        KeyBinding::new("tui.editor.cursorRight", vec!["l", "Right"], "Move cursor right"),
+        KeyBinding::new(
+            "tui.editor.cursorRight",
+            vec!["l", "Right"],
+            "Move cursor right",
+        ),
     );
     bindings.insert(
         "tui.input.submit".to_string(),
@@ -287,19 +295,35 @@ pub fn emacs_keybindings() -> HashMap<String, KeyBinding> {
 
     bindings.insert(
         "tui.editor.cursorUp".to_string(),
-        KeyBinding::new("tui.editor.cursorUp", vec!["ctrl+p", "Up"], "Move cursor up"),
+        KeyBinding::new(
+            "tui.editor.cursorUp",
+            vec!["ctrl+p", "Up"],
+            "Move cursor up",
+        ),
     );
     bindings.insert(
         "tui.editor.cursorDown".to_string(),
-        KeyBinding::new("tui.editor.cursorDown", vec!["ctrl+n", "Down"], "Move cursor down"),
+        KeyBinding::new(
+            "tui.editor.cursorDown",
+            vec!["ctrl+n", "Down"],
+            "Move cursor down",
+        ),
     );
     bindings.insert(
         "tui.editor.cursorLeft".to_string(),
-        KeyBinding::new("tui.editor.cursorLeft", vec!["ctrl+b", "Left"], "Move cursor left"),
+        KeyBinding::new(
+            "tui.editor.cursorLeft",
+            vec!["ctrl+b", "Left"],
+            "Move cursor left",
+        ),
     );
     bindings.insert(
         "tui.editor.cursorRight".to_string(),
-        KeyBinding::new("tui.editor.cursorRight", vec!["ctrl+f", "Right"], "Move cursor right"),
+        KeyBinding::new(
+            "tui.editor.cursorRight",
+            vec!["ctrl+f", "Right"],
+            "Move cursor right",
+        ),
     );
     bindings.insert(
         "tui.input.newLine".to_string(),
@@ -570,13 +594,14 @@ mod tests {
     #[test]
     fn test_user_keybindings_serde() {
         let user = UserKeybindings {
-            bindings: HashMap::from([
-                ("app.interrupt".to_string(), vec!["ctrl+c".to_string()]),
-            ]),
+            bindings: HashMap::from([("app.interrupt".to_string(), vec!["ctrl+c".to_string()])]),
         };
         let json = serde_json::to_string(&user).unwrap();
         let parsed: UserKeybindings = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.bindings.get("app.interrupt"), Some(&vec!["ctrl+c".to_string()]));
+        assert_eq!(
+            parsed.bindings.get("app.interrupt"),
+            Some(&vec!["ctrl+c".to_string()])
+        );
     }
 
     #[test]

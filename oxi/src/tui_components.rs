@@ -77,7 +77,9 @@ impl SessionSelector {
 
     /// Get currently selected session
     pub fn selected(&self) -> Option<&SessionInfo> {
-        self.filtered_sessions().into_iter().nth(self.selected_index)
+        self.filtered_sessions()
+            .into_iter()
+            .nth(self.selected_index)
     }
 
     /// Update filter text
@@ -109,7 +111,11 @@ impl SessionSelector {
         let filtered: Vec<_> = self.filtered_sessions();
         for (i, session) in filtered.iter().enumerate() {
             let marker = if i == self.selected_index { "▶" } else { " " };
-            let branch = if session.parent_id.is_some() { "├─ " } else { "  " };
+            let branch = if session.parent_id.is_some() {
+                "├─ "
+            } else {
+                "  "
+            };
             let name = if session.name.is_empty() {
                 &session.id[..8.min(session.id.len())]
             } else {
@@ -264,7 +270,8 @@ impl FooterData {
         } else {
             String::new()
         };
-        let elapsed = self.elapsed_seconds
+        let elapsed = self
+            .elapsed_seconds
             .map(|s| format!("{}m{}s", s / 60, s % 60))
             .unwrap_or_default();
 
@@ -281,7 +288,13 @@ impl FooterData {
         let content_len = left.len() + session_part.len() + right.len() + 2;
         if content_len < width {
             let padding = width - content_len;
-            format!("{}{}{:>width$}", left, session_part, right, width = padding + right.len())
+            format!(
+                "{}{}{:>width$}",
+                left,
+                session_part,
+                right,
+                width = padding + right.len()
+            )
         } else {
             format!("{}{} {}", left, session_part, right)
         }
@@ -297,6 +310,112 @@ pub struct LoginDialog {
     pub cursor_pos: usize,
     pub error_message: Option<String>,
     pub is_masked: bool,
+    /// OAuth-specific state
+    pub oauth_state: Option<OAuthState>,
+    /// Callback URL being waited for
+    pub pending_auth_url: Option<String>,
+}
+
+/// OAuth provider configuration
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OAuthProvider {
+    Anthropic,
+    OpenAI,
+    GitHub,
+    Google,
+    Azure,
+    /// Custom/provider-specific OAuth
+    Custom {
+        id: String,
+        name: String,
+    },
+}
+
+impl OAuthProvider {
+    /// Get the provider ID string
+    pub fn id(&self) -> &str {
+        match self {
+            OAuthProvider::Anthropic => "anthropic",
+            OAuthProvider::OpenAI => "openai",
+            OAuthProvider::GitHub => "github",
+            OAuthProvider::Google => "google",
+            OAuthProvider::Azure => "azure",
+            OAuthProvider::Custom { id, .. } => id,
+        }
+    }
+
+    /// Get the display name
+    pub fn name(&self) -> &str {
+        match self {
+            OAuthProvider::Anthropic => "Anthropic",
+            OAuthProvider::OpenAI => "OpenAI",
+            OAuthProvider::GitHub => "GitHub",
+            OAuthProvider::Google => "Google",
+            OAuthProvider::Azure => "Azure",
+            OAuthProvider::Custom { name, .. } => name,
+        }
+    }
+
+    /// Get the default redirect port for this provider
+    pub fn default_port(&self) -> u16 {
+        match self {
+            OAuthProvider::Anthropic => 8787,
+            OAuthProvider::OpenAI => 8788,
+            OAuthProvider::GitHub => 8789,
+            OAuthProvider::Google => 8790,
+            OAuthProvider::Azure => 8791,
+            OAuthProvider::Custom { .. } => 8792,
+        }
+    }
+
+    /// Parse provider from ID string
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id.to_lowercase().as_str() {
+            "anthropic" => Some(OAuthProvider::Anthropic),
+            "openai" => Some(OAuthProvider::OpenAI),
+            "github" | "github-copilot" => Some(OAuthProvider::GitHub),
+            "google" => Some(OAuthProvider::Google),
+            "azure" => Some(OAuthProvider::Azure),
+            _ => None,
+        }
+    }
+}
+
+/// Internal OAuth state for the login flow
+#[derive(Debug, Clone)]
+pub struct OAuthState {
+    pub provider: OAuthProvider,
+    pub code_verifier: String,
+    pub state: String,
+    pub authorization_url: String,
+    pub callback_port: u16,
+}
+
+/// Login state machine states
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginState {
+    /// Initial state - showing provider selection
+    ProviderSelection,
+    /// Waiting for user to enter API key
+    ApiKey,
+    /// Showing the OAuth authorization URL
+    WaitingForUrl,
+    /// Waiting for browser callback
+    WaitingForCallback,
+    /// Showing manual code input prompt
+    ManualInput,
+    /// Polling for device flow completion
+    Polling,
+    /// Authentication successful
+    Success,
+    /// Authentication failed with error message
+    Error(String),
+}
+
+impl Default for LoginState {
+    fn default() -> Self {
+        LoginState::ProviderSelection
+    }
 }
 
 impl LoginDialog {
@@ -308,12 +427,196 @@ impl LoginDialog {
             cursor_pos: 0,
             error_message: None,
             is_masked: true,
+            oauth_state: None,
+            pending_auth_url: None,
         }
+    }
+
+    /// Create a new login dialog with OAuth support
+    pub fn new_with_oauth() -> Self {
+        Self::new(vec![
+            "anthropic".to_string(),
+            "openai".to_string(),
+            "github".to_string(),
+        ])
+    }
+
+    /// Get the current login state
+    pub fn login_state(&self) -> LoginState {
+        if self.error_message.is_some() {
+            return LoginState::Error(self.error_message.clone().unwrap());
+        }
+        if self.oauth_state.is_some() {
+            if self.pending_auth_url.is_some() {
+                return LoginState::WaitingForCallback;
+            }
+            return LoginState::WaitingForUrl;
+        }
+        LoginState::ApiKey
+    }
+
+    /// Start an OAuth flow for the selected provider
+    /// Returns the authorization URL to display
+    pub fn start_oauth_flow(&mut self, provider: OAuthProvider) -> Result<String, String> {
+        let port = provider.default_port();
+        let code_verifier = generate_code_verifier();
+        let state = generate_state_token();
+
+        // Build authorization URL based on provider
+        let auth_url = match &provider {
+            OAuthProvider::Anthropic => {
+                format!(
+                    "https://auth.anthropic.com/oauth/authorize?response_type=code&client_id={}&redirect_uri=http%3A%2F%2Flocalhost%3A{}&code_challenge={}&code_challenge_method=S256&state={}",
+                    "anthropic-oauth-client",
+                    port,
+                    derive_code_challenge_sync(&code_verifier),
+                    state
+                )
+            }
+            OAuthProvider::OpenAI => {
+                format!(
+                    "https://auth.openai.com/authorize?response_type=code&client_id={}&redirect_uri=http%3A%2F%2Flocalhost%3A{}&code_challenge={}&code_challenge_method=S256&state={}",
+                    "openai-oauth-client",
+                    port,
+                    derive_code_challenge_sync(&code_verifier),
+                    state
+                )
+            }
+            OAuthProvider::GitHub => {
+                // GitHub uses device flow, not authorization code
+                format!(
+                    "https://github.com/login/device/code?client_id={}&scope=read:user%20user:email",
+                    "Iv1.placeholder_client_id"
+                )
+            }
+            _ => {
+                return Err(format!(
+                    "OAuth not supported for provider: {}",
+                    provider.name()
+                ));
+            }
+        };
+
+        let oauth_state = OAuthState {
+            provider,
+            code_verifier,
+            state,
+            authorization_url: auth_url.clone(),
+            callback_port: port,
+        };
+
+        self.oauth_state = Some(oauth_state);
+        self.pending_auth_url = Some(auth_url.clone());
+        Ok(auth_url)
+    }
+
+    /// Open the authorization URL in the default browser
+    pub fn open_auth_url(&self, url: &str) -> Result<(), String> {
+        crate::oauth_server::open_browser(url).map_err(|e| format!("Failed to open browser: {}", e))
+    }
+
+    /// Start the OAuth callback server
+    pub fn start_callback_server(
+        port: u16,
+    ) -> Result<crate::oauth_server::OAuthCallbackServer, String> {
+        let server = crate::oauth_server::OAuthCallbackServer::new(port);
+        Ok(server)
+    }
+
+    /// Handle the OAuth callback with code and state
+    pub fn handle_oauth_callback(&mut self, code: String, state: String) -> Result<(), String> {
+        if let Some(ref oauth_state) = self.oauth_state {
+            // Verify state matches
+            if oauth_state.state != state {
+                return Err("State mismatch - possible CSRF attack".to_string());
+            }
+            // Store code for exchange
+            self.api_key = code;
+            self.pending_auth_url = None;
+            Ok(())
+        } else {
+            Err("No OAuth flow in progress".to_string())
+        }
+    }
+
+    /// Show manual code input interface
+    pub fn show_manual_code_input(&mut self, message: &str) {
+        self.error_message = None;
+        // The message indicates what to show
+        if let Some(ref auth_url) = self.pending_auth_url {
+            eprintln!("\n{}", message);
+            eprintln!("Authorization URL: {}", auth_url);
+            eprintln!("Paste the code from the redirect URL here:\n");
+        }
+    }
+
+    /// Parse a redirect URL to extract the authorization code
+    pub fn parse_redirect_url(url: &str) -> Option<(String, String)> {
+        // Parse URL like http://localhost:8787/callback?code=xxx&state=yyy
+        if let Ok(parsed) = url::Url::parse(url) {
+            let code = parsed
+                .query_pairs()
+                .find(|(k, _)| k == "code")
+                .map(|(_, v)| v.to_string());
+            let state = parsed
+                .query_pairs()
+                .find(|(k, _)| k == "state")
+                .map(|(_, v)| v.to_string());
+            if let (Some(code), Some(state)) = (code, state) {
+                return Some((code, state));
+            }
+        }
+
+        // Try simple parsing for just ?code=xxx&state=yyy
+        let query = url.split('?').nth(1)?;
+        let mut code = None;
+        let mut state = None;
+        for pair in query.split('&') {
+            let (key, value) = pair.split_once('=')?;
+            let decoded = urlencoding::decode(value).ok()?.to_string();
+            match key {
+                "code" => code = Some(decoded),
+                "state" => state = Some(decoded),
+                _ => {}
+            }
+        }
+        Some((code?, state.unwrap_or_default()))
+    }
+
+    /// Complete the OAuth flow with the authorization code
+    pub fn complete_oauth(&mut self, code: String) -> Result<(), String> {
+        if let Some(ref oauth_state) = self.oauth_state {
+            // Store the code for exchange - the actual token exchange
+            // would be done by the caller using oxi-ai's oauth module
+            self.api_key = code;
+            self.oauth_state = None;
+            self.pending_auth_url = None;
+            Ok(())
+        } else {
+            Err("No OAuth flow in progress".to_string())
+        }
+    }
+
+    /// Cancel the current OAuth flow
+    pub fn cancel_oauth(&mut self) {
+        self.oauth_state = None;
+        self.pending_auth_url = None;
+        self.error_message = None;
+    }
+
+    /// Check if OAuth is available for a provider
+    pub fn is_oauth_available(&self, provider: &str) -> bool {
+        matches!(
+            provider.to_lowercase().as_str(),
+            "anthropic" | "openai" | "github" | "github-copilot"
+        )
     }
 
     /// Get selected provider
     pub fn selected_provider(&self) -> Option<&str> {
-        self.providers.get(self.selected_provider_index).map(|s| s.as_str())
+        self.providers
+            .get(self.selected_provider_index)
+            .map(|s| s.as_str())
     }
 
     /// Input a character
@@ -335,7 +638,8 @@ impl LoginDialog {
     /// Cycle provider selection
     pub fn next_provider(&mut self) {
         if !self.providers.is_empty() {
-            self.selected_provider_index = (self.selected_provider_index + 1) % self.providers.len();
+            self.selected_provider_index =
+                (self.selected_provider_index + 1) % self.providers.len();
             self.api_key.clear();
             self.cursor_pos = 0;
             self.error_message = None;
@@ -397,10 +701,24 @@ impl LoginDialog {
 /// Diff line for the diff viewer
 #[derive(Debug, Clone)]
 pub enum DiffLine {
-    Context { content: String, line_num: usize },
-    Added { content: String, line_num: usize },
-    Removed { content: String, line_num: usize },
-    Header { old_start: usize, old_count: usize, new_start: usize, new_count: usize },
+    Context {
+        content: String,
+        line_num: usize,
+    },
+    Added {
+        content: String,
+        line_num: usize,
+    },
+    Removed {
+        content: String,
+        line_num: usize,
+    },
+    Header {
+        old_start: usize,
+        old_count: usize,
+        new_start: usize,
+        new_count: usize,
+    },
 }
 
 /// Diff viewer state
@@ -449,7 +767,8 @@ impl DiffViewer {
         output.push_str(&format!("Diff: {}\n", self.file_path));
         output.push_str(&format!("{}\n", "─".repeat(60)));
 
-        let visible: Vec<_> = self.lines
+        let visible: Vec<_> = self
+            .lines
             .iter()
             .skip(self.scroll_offset)
             .take(self.visible_height)
@@ -457,7 +776,12 @@ impl DiffViewer {
 
         for line in &visible {
             match line {
-                DiffLine::Header { old_start, old_count, new_start, new_count } => {
+                DiffLine::Header {
+                    old_start,
+                    old_count,
+                    new_start,
+                    new_count,
+                } => {
                     output.push_str(&format!(
                         "@@ -{},{} +{},{} @@\n",
                         old_start, old_count, new_start, new_count
@@ -487,7 +811,10 @@ impl DiffViewer {
             }
         }
 
-        let remaining = self.lines.len().saturating_sub(self.scroll_offset + self.visible_height);
+        let remaining = self
+            .lines
+            .len()
+            .saturating_sub(self.scroll_offset + self.visible_height);
         if remaining > 0 {
             output.push_str(&format!("... {} more lines\n", remaining));
         }
@@ -528,15 +855,24 @@ fn parse_diff_lines(diff: &str) -> Vec<DiffLine> {
             }
         } else if raw_line.starts_with('+') {
             let content = raw_line[1..].to_string();
-            lines.push(DiffLine::Added { content, line_num: new_line });
+            lines.push(DiffLine::Added {
+                content,
+                line_num: new_line,
+            });
             new_line += 1;
         } else if raw_line.starts_with('-') {
             let content = raw_line[1..].to_string();
-            lines.push(DiffLine::Removed { content, line_num: old_line });
+            lines.push(DiffLine::Removed {
+                content,
+                line_num: old_line,
+            });
             old_line += 1;
         } else if raw_line.starts_with(' ') {
             let content = raw_line[1..].to_string();
-            lines.push(DiffLine::Context { content, line_num: new_line });
+            lines.push(DiffLine::Context {
+                content,
+                line_num: new_line,
+            });
             old_line += 1;
             new_line += 1;
         }
@@ -687,6 +1023,275 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
+// ── PKCE Helper Functions ────────────────────────────────────────────────────
+
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use sha2::{Digest, Sha256};
+
+/// Generate a cryptographically-random code_verifier (43 chars, RFC 7636 §4.1).
+pub fn generate_code_verifier() -> String {
+    let mut bytes = [0u8; 32]; // 32 bytes → 43 base64url chars
+    rand::thread_rng().fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// Derive the code_challenge from a code_verifier using S256 (SHA-256 + base64url).
+pub fn derive_code_challenge(verifier: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(verifier.as_bytes());
+    let hash = hasher.finalize();
+    URL_SAFE_NO_PAD.encode(hash)
+}
+
+/// Synchronous version of derive_code_challenge for use in non-async contexts
+fn derive_code_challenge_sync(verifier: &str) -> String {
+    derive_code_challenge(verifier)
+}
+
+/// Generate an opaque state parameter (22 random base64url chars).
+fn generate_state_token() -> String {
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+// ── OAuth Tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod oauth_tests {
+    use super::*;
+
+    #[test]
+    fn test_code_verifier_length() {
+        let v = generate_code_verifier();
+        assert!((43..=128).contains(&v.len()), "verifier length {}", v.len());
+    }
+
+    #[test]
+    fn test_code_verifier_is_base64url() {
+        let v = generate_code_verifier();
+        // base64url chars: A-Z a-z 0-9 - _
+        assert!(v
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn test_code_verifier_uniqueness() {
+        let a = generate_code_verifier();
+        let b = generate_code_verifier();
+        assert_ne!(a, b, "two verifiers should differ");
+    }
+
+    #[test]
+    fn test_code_challenge_deterministic() {
+        let v = generate_code_verifier();
+        let c1 = derive_code_challenge(&v);
+        let c2 = derive_code_challenge(&v);
+        assert_eq!(c1, c2);
+    }
+
+    #[test]
+    fn test_code_challenge_differs_from_verifier() {
+        let v = generate_code_verifier();
+        let c = derive_code_challenge(&v);
+        assert_ne!(v, c);
+    }
+
+    #[test]
+    fn test_code_challenge_is_base64url() {
+        let v = generate_code_verifier();
+        let c = derive_code_challenge(&v);
+        assert!(c
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'));
+    }
+
+    #[test]
+    fn test_known_pkce_vector() {
+        // RFC 7636 Appendix B reference vector
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        let challenge = derive_code_challenge(verifier);
+        assert_eq!(challenge, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+    }
+
+    #[test]
+    fn test_oauth_provider_from_id() {
+        assert_eq!(
+            OAuthProvider::from_id("anthropic"),
+            Some(OAuthProvider::Anthropic)
+        );
+        assert_eq!(
+            OAuthProvider::from_id("openai"),
+            Some(OAuthProvider::OpenAI)
+        );
+        assert_eq!(
+            OAuthProvider::from_id("github"),
+            Some(OAuthProvider::GitHub)
+        );
+        assert_eq!(
+            OAuthProvider::from_id("github-copilot"),
+            Some(OAuthProvider::GitHub)
+        );
+        assert_eq!(
+            OAuthProvider::from_id("google"),
+            Some(OAuthProvider::Google)
+        );
+        assert_eq!(OAuthProvider::from_id("azure"), Some(OAuthProvider::Azure));
+        assert_eq!(OAuthProvider::from_id("unknown"), None);
+    }
+
+    #[test]
+    fn test_oauth_provider_id_and_name() {
+        let anthropic = OAuthProvider::Anthropic;
+        assert_eq!(anthropic.id(), "anthropic");
+        assert_eq!(anthropic.name(), "Anthropic");
+
+        let openai = OAuthProvider::OpenAI;
+        assert_eq!(openai.id(), "openai");
+        assert_eq!(openai.name(), "OpenAI");
+
+        let custom = OAuthProvider::Custom {
+            id: "custom".into(),
+            name: "Custom Provider".into(),
+        };
+        assert_eq!(custom.id(), "custom");
+        assert_eq!(custom.name(), "Custom Provider");
+    }
+
+    #[test]
+    fn test_oauth_provider_default_port() {
+        assert_eq!(OAuthProvider::Anthropic.default_port(), 8787);
+        assert_eq!(OAuthProvider::OpenAI.default_port(), 8788);
+        assert_eq!(OAuthProvider::GitHub.default_port(), 8789);
+        assert_eq!(OAuthProvider::Google.default_port(), 8790);
+        assert_eq!(OAuthProvider::Azure.default_port(), 8791);
+    }
+
+    #[test]
+    fn test_login_dialog_oauth_state() {
+        let mut dialog = LoginDialog::new(vec!["anthropic".to_string()]);
+        assert!(dialog.oauth_state.is_none());
+        assert!(dialog.pending_auth_url.is_none());
+        assert_eq!(dialog.login_state(), LoginState::ApiKey);
+
+        // Start OAuth flow
+        let url = dialog.start_oauth_flow(OAuthProvider::Anthropic).unwrap();
+        assert!(url.contains("localhost:8787"));
+        assert!(dialog.oauth_state.is_some());
+        assert!(dialog.pending_auth_url.is_some());
+        assert_eq!(dialog.login_state(), LoginState::WaitingForCallback);
+
+        // Cancel OAuth
+        dialog.cancel_oauth();
+        assert!(dialog.oauth_state.is_none());
+        assert!(dialog.pending_auth_url.is_none());
+    }
+
+    #[test]
+    fn test_login_dialog_parse_redirect_url() {
+        let url = "http://localhost:8787/callback?code=test_code_123&state=state_456";
+        let result = LoginDialog::parse_redirect_url(url);
+        assert!(result.is_some());
+        let (code, state) = result.unwrap();
+        assert_eq!(code, "test_code_123");
+        assert_eq!(state, "state_456");
+    }
+
+    #[test]
+    fn test_login_dialog_parse_redirect_url_simple() {
+        let url = "?code=simple_code&state=state";
+        let result = LoginDialog::parse_redirect_url(url);
+        assert!(result.is_some());
+        let (code, state) = result.unwrap();
+        assert_eq!(code, "simple_code");
+        assert_eq!(state, "state");
+    }
+
+    #[test]
+    fn test_login_dialog_parse_redirect_url_invalid() {
+        let url = "http://localhost:8787/callback?state=only_state";
+        let result = LoginDialog::parse_redirect_url(url);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_login_dialog_oauth_callback() {
+        let mut dialog = LoginDialog::new(vec!["anthropic".to_string()]);
+        dialog.start_oauth_flow(OAuthProvider::Anthropic).unwrap();
+
+        let oauth_state = dialog.oauth_state.clone().unwrap();
+        let result = dialog.handle_oauth_callback("auth_code".into(), oauth_state.state.clone());
+        assert!(result.is_ok());
+        assert_eq!(dialog.api_key, "auth_code");
+    }
+
+    #[test]
+    fn test_login_dialog_oauth_callback_state_mismatch() {
+        let mut dialog = LoginDialog::new(vec!["anthropic".to_string()]);
+        dialog.start_oauth_flow(OAuthProvider::Anthropic).unwrap();
+
+        let result = dialog.handle_oauth_callback("auth_code".into(), "wrong_state".into());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("State mismatch"));
+    }
+
+    #[test]
+    fn test_login_dialog_is_oauth_available() {
+        let dialog = LoginDialog::new(vec![]);
+        assert!(dialog.is_oauth_available("anthropic"));
+        assert!(dialog.is_oauth_available("openai"));
+        assert!(dialog.is_oauth_available("github"));
+        assert!(dialog.is_oauth_available("github-copilot"));
+        assert!(!dialog.is_oauth_available("unknown"));
+    }
+
+    #[test]
+    fn test_login_dialog_complete_oauth() {
+        let mut dialog = LoginDialog::new(vec!["anthropic".to_string()]);
+        dialog.start_oauth_flow(OAuthProvider::Anthropic).unwrap();
+        assert!(dialog.oauth_state.is_some());
+
+        let result = dialog.complete_oauth("final_code".into());
+        assert!(result.is_ok());
+        assert_eq!(dialog.api_key, "final_code");
+        assert!(dialog.oauth_state.is_none());
+        assert!(dialog.pending_auth_url.is_none());
+    }
+
+    #[test]
+    fn test_login_state_default() {
+        assert_eq!(LoginState::default(), LoginState::ProviderSelection);
+    }
+
+    #[test]
+    fn test_login_state_error() {
+        let dialog = LoginDialog {
+            providers: vec![],
+            selected_provider_index: 0,
+            api_key: String::new(),
+            cursor_pos: 0,
+            error_message: Some("test error".to_string()),
+            is_masked: true,
+            oauth_state: None,
+            pending_auth_url: None,
+        };
+        assert_eq!(
+            dialog.login_state(),
+            LoginState::Error("test error".to_string())
+        );
+    }
+
+    #[test]
+    fn test_state_token_generation() {
+        let state1 = generate_state_token();
+        let state2 = generate_state_token();
+        assert_ne!(state1, state2);
+        assert!(state1.len() >= 16);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -793,10 +1398,7 @@ mod tests {
 
     #[test]
     fn test_login_dialog() {
-        let mut dialog = LoginDialog::new(vec![
-            "anthropic".to_string(),
-            "openai".to_string(),
-        ]);
+        let mut dialog = LoginDialog::new(vec!["anthropic".to_string(), "openai".to_string()]);
         assert_eq!(dialog.selected_provider(), Some("anthropic"));
         dialog.next_provider();
         assert_eq!(dialog.selected_provider(), Some("openai"));
@@ -829,11 +1431,16 @@ mod tests {
     fn test_diff_viewer_scroll() {
         let mut diff = "@@ -1,5 +1,5 @@\n".to_string();
         for i in 0..100 {
-            diff.push_str(&format!(" line {}\n", i));  // context lines start with space
+            diff.push_str(&format!(" line {}\n", i)); // context lines start with space
         }
         let mut viewer = DiffViewer::new("test.txt".to_string(), &diff);
         viewer.visible_height = 10;
-        assert!(viewer.lines.len() > 10, "need {} lines, got {}", 11, viewer.lines.len());
+        assert!(
+            viewer.lines.len() > 10,
+            "need {} lines, got {}",
+            11,
+            viewer.lines.len()
+        );
         viewer.scroll_down(10);
         assert!(viewer.scroll_offset > 0);
         viewer.scroll_up(5);

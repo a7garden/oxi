@@ -160,30 +160,47 @@ impl Component for CommandPalette {
         }
 
         match event {
-            Event::Key(KeyEvent { code: KeyCode::Escape, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Escape,
+                ..
+            }) => {
                 self.hide();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Up, ..
+            }) => {
                 self.select_prev();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }) => {
                 self.select_next();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            }) => {
                 self.confirm();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char(c),
+                ..
+            }) => {
                 self.query.push(*c);
                 self.apply_filter();
                 self.selected = 0;
                 self.dirty = true;
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            }) => {
                 self.query.pop();
                 self.apply_filter();
                 self.selected = 0;
@@ -219,32 +236,64 @@ impl Component for CommandPalette {
         // Draw border
         let border_fg = Color::Indexed(12);
         // Top
-        surface.set(y, x.saturating_sub(1), Cell::new('┌').with_fg(border_fg).with_bg(overlay_bg));
-        surface.set(y, x + palette_w, Cell::new('┐').with_fg(border_fg).with_bg(overlay_bg));
+        surface.set(
+            y,
+            x.saturating_sub(1),
+            Cell::new('┌').with_fg(border_fg).with_bg(overlay_bg),
+        );
+        surface.set(
+            y,
+            x + palette_w,
+            Cell::new('┐').with_fg(border_fg).with_bg(overlay_bg),
+        );
         // Bottom
         let bottom = y + total_height + 1;
-        surface.set(bottom, x.saturating_sub(1), Cell::new('└').with_fg(border_fg).with_bg(overlay_bg));
-        surface.set(bottom, x + palette_w, Cell::new('┘').with_fg(border_fg).with_bg(overlay_bg));
+        surface.set(
+            bottom,
+            x.saturating_sub(1),
+            Cell::new('└').with_fg(border_fg).with_bg(overlay_bg),
+        );
+        surface.set(
+            bottom,
+            x + palette_w,
+            Cell::new('┘').with_fg(border_fg).with_bg(overlay_bg),
+        );
         // Sides
         for r in y + 1..bottom {
             if r < area.y + area.height {
                 if x > 0 {
-                    surface.set(r, x - 1, Cell::new('│').with_fg(border_fg).with_bg(overlay_bg));
+                    surface.set(
+                        r,
+                        x - 1,
+                        Cell::new('│').with_fg(border_fg).with_bg(overlay_bg),
+                    );
                 }
                 if x + palette_w < area.x + area.width {
-                    surface.set(r, x + palette_w, Cell::new('│').with_fg(border_fg).with_bg(overlay_bg));
+                    surface.set(
+                        r,
+                        x + palette_w,
+                        Cell::new('│').with_fg(border_fg).with_bg(overlay_bg),
+                    );
                 }
             }
         }
         // Horizontal lines
         for c in x..x + palette_w {
             surface.set(y, c, Cell::new('─').with_fg(border_fg).with_bg(overlay_bg));
-            surface.set(bottom, c, Cell::new('─').with_fg(border_fg).with_bg(overlay_bg));
+            surface.set(
+                bottom,
+                c,
+                Cell::new('─').with_fg(border_fg).with_bg(overlay_bg),
+            );
         }
         // Separator after input
         let sep_y = y + 2;
         for c in x..x + palette_w {
-            surface.set(sep_y, c, Cell::new('─').with_fg(border_fg).with_bg(overlay_bg));
+            surface.set(
+                sep_y,
+                c,
+                Cell::new('─').with_fg(border_fg).with_bg(overlay_bg),
+            );
         }
 
         // Render input row
@@ -252,13 +301,21 @@ impl Component for CommandPalette {
         for (i, c) in prompt.chars().enumerate() {
             let col = x + i as u16;
             if col < x + palette_w {
-                surface.set(y + 1, col, Cell::new(c).with_fg(Color::White).with_bg(overlay_bg));
+                surface.set(
+                    y + 1,
+                    col,
+                    Cell::new(c).with_fg(Color::White).with_bg(overlay_bg),
+                );
             }
         }
         for (i, c) in self.query.chars().enumerate() {
             let col = x + prompt.len() as u16 + i as u16;
             if col < x + palette_w {
-                surface.set(y + 1, col, Cell::new(c).with_fg(Color::White).with_bg(overlay_bg));
+                surface.set(
+                    y + 1,
+                    col,
+                    Cell::new(c).with_fg(Color::White).with_bg(overlay_bg),
+                );
             }
         }
         // Cursor

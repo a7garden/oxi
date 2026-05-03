@@ -388,11 +388,11 @@ impl ReviewReport {
         let mut md = String::with_capacity(4096);
 
         // Title
+        md.push_str(&format!("# Code Review: {}\n\n", self.scope.description));
         md.push_str(&format!(
-            "# Code Review: {}\n\n",
-            self.scope.description
+            "> Date: {} | Reviewer: {}\n",
+            self.meta.date, self.meta.reviewer
         ));
-        md.push_str(&format!("> Date: {} | Reviewer: {}\n", self.meta.date, self.meta.reviewer));
 
         if let Some(ref range) = self.scope.commit_range {
             md.push_str(&format!("> Commits: {}\n", range));
@@ -409,7 +409,10 @@ impl ReviewReport {
         } else {
             "❌ Not ready to ship"
         };
-        md.push_str(&format!("**{}** — {}\n\n", ship_status, self.overall.summary));
+        md.push_str(&format!(
+            "**{}** — {}\n\n",
+            ship_status, self.overall.summary
+        ));
         md.push_str(&format!(
             "- Critical: {} | Important: {} | Minor: {} | Nit: {}\n\n",
             self.overall.critical_count,
@@ -442,11 +445,8 @@ impl ReviewReport {
         }
 
         // Confirmed findings
-        let confirmed: Vec<&ReviewFinding> = self
-            .findings
-            .iter()
-            .filter(|f| f.is_confirmed())
-            .collect();
+        let confirmed: Vec<&ReviewFinding> =
+            self.findings.iter().filter(|f| f.is_confirmed()).collect();
 
         if !confirmed.is_empty() {
             md.push_str("## Findings\n\n");
@@ -513,8 +513,7 @@ impl ReviewReport {
 
     /// Write the review to a file.
     pub fn write_to_file(&self, dir: &Path) -> Result<PathBuf> {
-        fs::create_dir_all(dir)
-            .with_context(|| format!("Failed to create {}", dir.display()))?;
+        fs::create_dir_all(dir).with_context(|| format!("Failed to create {}", dir.display()))?;
 
         let date = &self.meta.date;
         let slug = slugify(&self.scope.description);
@@ -615,14 +614,24 @@ impl ReviewSession {
 
     /// Get findings by severity.
     pub fn findings_by_severity(&self, severity: FindingSeverity) -> Vec<&ReviewFinding> {
-        self.findings.iter().filter(|f| f.severity == severity).collect()
+        self.findings
+            .iter()
+            .filter(|f| f.severity == severity)
+            .collect()
     }
 
     /// Cross-examine a specific finding by index.
     ///
     /// Sets the verdict based on the analysis.
-    pub fn cross_examine(&mut self, index: usize, verdict: FindingVerdict, reason: impl Into<String>) -> Result<()> {
-        let finding = self.findings.get_mut(index)
+    pub fn cross_examine(
+        &mut self,
+        index: usize,
+        verdict: FindingVerdict,
+        reason: impl Into<String>,
+    ) -> Result<()> {
+        let finding = self
+            .findings
+            .get_mut(index)
             .with_context(|| format!("No finding at index {}", index))?;
         finding.set_verdict(verdict, reason);
         Ok(())
@@ -631,7 +640,11 @@ impl ReviewSession {
     /// Cross-examine all unexamined findings.
     ///
     /// Returns the number of findings that were already examined.
-    pub fn cross_examine_all(&mut self, verdict: FindingVerdict, reason: impl Into<String>) -> usize {
+    pub fn cross_examine_all(
+        &mut self,
+        verdict: FindingVerdict,
+        reason: impl Into<String>,
+    ) -> usize {
         let reason_str = reason.into();
         let mut already_examined = 0;
         for finding in &mut self.findings {
@@ -646,29 +659,51 @@ impl ReviewSession {
 
     /// Produce the final report from accumulated findings.
     pub fn produce_report(&mut self) -> Result<()> {
-        let scope = self.scope.clone()
+        let scope = self
+            .scope
+            .clone()
             .context("Review scope not set — call with_scope() first")?;
 
         // Clone findings data to avoid borrow conflicts
         let findings_snapshot: Vec<ReviewFinding> = self.findings.clone();
 
         // Count confirmed findings by severity
-        let confirmed: Vec<&ReviewFinding> = findings_snapshot.iter().filter(|f| f.is_confirmed()).collect();
-        let critical_count = confirmed.iter().filter(|f| f.severity == FindingSeverity::Critical).count();
-        let important_count = confirmed.iter().filter(|f| f.severity == FindingSeverity::Important).count();
-        let minor_count = confirmed.iter().filter(|f| f.severity == FindingSeverity::Minor).count();
-        let nit_count = confirmed.iter().filter(|f| f.severity == FindingSeverity::Nit).count();
+        let confirmed: Vec<&ReviewFinding> = findings_snapshot
+            .iter()
+            .filter(|f| f.is_confirmed())
+            .collect();
+        let critical_count = confirmed
+            .iter()
+            .filter(|f| f.severity == FindingSeverity::Critical)
+            .count();
+        let important_count = confirmed
+            .iter()
+            .filter(|f| f.severity == FindingSeverity::Important)
+            .count();
+        let minor_count = confirmed
+            .iter()
+            .filter(|f| f.severity == FindingSeverity::Minor)
+            .count();
+        let nit_count = confirmed
+            .iter()
+            .filter(|f| f.severity == FindingSeverity::Nit)
+            .count();
 
         let ready_to_ship = critical_count == 0 && important_count == 0;
 
         // Build axis summaries
         let mut axis_summaries = Vec::new();
         for axis in ReviewAxis::all() {
-            let axis_findings: Vec<&&ReviewFinding> = confirmed.iter().filter(|f| f.axis == *axis).collect();
+            let axis_findings: Vec<&&ReviewFinding> =
+                confirmed.iter().filter(|f| f.axis == *axis).collect();
             let count = axis_findings.len();
 
-            let has_critical = axis_findings.iter().any(|f| f.severity == FindingSeverity::Critical);
-            let has_important = axis_findings.iter().any(|f| f.severity == FindingSeverity::Important);
+            let has_critical = axis_findings
+                .iter()
+                .any(|f| f.severity == FindingSeverity::Critical);
+            let has_important = axis_findings
+                .iter()
+                .any(|f| f.severity == FindingSeverity::Important);
 
             let impression = if count == 0 {
                 AxisImpression::Clean
@@ -700,7 +735,10 @@ impl ReviewSession {
             .iter()
             .enumerate()
             .map(|(i, f)| Recommendation {
-                action: f.suggestion.clone().unwrap_or_else(|| f.description.clone()),
+                action: f
+                    .suggestion
+                    .clone()
+                    .unwrap_or_else(|| f.description.clone()),
                 rationale: f.description.clone(),
                 severity: f.severity,
                 files: f.evidence.iter().map(|e| e.file.clone()).collect(),
@@ -715,8 +753,14 @@ impl ReviewSession {
         }
 
         // Build discarded list
-        let discarded: Vec<DiscardedFinding> = findings_snapshot.iter()
-            .filter(|f| matches!(f.verdict, Some(FindingVerdict::FalsePositive) | Some(FindingVerdict::Deferred)))
+        let discarded: Vec<DiscardedFinding> = findings_snapshot
+            .iter()
+            .filter(|f| {
+                matches!(
+                    f.verdict,
+                    Some(FindingVerdict::FalsePositive) | Some(FindingVerdict::Deferred)
+                )
+            })
             .map(|f| DiscardedFinding {
                 description: f.description.clone(),
                 reason: f.verdict_reason.clone().unwrap_or_default(),
@@ -725,9 +769,15 @@ impl ReviewSession {
             .collect();
 
         let summary = if ready_to_ship {
-            format!("Code is ready to ship with {} minor finding(s).", minor_count + nit_count)
+            format!(
+                "Code is ready to ship with {} minor finding(s).",
+                minor_count + nit_count
+            )
         } else {
-            format!("{} critical and {} important finding(s) must be addressed before shipping.", critical_count, important_count)
+            format!(
+                "{} critical and {} important finding(s) must be addressed before shipping.",
+                critical_count, important_count
+            )
         };
 
         let report = ReviewReport {
@@ -756,7 +806,9 @@ impl ReviewSession {
 
     /// Write the report to disk.
     pub fn write_report(&self, explicit_path: Option<&Path>) -> Result<PathBuf> {
-        let report = self.report.as_ref()
+        let report = self
+            .report
+            .as_ref()
             .context("Report not produced — call produce_report() first")?;
 
         if let Some(path) = explicit_path {
@@ -769,7 +821,9 @@ impl ReviewSession {
                 .with_context(|| format!("Failed to write review to {}", path.display()))?;
             Ok(path.to_path_buf())
         } else {
-            let root = self.project_root.as_deref()
+            let root = self
+                .project_root
+                .as_deref()
                 .context("No project root and no explicit path")?;
             let review_dir = root.join("docs").join("review");
             report.write_to_file(&review_dir)
@@ -899,18 +953,14 @@ mod tests {
     use super::*;
 
     fn sample_finding(axis: ReviewAxis, severity: FindingSeverity) -> ReviewFinding {
-        ReviewFinding::new(
-            format!("{:?} issue", axis),
-            axis,
-            severity,
-        )
-        .with_evidence(CodeEvidence {
-            file: "src/main.rs".to_string(),
-            line: Some(42),
-            snippet: Some("unwrap()".to_string()),
-            observation: "Direct unwrap on Option".to_string(),
-        })
-        .with_suggestion("Use ok_or_else()? instead")
+        ReviewFinding::new(format!("{:?} issue", axis), axis, severity)
+            .with_evidence(CodeEvidence {
+                file: "src/main.rs".to_string(),
+                line: Some(42),
+                snippet: Some("unwrap()".to_string()),
+                observation: "Direct unwrap on Option".to_string(),
+            })
+            .with_suggestion("Use ok_or_else()? instead")
     }
 
     #[test]
@@ -986,7 +1036,10 @@ mod tests {
     #[test]
     fn test_verdict_display() {
         assert_eq!(format!("{}", FindingVerdict::Confirmed), "confirmed");
-        assert_eq!(format!("{}", FindingVerdict::FalsePositive), "false positive");
+        assert_eq!(
+            format!("{}", FindingVerdict::FalsePositive),
+            "false positive"
+        );
         assert_eq!(format!("{}", FindingVerdict::Deferred), "deferred");
     }
 
@@ -1019,7 +1072,11 @@ mod tests {
 
     #[test]
     fn test_finding_creation() {
-        let f = ReviewFinding::new("Missing error check", ReviewAxis::ErrorHandling, FindingSeverity::Important);
+        let f = ReviewFinding::new(
+            "Missing error check",
+            ReviewAxis::ErrorHandling,
+            FindingSeverity::Important,
+        );
         assert_eq!(f.description, "Missing error check");
         assert_eq!(f.axis, ReviewAxis::ErrorHandling);
         assert_eq!(f.severity, FindingSeverity::Important);
@@ -1044,7 +1101,10 @@ mod tests {
         f.set_verdict(FindingVerdict::Confirmed, "Reproduces consistently");
         assert!(f.is_examined());
         assert!(f.is_confirmed());
-        assert_eq!(f.verdict_reason, Some("Reproduces consistently".to_string()));
+        assert_eq!(
+            f.verdict_reason,
+            Some("Reproduces consistently".to_string())
+        );
     }
 
     #[test]
@@ -1058,9 +1118,18 @@ mod tests {
     #[test]
     fn test_add_findings() {
         let mut session = ReviewSession::new();
-        session.add_finding(sample_finding(ReviewAxis::Correctness, FindingSeverity::Critical));
-        session.add_finding(sample_finding(ReviewAxis::Security, FindingSeverity::Important));
-        session.add_finding(sample_finding(ReviewAxis::Readability, FindingSeverity::Nit));
+        session.add_finding(sample_finding(
+            ReviewAxis::Correctness,
+            FindingSeverity::Critical,
+        ));
+        session.add_finding(sample_finding(
+            ReviewAxis::Security,
+            FindingSeverity::Important,
+        ));
+        session.add_finding(sample_finding(
+            ReviewAxis::Readability,
+            FindingSeverity::Nit,
+        ));
 
         assert_eq!(session.finding_count(), 3);
     }
@@ -1068,9 +1137,18 @@ mod tests {
     #[test]
     fn test_findings_by_axis() {
         let mut session = ReviewSession::new();
-        session.add_finding(sample_finding(ReviewAxis::Correctness, FindingSeverity::Important));
-        session.add_finding(sample_finding(ReviewAxis::Correctness, FindingSeverity::Minor));
-        session.add_finding(sample_finding(ReviewAxis::Security, FindingSeverity::Critical));
+        session.add_finding(sample_finding(
+            ReviewAxis::Correctness,
+            FindingSeverity::Important,
+        ));
+        session.add_finding(sample_finding(
+            ReviewAxis::Correctness,
+            FindingSeverity::Minor,
+        ));
+        session.add_finding(sample_finding(
+            ReviewAxis::Security,
+            FindingSeverity::Critical,
+        ));
 
         assert_eq!(session.findings_by_axis(ReviewAxis::Correctness).len(), 2);
         assert_eq!(session.findings_by_axis(ReviewAxis::Security).len(), 1);
@@ -1080,31 +1158,61 @@ mod tests {
     #[test]
     fn test_findings_by_severity() {
         let mut session = ReviewSession::new();
-        session.add_finding(sample_finding(ReviewAxis::Correctness, FindingSeverity::Critical));
-        session.add_finding(sample_finding(ReviewAxis::Security, FindingSeverity::Critical));
-        session.add_finding(sample_finding(ReviewAxis::Readability, FindingSeverity::Minor));
+        session.add_finding(sample_finding(
+            ReviewAxis::Correctness,
+            FindingSeverity::Critical,
+        ));
+        session.add_finding(sample_finding(
+            ReviewAxis::Security,
+            FindingSeverity::Critical,
+        ));
+        session.add_finding(sample_finding(
+            ReviewAxis::Readability,
+            FindingSeverity::Minor,
+        ));
 
-        assert_eq!(session.findings_by_severity(FindingSeverity::Critical).len(), 2);
-        assert_eq!(session.findings_by_severity(FindingSeverity::Minor).len(), 1);
+        assert_eq!(
+            session
+                .findings_by_severity(FindingSeverity::Critical)
+                .len(),
+            2
+        );
+        assert_eq!(
+            session.findings_by_severity(FindingSeverity::Minor).len(),
+            1
+        );
     }
 
     #[test]
     fn test_cross_examine_single() {
         let mut session = ReviewSession::new();
-        session.add_finding(sample_finding(ReviewAxis::Correctness, FindingSeverity::Important));
+        session.add_finding(sample_finding(
+            ReviewAxis::Correctness,
+            FindingSeverity::Important,
+        ));
 
-        session.cross_examine(0, FindingVerdict::Confirmed, "Real bug").unwrap();
+        session
+            .cross_examine(0, FindingVerdict::Confirmed, "Real bug")
+            .unwrap();
         assert!(session.findings[0].is_confirmed());
 
         // Invalid index
-        assert!(session.cross_examine(5, FindingVerdict::FalsePositive, "test").is_err());
+        assert!(session
+            .cross_examine(5, FindingVerdict::FalsePositive, "test")
+            .is_err());
     }
 
     #[test]
     fn test_cross_examine_all() {
         let mut session = ReviewSession::new();
-        session.add_finding(sample_finding(ReviewAxis::Correctness, FindingSeverity::Important));
-        session.add_finding(sample_finding(ReviewAxis::Security, FindingSeverity::Critical));
+        session.add_finding(sample_finding(
+            ReviewAxis::Correctness,
+            FindingSeverity::Important,
+        ));
+        session.add_finding(sample_finding(
+            ReviewAxis::Security,
+            FindingSeverity::Critical,
+        ));
 
         // Mark first as already examined
         session.findings[0].set_verdict(FindingVerdict::Confirmed, "Already done");
@@ -1123,13 +1231,12 @@ mod tests {
 
     #[test]
     fn test_produce_report_ready_to_ship() {
-        let mut session = ReviewSession::new()
-            .with_scope(ReviewScope {
-                description: "Test review".to_string(),
-                files: vec!["src/main.rs".to_string()],
-                commit_range: None,
-                branch: None,
-            });
+        let mut session = ReviewSession::new().with_scope(ReviewScope {
+            description: "Test review".to_string(),
+            files: vec!["src/main.rs".to_string()],
+            commit_range: None,
+            branch: None,
+        });
 
         // No findings → ready to ship
         session.produce_report().unwrap();
@@ -1142,13 +1249,12 @@ mod tests {
 
     #[test]
     fn test_produce_report_not_ready() {
-        let mut session = ReviewSession::new()
-            .with_scope(ReviewScope {
-                description: "Test".to_string(),
-                files: vec!["src/main.rs".to_string()],
-                commit_range: None,
-                branch: None,
-            });
+        let mut session = ReviewSession::new().with_scope(ReviewScope {
+            description: "Test".to_string(),
+            files: vec!["src/main.rs".to_string()],
+            commit_range: None,
+            branch: None,
+        });
 
         let mut f = sample_finding(ReviewAxis::Correctness, FindingSeverity::Critical);
         f.set_verdict(FindingVerdict::Confirmed, "Real bug");
@@ -1171,18 +1277,20 @@ mod tests {
         assert_eq!(report.overall.important_count, 1);
         assert_eq!(report.recommendations.len(), 2);
         assert_eq!(report.discarded.len(), 1);
-        assert_eq!(report.discarded[0].discard_type, FindingVerdict::FalsePositive);
+        assert_eq!(
+            report.discarded[0].discard_type,
+            FindingVerdict::FalsePositive
+        );
     }
 
     #[test]
     fn test_render_markdown() {
-        let mut session = ReviewSession::new()
-            .with_scope(ReviewScope {
-                description: "Auth feature".to_string(),
-                files: vec!["src/auth.rs".to_string(), "src/middleware.rs".to_string()],
-                commit_range: Some("abc..def".to_string()),
-                branch: Some("feat/auth".to_string()),
-            });
+        let mut session = ReviewSession::new().with_scope(ReviewScope {
+            description: "Auth feature".to_string(),
+            files: vec!["src/auth.rs".to_string(), "src/middleware.rs".to_string()],
+            commit_range: Some("abc..def".to_string()),
+            branch: Some("feat/auth".to_string()),
+        });
 
         let mut f = ReviewFinding::new(
             "SQL injection in login query",
@@ -1235,13 +1343,12 @@ mod tests {
     #[test]
     fn test_write_report_explicit_path() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut session = ReviewSession::new()
-            .with_scope(ReviewScope {
-                description: "Test".to_string(),
-                files: vec![],
-                commit_range: None,
-                branch: None,
-            });
+        let mut session = ReviewSession::new().with_scope(ReviewScope {
+            description: "Test".to_string(),
+            files: vec![],
+            commit_range: None,
+            branch: None,
+        });
 
         session.produce_report().unwrap();
         let explicit = tmp.path().join("review.md");
@@ -1258,14 +1365,16 @@ mod tests {
 
     #[test]
     fn test_session_serialization_roundtrip() {
-        let mut session = ReviewSession::new()
-            .with_scope(ReviewScope {
-                description: "Test".to_string(),
-                files: vec!["src/main.rs".to_string()],
-                commit_range: None,
-                branch: None,
-            });
-        session.add_finding(sample_finding(ReviewAxis::Correctness, FindingSeverity::Important));
+        let mut session = ReviewSession::new().with_scope(ReviewScope {
+            description: "Test".to_string(),
+            files: vec!["src/main.rs".to_string()],
+            commit_range: None,
+            branch: None,
+        });
+        session.add_finding(sample_finding(
+            ReviewAxis::Correctness,
+            FindingSeverity::Important,
+        ));
         session.set_phase(ReviewPhase::DeepReview);
 
         let json = serde_json::to_string(&session).unwrap();
@@ -1276,13 +1385,12 @@ mod tests {
 
     #[test]
     fn test_axis_summaries_populated() {
-        let mut session = ReviewSession::new()
-            .with_scope(ReviewScope {
-                description: "Test".to_string(),
-                files: vec![],
-                commit_range: None,
-                branch: None,
-            });
+        let mut session = ReviewSession::new().with_scope(ReviewScope {
+            description: "Test".to_string(),
+            files: vec![],
+            commit_range: None,
+            branch: None,
+        });
 
         let mut f = sample_finding(ReviewAxis::Security, FindingSeverity::Critical);
         f.set_verdict(FindingVerdict::Confirmed, "Real");
@@ -1290,13 +1398,17 @@ mod tests {
 
         session.produce_report().unwrap();
 
-        let security_summary = session.axis_summaries.iter()
+        let security_summary = session
+            .axis_summaries
+            .iter()
             .find(|s| s.axis == ReviewAxis::Security)
             .unwrap();
         assert_eq!(security_summary.finding_count, 1);
         assert_eq!(security_summary.impression, AxisImpression::Concerning);
 
-        let correctness_summary = session.axis_summaries.iter()
+        let correctness_summary = session
+            .axis_summaries
+            .iter()
             .find(|s| s.axis == ReviewAxis::Correctness)
             .unwrap();
         assert_eq!(correctness_summary.finding_count, 0);
@@ -1305,13 +1417,12 @@ mod tests {
 
     #[test]
     fn test_recommendations_sorted_by_severity() {
-        let mut session = ReviewSession::new()
-            .with_scope(ReviewScope {
-                description: "Test".to_string(),
-                files: vec![],
-                commit_range: None,
-                branch: None,
-            });
+        let mut session = ReviewSession::new().with_scope(ReviewScope {
+            description: "Test".to_string(),
+            files: vec![],
+            commit_range: None,
+            branch: None,
+        });
 
         // Add in reverse severity order
         let mut f1 = sample_finding(ReviewAxis::Readability, FindingSeverity::Nit);
@@ -1330,8 +1441,14 @@ mod tests {
         let report = session.report.as_ref().unwrap();
 
         // Critical should be first
-        assert_eq!(report.recommendations[0].severity, FindingSeverity::Critical);
-        assert_eq!(report.recommendations[1].severity, FindingSeverity::Important);
+        assert_eq!(
+            report.recommendations[0].severity,
+            FindingSeverity::Critical
+        );
+        assert_eq!(
+            report.recommendations[1].severity,
+            FindingSeverity::Important
+        );
         assert_eq!(report.recommendations[2].severity, FindingSeverity::Nit);
     }
 

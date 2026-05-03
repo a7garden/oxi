@@ -3,9 +3,9 @@
 //! This module provides intelligent file path completion with support
 //! for tilde expansion, relative paths, and directory traversal.
 
+use crate::autocomplete::FuzzyMatcher;
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::autocomplete::FuzzyMatcher;
 
 /// A completion suggestion with metadata.
 #[derive(Debug, Clone)]
@@ -28,7 +28,12 @@ impl Completion {
         } else {
             text.clone()
         };
-        Self { text, display, is_dir, score }
+        Self {
+            text,
+            display,
+            is_dir,
+            score,
+        }
     }
 
     /// Create a file completion.
@@ -73,10 +78,10 @@ impl FileCompleter {
 
         // Resolve the prefix to a directory and pattern
         let (dir_pattern, base_dir) = self.parse_prefix(prefix);
-        
+
         // List directory and filter by pattern
         let candidates = self.list_directory(&base_dir, &dir_pattern, self.max_results * 2);
-        
+
         // Apply fuzzy matching if pattern has multiple characters
         if dir_pattern.len() > 1 {
             let mut results: Vec<Completion> = candidates
@@ -91,7 +96,7 @@ impl FileCompleter {
                     })
                 })
                 .collect();
-            
+
             results.sort_by(|a, b| b.score.cmp(&a.score));
             results.truncate(self.max_results);
             results
@@ -99,7 +104,11 @@ impl FileCompleter {
             // Just use prefix matching for single character
             let filtered: Vec<Completion> = candidates
                 .into_iter()
-                .filter(|c| c.text.to_lowercase().starts_with(&dir_pattern.to_lowercase()))
+                .filter(|c| {
+                    c.text
+                        .to_lowercase()
+                        .starts_with(&dir_pattern.to_lowercase())
+                })
                 .take(self.max_results)
                 .collect();
             filtered
@@ -112,7 +121,7 @@ impl FileCompleter {
         if prefix.starts_with('~') {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
             let remainder = &prefix[1..];
-            
+
             if remainder.is_empty() || remainder.starts_with('/') {
                 // ~ or ~/...
                 let path = PathBuf::from(&home);
@@ -134,7 +143,10 @@ impl FileCompleter {
             }
             let pattern = parts.last().unwrap_or(&"").to_string();
             let dir = parts[..parts.len() - 1].join("/");
-            return (pattern, PathBuf::from(if dir.is_empty() { "/" } else { &dir }));
+            return (
+                pattern,
+                PathBuf::from(if dir.is_empty() { "/" } else { &dir }),
+            );
         }
 
         // Handle ./ and ../
@@ -173,7 +185,7 @@ impl FileCompleter {
     /// List directory contents matching a pattern.
     fn list_directory(&self, dir: &Path, pattern: &str, max: usize) -> Vec<Completion> {
         let mut results = Vec::new();
-        
+
         let entries = match fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => return results,
@@ -186,14 +198,14 @@ impl FileCompleter {
 
             let file_name = entry.file_name();
             let name = file_name.to_string_lossy();
-            
+
             // Filter by pattern
             if !pattern.is_empty() && !name.to_lowercase().starts_with(&pattern.to_lowercase()) {
                 continue;
             }
 
             let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-            
+
             // Skip hidden files unless pattern starts with .
             if name.starts_with('.') && !pattern.starts_with('.') {
                 continue;
@@ -204,12 +216,10 @@ impl FileCompleter {
         }
 
         // Sort: directories first, then alphabetically
-        results.sort_by(|a, b| {
-            match (a.is_dir, b.is_dir) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.text.to_lowercase().cmp(&b.text.to_lowercase()),
-            }
+        results.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.text.to_lowercase().cmp(&b.text.to_lowercase()),
         });
 
         results
@@ -231,7 +241,7 @@ impl FileCompleter {
     /// Returns the expanded path if it's a complete match.
     pub fn expand(&self, prefix: &str) -> Option<PathBuf> {
         let completions = self.completions(prefix);
-        
+
         // Find a completion that exactly matches the remaining text
         for completion in completions {
             // Reconstruct the full path
@@ -240,13 +250,13 @@ impl FileCompleter {
             } else {
                 ""
             };
-            
+
             let full = format!("{}{}", dir_pattern, completion.text);
             if full.ends_with('/') || !completion.is_dir {
                 return Some(self.base_path.join(&full));
             }
         }
-        
+
         None
     }
 }

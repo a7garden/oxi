@@ -5,28 +5,30 @@
 pub mod export;
 pub mod extensions;
 pub mod interactive;
+pub mod oauth_server;
 pub mod packages;
 pub mod print_mode;
 pub mod session;
 pub mod settings;
 pub mod skills;
 pub mod templates;
-pub mod tui_interactive;
 pub mod tui_components;
+pub mod tui_interactive;
 
 // Utility modules
-pub mod event_bus;
-pub mod model_resolver;
-pub mod cli;
-pub mod git_utils;
-pub mod keybindings;
-pub mod output_guard;
-pub mod messages;
 pub mod auth_storage;
 pub mod bash_executor;
+pub mod cli;
 pub mod diagnostics;
-pub mod resource_loader;
+pub mod event_bus;
 pub mod footer_data;
+pub mod git_utils;
+pub mod keybindings;
+pub mod messages;
+pub mod model_resolver;
+pub mod output_guard;
+pub mod resource_loader;
+pub mod tmux_detect;
 
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
@@ -146,17 +148,14 @@ impl InteractiveSession {
 }
 
 /// Build the system prompt based on thinking level and active skills
-fn build_system_prompt(
-    thinking_level: ThinkingLevel,
-    skill_contents: &[String],
-) -> String {
+fn build_system_prompt(thinking_level: ThinkingLevel, skill_contents: &[String]) -> String {
     let mut prompt = match thinking_level {
-        ThinkingLevel::None => String::from(
-            "You are a helpful AI assistant. Provide direct, concise answers.",
-        ),
-        ThinkingLevel::Minimal => String::from(
-            "You are a helpful AI assistant. Provide clear and helpful answers.",
-        ),
+        ThinkingLevel::None => {
+            String::from("You are a helpful AI assistant. Provide direct, concise answers.")
+        }
+        ThinkingLevel::Minimal => {
+            String::from("You are a helpful AI assistant. Provide clear and helpful answers.")
+        }
         ThinkingLevel::Standard => String::from(
             "You are a helpful AI coding assistant. Think through problems \
              step by step when helpful, but keep responses focused and actionable.",
@@ -338,10 +337,7 @@ impl App {
     /// Run in interactive mode, returning an event stream
     pub async fn run_interactive(&self) -> Result<InteractiveLoop<'_>> {
         let session = InteractiveSession::new();
-        Ok(InteractiveLoop {
-            app: self,
-            session,
-        })
+        Ok(InteractiveLoop { app: self, session })
     }
 
     /// Reset the conversation
@@ -404,7 +400,8 @@ impl<'a> InteractiveLoop<'a> {
                     self.session.thinking = false;
                 }
                 AgentEvent::Error { message } => {
-                    self.session.append_to_response(&format!("[Error: {}]", message));
+                    self.session
+                        .append_to_response(&format!("[Error: {}]", message));
                     self.session.finish_response();
                     self.session.thinking = false;
                 }

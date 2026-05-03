@@ -2,12 +2,12 @@
 //!
 //! Provides convenient functions for common LLM interactions.
 
-use futures::StreamExt;
-use crate::{
-    Context, Model, StreamOptions, ProviderEvent, AssistantMessage, 
-    ContentBlock, TextContent, ToolCall,
-};
 use crate::error::{Error, ProviderError};
+use crate::{
+    AssistantMessage, ContentBlock, Context, Model, ProviderEvent, StreamOptions, TextContent,
+    ToolCall,
+};
+use futures::StreamExt;
 
 /// High-level complete function that collects all streaming events
 /// and returns the final assistant message.
@@ -25,27 +25,34 @@ pub async fn complete(
     options: Option<StreamOptions>,
 ) -> std::result::Result<AssistantMessage, Error> {
     use crate::providers::stream;
-    
+
     let mut stream = stream(model, context, options).await?;
-    
+
     let mut final_message: Option<AssistantMessage> = None;
     let mut text_buffer = String::new();
     let mut current_text_index: Option<usize> = None;
     let mut tool_calls: Vec<(usize, ToolCall)> = Vec::new();
-    
+
     while let Some(event) = stream.next().await {
         match event {
             ProviderEvent::Start { partial } => {
                 final_message = Some(partial);
             }
-            ProviderEvent::TextStart { content_index, partial } => {
+            ProviderEvent::TextStart {
+                content_index,
+                partial,
+            } => {
                 if final_message.is_none() {
                     final_message = Some(partial);
                 }
                 current_text_index = Some(content_index);
                 text_buffer.clear();
             }
-            ProviderEvent::TextDelta { delta, content_index, .. } => {
+            ProviderEvent::TextDelta {
+                delta,
+                content_index,
+                ..
+            } => {
                 text_buffer.push_str(&delta);
                 if current_text_index != Some(content_index) {
                     // New text block started
@@ -60,15 +67,26 @@ pub async fn complete(
                 }
                 text_buffer.push_str(&delta);
             }
-            ProviderEvent::TextEnd { content_index, content, .. } => {
+            ProviderEvent::TextEnd {
+                content_index,
+                content,
+                ..
+            } => {
                 push_text_block(&mut final_message, content_index, &content);
             }
-            ProviderEvent::ThinkingStart { content_index: _, partial } => {
+            ProviderEvent::ThinkingStart {
+                content_index: _,
+                partial,
+            } => {
                 if final_message.is_none() {
                     final_message = Some(partial);
                 }
             }
-            ProviderEvent::ThinkingDelta { delta, content_index, .. } => {
+            ProviderEvent::ThinkingDelta {
+                delta,
+                content_index,
+                ..
+            } => {
                 // Append thinking content
                 if let Some(ref mut msg) = final_message {
                     // Find or create thinking block
@@ -83,7 +101,11 @@ pub async fn complete(
                     }
                 }
             }
-            ProviderEvent::ThinkingEnd { content_index, content, .. } => {
+            ProviderEvent::ThinkingEnd {
+                content_index,
+                content,
+                ..
+            } => {
                 if let Some(ref mut msg) = final_message {
                     let thinking = ContentBlock::Thinking(crate::ThinkingContent {
                         content_type: crate::ThinkingContentType::Thinking,
@@ -96,7 +118,10 @@ pub async fn complete(
                     }
                 }
             }
-            ProviderEvent::ToolCallStart { content_index, partial } => {
+            ProviderEvent::ToolCallStart {
+                content_index,
+                partial,
+            } => {
                 if final_message.is_none() {
                     final_message = Some(partial);
                 }
@@ -110,9 +135,14 @@ pub async fn complete(
                 };
                 tool_calls.push((content_index, tc));
             }
-            ProviderEvent::ToolCallDelta { delta, content_index, .. } => {
+            ProviderEvent::ToolCallDelta {
+                delta,
+                content_index,
+                ..
+            } => {
                 // Accumulate tool call arguments
-                if let Some((_, tc)) = tool_calls.iter_mut().find(|(idx, _)| *idx == content_index) {
+                if let Some((_, tc)) = tool_calls.iter_mut().find(|(idx, _)| *idx == content_index)
+                {
                     // Parse the accumulated args
                     let current_args = tc.arguments.to_string() + &delta;
                     if let Ok(parsed) = serde_json::from_str(&current_args) {
@@ -120,9 +150,14 @@ pub async fn complete(
                     }
                 }
             }
-            ProviderEvent::ToolCallEnd { content_index, tool_call, .. } => {
+            ProviderEvent::ToolCallEnd {
+                content_index,
+                tool_call,
+                ..
+            } => {
                 // Update or add tool call
-                if let Some((_, tc)) = tool_calls.iter_mut().find(|(idx, _)| *idx == content_index) {
+                if let Some((_, tc)) = tool_calls.iter_mut().find(|(idx, _)| *idx == content_index)
+                {
                     *tc = tool_call.clone();
                 }
                 // Add to final message content
@@ -135,22 +170,30 @@ pub async fn complete(
                         push_text_block(&mut final_message, idx, &text_buffer);
                     }
                 }
-                
+
                 // Add any pending tool calls
                 for (content_index, tc) in &tool_calls {
                     push_tool_call(&mut final_message, *content_index, tc.clone());
                 }
-                
+
                 final_message = Some(message);
                 break;
             }
             ProviderEvent::Error { error, .. } => {
-                return Err(Error::Provider(ProviderError::StreamError(error.error_message.unwrap_or_else(|| "Unknown error".to_string()))));
+                return Err(Error::Provider(ProviderError::StreamError(
+                    error
+                        .error_message
+                        .unwrap_or_else(|| "Unknown error".to_string()),
+                )));
             }
         }
     }
-    
-    final_message.ok_or_else(|| Error::Provider(ProviderError::StreamError("Stream ended without message".to_string())))
+
+    final_message.ok_or_else(|| {
+        Error::Provider(ProviderError::StreamError(
+            "Stream ended without message".to_string(),
+        ))
+    })
 }
 
 /// Push a text block to the message content
@@ -160,7 +203,7 @@ fn push_text_block(msg: &mut Option<AssistantMessage>, index: usize, text: &str)
             content_type: crate::TextContentType::Text,
             text: text.to_string(),
         });
-        
+
         // Ensure the content array is large enough
         while m.content.len() <= index {
             m.content.push(ContentBlock::Text(TextContent {
@@ -168,7 +211,7 @@ fn push_text_block(msg: &mut Option<AssistantMessage>, index: usize, text: &str)
                 text: String::new(),
             }));
         }
-        
+
         // Append text to existing block
         if let ContentBlock::Text(t) = &mut m.content[index] {
             if t.text.is_empty() {
@@ -279,10 +322,29 @@ pub mod tokens {
     /// tokenize into short, separate tokens.
     fn is_punctuation(ch: char) -> bool {
         ch.is_ascii_punctuation()
-            || matches!(ch,
-                '\u{201C}' | '\u{201D}' | '\u{2018}' | '\u{2019}' | '\u{2026}' | '\u{2013}' | '\u{2014}' | '\u{00AB}' | '\u{00BB}' |
-                '\u{00B7}' | '\u{2022}' | '\u{203B}' | '\u{2192}' | '\u{2190}' | '\u{21D2}' | '\u{2194}' |
-                '\\' | '|' | '~' | '^' | '`'
+            || matches!(
+                ch,
+                '\u{201C}'
+                    | '\u{201D}'
+                    | '\u{2018}'
+                    | '\u{2019}'
+                    | '\u{2026}'
+                    | '\u{2013}'
+                    | '\u{2014}'
+                    | '\u{00AB}'
+                    | '\u{00BB}'
+                    | '\u{00B7}'
+                    | '\u{2022}'
+                    | '\u{203B}'
+                    | '\u{2192}'
+                    | '\u{2190}'
+                    | '\u{21D2}'
+                    | '\u{2194}'
+                    | '\\'
+                    | '|'
+                    | '~'
+                    | '^'
+                    | '`'
             )
     }
 
@@ -332,16 +394,22 @@ pub mod tokens {
             // "Hello world, this is a test." ≈ 8 tokens (GPT-4 tiktoken)
             let tokens = estimate("Hello world, this is a test.");
             // Should be in a reasonable range (5–12)
-            assert!(tokens >= 4 && tokens <= 14,
-                "expected 4–14 tokens for plain English sentence, got {}", tokens);
+            assert!(
+                tokens >= 4 && tokens <= 14,
+                "expected 4–14 tokens for plain English sentence, got {}",
+                tokens
+            );
         }
 
         #[test]
         fn estimate_cjk() {
             // Each CJK char ≈ 1 token
             let tokens = estimate("\u{4F60}\u{597D}\u{4E16}\u{754C}\u{6D4B}\u{8BD5}");
-            assert!(tokens >= 4,
-                "expected >= 4 tokens for 5 CJK chars, got {}", tokens);
+            assert!(
+                tokens >= 4,
+                "expected >= 4 tokens for 5 CJK chars, got {}",
+                tokens
+            );
         }
 
         #[test]
@@ -349,8 +417,11 @@ pub mod tokens {
             let code = "fn main() { println!(\"hello\"); }";
             let tokens = estimate(code);
             // Code is punctuation-heavy; expect reasonable estimate
-            assert!(tokens >= 4 && tokens <= 20,
-                "expected 4–20 tokens for code snippet, got {}", tokens);
+            assert!(
+                tokens >= 4 && tokens <= 20,
+                "expected 4–20 tokens for code snippet, got {}",
+                tokens
+            );
         }
 
         #[test]

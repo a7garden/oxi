@@ -12,8 +12,8 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent,
-    StopReason, StreamOptions, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
+    StreamOptions, Usage,
 };
 
 use super::ProviderError;
@@ -170,8 +170,8 @@ impl Provider for CopilotProvider {
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
 
-        let stream = response.bytes_stream().flat_map(move |chunk: Result<Bytes, reqwest::Error>| {
-            match chunk {
+        let stream = response.bytes_stream().flat_map(
+            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes).to_string();
                     futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
@@ -180,8 +180,8 @@ impl Provider for CopilotProvider {
                     reason: StopReason::Error,
                     error: create_error_message(&e.to_string(), &provider_name, &model_id),
                 }]),
-            }
-        });
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -250,35 +250,36 @@ fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError
         }
     }
 
-    let items: Result<Vec<_>, _> = blocks.iter().map(|block| match block {
-        ContentBlock::Text(t) => {
-            Ok(serde_json::json!({
+    let items: Result<Vec<_>, _> = blocks
+        .iter()
+        .map(|block| match block {
+            ContentBlock::Text(t) => Ok(serde_json::json!({
                 "type": "text",
                 "text": t.text,
-            }))
-        }
-        ContentBlock::ToolCall(tc) => Ok(serde_json::json!({
-            "type": "function",
-            "id": tc.id,
-            "function": {
-                "name": tc.name,
-                "arguments": tc.arguments.to_string(),
-            },
-        })),
-        ContentBlock::Thinking(th) => Ok(serde_json::json!({
-            "type": "thinking",
-            "thinking": th.thinking,
-        })),
-        ContentBlock::Image(img) => Ok(serde_json::json!({
-            "type": "image_url",
-            "image_url": {
-                "url": format!("data:{};base64,{}", img.mime_type, img.data),
-            },
-        })),
-        ContentBlock::Unknown(_) => {
-            Err(ProviderError::InvalidResponse("Unknown content block type".into()))
-        }
-    }).collect();
+            })),
+            ContentBlock::ToolCall(tc) => Ok(serde_json::json!({
+                "type": "function",
+                "id": tc.id,
+                "function": {
+                    "name": tc.name,
+                    "arguments": tc.arguments.to_string(),
+                },
+            })),
+            ContentBlock::Thinking(th) => Ok(serde_json::json!({
+                "type": "thinking",
+                "thinking": th.thinking,
+            })),
+            ContentBlock::Image(img) => Ok(serde_json::json!({
+                "type": "image_url",
+                "image_url": {
+                    "url": format!("data:{};base64,{}", img.mime_type, img.data),
+                },
+            })),
+            ContentBlock::Unknown(_) => Err(ProviderError::InvalidResponse(
+                "Unknown content block type".into(),
+            )),
+        })
+        .collect();
 
     Ok(serde_json::json!(items?))
 }
@@ -486,7 +487,10 @@ mod tests {
 
     #[test]
     fn test_default_endpoint() {
-        assert_eq!(CopilotProvider::default_endpoint(), "https://api.githubcopilot.com/chat/completions");
+        assert_eq!(
+            CopilotProvider::default_endpoint(),
+            "https://api.githubcopilot.com/chat/completions"
+        );
     }
 
     #[test]
@@ -522,10 +526,12 @@ mod tests {
     fn test_parse_sse_basic() {
         let data = r#"data: {"id":"chatcmpl-123","model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}"#;
         let events = parse_sse_events(data, "copilot", "gpt-4");
-        
+
         assert!(!events.is_empty());
         // Should have TextDelta event
-        let has_text_delta = events.iter().any(|e| matches!(e, ProviderEvent::TextDelta { .. }));
+        let has_text_delta = events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::TextDelta { .. }));
         assert!(has_text_delta);
     }
 
@@ -533,9 +539,11 @@ mod tests {
     fn test_parse_sse_done() {
         let data = r#"data: {"id":"chatcmpl-123","model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":0}}}"#;
         let events = parse_sse_events(data, "copilot", "gpt-4");
-        
+
         // Should have both TextDelta and Done
-        let has_done = events.iter().any(|e| matches!(e, ProviderEvent::Done { .. }));
+        let has_done = events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::Done { .. }));
         assert!(has_done);
     }
 
@@ -551,8 +559,10 @@ data: {"id":"2","model":"m","choices":[{"index":0,"delta":{"content":"lo"},"fini
     fn test_parse_sse_tool_call() {
         let data = r#"data: {"id":"chatcmpl-123","model":"gpt-4","choices":[{"index":0,"delta":{"tool_calls":[{"id":"call_123","type":"function","function":{"name":"get_weather","arguments":"{\"loc"}}]},"finish_reason":"tool_calls"}]}"#;
         let events = parse_sse_events(data, "copilot", "gpt-4");
-        
-        let has_tool_delta = events.iter().any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }));
+
+        let has_tool_delta = events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }));
         assert!(has_tool_delta);
     }
 
@@ -561,7 +571,9 @@ data: {"id":"2","model":"m","choices":[{"index":0,"delta":{"content":"lo"},"fini
         let data = "data: {\"id\":\"123\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}";
         let events = parse_sse_events(data, "copilot", "gpt-4");
         // Should still have a Done event
-        let has_done = events.iter().any(|e| matches!(e, ProviderEvent::Done { .. }));
+        let has_done = events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::Done { .. }));
         assert!(has_done);
     }
 
@@ -581,9 +593,8 @@ data: {"id":"2","model":"m","choices":[{"index":0,"delta":{"content":"lo"},"fini
 
     #[test]
     fn test_build_messages_with_system() {
-        let context = Context::new()
-            .with_system_prompt("You are a helpful assistant");
-        
+        let context = Context::new().with_system_prompt("You are a helpful assistant");
+
         let messages = build_messages(&context).unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0]["role"], "system");
@@ -601,7 +612,7 @@ data: {"id":"2","model":"m","choices":[{"index":0,"delta":{"content":"lo"},"fini
     fn test_usage_accumulation() {
         let data = r#"data: {"id":"chatcmpl-123","model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":3}}}"#;
         let events = parse_sse_events(data, "copilot", "gpt-4");
-        
+
         if let Some(ProviderEvent::Done { message, .. }) = events.last() {
             assert_eq!(message.usage.input, 10);
             assert_eq!(message.usage.output, 5);

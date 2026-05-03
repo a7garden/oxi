@@ -1,6 +1,6 @@
 //! Text component - displays static or dynamic text.
 
-use crate::{Cell, Color, Component, Event, Rect, Surface, Size, Theme};
+use crate::{Cell, Color, Component, Event, Rect, Size, Surface, Theme};
 
 /// Text component configuration.
 #[derive(Debug, Clone)]

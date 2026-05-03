@@ -3,11 +3,11 @@
 //! Provides comprehensive environment variable detection for various AI providers.
 //! Follows the same patterns as pi-mono's env-api-keys.ts for consistency.
 
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
-use once_cell::sync::Lazy;
 
 /// Cache for Vertex ADC credentials check (expensive fs check)
 static VERTEX_ADC_CHECK: Lazy<bool> = Lazy::new(check_vertex_adc_credentials);
@@ -20,10 +20,12 @@ fn check_vertex_adc_credentials() -> bool {
     }
 
     // Fall back to default ADC path
-    let default_path = dirs::home_dir()
-        .map(|h| h.join(".config/gcloud/application_default_credentials.json"));
-    
-    default_path.map(|p| fs::metadata(p).is_ok()).unwrap_or(false)
+    let default_path =
+        dirs::home_dir().map(|h| h.join(".config/gcloud/application_default_credentials.json"));
+
+    default_path
+        .map(|p| fs::metadata(p).is_ok())
+        .unwrap_or(false)
 }
 
 /// Get a value from environment, supporting both std::env and /proc/self/environ fallback
@@ -36,7 +38,7 @@ fn get_env(key: &str) -> Option<String> {
 #[allow(dead_code)]
 fn get_proc_env(_key: &str) -> Option<String> {
     use std::os::unix::ffi::OsStrExt;
-    
+
     // Only try this on Linux where Bun sandbox may empty process.env
     #[cfg(target_os = "linux")]
     {
@@ -44,11 +46,11 @@ fn get_proc_env(_key: &str) -> Option<String> {
         if !env::var("PATH").is_ok() || std::env::vars().count() > 0 {
             return None;
         }
-        
+
         let Ok(contents) = fs::read_to_string("/proc/self/environ") else {
             return None;
         };
-        
+
         for segment in contents.split('\0') {
             if let Some(pos) = segment.find('=') {
                 let k = segment[..pos].as_bytes();
@@ -59,7 +61,7 @@ fn get_proc_env(_key: &str) -> Option<String> {
             }
         }
     }
-    
+
     None
 }
 
@@ -67,119 +69,75 @@ fn get_proc_env(_key: &str) -> Option<String> {
 pub fn find_env_keys(provider: &str) -> Option<Vec<&'static str>> {
     let keys = match provider {
         // GitHub Copilot: multiple possible env vars
-        "github-copilot" | "copilot" => vec![
-            "COPILOT_GITHUB_TOKEN",
-            "GH_TOKEN",
-            "GITHUB_TOKEN",
-        ],
-        
+        "github-copilot" | "copilot" => vec!["COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"],
+
         // Anthropic: OAuth token takes precedence over API key
-        "anthropic" => vec![
-            "ANTHROPIC_OAUTH_TOKEN",
-            "ANTHROPIC_API_KEY",
-        ],
-        
+        "anthropic" => vec!["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY"],
+
         // OpenAI variants
         "openai" | "openai-responses" => vec![
             "OPENAI_API_KEY",
-            "AZURE_OPENAI_API_KEY",  // Some deployments use this
+            "AZURE_OPENAI_API_KEY", // Some deployments use this
         ],
-        
+
         // Google/Gemini
-        "google" | "gemini" => vec![
-            "GEMINI_API_KEY",
-            "GOOGLE_API_KEY",
-        ],
-        
+        "google" | "gemini" => vec!["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+
         // Google Vertex AI
-        "vertex" | "google-vertex" => vec![
-            "GOOGLE_CLOUD_API_KEY",
-        ],
-        
+        "vertex" | "google-vertex" => vec!["GOOGLE_CLOUD_API_KEY"],
+
         // Azure
-        "azure" | "azure-openai" => vec![
-            "AZURE_OPENAI_API_KEY",
-        ],
-        
+        "azure" | "azure-openai" => vec!["AZURE_OPENAI_API_KEY"],
+
         // Groq
-        "groq" => vec![
-            "GROQ_API_KEY",
-        ],
-        
+        "groq" => vec!["GROQ_API_KEY"],
+
         // Cerebras
-        "cerebras" => vec![
-            "CEREBRAS_API_KEY",
-        ],
-        
+        "cerebras" => vec!["CEREBRAS_API_KEY"],
+
         // xAI / Grok
-        "xai" => vec![
-            "XAI_API_KEY",
-        ],
-        
+        "xai" => vec!["XAI_API_KEY"],
+
         // OpenRouter
-        "openrouter" => vec![
-            "OPENROUTER_API_KEY",
-        ],
-        
+        "openrouter" => vec!["OPENROUTER_API_KEY"],
+
         // Vercel AI Gateway
-        "vercel-ai-gateway" => vec![
-            "AI_GATEWAY_API_KEY",
-        ],
-        
+        "vercel-ai-gateway" => vec!["AI_GATEWAY_API_KEY"],
+
         // ZAI
-        "zai" => vec![
-            "ZAI_API_KEY",
-        ],
-        
+        "zai" => vec!["ZAI_API_KEY"],
+
         // Mistral
-        "mistral" => vec![
-            "MISTRAL_API_KEY",
-        ],
-        
+        "mistral" => vec!["MISTRAL_API_KEY"],
+
         // MiniMax (China)
-        "minimax" | "minimax-cn" => vec![
-            "MINIMAX_API_KEY",
-            "MINIMAX_CN_API_KEY",
-        ],
-        
+        "minimax" | "minimax-cn" => vec!["MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"],
+
         // Moonshot AI / Kimi (China)
-        "moonshotai" | "moonshotai-cn" | "kimi" | "kimi-coding" => vec![
-            "MOONSHOT_API_KEY",
-            "KIMI_API_KEY",
-        ],
-        
+        "moonshotai" | "moonshotai-cn" | "kimi" | "kimi-coding" => {
+            vec!["MOONSHOT_API_KEY", "KIMI_API_KEY"]
+        }
+
         // Hugging Face
-        "huggingface" | "hf" => vec![
-            "HF_TOKEN",
-            "HUGGINGFACE_TOKEN",
-        ],
-        
+        "huggingface" | "hf" => vec!["HF_TOKEN", "HUGGINGFACE_TOKEN"],
+
         // Fireworks AI
-        "fireworks" => vec![
-            "FIREWORKS_API_KEY",
-        ],
-        
+        "fireworks" => vec!["FIREWORKS_API_KEY"],
+
         // DeepSeek
-        "deepseek" => vec![
-            "DEEPSEEK_API_KEY",
-        ],
-        
+        "deepseek" => vec!["DEEPSEEK_API_KEY"],
+
         // OpenCode
-        "opencode" => vec![
-            "OPENCODE_API_KEY",
-        ],
-        
+        "opencode" => vec!["OPENCODE_API_KEY"],
+
         // Xiaomi
-        "xiaomi" => vec![
-            "XIAOMI_API_KEY",
-        ],
-        
+        "xiaomi" => vec!["XIAOMI_API_KEY"],
+
         // Cloudflare Workers AI
-        "cloudflare" | "cloudflare-workers-ai" | "cloudflare-ai-gateway" => vec![
-            "CLOUDFLARE_API_KEY",
-            "CLOUDFLARE_AI_GATEWAY_API_KEY",
-        ],
-        
+        "cloudflare" | "cloudflare-workers-ai" | "cloudflare-ai-gateway" => {
+            vec!["CLOUDFLARE_API_KEY", "CLOUDFLARE_AI_GATEWAY_API_KEY"]
+        }
+
         _ => return None,
     };
 
@@ -206,27 +164,27 @@ fn first_of(keys: &[&str]) -> Option<String> {
 }
 
 /// Get API key from environment variables for a provider
-/// 
+///
 /// Returns `Some("<authenticated>")` for providers that support ambient credentials
 /// (e.g., AWS IAM roles, Google ADC) rather than explicit API keys.
 pub fn get_env_api_key(provider: &str) -> Option<String> {
     let keys = find_env_keys(provider)?;
     let key = first_of(&keys)?;
-    
+
     // Filter out placeholder values
     if key == "<authenticated>" || key.starts_with("sk-") && key.len() < 10 {
         return None;
     }
-    
+
     Some(key)
 }
 
 /// Check Vertex AI-specific ambient credentials
-/// 
+///
 /// Vertex AI supports Application Default Credentials (ADC) configured via:
 /// - `gcloud auth application-default login`
 /// - `GOOGLE_APPLICATION_CREDENTIALS` pointing to service account JSON
-/// 
+///
 /// Returns true if all required ADC components are present.
 pub fn has_vertex_adc() -> bool {
     *VERTEX_ADC_CHECK
@@ -236,20 +194,20 @@ pub fn has_vertex_adc() -> bool {
 pub fn has_vertex_adc_full() -> bool {
     // Check credentials file exists
     let has_creds = has_vertex_adc();
-    
+
     // Check project ID
     let has_project = get_env("GOOGLE_CLOUD_PROJECT")
         .or_else(|| get_env("GCLOUD_PROJECT"))
         .is_some();
-    
+
     // Check location
     let has_location = get_env("GOOGLE_CLOUD_LOCATION").is_some();
-    
+
     has_creds && has_project && has_location
 }
 
 /// Check Amazon Bedrock ambient credentials
-/// 
+///
 /// Bedrock supports multiple credential sources:
 /// 1. AWS_PROFILE - named profile from ~/.aws/credentials
 /// 2. AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY - standard IAM keys
@@ -262,29 +220,29 @@ pub fn has_bedrock_creds() -> bool {
     if get_env("AWS_ACCESS_KEY_ID").is_some() && get_env("AWS_SECRET_ACCESS_KEY").is_some() {
         return true;
     }
-    
+
     // Named profile
     if get_env("AWS_PROFILE").is_some() {
         return true;
     }
-    
+
     // Bedrock bearer token
     if get_env("AWS_BEARER_TOKEN_BEDROCK").is_some() {
         return true;
     }
-    
+
     // ECS container credentials (IRSA)
     if get_env("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI").is_some()
         || get_env("AWS_CONTAINER_CREDENTIALS_FULL_URI").is_some()
     {
         return true;
     }
-    
+
     // Web identity token (IRSA)
     if get_env("AWS_WEB_IDENTITY_TOKEN_FILE").is_some() {
         return true;
     }
-    
+
     false
 }
 
@@ -294,12 +252,12 @@ pub fn has_bedrock_creds_full() -> bool {
     if get_env("AWS_ACCESS_KEY_ID").is_some() && get_env("AWS_SECRET_ACCESS_KEY").is_some() {
         return true;
     }
-    
+
     // For profile-based auth, just need the profile
     if get_env("AWS_PROFILE").is_some() {
         return true;
     }
-    
+
     // For ECS/IRSA, we need the credential endpoint/file
     if get_env("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI").is_some()
         || get_env("AWS_CONTAINER_CREDENTIALS_FULL_URI").is_some()
@@ -307,24 +265,28 @@ pub fn has_bedrock_creds_full() -> bool {
     {
         return true;
     }
-    
+
     // Bearer token
     if get_env("AWS_BEARER_TOKEN_BEDROCK").is_some() {
         return true;
     }
-    
+
     false
 }
 
 /// Get all providers with environment variable credentials
 pub fn get_all_env_keys() -> HashMap<String, String> {
     let mut result = HashMap::new();
-    
+
     // Map provider names to their possible env vars
     let mappings: [(&str, fn() -> Option<String>); 17] = [
-        ("anthropic", || first_of(&["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"])),
+        ("anthropic", || {
+            first_of(&["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"])
+        }),
         ("openai", || first_of(&["OPENAI_API_KEY"])),
-        ("github-copilot", || first_of(&["GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN"])),
+        ("github-copilot", || {
+            first_of(&["GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN"])
+        }),
         ("google", || first_of(&["GEMINI_API_KEY"])),
         ("vertex", || first_of(&["GOOGLE_CLOUD_API_KEY"])),
         ("groq", || first_of(&["GROQ_API_KEY"])),
@@ -338,15 +300,17 @@ pub fn get_all_env_keys() -> HashMap<String, String> {
         ("huggingface", || first_of(&["HF_TOKEN"])),
         ("fireworks", || first_of(&["FIREWORKS_API_KEY"])),
         ("moonshotai", || first_of(&["MOONSHOT_API_KEY"])),
-        ("bedrock", || first_of(&["AWS_ACCESS_KEY_ID", "AWS_PROFILE"])),
+        ("bedrock", || {
+            first_of(&["AWS_ACCESS_KEY_ID", "AWS_PROFILE"])
+        }),
     ];
-    
+
     for (provider, get_key) in mappings.iter() {
         if let Some(value) = get_key() {
             result.insert(provider.to_string(), value);
         }
     }
-    
+
     result
 }
 
@@ -392,10 +356,10 @@ mod tests {
     fn test_first_of_returns_first() {
         env::set_var("TEST_FIRST_OF_1", "value1");
         env::set_var("TEST_FIRST_OF_2", "value2");
-        
+
         let result = first_of(&["TEST_FIRST_OF_1", "TEST_FIRST_OF_2"]);
         assert_eq!(result, Some("value1".to_string()));
-        
+
         env::remove_var("TEST_FIRST_OF_1");
         env::remove_var("TEST_FIRST_OF_2");
     }
@@ -404,10 +368,10 @@ mod tests {
     fn test_first_of_skips_empty() {
         env::set_var("TEST_FIRST_OF_SKIP", "");
         env::set_var("TEST_FIRST_OF_SECOND", "second");
-        
+
         let result = first_of(&["TEST_FIRST_OF_SKIP", "TEST_FIRST_OF_SECOND"]);
         assert_eq!(result, Some("second".to_string()));
-        
+
         env::remove_var("TEST_FIRST_OF_SKIP");
         env::remove_var("TEST_FIRST_OF_SECOND");
     }
@@ -415,22 +379,22 @@ mod tests {
     #[test]
     fn test_get_env_api_key() {
         env::set_var("ANTHROPIC_API_KEY", "sk-test-key-123");
-        
+
         // Provider with known keys
         let result = get_env_api_key("anthropic");
         assert_eq!(result, Some("sk-test-key-123".to_string()));
-        
+
         env::remove_var("ANTHROPIC_API_KEY");
     }
 
     #[test]
     fn test_has_env_key() {
         env::set_var("DEEPSEEK_API_KEY", "test-value");
-        
+
         // Check that deepseek has an env key
-        let result = has_env_key("deepseek");  // DEEPSEEK_API_KEY
+        let result = has_env_key("deepseek"); // DEEPSEEK_API_KEY
         assert!(result);
-        
+
         env::remove_var("DEEPSEEK_API_KEY");
     }
 
@@ -445,24 +409,24 @@ mod tests {
     #[test]
     fn test_get_all_env_keys() {
         env::set_var("DEEPSEEK_API_KEY", "test-deepseek-key");
-        
+
         let all = get_all_env_keys();
         // Should contain at least deepseek
         assert!(all.contains_key("deepseek") || !all.is_empty());
-        
+
         env::remove_var("DEEPSEEK_API_KEY");
     }
 
     #[test]
     fn test_oauth_env_token() {
         env::set_var("ANTHROPIC_OAUTH_TOKEN", "oauth-token-123");
-        
+
         let result = get_oauth_env_token("anthropic");
         assert_eq!(result, Some("oauth-token-123".to_string()));
-        
+
         let not_oauth = get_oauth_env_token("openai");
         assert!(not_oauth.is_none());
-        
+
         env::remove_var("ANTHROPIC_OAUTH_TOKEN");
     }
 
@@ -494,7 +458,7 @@ mod tests {
         let keys = find_env_keys("moonshotai");
         assert!(keys.is_some());
         assert!(keys.unwrap().contains(&"MOONSHOT_API_KEY"));
-        
+
         let kimi = find_env_keys("kimi");
         assert!(kimi.is_some());
         assert!(kimi.unwrap().contains(&"KIMI_API_KEY"));

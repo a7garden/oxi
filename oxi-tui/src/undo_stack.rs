@@ -228,7 +228,7 @@ mod tests {
         assert_eq!(stack.undo(), Some(&2)); // popped 3
         assert_eq!(stack.undo(), Some(&1)); // popped 2
         assert_eq!(stack.undo(), Some(&0)); // popped 1
-        assert_eq!(stack.undo(), None);     // popped 0, undo stack empty
+        assert_eq!(stack.undo(), None); // popped 0, undo stack empty
 
         // Redo forward: each redo restores from redo stack
         assert_eq!(stack.redo(), Some(&0));

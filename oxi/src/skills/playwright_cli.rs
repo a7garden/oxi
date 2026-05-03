@@ -139,15 +139,10 @@ pub enum BrowserAction {
     },
 
     /// Type text into an element.
-    Fill {
-        selector: String,
-        value: String,
-    },
+    Fill { selector: String, value: String },
 
     /// Press a keyboard key combination.
-    Press {
-        key: String,
-    },
+    Press { key: String },
 
     /// Select an option in a `<select>` element.
     Select {
@@ -156,19 +151,13 @@ pub enum BrowserAction {
     },
 
     /// Check a checkbox or radio button.
-    Check {
-        selector: String,
-    },
+    Check { selector: String },
 
     /// Uncheck a checkbox.
-    Uncheck {
-        selector: String,
-    },
+    Uncheck { selector: String },
 
     /// Hover over an element.
-    Hover {
-        selector: String,
-    },
+    Hover { selector: String },
 
     /// Wait for an element to appear.
     WaitForSelector {
@@ -193,14 +182,10 @@ pub enum BrowserAction {
     },
 
     /// Get the text content of an element.
-    GetText {
-        selector: String,
-    },
+    GetText { selector: String },
 
     /// Evaluate JavaScript in the page context.
-    Evaluate {
-        expression: String,
-    },
+    Evaluate { expression: String },
 
     /// Upload files to a file input.
     Upload {
@@ -629,8 +614,7 @@ impl PlaywrightCli {
         // Write script to a temp file
         let tmp_dir = tempfile::tempdir().context("Failed to create temp dir")?;
         let script_path = tmp_dir.path().join("playwright-script.js");
-        std::fs::write(&script_path, script)
-            .context("Failed to write temp script")?;
+        std::fs::write(&script_path, script).context("Failed to write temp script")?;
 
         let node_output = Command::new("node")
             .arg(&script_path)
@@ -776,10 +760,7 @@ const {{ chromium }} = require('playwright');
         let result: serde_json::Value = serde_json::from_str(output.stdout.trim())
             .context("Failed to parse get_text output")?;
 
-        Ok(result["text"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string())
+        Ok(result["text"].as_str().unwrap_or_default().to_string())
     }
 
     // ── Test runner ──────────────────────────────────────────────────
@@ -893,19 +874,12 @@ const {{ chromium }} = require('playwright');
     ///
     /// Produces a complete TypeScript test file that can be run with
     /// `npx playwright test`.
-    pub fn generate_test_file(
-        test_name: &str,
-        url: &str,
-        actions: &[BrowserAction],
-    ) -> String {
+    pub fn generate_test_file(test_name: &str, url: &str, actions: &[BrowserAction]) -> String {
         let mut code = String::with_capacity(2048);
 
         code.push_str("import { test, expect } from '@playwright/test';\n\n");
 
-        code.push_str(&format!(
-            "test('{}', async ({{ page }}) => {{\n",
-            test_name
-        ));
+        code.push_str(&format!("test('{}', async ({{ page }}) => {{\n", test_name));
 
         code.push_str(&format!("  await page.goto('{}');\n", url));
 
@@ -950,7 +924,9 @@ const {{ chromium }} = require('playwright');
         script.push_str(&actions.len().to_string());
         script.push_str(", results }));\n");
         script.push_str("  } catch (error) {\n");
-        script.push_str("    console.error(JSON.stringify({ success: false, error: error.message }));\n");
+        script.push_str(
+            "    console.error(JSON.stringify({ success: false, error: error.message }));\n",
+        );
         script.push_str("  } finally {\n");
         script.push_str("    await browser.close();\n");
         script.push_str("  }\n");
@@ -982,7 +958,11 @@ const {{ chromium }} = require('playwright');
             }
             BrowserAction::Select { selector, values } => {
                 let vals: Vec<String> = values.iter().map(|v| format!("'{}'", v)).collect();
-                format!("  await page.selectOption('{}', [{}]);\n", selector, vals.join(", "))
+                format!(
+                    "  await page.selectOption('{}', [{}]);\n",
+                    selector,
+                    vals.join(", ")
+                )
             }
             BrowserAction::Check { selector } => {
                 format!("  await page.check('{}');\n", selector)
@@ -1023,7 +1003,10 @@ const {{ chromium }} = require('playwright');
             }
             BrowserAction::Upload { selector, files } => {
                 let files_json = serde_json::to_string(files).unwrap_or_default();
-                format!("  await page.setInputFiles('{}', {});\n", selector, files_json)
+                format!(
+                    "  await page.setInputFiles('{}', {});\n",
+                    selector, files_json
+                )
             }
         }
     }
@@ -1260,7 +1243,10 @@ const {{ chromium }} = require('playwright');
         cmd.args(args);
         cmd.current_dir(self.working_dir());
 
-        let output = cmd.output().await.context("Failed to execute npx playwright")?;
+        let output = cmd
+            .output()
+            .await
+            .context("Failed to execute npx playwright")?;
         Ok(output)
     }
 }
@@ -1466,7 +1452,10 @@ mod tests {
     #[test]
     fn test_wait_until_display() {
         assert_eq!(format!("{}", WaitUntil::Load), "load");
-        assert_eq!(format!("{}", WaitUntil::DomContentLoaded), "domcontentloaded");
+        assert_eq!(
+            format!("{}", WaitUntil::DomContentLoaded),
+            "domcontentloaded"
+        );
         assert_eq!(format!("{}", WaitUntil::NetworkIdle), "networkidle");
         assert_eq!(format!("{}", WaitUntil::Commit), "commit");
     }
@@ -1759,11 +1748,8 @@ mod tests {
             },
         ];
 
-        let code = PlaywrightCli::generate_test_file(
-            "search works",
-            "https://example.com",
-            &actions,
-        );
+        let code =
+            PlaywrightCli::generate_test_file("search works", "https://example.com", &actions);
 
         assert!(code.contains("import { test, expect }"));
         assert!(code.contains("test('search works'"));
@@ -1788,12 +1774,8 @@ mod tests {
             },
         ];
 
-        let script = PlaywrightCli::generate_action_script(
-            "https://example.com",
-            &actions,
-            true,
-            30_000,
-        );
+        let script =
+            PlaywrightCli::generate_action_script("https://example.com", &actions, true, 30_000);
 
         assert!(script.contains("require('playwright')"));
         assert!(script.contains("chromium.launch"));
@@ -1857,8 +1839,14 @@ mod tests {
     fn test_extract_count_pattern() {
         assert_eq!(PlaywrightCli::extract_count("5 passed", "passed"), Some(5));
         assert_eq!(PlaywrightCli::extract_count("2 failed", "failed"), Some(2));
-        assert_eq!(PlaywrightCli::extract_count("10 skipped", "skipped"), Some(10));
-        assert_eq!(PlaywrightCli::extract_count("1 timed out", "timed out"), Some(1));
+        assert_eq!(
+            PlaywrightCli::extract_count("10 skipped", "skipped"),
+            Some(10)
+        );
+        assert_eq!(
+            PlaywrightCli::extract_count("1 timed out", "timed out"),
+            Some(1)
+        );
     }
 
     #[test]
@@ -1870,14 +1858,23 @@ mod tests {
 
     #[test]
     fn test_extract_duration_ms_pattern() {
-        assert_eq!(PlaywrightCli::extract_duration_ms("ran in 2500ms"), Some(2500));
-        assert_eq!(PlaywrightCli::extract_duration_ms("finished in 100ms"), Some(100));
+        assert_eq!(
+            PlaywrightCli::extract_duration_ms("ran in 2500ms"),
+            Some(2500)
+        );
+        assert_eq!(
+            PlaywrightCli::extract_duration_ms("finished in 100ms"),
+            Some(100)
+        );
     }
 
     #[test]
     fn test_extract_duration_seconds_pattern() {
         assert_eq!(PlaywrightCli::extract_duration_ms("ran in 5s"), Some(5000));
-        assert_eq!(PlaywrightCli::extract_duration_ms("finished in 1.5s"), Some(1500));
+        assert_eq!(
+            PlaywrightCli::extract_duration_ms("finished in 1.5s"),
+            Some(1500)
+        );
     }
 
     #[test]

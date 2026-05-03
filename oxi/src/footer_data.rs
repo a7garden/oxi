@@ -159,7 +159,8 @@ impl FooterData {
     /// Add an extension status message
     pub fn set_extension_status(&mut self, key: &str, value: Option<&str>) {
         if let Some(v) = value {
-            self.extension_statuses.insert(key.to_string(), v.to_string());
+            self.extension_statuses
+                .insert(key.to_string(), v.to_string());
         } else {
             self.extension_statuses.remove(key);
         }
@@ -303,6 +304,172 @@ impl FooterData {
         }
 
         lines
+    }
+}
+
+/// Update footer data from agent events
+impl FooterData {
+    /// Update footer data based on an agent event.
+    ///
+    /// This method handles common agent events and updates the
+    /// corresponding footer data fields accordingly.
+    pub fn update_from_event(&mut self, event: &crate::AgentEvent) {
+        use crate::AgentEvent;
+
+        match event {
+            AgentEvent::Start { .. } => {
+                // New interaction started
+            }
+            AgentEvent::Thinking => {
+                // Agent is thinking
+            }
+            AgentEvent::TextChunk { .. } => {
+                // Text being streamed
+            }
+            AgentEvent::ThinkingEnd => {
+                // Thinking finished
+            }
+            AgentEvent::MessageEnd => {
+                // Message complete - tokens already updated via streaming
+            }
+            AgentEvent::TokensUpdate {
+                input,
+                output,
+                cache_read,
+                cache_write,
+            } => {
+                self.update_all_tokens(*input, *output, *cache_read, *cache_write);
+            }
+            AgentEvent::CostUpdate { cost } => {
+                self.total_cost = *cost;
+            }
+            AgentEvent::ContextUpdate { percent } => {
+                self.context_window_pct = *percent;
+            }
+            AgentEvent::ModelChange { model, provider } => {
+                self.model_name = model.clone();
+                if let Some(p) = provider {
+                    self.provider_name = p.clone();
+                }
+            }
+            AgentEvent::ThinkingLevelChange { level } => {
+                self.thinking_level = level.clone();
+            }
+            AgentEvent::SessionInfoChange { name, .. } => {
+                self.session_name = name.clone();
+            }
+            AgentEvent::GitBranchChange { branch } => {
+                self.git_branch = branch.clone();
+            }
+            _ => {
+                // Other events not handled by footer
+            }
+        }
+    }
+
+    /// Render a single footer line combining all status information.
+    ///
+    /// Unlike `render_lines` which returns multiple lines for different info,
+    /// this method combines everything into a single compact status line.
+    pub fn render_footer_line(&self, width: usize) -> String {
+        let mut parts = Vec::new();
+
+        // Left section: model/provider
+        if !self.model_name.is_empty() {
+            if !self.provider_name.is_empty() {
+                parts.push(format!("({}) {}", self.provider_name, self.model_name));
+            } else {
+                parts.push(self.model_name.clone());
+            }
+        }
+
+        // Token counts
+        let tokens = self.format_tokens();
+        if !tokens.is_empty() {
+            parts.push(tokens);
+        }
+
+        // Cost
+        if self.total_cost > 0.0 {
+            parts.push(format!("${:.3}", self.total_cost));
+        }
+
+        // Git branch
+        if let Some(ref branch) = self.git_branch {
+            if !branch.is_empty() {
+                parts.push(format!("@{}", branch));
+            }
+        }
+
+        // Context window (color indicator in output)
+        if self.context_window_pct > 0.0 {
+            parts.push(format!("{:.1}%ctx", self.context_window_pct));
+        }
+
+        // Thinking level
+        if !self.thinking_level.is_empty() && self.thinking_level != "off" {
+            parts.push(format!("thinking:{}", self.thinking_level));
+        }
+
+        // Session name and duration
+        if let Some(ref session) = self.session_name {
+            if !session.is_empty() {
+                parts.push(session.clone());
+            }
+        }
+        if self.session_duration_secs > 0 {
+            parts.push(Self::format_duration_short(self.session_duration_secs));
+        }
+
+        let combined = parts.join(" | ");
+
+        // Truncate if needed
+        let visible = Self::visible_width(&combined);
+        if visible <= width {
+            combined
+        } else {
+            Self::truncate_to_width(&combined, width)
+        }
+    }
+
+    /// Calculate visible width of a string (accounts for fullwidth chars).
+    fn visible_width(s: &str) -> usize {
+        s.chars()
+            .map(|c| if c.is_fullwidth() { 2 } else { 1 })
+            .sum()
+    }
+
+    /// Truncate string to visible width.
+    fn truncate_to_width(s: &str, max_width: usize) -> String {
+        let mut result = String::new();
+        let mut width = 0;
+
+        for c in s.chars() {
+            let char_width = if c.is_fullwidth() { 2 } else { 1 };
+            if width + char_width > max_width {
+                // Add ellipsis if we have room
+                if width >= 3 {
+                    result.truncate(result.len() - 3);
+                    result.push_str("...");
+                }
+                break;
+            }
+            result.push(c);
+            width += char_width;
+        }
+
+        result
+    }
+
+    /// Format duration in short form.
+    fn format_duration_short(secs: u64) -> String {
+        if secs < 60 {
+            format!("{}s", secs)
+        } else if secs < 3600 {
+            format!("{}m", secs / 60)
+        } else {
+            format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+        }
     }
 }
 
@@ -536,7 +703,8 @@ impl SimpleFooterDataProvider {
 
     /// Add a keybinding hint
     pub fn add_hint(mut self, keys: &str, description: &str) -> Self {
-        self.keybinding_hints.push(KeybindingHint::new(keys, description));
+        self.keybinding_hints
+            .push(KeybindingHint::new(keys, description));
         self
     }
 
@@ -561,7 +729,8 @@ impl SimpleFooterDataProvider {
     /// Add an extension status
     pub fn set_extension_status(&mut self, key: &str, status: Option<&str>) {
         if let Some(s) = status {
-            self.extension_statuses.insert(key.to_string(), s.to_string());
+            self.extension_statuses
+                .insert(key.to_string(), s.to_string());
         } else {
             self.extension_statuses.remove(key);
         }
@@ -632,7 +801,10 @@ impl FooterDataProvider for SimpleFooterDataProvider {
     }
 
     fn get_token_counts(&self) -> (u32, u32) {
-        (self.input_tokens.load(Ordering::Relaxed), self.output_tokens)
+        (
+            self.input_tokens.load(Ordering::Relaxed),
+            self.output_tokens,
+        )
     }
 
     fn get_session_duration(&self) -> Duration {
@@ -657,7 +829,8 @@ impl ExtensionStatusTracker {
     }
 
     pub fn set(&mut self, extension: &str, status: &str) {
-        self.statuses.insert(extension.to_string(), status.to_string());
+        self.statuses
+            .insert(extension.to_string(), status.to_string());
     }
 
     pub fn clear(&mut self, extension: &str) {
@@ -789,7 +962,10 @@ mod tests {
     fn test_footer_data_extension_status() {
         let mut data = FooterData::new();
         data.set_extension_status("ext1", Some("working"));
-        assert_eq!(data.extension_statuses.get("ext1"), Some(&"working".to_string()));
+        assert_eq!(
+            data.extension_statuses.get("ext1"),
+            Some(&"working".to_string())
+        );
         data.set_extension_status("ext1", None);
         assert!(data.extension_statuses.get("ext1").is_none());
     }
@@ -908,7 +1084,10 @@ mod tests {
         let mut tracker = ExtensionStatusTracker::new();
 
         tracker.set("my-extension", "Working...");
-        assert_eq!(tracker.get_all().get("my-extension"), Some(&"Working...".to_string()));
+        assert_eq!(
+            tracker.get_all().get("my-extension"),
+            Some(&"Working...".to_string())
+        );
 
         tracker.clear("my-extension");
         assert!(tracker.get_all().get("my-extension").is_none());

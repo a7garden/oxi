@@ -189,7 +189,11 @@ pub struct ExtensionErrorRecord {
 
 impl ExtensionErrorRecord {
     /// Create a new error record with the current timestamp.
-    pub fn new(extension_name: impl Into<String>, event: impl Into<String>, error: impl Into<String>) -> Self {
+    pub fn new(
+        extension_name: impl Into<String>,
+        event: impl Into<String>,
+        error: impl Into<String>,
+    ) -> Self {
         Self {
             extension_name: extension_name.into(),
             event: event.into(),
@@ -379,7 +383,10 @@ impl ExtensionContextBuilder {
     }
 
     /// Set the tool registrar callback.
-    pub fn tool_registrar(mut self, registrar: Arc<dyn Fn(Arc<dyn AgentTool>) + Send + Sync>) -> Self {
+    pub fn tool_registrar(
+        mut self,
+        registrar: Arc<dyn Fn(Arc<dyn AgentTool>) + Send + Sync>,
+    ) -> Self {
         self.tool_registrar = Some(registrar);
         self
     }
@@ -400,9 +407,9 @@ impl ExtensionContextBuilder {
     pub fn build(self) -> ExtensionContext {
         ExtensionContext {
             cwd: self.cwd,
-            settings: self.settings.unwrap_or_else(|| {
-                Arc::new(RwLock::new(crate::settings::Settings::default()))
-            }),
+            settings: self
+                .settings
+                .unwrap_or_else(|| Arc::new(RwLock::new(crate::settings::Settings::default()))),
             config: self.config,
             session_id: self.session_id,
             idle: self.idle,
@@ -475,8 +482,7 @@ pub trait Extension: Send + Sync {
     /// The default implementation builds a minimal manifest from
     /// [`name`](Extension::name) and [`description`](Extension::description).
     fn manifest(&self) -> ExtensionManifest {
-        ExtensionManifest::new(self.name(), "0.0.0")
-            .with_description(self.description())
+        ExtensionManifest::new(self.name(), "0.0.0").with_description(self.description())
     }
 
     // ── Registration ─────────────────────────────────────────────────
@@ -701,10 +707,7 @@ impl ExtensionRegistry {
 
     /// Check whether an extension is currently enabled.
     pub fn is_enabled(&self, name: &str) -> bool {
-        self.entries
-            .get(name)
-            .map(|e| e.enabled)
-            .unwrap_or(false)
+        self.entries.get(name).map(|e| e.enabled).unwrap_or(false)
     }
 
     // ── Hot Reload ───────────────────────────────────────────────────
@@ -734,17 +737,17 @@ impl ExtensionRegistry {
         self.unregister(name);
 
         // Load new
-        let new_ext = load_extension(&source_path).map_err(|e| ExtensionError::HotReloadFailed {
-            name: name.to_string(),
-            reason: e.to_string(),
-        })?;
+        let new_ext =
+            load_extension(&source_path).map_err(|e| ExtensionError::HotReloadFailed {
+                name: name.to_string(),
+                reason: e.to_string(),
+            })?;
 
         let library = unsafe {
-            Library::new(&source_path)
-                .map_err(|e| ExtensionError::HotReloadFailed {
-                    name: name.to_string(),
-                    reason: format!("Failed to re-open library: {}", e),
-                })?
+            Library::new(&source_path).map_err(|e| ExtensionError::HotReloadFailed {
+                name: name.to_string(),
+                reason: format!("Failed to re-open library: {}", e),
+            })?
         };
 
         // Call on_load on the new extension
@@ -883,9 +886,7 @@ impl ExtensionRegistry {
 
     /// Get a reference to an extension by name.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Extension>> {
-        self.entries
-            .get(name)
-            .map(|e| Arc::clone(&e.extension))
+        self.entries.get(name).map(|e| Arc::clone(&e.extension))
     }
 
     /// Iterate over registered extension names.
@@ -960,10 +961,7 @@ impl fmt::Debug for ExtensionRegistry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ExtensionRegistry")
             .field("count", &self.entries.len())
-            .field(
-                "names",
-                &self.entries.keys().cloned().collect::<Vec<_>>(),
-            )
+            .field("names", &self.entries.keys().cloned().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -1185,8 +1183,8 @@ mod tests {
 
     #[test]
     fn test_manifest_serialization() {
-        let manifest = ExtensionManifest::new("test", "0.1.0")
-            .with_permission(ExtensionPermission::Network);
+        let manifest =
+            ExtensionManifest::new("test", "0.1.0").with_permission(ExtensionPermission::Network);
 
         let json = serde_json::to_string(&manifest).unwrap();
         let parsed: ExtensionManifest = serde_json::from_str(&json).unwrap();
@@ -1267,8 +1265,7 @@ mod tests {
 
     #[test]
     fn test_context_builder_minimal() {
-        let ctx = ExtensionContextBuilder::new(PathBuf::from("/tmp"))
-            .build();
+        let ctx = ExtensionContextBuilder::new(PathBuf::from("/tmp")).build();
         assert_eq!(ctx.cwd, PathBuf::from("/tmp"));
         assert!(ctx.session_id.is_none());
         assert!(ctx.is_idle());
@@ -1301,10 +1298,7 @@ mod tests {
         assert!(ctx.is_idle());
 
         // Config access
-        assert_eq!(
-            ctx.config_get("key"),
-            Some(serde_json::json!("value"))
-        );
+        assert_eq!(ctx.config_get("key"), Some(serde_json::json!("value")));
         assert_eq!(ctx.config_get("missing"), None);
     }
 
@@ -1647,8 +1641,12 @@ mod tests {
     fn test_graceful_degradation_on_panic() {
         struct PanickingExtension;
         impl Extension for PanickingExtension {
-            fn name(&self) -> &str { "panicker" }
-            fn description(&self) -> &str { "Panics" }
+            fn name(&self) -> &str {
+                "panicker"
+            }
+            fn description(&self) -> &str {
+                "Panics"
+            }
             fn on_load(&self, _ctx: &ExtensionContext) {
                 panic!("intentional panic in on_load");
             }

@@ -89,13 +89,13 @@ pub enum InputModality {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Cost {
     #[serde(default)]
-    pub input: f64,        // $/million tokens
+    pub input: f64, // $/million tokens
     #[serde(default)]
-    pub output: f64,       // $/million tokens
+    pub output: f64, // $/million tokens
     #[serde(default)]
-    pub cache_read: f64,   // $/million tokens
+    pub cache_read: f64, // $/million tokens
     #[serde(default)]
-    pub cache_write: f64,  // $/million tokens
+    pub cache_write: f64, // $/million tokens
 }
 
 impl Cost {
@@ -166,8 +166,12 @@ pub struct CompatSettings {
     pub thinking_format: Option<ThinkingFormat>,
 }
 
-fn default_true() -> bool { true }
-fn default_false() -> bool { false }
+fn default_true() -> bool {
+    true
+}
+fn default_false() -> bool {
+    false
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -240,7 +244,13 @@ pub struct Model {
 }
 
 impl Model {
-    pub fn new(id: impl Into<String>, name: impl Into<String>, api: Api, provider: impl Into<String>, base_url: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        api: Api,
+        provider: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             name: name.into(),

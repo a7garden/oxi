@@ -70,8 +70,18 @@ impl WasmFunction {
     }
 
     pub fn signature(&self) -> String {
-        let params = self.params.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ");
-        let results = self.results.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(", ");
+        let params = self
+            .params
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let results = self
+            .results
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         if results.is_empty() {
             format!("{}({}) -> void", self.name, params)
         } else {
@@ -129,19 +139,28 @@ impl WasmModule {
         if !path.exists() {
             bail!("WASM file not found: {}", path.display());
         }
-        let metadata = fs::metadata(path).with_context(|| format!("Failed to stat {}", path.display()))?;
+        let metadata =
+            fs::metadata(path).with_context(|| format!("Failed to stat {}", path.display()))?;
         if metadata.len() == 0 {
             bail!("WASM file is empty: {}", path.display());
         }
         let bytes = fs::read(path).with_context(|| format!("Failed to read {}", path.display()))?;
         if bytes.len() < 8 {
-            bail!("WASM file too small ({} bytes): {}", bytes.len(), path.display());
+            bail!(
+                "WASM file too small ({} bytes): {}",
+                bytes.len(),
+                path.display()
+            );
         }
         if &bytes[0..4] != b"\0asm" {
             bail!("Invalid WASM file (bad magic bytes): {}", path.display());
         }
         let _version = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-        let name = path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+        let name = path
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         let hash = sha256_hex(&bytes);
         let exports = parse_wasm_exports(&bytes);
 
@@ -177,12 +196,20 @@ impl WasmModule {
     }
 
     pub fn validate_exports(&self, required: &[&str]) -> Vec<String> {
-        required.iter().filter(|name| !self.has_export(name)).map(|name| (*name).to_string()).collect()
+        required
+            .iter()
+            .filter(|name| !self.has_export(name))
+            .map(|name| (*name).to_string())
+            .collect()
     }
 
     pub fn render_summary(&self) -> String {
         let mut out = String::with_capacity(512);
-        out.push_str(&format!("Module: {} ({})\n", self.name, self.path.display()));
+        out.push_str(&format!(
+            "Module: {} ({})\n",
+            self.name,
+            self.path.display()
+        ));
         out.push_str(&format!("Size: {} bytes\n", self.size_bytes));
         if let Some(ref hash) = self.hash {
             out.push_str(&format!("Hash: {}...\n", &hash[..16]));
@@ -191,7 +218,11 @@ impl WasmModule {
             out.push_str(&format!("Description: {}\n", desc));
         }
         if !self.required_capabilities.is_empty() {
-            let caps: Vec<String> = self.required_capabilities.iter().map(|c| c.to_string()).collect();
+            let caps: Vec<String> = self
+                .required_capabilities
+                .iter()
+                .map(|c| c.to_string())
+                .collect();
             out.push_str(&format!("Capabilities: {}\n", caps.join(", ")));
         }
         if !self.exports.is_empty() {
@@ -213,7 +244,10 @@ pub struct WasmRegistry {
 
 impl WasmRegistry {
     pub fn new() -> Self {
-        Self { modules: HashMap::new(), search_paths: Vec::new() }
+        Self {
+            modules: HashMap::new(),
+            search_paths: Vec::new(),
+        }
     }
 
     pub fn add_search_path(&mut self, path: impl Into<PathBuf>) {
@@ -231,13 +265,19 @@ impl WasmRegistry {
         self.modules.get(name)
     }
 
-    pub fn len(&self) -> usize { self.modules.len() }
-    pub fn is_empty(&self) -> bool { self.modules.is_empty() }
+    pub fn len(&self) -> usize {
+        self.modules.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.modules.is_empty()
+    }
 
     pub fn scan_search_paths(&mut self) -> Result<Vec<String>> {
         let mut loaded = Vec::new();
         for search_path in &self.search_paths {
-            if !search_path.exists() { continue; }
+            if !search_path.exists() {
+                continue;
+            }
             let entries = fs::read_dir(search_path)
                 .with_context(|| format!("Failed to read {}", search_path.display()))?;
             for entry in entries {
@@ -250,7 +290,9 @@ impl WasmRegistry {
                             self.modules.insert(name.clone(), module);
                             loaded.push(name);
                         }
-                        Err(e) => { tracing::warn!("Failed to load {}: {}", path.display(), e); }
+                        Err(e) => {
+                            tracing::warn!("Failed to load {}: {}", path.display(), e);
+                        }
                     }
                 }
             }
@@ -260,13 +302,17 @@ impl WasmRegistry {
 }
 
 impl Default for WasmRegistry {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 pub struct WasmSkill;
 
 impl WasmSkill {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
     pub fn skill_prompt() -> String {
         r#"# WASM Skill
 
@@ -300,11 +346,15 @@ WASM modules are discovered from:
 }
 
 impl Default for WasmSkill {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl fmt::Debug for WasmSkill {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.debug_struct("WasmSkill").finish() }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WasmSkill").finish()
+    }
 }
 
 fn sha256_hex(data: &[u8]) -> String {
@@ -315,39 +365,53 @@ fn sha256_hex(data: &[u8]) -> String {
         hash[i % 32] = hash[i % 32].wrapping_add(*byte);
     }
     let mut hex = String::with_capacity(64);
-    for byte in &hash { write!(&mut hex, "{:02x}", byte).unwrap(); }
+    for byte in &hash {
+        write!(&mut hex, "{:02x}", byte).unwrap();
+    }
     hex
 }
 
 fn parse_wasm_exports(bytes: &[u8]) -> Vec<WasmFunction> {
     let mut exports = Vec::new();
-    if bytes.len() < 8 { return exports; }
+    if bytes.len() < 8 {
+        return exports;
+    }
     let mut pos = 8usize;
     while pos + 1 < bytes.len() {
         let section_id = bytes[pos];
         pos += 1;
         let (size, bytes_read) = read_leb128(&bytes[pos..]);
         pos += bytes_read;
-        if pos + size > bytes.len() { break; }
+        if pos + size > bytes.len() {
+            break;
+        }
         let section_end = pos + size;
         if section_id == 7 && size > 0 {
             let section_data = &bytes[pos..section_end];
             let (num_exports, _) = read_leb128(section_data);
             let mut export_pos = 1usize;
             for _ in 0..num_exports {
-                if export_pos >= section_data.len() { break; }
+                if export_pos >= section_data.len() {
+                    break;
+                }
                 let (name_len, nr) = read_leb128(&section_data[export_pos..]);
                 export_pos += nr;
-                if export_pos + name_len as usize > section_data.len() { break; }
+                if export_pos + name_len as usize > section_data.len() {
+                    break;
+                }
                 let name_bytes = &section_data[export_pos..export_pos + name_len as usize];
                 let name = String::from_utf8_lossy(name_bytes).to_string();
                 export_pos += name_len as usize;
-                if export_pos >= section_data.len() { break; }
+                if export_pos >= section_data.len() {
+                    break;
+                }
                 let kind = section_data[export_pos];
                 export_pos += 1;
                 let (_index, nr) = read_leb128(&section_data[export_pos..]);
                 export_pos += nr;
-                if kind == 0 { exports.push(WasmFunction::new(&name)); }
+                if kind == 0 {
+                    exports.push(WasmFunction::new(&name));
+                }
             }
         }
         pos = section_end;
@@ -363,8 +427,12 @@ fn read_leb128(data: &[u8]) -> (usize, usize) {
         result |= ((byte & 0x7F) as usize) << shift;
         shift += 7;
         i += 1;
-        if byte & 0x80 == 0 { break; }
-        if shift >= 32 { break; }
+        if byte & 0x80 == 0 {
+            break;
+        }
+        if shift >= 32 {
+            break;
+        }
     }
     (result, i)
 }
@@ -385,20 +453,24 @@ mod tests {
         bytes.extend_from_slice(b"\0asm");
         bytes.extend_from_slice(&1u32.to_le_bytes());
         let type_section = vec![0x01, 0x60, 0x00, 0x00];
-        bytes.push(1); bytes.push(type_section.len() as u8);
+        bytes.push(1);
+        bytes.push(type_section.len() as u8);
         bytes.extend_from_slice(&type_section);
         let func_section = vec![0x01, 0x00];
-        bytes.push(3); bytes.push(func_section.len() as u8);
+        bytes.push(3);
+        bytes.push(func_section.len() as u8);
         bytes.extend_from_slice(&func_section);
         let name_bytes = export_name.as_bytes();
         let mut export_entry = Vec::new();
         export_entry.push(name_bytes.len() as u8);
         export_entry.extend_from_slice(name_bytes);
-        export_entry.push(0); export_entry.push(0);
+        export_entry.push(0);
+        export_entry.push(0);
         let mut export_section = Vec::new();
         export_section.push(0x01);
         export_section.extend_from_slice(&export_entry);
-        bytes.push(7); bytes.push(export_section.len() as u8);
+        bytes.push(7);
+        bytes.push(export_section.len() as u8);
         bytes.extend_from_slice(&export_section);
         let func_body = vec![0x00];
         let mut code_entry = Vec::new();
@@ -409,7 +481,8 @@ mod tests {
         let mut code_section = Vec::new();
         code_section.push(0x01);
         code_section.extend_from_slice(&code_entry);
-        bytes.push(10); bytes.push(code_section.len() as u8);
+        bytes.push(10);
+        bytes.push(code_section.len() as u8);
         bytes.extend_from_slice(&code_section);
         bytes
     }
@@ -422,7 +495,10 @@ mod tests {
 
     #[test]
     fn test_wasm_function_signature() {
-        let func = WasmFunction::new("add").param(WasmValueType::I32).param(WasmValueType::I32).result(WasmValueType::I32);
+        let func = WasmFunction::new("add")
+            .param(WasmValueType::I32)
+            .param(WasmValueType::I32)
+            .result(WasmValueType::I32);
         assert_eq!(func.signature(), "add(i32, i32) -> i32");
     }
 
@@ -465,7 +541,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("test.wasm");
         fs::write(&path, minimal_wasm_bytes()).unwrap();
-        let module = WasmModule::load(&path).unwrap().with_description("A test module");
+        let module = WasmModule::load(&path)
+            .unwrap()
+            .with_description("A test module");
         assert_eq!(module.description.as_deref(), Some("A test module"));
     }
 
@@ -476,7 +554,10 @@ mod tests {
         fs::write(&path, wasm_with_export("greet")).unwrap();
         let module = WasmModule::load(&path).unwrap();
         assert!(module.validate_exports(&["greet"]).is_empty());
-        assert_eq!(module.validate_exports(&["greet", "missing"]), vec!["missing"]);
+        assert_eq!(
+            module.validate_exports(&["greet", "missing"]),
+            vec!["missing"]
+        );
     }
 
     #[test]

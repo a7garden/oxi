@@ -305,19 +305,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let templates_dir = dir.path();
 
-        std::fs::write(
-            templates_dir.join("greet.md"),
-            "Hello {{name}}!",
-        ).unwrap();
-        std::fs::write(
-            templates_dir.join("review.md"),
-            "Review {{lang}} code.",
-        ).unwrap();
+        std::fs::write(templates_dir.join("greet.md"), "Hello {{name}}!").unwrap();
+        std::fs::write(templates_dir.join("review.md"), "Review {{lang}} code.").unwrap();
         // Non-md file should be skipped
-        std::fs::write(
-            templates_dir.join("notes.txt"),
-            "Not a template",
-        ).unwrap();
+        std::fs::write(templates_dir.join("notes.txt"), "Not a template").unwrap();
 
         let mgr = TemplateManager::load_from_dir(templates_dir).unwrap();
         assert_eq!(mgr.len(), 2);

@@ -16,8 +16,8 @@ use oxi_ai::ProviderEvent;
 /// Minimal replicated OpenAI SSE chunk for benchmarking parse performance.
 /// This mirrors `oxi_ai::providers::openai::parse_sse_events`.
 mod openai_parser {
-    use serde::Deserialize;
     use oxi_ai::{Api, AssistantMessage, ProviderEvent, StopReason, Usage};
+    use serde::Deserialize;
 
     #[derive(Debug, Deserialize)]
     struct SSEChunk {
@@ -71,11 +71,7 @@ mod openai_parser {
     /// Parse SSE text into events (replicates openai::parse_sse_events).
     pub fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
         let mut events = Vec::new();
-        let partial_message = AssistantMessage::new(
-            Api::OpenAiCompletions,
-            provider,
-            model_id,
-        );
+        let partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
 
         let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
         events.reserve(estimated_events);
@@ -149,8 +145,8 @@ mod openai_parser {
 
 /// Anthropic SSE parser replica for benchmarking.
 mod anthropic_parser {
-    use serde::Deserialize;
     use oxi_ai::{Api, AssistantMessage, ProviderEvent, StopReason, Usage};
+    use serde::Deserialize;
 
     #[derive(Debug, Deserialize)]
     struct AnthropicEvent {
@@ -192,11 +188,7 @@ mod anthropic_parser {
 
     pub fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
         let mut events = Vec::new();
-        let partial_message = AssistantMessage::new(
-            Api::AnthropicMessages,
-            "anthropic",
-            model_id,
-        );
+        let partial_message = AssistantMessage::new(Api::AnthropicMessages, "anthropic", model_id);
 
         let estimated = text.split('\n').filter(|l| l.starts_with("data: ")).count();
         events.reserve(estimated);
@@ -305,7 +297,10 @@ fn generate_openai_stream(n: usize) -> String {
     s.push_str("data: {\"id\":\"chatcmpl-bench\",\"model\":\"gpt-4o\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":null},\"finish_reason\":null}]}\n\n");
 
     for i in 0..n {
-        let text = format!("This is chunk number {} with some realistic text content. ", i);
+        let text = format!(
+            "This is chunk number {} with some realistic text content. ",
+            i
+        );
         s.push_str(&format!(
             "data: {{\"id\":\"chatcmpl-bench\",\"model\":\"gpt-4o\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"{}\" }},\"finish_reason\":null}}]}}\n\n",
             text.replace('"', "\\\"").replace('\n', "\\n")
@@ -326,14 +321,19 @@ fn generate_anthropic_stream(n: usize) -> String {
     s.push_str("event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n");
 
     for i in 0..n {
-        let text = format!("This is chunk number {} with some realistic text content. ", i);
+        let text = format!(
+            "This is chunk number {} with some realistic text content. ",
+            i
+        );
         s.push_str(&format!(
             "event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"{}\" }}}}\n\n",
             text.replace('"', "\\\"").replace('\n', "\\n")
         ));
     }
 
-    s.push_str("event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n");
+    s.push_str(
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+    );
     s.push_str("event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":50}}\n\n");
     s.push_str("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
     s
@@ -345,20 +345,12 @@ fn bench_openai_sse(c: &mut Criterion) {
     for n in [10, 50, 200, 1000] {
         let stream = generate_openai_stream(n);
         group.throughput(Throughput::Bytes(stream.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::new("parse", n),
-            &stream,
-            |b, text| {
-                b.iter(|| {
-                    let events = openai_parser::parse_sse_events(
-                        black_box(text),
-                        "openai",
-                        "gpt-4o",
-                    );
-                    black_box(events);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("parse", n), &stream, |b, text| {
+            b.iter(|| {
+                let events = openai_parser::parse_sse_events(black_box(text), "openai", "gpt-4o");
+                black_box(events);
+            });
+        });
     }
 
     group.finish();
@@ -370,19 +362,15 @@ fn bench_anthropic_sse(c: &mut Criterion) {
     for n in [10, 50, 200, 1000] {
         let stream = generate_anthropic_stream(n);
         group.throughput(Throughput::Bytes(stream.len() as u64));
-        group.bench_with_input(
-            BenchmarkId::new("parse", n),
-            &stream,
-            |b, text| {
-                b.iter(|| {
-                    let events = anthropic_parser::parse_anthropic_events(
-                        black_box(text),
-                        "claude-sonnet-4-20250514",
-                    );
-                    black_box(events);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("parse", n), &stream, |b, text| {
+            b.iter(|| {
+                let events = anthropic_parser::parse_anthropic_events(
+                    black_box(text),
+                    "claude-sonnet-4-20250514",
+                );
+                black_box(events);
+            });
+        });
     }
 
     group.finish();

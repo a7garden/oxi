@@ -13,7 +13,12 @@ pub struct Rect {
 
 impl Rect {
     pub fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     pub fn from_size(width: u16, height: u16) -> Self {
@@ -117,7 +122,9 @@ impl Surface {
     /// Get a cell at (row, col).
     pub fn get(&self, row: u16, col: u16) -> Option<&Cell> {
         if row < self.height && col < self.width {
-            self.cells.get(row as usize).and_then(|r| r.get(col as usize))
+            self.cells
+                .get(row as usize)
+                .and_then(|r| r.get(col as usize))
         } else {
             None
         }
@@ -237,8 +244,7 @@ impl Surface {
     pub fn diff_from(&mut self, other: &Surface) {
         for row in 0..self.height.min(other.height) {
             for col in 0..self.width.min(other.width) {
-                if self.cells[row as usize][col as usize]
-                    != other.cells[row as usize][col as usize]
+                if self.cells[row as usize][col as usize] != other.cells[row as usize][col as usize]
                 {
                     self.mark_dirty(row, col);
                 }

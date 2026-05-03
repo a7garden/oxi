@@ -162,31 +162,44 @@ impl Component for SelectList {
         }
 
         match event {
-            Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Up, ..
+            }) => {
                 self.select_prev();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Down,
+                ..
+            }) => {
                 self.select_next();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Char('k'), modifiers })
-                if !modifiers.ctrl && !modifiers.alt =>
-            {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('k'),
+                modifiers,
+            }) if !modifiers.ctrl && !modifiers.alt => {
                 self.select_prev();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Char('j'), modifiers })
-                if !modifiers.ctrl && !modifiers.alt =>
-            {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char('j'),
+                modifiers,
+            }) if !modifiers.ctrl && !modifiers.alt => {
                 self.select_next();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Enter,
+                ..
+            }) => {
                 self.confirm();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Char(c),
+                ..
+            }) => {
                 self.filter.push(*c);
                 self.apply_filter();
                 self.selected = 0;
@@ -194,7 +207,10 @@ impl Component for SelectList {
                 self.dirty = true;
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Backspace,
+                ..
+            }) => {
                 self.filter.pop();
                 self.apply_filter();
                 self.selected = 0;
@@ -202,7 +218,10 @@ impl Component for SelectList {
                 self.dirty = true;
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Escape, .. }) => {
+            Event::Key(KeyEvent {
+                code: KeyCode::Escape,
+                ..
+            }) => {
                 if !self.filter.is_empty() {
                     self.filter.clear();
                     self.apply_filter();
@@ -244,11 +263,7 @@ impl Component for SelectList {
             for (i, c) in indicator.chars().enumerate() {
                 let col = area.x + i as u16;
                 if col < area.x + area.width {
-                    surface.set(
-                        row,
-                        col,
-                        Cell::new(c).with_fg(fg).with_bg(bg),
-                    );
+                    surface.set(row, col, Cell::new(c).with_fg(fg).with_bg(bg));
                 }
             }
 

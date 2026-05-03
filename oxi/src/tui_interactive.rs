@@ -5,11 +5,10 @@
 
 use anyhow::Result;
 use oxi_agent::{Agent, AgentEvent};
-use oxi_tui::{
-    ChatMessageDisplay, ChatView, ContentBlockDisplay, Input, MessageRole,
-    Surface, Theme,
-};
 use oxi_tui::component::Component;
+use oxi_tui::{
+    ChatMessageDisplay, ChatView, ContentBlockDisplay, Input, MessageRole, Surface, Theme,
+};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -23,9 +22,17 @@ enum UiEvent {
     /// Text delta from agent streaming.
     TextDelta(String),
     /// Tool call started.
-    ToolCall { id: String, name: String, arguments: String },
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: String,
+    },
     /// Tool completed.
-    ToolResult { tool_name: String, content: String, is_error: bool },
+    ToolResult {
+        tool_name: String,
+        content: String,
+        is_error: bool,
+    },
     /// Agent response complete.
     Complete,
     /// Agent error.
@@ -55,52 +62,54 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             .expect("Failed to build agent runtime");
         rt.block_on(async {
             let local = tokio::task::LocalSet::new();
-            local.run_until(async {
-                while let Some(prompt) = prompt_rx.recv().await {
-                    let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
+            local
+                .run_until(async {
+                    while let Some(prompt) = prompt_rx.recv().await {
+                        let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
 
-                    // Forward agent events to UI
-                    let ui_fwd = ui_tx_for_thread.clone();
-                    let event_forwarder = tokio::task::spawn_local(async move {
-                        while let Some(event) = event_rx.recv().await {
-                            let ui_event = match event {
-                                AgentEvent::Start { .. } => UiEvent::Start,
-                                AgentEvent::Thinking => UiEvent::Thinking,
-                                AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
-                                AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
-                                    id: tool_call.id,
-                                    name: tool_call.name,
-                                    arguments: tool_call.arguments.to_string(),
-                                },
-                                AgentEvent::ToolStart { tool_name, .. } => UiEvent::TextDelta(
-                                    format!("\n\u{2699} Running: {}...\n", tool_name),
-                                ),
-                                AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
-                                    tool_name: String::new(),
-                                    content: result.content.chars().take(500).collect(),
-                                    is_error: false,
-                                },
-                                AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
-                                    tool_name: String::new(),
-                                    content: error.clone(),
-                                    is_error: true,
-                                },
-                                AgentEvent::Complete { .. } => UiEvent::Complete,
-                                AgentEvent::Error { message } => UiEvent::Error(message),
-                                _ => continue,
-                            };
-                            if ui_fwd.send(ui_event).await.is_err() {
-                                break;
+                        // Forward agent events to UI
+                        let ui_fwd = ui_tx_for_thread.clone();
+                        let event_forwarder = tokio::task::spawn_local(async move {
+                            while let Some(event) = event_rx.recv().await {
+                                let ui_event = match event {
+                                    AgentEvent::Start { .. } => UiEvent::Start,
+                                    AgentEvent::Thinking => UiEvent::Thinking,
+                                    AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
+                                    AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
+                                        id: tool_call.id,
+                                        name: tool_call.name,
+                                        arguments: tool_call.arguments.to_string(),
+                                    },
+                                    AgentEvent::ToolStart { tool_name, .. } => UiEvent::TextDelta(
+                                        format!("\n\u{2699} Running: {}...\n", tool_name),
+                                    ),
+                                    AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
+                                        tool_name: String::new(),
+                                        content: result.content.chars().take(500).collect(),
+                                        is_error: false,
+                                    },
+                                    AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
+                                        tool_name: String::new(),
+                                        content: error.clone(),
+                                        is_error: true,
+                                    },
+                                    AgentEvent::Complete { .. } => UiEvent::Complete,
+                                    AgentEvent::Error { message } => UiEvent::Error(message),
+                                    _ => continue,
+                                };
+                                if ui_fwd.send(ui_event).await.is_err() {
+                                    break;
+                                }
                             }
-                        }
-                    });
+                        });
 
-                    // Run agent with channel on the local set
-                    let a: Arc<Agent> = Arc::clone(&agent_for_thread);
-                    let _ = a.run_with_channel(prompt, event_tx).await;
-                    let _ = event_forwarder.await;
-                }
-            }).await;
+                        // Run agent with channel on the local set
+                        let a: Arc<Agent> = Arc::clone(&agent_for_thread);
+                        let _ = a.run_with_channel(prompt, event_tx).await;
+                        let _ = event_forwarder.await;
+                    }
+                })
+                .await;
         });
     });
 
@@ -142,7 +151,8 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
             // Render prompt indicator
             surface.set(
-                chat_height + 1, 0,
+                chat_height + 1,
+                0,
                 oxi_tui::Cell::new('\u{276F}').with_fg(theme.colors.primary),
             );
 
@@ -165,7 +175,8 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 let col = width as usize - status_text.len() + i;
                 if col < width as usize {
                     surface.set(
-                        chat_height + 2, col as u16,
+                        chat_height + 2,
+                        col as u16,
                         oxi_tui::Cell::new(ch).with_fg(status_fg),
                     );
                 }
@@ -210,7 +221,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             }
                         }
                         crossterm::event::KeyCode::Char('c')
-                            if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
                         {
                             running = false;
                         }
@@ -228,21 +241,19 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         }
                     }
                 }
-                crossterm::event::Event::Mouse(mouse) => {
-                    match mouse.kind {
-                        crossterm::event::MouseEventKind::ScrollUp => {
-                            if mouse.row < chat_height {
-                                chat_view.scroll_up(3);
-                            }
+                crossterm::event::Event::Mouse(mouse) => match mouse.kind {
+                    crossterm::event::MouseEventKind::ScrollUp => {
+                        if mouse.row < chat_height {
+                            chat_view.scroll_up(3);
                         }
-                        crossterm::event::MouseEventKind::ScrollDown => {
-                            if mouse.row < chat_height {
-                                chat_view.scroll_down(3);
-                            }
-                        }
-                        _ => {}
                     }
-                }
+                    crossterm::event::MouseEventKind::ScrollDown => {
+                        if mouse.row < chat_height {
+                            chat_view.scroll_down(3);
+                        }
+                    }
+                    _ => {}
+                },
                 crossterm::event::Event::Resize(_, _) => {
                     // Handled on next render cycle via crossterm::terminal::size()
                 }
@@ -260,11 +271,19 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 UiEvent::TextDelta(text) => {
                     chat_view.stream_text_delta(&text);
                 }
-                UiEvent::ToolCall { id, name, arguments } => {
+                UiEvent::ToolCall {
+                    id,
+                    name,
+                    arguments,
+                } => {
                     chat_view.stream_thinking_end();
                     chat_view.stream_tool_call(id, name, arguments);
                 }
-                UiEvent::ToolResult { tool_name, content, is_error } => {
+                UiEvent::ToolResult {
+                    tool_name,
+                    content,
+                    is_error,
+                } => {
                     chat_view.stream_tool_result(tool_name, content, is_error);
                 }
                 UiEvent::Complete => {
@@ -358,10 +377,18 @@ fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
                         oxi_tui::Color::Rgb(r, g, b) => print!("\x1b[48;2;{};{};{}m", r, g, b),
                     }
 
-                    if cell.attrs.bold { print!("\x1b[1m"); }
-                    if cell.attrs.italic { print!("\x1b[3m"); }
-                    if cell.attrs.underline { print!("\x1b[4m"); }
-                    if cell.attrs.strikethrough { print!("\x1b[9m"); }
+                    if cell.attrs.bold {
+                        print!("\x1b[1m");
+                    }
+                    if cell.attrs.italic {
+                        print!("\x1b[3m");
+                    }
+                    if cell.attrs.underline {
+                        print!("\x1b[4m");
+                    }
+                    if cell.attrs.strikethrough {
+                        print!("\x1b[9m");
+                    }
 
                     last_fg = cell.fg;
                     last_bg = cell.bg;
@@ -394,7 +421,9 @@ fn convert_key_event(key: crossterm::event::KeyEvent) -> Option<oxi_tui::Event> 
     let code = match key.code {
         crossterm::event::KeyCode::Enter => return None,
         crossterm::event::KeyCode::Char('c')
-            if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+            if key
+                .modifiers
+                .contains(crossterm::event::KeyModifiers::CONTROL) =>
         {
             return None
         }
@@ -414,13 +443,19 @@ fn convert_key_event(key: crossterm::event::KeyEvent) -> Option<oxi_tui::Event> 
     };
 
     let modifiers = oxi_tui::KeyModifiers {
-        shift: key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT),
-        ctrl: key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL),
+        shift: key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::SHIFT),
+        ctrl: key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL),
         alt: key.modifiers.contains(crossterm::event::KeyModifiers::ALT),
         meta: key.modifiers.contains(crossterm::event::KeyModifiers::META),
     };
 
-    Some(oxi_tui::Event::Key(oxi_tui::KeyEvent::with_modifiers(code, modifiers)))
+    Some(oxi_tui::Event::Key(oxi_tui::KeyEvent::with_modifiers(
+        code, modifiers,
+    )))
 }
 
 /// Get current timestamp in milliseconds.

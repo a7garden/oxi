@@ -23,7 +23,8 @@ static API_KEY_PATTERNS: LazyLock<Vec<(Regex, &str, &str)>> = LazyLock::new(|| {
         ),
         // AWS secret
         (
-            Regex::new(r"(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*[a-zA-Z0-9/+=]{40}").unwrap(),
+            Regex::new(r"(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*[a-zA-Z0-9/+=]{40}")
+                .unwrap(),
             "aws_secret",
             "AWS secret access key detected",
         ),
@@ -217,11 +218,9 @@ pub fn is_sensitive_pattern(s: &str) -> bool {
         r"^Bearer\s+",
     ];
 
-    patterns.iter().any(|p| {
-        Regex::new(p)
-            .map(|re| re.is_match(s))
-            .unwrap_or(false)
-    })
+    patterns
+        .iter()
+        .any(|p| Regex::new(p).map(|re| re.is_match(s)).unwrap_or(false))
 }
 
 /// Get a list of all supported categories
@@ -264,7 +263,8 @@ mod tests {
 
     #[test]
     fn test_scan_private_key() {
-        let output = "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQ...\n-----END RSA PRIVATE KEY-----";
+        let output =
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQ...\n-----END RSA PRIVATE KEY-----";
         let result = scan_output(output, false);
         assert!(result.has_sensitive_data);
         assert_eq!(result.findings[0].category, "private_key");
@@ -311,7 +311,9 @@ mod tests {
 
     #[test]
     fn test_is_sensitive_pattern() {
-        assert!(is_sensitive_pattern("ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+        assert!(is_sensitive_pattern(
+            "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ));
         assert!(is_sensitive_pattern("AKIAIOSFODNN7EXAMPLE"));
         assert!(!is_sensitive_pattern("hello"));
         assert!(!is_sensitive_pattern("short"));
@@ -332,8 +334,14 @@ mod tests {
         let output = "AWS Key: AKIAIOSFODNN7EXAMPLE";
         let non_strict = scan_output(output, false);
         let strict = scan_output(output, true);
-        assert!(non_strict.has_sensitive_data || !non_strict.findings.is_empty(), "non_strict should detect AWS keys");
-        assert!(strict.has_sensitive_data || !strict.findings.is_empty(), "strict should detect AWS keys");
+        assert!(
+            non_strict.has_sensitive_data || !non_strict.findings.is_empty(),
+            "non_strict should detect AWS keys"
+        );
+        assert!(
+            strict.has_sensitive_data || !strict.findings.is_empty(),
+            "strict should detect AWS keys"
+        );
         // strict mode should detect more
         assert!(strict.findings.len() >= non_strict.findings.len());
     }

@@ -1,6 +1,5 @@
 //! Input events for the TUI.
 
-
 /// Keyboard key codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyCode {

@@ -46,15 +46,15 @@ impl FuzzyMatcher {
             }
 
             let pchar = pattern_lower[pattern_idx];
-            
+
             // Check if pattern char matches or is wildcard
             let is_wildcard = pchar == '_' || pchar == ' ';
             let matches = is_wildcard || *c == pchar;
-            
+
             if matches {
                 // Base score for match
                 score += 10;
-                
+
                 // Bonus for consecutive matches
                 if !is_wildcard {
                     if let Some(last) = last_match_pos {
@@ -86,7 +86,7 @@ impl FuzzyMatcher {
         if pattern_idx == pattern_lower.len() {
             // Bonus for shorter candidates (more exact matches)
             score += (50 as usize).saturating_sub(candidate.len().min(50));
-            
+
             Some(score)
         } else {
             None
@@ -95,7 +95,10 @@ impl FuzzyMatcher {
 
     /// Check if a character at position is a path separator.
     fn is_path_separator(candidate: &str, pos: usize) -> bool {
-        candidate.chars().nth(pos).map_or(false, |c| c == '/' || c == '\\')
+        candidate
+            .chars()
+            .nth(pos)
+            .map_or(false, |c| c == '/' || c == '\\')
     }
 
     /// Match a pattern against multiple candidates and return sorted results.
@@ -103,21 +106,20 @@ impl FuzzyMatcher {
     pub fn match_many(&self, pattern: &str, candidates: &[String]) -> Vec<(usize, String)> {
         let mut results: Vec<(usize, String)> = candidates
             .iter()
-            .filter_map(|c| {
-                self.matches(pattern, c)
-                    .map(|score| (score, c.clone()))
-            })
+            .filter_map(|c| self.matches(pattern, c).map(|score| (score, c.clone())))
             .collect();
 
         // Sort by score descending
         results.sort_by(|a, b| b.0.cmp(&a.0));
-        
+
         results
     }
 
     /// Check if pattern matches the start of candidate.
     pub fn starts_with(&self, pattern: &str, candidate: &str) -> bool {
-        candidate.to_lowercase().starts_with(&pattern.to_lowercase())
+        candidate
+            .to_lowercase()
+            .starts_with(&pattern.to_lowercase())
     }
 }
 

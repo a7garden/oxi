@@ -165,7 +165,10 @@ mod tests {
         // Matching consecutive chars should score higher than scattered chars
         let tight = fuzzy_match("abc", "abc").unwrap().score;
         let loose = fuzzy_match("abc", "a_x_b_c").unwrap().score;
-        assert!(tight > loose, "tight score {tight} should exceed loose score {loose}");
+        assert!(
+            tight > loose,
+            "tight score {tight} should exceed loose score {loose}"
+        );
     }
 
     #[test]

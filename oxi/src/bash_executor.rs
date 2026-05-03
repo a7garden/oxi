@@ -106,7 +106,10 @@ impl BashExecutor {
 
     /// Set an environment variable
     pub fn set_env(&self, key: &str, value: &str) {
-        self.env.write().unwrap().insert(key.to_string(), value.to_string());
+        self.env
+            .write()
+            .unwrap()
+            .insert(key.to_string(), value.to_string());
     }
 
     /// Remove an environment variable
@@ -120,10 +123,7 @@ impl BashExecutor {
 
         // Build the command — wrap with cwd tracking
         // We prefix with a pwd capture so we can track directory changes
-        let wrapped = format!(
-            "{}; __oxi_cwd=$(pwd)",
-            command
-        );
+        let wrapped = format!("{}; __oxi_cwd=$(pwd)", command);
 
         let mut cmd = Command::new(&self.config.shell);
         cmd.arg("-c")
@@ -140,61 +140,59 @@ impl BashExecutor {
 
         // Execute with timeout
         let output_result = match self.config.timeout {
-            Some(t) => {
-                match cmd.spawn() {
-                    Ok(mut child) => {
-                        let deadline = std::time::Instant::now() + t;
-                        loop {
-                            match child.try_wait() {
-                                Ok(Some(_status)) => {
-                                    break child.wait_with_output();
-                                }
-                                Ok(None) => {
-                                    if std::time::Instant::now() >= deadline {
-                                        let _ = child.kill();
-                                        let _ = child.wait();
-                                        let duration_ms = start.elapsed().as_millis() as u64;
-                                        self.history.write().unwrap().push(command.to_string());
-                                        return BashResult {
-                                            command: command.to_string(),
-                                            stdout: String::new(),
-                                            stderr: "Command timed out".to_string(),
-                                            exit_code: Some(-1),
-                                            timed_out: true,
-                                            duration_ms,
-                                        };
-                                    }
-                                    std::thread::sleep(Duration::from_millis(50));
-                                }
-                                Err(e) => {
+            Some(t) => match cmd.spawn() {
+                Ok(mut child) => {
+                    let deadline = std::time::Instant::now() + t;
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(_status)) => {
+                                break child.wait_with_output();
+                            }
+                            Ok(None) => {
+                                if std::time::Instant::now() >= deadline {
+                                    let _ = child.kill();
+                                    let _ = child.wait();
                                     let duration_ms = start.elapsed().as_millis() as u64;
                                     self.history.write().unwrap().push(command.to_string());
                                     return BashResult {
                                         command: command.to_string(),
                                         stdout: String::new(),
-                                        stderr: format!("Failed to wait: {}", e),
+                                        stderr: "Command timed out".to_string(),
                                         exit_code: Some(-1),
-                                        timed_out: false,
+                                        timed_out: true,
                                         duration_ms,
                                     };
                                 }
+                                std::thread::sleep(Duration::from_millis(50));
+                            }
+                            Err(e) => {
+                                let duration_ms = start.elapsed().as_millis() as u64;
+                                self.history.write().unwrap().push(command.to_string());
+                                return BashResult {
+                                    command: command.to_string(),
+                                    stdout: String::new(),
+                                    stderr: format!("Failed to wait: {}", e),
+                                    exit_code: Some(-1),
+                                    timed_out: false,
+                                    duration_ms,
+                                };
                             }
                         }
                     }
-                    Err(e) => {
-                        let duration_ms = start.elapsed().as_millis() as u64;
-                        self.history.write().unwrap().push(command.to_string());
-                        return BashResult {
-                            command: command.to_string(),
-                            stdout: String::new(),
-                            stderr: format!("Failed to spawn: {}", e),
-                            exit_code: Some(-1),
-                            timed_out: false,
-                            duration_ms,
-                        };
-                    }
                 }
-            }
+                Err(e) => {
+                    let duration_ms = start.elapsed().as_millis() as u64;
+                    self.history.write().unwrap().push(command.to_string());
+                    return BashResult {
+                        command: command.to_string(),
+                        stdout: String::new(),
+                        stderr: format!("Failed to spawn: {}", e),
+                        exit_code: Some(-1),
+                        timed_out: false,
+                        duration_ms,
+                    };
+                }
+            },
             None => cmd.output(),
         };
 
@@ -223,7 +221,13 @@ impl BashExecutor {
         if command.trim().starts_with("cd ") && exit_code == Some(0) {
             let target = command.trim().strip_prefix("cd ").unwrap().trim();
             let target = if target.starts_with("~/") {
-                format!("{}/{}", dirs::home_dir().map(|p| p.display().to_string()).unwrap_or_default(), &target[2..])
+                format!(
+                    "{}/{}",
+                    dirs::home_dir()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                    &target[2..]
+                )
             } else {
                 target.to_string()
             };
@@ -436,7 +440,11 @@ mod tests {
     fn test_execute_nonexistent_command() {
         let executor = BashExecutor::default();
         let result = executor.execute("nonexistent_command_12345");
-        assert!(result.exit_code.is_some() && result.exit_code.unwrap() != 0 || result.stderr.contains("not found") || result.stderr.contains("command not found"));
+        assert!(
+            result.exit_code.is_some() && result.exit_code.unwrap() != 0
+                || result.stderr.contains("not found")
+                || result.stderr.contains("command not found")
+        );
     }
 
     #[test]

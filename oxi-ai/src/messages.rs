@@ -60,7 +60,7 @@ impl ThinkingContent {
 pub struct ImageContent {
     #[serde(rename = "type")]
     pub content_type: ImageContentType,
-    pub data: String,        // base64 encoded
+    pub data: String, // base64 encoded
     pub mime_type: String,
 }
 
@@ -211,7 +211,9 @@ impl AssistantMessage {
 
     pub fn text_content(&self) -> String {
         // Pre-compute capacity to avoid reallocations.
-        let estimated_len: usize = self.content.iter()
+        let estimated_len: usize = self
+            .content
+            .iter()
             .map(|b| b.as_text().map(|t| t.len()).unwrap_or(0))
             .sum();
         let mut result = String::with_capacity(estimated_len);
@@ -262,7 +264,11 @@ impl ToolResultMessage {
         }
     }
 
-    pub fn error(tool_call_id: impl Into<String>, tool_name: impl Into<String>, error: impl Into<String>) -> Self {
+    pub fn error(
+        tool_call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        error: impl Into<String>,
+    ) -> Self {
         Self {
             role: ToolResultRole::ToolResult,
             tool_call_id: tool_call_id.into(),
@@ -276,7 +282,9 @@ impl ToolResultMessage {
 
     pub fn text_content(&self) -> Result<String, crate::error::ProviderError> {
         // Pre-compute capacity estimate.
-        let estimated_len: usize = self.content.iter()
+        let estimated_len: usize = self
+            .content
+            .iter()
             .map(|b| match b {
                 ContentBlock::Text(t) => t.text.len() + 1,
                 ContentBlock::Image(_) => 7,
@@ -335,45 +343,44 @@ impl Message {
     /// Get the text content of this message
     pub fn text_content(&self) -> Result<String, crate::error::ProviderError> {
         match self {
-            Message::User(m) => {
-                match &m.content {
-                    MessageContent::Text(s) => Ok(s.clone()),
-                    MessageContent::Blocks(blocks) => {
-                        let estimated_len: usize = blocks.iter()
-                            .map(|b| match b {
-                                ContentBlock::Text(t) => t.text.len() + 1,
-                                ContentBlock::Image(_) => 8,
-                                ContentBlock::Thinking(t) => t.thinking.len() + 1,
-                                ContentBlock::ToolCall(_) => 12,
-                                ContentBlock::Unknown(_) => 10,
-                            })
-                            .sum();
-                        let mut result = String::with_capacity(estimated_len);
-                        for block in blocks {
-                            match block {
-                                ContentBlock::Text(t) => {
-                                    result.push_str(&t.text);
-                                    result.push('\n');
-                                }
-                                ContentBlock::Image(_) => {
-                                    result.push_str("[Image]\n");
-                                }
-                                ContentBlock::Thinking(t) => {
-                                    result.push_str(&t.thinking);
-                                    result.push('\n');
-                                }
-                                ContentBlock::ToolCall(_) => {
-                                    result.push_str("[Tool Call]\n");
-                                }
-                                ContentBlock::Unknown(_) => {
-                                    result.push_str("[Unknown]\n");
-                                }
+            Message::User(m) => match &m.content {
+                MessageContent::Text(s) => Ok(s.clone()),
+                MessageContent::Blocks(blocks) => {
+                    let estimated_len: usize = blocks
+                        .iter()
+                        .map(|b| match b {
+                            ContentBlock::Text(t) => t.text.len() + 1,
+                            ContentBlock::Image(_) => 8,
+                            ContentBlock::Thinking(t) => t.thinking.len() + 1,
+                            ContentBlock::ToolCall(_) => 12,
+                            ContentBlock::Unknown(_) => 10,
+                        })
+                        .sum();
+                    let mut result = String::with_capacity(estimated_len);
+                    for block in blocks {
+                        match block {
+                            ContentBlock::Text(t) => {
+                                result.push_str(&t.text);
+                                result.push('\n');
+                            }
+                            ContentBlock::Image(_) => {
+                                result.push_str("[Image]\n");
+                            }
+                            ContentBlock::Thinking(t) => {
+                                result.push_str(&t.thinking);
+                                result.push('\n');
+                            }
+                            ContentBlock::ToolCall(_) => {
+                                result.push_str("[Tool Call]\n");
+                            }
+                            ContentBlock::Unknown(_) => {
+                                result.push_str("[Unknown]\n");
                             }
                         }
-                        Ok(result.trim().to_string())
                     }
+                    Ok(result.trim().to_string())
                 }
-            }
+            },
             Message::Assistant(m) => Ok(m.text_content()),
             Message::ToolResult(m) => m.text_content(),
         }
@@ -483,10 +490,7 @@ fn transform_content_blocks(blocks: &[ContentBlock], to_api: &super::Api) -> Vec
                 match block {
                     ContentBlock::Thinking(t) => {
                         // Convert thinking block to text wrapped in tags
-                        let text = format!(
-                            "<thinking>\n{}\n</thinking>",
-                            t.thinking
-                        );
+                        let text = format!("<thinking>\n{}\n</thinking>", t.thinking);
                         transformed.push(ContentBlock::Text(TextContent::new(text)));
                     }
                     ContentBlock::Text(t) => {
@@ -528,9 +532,9 @@ fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
             }
             other => {
                 if !pending_text.is_empty() {
-                    result.push(ContentBlock::Text(TextContent::new(
-                        std::mem::take(&mut pending_text),
-                    )));
+                    result.push(ContentBlock::Text(TextContent::new(std::mem::take(
+                        &mut pending_text,
+                    ))));
                 }
                 result.push(other);
             }
