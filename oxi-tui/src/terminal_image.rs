@@ -595,19 +595,21 @@ impl ImagePlaceholder {
 
         // Content lines
         let label = format!(" {} ", self.label);
-        let padded_label = if label.len() <= inner {
-            format!("{}{}", label, " ".repeat(inner - label.len()))
+        let padded_label = if label.chars().count() <= inner {
+            let pad = inner.saturating_sub(label.chars().count());
+            format!("{}{}", label, " ".repeat(pad))
         } else {
-            label[..inner].to_string()
+            label.chars().take(inner).collect::<String>()
         };
         lines.push(format!("│{}│", padded_label));
 
         // Loading indicator
         let loading = " ⏳ loading… ".to_string();
-        let padded_loading = if loading.len() <= inner {
-            format!("{}{}", loading, " ".repeat(inner.saturating_sub(loading.len())))
+        let padded_loading = if loading.chars().count() <= inner {
+            let pad = inner.saturating_sub(loading.chars().count());
+            format!("{}{}", loading, " ".repeat(pad))
         } else {
-            loading[..inner].to_string()
+            loading.chars().take(inner).collect::<String>()
         };
         if h > 3 {
             lines.push(format!("│{}│", padded_loading));
@@ -1106,11 +1108,19 @@ mod tests {
 
     // ----- prepare_image -----
 
+    /// Create a valid 2×2 PNG using the image crate.
+    fn make_test_png() -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]));
+        let mut buf = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .unwrap();
+        buf
+    }
+
     #[test]
     fn test_prepare_image_png_passthrough() {
-        let png = sample_png();
+        let png = make_test_png();
         let result = prepare_image(&png, None, None);
-        // The image crate should be able to load and re-encode the 1x1 PNG
         assert!(result.is_some());
         let out = result.unwrap();
         // Output should be a valid PNG
@@ -1119,8 +1129,8 @@ mod tests {
 
     #[test]
     fn test_prepare_image_resize() {
-        let png = sample_png();
-        // 1x1 image, max 100x100 – no resize needed
+        let png = make_test_png();
+        // 2x2 image, max 100x100 – no resize needed
         let result = prepare_image(&png, Some(100), Some(100));
         assert!(result.is_some());
     }
