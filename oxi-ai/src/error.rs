@@ -20,6 +20,9 @@ pub enum ProviderError {
     #[error("Request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
     
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
     
