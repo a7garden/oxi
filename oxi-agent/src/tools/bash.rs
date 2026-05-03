@@ -404,7 +404,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!result.success);
-        assert!(result.output.contains("exit code 1"));
+        assert!(result.output.contains("exited with code 1"));
     }
 
     #[tokio::test]
