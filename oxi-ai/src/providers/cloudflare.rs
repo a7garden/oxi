@@ -544,8 +544,6 @@ mod tests {
     // Test 8: Build messages with tool result
     #[test]
     fn test_build_messages_with_tool_result() {
-        use crate::Message;
-
         let context = Context::new();
         let messages = build_messages(&context).unwrap();
         // Empty context should produce empty messages (no system prompt, no messages)

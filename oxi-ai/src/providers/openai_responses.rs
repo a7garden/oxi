@@ -676,6 +676,7 @@ mod tests {
     use crate::{Context, Message, Model, TextContent};
     use serde_json::json;
 
+    #[allow(dead_code)]
     fn create_test_model() -> Model {
         Model::new(
             "gpt-4o",

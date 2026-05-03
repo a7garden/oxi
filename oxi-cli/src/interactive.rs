@@ -9,6 +9,79 @@
 //!
 //! `/model`, `/clear`, `/compact`, `/undo`, `/redo`, `/branch`,
 //! `/session`, `/export`, `/settings`, `/help`
+//!
+//! # Gaps vs pi-mono interactive-mode.ts
+//!
+//! Comparison with `pi-mono/packages/coding-agent/src/modes/interactive/interactive-mode.ts`.
+//!
+//! ## Missing slash commands
+//!
+//! pi-mono has these commands not present in oxi-cli:
+//! - `/settings` — opens a settings overlay UI (oxi-cli only prints current settings)
+//! - `/scoped-models` — enable/disable models for Ctrl+P cycling
+//! - `/export` — HTML export (oxi-cli supports JSONL only)
+//! - `/import` — import and resume a session from JSONL
+//! - `/share` — share session as a secret GitHub gist
+//! - `/copy` — copy last agent message to clipboard
+//! - `/name` — set session display name
+//! - `/changelog` — show changelog entries
+//! - `/hotkeys` — show all keyboard shortcuts
+//! - `/clone` — duplicate the current session
+//! - `/login` / `/logout` — configure/remove provider authentication
+//! - `/new` — start a new session
+//! - `/reload` — reload keybindings, extensions, skills, prompts, and themes
+//! - `/resume` — resume a different session
+//!
+//! ## Keyboard handling gaps
+//!
+//! pi-mono supports rich keybinding configuration via `KeybindingsManager`:
+//! - Configurable keybindings (user can remap keys)
+//! - `Ctrl+Z` / SIGTSTP for suspend (pi-mono handles it; oxi-cli does not)
+//! - Double-`Escape` for quit (configurable action: quit or clear)
+//! - Extension-registered shortcuts
+//! - `Ctrl+P` for model cycling overlay
+//!
+//! oxi-cli handles: Enter, Ctrl+C (quit/interrupt), Escape, Tab, Backspace,
+//! Delete, arrows, Home/End, PageUp/PageDown, F-keys, Ctrl+L/U/A/E.
+//!
+//! ## UI component gaps
+//!
+//! - **Model selector overlay**: pi-mono has `ModelSelectorComponent` with fuzzy
+//!   search, provider tabs, scoped models. oxi-cli `/model` is text-only.
+//! - **Session selector overlay**: pi-mono has `SessionSelectorComponent`. oxi-cli
+//!   `/session` shows info only.
+//! - **Settings overlay**: pi-mono has `SettingsSelectorComponent`.
+//! - **Footer/header**: pi-mono has `FooterDataProvider` with rich status info
+//!   (model, cost, token counts, session name, version). oxi-cli footer is simpler.
+//! - **Assistant message rendering**: pi-mono has dedicated `AssistantMessageComponent`
+//!   with reasoning blocks, diff syntax highlighting, copy buttons.
+//! - **Bash execution component**: pi-mono renders tool calls with real-time output,
+//!   syntax highlighting, exit codes.
+//! - **Extension/custom editors**: pi-mono supports extension-registered editors.
+//!
+//! ## Session switching/branching in TUI mode
+//!
+//! - pi-mono has full session tree navigation (`/tree`, `/fork`, `/clone`, `/branch`)
+//!   with visual tree component.
+//! - oxi-cli has basic `/undo`, `/redo`, `/branch` support but no tree navigation UI.
+//!
+//! ## Model selector overlay
+//!
+//! - pi-mono: Full interactive overlay with fuzzy search, provider tabs,
+//!   scoped model cycling via Ctrl+P.
+//! - oxi-cli: Text-based `/model <name>` command only; no overlay UI.
+//!
+//! ## Other gaps
+//!
+//! - Auto-compaction with escape handler (pi-mono compacts automatically and
+//!   lets user cancel with Escape)
+//! - Retry with escape handler
+//! - Clipboard image paste via Ctrl+V (pi-mono reads system clipboard)
+//! - Extension system integration
+//! - Template commands (`/templates/*`)
+//! - Skill commands (`/skills/*`)
+//! - MCP tool integration in UI
+//! - Telemetry / version check notifications
 
 use crate::InteractiveSession;
 use anyhow::Result;
