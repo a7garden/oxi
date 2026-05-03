@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn test_on_select_callback() {
         let themes = make_test_themes();
-        let selected_idx = std::sync::atomic::AtomicUsize::new(0);
+        static SELECTED_IDX: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
         {
             let mut selector = ThemeSelector::new(themes).on_select(|name| {
@@ -526,13 +526,13 @@ mod tests {
                     "monokai" => 3,
                     _ => 0,
                 };
-                selected_idx.store(idx, std::sync::atomic::Ordering::SeqCst);
+                SELECTED_IDX.store(idx, std::sync::atomic::Ordering::SeqCst);
             });
 
             selector.select_next();
             selector.confirm();
         }
 
-        assert_eq!(selected_idx.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(SELECTED_IDX.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

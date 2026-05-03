@@ -609,7 +609,7 @@ mod tests {
     #[test]
     fn test_footer_new() {
         let data = FooterData::new();
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
         assert!(footer.data.model_name.is_empty());
     }
 
@@ -618,7 +618,8 @@ mod tests {
         let data = create_test_footer_data();
         let theme = Theme::dark();
         let footer = Footer::with_theme(data, &theme);
-        assert_eq!(footer.theme.dim, Color::Indexed(245));
+        // Dark theme muted color is Indexed(8)
+        assert_eq!(footer.theme.dim, Color::Indexed(8));
     }
 
     #[test]
@@ -663,7 +664,7 @@ mod tests {
     #[test]
     fn test_footer_height_basic() {
         let data = create_test_footer_data();
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
         assert_eq!(footer.height(), 1);
     }
 
@@ -686,7 +687,7 @@ mod tests {
     #[test]
     fn test_footer_render_main_line() {
         let data = create_test_footer_data();
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
 
         let line = footer.render_main_line();
 
@@ -698,7 +699,7 @@ mod tests {
     fn test_footer_render_main_line_context_color() {
         let mut data = create_test_footer_data();
         data.context_window_pct = 85.0;
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
 
         // Should render without panic
         let line = footer.render_main_line();
@@ -709,7 +710,7 @@ mod tests {
     fn test_footer_render_main_line_high_context() {
         let mut data = create_test_footer_data();
         data.context_window_pct = 95.0;
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
 
         let line = footer.render_main_line();
         assert!(!line.is_empty());
@@ -718,7 +719,7 @@ mod tests {
     #[test]
     fn test_footer_render_main_line_empty_data() {
         let data = FooterData::new();
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
 
         let line = footer.render_main_line();
         // Empty data should produce empty line
@@ -728,7 +729,7 @@ mod tests {
     #[test]
     fn test_footer_truncate_to_width() {
         let _data = create_test_footer_data();
-        let footer = Footer::new(FooterData::new());
+        let mut footer = Footer::new(FooterData::new());
 
         let truncated = Footer::truncate_to_width("hello world", 5);
         // Should truncate or fit
@@ -809,7 +810,7 @@ mod tests {
     #[test]
     fn test_footer_render_empty_surface() {
         let data = create_test_footer_data();
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
 
         let mut surface = Surface::new(80, 1);
         let rect = Rect::new(0, 0, 80, 1);
@@ -819,7 +820,7 @@ mod tests {
     #[test]
     fn test_footer_render_wide() {
         let data = create_test_footer_data();
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
 
         let mut surface = Surface::new(120, 1);
         let rect = Rect::new(0, 0, 120, 1);
@@ -849,7 +850,7 @@ mod tests {
         data.git_branch = Some("feature/xyz".to_string());
         data.session_name = Some("my-session".to_string());
 
-        let footer = Footer::new(data);
+        let mut footer = Footer::new(data);
 
         let mut surface = Surface::new(120, 1);
         let rect = Rect::new(0, 0, 120, 1);
@@ -859,7 +860,7 @@ mod tests {
 
     #[test]
     fn test_footer_min_size() {
-        let footer = Footer::new(FooterData::new());
+        let mut footer = Footer::new(FooterData::new());
         let min = footer.min_size();
         assert_eq!(min.height, 1);
         assert_eq!(min.width, 40);
