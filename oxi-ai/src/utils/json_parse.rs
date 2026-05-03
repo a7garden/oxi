@@ -5,7 +5,7 @@
 //! - Doubles backslashes before invalid escape characters
 //! - Repairs incomplete JSON from streaming responses
 
-use crate::types::AssistantMessage;
+use crate::messages::AssistantMessage;
 
 /// Characters that are valid after a backslash in JSON strings
 const VALID_JSON_ESCAPES: &[char] = &['"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'];

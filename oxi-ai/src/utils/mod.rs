@@ -8,11 +8,3 @@
 pub mod json_parse;
 pub mod overflow;
 pub mod sanitize_unicode;
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_utils_module_loads() {
-        assert!(true);
-    }
-}

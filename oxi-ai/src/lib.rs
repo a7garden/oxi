@@ -15,6 +15,7 @@ mod providers;
 mod tools;
 mod transform;
 mod types;
+pub mod utils;
 
 pub mod prelude {
     pub use crate::compaction::{
