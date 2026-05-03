@@ -9,6 +9,7 @@ authors = ["Won <won@mariozechner.com>"]
 repository = "https://github.com/a7garden/oxi"
 keywords = ["tui", "terminal", "ui", "rendering"]
 categories = ["command-line-interface", "gui"]
+exclude = ["target/", "benches/"]
 
 [dependencies]
 # Terminal UI
