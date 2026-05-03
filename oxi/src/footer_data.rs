@@ -92,7 +92,8 @@ impl FooterData {
 
     /// Set git branch from git_utils
     pub fn with_git_branch(mut self, cwd: &PathBuf) -> Self {
-        self.git_branch = git_utils::get_current_branch(cwd).ok();
+        // Note: get_current_branch already returns Option<String>, no .ok() needed
+        self.git_branch = git_utils::get_current_branch(cwd);
         self
     }
 
