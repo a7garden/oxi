@@ -280,7 +280,7 @@ pub struct CliArgs {
     pub messages: Vec<String>,
 
     /// File arguments
-    #[arg(short = 'f')]
+    #[arg(long = "file", value_delimiter = ' ')]
     pub file_args: Vec<PathBuf>,
 }
 
@@ -377,8 +377,8 @@ mod tests {
     fn test_parse_with_multiple_files() {
         let args = parse_args_from([
             "oxi",
-            "@file1.txt",
-            "@file2.txt",
+            "--file", "file1.txt",
+            "--file", "file2.txt",
             "Hello",
         ])
         .unwrap();

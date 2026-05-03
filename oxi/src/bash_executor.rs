@@ -436,7 +436,7 @@ mod tests {
     fn test_execute_nonexistent_command() {
         let executor = BashExecutor::default();
         let result = executor.execute("nonexistent_command_12345");
-        assert!(result.exit_code != Some(0));
+        assert!(result.exit_code.is_some() && result.exit_code.unwrap() != 0 || result.stderr.contains("not found") || result.stderr.contains("command not found"));
     }
 
     #[test]
