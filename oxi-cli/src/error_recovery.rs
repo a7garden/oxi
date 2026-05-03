@@ -159,7 +159,6 @@ impl RetryableError {
     pub fn from_status_code(code: u16) -> Option<Self> {
         match code {
             408 | 429 => Some(Self::RateLimitError { retry_after: 0 }),
-            408 | 429 => Some(Self::RateLimitError { retry_after: 0 }),
             500 | 502 | 504 => Some(Self::ServerError { code }),
             503 => Some(Self::ServiceUnavailable { retry_after: 0 }),
             _ if code >= 500 => Some(Self::ServerError { code }),
