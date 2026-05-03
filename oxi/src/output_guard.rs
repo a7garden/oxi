@@ -330,6 +330,11 @@ mod tests {
         let output = "secret = my-long-secret-value-here";
         let non_strict = scan_output(output, false);
         let strict = scan_output(output, true);
+        // strict mode should detect more or equal to non_strict
         assert!(strict.has_sensitive_data || !strict.findings.is_empty());
+        // non_strict should still catch this pattern
+        assert!(non_strict.has_sensitive_data || !non_strict.findings.is_empty());
+        // both should catch the same data
+        assert!(strict.findings.len() >= non_strict.findings.len());
     }
 }
