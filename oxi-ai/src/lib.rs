@@ -13,6 +13,8 @@ mod high_level;
 mod compaction;
 mod transform;
 pub mod oauth;
+pub mod env_api_keys;
+pub mod provider_registry;
 
 pub mod prelude {
     pub use crate::types::*;
@@ -54,3 +56,9 @@ pub use model_db::{ModelEntry, get_model_entry, get_provider_models, get_all_mod
 
 /// Re-export AssistantMessage from messages
 pub use messages::AssistantMessage;
+
+// Environment-based API key resolution
+pub use env_api_keys::{get_env_api_key, find_env_keys, get_all_env_keys};
+
+// Provider authentication registry
+pub use provider_registry::{ProviderAuthRegistry, ProviderAuth, OAuthTokenInfo};

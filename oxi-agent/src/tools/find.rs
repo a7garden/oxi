@@ -176,7 +176,10 @@ impl FindTool {
             }
 
             let entry_path = entry.path();
-            let file_name = entry.file_name().to_string_lossy().to_string();
+            let file_name = entry
+                .file_name()
+                .to_string_lossy()
+                .to_string();
 
             // Skip hidden entries (unless explicitly excluded)
             if file_name.starts_with('.') {
@@ -352,10 +355,7 @@ impl AgentTool for FindTool {
 
         let name = params.get("name").and_then(|v: &Value| v.as_str());
         let file_type = params.get("type").and_then(|v: &Value| v.as_str());
-        let max_depth = params
-            .get("max_depth")
-            .and_then(|v: &Value| v.as_u64())
-            .map(|d| d as usize);
+        let max_depth = params.get("max_depth").and_then(|v: &Value| v.as_u64()).map(|d| d as usize);
         let max_results = params
             .get("max_results")
             .and_then(|v: &Value| v.as_u64())
@@ -377,17 +377,7 @@ impl AgentTool for FindTool {
             .and_then(|v: &Value| v.as_bool())
             .unwrap_or(false);
 
-        match Self::find_impl(
-            path,
-            name,
-            file_type,
-            max_depth,
-            max_results,
-            &exclude,
-            follow_symlinks,
-        )
-        .await
-        {
+        match Self::find_impl(path, name, file_type, max_depth, max_results, &exclude, follow_symlinks).await {
             Ok(output) => Ok(AgentToolResult::success(output)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }
@@ -428,24 +418,14 @@ mod tests {
 
     #[test]
     fn test_matches_pattern_multi_wildcard() {
-        assert!(FindTool::matches_pattern(
-            "test_file_backup.txt",
-            "test*backup.txt"
-        ));
-        assert!(FindTool::matches_pattern(
-            "abcxyzbackup.txt",
-            "abc*xyz*backup.txt"
-        ));
+        assert!(FindTool::matches_pattern("test_file_backup.txt", "test*backup.txt"));
+        assert!(FindTool::matches_pattern("abcxyzbackup.txt", "abc*xyz*backup.txt"));
     }
 
     #[test]
     fn test_matches_exclude() {
-        let patterns = vec![
-            "*.log".to_string(),
-            "*.tmp".to_string(),
-            "node_modules".to_string(),
-        ];
-
+        let patterns = vec!["*.log".to_string(), "*.tmp".to_string(), "node_modules".to_string()];
+        
         let path = Path::new("debug.log");
         assert!(FindTool::matches_exclude(path, &patterns));
 

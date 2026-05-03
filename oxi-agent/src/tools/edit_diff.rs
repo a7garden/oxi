@@ -91,7 +91,7 @@ pub fn apply_edits_to_normalized_content(
 
     // Find all match positions first
     let mut matches: Vec<(usize, usize, &Edit)> = Vec::new(); // (start, end, edit)
-
+    
     for edit in edits {
         let start = content.find(&edit.old_text).ok_or_else(|| EditDiffError {
             message: format!(
@@ -99,7 +99,7 @@ pub fn apply_edits_to_normalized_content(
             ),
         })?;
         let end = start + edit.old_text.len();
-
+        
         // Check for overlaps with existing matches
         for &(existing_start, existing_end, _) in &matches {
             if start < existing_end && end > existing_start {
@@ -108,54 +108,51 @@ pub fn apply_edits_to_normalized_content(
                 });
             }
         }
-
+        
         matches.push((start, end, edit));
     }
-
+    
     // Sort by position (reverse order for safe replacement)
     matches.sort_by(|a, b| b.0.cmp(&a.0));
-
+    
     let mut result = content.to_string();
     for (start, end, edit) in matches {
         result.replace_range(start..end, &edit.new_text);
     }
-
+    
     Ok(result)
 }
 
 /// Compute a unified diff between original and modified content.
 /// Returns the diff string and the first changed line number.
-pub fn compute_edits_diff(original: &str, modified: &str, context_lines: usize) -> EditDiffResult {
+pub fn compute_edits_diff(
+    original: &str,
+    modified: &str,
+    context_lines: usize,
+) -> EditDiffResult {
     let orig_lines: Vec<&str> = original.lines().collect();
     let mod_lines: Vec<&str> = modified.lines().collect();
-
+    
     let mut diff = String::new();
     let mut first_changed_line: Option<usize> = None;
-
+    
     // Simple line-by-line diff using longest common subsequence approach
     let lcs = compute_lcs_table(&orig_lines, &mod_lines);
     let mut diff_ops = Vec::new();
-    build_diff_ops(
-        &lcs,
-        &orig_lines,
-        &mod_lines,
-        orig_lines.len(),
-        mod_lines.len(),
-        &mut diff_ops,
-    );
-
+    build_diff_ops(&lcs, &orig_lines, &mod_lines, orig_lines.len(), mod_lines.len(), &mut diff_ops);
+    
     // Group into hunks with context
     let hunks = group_into_hunks(&diff_ops, &orig_lines, &mod_lines, context_lines);
-
+    
     for (i, hunk) in hunks.iter().enumerate() {
         if i > 0 {
             diff.push('\n');
         }
-
+        
         if first_changed_line.is_none() {
             first_changed_line = Some(hunk.new_start);
         }
-
+        
         diff.push_str(&format!(
             "@@ -{},{} +{},{} @@\n",
             hunk.old_start + 1,
@@ -163,7 +160,7 @@ pub fn compute_edits_diff(original: &str, modified: &str, context_lines: usize) 
             hunk.new_start + 1,
             hunk.new_count,
         ));
-
+        
         for line in &hunk.lines {
             match line {
                 DiffLine::Context(s) => diff.push_str(&format!(" {}\n", s)),
@@ -172,7 +169,7 @@ pub fn compute_edits_diff(original: &str, modified: &str, context_lines: usize) 
             }
         }
     }
-
+    
     EditDiffResult {
         diff,
         first_changed_line,
@@ -195,7 +192,7 @@ fn compute_lcs_table(a: &[&str], b: &[&str]) -> Vec<Vec<usize>> {
     let m = a.len();
     let n = b.len();
     let mut dp = vec![vec![0; n + 1]; m + 1];
-
+    
     for i in 1..=m {
         for j in 1..=n {
             if a[i - 1] == b[j - 1] {
@@ -205,7 +202,7 @@ fn compute_lcs_table(a: &[&str], b: &[&str]) -> Vec<Vec<usize>> {
             }
         }
     }
-
+    
     dp
 }
 
@@ -265,33 +262,29 @@ fn group_into_hunks<'a>(
             DiffOp::Equal(_, _) => {}
         }
     }
-
+    
     if changes.is_empty() {
         return Vec::new();
     }
-
+    
     // Group changes into hunks
     let mut hunks: Vec<Hunk<'a>> = Vec::new();
     let mut hunk_start = changes[0];
     let mut hunk_end = changes[0];
-
+    
     for &change_idx in &changes[1..] {
         if change_idx <= hunk_end + 2 * context {
             // Within context range, extend current hunk
             hunk_end = change_idx;
         } else {
             // Start a new hunk
-            hunks.push(build_hunk(
-                ops, old_lines, new_lines, hunk_start, hunk_end, context,
-            ));
+            hunks.push(build_hunk(ops, old_lines, new_lines, hunk_start, hunk_end, context));
             hunk_start = change_idx;
             hunk_end = change_idx;
         }
     }
-    hunks.push(build_hunk(
-        ops, old_lines, new_lines, hunk_start, hunk_end, context,
-    ));
-
+    hunks.push(build_hunk(ops, old_lines, new_lines, hunk_start, hunk_end, context));
+    
     hunks
 }
 
@@ -305,7 +298,7 @@ fn build_hunk<'a>(
 ) -> Hunk<'a> {
     let start = change_start.saturating_sub(context);
     let end = (change_end + context + 1).min(ops.len());
-
+    
     let mut lines = Vec::new();
     let mut _old_pos = usize::MAX;
     let mut _new_pos = usize::MAX;
@@ -313,7 +306,7 @@ fn build_hunk<'a>(
     let mut new_count = 0;
     let mut first_old = None;
     let mut first_new = None;
-
+    
     for i in start..end {
         match &ops[i] {
             DiffOp::Equal(oi, ni) => {
@@ -347,7 +340,7 @@ fn build_hunk<'a>(
             }
         }
     }
-
+    
     Hunk {
         old_start: first_old.unwrap_or(0),
         old_count,
@@ -395,14 +388,8 @@ mod tests {
     fn test_apply_multiple_edits() {
         let content = "aaa\nbbb\nccc\n";
         let edits = vec![
-            Edit {
-                old_text: "aaa".to_string(),
-                new_text: "AAA".to_string(),
-            },
-            Edit {
-                old_text: "ccc".to_string(),
-                new_text: "CCC".to_string(),
-            },
+            Edit { old_text: "aaa".to_string(), new_text: "AAA".to_string() },
+            Edit { old_text: "ccc".to_string(), new_text: "CCC".to_string() },
         ];
         let result = apply_edits_to_normalized_content(content, &edits).unwrap();
         assert_eq!(result, "AAA\nbbb\nCCC\n");
@@ -412,14 +399,8 @@ mod tests {
     fn test_apply_overlapping_edits_fails() {
         let content = "aaa\nbbb\nccc\n";
         let edits = vec![
-            Edit {
-                old_text: "aaa\nbbb".to_string(),
-                new_text: "AAA".to_string(),
-            },
-            Edit {
-                old_text: "bbb\nccc".to_string(),
-                new_text: "CCC".to_string(),
-            },
+            Edit { old_text: "aaa\nbbb".to_string(), new_text: "AAA".to_string() },
+            Edit { old_text: "bbb\nccc".to_string(), new_text: "CCC".to_string() },
         ];
         let result = apply_edits_to_normalized_content(content, &edits);
         assert!(result.is_err());

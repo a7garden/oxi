@@ -64,9 +64,9 @@ impl AgentMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMeta {
     pub id: Uuid,
-    pub parent_id: Option<Uuid>, // Root session that this branched from (if any)
-    pub root_id: Option<Uuid>,   // Original root session (for deep branches)
-    pub branch_point: Option<Uuid>, // Entry ID where branching occurred
+    pub parent_id: Option<Uuid>,          // Root session that this branched from (if any)
+    pub root_id: Option<Uuid>,           // Original root session (for deep branches)
+    pub branch_point: Option<Uuid>,       // Entry ID where branching occurred
     pub created_at: i64,
     pub updated_at: i64,
     pub name: Option<String>,
@@ -113,10 +113,7 @@ impl SessionManager {
         let meta_dir = base_dir.join("meta");
         tokio::fs::create_dir_all(&sessions_dir).await?;
         tokio::fs::create_dir_all(&meta_dir).await?;
-        Ok(Self {
-            sessions_dir,
-            meta_dir,
-        })
+        Ok(Self { sessions_dir, meta_dir })
     }
 
     pub async fn save(&self, id: Uuid, entries: &[SessionEntry]) -> Result<()> {
@@ -193,11 +190,7 @@ impl SessionManager {
     }
 
     /// Create a branch from an existing session at a given entry
-    pub async fn branch_from(
-        &self,
-        parent_id: Uuid,
-        entry_id: Uuid,
-    ) -> Result<(Uuid, Vec<SessionEntry>)> {
+    pub async fn branch_from(&self, parent_id: Uuid, entry_id: Uuid) -> Result<(Uuid, Vec<SessionEntry>)> {
         // Load parent entries
         let parent_entries = self.load(parent_id).await?;
 
@@ -208,18 +201,12 @@ impl SessionManager {
             .with_context(|| format!("Entry {} not found in session {}", entry_id, parent_id))?;
 
         // Load parent metadata to get root info
-        let parent_meta = self
-            .load_meta(parent_id)
-            .await?
+        let parent_meta = self.load_meta(parent_id).await?
             .with_context(|| format!("Parent session {} not found", parent_id))?;
 
         // Create new session
         let new_id = Uuid::new_v4();
-        let meta = SessionMeta::branched_from(
-            parent_id,
-            parent_meta.root_id.or(Some(parent_id)),
-            entry_id,
-        );
+        let meta = SessionMeta::branched_from(parent_id, parent_meta.root_id.or(Some(parent_id)), entry_id);
 
         // Copy entries up to and including the branch point
         let mut new_entries: Vec<SessionEntry> = parent_entries[..=entry_idx]
@@ -273,10 +260,7 @@ impl SessionManager {
     }
 
     /// Get all direct branches from a given entry across all sessions
-    pub async fn get_branches_from_entry(
-        &self,
-        entry_id: Uuid,
-    ) -> Result<Vec<(Uuid, SessionEntry)>> {
+    pub async fn get_branches_from_entry(&self, entry_id: Uuid) -> Result<Vec<(Uuid, SessionEntry)>> {
         let mut branches = Vec::new();
         let metas = self.list_sessions().await?;
 

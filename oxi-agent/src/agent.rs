@@ -5,13 +5,13 @@ use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::events::AgentEvent;
 use crate::state::{AgentState, SharedState};
-use crate::tools::{AgentTool, AgentToolResult, ToolRegistry};
-use crate::types::{Response, StopReason};
+use crate::tools::{ToolRegistry, AgentTool, AgentToolResult};
+use crate::types::{StopReason, Response};
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
-    get_model, progress_callback, transform_for_provider, CompactionManager, CompactionStrategy,
-    Context, LlmCompactor, Message, Provider, ProviderEvent, StreamOptions, ToolCall,
+    get_model, transform_for_provider, CompactionManager, CompactionStrategy, Context,
+    LlmCompactor, Message, Provider, ProviderEvent, StreamOptions, ToolCall, progress_callback,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -44,9 +44,11 @@ pub struct Agent {
 impl Agent {
     /// Create a new agent with the given provider and config
     pub fn new(provider: Arc<dyn Provider>, config: AgentConfig) -> Self {
-        let mut compaction_manager =
-            CompactionManager::new(config.compaction_strategy.clone(), config.context_window);
-
+        let mut compaction_manager = CompactionManager::new(
+            config.compaction_strategy.clone(),
+            config.context_window,
+        );
+        
         // Pre-initialize the LLM compactor if compaction is enabled
         if config.compaction_strategy != CompactionStrategy::Disabled {
             let model_id = config.model_id.clone();
@@ -58,14 +60,13 @@ impl Agent {
                     get_model("anthropic", &model_id)
                 }
             };
-
+            
             if let Some(model) = model {
-                let llm_compactor =
-                    Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
+                let llm_compactor = Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
                 compaction_manager.set_compactor(llm_compactor);
             }
         }
-
+        
         Self {
             inner: RwLock::new(AgentInner { config, provider }),
             tools: Arc::new(ToolRegistry::new()),
@@ -117,7 +118,10 @@ impl Agent {
 
         // Create the new provider
         let new_provider = oxi_ai::get_provider(&new_model.provider)
-            .ok_or_else(|| Error::msg(format!("Provider '{}' not found", new_model.provider)))?;
+            .ok_or_else(|| Error::msg(format!(
+                "Provider '{}' not found",
+                new_model.provider
+            )))?;
 
         // Detect API change and transform messages if needed
         {
@@ -229,16 +233,8 @@ impl Agent {
     }
 
     /// Run agent with event channel
-    pub async fn run_with_channel(
-        &self,
-        prompt: String,
-        tx: mpsc::Sender<AgentEvent>,
-    ) -> Result<Response> {
-        let _ = tx
-            .send(AgentEvent::Start {
-                prompt: prompt.clone(),
-            })
-            .await;
+    pub async fn run_with_channel(&self, prompt: String, tx: mpsc::Sender<AgentEvent>) -> Result<Response> {
+        let _ = tx.send(AgentEvent::Start { prompt: prompt.clone() }).await;
         let _ = tx.send(AgentEvent::Thinking).await;
 
         self.state.update(|s| {
@@ -253,100 +249,86 @@ impl Agent {
             } else {
                 get_model("anthropic", &inner.config.model_id)
             }
-        }
-        .ok_or_else(|| {
+        }.ok_or_else(|| {
             let inner = self.config();
             Error::msg(format!("Model not found: {}", inner.config.model_id))
         })?;
-
+        
         // Check for compaction at the start of each iteration
         let messages = &self.state.get_state().messages;
         let iteration = self.state.get_state().iteration;
-
+        
         // Estimate token count
         let context_text = serde_json::to_string(messages).unwrap_or_default();
         let context_tokens = oxi_ai::estimate_tokens(&context_text);
-
+        
         // Try to compact if needed
-        if self
-            .compaction_manager
-            .should_compact(context_tokens, iteration)
-        {
-            let _ = tx
-                .send(AgentEvent::Compaction {
-                    event: CompactionEvent::Triggered {
-                        context_tokens,
-                        iteration,
-                    },
-                })
-                .await;
-
+        if self.compaction_manager.should_compact(context_tokens, iteration) {
+            let _ = tx.send(AgentEvent::Compaction { 
+                event: CompactionEvent::Triggered { 
+                    context_tokens, 
+                    iteration 
+                }
+            }).await;
+            
             // Clone messages for compaction since compact_if_needed takes a reference
             let messages_to_compact: Vec<Message> = messages.iter().cloned().collect();
-
-            match self
-                .compaction_manager
-                .compact_if_needed(
-                    &messages_to_compact,
-                    {
-                        let inner = self.config();
-                        inner.config.compaction_instruction.clone().as_deref()
-                    },
-                    context_tokens,
-                    iteration,
-                )
-                .await
-            {
+            
+            match self.compaction_manager.compact_if_needed(
+                &messages_to_compact,
+                {
+                    let inner = self.config();
+                    inner.config.compaction_instruction.clone().as_deref()
+                },
+                context_tokens,
+                iteration,
+            ).await {
                 Ok(Some(compacted)) => {
                     let start = Instant::now();
                     let message_count = compacted.compacted_count;
-                    let _ = tx
-                        .send(AgentEvent::Compaction {
-                            event: CompactionEvent::Started { message_count },
-                        })
-                        .await;
-
+                    let _ = tx.send(AgentEvent::Compaction { 
+                        event: CompactionEvent::Started { 
+                            message_count 
+                        }
+                    }).await;
+                    
                     // Extract data before moving
                     let kept_messages = compacted.kept_messages;
                     let summary = compacted.summary;
                     let compacted_count = compacted.compacted_count;
-
+                    
                     // Replace old messages with compacted context
                     self.state.update(|s| {
                         s.replace_messages(kept_messages);
                     });
-
+                    
                     let compacted_ctx = AgentCompactedContext {
                         summary,
                         kept_messages: Vec::new(), // Already moved to state
                         compacted_count,
                     };
-                    let _ = tx
-                        .send(AgentEvent::Compaction {
-                            event: CompactionEvent::Completed {
-                                result: compacted_ctx,
-                                duration_ms: start.elapsed().as_millis() as u64,
-                            },
-                        })
-                        .await;
+                    let _ = tx.send(AgentEvent::Compaction { 
+                        event: CompactionEvent::Completed { 
+                            result: compacted_ctx,
+                            duration_ms: start.elapsed().as_millis() as u64,
+                        }
+                    }).await;
                 }
                 Ok(None) => {
                     // No compaction needed
                 }
                 Err(e) => {
-                    let _ = tx
-                        .send(AgentEvent::Compaction {
-                            event: CompactionEvent::Failed {
-                                error: e.to_string(),
-                            },
-                        })
-                        .await;
+                    let _ = tx.send(AgentEvent::Compaction { 
+                        event: CompactionEvent::Failed { 
+                            error: e.to_string() 
+                        }
+                    }).await;
                 }
             }
         }
-
+        
         let mut context = Context::new();
-
+        
         // Add system prompt
         {
             let inner = self.config();
@@ -354,7 +336,7 @@ impl Agent {
                 context.set_system_prompt(system_prompt.clone());
             }
         }
-
+        
         // Add previous messages
         for msg in &self.state.get_state().messages {
             context.add_message(msg.clone());
@@ -365,8 +347,9 @@ impl Agent {
         if !tool_defs.is_empty() {
             let mut oxi_tools = Vec::new();
             for def in &tool_defs {
-                let schema = serde_json::to_value(&def.input_schema)
-                    .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
+                let schema = serde_json::to_value(&def.input_schema).unwrap_or_else(|_| {
+                    serde_json::json!({"type": "object", "properties": {}})
+                });
                 oxi_tools.push(oxi_ai::Tool::new(&def.name, &def.description, schema));
             }
             context.set_tools(oxi_tools);
@@ -425,11 +408,7 @@ impl Agent {
                         Ok(s) => s,
                         Err(fallback_err) => {
                             let msg = fallback_err.user_friendly();
-                            let _ = tx
-                                .send(AgentEvent::Error {
-                                    message: msg.clone(),
-                                })
-                                .await;
+                            let _ = tx.send(AgentEvent::Error { message: msg.clone() }).await;
                             return Err(Error::msg(msg));
                         }
                     }
@@ -449,62 +428,45 @@ impl Agent {
                     response_text.push_str(&delta);
                     let _ = tx_clone.send(AgentEvent::TextChunk { text: delta }).await;
                 }
-                ProviderEvent::ToolCallStart {
-                    content_index,
-                    partial,
-                    ..
-                } => {
+                ProviderEvent::ToolCallStart { content_index, partial, .. } => {
                     // Track tool start - extract info from partial message if available
                     // Note: content_index is not directly accessible as tool_call_id
                     // In a full implementation, we'd track this differently
                     let _ = content_index; // Suppress unused warning
                     let _ = partial; // Suppress unused warning
-                                     // Tool call will be tracked when ToolCallEnd arrives
+                    // Tool call will be tracked when ToolCallEnd arrives
                 }
                 ProviderEvent::ToolCallEnd { tool_call, .. } => {
                     // Execute the tool and send results
                     let _tool_call_id = tool_call.id.clone();
                     let tool_name = tool_call.name.clone();
-
+                    
                     // Execute tool with progress callback
-                    let tool_result = self
-                        .execute_tool(&tools, &tool_call, tx_clone.clone())
-                        .await;
-
+                    let tool_result = self.execute_tool(&tools, &tool_call, tx_clone.clone()).await;
+                    
                     // Send result
-                    let _ = tx_clone
-                        .send(AgentEvent::ToolComplete {
-                            result: tool_result.clone(),
-                        })
-                        .await;
-
+                    let _ = tx_clone.send(AgentEvent::ToolComplete { result: tool_result.clone() }).await;
+                    
                     // Add tool result to context for next turn
-                    context.add_message(Message::User(oxi_ai::UserMessage::new(format!(
-                        "Tool {} returned: {}",
-                        tool_name, tool_result.content
-                    ))));
-
+                    context.add_message(Message::User(oxi_ai::UserMessage::new(
+                        format!("Tool {} returned: {}", tool_name, tool_result.content)
+                    )));
+                    
                     // Continue streaming for the next response
                     // Note: This is a simplified loop - a real implementation would handle
                     // continuing the conversation after tool results
                 }
                 ProviderEvent::Done { message, .. } => {
                     let content = message.text_content();
-                    let _ = tx_clone
-                        .send(AgentEvent::Complete {
-                            content: content.clone(),
-                            stop_reason: format!("{:?}", message.stop_reason),
-                        })
-                        .await;
+                    let _ = tx_clone.send(AgentEvent::Complete {
+                        content: content.clone(),
+                        stop_reason: format!("{:?}", message.stop_reason),
+                    }).await;
                     self.state.update(|s| {
                         s.add_assistant_message(content.clone());
                         s.increment_iteration();
                     });
-                    let _ = tx_clone
-                        .send(AgentEvent::Iteration {
-                            number: self.state.get_state().iteration,
-                        })
-                        .await;
+                    let _ = tx_clone.send(AgentEvent::Iteration { number: self.state.get_state().iteration }).await;
                     return Ok(Response {
                         content,
                         stop_reason: StopReason::Stop,
@@ -517,11 +479,7 @@ impl Agent {
                     } else {
                         raw_msg
                     };
-                    let _ = tx_clone
-                        .send(AgentEvent::Error {
-                            message: format!("⚠ {}", friendly),
-                        })
-                        .await;
+                    let _ = tx_clone.send(AgentEvent::Error { message: format!("⚠ {}", friendly) }).await;
                     return Err(Error::msg(friendly));
                 }
                 _ => {}
@@ -543,7 +501,7 @@ impl Agent {
     ) -> oxi_ai::ToolResult {
         let tool_call_id = tool_call.id.clone();
         let tool_name = tool_call.name.clone();
-
+        
         let tool = match tools.get(&tool_name) {
             Some(t) => t,
             None => {
@@ -554,7 +512,7 @@ impl Agent {
                 };
             }
         };
-
+        
         // Set up progress callback that emits to the channel
         let tool_call_id_clone = tool_call_id.clone();
         let tx_clone = tx.clone();
@@ -562,39 +520,35 @@ impl Agent {
             let tx = tx_clone.clone();
             let tool_call_id = tool_call_id_clone.clone();
             tokio::spawn(async move {
-                let _ = tx
-                    .send(AgentEvent::ToolProgress {
-                        tool_call_id,
-                        message: msg,
-                    })
-                    .await;
+                let _ = tx.send(AgentEvent::ToolProgress {
+                    tool_call_id,
+                    message: msg,
+                }).await;
             });
         });
-
+        
         // Set the callback on the tool
         tool.on_progress(progress_cb);
-
+        
         // tool_call.arguments is already JsonValue, use it directly
         let params = tool_call.arguments.clone();
-
+        
         // Execute the tool
         match tool.execute(&tool_call_id, params, None).await {
-            Ok(AgentToolResult {
-                success, output, ..
-            }) => oxi_ai::ToolResult {
-                tool_call_id: tool_call_id.clone(),
-                content: output,
-                status: if success {
-                    "success".to_string()
-                } else {
-                    "error".to_string()
-                },
-            },
-            Err(e) => oxi_ai::ToolResult {
-                tool_call_id: tool_call_id.clone(),
-                content: e,
-                status: "error".to_string(),
-            },
+            Ok(AgentToolResult { success, output, .. }) => {
+                oxi_ai::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    content: output,
+                    status: if success { "success".to_string() } else { "error".to_string() },
+                }
+            }
+            Err(e) => {
+                oxi_ai::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    content: e,
+                    status: "error".to_string(),
+                }
+            }
         }
     }
 
@@ -627,7 +581,10 @@ impl Agent {
         context: &Context,
         options: Option<StreamOptions>,
         tx: &mpsc::Sender<AgentEvent>,
-    ) -> std::result::Result<futures::stream::BoxStream<'static, ProviderEvent>, AgentError> {
+    ) -> std::result::Result<
+        futures::stream::BoxStream<'static, ProviderEvent>,
+        AgentError,
+    > {
         let mut last_err: Option<String> = None;
 
         for attempt in 0..=MAX_RETRIES {
@@ -635,7 +592,10 @@ impl Agent {
                 Ok(stream) => return Ok(stream.boxed()),
                 Err(e) => {
                     let msg = e.to_string();
-                    let is_rate_limit = matches!(e, oxi_ai::ProviderError::HttpError(429, _));
+                    let is_rate_limit = matches!(
+                        e,
+                        oxi_ai::ProviderError::HttpError(429, _)
+                    );
 
                     if !is_rate_limit && attempt == 0 {
                         // Non-retryable, bail immediately.
@@ -646,14 +606,12 @@ impl Agent {
 
                     if attempt < MAX_RETRIES {
                         let delay = BACKOFF_BASE_SECS.pow(attempt as u32 + 1);
-                        let _ = tx
-                            .send(AgentEvent::Retry {
-                                attempt: attempt + 1,
-                                max_retries: MAX_RETRIES,
-                                retry_after_secs: delay,
-                                reason: msg.clone(),
-                            })
-                            .await;
+                        let _ = tx.send(AgentEvent::Retry {
+                            attempt: attempt + 1,
+                            max_retries: MAX_RETRIES,
+                            retry_after_secs: delay,
+                            reason: msg.clone(),
+                        }).await;
                         tokio::time::sleep(Duration::from_secs(delay)).await;
                     }
                 }
@@ -677,7 +635,10 @@ impl Agent {
         options: Option<StreamOptions>,
         tx: &mpsc::Sender<AgentEvent>,
         primary_error: String,
-    ) -> std::result::Result<futures::stream::BoxStream<'static, ProviderEvent>, AgentError> {
+    ) -> std::result::Result<
+        futures::stream::BoxStream<'static, ProviderEvent>,
+        AgentError,
+    > {
         // Resolve fallback model
         let fallback_id = DEFAULT_FALLBACK_MODEL;
         let parts: Vec<&str> = fallback_id.split('/').collect();
@@ -711,12 +672,10 @@ impl Agent {
             }
         };
 
-        let _ = tx
-            .send(AgentEvent::Fallback {
-                from_model: format!("{}/{}", model.provider, model.id),
-                to_model: fallback_id.to_string(),
-            })
-            .await;
+        let _ = tx.send(AgentEvent::Fallback {
+            from_model: format!("{}/{}", model.provider, model.id),
+            to_model: fallback_id.to_string(),
+        }).await;
 
         // Try streaming with the fallback provider
         match Self::stream_with_retry(

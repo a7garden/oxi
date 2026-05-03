@@ -103,25 +103,25 @@ pub trait AgentTool: Send + Sync {
 }
 
 // Built-in tools
-pub mod bash;
+pub mod read;
+pub mod write;
 pub mod edit;
+pub mod bash;
+pub mod grep;
+pub mod find;
+pub mod ls;
+pub mod truncate;
 pub mod edit_diff;
 pub mod file_mutation_queue;
-pub mod find;
-pub mod grep;
-pub mod ls;
-pub mod read;
-pub mod truncate;
-pub mod write;
 
 // Re-export for convenience
-pub use bash::BashTool;
-pub use edit::EditTool;
-pub use find::FindTool;
-pub use grep::GrepTool;
-pub use ls::LsTool;
 pub use read::ReadTool;
 pub use write::WriteTool;
+pub use edit::EditTool;
+pub use bash::BashTool;
+pub use grep::GrepTool;
+pub use find::FindTool;
+pub use ls::LsTool;
 
 /// Tool registry for managing available tools
 #[derive(Clone)]
@@ -167,11 +167,7 @@ impl ToolRegistry {
 
     /// Get all tool definitions
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        self.tools
-            .read()
-            .values()
-            .map(|t| t.to_definition())
-            .collect()
+        self.tools.read().values().map(|t| t.to_definition()).collect()
     }
 
     /// Get all tools as a slice

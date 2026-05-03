@@ -67,17 +67,15 @@ impl CircuitBreaker {
                 if let Some(t) = *opened_at {
                     if t.elapsed() >= self.config.open_duration {
                         drop(opened_at);
-                        self.state
-                            .store(CircuitState::HalfOpen as u8, Ordering::SeqCst);
+                        self.state.store(CircuitState::HalfOpen as u8, Ordering::SeqCst);
                         self.consecutive_successes.store(0, Ordering::SeqCst);
                         return Ok(());
                     }
                 }
                 Err(CircuitOpenError {
-                    remaining: self
-                        .config
-                        .open_duration
-                        .saturating_sub(opened_at.map(|t| t.elapsed()).unwrap_or_default()),
+                    remaining: self.config.open_duration.saturating_sub(
+                        opened_at.map(|t| t.elapsed()).unwrap_or_default(),
+                    ),
                 })
             }
             CircuitState::HalfOpen => Ok(()),
@@ -93,8 +91,7 @@ impl CircuitBreaker {
             CircuitState::HalfOpen => {
                 let prev = self.consecutive_successes.fetch_add(1, Ordering::SeqCst);
                 if prev + 1 >= self.config.half_open_successes as u64 {
-                    self.state
-                        .store(CircuitState::Closed as u8, Ordering::SeqCst);
+                    self.state.store(CircuitState::Closed as u8, Ordering::SeqCst);
                     self.consecutive_failures.store(0, Ordering::SeqCst);
                 }
             }
@@ -121,8 +118,7 @@ impl CircuitBreaker {
     }
 
     pub fn reset(&self) {
-        self.state
-            .store(CircuitState::Closed as u8, Ordering::SeqCst);
+        self.state.store(CircuitState::Closed as u8, Ordering::SeqCst);
         self.consecutive_failures.store(0, Ordering::SeqCst);
         self.consecutive_successes.store(0, Ordering::SeqCst);
         *self.opened_at.lock() = None;
@@ -152,36 +148,15 @@ pub struct PartialResponse {
 }
 
 impl PartialResponse {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn push_text(&mut self, delta: &str) {
-        self.text.push_str(delta);
-    }
-    pub fn push_thinking(&mut self, delta: &str) {
-        self.has_thinking = true;
-        self.thinking.push_str(delta);
-    }
-    pub fn take_text(&mut self) -> String {
-        std::mem::take(&mut self.text)
-    }
-    pub fn text(&self) -> &str {
-        &self.text
-    }
-    pub fn thinking(&self) -> &str {
-        &self.thinking
-    }
-    pub fn has_thinking(&self) -> bool {
-        self.has_thinking
-    }
-    pub fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.thinking.is_empty()
-    }
-    pub fn clear(&mut self) {
-        self.text.clear();
-        self.thinking.clear();
-        self.has_thinking = false;
-    }
+    pub fn new() -> Self { Self::default() }
+    pub fn push_text(&mut self, delta: &str) { self.text.push_str(delta); }
+    pub fn push_thinking(&mut self, delta: &str) { self.has_thinking = true; self.thinking.push_str(delta); }
+    pub fn take_text(&mut self) -> String { std::mem::take(&mut self.text) }
+    pub fn text(&self) -> &str { &self.text }
+    pub fn thinking(&self) -> &str { &self.thinking }
+    pub fn has_thinking(&self) -> bool { self.has_thinking }
+    pub fn is_empty(&self) -> bool { self.text.is_empty() && self.thinking.is_empty() }
+    pub fn clear(&mut self) { self.text.clear(); self.thinking.clear(); self.has_thinking = false; }
 }
 
 /// Fallback model chain.
@@ -191,23 +166,13 @@ pub struct FallbackChain {
 }
 
 impl Default for FallbackChain {
-    fn default() -> Self {
-        Self {
-            models: vec!["openai/gpt-4o-mini".to_string()],
-        }
-    }
+    fn default() -> Self { Self { models: vec!["openai/gpt-4o-mini".to_string()] } }
 }
 
 impl FallbackChain {
-    pub fn new(models: Vec<String>) -> Self {
-        Self { models }
-    }
-    pub fn get(&self, index: usize) -> Option<&str> {
-        self.models.get(index).map(|s| s.as_str())
-    }
-    pub fn is_empty(&self) -> bool {
-        self.models.is_empty()
-    }
+    pub fn new(models: Vec<String>) -> Self { Self { models } }
+    pub fn get(&self, index: usize) -> Option<&str> { self.models.get(index).map(|s| s.as_str()) }
+    pub fn is_empty(&self) -> bool { self.models.is_empty() }
 }
 
 #[cfg(test)]
@@ -222,10 +187,7 @@ mod tests {
 
     #[test]
     fn circuit_breaker_opens_after_threshold() {
-        let config = CircuitBreakerConfig {
-            failure_threshold: 3,
-            ..Default::default()
-        };
+        let config = CircuitBreakerConfig { failure_threshold: 3, ..Default::default() };
         let cb = CircuitBreaker::new(config);
         cb.record_failure();
         cb.record_failure();
@@ -236,10 +198,7 @@ mod tests {
 
     #[test]
     fn circuit_breaker_resets() {
-        let config = CircuitBreakerConfig {
-            failure_threshold: 1,
-            ..Default::default()
-        };
+        let config = CircuitBreakerConfig { failure_threshold: 1, ..Default::default() };
         let cb = CircuitBreaker::new(config);
         cb.record_failure();
         assert!(cb.allow_request().is_err());

@@ -6,7 +6,7 @@
 use crate::env_api_keys;
 use std::collections::HashMap;
 use std::sync::RwLock;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 /// Information about an OAuth token
@@ -124,7 +124,6 @@ impl ProviderAuth for ApiKeyAuth {
 }
 
 /// OAuth-based authentication with auto-refresh support
-#[derive(Debug, Clone)]
 pub struct OAuthAuth {
     provider_name: String,
     token: Option<OAuthTokenInfo>,
@@ -191,7 +190,6 @@ impl ProviderAuth for OAuthAuth {
 }
 
 /// Ambient credential authentication (AWS IAM, Google ADC, etc.)
-#[derive(Debug, Clone)]
 pub struct AmbientAuth {
     provider_name: String,
     check_fn: Box<dyn Fn() -> bool + Send + Sync>,
@@ -418,14 +416,14 @@ impl ProviderAuthRegistry {
     }
     
     /// Update OAuth token for a provider
-    pub fn set_oauth_token(&self, provider: &str, token: OAuthTokenInfo) {
+    pub fn set_oauth_token(&mut self, provider: &str, token: OAuthTokenInfo) {
         if let Some(auth) = self.providers.get_mut(provider) {
             auth.set_oauth_token(token);
         }
     }
     
     /// Update API key directly
-    pub fn set_api_key(&self, provider: &str, api_key: String) {
+    pub fn set_api_key(&mut self, provider: &str, api_key: String) {
         if let Some(auth) = self.providers.get_mut(provider) {
             auth.set_api_key(api_key);
         } else {
@@ -589,9 +587,10 @@ mod tests {
     fn test_oauth_auth_refresh_callback() {
         let mut auth = OAuthAuth::new("anthropic");
         
-        let mut refreshed = false;
-        auth.on_token_refresh(|_| {
-            refreshed = true;
+        let refreshed = std::sync::Arc::new(std::sync::Mutex::new(false));
+        let refreshed_clone = refreshed.clone();
+        auth.on_token_refresh(move |_| {
+            *refreshed_clone.lock().unwrap() = true;
         });
         
         let new_token = OAuthTokenInfo::new(
@@ -601,7 +600,7 @@ mod tests {
         );
         auth.set_oauth_token(new_token);
         
-        assert!(refreshed);
+        assert!(*refreshed.lock().unwrap());
         assert_eq!(auth.get_api_key(), Some("new_access".to_string()));
     }
 
@@ -713,20 +712,20 @@ mod tests {
     fn test_registry_priority() {
         std::env::set_var("ANTHROPIC_API_KEY", "sk-env");
         
-        let registry = ProviderAuthRegistry::new();
+        let mut registry = ProviderAuthRegistry::new();
         
         // Register stored key
-        registry.register_api_key("anthropic", Some("sk-stored"));
-        registry.set_runtime_key("anthropic", "sk-runtime");
+        registry.register_api_key("anthropic", Some("sk-stored".to_string()));
+        registry.set_runtime_key("anthropic", "sk-runtime".to_string());
         
         // Runtime should win
-        assert_eq!(registry.get_api_key("anthropic"), Some("sk-runtime"));
+        assert_eq!(registry.get_api_key("anthropic"), Some("sk-runtime".to_string()));
         
         // Remove runtime
         registry.remove_runtime_key("anthropic");
         
         // Stored should win
-        assert_eq!(registry.get_api_key("anthropic"), Some("sk-stored"));
+        assert_eq!(registry.get_api_key("anthropic"), Some("sk-stored".to_string()));
         
         std::env::remove_var("ANTHROPIC_API_KEY");
     }
@@ -747,7 +746,7 @@ mod tests {
 
     #[test]
     fn test_registry_get_auth_status() {
-        let mut registry = ProviderAuthRegistry::new();
+        let registry = ProviderAuthRegistry::new();
         
         registry.set_runtime_key("openai", "key".to_string());
         
