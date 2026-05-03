@@ -162,19 +162,23 @@ impl Component for SelectList {
         }
 
         match event {
-            Event::Key(KeyEvent { code: KeyCode::Up, .. })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers,
-            }) if !modifiers.ctrl && !modifiers.alt => {
+            Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
                 self.select_prev();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Down, .. })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('j'),
-                modifiers,
-            }) if !modifiers.ctrl && !modifiers.alt => {
+            Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+                self.select_next();
+                true
+            }
+            Event::Key(KeyEvent { code: KeyCode::Char('k'), modifiers })
+                if !modifiers.ctrl && !modifiers.alt =>
+            {
+                self.select_prev();
+                true
+            }
+            Event::Key(KeyEvent { code: KeyCode::Char('j'), modifiers })
+                if !modifiers.ctrl && !modifiers.alt =>
+            {
                 self.select_next();
                 true
             }
