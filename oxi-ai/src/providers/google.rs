@@ -86,7 +86,9 @@ impl Provider for GoogleProvider {
             generation_config["maxOutputTokens"] = serde_json::json!(max);
         }
         
-        if !generation_config.is_array() || !generation_config.as_array().unwrap().is_empty() {
+        // Only add generation config if there are actual values
+        let has_config = options.temperature.is_some() || options.max_tokens.is_some();
+        if has_config {
             body["generationConfig"] = generation_config;
         }
         
@@ -296,12 +298,11 @@ fn parse_google_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                         _ => StopReason::Stop,
                     };
                     
-                    if matches!(reason, StopReason::Stop | StopReason::Length) {
-                        events.push(ProviderEvent::Done {
-                            reason,
-                            message: partial_message.clone(),
-                        });
-                    }
+                    // Always emit Done event — even on error, stream has ended
+                    events.push(ProviderEvent::Done {
+                        reason,
+                        message: partial_message.clone(),
+                    });
                 }
             }
         }
