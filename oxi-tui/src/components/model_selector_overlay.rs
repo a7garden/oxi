@@ -4,9 +4,6 @@
 //! indicators for the currently active model. Supports arrow-key navigation,
 //! fuzzy filtering, and selection callbacks.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
 use crate::autocomplete::FuzzyMatcher;
 use crate::utils::{truncate_to_width, visible_width};
 use crate::{Cell, Color, Component, Event, KeyCode, KeyEvent, Rect, Size, Surface};

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::components::Loader;
-use crate::{Cell, Color, Component, Event, KeyCode, KeyEvent, Rect, Size, Surface};
+use crate::{Color, Component, Event, KeyCode, Rect, Size, Surface};
 
 /// Callback when the loader is aborted by the user.
 pub type OnAbortFn = Box<dyn Fn() + Send>;
@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn test_handle_ctrl_c() {
         let mut loader = CancellableLoader::new("Working...");
-        let event = Event::Key(KeyEvent::with_modifiers(
+        let event = Event::Key(crate::KeyEvent::with_modifiers(
             KeyCode::Char('c'),
             crate::event::KeyModifiers::new().with_ctrl(),
         ));
