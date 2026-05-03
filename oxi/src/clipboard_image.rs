@@ -115,18 +115,18 @@ fn read_image_via_wl_paste() -> Option<ClipboardImage> {
         return None;
     }
 
-    let types: Vec<&str> = list_output
+    let types: Vec<String> = list_output
         .stdout
         .split(|&b| b == b'\n')
         .filter_map(|b| std::str::from_utf8(b).ok())
-        .filter_map(|s| s.trim().parse().ok())
+        .filter_map(|s| s.trim().to_string().parse::<String>().ok())
         .collect();
 
     // Try image types in preferred order
     let preferred_types = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
     for mime_type in preferred_types {
-        if types.iter().any(|t| *t == mime_type) {
+        if types.iter().any(|t| t == mime_type) {
             let data = run_command_timeout(
                 "wl-paste",
                 &["--type", mime_type, "--no-newline"],
@@ -156,12 +156,12 @@ fn read_image_via_xclip() -> Option<ClipboardImage> {
     )
     .ok()?;
 
-    let candidate_types: Vec<&str> = if targets_output.status.success() {
+    let candidate_types: Vec<String> = if targets_output.status.success() {
         targets_output
             .stdout
             .split(|&b| b == b'\n')
             .filter_map(|b| std::str::from_utf8(b).ok())
-            .filter_map(|s| s.trim().parse().ok())
+            .filter_map(|s| s.trim().to_string().parse::<String>().ok())
             .collect()
     } else {
         vec![]
@@ -172,7 +172,7 @@ fn read_image_via_xclip() -> Option<ClipboardImage> {
 
     for mime_type in preferred_types {
         // Check if this type is available
-        if !candidate_types.is_empty() && !candidate_types.contains(&mime_type) {
+        if !candidate_types.is_empty() && !candidate_types.iter().any(|t| t == mime_type) {
             continue;
         }
 

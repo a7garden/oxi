@@ -29,6 +29,7 @@ use tokio::sync::mpsc;
 
 
 use crate::clipboard_image;
+use crate::image_convert::convert_to_png;
 use crate::image_resize::{resize_image, ResizeOptions, ResizedImage};
 use crate::file_processor::{process_file_args, FileProcessorOptions};
 use crate::rpc_mode::{PasteHandler, PasteState};

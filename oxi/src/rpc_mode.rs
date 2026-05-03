@@ -7,6 +7,7 @@
 
 use crate::App;
 use anyhow::{Context, Result};
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{BufRead, Write};
@@ -497,7 +498,7 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
             images,
         } => {
             // Parse images
-            let image_sources = server.parse_images(images);
+            let image_sources = RpcServer::parse_images(images);
 
             // In a real implementation, this would send to the agent
             // For now, we just update state
@@ -1037,10 +1038,11 @@ impl PasteHandler {
                     None
                 } else {
                     // Not a paste sequence, pass through buffered bytes
-                    let result = self.buffer.split_first().copied().cloned();
+                    // Not a paste sequence, pass through buffered bytes
+                    let first_byte = self.buffer.first().copied();
                     self.buffer.clear();
                     // Also pass through current byte
-                    Some(byte)
+                    first_byte
                 }
             }
             PasteState::Pasting => {
@@ -1104,7 +1106,8 @@ impl PasteHandler {
         if self.buffer.len() < sequence.len() {
             return false;
         }
-        self.buffer[self.buffer.len() - sequence.len()..] == sequence
+        let end_pos = self.buffer.len() - sequence.len();
+        &self.buffer[end_pos..] == sequence
     }
 
     /// Extract image data from clipboard paste (basic heuristic)

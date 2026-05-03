@@ -555,7 +555,7 @@ pub trait Extension: Send + Sync {
     /// Use this for pre-processing, validation, or logging tool calls.
     /// Return `Err` to abort the tool execution (optional, implement
     /// [`on_before_tool_call_with_result`] for that).
-    fn on_before_tool_call(&self, _tool: &str, _args: &Value) -> Result<(), crate::error::Error> {
+    fn on_before_tool_call(&self, _tool: &str, _args: &Value) -> Result<(), anyhow::Error> {
         Ok(())
     }
 
@@ -563,7 +563,7 @@ pub trait Extension: Send + Sync {
     ///
     /// This is similar to [`on_tool_result`] but provides access to the
     /// full [`AgentToolResult`] including metadata.
-    fn on_after_tool_call(&self, _tool: &str, _result: &AgentToolResult) -> Result<(), crate::error::Error> {
+    fn on_after_tool_call(&self, _tool: &str, _result: &AgentToolResult) -> Result<(), anyhow::Error> {
         Ok(())
     }
 
@@ -573,7 +573,7 @@ pub trait Extension: Send + Sync {
     ///
     /// Use this to save any state that should be preserved through compaction,
     /// or to log that compaction is starting.
-    fn on_before_compaction(&self, _ctx: &crate::CompactionContext) -> Result<(), crate::error::Error> {
+    fn on_before_compaction(&self, _ctx: &crate::CompactionContext) -> Result<(), anyhow::Error> {
         Ok(())
     }
 
@@ -581,7 +581,7 @@ pub trait Extension: Send + Sync {
     ///
     /// The `summary` contains the generated summary of the compacted messages.
     /// Use this to restore state, update indices, or log compaction results.
-    fn on_after_compaction(&self, _summary: &str) -> Result<(), crate::error::Error> {
+    fn on_after_compaction(&self, _summary: &str) -> Result<(), anyhow::Error> {
         Ok(())
     }
 
@@ -590,7 +590,7 @@ pub trait Extension: Send + Sync {
     /// Called when an error occurs in the agent.
     ///
     /// Use this to log errors, send notifications, or perform recovery actions.
-    fn on_error(&self, _error: &crate::error::Error) -> Result<(), crate::error::Error> {
+    fn on_error(&self, _error: &anyhow::Error) -> Result<(), anyhow::Error> {
         Ok(())
     }
 }
@@ -935,7 +935,7 @@ impl ExtensionRegistry {
         &self,
         tool: &str,
         args: &Value,
-    ) -> Vec<(String, crate::error::Error)> {
+    ) -> Vec<(String, anyhow::Error)> {
         let mut errors = Vec::new();
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -955,7 +955,7 @@ impl ExtensionRegistry {
         &self,
         tool: &str,
         result: &AgentToolResult,
-    ) -> Vec<(String, crate::error::Error)> {
+    ) -> Vec<(String, anyhow::Error)> {
         let mut errors = Vec::new();
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -976,7 +976,7 @@ impl ExtensionRegistry {
     pub fn emit_before_compaction(
         &self,
         ctx: &crate::CompactionContext,
-    ) -> Vec<(String, crate::error::Error)> {
+    ) -> Vec<(String, anyhow::Error)> {
         let mut errors = Vec::new();
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -995,7 +995,7 @@ impl ExtensionRegistry {
     pub fn emit_after_compaction(
         &self,
         summary: &str,
-    ) -> Vec<(String, crate::error::Error)> {
+    ) -> Vec<(String, anyhow::Error)> {
         let mut errors = Vec::new();
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -1015,8 +1015,8 @@ impl ExtensionRegistry {
     /// Broadcast `on_error` to all enabled extensions.
     pub fn emit_error(
         &self,
-        error: &crate::error::Error,
-    ) -> Vec<(String, crate::error::Error)> {
+        error: &anyhow::Error,
+    ) -> Vec<(String, anyhow::Error)> {
         let mut errors = Vec::new();
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();

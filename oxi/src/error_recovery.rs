@@ -202,11 +202,11 @@ impl RetryableError {
 
     /// Check if this error indicates we should wait before retry
     pub fn has_required_wait(&self) -> bool {
-        matches!(
-            self,
-            RetryableError::RateLimitError { retry_after }
-                | RetryableError::ServiceUnavailable { retry_after }
-        ) && *retry_after > 0
+        match self {
+            RetryableError::RateLimitError { retry_after } => *retry_after > 0,
+            RetryableError::ServiceUnavailable { retry_after } => *retry_after > 0,
+            _ => false,
+        }
     }
 }
 
@@ -491,13 +491,13 @@ pub fn format_retry_message(
     error: &RetryableError,
     can_cancel: bool,
 ) -> String {
-    let error_str = match error {
-        RetryableError::NetworkError => "Network error",
-        RetryableError::RateLimitError { .. } => "Rate limit exceeded",
+    let error_str: String = match error {
+        RetryableError::NetworkError => "Network error".to_string(),
+        RetryableError::RateLimitError { .. } => "Rate limit exceeded".to_string(),
         RetryableError::ServerError { code } => format!("Server error ({})", code),
-        RetryableError::Timeout => "Request timeout",
-        RetryableError::ServiceUnavailable { .. } => "Service unavailable",
-        RetryableError::TemporaryFailure => "Temporary failure",
+        RetryableError::Timeout => "Request timeout".to_string(),
+        RetryableError::ServiceUnavailable { .. } => "Service unavailable".to_string(),
+        RetryableError::TemporaryFailure => "Temporary failure".to_string(),
     };
 
     let cancel_hint = if can_cancel { " (Esc to cancel)" } else { "" };
@@ -805,7 +805,7 @@ mod tests {
 
     #[test]
     fn test_retry_result_exhausted() {
-        let result = RetryResult::Exhausted {
+        let result: RetryResult<()> = RetryResult::Exhausted {
             attempts: 3,
             last_error: RetryableError::NetworkError,
         };
@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn test_retry_result_aborted() {
-        let result = RetryResult::Aborted { attempts: 2 };
+        let result: RetryResult<()> = RetryResult::Aborted { attempts: 2 };
         match result {
             RetryResult::Aborted { attempts } => assert_eq!(attempts, 2),
             _ => panic!("Expected Aborted"),
@@ -832,7 +832,7 @@ mod tests {
 
     #[test]
     fn test_retry_result_timed_out() {
-        let result = RetryResult::TimedOut {
+        let result: RetryResult<()> = RetryResult::TimedOut {
             attempts: 3,
             elapsed_ms: 30000,
         };

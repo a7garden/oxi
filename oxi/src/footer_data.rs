@@ -332,12 +332,10 @@ impl FooterData {
             AgentEvent::MessageEnd { message } => {
                 // Message complete - extract usage if available
                 if let oxi_ai::Message::Assistant(a) = message {
-                    if let Some(usage) = &a.usage {
-                        self.update_tokens(
-                            usage.input_tokens as u32,
-                            usage.output_tokens as u32,
-                        );
-                    }
+                    self.update_tokens(
+                        a.usage.input as u32,
+                        a.usage.output as u32,
+                    );
                 }
             }
             AgentEvent::Usage { input_tokens, output_tokens } => {

@@ -10,6 +10,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use rand::RngCore;
+
 /// Session info for display in session selector
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
@@ -512,7 +514,7 @@ impl LoginDialog {
 
     /// Open the authorization URL in the default browser
     pub fn open_auth_url(&self, url: &str) -> Result<(), String> {
-        crate::oauth_server::open_browser(url).map_err(|e| format!("Failed to open browser: {}", e))
+        crate::oauth_server::open_browser(url).map(|_child| ()).map_err(|e| format!("Failed to open browser: {}", e))
     }
 
     /// Start the OAuth callback server
