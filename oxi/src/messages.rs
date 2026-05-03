@@ -178,7 +178,7 @@ pub fn compact_messages(
     }
 
     let to_keep = max_messages / 2;
-    let to_summarize = messages.len() - to_keep;
+    let _to_summarize = messages.len() - to_keep;
 
     // Keep the first few messages
     let kept: Vec<SimpleMessage> = messages.iter().take(to_keep).cloned().collect();

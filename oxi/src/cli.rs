@@ -2,7 +2,7 @@
 //!
 //! Provides command-line argument parsing for the oxi CLI.
 
-use clap::{Arg, ArgAction, Command, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use std::str::FromStr;
 

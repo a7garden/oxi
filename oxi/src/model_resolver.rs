@@ -5,7 +5,6 @@
 
 use crate::settings::Settings;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Known AI providers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -262,7 +261,7 @@ pub fn resolve_cli_model(
     cli_provider: Option<&str>,
     cli_model: Option<&str>,
     available_models: &[Model],
-    settings: Option<&Settings>,
+    _settings: Option<&Settings>,
 ) -> ResolveCliModelResult {
     let cli_model = match cli_model {
         Some(m) => m,
