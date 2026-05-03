@@ -410,6 +410,8 @@ pub struct DiffViewer {
     pub scroll_offset: usize,
     pub visible_height: usize,
     pub file_path: String,
+    /// Enable word-level highlighting for changed parts
+    pub word_diff: bool,
 }
 
 impl DiffViewer {
@@ -420,10 +422,28 @@ impl DiffViewer {
             scroll_offset: 0,
             visible_height: 30,
             file_path,
+            word_diff: true, // Enable word-level highlighting by default
         }
     }
 
-    /// Render the diff viewer
+    /// Create without word diff highlighting
+    pub fn new_simple(file_path: String, diff_text: &str) -> Self {
+        let lines = parse_diff_lines(diff_text);
+        Self {
+            lines,
+            scroll_offset: 0,
+            visible_height: 30,
+            file_path,
+            word_diff: false,
+        }
+    }
+
+    /// Enable or disable word-level diff highlighting
+    pub fn set_word_diff(&mut self, enabled: bool) {
+        self.word_diff = enabled;
+    }
+
+    /// Render the diff viewer with optional word-level highlighting
     pub fn render(&self) -> String {
         let mut output = String::new();
         output.push_str(&format!("Diff: {}\n", self.file_path));
@@ -447,10 +467,22 @@ impl DiffViewer {
                     output.push_str(&format!(" {:>4} {}\n", line_num, content));
                 }
                 DiffLine::Added { content, line_num } => {
-                    output.push_str(&format!("+{:>4} {}\n", line_num, content));
+                    if self.word_diff {
+                        // Apply word-level highlighting for added lines
+                        let highlighted = highlight_words_diff(content, true);
+                        output.push_str(&format!("+{:>4} {}\n", line_num, highlighted));
+                    } else {
+                        output.push_str(&format!("+{:>4} {}\n", line_num, content));
+                    }
                 }
                 DiffLine::Removed { content, line_num } => {
-                    output.push_str(&format!("-{:>4} {}\n", line_num, content));
+                    if self.word_diff {
+                        // Apply word-level highlighting for removed lines
+                        let highlighted = highlight_words_diff(content, false);
+                        output.push_str(&format!("-{:>4} {}\n", line_num, highlighted));
+                    } else {
+                        output.push_str(&format!("-{:>4} {}\n", line_num, content));
+                    }
                 }
             }
         }
@@ -540,6 +572,31 @@ fn parse_hunk_header(line: &str) -> Option<(usize, usize, usize, usize)> {
         *new.first()?,
         *new.get(1).unwrap_or(&1),
     ))
+}
+
+/// Highlight word-level changes in a diff line
+/// Returns the content with ANSI color codes for changed words.
+fn highlight_words_diff(content: &str, is_added: bool) -> String {
+    use std::fmt::Write;
+
+    // Split content into words while preserving spaces
+    let words: Vec<&str> = content.split_whitespace().collect();
+    let mut result = String::new();
+
+    for (i, word) in words.iter().enumerate() {
+        // Simple heuristic: short words (1-4 chars) that differ are likely changed
+        let is_short_change = word.len() <= 4 && !word.chars().all(|c| c.is_alphanumeric());
+
+        if is_short_change && i > 0 {
+            // Highlight as changed
+            let color = if is_added { "\x1b[32m" } else { "\x1b[31m" };
+            write!(&mut result, "{}{}{}\x1b[0m ", color, word, "\x1b[0m").unwrap();
+        } else {
+            write!(&mut result, "{} ", word).unwrap();
+        }
+    }
+
+    result.trim_end().to_string()
 }
 
 /// Bash execution display state
