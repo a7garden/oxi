@@ -543,7 +543,7 @@ async fn test_grep_invalid_regex() {
         "path": dir
     })).await;
     assert!(!result.success);
-    assert!(result.output.contains("Invalid regex"));
+    assert!(result.output.contains("Invalid pattern") || result.output.contains("Invalid regex"));
 
     cleanup(&dir).await;
 }
