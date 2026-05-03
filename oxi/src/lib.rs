@@ -17,9 +17,11 @@ pub mod tui_interactive;
 
 // Utility modules
 pub mod auth_storage;
+pub mod auto_compaction;
 pub mod bash_executor;
 pub mod cli;
 pub mod diagnostics;
+pub mod error_recovery;
 pub mod event_bus;
 pub mod footer_data;
 pub mod git_utils;
@@ -29,6 +31,7 @@ pub mod model_resolver;
 pub mod output_guard;
 pub mod resource_loader;
 pub mod tmux_detect;
+pub mod version_check;
 
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};

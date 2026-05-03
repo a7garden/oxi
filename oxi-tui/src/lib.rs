@@ -28,7 +28,7 @@ pub use components::{
     Completion, ContentBlockDisplay, Editor, EditorOptions, FileCompleter, Footer, FooterData,
     FooterTheme, Image, ImageProtocol, Input, InputOptions, Loader, Markdown, MarkdownTheme,
     Mention, MessageRole, SelectItem, SelectList, SettingEntry, SettingValue, SettingsList,
-    SettingsOverlay, Spacer, StreamingState, Text, TruncatedText,
+    SettingsOverlay, Spacer, StreamingState, Text, ThemeInfo, ThemeSelector, TruncatedText,
 };
 pub use event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent,

@@ -204,7 +204,8 @@ impl RetryableError {
     pub fn has_required_wait(&self) -> bool {
         matches!(
             self,
-            RetryableError::RateLimitError { retry_after } | RetryableError::ServiceUnavailable { retry_after }
+            RetryableError::RateLimitError { retry_after }
+                | RetryableError::ServiceUnavailable { retry_after }
         ) && *retry_after > 0
     }
 }
@@ -289,7 +290,10 @@ pub enum RetryResult<T> {
     /// Success with the result
     Success(T),
     /// All retries exhausted
-    Exhausted { attempts: u32, last_error: RetryableError },
+    Exhausted {
+        attempts: u32,
+        last_error: RetryableError,
+    },
     /// User aborted the retry
     Aborted { attempts: u32 },
     /// Timeout exceeded
@@ -297,7 +301,10 @@ pub enum RetryResult<T> {
 }
 
 /// Execute a function with retry logic
-pub async fn with_retry<R, F, Fut>(config: &RetryConfig, f: F) -> Result<RetryResult<R>, RetryableError>
+pub async fn with_retry<R, F, Fut>(
+    config: &RetryConfig,
+    f: F,
+) -> Result<RetryResult<R>, RetryableError>
 where
     F: Fn() -> Fut,
     Fut: Future<Output = Result<R, RetryableError>>,
@@ -359,16 +366,28 @@ where
 {
     match with_retry(config, f).await? {
         RetryResult::Success(r) => Ok(r),
-        RetryResult::Exhausted { attempts, last_error } => {
-            warn!("Retry exhausted after {} attempts: {}", attempts, last_error);
+        RetryResult::Exhausted {
+            attempts,
+            last_error,
+        } => {
+            warn!(
+                "Retry exhausted after {} attempts: {}",
+                attempts, last_error
+            );
             Err(last_error)
         }
         RetryResult::Aborted { attempts } => {
             warn!("Retry aborted after {} attempts", attempts);
             Err(RetryableError::TemporaryFailure) // Use generic error for abort
         }
-        RetryResult::TimedOut { attempts, elapsed_ms } => {
-            warn!("Retry timed out after {} attempts ({}ms)", attempts, elapsed_ms);
+        RetryResult::TimedOut {
+            attempts,
+            elapsed_ms,
+        } => {
+            warn!(
+                "Retry timed out after {} attempts ({}ms)",
+                attempts, elapsed_ms
+            );
             Err(RetryableError::Timeout)
         }
     }
@@ -481,11 +500,7 @@ pub fn format_retry_message(
         RetryableError::TemporaryFailure => "Temporary failure",
     };
 
-    let cancel_hint = if can_cancel {
-        " (Esc to cancel)"
-    } else {
-        ""
-    };
+    let cancel_hint = if can_cancel { " (Esc to cancel)" } else { "" };
 
     format!(
         "Retrying ({}/{}) in {}s: {}{}",
@@ -501,7 +516,10 @@ pub fn format_error_message(error: &RetryableError) -> String {
         }
         RetryableError::RateLimitError { retry_after } => {
             if *retry_after > 0 {
-                format!("Rate limit hit. Wait {}s or reduce request frequency.", retry_after)
+                format!(
+                    "Rate limit hit. Wait {}s or reduce request frequency.",
+                    retry_after
+                )
             } else {
                 "Rate limit exceeded. Try again in a few moments.".to_string()
             }
@@ -514,14 +532,15 @@ pub fn format_error_message(error: &RetryableError) -> String {
         }
         RetryableError::ServiceUnavailable { retry_after } => {
             if *retry_after > 0 {
-                format!("Service temporarily unavailable. Retry in {}s.", retry_after)
+                format!(
+                    "Service temporarily unavailable. Retry in {}s.",
+                    retry_after
+                )
             } else {
                 "Service temporarily unavailable. Try again later.".to_string()
             }
         }
-        RetryableError::TemporaryFailure => {
-            "Temporary failure. Try again.".to_string()
-        }
+        RetryableError::TemporaryFailure => "Temporary failure. Try again.".to_string(),
     }
 }
 
@@ -585,14 +604,8 @@ mod tests {
     fn test_should_retry_rate_limit() {
         let config = RetryConfig::default();
 
-        assert!(config.should_retry(
-            &RetryableError::RateLimitError { retry_after: 0 },
-            0
-        ));
-        assert!(config.should_retry(
-            &RetryableError::RateLimitError { retry_after: 30 },
-            0
-        ));
+        assert!(config.should_retry(&RetryableError::RateLimitError { retry_after: 0 }, 0));
+        assert!(config.should_retry(&RetryableError::RateLimitError { retry_after: 30 }, 0));
     }
 
     #[test]
@@ -715,7 +728,7 @@ mod tests {
     #[test]
     fn test_countdown_timer_basic() {
         let timer = CountdownTimer::new(5000, None, None);
-        
+
         assert!(!timer.is_complete());
         assert_eq!(timer.remaining_ms(), 5000);
     }
@@ -723,7 +736,7 @@ mod tests {
     #[test]
     fn test_countdown_timer_progress() {
         let timer = CountdownTimer::new(10000, None, None);
-        
+
         // At start, progress should be 0
         assert!((timer.progress() - 0.0).abs() < 0.01);
     }
@@ -731,7 +744,7 @@ mod tests {
     #[test]
     fn test_countdown_timer_formatted() {
         let timer = CountdownTimer::new(3500, None, None);
-        
+
         // Should round to seconds
         assert_eq!(timer.formatted(), "3s");
     }
@@ -740,7 +753,7 @@ mod tests {
     fn test_countdown_timer_cancel() {
         let timer = CountdownTimer::new(5000, None, None);
         timer.cancel();
-        
+
         assert!(timer.is_complete());
         assert_eq!(timer.remaining_ms(), 0);
     }
@@ -797,7 +810,10 @@ mod tests {
             last_error: RetryableError::NetworkError,
         };
         match result {
-            RetryResult::Exhausted { attempts, last_error } => {
+            RetryResult::Exhausted {
+                attempts,
+                last_error,
+            } => {
                 assert_eq!(attempts, 3);
                 assert!(matches!(last_error, RetryableError::NetworkError));
             }
@@ -821,7 +837,10 @@ mod tests {
             elapsed_ms: 30000,
         };
         match result {
-            RetryResult::TimedOut { attempts, elapsed_ms } => {
+            RetryResult::TimedOut {
+                attempts,
+                elapsed_ms,
+            } => {
                 assert_eq!(attempts, 3);
                 assert_eq!(elapsed_ms, 30000);
             }
@@ -832,11 +851,11 @@ mod tests {
     #[test]
     fn test_jitter_variance() {
         let config = RetryConfig::default();
-        
+
         // Delays should vary due to jitter
         let delay1 = config.next_delay(1);
         let delay2 = config.next_delay(1);
-        
+
         // Note: with jitter there may be some variance, but with low jitter (0.1)
         // the variance should be small relative to the base delay
         let diff = (delay1.as_millis() as i64 - delay2.as_millis() as i64).abs();
@@ -856,13 +875,12 @@ mod tests {
 
     #[test]
     fn test_zero_jitter() {
-        let config = RetryConfig::new()
-            .with_jitter(0.0);
+        let config = RetryConfig::new().with_jitter(0.0);
 
         // With zero jitter, subsequent calls should give similar results
         let delay1 = config.next_delay(1);
         let delay2 = config.next_delay(1);
-        
+
         // Without jitter, they should be very similar
         let diff = (delay1.as_millis() as i64 - delay2.as_millis() as i64).abs();
         assert!(diff <= 1); // Allow 1ms tolerance for rounding

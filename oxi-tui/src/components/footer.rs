@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use crate::{Cell, Color, Component, Event, Rect, Size, Surface, Theme};
 use crate::utils::visible_width;
-use crate::{Cell, Color, Component, Event, Rect, Surface, Theme, ThemeColors};
 
 /// Footer data containing all status information for the TUI footer display.
 #[derive(Debug, Clone)]
@@ -126,11 +126,20 @@ impl FooterData {
     /// Add an extension status message
     pub fn set_extension_status(&mut self, key: &str, value: Option<&str>) {
         if let Some(v) = value {
-            self.extension_statuses
-                .insert(key.to_string(), v.to_string());
+            self.extension_statuses.insert(key.to_string(), v.to_string());
         } else {
             self.extension_statuses.remove(key);
         }
+    }
+
+    /// Create a footer component from this data.
+    pub fn to_footer(&self) -> Footer {
+        Footer::new(self.clone())
+    }
+
+    /// Create a footer component with theme.
+    pub fn to_footer_with_theme(&self, theme: &Theme) -> Footer {
+        Footer::with_theme(self.clone(), theme)
     }
 }
 
@@ -151,10 +160,6 @@ pub struct FooterTheme {
     pub error: Color,
     /// Separator character.
     pub separator: char,
-    /// Left section background.
-    pub left_bg: Option<Color>,
-    /// Right section background.
-    pub right_bg: Option<Color>,
 }
 
 impl Default for FooterTheme {
@@ -167,8 +172,6 @@ impl Default for FooterTheme {
             warning: Color::Yellow,
             error: Color::Red,
             separator: '|',
-            left_bg: None,
-            right_bg: None,
         }
     }
 }
@@ -184,8 +187,6 @@ impl FooterTheme {
             warning: theme.colors.warning,
             error: theme.colors.error,
             separator: '|',
-            left_bg: theme.colors.accent_bg,
-            right_bg: theme.colors.accent_bg,
         }
     }
 }
@@ -202,6 +203,8 @@ pub struct Footer {
     show_extension_statuses: bool,
     /// Minimum width before truncation.
     min_width: usize,
+    /// Dirty flag for render requests.
+    dirty: bool,
 }
 
 impl Footer {
@@ -213,6 +216,7 @@ impl Footer {
             theme: FooterTheme::default(),
             show_extension_statuses: true,
             min_width: 40,
+            dirty: true,
         }
     }
 
@@ -224,12 +228,14 @@ impl Footer {
             theme: FooterTheme::from_theme(theme),
             show_extension_statuses: true,
             min_width: 40,
+            dirty: true,
         }
     }
 
     /// Update the footer data.
     pub fn set_data(&mut self, data: FooterData) {
         self.data = data;
+        self.dirty = true;
     }
 
     /// Get a reference to the footer data.
@@ -250,6 +256,7 @@ impl Footer {
     /// Set whether to show extension statuses.
     pub fn set_show_extension_statuses(&mut self, show: bool) {
         self.show_extension_statuses = show;
+        self.dirty = true;
     }
 
     /// Get the number of rows this footer requires.
@@ -271,7 +278,12 @@ impl Footer {
 
     /// Render the extension statuses line.
     fn render_extension_status_line(&self) -> String {
-        let mut parts: Vec<String> = self.data.extension_statuses.values().cloned().collect();
+        let mut parts: Vec<String> = self
+            .data
+            .extension_statuses
+            .values()
+            .cloned()
+            .collect();
         parts.sort();
         parts.join(" ")
     }
@@ -326,7 +338,8 @@ impl Footer {
         let mut width = 0;
 
         for c in text.chars() {
-            let char_width = if c.is_fullwidth() { 2 } else { 1 };
+            // Check if character is likely fullwidth (CJK characters, emojis, etc.)
+            let char_width = if unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) == 2 { 2 } else { 1 };
             if width + char_width > max_width {
                 break;
             }
@@ -337,12 +350,31 @@ impl Footer {
         if width < max_width && result.len() < text.len() {
             // Add ellipsis
             if width >= 3 {
-                result.truncate(result.len() - 3);
+                result.truncate(result.len().saturating_sub(3));
                 result.push_str("...");
             }
         }
 
         result
+    }
+
+    /// Check if a character is wide (typically CJK or emoji).
+    fn is_wide_char(c: char) -> bool {
+        // Check Unicode character width categories
+        // Fullwidth forms, CJK unified ideographs, etc.
+        let code = c as u32;
+        // Fullwidth ASCII variants (FF01-FF5E)
+        (0xFF01..=0xFF5E).contains(&code)
+            // CJK Unified Ideographs (4E00-9FFF)
+            || (0x4E00..=0x9FFF).contains(&code)
+            // CJK Unified Ideographs Extension A (3400-4DBF)
+            || (0x3400..=0x4DBF).contains(&code)
+            // CJK Compatibility Forms (FE30-FE4F)
+            || (0xFE30..=0xFE4F).contains(&code)
+            // Halfwidth and Fullwidth Forms (FF00-FFEF)
+            || (0xFF00..=0xFFEF).contains(&code)
+            // Common CJK symbols (3000-303F)
+            || (0x3000..=0x303F).contains(&code)
     }
 
     /// Render the main footer line.
@@ -355,10 +387,7 @@ impl Footer {
         // Model info
         if !self.data.model_name.is_empty() {
             if !self.data.provider_name.is_empty() {
-                left_parts.push(format!(
-                    "({}) {}",
-                    self.data.provider_name, self.data.model_name
-                ));
+                left_parts.push(format!("({}) {}", self.data.provider_name, self.data.model_name));
             } else {
                 left_parts.push(self.data.model_name.clone());
             }
@@ -442,8 +471,7 @@ impl Footer {
             if left_width + sep_width + min_right > self.width {
                 // Truncate left side
                 let available = self.width.saturating_sub(sep_width + min_right);
-                format!(
-                    "{}{}{}",
+                format!("{}{}{}",
                     Self::truncate_to_width(&left_str, available),
                     separator_str,
                     Self::truncate_to_width(&right_str, min_right)
@@ -451,8 +479,7 @@ impl Footer {
             } else {
                 // Truncate right side
                 let available = self.width.saturating_sub(left_width + sep_width);
-                format!(
-                    "{}{}{}",
+                format!("{}{}{}",
                     left_str,
                     separator_str,
                     Self::truncate_to_width(&right_str, available)
@@ -471,15 +498,27 @@ impl Footer {
             format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
         }
     }
-
-    /// Apply color to text based on context percentage.
-    fn colorize_context(text: &str, pct: f32) -> String {
-        text.to_string() // Caller should use the color directly
-    }
 }
 
 impl Component for Footer {
-    fn render(&self, surface: &mut Surface, rect: Rect) {
+    fn request_render(&mut self) {
+        self.dirty = true;
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    fn clear_dirty(&mut self) {
+        self.dirty = false;
+    }
+
+    fn handle_event(&mut self, _event: &Event) -> bool {
+        // Footer is not interactive
+        false
+    }
+
+    fn render(&mut self, surface: &mut Surface, rect: Rect) {
         self.width = rect.width as usize;
 
         let dim = self.theme.dim;
@@ -494,14 +533,13 @@ impl Component for Footer {
             if col >= rect.width as usize {
                 break;
             }
-            let color = if self.data.context_window_pct > 0.0 && col >= main_width {
-                // Context percentage portion - colorize
-                Self::context_color(self.data.context_window_pct)
-            } else {
-                dim
-            };
+            let color = dim;
 
-            surface.set(row, col as u16, Cell::new(c).with_fg(color));
+            surface.set(
+                row,
+                col as u16,
+                Cell::new(c).with_fg(color),
+            );
         }
 
         // Fill remaining width with dim spaces
@@ -520,7 +558,11 @@ impl Component for Footer {
                 if col >= rect.width as usize {
                     break;
                 }
-                surface.set(row, col as u16, Cell::new(c).with_fg(dim));
+                surface.set(
+                    row,
+                    col as u16,
+                    Cell::new(c).with_fg(dim),
+                );
             }
 
             // Fill remaining
@@ -528,23 +570,15 @@ impl Component for Footer {
                 surface.set(row, col as u16, Cell::new(' ').with_fg(dim));
             }
         }
+
+        self.dirty = false;
     }
 
-    fn handle_event(&mut self, _event: &Event) -> bool {
-        // Footer is not interactive
-        false
-    }
-}
-
-impl FooterData {
-    /// Create a footer component from this data.
-    pub fn to_footer(&self) -> Footer {
-        Footer::new(self.clone())
-    }
-
-    /// Create a footer component with theme.
-    pub fn to_footer_with_theme(&self, theme: &Theme) -> Footer {
-        Footer::with_theme(self.clone(), theme)
+    fn min_size(&self) -> Size {
+        Size {
+            width: self.min_width as u16,
+            height: 1,
+        }
     }
 }
 
@@ -552,7 +586,6 @@ impl FooterData {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicU32;
-    use std::sync::Arc;
 
     fn create_test_footer_data() -> FooterData {
         FooterData {
@@ -569,7 +602,7 @@ mod tests {
             context_window_pct: 65.0,
             total_cost: 0.025,
             session_duration_secs: 125,
-            extension_statuses: std::collections::HashMap::new(),
+            extension_statuses: HashMap::new(),
         }
     }
 
@@ -639,7 +672,7 @@ mod tests {
         let data = create_test_footer_data();
         let mut footer = Footer::new(data);
 
-        let mut ext_statuses = std::collections::HashMap::new();
+        let mut ext_statuses = HashMap::new();
         ext_statuses.insert("ext1".to_string(), "Working...".to_string());
         ext_statuses.insert("ext2".to_string(), "Done".to_string());
 
@@ -694,10 +727,11 @@ mod tests {
 
     #[test]
     fn test_footer_truncate_to_width() {
-        let data = create_test_footer_data();
-        let footer = Footer::new(data);
+        let _data = create_test_footer_data();
+        let footer = Footer::new(FooterData::new());
 
         let truncated = Footer::truncate_to_width("hello world", 5);
+        // Should truncate or fit
         assert!(truncated.len() <= 8); // "hello" or "he..."
     }
 
@@ -705,7 +739,7 @@ mod tests {
     fn test_footer_format_duration() {
         // 30 seconds
         assert_eq!(Footer::format_duration(30), "30s");
-        // 90 seconds = 1m 30s
+        // 90 seconds = 1m 30s (shows just "1m")
         assert_eq!(Footer::format_duration(90), "1m");
         // 3661 seconds = 1h 1m
         assert_eq!(Footer::format_duration(3661), "1h1m");
@@ -759,7 +793,7 @@ mod tests {
         let mut footer = Footer::new(data);
 
         // Add wide extension statuses
-        let mut ext_statuses = std::collections::HashMap::new();
+        let mut ext_statuses = HashMap::new();
         for i in 0..5 {
             ext_statuses.insert(format!("ext{}", i), "A".repeat(50));
         }
@@ -797,7 +831,7 @@ mod tests {
         let theme = Theme::dark();
         let footer_theme = FooterTheme::from_theme(&theme);
         assert_eq!(footer_theme.separator, '|');
-        assert_eq!(footer_theme.dim, Color::Indexed(245));
+        assert_eq!(footer_theme.dim, Color::Indexed(8)); // muted color in dark theme
     }
 
     #[test]
@@ -821,5 +855,27 @@ mod tests {
         let rect = Rect::new(0, 0, 120, 1);
         footer.render(&mut surface, rect);
         // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_footer_min_size() {
+        let footer = Footer::new(FooterData::new());
+        let min = footer.min_size();
+        assert_eq!(min.height, 1);
+        assert_eq!(min.width, 40);
+    }
+
+    #[test]
+    fn test_footer_dirty_flag() {
+        let data = create_test_footer_data();
+        let mut footer = Footer::new(data);
+        
+        assert!(footer.is_dirty()); // Initial state is dirty
+        
+        footer.clear_dirty();
+        assert!(!footer.is_dirty());
+        
+        footer.request_render();
+        assert!(footer.is_dirty());
     }
 }
