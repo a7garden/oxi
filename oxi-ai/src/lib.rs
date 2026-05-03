@@ -11,6 +11,7 @@ mod providers;
 mod error;
 mod high_level;
 mod compaction;
+mod transform;
 pub mod oauth;
 
 pub mod prelude {
@@ -39,6 +40,9 @@ pub use high_level::tokens::{estimate, estimate_words, context_usage};
 
 // Context compaction
 pub use compaction::{Compactor, CompactionStrategy, CompactionManager, CompactedContext, LlmCompactor};
+
+// Cross-provider message transformation
+pub use transform::{transform_messages, TransformOptions, anthropic_to_openai, openai_to_anthropic, google_to_openai, anthropic_to_google};
 
 // Model registry
 mod model_registry;
