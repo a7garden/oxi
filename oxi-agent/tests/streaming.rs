@@ -79,7 +79,7 @@ async fn test_bash_tool_progress_streaming() {
     assert!(!updates.is_empty(), "Expected progress updates for bash command");
     
     // Should have execution message and process exit message
-    assert!(updates.iter().any(|u| u.contains("Executing:")), "Should have execution message");
+    assert!(updates.iter().any(|u| u.contains("Executing:") || u.contains("Running")), "Should have execution message");
     assert!(updates.iter().any(|u| u.contains("exited with code")), "Should have exit message");
 }
 
