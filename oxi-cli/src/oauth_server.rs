@@ -133,7 +133,7 @@ async fn run_server(
 ) -> Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-    let mut listener = tokio::net::TcpListener::from_std(listener)?;
+    let listener = tokio::net::TcpListener::from_std(listener)?;
     
     // Set a timeout for waiting for the callback
     let timeout_duration = std::time::Duration::from_secs(600); // 10 minutes

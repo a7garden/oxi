@@ -9,7 +9,6 @@ use crate::image_resize::{resize_image, ResizeOptions};
 use anyhow::Result;
 use base64::Engine as _;
 use oxi_ai::{ContentBlock, ImageContent, TextContent};
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 

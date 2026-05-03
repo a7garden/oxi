@@ -587,7 +587,7 @@ impl LoginDialog {
 
     /// Complete the OAuth flow with the authorization code
     pub fn complete_oauth(&mut self, code: String) -> Result<(), String> {
-        if let Some(ref oauth_state) = self.oauth_state {
+        if let Some(ref _oauth_state) = self.oauth_state {
             // Store the code for exchange - the actual token exchange
             // would be done by the caller using oxi-ai's oauth module
             self.api_key = code;

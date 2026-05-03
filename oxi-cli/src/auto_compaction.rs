@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use oxi_ai::{
-    Model, Provider, TextContent, UserMessage,
+    Api, Model, Provider, UserMessage,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -207,6 +207,7 @@ impl CompactionNotification {
 
 /// Auto-compaction engine
 pub struct AutoCompactor {
+    #[allow(dead_code)]
     llm: Arc<dyn Provider>,
     model: Model,
     config: CompactionConfig,
@@ -351,7 +352,7 @@ impl AutoCompactor {
         let prompt = self.build_summarization_prompt(messages);
 
         // Convert to LLM messages
-        let llm_messages: Vec<oxi_ai::Message> =
+        let _llm_messages: Vec<oxi_ai::Message> =
             vec![oxi_ai::Message::User(UserMessage::new(prompt))];
 
         // Create a context for the completion
@@ -487,6 +488,8 @@ impl AutoCompactor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use futures::StreamExt;
 
     fn create_test_provider() -> Arc<dyn Provider> {
         // Create a mock provider for testing

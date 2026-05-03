@@ -64,6 +64,8 @@ impl ClipboardImage {
 }
 
 /// Run a command and capture output
+/// Unused but kept for future use
+#[allow(dead_code)]
 fn run_command(command: &str, args: &[&str]) -> Result<std::process::Output> {
     let output = Command::new(command)
         .args(args)
@@ -76,7 +78,7 @@ fn run_command(command: &str, args: &[&str]) -> Result<std::process::Output> {
 fn run_command_timeout(
     command: &str,
     args: &[&str],
-    timeout_ms: u64,
+    _timeout_ms: u64,
 ) -> Result<std::process::Output> {
     let output = Command::new(command)
         .args(args)

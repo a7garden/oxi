@@ -542,6 +542,7 @@ impl Default for AuthStorage {
 }
 
 /// Wrapper for using keyring crate with fallback
+#[allow(unexpected_cfgs)]
 pub mod keyring_support {
     use super::*;
 
