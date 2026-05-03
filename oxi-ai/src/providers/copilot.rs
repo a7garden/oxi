@@ -368,8 +368,22 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     }
                 }
             }
+        }
 
-            // Check for completion
+        // Accumulate usage from the chunk BEFORE checking completion
+        if let Some(chunk_usage) = &chunk.usage {
+            accumulated_usage.input = chunk_usage.prompt_tokens;
+            accumulated_usage.output = chunk_usage.completion_tokens;
+            accumulated_usage.cache_read = chunk_usage
+                .prompt_tokens_details
+                .as_ref()
+                .map(|d| d.cached_tokens)
+                .unwrap_or(0);
+            accumulated_usage.total_tokens = chunk_usage.total_tokens;
+        }
+
+        // Check for completion (after usage accumulation so usage is included in Done)
+        for choice in &chunk.choices {
             if choice.finish_reason.is_some() {
                 let reason = match choice.finish_reason.as_deref() {
                     Some("stop") => StopReason::Stop,
@@ -386,18 +400,6 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     message: done_msg,
                 });
             }
-        }
-
-        // Accumulate usage from the chunk
-        if let Some(chunk_usage) = &chunk.usage {
-            accumulated_usage.input = chunk_usage.prompt_tokens;
-            accumulated_usage.output = chunk_usage.completion_tokens;
-            accumulated_usage.cache_read = chunk_usage
-                .prompt_tokens_details
-                .as_ref()
-                .map(|d| d.cached_tokens)
-                .unwrap_or(0);
-            accumulated_usage.total_tokens = chunk_usage.total_tokens;
         }
     }
 
