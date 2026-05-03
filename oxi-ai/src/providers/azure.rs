@@ -361,10 +361,13 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
             continue;
         }
 
-        let mut chunk = match serde_json::from_str::<SSEChunk>(data) {
+        let chunk = match serde_json::from_str::<SSEChunk>(data) {
             Ok(c) => c,
             Err(_) => continue,
         };
+
+        // Get this chunk's usage for setting on Done events
+        let this_chunk_usage = chunk.usage.as_ref();
 
         for choice in &chunk.choices {
             if let Some(delta) = &choice.delta {
@@ -389,19 +392,9 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                 }
             }
 
-            // Accumulate usage from the chunk (if present).
-            if let Some(ref chunk_usage) = chunk.usage {
-                accumulated_usage.input = chunk_usage.prompt_tokens;
-                accumulated_usage.output = chunk_usage.completion_tokens;
-                accumulated_usage.cache_read = chunk_usage
-                    .prompt_tokens_details
-                    .as_ref()
-                    .map(|d| d.cached_tokens)
-                    .unwrap_or(0);
-                accumulated_usage.total_tokens = chunk_usage.total_tokens;
-            }
-
             if choice.finish_reason.is_some() {
+                // For Done events: prefer current chunk's usage if available,
+                // otherwise fall back to accumulated usage
                 let reason = match choice.finish_reason.as_deref() {
                     Some("stop") => StopReason::Stop,
                     Some("length") => StopReason::Length,
@@ -410,12 +403,38 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                 };
 
                 let mut done_msg = partial_message.clone();
-                done_msg.usage = accumulated_usage.clone();
+                
+                // Use current chunk's usage if present, otherwise accumulated
+                if let Some(usage) = this_chunk_usage {
+                    done_msg.usage.input = usage.prompt_tokens;
+                    done_msg.usage.output = usage.completion_tokens;
+                    done_msg.usage.cache_read = usage
+                        .prompt_tokens_details
+                        .as_ref()
+                        .map(|d| d.cached_tokens)
+                        .unwrap_or(0);
+                    done_msg.usage.total_tokens = usage.total_tokens;
+                } else {
+                    done_msg.usage = accumulated_usage.clone();
+                }
+                
                 events.push(ProviderEvent::Done {
                     reason,
                     message: done_msg,
                 });
             }
+        }
+
+        // Update accumulated usage for next chunks
+        if let Some(usage) = this_chunk_usage {
+            accumulated_usage.input = usage.prompt_tokens;
+            accumulated_usage.output = usage.completion_tokens;
+            accumulated_usage.cache_read = usage
+                .prompt_tokens_details
+                .as_ref()
+                .map(|d| d.cached_tokens)
+                .unwrap_or(0);
+            accumulated_usage.total_tokens = usage.total_tokens;
         }
     }
 
