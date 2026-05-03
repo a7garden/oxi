@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use oxi_ai::{
-    Api, Model, Provider, UserMessage,
+    Model, Provider, UserMessage,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -490,6 +490,7 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::StreamExt;
+    use oxi_ai::Api;
 
     fn create_test_provider() -> Arc<dyn Provider> {
         // Create a mock provider for testing
