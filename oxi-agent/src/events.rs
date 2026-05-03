@@ -1,52 +1,90 @@
 //! Agent event system
 
 use crate::compaction::CompactionEvent;
+use serde::{Deserialize, Serialize};
 
-/// Agent events emitted during agent execution
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum AgentEvent {
-    /// Agent started processing a request
+    // ── Lifecycle events (from pi-mono agent-loop) ──────────────────
+    AgentStart { prompts: Vec<oxi_ai::Message> },
+    AgentEnd { messages: Vec<oxi_ai::Message>, stop_reason: Option<String> },
+    TurnStart { turn_number: u32 },
+    TurnEnd { turn_number: u32, assistant_message: oxi_ai::Message, tool_results: Vec<oxi_ai::ToolResultMessage> },
+    
+    // ── Message events (from pi-mono agent-loop) ────────────────────
+    MessageStart { message: oxi_ai::Message },
+    MessageUpdate { message: oxi_ai::Message, delta: Option<String> },
+    MessageEnd { message: oxi_ai::Message },
+    
+    // ── Tool execution events (from pi-mono agent-loop) ────────────
+    ToolExecutionStart { tool_call_id: String, tool_name: String, args: serde_json::Value },
+    ToolExecutionUpdate { tool_call_id: String, tool_name: String, partial_result: String },
+    ToolExecutionEnd { tool_call_id: String, tool_name: String, result: oxi_ai::ToolResult, is_error: bool },
+    
+    // ── Legacy events (kept for backward compatibility) ──────────
+    #[serde(rename = "start")]
     Start { prompt: String },
-    /// Thinking started
     Thinking,
-    /// Thinking delta (streaming thinking content, pi-mono inspired)
     ThinkingDelta { text: String },
-    /// Text chunk received (for streaming)
     TextChunk { text: String },
-    /// Tool call requested
     ToolCall { tool_call: oxi_ai::ToolCall },
-    /// Tool execution started
     ToolStart { tool_call_id: String, tool_name: String },
-    /// Tool execution in progress with progress update
     ToolProgress { tool_call_id: String, message: String },
-    /// Tool execution completed
     ToolComplete { result: oxi_ai::ToolResult },
-    /// Tool execution failed
     ToolError { tool_call_id: String, error: String },
-    /// Response generation completed
     Complete { content: String, stop_reason: String },
-    /// Error occurred
     Error { message: String },
-    /// Iteration completed
     Iteration { number: usize },
-    /// Token usage update
     Usage { input_tokens: usize, output_tokens: usize },
-    /// Compaction event
     Compaction { event: CompactionEvent },
-    /// Retry attempt for a transient error
-    Retry {
-        attempt: usize,
-        max_retries: usize,
-        retry_after_secs: u64,
-        reason: String,
-    },
-    /// Falling back to a different model
-    Fallback {
-        from_model: String,
-        to_model: String,
-    },
-    /// Streaming was cancelled by the user
+    Retry { attempt: usize, max_retries: usize, retry_after_secs: u64, reason: String },
+    Fallback { from_model: String, to_model: String },
     Cancelled,
-    /// Partial response recovered after error (best-effort delivery)
     PartialResponse { content: String },
+    
+    // ── Loop-specific steering events ─────────────────────────────
+    SteeringMessage { message: oxi_ai::Message },
+    FollowUpMessage { message: oxi_ai::Message },
+}
+
+impl AgentEvent {
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, AgentEvent::AgentEnd { .. })
+    }
+    
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            AgentEvent::AgentStart { .. } => "agent_start",
+            AgentEvent::AgentEnd { .. } => "agent_end",
+            AgentEvent::TurnStart { .. } => "turn_start",
+            AgentEvent::TurnEnd { .. } => "turn_end",
+            AgentEvent::MessageStart { .. } => "message_start",
+            AgentEvent::MessageUpdate { .. } => "message_update",
+            AgentEvent::MessageEnd { .. } => "message_end",
+            AgentEvent::ToolExecutionStart { .. } => "tool_execution_start",
+            AgentEvent::ToolExecutionUpdate { .. } => "tool_execution_update",
+            AgentEvent::ToolExecutionEnd { .. } => "tool_execution_end",
+            AgentEvent::Start { .. } => "start",
+            AgentEvent::Thinking => "thinking",
+            AgentEvent::ThinkingDelta { .. } => "thinking_delta",
+            AgentEvent::TextChunk { .. } => "text_chunk",
+            AgentEvent::ToolCall { .. } => "tool_call",
+            AgentEvent::ToolStart { .. } => "tool_start",
+            AgentEvent::ToolProgress { .. } => "tool_progress",
+            AgentEvent::ToolComplete { .. } => "tool_complete",
+            AgentEvent::ToolError { .. } => "tool_error",
+            AgentEvent::Complete { .. } => "complete",
+            AgentEvent::Error { .. } => "error",
+            AgentEvent::Iteration { .. } => "iteration",
+            AgentEvent::Usage { .. } => "usage",
+            AgentEvent::Compaction { .. } => "compaction",
+            AgentEvent::Retry { .. } => "retry",
+            AgentEvent::Fallback { .. } => "fallback",
+            AgentEvent::Cancelled => "cancelled",
+            AgentEvent::PartialResponse { .. } => "partial_response",
+            AgentEvent::SteeringMessage { .. } => "steering_message",
+            AgentEvent::FollowUpMessage { .. } => "follow_up_message",
+        }
+    }
 }
