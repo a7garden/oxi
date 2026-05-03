@@ -97,7 +97,9 @@ pub fn export_html(
     html.push_str("<body class=\"dark\">\n");
 
     // Theme toggle button
-    html.push_str("<button id=\"theme-toggle\" onclick=\"toggleTheme()\" title=\"Toggle light/dark theme\">");
+    html.push_str(
+        "<button id=\"theme-toggle\" onclick=\"toggleTheme()\" title=\"Toggle light/dark theme\">",
+    );
     html.push_str("🌓</button>\n");
 
     // Optional tree sidebar
@@ -225,10 +227,7 @@ fn render_tree_node(html: &mut String, node: &TreeNode, depth: usize) -> Result<
     let current = if node.is_current { " tree-current" } else { "" };
     let fallback = node.session_id.to_string();
     let short_id = &fallback[..8.min(fallback.len())];
-    let name = node
-        .name
-        .as_deref()
-        .unwrap_or(short_id);
+    let name = node.name.as_deref().unwrap_or(short_id);
     write!(
         html,
         "<div class=\"tree-node{}\">{}<a href=\"#\">{}</a></div>\n",
@@ -774,7 +773,9 @@ mod tests {
     #[test]
     fn export_renders_code_block_with_language_class() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: "Here is some code:\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\nDone.".into(),
+            content:
+                "Here is some code:\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\nDone."
+                    .into(),
         })];
         let meta = ExportMeta::default();
         let html = export_html(&entries, &meta, None, None).unwrap();

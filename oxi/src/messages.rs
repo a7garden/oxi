@@ -63,11 +63,7 @@ pub fn format_message_with_prefix(role: &str, content: &str, prefix: &str) -> St
 ///
 /// # Returns
 /// The truncated content
-pub fn truncate_message(
-    content: &str,
-    max_length: usize,
-    suffix: &str,
-) -> String {
+pub fn truncate_message(content: &str, max_length: usize, suffix: &str) -> String {
     if content.len() <= max_length {
         return content.to_string();
     }
@@ -94,7 +90,11 @@ pub fn truncate_message(
 
 /// Truncate a message with default suffix
 pub fn truncate_message_default(content: &str) -> String {
-    truncate_message(content, DEFAULT_MAX_MESSAGE_LENGTH, "\n\n... [message truncated]")
+    truncate_message(
+        content,
+        DEFAULT_MAX_MESSAGE_LENGTH,
+        "\n\n... [message truncated]",
+    )
 }
 
 /// Estimate token count for a message
@@ -244,7 +244,9 @@ pub fn get_preview(content: &str, max_length: usize) -> String {
 }
 
 /// Count messages by role
-pub fn count_messages_by_role(messages: &[SimpleMessage]) -> std::collections::HashMap<String, usize> {
+pub fn count_messages_by_role(
+    messages: &[SimpleMessage],
+) -> std::collections::HashMap<String, usize> {
     let mut counts = std::collections::HashMap::new();
     for msg in messages {
         *counts.entry(msg.role.clone()).or_insert(0) += 1;
@@ -277,7 +279,11 @@ pub fn is_empty_message(msg: &SimpleMessage) -> bool {
 
 /// Filter out empty messages
 pub fn filter_empty_messages(messages: &[SimpleMessage]) -> Vec<SimpleMessage> {
-    messages.iter().filter(|m| !is_empty_message(m)).cloned().collect()
+    messages
+        .iter()
+        .filter(|m| !is_empty_message(m))
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]
@@ -344,7 +350,8 @@ mod tests {
             },
             SimpleMessage {
                 role: "assistant".to_string(),
-                content: "I'd be happy to help with Rust! What specifically do you need?".to_string(),
+                content: "I'd be happy to help with Rust! What specifically do you need?"
+                    .to_string(),
             },
         ];
         let summary = summarize_conversation(&messages, 200);

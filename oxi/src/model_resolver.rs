@@ -85,7 +85,11 @@ impl Model {
             cost_output: Some(entry.cost_output),
             cost_cache_read: Some(entry.cost_cache_read),
             cost_cache_write: Some(entry.cost_cache_write),
-            input_modalities: entry.input.iter().map(|m| format!("{:?}", m).to_lowercase()).collect(),
+            input_modalities: entry
+                .input
+                .iter()
+                .map(|m| format!("{:?}", m).to_lowercase())
+                .collect(),
         }
     }
 
@@ -102,7 +106,11 @@ impl Model {
             cost_output: Some(model.cost.output),
             cost_cache_read: Some(model.cost.cache_read),
             cost_cache_write: Some(model.cost.cache_write),
-            input_modalities: model.input.iter().map(|m| format!("{:?}", m).to_lowercase()).collect(),
+            input_modalities: model
+                .input
+                .iter()
+                .map(|m| format!("{:?}", m).to_lowercase())
+                .collect(),
         }
     }
 }
@@ -179,7 +187,7 @@ pub fn match_glob(pattern: &str, text: &str) -> bool {
     let mut regex_pattern = String::new();
     let mut in_class = false;
     let mut chars = pattern.chars().peekable();
-    
+
     while let Some(c) = chars.next() {
         match c {
             '*' => {
@@ -214,12 +222,12 @@ pub fn match_glob(pattern: &str, text: &str) -> bool {
             _ => regex_pattern.push(c),
         }
     }
-    
+
     // Handle trailing ** in patterns
     if pattern.ends_with("**") {
         regex_pattern.push_str(".*");
     }
-    
+
     // Use case-insensitive regex matching
     regex::RegexBuilder::new(&format!("^{}$", regex_pattern))
         .case_insensitive(true)
@@ -229,7 +237,11 @@ pub fn match_glob(pattern: &str, text: &str) -> bool {
 }
 
 /// Find all models matching a provider and glob pattern
-pub fn find_models_by_glob<'a>(provider: &str, pattern: &str, models: &'a [Model]) -> Vec<&'a Model> {
+pub fn find_models_by_glob<'a>(
+    provider: &str,
+    pattern: &str,
+    models: &'a [Model],
+) -> Vec<&'a Model> {
     models
         .iter()
         .filter(|m| m.provider == provider && match_glob(pattern, &m.id))
@@ -262,40 +274,54 @@ pub fn get_thinking_level_map(model_id: &str) -> Option<HashMap<String, String>>
     // Strip common suffixes to find base model name
     let base = if let Some(stripped) = model_id.strip_suffix("-latest") {
         stripped
-    } else if let Some(dated) = model_id.strip_suffix(regex::Regex::new(r"-\d{8}").ok().unwrap().as_str()) {
+    } else if let Some(dated) =
+        model_id.strip_suffix(regex::Regex::new(r"-\d{8}").ok().unwrap().as_str())
+    {
         dated
     } else {
         // Also try stripping numbered suffixes like -5, -6, etc.
         // Match patterns like claude-opus-4-5, claude-sonnet-4-6, etc.
         model_id
     };
-    
+
     // Only certain models have thinking variants
     let thinking_models = [
-        ("claude-3-5-sonnet", vec![
-            ("high", "claude-3-5-sonnet-20240620"),
-            ("medium", "claude-3-5-sonnet-latest"),
-            ("low", "claude-3-5-sonnet-latest"),
-        ]),
-        ("claude-3-7-sonnet", vec![
-            ("high", "claude-3-7-sonnet-20250219"),
-            ("medium", "claude-3-7-sonnet-20250219"),
-            ("low", "claude-3-7-sonnet-latest"),
-        ]),
-        ("claude-opus-4", vec![
-            ("high", "claude-opus-4-5-20251101"),
-            ("medium", "claude-opus-4-5"),
-            ("low", "claude-opus-4-1"),
-            ("off", "claude-opus-4-0"),
-        ]),
-        ("claude-sonnet-4", vec![
-            ("high", "claude-sonnet-4-20250514"),
-            ("medium", "claude-sonnet-4-5"),
-            ("low", "claude-sonnet-4-0"),
-            ("off", "claude-sonnet-4-0"),
-        ]),
+        (
+            "claude-3-5-sonnet",
+            vec![
+                ("high", "claude-3-5-sonnet-20240620"),
+                ("medium", "claude-3-5-sonnet-latest"),
+                ("low", "claude-3-5-sonnet-latest"),
+            ],
+        ),
+        (
+            "claude-3-7-sonnet",
+            vec![
+                ("high", "claude-3-7-sonnet-20250219"),
+                ("medium", "claude-3-7-sonnet-20250219"),
+                ("low", "claude-3-7-sonnet-latest"),
+            ],
+        ),
+        (
+            "claude-opus-4",
+            vec![
+                ("high", "claude-opus-4-5-20251101"),
+                ("medium", "claude-opus-4-5"),
+                ("low", "claude-opus-4-1"),
+                ("off", "claude-opus-4-0"),
+            ],
+        ),
+        (
+            "claude-sonnet-4",
+            vec![
+                ("high", "claude-sonnet-4-20250514"),
+                ("medium", "claude-sonnet-4-5"),
+                ("low", "claude-sonnet-4-0"),
+                ("off", "claude-sonnet-4-0"),
+            ],
+        ),
     ];
-    
+
     for (base_name, levels) in thinking_models {
         if base.contains(base_name) {
             let mut map = HashMap::new();
@@ -305,7 +331,7 @@ pub fn get_thinking_level_map(model_id: &str) -> Option<HashMap<String, String>>
             return Some(map);
         }
     }
-    
+
     None
 }
 
@@ -317,9 +343,12 @@ pub fn clamp_thinking_level(model_id: &str, requested_level: &str) -> String {
     if let Some(map) = get_thinking_level_map(model_id) {
         // If the requested level is in the map, use it
         if map.contains_key(requested_level) {
-            return map.get(requested_level).cloned().unwrap_or_else(|| model_id.to_string());
+            return map
+                .get(requested_level)
+                .cloned()
+                .unwrap_or_else(|| model_id.to_string());
         }
-        
+
         // Find the closest level that IS in the map
         let level_idx = THINKING_LEVELS.iter().position(|&l| l == requested_level);
         if let Some(idx) = level_idx {
@@ -327,12 +356,15 @@ pub fn clamp_thinking_level(model_id: &str, requested_level: &str) -> String {
             for i in (0..idx).rev() {
                 let level = THINKING_LEVELS[i];
                 if map.contains_key(level) {
-                    return map.get(level).cloned().unwrap_or_else(|| model_id.to_string());
+                    return map
+                        .get(level)
+                        .cloned()
+                        .unwrap_or_else(|| model_id.to_string());
                 }
             }
         }
     }
-    
+
     // Fallback: return the requested level as-is if model has no special mapping
     requested_level.to_string()
 }
@@ -357,7 +389,7 @@ pub fn has_configured_auth(provider: &str, _model: &Model) -> bool {
         "amazon-bedrock" => "AWS_ACCESS_KEY_ID",
         _ => return false,
     };
-    
+
     std::env::var(env_var).is_ok()
 }
 
@@ -369,10 +401,7 @@ pub fn has_configured_auth(provider: &str, _model: &Model) -> bool {
 ///
 /// # Returns
 /// A parsed model result with provider, model_id, and optional thinking level
-pub fn parse_model_pattern(
-    pattern: &str,
-    available_models: &[Model],
-) -> ParsedModelResult {
+pub fn parse_model_pattern(pattern: &str, available_models: &[Model]) -> ParsedModelResult {
     let pattern = pattern.trim();
     if pattern.is_empty() {
         return ParsedModelResult {
@@ -398,8 +427,7 @@ pub fn parse_model_pattern(
 
     // Try to find an exact match first
     let exact_match = available_models.iter().find(|m| {
-        m.id.eq_ignore_ascii_case(base_pattern)
-            || m.full_id().eq_ignore_ascii_case(base_pattern)
+        m.id.eq_ignore_ascii_case(base_pattern) || m.full_id().eq_ignore_ascii_case(base_pattern)
     });
 
     if let Some(model) = exact_match {
@@ -417,9 +445,9 @@ pub fn parse_model_pattern(
         let model_id = &base_pattern[slash_idx + 1..];
 
         // Check if provider exists in available models
-        let provider_exists = available_models.iter().any(|m| {
-            m.provider.eq_ignore_ascii_case(provider)
-        });
+        let provider_exists = available_models
+            .iter()
+            .any(|m| m.provider.eq_ignore_ascii_case(provider));
 
         if provider_exists {
             return ParsedModelResult {
@@ -502,12 +530,18 @@ pub fn default_model_per_provider() -> HashMap<String, String> {
     map.insert("openai".to_string(), "gpt-4o".to_string());
     map.insert("google".to_string(), "gemini-2.5-pro".to_string());
     map.insert("deepseek".to_string(), "deepseek-v3".to_string());
-    map.insert("openrouter".to_string(), "anthropic/claude-sonnet-4".to_string());
+    map.insert(
+        "openrouter".to_string(),
+        "anthropic/claude-sonnet-4".to_string(),
+    );
     map.insert("groq".to_string(), "mixtral-8x7b".to_string());
     map.insert("cerebras".to_string(), "llama-3.3-70b".to_string());
     map.insert("mistral".to_string(), "mistral-large".to_string());
     map.insert("xai".to_string(), "grok-2".to_string());
-    map.insert("amazon-bedrock".to_string(), "anthropic.claude-v2".to_string());
+    map.insert(
+        "amazon-bedrock".to_string(),
+        "anthropic.claude-v2".to_string(),
+    );
     map.insert("azure-openai".to_string(), "gpt-4o".to_string());
     map
 }
@@ -549,7 +583,10 @@ pub fn resolve_cli_model(
 
     // Extract the model pattern
     let model_pattern = if let Some(ref p) = provider {
-        if cli_model.to_lowercase().starts_with(&format!("{}/", p.to_lowercase())) {
+        if cli_model
+            .to_lowercase()
+            .starts_with(&format!("{}/", p.to_lowercase()))
+        {
             &cli_model[p.len() + 1..]
         } else {
             cli_model
@@ -644,7 +681,9 @@ pub fn find_initial_model(
         if result.error.is_none() {
             return InitialModelResult {
                 model: result.model,
-                thinking_level: result.thinking_level.unwrap_or_else(|| DEFAULT_THINKING_LEVEL.to_string()),
+                thinking_level: result
+                    .thinking_level
+                    .unwrap_or_else(|| DEFAULT_THINKING_LEVEL.to_string()),
                 fallback_message: None,
             };
         }
@@ -666,7 +705,10 @@ pub fn find_initial_model(
             if let Some(ref p) = parsed.provider {
                 let model = available_models
                     .iter()
-                    .find(|m| m.provider.eq_ignore_ascii_case(p) && m.id.eq_ignore_ascii_case(&parsed.model_id))
+                    .find(|m| {
+                        m.provider.eq_ignore_ascii_case(p)
+                            && m.id.eq_ignore_ascii_case(&parsed.model_id)
+                    })
                     .cloned();
                 if model.is_some() {
                     return InitialModelResult {
@@ -682,10 +724,9 @@ pub fn find_initial_model(
     // 4. Try default models from known providers
     let defaults = default_model_per_provider();
     for (provider, default_id) in &defaults {
-        if let Some(model) = available_models
-            .iter()
-            .find(|m| m.provider.eq_ignore_ascii_case(provider) && m.id.eq_ignore_ascii_case(default_id))
-        {
+        if let Some(model) = available_models.iter().find(|m| {
+            m.provider.eq_ignore_ascii_case(provider) && m.id.eq_ignore_ascii_case(default_id)
+        }) {
             return InitialModelResult {
                 model: Some(model.clone()),
                 thinking_level: DEFAULT_THINKING_LEVEL.to_string(),
@@ -724,7 +765,8 @@ pub fn restore_model_from_session(
     let restored = available_models
         .iter()
         .find(|m| {
-            m.provider.eq_ignore_ascii_case(saved_provider) && m.id.eq_ignore_ascii_case(saved_model_id)
+            m.provider.eq_ignore_ascii_case(saved_provider)
+                && m.id.eq_ignore_ascii_case(saved_model_id)
         })
         .cloned();
 
@@ -748,7 +790,7 @@ pub fn restore_model_from_session(
                         saved_provider, saved_model_id
                     );
                 }
-                
+
                 if let Some(current) = current_model {
                     if should_print_messages {
                         eprintln!("Falling back to: {}/{}", current.provider, current.id);
@@ -763,7 +805,10 @@ pub fn restore_model_from_session(
                     }
                 } else if let Some(fallback) = available_models.first() {
                     if should_print_messages {
-                        eprintln!("Using first available model: {}/{}", fallback.provider, fallback.id);
+                        eprintln!(
+                            "Using first available model: {}/{}",
+                            fallback.provider, fallback.id
+                        );
                     }
                     RestoreModelResult {
                         model: Some(fallback.clone()),
@@ -807,7 +852,10 @@ pub fn restore_model_from_session(
                         "Warning: Could not restore model {}/{} (model not found).",
                         saved_provider, saved_model_id
                     );
-                    eprintln!("Using first available model: {}/{}", model.provider, model.id);
+                    eprintln!(
+                        "Using first available model: {}/{}",
+                        model.provider, model.id
+                    );
                 }
                 RestoreModelResult {
                     model: Some(model.clone()),
@@ -892,7 +940,7 @@ mod tests {
     // =============================================================================
     // Model Equality Tests
     // =============================================================================
-    
+
     #[test]
     fn test_models_are_equal_same() {
         let model1 = Model {
@@ -921,10 +969,10 @@ mod tests {
             cost_cache_write: None,
             input_modalities: vec![],
         };
-        
+
         assert!(models_are_equal(&model1, &model2));
     }
-    
+
     #[test]
     fn test_models_are_equal_different_provider() {
         let model1 = Model {
@@ -953,10 +1001,10 @@ mod tests {
             cost_cache_write: None,
             input_modalities: vec![],
         };
-        
+
         assert!(!models_are_equal(&model1, &model2));
     }
-    
+
     #[test]
     fn test_models_are_equal_different_id() {
         let model1 = Model {
@@ -985,33 +1033,33 @@ mod tests {
             cost_cache_write: None,
             input_modalities: vec![],
         };
-        
+
         assert!(!models_are_equal(&model1, &model2));
     }
 
     // =============================================================================
     // Glob Pattern Tests
     // =============================================================================
-    
+
     #[test]
     fn test_match_glob_exact() {
         assert!(match_glob("claude-sonnet-4-5", "claude-sonnet-4-5"));
         assert!(!match_glob("claude-sonnet-4-5", "claude-opus-4-7"));
     }
-    
+
     #[test]
     fn test_match_glob_asterisk() {
         assert!(match_glob("claude-*", "claude-sonnet-4-5"));
         assert!(match_glob("claude-*", "claude-opus-4-7"));
         assert!(!match_glob("claude-*", "gpt-4o"));
     }
-    
+
     #[test]
     fn test_match_glob_question() {
         assert!(match_glob("claude-?-sonnet-4-5", "claude-3-sonnet-4-5"));
         assert!(!match_glob("claude-?-sonnet-4-5", "claude-35-sonnet-4-5"));
     }
-    
+
     #[test]
     fn test_match_glob_char_class() {
         // Character classes match case-insensitively (since glob matching is case-insensitive overall)
@@ -1020,12 +1068,12 @@ mod tests {
         // Note: character classes are case-insensitive with our implementation
         assert!(match_glob("claude-[a-z]-sonnet", "claude-A-sonnet"));
     }
-    
+
     #[test]
     fn test_match_glob_case_insensitive() {
         assert!(match_glob("CLAUDE-*", "claude-sonnet-4-5"));
     }
-    
+
     #[test]
     fn test_find_models_by_glob() {
         let models = sample_models();
@@ -1033,7 +1081,7 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|m| m.provider == "anthropic"));
     }
-    
+
     #[test]
     fn test_find_models_by_glob_no_match() {
         let models = sample_models();
@@ -1044,43 +1092,49 @@ mod tests {
     // =============================================================================
     // Thinking Level Mapping Tests
     // =============================================================================
-    
+
     #[test]
     fn test_get_thinking_level_map_claude_35_sonnet() {
         let map = get_thinking_level_map("claude-3-5-sonnet-latest");
         assert!(map.is_some());
         let map = map.unwrap();
-        assert_eq!(map.get("high"), Some(&"claude-3-5-sonnet-20240620".to_string()));
+        assert_eq!(
+            map.get("high"),
+            Some(&"claude-3-5-sonnet-20240620".to_string())
+        );
     }
-    
+
     #[test]
     fn test_get_thinking_level_map_claude_opus_4() {
         let map = get_thinking_level_map("claude-opus-4-5");
         assert!(map.is_some());
         let map = map.unwrap();
-        assert_eq!(map.get("high"), Some(&"claude-opus-4-5-20251101".to_string()));
+        assert_eq!(
+            map.get("high"),
+            Some(&"claude-opus-4-5-20251101".to_string())
+        );
         assert_eq!(map.get("medium"), Some(&"claude-opus-4-5".to_string()));
     }
-    
+
     #[test]
     fn test_get_thinking_level_map_no_match() {
         let map = get_thinking_level_map("gpt-4o");
         assert!(map.is_none());
     }
-    
+
     #[test]
     fn test_clamp_thinking_level_supported() {
         let result = clamp_thinking_level("claude-3-5-sonnet-latest", "high");
         assert_eq!(result, "claude-3-5-sonnet-20240620");
     }
-    
+
     #[test]
     fn test_clamp_thinking_level_clamp_down() {
         // Request "xhigh" which doesn't exist, should clamp to "high"
         let result = clamp_thinking_level("claude-3-5-sonnet-latest", "xhigh");
         assert_eq!(result, "claude-3-5-sonnet-20240620");
     }
-    
+
     #[test]
     fn test_clamp_thinking_level_no_mapping() {
         // gpt-4o has no mapping, should return requested level
@@ -1091,7 +1145,7 @@ mod tests {
     // =============================================================================
     // Auth Validation Tests
     // =============================================================================
-    
+
     #[test]
     fn test_has_configured_auth_unknown_provider() {
         let model = Model {
@@ -1107,12 +1161,12 @@ mod tests {
             cost_cache_write: None,
             input_modalities: vec![],
         };
-        
+
         // Without env vars, this should return false
         let has_auth = has_configured_auth("unknown", &model);
         assert!(!has_auth);
     }
-    
+
     #[test]
     fn test_has_configured_auth_known_provider_no_env() {
         let model = Model {
@@ -1128,7 +1182,7 @@ mod tests {
             cost_cache_write: None,
             input_modalities: vec![],
         };
-        
+
         // Without setting env vars in test, this should return false
         let has_auth = has_configured_auth("anthropic", &model);
         // This might be true if ANTHROPIC_API_KEY is set in the environment
@@ -1138,7 +1192,7 @@ mod tests {
     // =============================================================================
     // Model Parsing Tests
     // =============================================================================
-    
+
     #[test]
     fn test_parse_model_pattern_exact() {
         let models = sample_models();
@@ -1165,7 +1219,7 @@ mod tests {
 
         assert_eq!(result.thinking_level, Some("high".to_string()));
     }
-    
+
     #[test]
     fn test_parse_model_pattern_invalid_thinking_level() {
         let models = sample_models();
@@ -1195,7 +1249,7 @@ mod tests {
     // =============================================================================
     // CLI Resolution Tests
     // =============================================================================
-    
+
     #[test]
     fn test_resolve_cli_model_with_provider() {
         let models = sample_models();
@@ -1235,19 +1289,20 @@ mod tests {
     // =============================================================================
     // Search Tests
     // =============================================================================
-    
+
     #[test]
     fn test_find_models_by_pattern() {
         let models = sample_models();
         let results = find_models_by_pattern("sonnet", &models);
 
         assert!(!results.is_empty());
-        assert!(results.iter().all(|m| 
-            m.id.contains("sonnet") || 
-            m.name.as_ref().map(|n| n.contains("sonnet")).unwrap_or(false)
-        ));
+        assert!(results.iter().all(|m| m.id.contains("sonnet")
+            || m.name
+                .as_ref()
+                .map(|n| n.contains("sonnet"))
+                .unwrap_or(false)));
     }
-    
+
     #[test]
     fn test_find_models_by_pattern_full_id() {
         let models = sample_models();
@@ -1258,18 +1313,11 @@ mod tests {
     // =============================================================================
     // Initial Model Selection Tests
     // =============================================================================
-    
+
     #[test]
     fn test_find_initial_model_from_cli() {
         let models = sample_models();
-        let result = find_initial_model(
-            Some("openai"),
-            Some("gpt-4o"),
-            &[],
-            false,
-            None,
-            &models,
-        );
+        let result = find_initial_model(Some("openai"), Some("gpt-4o"), &[], false, None, &models);
 
         assert!(result.model.is_some());
         assert_eq!(result.model.unwrap().id, "gpt-4o");
@@ -1283,18 +1331,11 @@ mod tests {
         assert!(result.model.is_some());
         assert!(result.fallback_message.is_none());
     }
-    
+
     #[test]
     fn test_find_initial_model_default_thinking_level() {
         let models = sample_models();
-        let result = find_initial_model(
-            Some("openai"),
-            Some("gpt-4o"),
-            &[],
-            false,
-            None,
-            &models,
-        );
+        let result = find_initial_model(Some("openai"), Some("gpt-4o"), &[], false, None, &models);
 
         assert_eq!(result.thinking_level, DEFAULT_THINKING_LEVEL);
     }
@@ -1302,18 +1343,12 @@ mod tests {
     // =============================================================================
     // Restore Model Tests
     // =============================================================================
-    
+
     #[test]
     fn test_restore_model_from_session_success() {
         let models = sample_models();
-        let result = restore_model_from_session(
-            "anthropic",
-            "claude-sonnet-4-5",
-            None,
-            false,
-            &models,
-        );
-
+        let result =
+            restore_model_from_session("anthropic", "claude-sonnet-4-5", None, false, &models);
 
         // Model should be found
         assert!(result.model.is_some());
@@ -1323,35 +1358,25 @@ mod tests {
             assert_eq!(result.reason, Some("no_auth".to_string()));
         }
     }
-    
+
     #[test]
     fn test_restore_model_from_session_not_found() {
         let models = sample_models();
         let current = &models[0];
-        let result = restore_model_from_session(
-            "nonexistent",
-            "model",
-            Some(current),
-            false,
-            &models,
-        );
+        let result =
+            restore_model_from_session("nonexistent", "model", Some(current), false, &models);
 
         assert!(result.model.is_some());
         assert!(result.fallback_message.is_some());
         assert_eq!(result.reason, Some("model_not_found".to_string()));
     }
-    
+
     #[test]
     fn test_restore_model_from_session_fallback() {
         let models = sample_models();
         let current = &models[0];
-        let result = restore_model_from_session(
-            "nonexistent",
-            "model",
-            Some(current),
-            false,
-            &models,
-        );
+        let result =
+            restore_model_from_session("nonexistent", "model", Some(current), false, &models);
 
         assert!(result.model.is_some());
         // Should fall back to current model
@@ -1361,7 +1386,7 @@ mod tests {
     // =============================================================================
     // Alias Detection Tests
     // =============================================================================
-    
+
     #[test]
     fn test_is_alias() {
         assert!(is_alias("claude-sonnet-4-latest"));
@@ -1369,14 +1394,17 @@ mod tests {
         assert!(!is_alias("claude-sonnet-4-20250929"));
         assert!(!is_alias("claude-sonnet-4-20250514"));
     }
-    
+
     #[test]
     fn test_default_thinking_level_constant() {
         assert_eq!(DEFAULT_THINKING_LEVEL, "medium");
     }
-    
+
     #[test]
     fn test_thinking_levels_constant() {
-        assert_eq!(THINKING_LEVELS, &["off", "minimal", "low", "medium", "high", "xhigh"]);
+        assert_eq!(
+            THINKING_LEVELS,
+            &["off", "minimal", "low", "medium", "high", "xhigh"]
+        );
     }
 }

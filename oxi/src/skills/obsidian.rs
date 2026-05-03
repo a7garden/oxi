@@ -966,7 +966,9 @@ impl ObsidianVault {
             .await
             .context("Failed to get commit hash")?;
 
-        let hash = String::from_utf8_lossy(&hash_output.stdout).trim().to_string();
+        let hash = String::from_utf8_lossy(&hash_output.stdout)
+            .trim()
+            .to_string();
 
         Ok(GitCommitResult {
             success: true,
@@ -997,7 +999,10 @@ impl ObsidianVault {
             );
         }
 
-        tracing::info!("Initialized git repository in {}", self.vault_root().display());
+        tracing::info!(
+            "Initialized git repository in {}",
+            self.vault_root().display()
+        );
         Ok(true)
     }
 
@@ -1169,7 +1174,9 @@ impl ObsidianVault {
                 // Heading detection: if all chars before '#' are whitespace AND
                 // next char is '#' or whitespace, it's a heading marker
                 let prefix = &line[..hash_pos];
-                if prefix.trim().is_empty() && (next_ch == b'#' || next_ch == b' ' || next_ch == b'\t') {
+                if prefix.trim().is_empty()
+                    && (next_ch == b'#' || next_ch == b' ' || next_ch == b'\t')
+                {
                     continue;
                 }
 
@@ -1288,7 +1295,9 @@ impl ObsidianVault {
         match mode {
             SearchMode::Fuzzy => text.to_lowercase().contains(query_lower),
             SearchMode::Exact => text.to_lowercase() == *query_lower,
-            SearchMode::Regex => regex.map(|r: &regex::Regex| r.is_match(text)).unwrap_or(false),
+            SearchMode::Regex => regex
+                .map(|r: &regex::Regex| r.is_match(text))
+                .unwrap_or(false),
         }
     }
 
@@ -1308,7 +1317,10 @@ impl ObsidianVault {
                 self.text_matches(&note.title, query_lower, mode, regex)
                     || self.text_matches(&note.path, query_lower, mode, regex)
                     || self.text_matches(&note.content, query_lower, mode, regex)
-                    || note.tags.iter().any(|t| self.text_matches(t, query_lower, mode, regex))
+                    || note
+                        .tags
+                        .iter()
+                        .any(|t| self.text_matches(t, query_lower, mode, regex))
             }
         }
     }
@@ -1566,7 +1578,11 @@ mod tests {
 
         // Should not include files from .obsidian/
         for note in &notes {
-            assert!(!note.path.contains(".obsidian"), "Should skip .obsidian: {}", note.path);
+            assert!(
+                !note.path.contains(".obsidian"),
+                "Should skip .obsidian: {}",
+                note.path
+            );
         }
     }
 
@@ -1736,7 +1752,10 @@ mod tests {
             .search_with_options("alpha", SearchMode::Fuzzy, SearchScope::Title)
             .unwrap();
         assert!(results.total_matches >= 1);
-        assert!(results.notes.iter().any(|m| m.matched_field == MatchField::Title));
+        assert!(results
+            .notes
+            .iter()
+            .any(|m| m.matched_field == MatchField::Title));
     }
 
     #[test]
@@ -1755,7 +1774,11 @@ mod tests {
 
         // Create more notes than max_results allows
         for i in 0..5 {
-            fs::write(root.join(format!("note{}.md", i)), format!("Find me matchtest {}", i)).unwrap();
+            fs::write(
+                root.join(format!("note{}.md", i)),
+                format!("Find me matchtest {}", i),
+            )
+            .unwrap();
         }
 
         let vault = ObsidianVault::new(VaultConfig {
@@ -1888,7 +1911,8 @@ mod tests {
         let note = Note {
             path: "test.md".to_string(),
             title: "test".to_string(),
-            content: "Some content that is long enough to need truncation at some point".to_string(),
+            content: "Some content that is long enough to need truncation at some point"
+                .to_string(),
             tags: BTreeSet::new(),
             forward_links: BTreeSet::new(),
             size_bytes: 100,
@@ -1939,11 +1963,7 @@ mod tests {
         let vault = make_vault(tmp.path());
 
         let results = vault
-            .search_with_options(
-                "project|meeting",
-                SearchMode::Regex,
-                SearchScope::Title,
-            )
+            .search_with_options("project|meeting", SearchMode::Regex, SearchScope::Title)
             .unwrap();
         assert!(results.total_matches >= 2);
     }

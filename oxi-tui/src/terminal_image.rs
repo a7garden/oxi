@@ -190,7 +190,7 @@ impl ImageFormat {
         match self {
             ImageFormat::Png => 100,
             ImageFormat::Jpeg => 24,
-            ImageFormat::Gif => 100, // re-encoded as PNG
+            ImageFormat::Gif => 100,  // re-encoded as PNG
             ImageFormat::WebP => 100, // re-encoded as PNG
             ImageFormat::Bmp => 100,  // re-encoded as PNG
         }
@@ -240,7 +240,12 @@ pub fn detect_format(data: &[u8]) -> Option<ImageFormat> {
 
 /// Detect format from file extension.
 pub fn format_from_extension(path: &Path) -> Option<ImageFormat> {
-    match path.extension().and_then(|e| e.to_str())?.to_lowercase().as_str() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())?
+        .to_lowercase()
+        .as_str()
+    {
         "png" => Some(ImageFormat::Png),
         "jpg" | "jpeg" => Some(ImageFormat::Jpeg),
         "gif" => Some(ImageFormat::Gif),
@@ -265,7 +270,11 @@ pub fn get_image_dimensions(data: &[u8]) -> Option<ImageDimensions> {
 ///
 /// If `max_width` / `max_height` are provided and the image exceeds them,
 /// it is scaled down preserving aspect ratio. The output is always PNG.
-pub fn prepare_image(data: &[u8], max_width: Option<u32>, max_height: Option<u32>) -> Option<Vec<u8>> {
+pub fn prepare_image(
+    data: &[u8],
+    max_width: Option<u32>,
+    max_height: Option<u32>,
+) -> Option<Vec<u8>> {
     let img = image::load_from_memory(data).ok()?;
     let (w, h) = (img.width(), img.height());
 
@@ -294,7 +303,9 @@ pub fn prepare_image(data: &[u8], max_width: Option<u32>, max_height: Option<u32
     };
 
     let mut buf = Vec::new();
-    scaled.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png).ok()?;
+    scaled
+        .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+        .ok()?;
     Some(buf)
 }
 
@@ -415,14 +426,9 @@ impl ImageCache {
 
     /// Look up a cached image by key.
     pub fn get(&self, key: u32) -> Option<(u32, ImageDimensions, u32, u32)> {
-        self.entries.get(&key).map(|e| {
-            (
-                e.image_id,
-                e.dimensions,
-                e.columns,
-                e.rows,
-            )
-        })
+        self.entries
+            .get(&key)
+            .map(|e| (e.image_id, e.dimensions, e.columns, e.rows))
     }
 
     /// Remove a cached image by key. Returns the Kitty image ID if found.
@@ -477,7 +483,13 @@ pub fn encode_kitty(
     }
 
     if base64_data.len() <= KITTY_CHUNK_SIZE {
-        format!("{}{};{}{}", KITTY_PREFIX, params.join(","), base64_data, KITTY_SUFFIX)
+        format!(
+            "{}{};{}{}",
+            KITTY_PREFIX,
+            params.join(","),
+            base64_data,
+            KITTY_SUFFIX
+        )
     } else {
         let mut chunks: Vec<String> = Vec::new();
         let mut offset = 0;
@@ -512,10 +524,7 @@ pub fn encode_kitty(
 
 /// Generate a Kitty delete-image escape sequence for a specific ID.
 pub fn delete_kitty_image(image_id: u32) -> String {
-    format!(
-        "{}a=d,d=I,i={}{}",
-        KITTY_PREFIX, image_id, KITTY_SUFFIX
-    )
+    format!("{}a=d,d=I,i={}{}", KITTY_PREFIX, image_id, KITTY_SUFFIX)
 }
 
 /// Generate a Kitty delete-all-images escape sequence.
@@ -549,12 +558,7 @@ pub fn encode_iterm2(
         params.push("preserveAspectRatio=0".to_string());
     }
 
-    format!(
-        "{}{}:{}\x07",
-        ITERM2_PREFIX,
-        params.join(";"),
-        base64_data
-    )
+    format!("{}{}:{}\x07", ITERM2_PREFIX, params.join(";"), base64_data)
 }
 
 // ---------------------------------------------------------------------------
@@ -735,7 +739,11 @@ pub fn render_terminal_image(
 }
 
 /// Render a fallback placeholder string for when no protocol is available.
-pub fn image_fallback(mime_type: &str, dims: Option<ImageDimensions>, filename: Option<&str>) -> String {
+pub fn image_fallback(
+    mime_type: &str,
+    dims: Option<ImageDimensions>,
+    filename: Option<&str>,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(f) = filename {
         parts.push(f.to_string());
@@ -768,9 +776,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
             0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, // 8-bit RGB
             0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, // IDAT
-            0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00,
-            0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC, 0x33,
-            0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, // IEND
+            0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21,
+            0xBC, 0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, // IEND
             0xAE, 0x42, 0x60, 0x82,
         ]
     }
@@ -877,7 +884,7 @@ mod tests {
         // Should have multiple chunks
         let chunk_count = result.matches(KITTY_PREFIX).count();
         assert!(chunk_count >= 3); // 10000 / 4096 ≈ 3 chunks
-        // First chunk: m=1, last chunk: m=0
+                                   // First chunk: m=1, last chunk: m=0
         assert!(result.contains(",m=1;"));
         assert!(result.contains("m=0;"));
     }

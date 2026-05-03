@@ -28,14 +28,9 @@ pub enum AgentSessionEvent {
         duration_ms: u64,
     },
     /// An error occurred
-    Error {
-        message: String,
-        recoverable: bool,
-    },
+    Error { message: String, recoverable: bool },
     /// Model started generating a response
-    ModelStart {
-        model_id: String,
-    },
+    ModelStart { model_id: String },
     /// Model finished generating a response
     ModelEnd {
         model_id: String,
@@ -49,9 +44,7 @@ pub enum AgentSessionEvent {
         cached_tokens: Option<u32>,
     },
     /// Session started
-    SessionStart {
-        session_id: String,
-    },
+    SessionStart { session_id: String },
     /// Session ended
     SessionEnd {
         session_id: String,
@@ -60,13 +53,9 @@ pub enum AgentSessionEvent {
     /// Thinking block started
     ThinkingStart,
     /// Thinking block ended
-    ThinkingEnd {
-        thoughts: String,
-    },
+    ThinkingEnd { thoughts: String },
     /// Stream chunk received
-    StreamChunk {
-        content: String,
-    },
+    StreamChunk { content: String },
     /// Tool call requested
     ToolCall {
         tool_name: String,
@@ -85,7 +74,13 @@ pub enum AgentSessionEvent {
 }
 
 /// Async event handler type - returns a pinned boxed future
-pub type EventHandler = Arc<dyn Fn(AgentSessionEvent) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> + Send + Sync>;
+pub type EventHandler = Arc<
+    dyn Fn(
+            AgentSessionEvent,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>
+        + Send
+        + Sync,
+>;
 
 /// Sync event handler type (for simpler handlers)
 pub type SyncEventHandler = Arc<dyn Fn(AgentSessionEvent) + Send + Sync>;
@@ -154,7 +149,8 @@ impl EventBus {
             Box::pin(fut)
         });
 
-        self.inner.subscribers
+        self.inner
+            .subscribers
             .write()
             .await
             .entry(channel.to_string())
@@ -174,7 +170,8 @@ impl EventBus {
         *next_id = id + 1;
         drop(next_id);
 
-        self.inner.sync_subscribers
+        self.inner
+            .sync_subscribers
             .write()
             .await
             .entry(channel.to_string())
@@ -190,9 +187,7 @@ impl EventBus {
     /// Subscribe to an event channel (sync version for convenience)
     pub fn subscribe(&self, channel: &str, handler: SyncEventHandler) -> Subscriber {
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            self.subscribe_sync(channel, handler).await
-        })
+        rt.block_on(async { self.subscribe_sync(channel, handler).await })
     }
 
     /// Publish an event to a channel
@@ -248,8 +243,22 @@ impl EventBus {
 
     /// Get the number of active subscriptions
     pub async fn subscription_count(&self) -> usize {
-        let async_count: usize = self.inner.subscribers.read().await.values().map(|h| h.len()).sum();
-        let sync_count: usize = self.inner.sync_subscribers.read().await.values().map(|h| h.len()).sum();
+        let async_count: usize = self
+            .inner
+            .subscribers
+            .read()
+            .await
+            .values()
+            .map(|h| h.len())
+            .sum();
+        let sync_count: usize = self
+            .inner
+            .sync_subscribers
+            .read()
+            .await
+            .values()
+            .map(|h| h.len())
+            .sum();
         async_count + sync_count
     }
 }
@@ -261,7 +270,9 @@ pub struct EventBusBuilder {
 
 impl EventBusBuilder {
     pub fn new() -> Self {
-        Self { channels: Vec::new() }
+        Self {
+            channels: Vec::new(),
+        }
     }
 
     pub fn with_channel(mut self, channel: impl Into<String>) -> Self {
@@ -335,9 +346,13 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        bus.subscribe_sync("test", Arc::new(move |event| {
-            received_clone.lock().unwrap().push(event);
-        })).await;
+        bus.subscribe_sync(
+            "test",
+            Arc::new(move |event| {
+                received_clone.lock().unwrap().push(event);
+            }),
+        )
+        .await;
 
         let event = AgentSessionEvent::SessionStart {
             session_id: "123".to_string(),
@@ -357,12 +372,20 @@ mod tests {
         let count1_clone = count1.clone();
         let count2_clone = count2.clone();
 
-        bus.subscribe_sync("test", Arc::new(move |_| {
-            *count1_clone.lock().unwrap() += 1;
-        })).await;
-        bus.subscribe_sync("test", Arc::new(move |_| {
-            *count2_clone.lock().unwrap() += 1;
-        })).await;
+        bus.subscribe_sync(
+            "test",
+            Arc::new(move |_| {
+                *count1_clone.lock().unwrap() += 1;
+            }),
+        )
+        .await;
+        bus.subscribe_sync(
+            "test",
+            Arc::new(move |_| {
+                *count2_clone.lock().unwrap() += 1;
+            }),
+        )
+        .await;
 
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
 
@@ -378,9 +401,14 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        let subscriber = bus.subscribe_sync("test", Arc::new(move |_| {
-            received_clone.lock().unwrap().push(1);
-        })).await;
+        let subscriber = bus
+            .subscribe_sync(
+                "test",
+                Arc::new(move |_| {
+                    received_clone.lock().unwrap().push(1);
+                }),
+            )
+            .await;
 
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -399,9 +427,13 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        bus.subscribe_sync("test", Arc::new(move |_| {
-            received_clone.lock().unwrap().push(1);
-        })).await;
+        bus.subscribe_sync(
+            "test",
+            Arc::new(move |_| {
+                received_clone.lock().unwrap().push(1);
+            }),
+        )
+        .await;
 
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;

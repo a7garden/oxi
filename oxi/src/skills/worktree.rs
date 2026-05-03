@@ -136,9 +136,7 @@ impl WorktreeCreateOpts {
     /// sibling directory next to the repo root.
     pub fn feature_branch(branch: &str, repo_root: &Path) -> Self {
         let safe_name = branch.replace('/', "-");
-        let parent = repo_root
-            .parent()
-            .unwrap_or(repo_root);
+        let parent = repo_root.parent().unwrap_or(repo_root);
         let path = parent.join(safe_name);
         Self {
             branch: branch.to_string(),
@@ -152,9 +150,7 @@ impl WorktreeCreateOpts {
     /// Build options for a hotfix worktree based on a specific commit/tag.
     pub fn hotfix(branch: &str, start_point: &str, repo_root: &Path) -> Self {
         let safe_name = branch.replace('/', "-");
-        let parent = repo_root
-            .parent()
-            .unwrap_or(repo_root);
+        let parent = repo_root.parent().unwrap_or(repo_root);
         let path = parent.join(safe_name);
         Self {
             branch: branch.to_string(),
@@ -412,11 +408,7 @@ impl WorktreeManager {
     ///
     /// This checks out `target_branch` in the main worktree, merges
     /// `source_branch`, and returns the result.
-    pub async fn merge(
-        &self,
-        source_branch: &str,
-        target_branch: &str,
-    ) -> Result<MergeResult> {
+    pub async fn merge(&self, source_branch: &str, target_branch: &str) -> Result<MergeResult> {
         // Checkout target branch in the main worktree
         self.run_git(&["checkout", target_branch]).await?;
 
@@ -523,7 +515,10 @@ impl WorktreeManager {
             .await?;
         let branch = output.trim().to_string();
         if branch.is_empty() || branch == "HEAD" {
-            bail!("Worktree at {} has a detached HEAD", worktree_path.display());
+            bail!(
+                "Worktree at {} has a detached HEAD",
+                worktree_path.display()
+            );
         }
         Ok(branch)
     }
@@ -538,9 +533,7 @@ impl WorktreeManager {
 
     /// Check if a branch name already exists in the repo.
     pub async fn branch_exists(&self, branch: &str) -> Result<bool> {
-        let output = self
-            .run_git_output(&["branch", "--list", branch])
-            .await?;
+        let output = self.run_git_output(&["branch", "--list", branch]).await?;
         Ok(!output.trim().is_empty())
     }
 
@@ -999,7 +992,10 @@ mod tests {
         assert_eq!(worktrees.len(), 1);
         assert_eq!(worktrees[0].path, PathBuf::from("/home/user/project"));
         assert_eq!(worktrees[0].branch, Some("main".to_string()));
-        assert_eq!(worktrees[0].commit, "abc123def456789012345678901234567890abcd");
+        assert_eq!(
+            worktrees[0].commit,
+            "abc123def456789012345678901234567890abcd"
+        );
         assert!(worktrees[0].is_main);
         assert!(!worktrees[0].is_detached);
     }

@@ -119,7 +119,9 @@ impl ValidationResult {
 
     /// Create a failing result with findings.
     pub fn fail(findings: Vec<ValidationFinding>) -> Self {
-        let has_errors = findings.iter().any(|f| f.severity == ValidationSeverity::Error);
+        let has_errors = findings
+            .iter()
+            .any(|f| f.severity == ValidationSeverity::Error);
         Self {
             valid: !has_errors,
             findings,
@@ -205,8 +207,9 @@ impl SkillValidator {
         {
             findings.push(ValidationFinding {
                 severity: ValidationSeverity::Warning,
-                message: "name contains invalid characters (must be lowercase a-z, 0-9, hyphens only)"
-                    .to_string(),
+                message:
+                    "name contains invalid characters (must be lowercase a-z, 0-9, hyphens only)"
+                        .to_string(),
                 path: None,
             });
         }
@@ -256,14 +259,8 @@ impl SkillValidator {
     }
 
     /// Validate that a skill name matches its parent directory.
-    pub fn validate_name_matches_dir(
-        name: &str,
-        dir_path: &Path,
-    ) -> Vec<ValidationFinding> {
-        let dir_name = dir_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy();
+    pub fn validate_name_matches_dir(name: &str, dir_path: &Path) -> Vec<ValidationFinding> {
+        let dir_name = dir_path.file_name().unwrap_or_default().to_string_lossy();
 
         if name != dir_name {
             vec![ValidationFinding {
@@ -462,7 +459,10 @@ impl SkillBuilder {
         // Frontmatter
         md.push_str("---\n");
         md.push_str(&format!("name: {}\n", self.name));
-        md.push_str(&format!("description: {}\n", escape_yaml_string(&self.description)));
+        md.push_str(&format!(
+            "description: {}\n",
+            escape_yaml_string(&self.description)
+        ));
 
         if let Some(ref license) = self.license {
             md.push_str(&format!("license: {}\n", escape_yaml_string(license)));
@@ -657,14 +657,18 @@ mod tests {
     #[test]
     fn test_validate_name_empty() {
         let findings = SkillValidator::validate_name("");
-        assert!(findings.iter().any(|f| f.severity == ValidationSeverity::Error));
+        assert!(findings
+            .iter()
+            .any(|f| f.severity == ValidationSeverity::Error));
     }
 
     #[test]
     fn test_validate_name_too_long() {
         let name = "a".repeat(65);
         let findings = SkillValidator::validate_name(&name);
-        assert!(findings.iter().any(|f| f.message.contains("exceeds 64 characters")));
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("exceeds 64 characters")));
     }
 
     #[test]
@@ -677,25 +681,33 @@ mod tests {
     #[test]
     fn test_validate_name_uppercase() {
         let findings = SkillValidator::validate_name("My-Skill");
-        assert!(findings.iter().any(|f| f.message.contains("invalid characters")));
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("invalid characters")));
     }
 
     #[test]
     fn test_validate_name_leading_hyphen() {
         let findings = SkillValidator::validate_name("-skill");
-        assert!(findings.iter().any(|f| f.message.contains("start or end with a hyphen")));
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("start or end with a hyphen")));
     }
 
     #[test]
     fn test_validate_name_trailing_hyphen() {
         let findings = SkillValidator::validate_name("skill-");
-        assert!(findings.iter().any(|f| f.message.contains("start or end with a hyphen")));
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("start or end with a hyphen")));
     }
 
     #[test]
     fn test_validate_name_consecutive_hyphens() {
         let findings = SkillValidator::validate_name("my--skill");
-        assert!(findings.iter().any(|f| f.message.contains("consecutive hyphens")));
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("consecutive hyphens")));
     }
 
     #[test]
@@ -713,20 +725,26 @@ mod tests {
     #[test]
     fn test_validate_description_empty() {
         let findings = SkillValidator::validate_description("");
-        assert!(findings.iter().any(|f| f.severity == ValidationSeverity::Error));
+        assert!(findings
+            .iter()
+            .any(|f| f.severity == ValidationSeverity::Error));
     }
 
     #[test]
     fn test_validate_description_whitespace_only() {
         let findings = SkillValidator::validate_description("   ");
-        assert!(findings.iter().any(|f| f.severity == ValidationSeverity::Error));
+        assert!(findings
+            .iter()
+            .any(|f| f.severity == ValidationSeverity::Error));
     }
 
     #[test]
     fn test_validate_description_too_long() {
         let desc = "x".repeat(1025);
         let findings = SkillValidator::validate_description(&desc);
-        assert!(findings.iter().any(|f| f.message.contains("exceeds 1024 characters")));
+        assert!(findings
+            .iter()
+            .any(|f| f.message.contains("exceeds 1024 characters")));
     }
 
     #[test]
@@ -752,7 +770,9 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let findings = SkillValidator::validate_name_matches_dir("my-skill", &dir);
         assert!(!findings.is_empty());
-        assert!(findings[0].message.contains("does not match parent directory"));
+        assert!(findings[0]
+            .message
+            .contains("does not match parent directory"));
     }
 
     #[test]
@@ -777,7 +797,10 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let result = SkillValidator::validate_skill_dir(&dir);
         assert!(!result.valid);
-        assert!(result.findings.iter().any(|f| f.message.contains("SKILL.md not found")));
+        assert!(result
+            .findings
+            .iter()
+            .any(|f| f.message.contains("SKILL.md not found")));
     }
 
     #[test]

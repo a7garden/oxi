@@ -6,7 +6,9 @@
 use crate::{
     cell::Cell,
     component::Component,
-    event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent},
+    event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent,
+    },
     overlay::{OverlayBox, OverlayContent, OverlayHandle, OverlayOptions},
     renderer::Renderer,
     surface::Surface,
@@ -56,7 +58,10 @@ struct OverlayHandleWrapper {
 impl TUI {
     /// Create a new TUI instance with a default terminal.
     pub fn new(mut terminal: impl Terminal + 'static) -> Self {
-        let size = terminal.size().unwrap_or(Size { width: 80, height: 24 });
+        let size = terminal.size().unwrap_or(Size {
+            width: 80,
+            height: 24,
+        });
         Self {
             terminal: Box::new(terminal),
             children: Vec::new(),
@@ -185,10 +190,7 @@ impl TUI {
         crossterm::execute!(stdout(), crossterm::cursor::Hide)?;
 
         // Enable mouse reporting
-        crossterm::execute!(
-            stdout(),
-            crossterm::event::EnableMouseCapture
-        )?;
+        crossterm::execute!(stdout(), crossterm::event::EnableMouseCapture)?;
 
         // Initial render
         self.render()?;
@@ -256,8 +258,12 @@ impl TUI {
                 };
 
                 let modifiers = KeyModifiers {
-                    shift: key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT),
-                    ctrl: key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL),
+                    shift: key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::SHIFT),
+                    ctrl: key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL),
                     alt: key.modifiers.contains(crossterm::event::KeyModifiers::ALT),
                     meta: key.modifiers.contains(crossterm::event::KeyModifiers::META),
                 };
@@ -273,9 +279,15 @@ impl TUI {
                     _ => MouseEventKind::Click,
                 };
 
-                let button = if mouse.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) {
+                let button = if mouse
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
+                {
                     MouseButton::Right
-                } else if mouse.modifiers.contains(crossterm::event::KeyModifiers::ALT) {
+                } else if mouse
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::ALT)
+                {
                     MouseButton::Middle
                 } else {
                     MouseButton::Left
@@ -401,8 +413,11 @@ impl TUI {
             RenderStrategy::Incremental => {
                 self.renderer.begin_sync();
                 if let (Some(first), Some(last)) = (surface.first_dirty(), surface.last_dirty()) {
-                    self.renderer
-                        .render_changed_lines(&surface, first, last.min(size.height - 1))?;
+                    self.renderer.render_changed_lines(
+                        &surface,
+                        first,
+                        last.min(size.height - 1),
+                    )?;
                 }
                 self.renderer.end_sync()?;
             }
@@ -459,10 +474,7 @@ impl TUI {
         crossterm::execute!(stdout(), crossterm::cursor::Show)?;
 
         // Disable mouse capture
-        crossterm::execute!(
-            stdout(),
-            crossterm::event::DisableMouseCapture
-        )?;
+        crossterm::execute!(stdout(), crossterm::event::DisableMouseCapture)?;
 
         // Leave alternate screen
         crossterm::execute!(stdout(), crossterm::terminal::LeaveAlternateScreen)?;

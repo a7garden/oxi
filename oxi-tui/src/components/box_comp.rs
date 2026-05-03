@@ -122,7 +122,11 @@ impl Component for Box {
 
         // Top border
         surface.set(area.y, area.x, Cell::new(tl).with_fg(self.fg_color));
-        surface.set(area.y, area.x + area.width - 1, Cell::new(tr).with_fg(self.fg_color));
+        surface.set(
+            area.y,
+            area.x + area.width - 1,
+            Cell::new(tr).with_fg(self.fg_color),
+        );
         for c in area.x + 1..area.x + area.width - 1 {
             surface.set(area.y, c, Cell::new(h).with_fg(self.fg_color));
         }
@@ -130,7 +134,11 @@ impl Component for Box {
         // Bottom border
         let bottom = area.y + area.height - 1;
         surface.set(bottom, area.x, Cell::new(bl).with_fg(self.fg_color));
-        surface.set(bottom, area.x + area.width - 1, Cell::new(br).with_fg(self.fg_color));
+        surface.set(
+            bottom,
+            area.x + area.width - 1,
+            Cell::new(br).with_fg(self.fg_color),
+        );
         for c in area.x + 1..area.x + area.width - 1 {
             surface.set(bottom, c, Cell::new(h).with_fg(self.fg_color));
         }
@@ -138,7 +146,11 @@ impl Component for Box {
         // Side borders
         for r in area.y + 1..bottom {
             surface.set(r, area.x, Cell::new(v).with_fg(self.fg_color));
-            surface.set(r, area.x + area.width - 1, Cell::new(v).with_fg(self.fg_color));
+            surface.set(
+                r,
+                area.x + area.width - 1,
+                Cell::new(v).with_fg(self.fg_color),
+            );
         }
 
         // Title (rendered on top border)

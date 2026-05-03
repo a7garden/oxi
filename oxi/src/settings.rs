@@ -189,9 +189,7 @@ impl Settings {
 
         if json_path.exists() && toml_path.exists() {
             // Both exist: JSON takes priority
-            tracing::debug!(
-                "Both settings.json and settings.toml exist, using settings.json"
-            );
+            tracing::debug!("Both settings.json and settings.toml exist, using settings.json");
             return Ok(json_path);
         }
 
@@ -335,26 +333,26 @@ impl Settings {
         let format = Self::detect_format(path);
         let overlay: serde_json::Value = match format {
             SettingsFormat::Toml => {
-                let toml_value: toml::Value = toml::from_str(&content)
-                    .with_context(|| format!("Failed to parse TOML settings from {}", path.display()))?;
+                let toml_value: toml::Value = toml::from_str(&content).with_context(|| {
+                    format!("Failed to parse TOML settings from {}", path.display())
+                })?;
                 // Convert TOML to JSON Value for uniform merging
                 toml_value_to_json(toml_value)
             }
-            SettingsFormat::Json => {
-                serde_json::from_str(&content)
-                    .with_context(|| format!("Failed to parse JSON settings from {}", path.display()))?
-            }
+            SettingsFormat::Json => serde_json::from_str(&content).with_context(|| {
+                format!("Failed to parse JSON settings from {}", path.display())
+            })?,
         };
 
         // Re-serialize the base to JSON, merge with the overlay, then
         // deserialize back. This gives correct "only override what's
         // present" semantics.
-        let base_json = serde_json::to_value(base)
-            .context("Failed to serialize base settings for merge")?;
+        let base_json =
+            serde_json::to_value(base).context("Failed to serialize base settings for merge")?;
 
         let merged = merge_json_values(base_json, overlay);
-        let result: Settings = serde_json::from_value(merged)
-            .context("Failed to deserialize merged settings")?;
+        let result: Settings =
+            serde_json::from_value(merged).context("Failed to deserialize merged settings")?;
 
         Ok(result)
     }
@@ -447,8 +445,9 @@ impl Settings {
         let path = Self::settings_path()?;
 
         if !dir.exists() {
-            fs::create_dir_all(&dir)
-                .with_context(|| format!("Failed to create settings directory {}", dir.display()))?;
+            fs::create_dir_all(&dir).with_context(|| {
+                format!("Failed to create settings directory {}", dir.display())
+            })?;
         }
 
         let format = Self::detect_format(&path);
@@ -493,8 +492,12 @@ impl Settings {
         let dir = project_dir.join(".oxi");
 
         if !dir.exists() {
-            fs::create_dir_all(&dir)
-                .with_context(|| format!("Failed to create project settings directory {}", dir.display()))?;
+            fs::create_dir_all(&dir).with_context(|| {
+                format!(
+                    "Failed to create project settings directory {}",
+                    dir.display()
+                )
+            })?;
         }
 
         // Check if a settings file already exists in project
@@ -526,8 +529,9 @@ impl Settings {
     /// Serialize settings to a string in the specified format.
     pub fn serialize_for_format(settings: &Settings, format: SettingsFormat) -> Result<String> {
         match format {
-            SettingsFormat::Toml => toml::to_string_pretty(settings)
-                .context("Failed to serialize settings to TOML"),
+            SettingsFormat::Toml => {
+                toml::to_string_pretty(settings).context("Failed to serialize settings to TOML")
+            }
             SettingsFormat::Json => serde_json::to_string_pretty(settings)
                 .context("Failed to serialize settings to JSON"),
         }
@@ -536,10 +540,12 @@ impl Settings {
     /// Parse settings from a string in the specified format.
     pub fn parse_from_str(content: &str, format: SettingsFormat) -> Result<Settings> {
         match format {
-            SettingsFormat::Toml => toml::from_str(content)
-                .context("Failed to parse TOML settings"),
-            SettingsFormat::Json => serde_json::from_str(content)
-                .context("Failed to parse JSON settings"),
+            SettingsFormat::Toml => {
+                toml::from_str(content).context("Failed to parse TOML settings")
+            }
+            SettingsFormat::Json => {
+                serde_json::from_str(content).context("Failed to parse JSON settings")
+            }
         }
     }
 
@@ -581,7 +587,26 @@ impl Settings {
     /// Get the effective max tokens, preferring `max_response_tokens` (usize)
     /// over `max_tokens` (u32), falling back to `None`.
     pub fn effective_max_tokens(&self) -> Option<usize> {
-        self.max_response_tokens.or(self.max_tokens.map(|t| t as usize))
+        self.max_response_tokens
+            .or(self.max_tokens.map(|t| t as usize))
+    }
+
+    // ── Theme persistence ─────────────────────────────────────────────
+
+
+    /// Save the current theme to settings and persist to disk.
+    pub fn save_theme(&mut self, name: &str) -> Result<()> {
+        self.theme = name.to_string();
+        self.save()
+    }
+
+    /// Get the theme name from settings, returning a default if not set.
+    pub fn get_theme_name(&self) -> String {
+        if self.theme.is_empty() || self.theme == "default" {
+            "oxi_dark".to_string()
+        } else {
+            self.theme.clone()
+        }
     }
 
     // ── Migration ────────────────────────────────────────────────────
@@ -659,10 +684,9 @@ fn toml_value_to_json(toml: toml::Value) -> serde_json::Value {
     match toml {
         toml::Value::String(s) => serde_json::Value::String(s),
         toml::Value::Integer(i) => serde_json::Value::Number(i.into()),
-        toml::Value::Float(f) => {
-            serde_json::Number::from_f64(f).map(serde_json::Value::Number)
-                .unwrap_or(serde_json::Value::Null)
-        }
+        toml::Value::Float(f) => serde_json::Number::from_f64(f)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null),
         toml::Value::Boolean(b) => serde_json::Value::Bool(b),
         toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
         toml::Value::Array(arr) => {
@@ -825,10 +849,17 @@ theme = "dracula"
         let oxi_dir = tmp.path().join(".oxi");
         fs::create_dir_all(&oxi_dir).unwrap();
         let settings_path = oxi_dir.join("settings.toml");
-        fs::write(&settings_path, "default_model = \"google/gemini-2.0-flash\"\n").unwrap();
+        fs::write(
+            &settings_path,
+            "default_model = \"google/gemini-2.0-flash\"\n",
+        )
+        .unwrap();
 
         let settings = Settings::load_from(tmp.path()).unwrap();
-        assert_eq!(settings.default_model, Some("google/gemini-2.0-flash".to_string()));
+        assert_eq!(
+            settings.default_model,
+            Some("google/gemini-2.0-flash".to_string())
+        );
     }
 
     #[test]
@@ -856,17 +887,16 @@ theme = "dracula"
 
     #[test]
     fn test_from_env() {
-        let _guard = EnvGuard::new(&[
-            "OXI_MODEL",
-            "OXI_THEME",
-            "OXI_TOOL_TIMEOUT",
-        ]);
+        let _guard = EnvGuard::new(&["OXI_MODEL", "OXI_THEME", "OXI_TOOL_TIMEOUT"]);
         env::set_var("OXI_MODEL", "anthropic/claude-haiku-4-20250414");
         env::set_var("OXI_THEME", "nord");
         env::set_var("OXI_TOOL_TIMEOUT", "60");
 
         let settings = Settings::from_env();
-        assert_eq!(settings.default_model, Some("anthropic/claude-haiku-4-20250414".to_string()));
+        assert_eq!(
+            settings.default_model,
+            Some("anthropic/claude-haiku-4-20250414".to_string())
+        );
         assert_eq!(settings.theme, "nord");
         assert_eq!(settings.tool_timeout_seconds, 60);
     }
@@ -906,9 +936,18 @@ theme = "dracula"
     #[test]
     fn test_parse_thinking_level() {
         assert_eq!(parse_thinking_level("none"), Some(ThinkingLevel::None));
-        assert_eq!(parse_thinking_level("MINIMAL"), Some(ThinkingLevel::Minimal));
-        assert_eq!(parse_thinking_level("Standard"), Some(ThinkingLevel::Standard));
-        assert_eq!(parse_thinking_level("thorough"), Some(ThinkingLevel::Thorough));
+        assert_eq!(
+            parse_thinking_level("MINIMAL"),
+            Some(ThinkingLevel::Minimal)
+        );
+        assert_eq!(
+            parse_thinking_level("Standard"),
+            Some(ThinkingLevel::Standard)
+        );
+        assert_eq!(
+            parse_thinking_level("thorough"),
+            Some(ThinkingLevel::Thorough)
+        );
         assert_eq!(parse_thinking_level("invalid"), None);
     }
 
@@ -972,14 +1011,20 @@ theme = "dracula"
         env::remove_var("OXI_SESSION_DIR");
         let mut settings = Settings::default();
         settings.session_dir = Some(PathBuf::from("/tmp/oxi-sessions"));
-        assert_eq!(settings.effective_session_dir().unwrap(), PathBuf::from("/tmp/oxi-sessions"));
+        assert_eq!(
+            settings.effective_session_dir().unwrap(),
+            PathBuf::from("/tmp/oxi-sessions")
+        );
     }
 
     #[test]
     fn test_effective_session_dir_from_env() {
         env::set_var("OXI_SESSION_DIR", "/tmp/env-sessions");
         let settings = Settings::default();
-        assert_eq!(settings.effective_session_dir().unwrap(), PathBuf::from("/tmp/env-sessions"));
+        assert_eq!(
+            settings.effective_session_dir().unwrap(),
+            PathBuf::from("/tmp/env-sessions")
+        );
         env::remove_var("OXI_SESSION_DIR");
     }
 
@@ -1127,7 +1172,10 @@ tool_timeout_seconds = 45
 "#;
 
         let settings = Settings::parse_from_str(toml_content, SettingsFormat::Toml).unwrap();
-        assert_eq!(settings.default_model, Some("anthropic/claude-opus".to_string()));
+        assert_eq!(
+            settings.default_model,
+            Some("anthropic/claude-opus".to_string())
+        );
         assert_eq!(settings.theme, "monokai");
         assert_eq!(settings.tool_timeout_seconds, 45);
         assert_eq!(settings.thinking_level, ThinkingLevel::Standard);
@@ -1219,7 +1267,10 @@ tool_timeout_seconds = 45
         fs::write(&settings_path, json_content).unwrap();
 
         let settings = Settings::load_from(tmp.path()).unwrap();
-        assert_eq!(settings.default_model, Some("google/gemini-2.0-flash".to_string()));
+        assert_eq!(
+            settings.default_model,
+            Some("google/gemini-2.0-flash".to_string())
+        );
     }
 
     #[test]
@@ -1237,7 +1288,10 @@ tool_timeout_seconds = 45
         // JSON takes priority
         let found = Settings::find_project_settings(tmp.path());
         assert!(found.is_some());
-        assert_eq!(found.unwrap().file_name().unwrap().to_str().unwrap(), "settings.json");
+        assert_eq!(
+            found.unwrap().file_name().unwrap().to_str().unwrap(),
+            "settings.json"
+        );
     }
 
     #[test]
@@ -1251,7 +1305,10 @@ tool_timeout_seconds = 45
 
         let found = Settings::find_project_settings(tmp.path());
         assert!(found.is_some());
-        assert_eq!(found.unwrap().file_name().unwrap().to_str().unwrap(), "settings.json");
+        assert_eq!(
+            found.unwrap().file_name().unwrap().to_str().unwrap(),
+            "settings.json"
+        );
     }
 
     #[test]
@@ -1265,7 +1322,10 @@ tool_timeout_seconds = 45
 
         let found = Settings::find_project_settings(tmp.path());
         assert!(found.is_some());
-        assert_eq!(found.unwrap().file_name().unwrap().to_str().unwrap(), "settings.toml");
+        assert_eq!(
+            found.unwrap().file_name().unwrap().to_str().unwrap(),
+            "settings.toml"
+        );
     }
 
     #[test]
@@ -1276,7 +1336,8 @@ tool_timeout_seconds = 45
 
         assert_eq!(Settings::detect_format(&json_path), SettingsFormat::Json);
         assert_eq!(Settings::detect_format(&toml_path), SettingsFormat::Toml);
-        assert_eq!(Settings::detect_format(&unknown_path), SettingsFormat::Json); // Default
+        assert_eq!(Settings::detect_format(&unknown_path), SettingsFormat::Json);
+        // Default
     }
 
     #[test]

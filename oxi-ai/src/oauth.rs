@@ -266,8 +266,8 @@ pub fn build_authorization_url(config: &OAuthConfig) -> PkceState {
     let code_challenge = derive_code_challenge(&code_verifier);
     let state = generate_state_token();
 
-    let mut url = url::Url::parse(&config.authorization_endpoint)
-        .expect("invalid authorization endpoint");
+    let mut url =
+        url::Url::parse(&config.authorization_endpoint).expect("invalid authorization endpoint");
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", &config.client_id)
@@ -438,10 +438,9 @@ pub async fn ensure_valid_token(
     config: &OAuthConfig,
     provider_key: &str,
 ) -> Result<TokenBundle> {
-    let bundle = load_token(provider_key)?
-        .ok_or(OAuthError::InvalidState(format!(
-            "No token stored for {provider_key}"
-        )))?;
+    let bundle = load_token(provider_key)?.ok_or(OAuthError::InvalidState(format!(
+        "No token stored for {provider_key}"
+    )))?;
 
     if !bundle.is_expired() {
         return Ok(bundle);
@@ -648,7 +647,9 @@ mod tests {
     fn test_code_verifier_is_base64url() {
         let v = generate_code_verifier();
         // base64url chars: A-Z a-z 0-9 - _
-        assert!(v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(v
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
     }
 
     #[test]
@@ -677,7 +678,9 @@ mod tests {
     fn test_code_challenge_is_base64url() {
         let v = generate_code_verifier();
         let c = derive_code_challenge(&v);
-        assert!(c.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'));
+        assert!(c
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'));
     }
 
     #[test]
@@ -798,7 +801,9 @@ mod tests {
         let pkce = build_authorization_url(&config);
 
         assert!(pkce.authorization_url.contains("code_challenge="));
-        assert!(pkce.authorization_url.contains("code_challenge_method=S256"));
+        assert!(pkce
+            .authorization_url
+            .contains("code_challenge_method=S256"));
         assert!(pkce.authorization_url.contains("client_id=my-client"));
         assert!(pkce.authorization_url.contains("response_type=code"));
         assert!(pkce.authorization_url.contains("state="));

@@ -1,10 +1,10 @@
 //! Provider trait definition
 
+use crate::error::ProviderError;
+use crate::{Context, Model, ProviderEvent, StreamOptions};
 use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
-use crate::error::ProviderError;
-use crate::{Model, Context, StreamOptions, ProviderEvent};
 
 /// LLM provider trait
 ///
@@ -18,7 +18,7 @@ pub trait Provider: Send + Sync + 'static {
         context: &Context,
         options: Option<StreamOptions>,
     ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>;
-    
+
     /// Get the provider name
     fn name(&self) -> &str;
 }

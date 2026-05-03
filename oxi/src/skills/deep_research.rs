@@ -257,7 +257,10 @@ impl DeepResearchSkill {
 
         // Title and metadata
         md.push_str(&format!("# {}\n\n", report.topic));
-        md.push_str(&format!("> Date: {} | Version: {}\n", report.meta.date, report.meta.version));
+        md.push_str(&format!(
+            "> Date: {} | Version: {}\n",
+            report.meta.date, report.meta.version
+        ));
         if let Some(ref focus) = report.focus {
             md.push_str(&format!("> Focus: {}\n", focus));
         }
@@ -327,11 +330,7 @@ impl DeepResearchSkill {
                 let cons = approach.cons.join(", ");
                 md.push_str(&format!(
                     "| {} | {}/5 | {}/5 | {} | {} |\n",
-                    approach.name,
-                    approach.complexity,
-                    approach.suitability,
-                    pros,
-                    cons,
+                    approach.name, approach.complexity, approach.suitability, pros, cons,
                 ));
             }
             md.push('\n');
@@ -403,8 +402,12 @@ impl DeepResearchSkill {
         };
 
         // Create output directory
-        fs::create_dir_all(&output_dir)
-            .with_context(|| format!("Failed to create output directory: {}", output_dir.display()))?;
+        fs::create_dir_all(&output_dir).with_context(|| {
+            format!(
+                "Failed to create output directory: {}",
+                output_dir.display()
+            )
+        })?;
 
         let filename = Self::report_filename(&config.topic);
         let path = output_dir.join(&filename);
@@ -510,9 +513,15 @@ impl DeepResearchSkill {
             let name = entry.file_name().to_string_lossy().to_string();
 
             // Skip hidden dirs and common noise
-            if name.starts_with('.') || name == "target" || name == "node_modules"
-                || name == "__pycache__" || name == "dist" || name == "build"
-                || name == ".git" || name == "vendor" || name == "coverage"
+            if name.starts_with('.')
+                || name == "target"
+                || name == "node_modules"
+                || name == "__pycache__"
+                || name == "dist"
+                || name == "build"
+                || name == ".git"
+                || name == "vendor"
+                || name == "coverage"
             {
                 continue;
             }
@@ -534,17 +543,17 @@ impl DeepResearchSkill {
                 let is_config = matches!(
                     name_lower.as_str(),
                     "cargo.toml"
-                    | "package.json"
-                    | "tsconfig.json"
-                    | "pyproject.toml"
-                    | "go.mod"
-                    | "makefile"
-                    | "dockerfile"
-                    | "docker-compose.yml"
-                    | "docker-compose.yaml"
-                    | ".env.example"
-                    | "readme.md"
-                    | "license"
+                        | "package.json"
+                        | "tsconfig.json"
+                        | "pyproject.toml"
+                        | "go.mod"
+                        | "makefile"
+                        | "dockerfile"
+                        | "docker-compose.yml"
+                        | "docker-compose.yaml"
+                        | ".env.example"
+                        | "readme.md"
+                        | "license"
                 );
 
                 // Check keyword relevance
@@ -578,9 +587,16 @@ impl DeepResearchSkill {
 
     /// Extract relevant dependencies from a Cargo.toml file.
     fn extract_cargo_deps(content: &str, keywords: &[&str], deps: &mut Vec<String>) {
-        let in_deps = content.lines()
-            .skip_while(|line| line.trim() != "[dependencies]" && line.trim() != "[dev-dependencies]")
-            .take_while(|line| !line.starts_with('[') || line.trim() == "[dependencies]" || line.trim() == "[dev-dependencies]");
+        let in_deps = content
+            .lines()
+            .skip_while(|line| {
+                line.trim() != "[dependencies]" && line.trim() != "[dev-dependencies]"
+            })
+            .take_while(|line| {
+                !line.starts_with('[')
+                    || line.trim() == "[dependencies]"
+                    || line.trim() == "[dev-dependencies]"
+            });
 
         for line in in_deps {
             let line = line.trim();
@@ -593,7 +609,9 @@ impl DeepResearchSkill {
                     deps.push(format!("{} (Rust crate)", name));
                 } else {
                     let name_lower = name.to_lowercase();
-                    let relevant = keywords.iter().any(|kw| name_lower.contains(&kw.to_lowercase()));
+                    let relevant = keywords
+                        .iter()
+                        .any(|kw| name_lower.contains(&kw.to_lowercase()));
                     if relevant {
                         deps.push(format!("{} (Rust crate)", name));
                     }
@@ -613,7 +631,9 @@ impl DeepResearchSkill {
                             deps.push(format!("{} (npm)", name));
                         } else {
                             let name_lower = name.to_lowercase();
-                            let relevant = keywords.iter().any(|kw| name_lower.contains(&kw.to_lowercase()));
+                            let relevant = keywords
+                                .iter()
+                                .any(|kw| name_lower.contains(&kw.to_lowercase()));
                             if relevant {
                                 deps.push(format!("{} (npm)", name));
                             }
@@ -646,7 +666,10 @@ mod tests {
 
     #[test]
     fn test_slugify_simple() {
-        assert_eq!(slugify("What is the best ORM for Rust?"), "what-is-the-best-orm-for-rust");
+        assert_eq!(
+            slugify("What is the best ORM for Rust?"),
+            "what-is-the-best-orm-for-rust"
+        );
     }
 
     #[test]
@@ -857,7 +880,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let analysis = DeepResearchSkill::analyze_project(tmp.path(), &[]).unwrap();
         // Empty dir, no keywords — should still return valid analysis
-        assert!(analysis.files.is_empty() || analysis.files.iter().any(|f| f.contains("Cargo.toml") || f.contains("package.json")));
+        assert!(
+            analysis.files.is_empty()
+                || analysis
+                    .files
+                    .iter()
+                    .any(|f| f.contains("Cargo.toml") || f.contains("package.json"))
+        );
     }
 
     #[test]
@@ -867,7 +896,9 @@ mod tests {
         // Create a minimal Rust project structure
         let src_dir = tmp.path().join("src");
         fs::create_dir_all(&src_dir).unwrap();
-        fs::write(tmp.path().join("Cargo.toml"), r#"
+        fs::write(
+            tmp.path().join("Cargo.toml"),
+            r#"
 [package]
 name = "test-project"
 version = "0.1.0"
@@ -875,7 +906,9 @@ version = "0.1.0"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 tokio = "1"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
 
         let analysis = DeepResearchSkill::analyze_project(tmp.path(), &["serde"]).unwrap();
@@ -913,7 +946,11 @@ tokio = "1"
         for file in &analysis.files {
             assert!(!file.starts_with(".git/"), "Should skip .git: {}", file);
             assert!(!file.starts_with("target/"), "Should skip target: {}", file);
-            assert!(!file.starts_with("node_modules/"), "Should skip node_modules: {}", file);
+            assert!(
+                !file.starts_with("node_modules/"),
+                "Should skip node_modules: {}",
+                file
+            );
         }
     }
 
@@ -921,7 +958,14 @@ tokio = "1"
     fn test_analyze_project_depth_limited() {
         let tmp = tempfile::tempdir().unwrap();
         // Create deeply nested structure
-        let deep = tmp.path().join("a").join("b").join("c").join("d").join("e").join("f");
+        let deep = tmp
+            .path()
+            .join("a")
+            .join("b")
+            .join("c")
+            .join("d")
+            .join("e")
+            .join("f");
         fs::create_dir_all(&deep).unwrap();
         fs::write(deep.join("deep.txt"), "content").unwrap();
         fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();

@@ -127,7 +127,11 @@ impl PackageManager {
                         self.installed.insert(manifest.name.clone(), manifest);
                     }
                     Err(e) => {
-                        tracing::warn!("Failed to load manifest {}: {}", manifest_path.display(), e);
+                        tracing::warn!(
+                            "Failed to load manifest {}: {}",
+                            manifest_path.display(),
+                            e
+                        );
                     }
                 }
             }
@@ -162,28 +166,39 @@ impl PackageManager {
         let dest = self.pkg_install_dir(&manifest.name);
 
         // Ensure packages directory exists
-        fs::create_dir_all(&self.packages_dir)
-            .with_context(|| format!("Failed to create packages directory {}", self.packages_dir.display()))?;
+        fs::create_dir_all(&self.packages_dir).with_context(|| {
+            format!(
+                "Failed to create packages directory {}",
+                self.packages_dir.display()
+            )
+        })?;
 
         // Remove previous installation if it exists
         if dest.exists() {
-            fs::remove_dir_all(&dest)
-                .with_context(|| format!("Failed to remove existing package at {}", dest.display()))?;
+            fs::remove_dir_all(&dest).with_context(|| {
+                format!("Failed to remove existing package at {}", dest.display())
+            })?;
         }
 
         // Copy the entire source directory
-        copy_dir_recursive(source_path, &dest)
-            .with_context(|| format!("Failed to copy package from {} to {}", source, dest.display()))?;
+        copy_dir_recursive(source_path, &dest).with_context(|| {
+            format!(
+                "Failed to copy package from {} to {}",
+                source,
+                dest.display()
+            )
+        })?;
 
-        self.installed.insert(manifest.name.clone(), manifest.clone());
+        self.installed
+            .insert(manifest.name.clone(), manifest.clone());
         Ok(manifest)
     }
 
     /// Install a package from npm
     pub fn install_npm(&mut self, name: &str) -> Result<PackageManifest> {
         // npm pack the package to a temp directory
-        let tmp_dir = tempfile::tempdir()
-            .context("Failed to create temp directory for npm install")?;
+        let tmp_dir =
+            tempfile::tempdir().context("Failed to create temp directory for npm install")?;
 
         let status = std::process::Command::new("npm")
             .args(["pack", name, "--pack-destination"])
@@ -229,15 +244,20 @@ impl PackageManager {
         let pkg_source = extract_dir.join("package");
 
         // Ensure packages directory exists
-        fs::create_dir_all(&self.packages_dir)
-            .with_context(|| format!("Failed to create packages directory {}", self.packages_dir.display()))?;
+        fs::create_dir_all(&self.packages_dir).with_context(|| {
+            format!(
+                "Failed to create packages directory {}",
+                self.packages_dir.display()
+            )
+        })?;
 
         let safe_name = name.replace('@', "").replace('/', "-");
         let dest = self.packages_dir.join(safe_name);
 
         if dest.exists() {
-            fs::remove_dir_all(&dest)
-                .with_context(|| format!("Failed to remove existing package at {}", dest.display()))?;
+            fs::remove_dir_all(&dest).with_context(|| {
+                format!("Failed to remove existing package at {}", dest.display())
+            })?;
         }
 
         copy_dir_recursive(&pkg_source, &dest)
@@ -259,7 +279,8 @@ impl PackageManager {
             }
         };
 
-        self.installed.insert(manifest.name.clone(), manifest.clone());
+        self.installed
+            .insert(manifest.name.clone(), manifest.clone());
         Ok(manifest)
     }
 
@@ -271,8 +292,9 @@ impl PackageManager {
 
         let dest = self.pkg_install_dir(name);
         if dest.exists() {
-            fs::remove_dir_all(&dest)
-                .with_context(|| format!("Failed to remove package directory {}", dest.display()))?;
+            fs::remove_dir_all(&dest).with_context(|| {
+                format!("Failed to remove package directory {}", dest.display())
+            })?;
         }
 
         self.installed.remove(name);
@@ -326,7 +348,9 @@ impl PackageManager {
     /// If the manifest lists explicit paths, those are resolved against the
     /// install directory. Otherwise, auto-discovery is performed.
     pub fn discover_resources(&self, name: &str) -> Result<Vec<DiscoveredResource>> {
-        let manifest = self.installed.get(name)
+        let manifest = self
+            .installed
+            .get(name)
             .with_context(|| format!("Package '{}' not found", name))?;
 
         let install_dir = self.pkg_install_dir(name);
@@ -456,7 +480,11 @@ fn discover_extensions(dir: &Path) -> Vec<DiscoveredResource> {
     results
 }
 
-fn discover_extensions_recursive(base: &Path, current: &Path, results: &mut Vec<DiscoveredResource>) {
+fn discover_extensions_recursive(
+    base: &Path,
+    current: &Path,
+    results: &mut Vec<DiscoveredResource>,
+) {
     if !current.exists() {
         return;
     }
@@ -573,7 +601,11 @@ fn discover_skills(dir: &Path) -> Vec<DiscoveredResource> {
 fn discover_prompts(dir: &Path) -> Vec<DiscoveredResource> {
     let prompts_dir = dir.join("prompts");
     discover_files_by_ext(
-        if prompts_dir.exists() { &prompts_dir } else { dir },
+        if prompts_dir.exists() {
+            &prompts_dir
+        } else {
+            dir
+        },
         "md",
         ResourceKind::Prompt,
     )
@@ -583,7 +615,11 @@ fn discover_prompts(dir: &Path) -> Vec<DiscoveredResource> {
 fn discover_themes(dir: &Path) -> Vec<DiscoveredResource> {
     let themes_dir = dir.join("themes");
     discover_files_by_ext(
-        if themes_dir.exists() { &themes_dir } else { dir },
+        if themes_dir.exists() {
+            &themes_dir
+        } else {
+            dir
+        },
         "json",
         ResourceKind::Theme,
     )
@@ -830,8 +866,14 @@ mod tests {
         let resources = mgr.discover_resources("test-pkg").unwrap();
         assert_eq!(resources.len(), 2); // ext1.so + skill-a/SKILL.md
 
-        let extensions: Vec<_> = resources.iter().filter(|r| r.kind == ResourceKind::Extension).collect();
-        let skills: Vec<_> = resources.iter().filter(|r| r.kind == ResourceKind::Skill).collect();
+        let extensions: Vec<_> = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Extension)
+            .collect();
+        let skills: Vec<_> = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Skill)
+            .collect();
         assert_eq!(extensions.len(), 1);
         assert_eq!(skills.len(), 1);
     }
@@ -847,15 +889,43 @@ mod tests {
         let resources = mgr.discover_resources("auto-pkg").unwrap();
 
         // Should discover: myext.so, my-skill/SKILL.md, prompts/review.md, themes/dark.json
-        let ext_count = resources.iter().filter(|r| r.kind == ResourceKind::Extension).count();
-        let skill_count = resources.iter().filter(|r| r.kind == ResourceKind::Skill).count();
-        let prompt_count = resources.iter().filter(|r| r.kind == ResourceKind::Prompt).count();
-        let theme_count = resources.iter().filter(|r| r.kind == ResourceKind::Theme).count();
+        let ext_count = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Extension)
+            .count();
+        let skill_count = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Skill)
+            .count();
+        let prompt_count = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Prompt)
+            .count();
+        let theme_count = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Theme)
+            .count();
 
-        assert!(ext_count >= 1, "Expected at least 1 extension, got {}", ext_count);
-        assert!(skill_count >= 1, "Expected at least 1 skill, got {}", skill_count);
-        assert!(prompt_count >= 1, "Expected at least 1 prompt, got {}", prompt_count);
-        assert!(theme_count >= 1, "Expected at least 1 theme, got {}", theme_count);
+        assert!(
+            ext_count >= 1,
+            "Expected at least 1 extension, got {}",
+            ext_count
+        );
+        assert!(
+            skill_count >= 1,
+            "Expected at least 1 skill, got {}",
+            skill_count
+        );
+        assert!(
+            prompt_count >= 1,
+            "Expected at least 1 prompt, got {}",
+            prompt_count
+        );
+        assert!(
+            theme_count >= 1,
+            "Expected at least 1 theme, got {}",
+            theme_count
+        );
     }
 
     #[test]

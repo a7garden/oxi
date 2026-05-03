@@ -26,9 +26,9 @@
 use serde_json::Value as JsonValue;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, ImageContent, ImageContentType,
-    Message, MessageContent, StopReason, TextContent, TextContentType, ThinkingContent,
-    ToolCall, ToolCallType, ToolResultMessage, Usage,
+    Api, AssistantMessage, ContentBlock, ImageContent, ImageContentType, Message, MessageContent,
+    StopReason, TextContent, TextContentType, ThinkingContent, ToolCall, ToolCallType,
+    ToolResultMessage, Usage,
 };
 
 // ---------------------------------------------------------------------------
@@ -533,7 +533,10 @@ mod tests {
                 assert!(text.contains("Let me think..."));
                 assert!(text.contains("Here's the answer."));
                 // No native thinking blocks left
-                assert!(!a.content.iter().any(|b| matches!(b, ContentBlock::Thinking(_))));
+                assert!(!a
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::Thinking(_))));
             }
             _ => panic!("Expected Assistant"),
         }
@@ -557,7 +560,8 @@ mod tests {
             strip_thinking: true,
             ..Default::default()
         };
-        let result = transform_messages(&msgs, Api::AnthropicMessages, Api::OpenAiCompletions, opts);
+        let result =
+            transform_messages(&msgs, Api::AnthropicMessages, Api::OpenAiCompletions, opts);
 
         match &result[0] {
             Message::Assistant(a) => {
@@ -584,7 +588,10 @@ mod tests {
                 Api::AnthropicMessages,
                 "anthropic",
                 "claude-3.5-sonnet",
-                vec![ContentBlock::Text(TextContent::new("Let me check.")), tool_call],
+                vec![
+                    ContentBlock::Text(TextContent::new("Let me check.")),
+                    tool_call,
+                ],
             ),
             tool_result_msg("call_123", "get_weather", "Sunny, 22°C"),
         ];
@@ -631,7 +638,8 @@ mod tests {
             convert_tools: false,
             ..Default::default()
         };
-        let result = transform_messages(&msgs, Api::AnthropicMessages, Api::OpenAiCompletions, opts);
+        let result =
+            transform_messages(&msgs, Api::AnthropicMessages, Api::OpenAiCompletions, opts);
 
         match &result[0] {
             Message::Assistant(a) => {
@@ -661,7 +669,10 @@ mod tests {
         match &result[0] {
             Message::Assistant(a) => {
                 let has_text = a.content.iter().any(|b| matches!(b, ContentBlock::Text(_)));
-                let has_image = a.content.iter().any(|b| matches!(b, ContentBlock::Image(_)));
+                let has_image = a
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::Image(_)));
                 assert!(has_text, "Text block should be preserved");
                 assert!(has_image, "Image block should be preserved");
             }
@@ -758,8 +769,14 @@ mod tests {
         match &result[0] {
             Message::Assistant(a) => {
                 // Thinking block should be preserved natively for Anthropic
-                let has_thinking = a.content.iter().any(|b| matches!(b, ContentBlock::Thinking(_)));
-                assert!(has_thinking, "Thinking block should be preserved for Anthropic");
+                let has_thinking = a
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::Thinking(_)));
+                assert!(
+                    has_thinking,
+                    "Thinking block should be preserved for Anthropic"
+                );
             }
             _ => panic!("Expected Assistant"),
         }
@@ -784,8 +801,14 @@ mod tests {
         match &result[0] {
             Message::Assistant(a) => {
                 // No native thinking blocks for Google
-                let has_thinking = a.content.iter().any(|b| matches!(b, ContentBlock::Thinking(_)));
-                assert!(!has_thinking, "Google target should not have thinking blocks");
+                let has_thinking = a
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::Thinking(_)));
+                assert!(
+                    !has_thinking,
+                    "Google target should not have thinking blocks"
+                );
                 // Text should contain wrapped thinking
                 let text = a.text_content();
                 assert!(text.contains("<thinking>"));
@@ -833,10 +856,19 @@ mod tests {
         // First assistant: thinking converted + tool call preserved
         match &result[1] {
             Message::Assistant(a) => {
-                let has_tool = a.content.iter().any(|b| matches!(b, ContentBlock::ToolCall(_)));
+                let has_tool = a
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::ToolCall(_)));
                 assert!(has_tool, "Tool call should be preserved");
-                let has_thinking = a.content.iter().any(|b| matches!(b, ContentBlock::Thinking(_)));
-                assert!(!has_thinking, "Thinking should be converted to text for OpenAI");
+                let has_thinking = a
+                    .content
+                    .iter()
+                    .any(|b| matches!(b, ContentBlock::Thinking(_)));
+                assert!(
+                    !has_thinking,
+                    "Thinking should be converted to text for OpenAI"
+                );
             }
             _ => panic!("Expected Assistant"),
         }
@@ -871,7 +903,8 @@ mod tests {
             convert_images: false,
             ..Default::default()
         };
-        let result = transform_messages(&msgs, Api::AnthropicMessages, Api::OpenAiCompletions, opts);
+        let result =
+            transform_messages(&msgs, Api::AnthropicMessages, Api::OpenAiCompletions, opts);
 
         match &result[0] {
             Message::User(u) => match &u.content {

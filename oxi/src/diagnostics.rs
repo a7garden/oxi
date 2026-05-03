@@ -192,7 +192,11 @@ pub fn collect_build_info(entries: &mut Vec<DiagnosticEntry>) {
         entries,
         "build",
         "features",
-        std::env::var("CARGO_CFG_DEBUG").ok().map(|_| "debug").unwrap_or("release").to_string(),
+        std::env::var("CARGO_CFG_DEBUG")
+            .ok()
+            .map(|_| "debug")
+            .unwrap_or("release")
+            .to_string(),
     );
 }
 

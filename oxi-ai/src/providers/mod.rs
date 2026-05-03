@@ -1,45 +1,45 @@
 //! Provider abstraction layer
 
-mod trait_def;
+mod anthropic;
+mod azure;
+mod bedrock;
+mod cloudflare;
+mod copilot;
+mod deepseek;
 mod event;
-mod options;
+mod google;
+mod mistral;
 mod openai;
 mod openai_responses;
-mod anthropic;
-mod google;
+mod options;
+mod trait_def;
 mod vertex;
-mod deepseek;
-mod mistral;
-mod bedrock;
-mod azure;
-mod copilot;
-mod cloudflare;
 
-use std::pin::Pin;
 use futures::Stream;
+use std::pin::Pin;
 
-pub use trait_def::Provider;
-pub use event::ProviderEvent;
 use crate::error::ProviderError;
+pub use crate::CacheRetention;
+pub use crate::Context;
+pub use crate::Model;
 #[allow(unused_imports)]
-pub use options::{StreamOptions, ThinkingBudgets};
-#[allow(unused_imports)]
-pub use openai::OpenAiProvider;
-#[allow(unused_imports)]
-pub use openai_responses::OpenAiResponsesProvider;
+pub use crate::ThinkingLevel;
 #[allow(unused_imports)]
 pub use anthropic::AnthropicProvider;
 #[allow(unused_imports)]
 pub use azure::AzureProvider;
 #[allow(unused_imports)]
-pub use copilot::CopilotProvider;
-#[allow(unused_imports)]
 pub use cloudflare::CloudflareProvider;
-pub use crate::CacheRetention;
 #[allow(unused_imports)]
-pub use crate::ThinkingLevel;
-pub use crate::Context;
-pub use crate::Model;
+pub use copilot::CopilotProvider;
+pub use event::ProviderEvent;
+#[allow(unused_imports)]
+pub use openai::OpenAiProvider;
+#[allow(unused_imports)]
+pub use openai_responses::OpenAiResponsesProvider;
+#[allow(unused_imports)]
+pub use options::{StreamOptions, ThinkingBudgets};
+pub use trait_def::Provider;
 
 /// Provider factory functions
 
@@ -49,36 +49,18 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         "openai" | "groq" | "cerebras" | "xai" | "openrouter" | "fireworks" | "huggingface" => {
             Some(Box::new(openai::OpenAiProvider::new()))
         }
-        "azure" | "azure-openai" => {
-            Some(Box::new(azure::AzureProvider::new()))
-        }
-        "anthropic" => {
-            Some(Box::new(anthropic::AnthropicProvider::new()))
-        }
-        "google" => {
-            Some(Box::new(google::GoogleProvider::new()))
-        }
-        "vertex" | "google-vertex" => {
-            Some(Box::new(vertex::VertexProvider::new()))
-        }
-        "deepseek" => {
-            Some(Box::new(deepseek::DeepSeekProvider::new()))
-        }
-        "mistral" => {
-            Some(Box::new(mistral::MistralProvider::new()))
-        }
+        "azure" | "azure-openai" => Some(Box::new(azure::AzureProvider::new())),
+        "anthropic" => Some(Box::new(anthropic::AnthropicProvider::new())),
+        "google" => Some(Box::new(google::GoogleProvider::new())),
+        "vertex" | "google-vertex" => Some(Box::new(vertex::VertexProvider::new())),
+        "deepseek" => Some(Box::new(deepseek::DeepSeekProvider::new())),
+        "mistral" => Some(Box::new(mistral::MistralProvider::new())),
         "bedrock" | "amazon-bedrock" | "aws-bedrock" => {
             Some(Box::new(bedrock::BedrockProvider::new()))
         }
-        "cloudflare" | "workers-ai" => {
-            Some(Box::new(cloudflare::CloudflareProvider::new()))
-        }
-        "copilot" | "github-copilot" => {
-            Some(Box::new(copilot::CopilotProvider::new()))
-        }
-        "openai-responses" => {
-            Some(Box::new(openai_responses::OpenAiResponsesProvider::new()))
-        }
+        "cloudflare" | "workers-ai" => Some(Box::new(cloudflare::CloudflareProvider::new())),
+        "copilot" | "github-copilot" => Some(Box::new(copilot::CopilotProvider::new())),
+        "openai-responses" => Some(Box::new(openai_responses::OpenAiResponsesProvider::new())),
         _ => None,
     }
 }
@@ -135,6 +117,6 @@ pub async fn stream(
 ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
     let provider = get_provider(&model.provider)
         .ok_or_else(|| ProviderError::UnknownProvider(model.provider.clone()))?;
-    
+
     provider.stream(model, context, options).await
 }

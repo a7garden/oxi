@@ -85,15 +85,15 @@ impl ColorScheme {
     /// Default light color scheme.
     pub fn light() -> Self {
         Self {
-            foreground: Color::Rgb(76, 79, 105),    // #4c4f69
-            background: Color::Rgb(239, 241, 245),  // #eff1f5
-            primary: Color::Rgb(30, 102, 240),      // #1e66f0
-            secondary: Color::Rgb(64, 160, 43),     // #40a02b
-            error: Color::Rgb(210, 15, 57),          // #d20f39
-            warning: Color::Rgb(223, 142, 29),       // #df8e1d
-            success: Color::Rgb(64, 160, 43),        // #40a02b
+            foreground: Color::Rgb(76, 79, 105),   // #4c4f69
+            background: Color::Rgb(239, 241, 245), // #eff1f5
+            primary: Color::Rgb(30, 102, 240),     // #1e66f0
+            secondary: Color::Rgb(64, 160, 43),    // #40a02b
+            error: Color::Rgb(210, 15, 57),        // #d20f39
+            warning: Color::Rgb(223, 142, 29),     // #df8e1d
+            success: Color::Rgb(64, 160, 43),      // #40a02b
             muted: Color::Indexed(8),
-            accent: Color::Rgb(136, 57, 239),        // #8839ef
+            accent: Color::Rgb(136, 57, 239), // #8839ef
             border: Color::Indexed(7),
             cursor_fg: Color::Rgb(239, 241, 245),
             cursor_bg: Color::Rgb(76, 79, 105),
@@ -247,19 +247,84 @@ impl ThemeFile {
     pub fn into_theme(self) -> Theme {
         let defaults = ColorScheme::dark();
         let colors = ColorScheme {
-            foreground: self.colors.foreground.as_deref().and_then(parse_color).unwrap_or(defaults.foreground),
-            background: self.colors.background.as_deref().and_then(parse_color).unwrap_or(defaults.background),
-            primary: self.colors.primary.as_deref().and_then(parse_color).unwrap_or(defaults.primary),
-            secondary: self.colors.secondary.as_deref().and_then(parse_color).unwrap_or(defaults.secondary),
-            error: self.colors.error.as_deref().and_then(parse_color).unwrap_or(defaults.error),
-            warning: self.colors.warning.as_deref().and_then(parse_color).unwrap_or(defaults.warning),
-            success: self.colors.success.as_deref().and_then(parse_color).unwrap_or(defaults.success),
-            muted: self.colors.muted.as_deref().and_then(parse_color).unwrap_or(defaults.muted),
-            accent: self.colors.accent.as_deref().and_then(parse_color).unwrap_or(defaults.accent),
-            border: self.colors.border.as_deref().and_then(parse_color).unwrap_or(defaults.border),
-            cursor_fg: self.colors.cursor_fg.as_deref().and_then(parse_color).unwrap_or(defaults.cursor_fg),
-            cursor_bg: self.colors.cursor_bg.as_deref().and_then(parse_color).unwrap_or(defaults.cursor_bg),
-            selection_bg: self.colors.selection_bg.as_deref().and_then(parse_color).unwrap_or(defaults.selection_bg),
+            foreground: self
+                .colors
+                .foreground
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.foreground),
+            background: self
+                .colors
+                .background
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.background),
+            primary: self
+                .colors
+                .primary
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.primary),
+            secondary: self
+                .colors
+                .secondary
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.secondary),
+            error: self
+                .colors
+                .error
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.error),
+            warning: self
+                .colors
+                .warning
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.warning),
+            success: self
+                .colors
+                .success
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.success),
+            muted: self
+                .colors
+                .muted
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.muted),
+            accent: self
+                .colors
+                .accent
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.accent),
+            border: self
+                .colors
+                .border
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.border),
+            cursor_fg: self
+                .colors
+                .cursor_fg
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.cursor_fg),
+            cursor_bg: self
+                .colors
+                .cursor_bg
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.cursor_bg),
+            selection_bg: self
+                .colors
+                .selection_bg
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.selection_bg),
         };
         Theme {
             name: if self.name.is_empty() {
@@ -385,7 +450,9 @@ impl ThemeManager {
         let file = ThemeFile::load(&path)?;
         let theme = file.into_theme();
         *self.theme.write() = theme;
-        self.last_modified = std::fs::metadata(&path).ok().and_then(|m| m.modified().ok());
+        self.last_modified = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok());
         self.watch_path = Some(path);
         Ok(())
     }
@@ -434,7 +501,10 @@ impl ThemeManager {
         }
         self.last_poll = Instant::now();
 
-        let current_mtime = match std::fs::metadata(&path).ok().and_then(|m| m.modified().ok()) {
+        let current_mtime = match std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+        {
             Some(t) => t,
             None => return false,
         };
@@ -510,14 +580,8 @@ mod tests {
 
     #[test]
     fn parse_hex_colors() {
-        assert_eq!(
-            parse_color("#ff8800"),
-            Some(Color::Rgb(255, 136, 0))
-        );
-        assert_eq!(
-            parse_color("#f80"),
-            Some(Color::Rgb(255, 136, 0))
-        );
+        assert_eq!(parse_color("#ff8800"), Some(Color::Rgb(255, 136, 0)));
+        assert_eq!(parse_color("#f80"), Some(Color::Rgb(255, 136, 0)));
     }
 
     #[test]
@@ -557,7 +621,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
 
         let json_path = dir.join("test_theme.json");
-        std::fs::write(&json_path, r##"{"name":"mytheme","colors":{"primary":"#ff0000"}}"##).unwrap();
+        std::fs::write(
+            &json_path,
+            r##"{"name":"mytheme","colors":{"primary":"#ff0000"}}"##,
+        )
+        .unwrap();
         let file = ThemeFile::load(&json_path).unwrap();
         let theme = file.into_theme();
         assert_eq!(theme.name, "mytheme");

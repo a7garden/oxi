@@ -55,7 +55,10 @@ impl ReadTool {
     }
 
     /// Read an image file and return it as a base64-encoded content block.
-    async fn read_image(path: &Path, progress_cb: &Option<ProgressCallback>) -> Result<AgentToolResult, ToolError> {
+    async fn read_image(
+        path: &Path,
+        progress_cb: &Option<ProgressCallback>,
+    ) -> Result<AgentToolResult, ToolError> {
         let display_path = path.display();
 
         if let Some(cb) = progress_cb {
@@ -108,7 +111,10 @@ impl ReadTool {
         };
 
         if let Some(cb) = progress_cb {
-            cb(format!("Reading file: {} ({} bytes)", display_path, file_size));
+            cb(format!(
+                "Reading file: {} ({} bytes)",
+                display_path, file_size
+            ));
         }
 
         // Open and read file
@@ -118,7 +124,10 @@ impl ReadTool {
 
         // Read a chunk for binary detection
         let mut detect_buf = vec![0u8; BINARY_DETECT_BYTES.min(file_size as usize)];
-        let n = file.read(&mut detect_buf).await.map_err(|e| format!("Cannot read file: {}", e))?;
+        let n = file
+            .read(&mut detect_buf)
+            .await
+            .map_err(|e| format!("Cannot read file: {}", e))?;
 
         if Self::is_binary(&detect_buf[..n]) {
             return Ok(AgentToolResult::error(format!(
@@ -131,7 +140,10 @@ impl ReadTool {
         let mut content = String::from_utf8_lossy(&detect_buf[..n]).into_owned();
         let mut buffer = vec![0u8; 8192];
         loop {
-            let n = file.read(&mut buffer).await.map_err(|e| format!("Cannot read file: {}", e))?;
+            let n = file
+                .read(&mut buffer)
+                .await
+                .map_err(|e| format!("Cannot read file: {}", e))?;
             if n == 0 {
                 break;
             }
@@ -220,7 +232,12 @@ impl ReadTool {
 
         // If offset was used, add context header
         if start_idx > 0 {
-            output = format!("Showing lines {}-{} of {}:\n", start_idx + 1, start_idx + output_lines, total_lines) + &output;
+            output = format!(
+                "Showing lines {}-{} of {}:\n",
+                start_idx + 1,
+                start_idx + output_lines,
+                total_lines
+            ) + &output;
         }
 
         Ok(AgentToolResult::success(output))
@@ -454,7 +471,8 @@ mod tests {
     async fn test_read_image_file() {
         let mut f = NamedTempFile::with_suffix(".png").unwrap();
         // Write a fake PNG-like header + data
-        f.write_all(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00]).unwrap();
+        f.write_all(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00])
+            .unwrap();
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
@@ -525,11 +543,26 @@ mod tests {
 
     #[test]
     fn test_image_mime_type_detection() {
-        assert_eq!(ReadTool::image_mime_type(Path::new("photo.jpg")), Some("image/jpeg"));
-        assert_eq!(ReadTool::image_mime_type(Path::new("photo.jpeg")), Some("image/jpeg"));
-        assert_eq!(ReadTool::image_mime_type(Path::new("icon.png")), Some("image/png"));
-        assert_eq!(ReadTool::image_mime_type(Path::new("anim.gif")), Some("image/gif"));
-        assert_eq!(ReadTool::image_mime_type(Path::new("img.webp")), Some("image/webp"));
+        assert_eq!(
+            ReadTool::image_mime_type(Path::new("photo.jpg")),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            ReadTool::image_mime_type(Path::new("photo.jpeg")),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            ReadTool::image_mime_type(Path::new("icon.png")),
+            Some("image/png")
+        );
+        assert_eq!(
+            ReadTool::image_mime_type(Path::new("anim.gif")),
+            Some("image/gif")
+        );
+        assert_eq!(
+            ReadTool::image_mime_type(Path::new("img.webp")),
+            Some("image/webp")
+        );
         assert_eq!(ReadTool::image_mime_type(Path::new("file.txt")), None);
         assert_eq!(ReadTool::image_mime_type(Path::new("noext")), None);
     }

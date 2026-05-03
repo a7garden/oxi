@@ -1,7 +1,7 @@
 //! Conversation context management
 
-use serde::{Deserialize, Serialize};
 use super::{Message, Tool};
+use serde::{Deserialize, Serialize};
 
 /// Conversation context for LLM interactions
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -9,10 +9,10 @@ pub struct Context {
     /// System prompt sent with each request
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
-    
+
     /// Conversation history
     pub messages: Vec<Message>,
-    
+
     /// Available tools for this context
     #[serde(default)]
     pub tools: Vec<Tool>,

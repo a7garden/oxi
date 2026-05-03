@@ -224,11 +224,7 @@ impl fmt::Debug for SkillManager {
             .field("count", &self.skills.len())
             .field(
                 "names",
-                &self
-                    .skills
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<String>>(),
+                &self.skills.keys().cloned().collect::<Vec<String>>(),
             )
             .finish()
     }
@@ -331,7 +327,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("helper");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("SKILL.md"), "# Helper\nA database optimization expert").unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            "# Helper\nA database optimization expert",
+        )
+        .unwrap();
 
         let manager = SkillManager::load_from_dir(tmp.path()).unwrap();
         let results = manager.search("database");
@@ -344,7 +344,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("coder");
         fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join("SKILL.md"), "# Coder\nA coding assistant\n\n## Details\nFocuses on async patterns").unwrap();
+        fs::write(
+            dir.join("SKILL.md"),
+            "# Coder\nA coding assistant\n\n## Details\nFocuses on async patterns",
+        )
+        .unwrap();
 
         let manager = SkillManager::load_from_dir(tmp.path()).unwrap();
         let results = manager.search("async");

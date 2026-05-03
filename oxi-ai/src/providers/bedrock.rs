@@ -14,8 +14,8 @@ use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
+    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
+    ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
 // Import Digest trait and Sha256 type for SHA256 hashing
@@ -36,8 +36,7 @@ impl BedrockProvider {
     pub fn new() -> Self {
         Self {
             client: Client::new(),
-            default_region: std::env::var("AWS_REGION")
-                .unwrap_or_else(|_| "us-east-1".to_string()),
+            default_region: std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
         }
     }
 
@@ -52,12 +51,11 @@ impl BedrockProvider {
 
     /// Get AWS credentials from environment
     fn get_credentials(&self) -> Result<(String, String, String), ProviderError> {
-        let access_key = std::env::var("AWS_ACCESS_KEY_ID")
-            .map_err(|_| ProviderError::MissingApiKey)?;
-        let secret_key = std::env::var("AWS_SECRET_ACCESS_KEY")
-            .map_err(|_| ProviderError::MissingApiKey)?;
-        let region = std::env::var("AWS_REGION")
-            .unwrap_or_else(|_| self.default_region.clone());
+        let access_key =
+            std::env::var("AWS_ACCESS_KEY_ID").map_err(|_| ProviderError::MissingApiKey)?;
+        let secret_key =
+            std::env::var("AWS_SECRET_ACCESS_KEY").map_err(|_| ProviderError::MissingApiKey)?;
+        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| self.default_region.clone());
 
         Ok((access_key, secret_key, region))
     }
@@ -80,8 +78,7 @@ impl BedrockProvider {
             };
             format!(
                 "https://bedrock-runtime.{}.amazonaws.com/model/{}/converse-stream",
-                region,
-                model.id
+                region, model.id
             )
         }
     }
@@ -99,8 +96,8 @@ impl BedrockProvider {
         service: &str,
     ) -> Result<(), ProviderError> {
         // Parse the URL to get host and path
-        let parsed_url = url::Url::parse(url)
-            .map_err(|e| ProviderError::InvalidResponse(e.to_string()))?;
+        let parsed_url =
+            url::Url::parse(url).map_err(|e| ProviderError::InvalidResponse(e.to_string()))?;
 
         let host = parsed_url.host_str().unwrap_or("");
         let path = parsed_url.path();
@@ -123,32 +120,20 @@ impl BedrockProvider {
         headers.insert("x-amz-content-sha256", content_hash.parse().unwrap());
 
         // Build canonical request
-        let canonical_request = build_canonical_request(
-            method,
-            path,
-            query,
-            headers,
-            &content_hash,
-        );
+        let canonical_request =
+            build_canonical_request(method, path, query, headers, &content_hash);
 
         // Build string to sign
         let credential_scope = format!("{}/{}/*", datetime, service);
         let hashed_canonical = hex_encode(hash_sha256(canonical_request.as_bytes()));
         let string_to_sign = format!(
             "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-            datetime,
-            credential_scope,
-            hashed_canonical
+            datetime, credential_scope, hashed_canonical
         );
 
         // Calculate signature
-        let signature = self.calculate_signature(
-            secret_key,
-            region,
-            service,
-            timestamp,
-            &string_to_sign,
-        );
+        let signature =
+            self.calculate_signature(secret_key, region, service, timestamp, &string_to_sign);
 
         // Build authorization header
         let authorization = format!(
@@ -196,7 +181,8 @@ impl Default for BedrockProvider {
 /// AWS timestamp format: YYYYMMDDTHHMMSSZ using chrono
 fn format_timestamp(timestamp: u64) -> String {
     use chrono::TimeZone;
-    let datetime = chrono::Utc.timestamp_opt(timestamp as i64, 0)
+    let datetime = chrono::Utc
+        .timestamp_opt(timestamp as i64, 0)
         .single()
         .expect("invalid timestamp");
     datetime.format("%Y%m%dT%H%M%SZ").to_string()
@@ -249,20 +235,12 @@ fn build_canonical_request(
         .collect();
     let canonical_headers_str = canonical_headers.join("\n");
 
-    let signed_headers: Vec<&str> = header_vec
-        .iter()
-        .map(|(k, _)| k.as_str())
-        .collect();
+    let signed_headers: Vec<&str> = header_vec.iter().map(|(k, _)| k.as_str()).collect();
     let signed_headers_str = signed_headers.join(";");
 
     format!(
         "{}\n{}\n{}\n{}\n\n{}\n{}",
-        method,
-        path,
-        canonical_query,
-        canonical_headers_str,
-        signed_headers_str,
-        content_hash
+        method, path, canonical_query, canonical_headers_str, signed_headers_str, content_hash
     )
 }
 
@@ -381,7 +359,8 @@ impl Provider for BedrockProvider {
         )?;
 
         // Make request
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .headers(headers)
             .body(body_bytes)
@@ -399,19 +378,18 @@ impl Provider for BedrockProvider {
         let provider_name = "bedrock".to_string();
         let model_id = model.id.clone();
 
-        let stream = response.bytes_stream()
-            .flat_map(move |chunk: Result<Bytes, reqwest::Error>| {
-                match chunk {
-                    Ok(bytes) => {
-                        let text = String::from_utf8_lossy(&bytes).to_string();
-                        futures::stream::iter(parse_bedrock_events(&text, &provider_name, &model_id))
-                    }
-                    Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                    }]),
+        let stream = response.bytes_stream().flat_map(
+            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
+                Ok(bytes) => {
+                    let text = String::from_utf8_lossy(&bytes).to_string();
+                    futures::stream::iter(parse_bedrock_events(&text, &provider_name, &model_id))
                 }
-            });
+                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
+                    reason: StopReason::Error,
+                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                }]),
+            },
+        );
 
         Ok(Box::pin(stream))
     }
@@ -434,9 +412,7 @@ fn build_bedrock_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderE
                             "text": s,
                         })]
                     }
-                    crate::MessageContent::Blocks(blocks) => {
-                        blocks_to_bedrock_content(blocks)?
-                    }
+                    crate::MessageContent::Blocks(blocks) => blocks_to_bedrock_content(blocks)?,
                 };
                 messages.push(serde_json::json!({
                     "role": "user",
@@ -520,17 +496,20 @@ fn blocks_to_bedrock_content(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>, 
 
 /// Build tool config in Bedrock format
 fn build_bedrock_tool_config(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
-    let items: Vec<_> = tools.iter().map(|tool| {
-        serde_json::json!({
-            "toolSpec": {
-                "name": tool.name,
-                "description": tool.description,
-                "inputSchema": {
-                    "json": tool.parameters,
+    let items: Vec<_> = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "toolSpec": {
+                    "name": tool.name,
+                    "description": tool.description,
+                    "inputSchema": {
+                        "json": tool.parameters,
+                    },
                 },
-            },
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(serde_json::json!({
         "tools": items,
@@ -540,11 +519,7 @@ fn build_bedrock_tool_config(tools: &[crate::Tool]) -> Result<JsonValue, Provide
 /// Parse Bedrock ConverseStream SSE events
 fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(
-        Api::BedrockConverseStream,
-        provider,
-        model_id,
-    );
+    let partial_message = AssistantMessage::new(Api::BedrockConverseStream, provider, model_id);
 
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
     events.reserve(estimated_events);
@@ -671,8 +646,8 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                     if let Some(usage) = &metadata.usage {
                         accumulated_usage.input = usage.input_tokens.unwrap_or(0);
                         accumulated_usage.output = usage.output_tokens.unwrap_or(0);
-                        accumulated_usage.total_tokens = usage.input_tokens.unwrap_or(0) 
-                            + usage.output_tokens.unwrap_or(0);
+                        accumulated_usage.total_tokens =
+                            usage.input_tokens.unwrap_or(0) + usage.output_tokens.unwrap_or(0);
                     }
                 }
             }
@@ -695,11 +670,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
 
 /// Create error assistant message
 fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantMessage {
-    let mut message = AssistantMessage::new(
-        Api::BedrockConverseStream,
-        provider,
-        model_id,
-    );
+    let mut message = AssistantMessage::new(Api::BedrockConverseStream, provider, model_id);
     message.stop_reason = StopReason::Error;
     message.error_message = Some(msg.to_string());
     message
@@ -726,7 +697,6 @@ struct ContentBlockRef {
     #[serde(rename = "index")]
     index: Option<usize>,
 }
-
 
 impl ContentBlockRef {
     fn get_type(&self) -> Option<&str> {
@@ -821,7 +791,10 @@ mod tests {
         // RFC 3986 percent-encoding - = is a reserved character and should be encoded
         assert_eq!(urlencoding_encode("hello world"), "hello%20world");
         assert_eq!(urlencoding_encode("test-file.png"), "test-file.png");
-        assert_eq!(urlencoding_encode("key=value&other=1"), "key%3Dvalue%26other%3D1");
+        assert_eq!(
+            urlencoding_encode("key=value&other=1"),
+            "key%3Dvalue%26other%3D1"
+        );
     }
 
     #[test]
@@ -845,7 +818,9 @@ mod tests {
             "anthropic.claude-3-sonnet",
         );
 
-        let done_event = events.iter().find(|e| matches!(e, ProviderEvent::Done { .. }));
+        let done_event = events
+            .iter()
+            .find(|e| matches!(e, ProviderEvent::Done { .. }));
         assert!(done_event.is_some());
         if let ProviderEvent::Done { message, .. } = done_event.unwrap() {
             assert_eq!(message.usage.input, 100);
@@ -920,15 +895,27 @@ mod tests {
     fn test_parse_bedrock_events_content_blocks() {
         let j1 = r#"{"type":"messageStart"}"#;
         let j2 = r#"{"type":"contentBlockStart","contentBlock":{"type":"text","index":0}}"#;
-        let j3 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"textDelta","text":"Hello"}}"#;
+        let j3 =
+            r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"textDelta","text":"Hello"}}"#;
         let j4 = r#"{"type":"contentBlockStop","index":0}"#;
         let j5 = r#"{"type":"messageStop","metadata":{"stopReason":"end_turn"}}"#;
-        let text = format!("data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}", j1, j2, j3, j4, j5);
+        let text = format!(
+            "data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}",
+            j1, j2, j3, j4, j5
+        );
         let events = parse_bedrock_events(&text, "bedrock", "model");
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Start { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::Start { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::TextStart { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::Done { .. })));
     }
     #[test]
     fn test_parse_bedrock_events_thinking() {
@@ -937,10 +924,17 @@ mod tests {
         let j3 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"thinkingDelta","thinking":"test"}}"#;
         let j4 = r#"{"type":"contentBlockStop","index":0}"#;
         let j5 = r#"{"type":"messageStop","metadata":{"stopReason":"end_turn"}}"#;
-        let text = format!("data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}", j1, j2, j3, j4, j5);
+        let text = format!(
+            "data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}",
+            j1, j2, j3, j4, j5
+        );
         let events = parse_bedrock_events(&text, "bedrock", "model");
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ThinkingStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ThinkingDelta { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ThinkingStart { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ThinkingDelta { .. })));
     }
     #[test]
     fn test_parse_bedrock_events_tool_call() {
@@ -949,9 +943,20 @@ mod tests {
         let j3 = r#"{"type":"contentBlockDelta","index":0,"delta":{"type":"toolUseDelta","toolUse":{"name":"test"}}}"#;
         let j4 = r#"{"type":"contentBlockStop","index":0}"#;
         let j5 = r#"{"type":"messageStop","metadata":{"stopReason":"tool_use"}}"#;
-        let text = format!("data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}", j1, j2, j3, j4, j5);
+        let text = format!(
+            "data: {}\ndata: {}\ndata: {}\ndata: {}\ndata: {}",
+            j1, j2, j3, j4, j5
+        );
         let events = parse_bedrock_events(&text, "bedrock", "model");
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::ToolCallStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { reason: StopReason::ToolUse, .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, ProviderEvent::ToolCallStart { .. })));
+        assert!(events.iter().any(|e| matches!(
+            e,
+            ProviderEvent::Done {
+                reason: StopReason::ToolUse,
+                ..
+            }
+        )));
     }
 }

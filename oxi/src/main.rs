@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use oxi::extensions::ExtensionRegistry;
 use oxi::packages::{PackageManager, ResourceKind};
-use oxi::session::{SessionManager, AgentMessage};
+use oxi::session::{AgentMessage, SessionManager};
 use oxi::settings::Settings;
 use oxi::templates::TemplateManager;
 use std::collections::HashMap;
@@ -228,7 +228,10 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
             let manager = SessionManager::new().await?;
             show_tree(&manager, session_id).await?;
         }
-        Commands::Fork { parent_id, entry_id } => {
+        Commands::Fork {
+            parent_id,
+            entry_id,
+        } => {
             let manager = SessionManager::new().await?;
             fork_session(&manager, parent_id, entry_id).await?;
         }
@@ -274,7 +277,10 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
             if packages.is_empty() {
                 println!("No packages installed.");
             } else {
-                println!("{:<30} {:<10} {:<15} {}", "NAME", "VERSION", "RESOURCES", "INSTALL DIR");
+                println!(
+                    "{:<30} {:<10} {:<15} {}",
+                    "NAME", "VERSION", "RESOURCES", "INSTALL DIR"
+                );
                 println!("{:-<30} {:-<10} {:-<15} {:-<40}", "", "", "", "");
                 for pkg in packages {
                     let counts = mgr.resource_counts(&pkg.name).unwrap_or_default();
@@ -300,31 +306,29 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
             mgr.uninstall(name)?;
             println!("Uninstalled {}", name);
         }
-        PkgCommands::Update { name } => {
-            match name {
-                Some(pkg_name) => {
-                    let manifest = mgr.update(pkg_name)?;
-                    println!("Updated {} to v{}", manifest.name, manifest.version);
-                }
-                None => {
-                    let packages: Vec<String> = mgr.list().iter().map(|p| p.name.clone()).collect();
-                    if packages.is_empty() {
-                        println!("No packages to update.");
-                    } else {
-                        for pkg_name in &packages {
-                            match mgr.update(pkg_name) {
-                                Ok(manifest) => {
-                                    println!("Updated {} to v{}", manifest.name, manifest.version);
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to update {}: {}", pkg_name, e);
-                                }
+        PkgCommands::Update { name } => match name {
+            Some(pkg_name) => {
+                let manifest = mgr.update(pkg_name)?;
+                println!("Updated {} to v{}", manifest.name, manifest.version);
+            }
+            None => {
+                let packages: Vec<String> = mgr.list().iter().map(|p| p.name.clone()).collect();
+                if packages.is_empty() {
+                    println!("No packages to update.");
+                } else {
+                    for pkg_name in &packages {
+                        match mgr.update(pkg_name) {
+                            Ok(manifest) => {
+                                println!("Updated {} to v{}", manifest.name, manifest.version);
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to update {}: {}", pkg_name, e);
                             }
                         }
                     }
                 }
             }
-        }
+        },
     }
 
     Ok(())
@@ -346,7 +350,10 @@ fn parse_config_bool(s: &str) -> Result<bool> {
     match s.to_lowercase().as_str() {
         "true" | "1" | "yes" | "on" => Ok(true),
         "false" | "0" | "no" | "off" => Ok(false),
-        _ => anyhow::bail!("Invalid boolean value: '{}'. Use true/false, yes/no, on/off, or 1/0", s),
+        _ => anyhow::bail!(
+            "Invalid boolean value: '{}'. Use true/false, yes/no, on/off, or 1/0",
+            s
+        ),
     }
 }
 
@@ -396,12 +403,16 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
             ];
 
             let filtered: Vec<_> = if let Some(rt) = resource_type {
-                let kind = parse_resource_type(rt)
-                    .ok_or_else(|| anyhow::anyhow!(
+                let kind = parse_resource_type(rt).ok_or_else(|| {
+                    anyhow::anyhow!(
                         "Unknown resource type '{}'. Valid: extension, skill, prompt, theme",
                         rt
-                    ))?;
-                resource_types.into_iter().filter(|(_, _, k)| *k == kind).collect()
+                    )
+                })?;
+                resource_types
+                    .into_iter()
+                    .filter(|(_, _, k)| *k == kind)
+                    .collect()
             } else {
                 resource_types
             };
@@ -441,12 +452,16 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
             }
         }
 
-        ConfigCommands::Enable { resource_type, name } => {
-            let kind = parse_resource_type(resource_type)
-                .ok_or_else(|| anyhow::anyhow!(
+        ConfigCommands::Enable {
+            resource_type,
+            name,
+        } => {
+            let kind = parse_resource_type(resource_type).ok_or_else(|| {
+                anyhow::anyhow!(
                     "Unknown resource type '{}'. Valid: extension, skill, prompt, theme",
                     resource_type
-                ))?;
+                )
+            })?;
 
             let mut settings = Settings::load()?;
 
@@ -467,12 +482,16 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
             println!("Enabled {} '{}'", kind, name);
         }
 
-        ConfigCommands::Disable { resource_type, name } => {
-            let kind = parse_resource_type(resource_type)
-                .ok_or_else(|| anyhow::anyhow!(
+        ConfigCommands::Disable {
+            resource_type,
+            name,
+        } => {
+            let kind = parse_resource_type(resource_type).ok_or_else(|| {
+                anyhow::anyhow!(
                     "Unknown resource type '{}'. Valid: extension, skill, prompt, theme",
                     resource_type
-                ))?;
+                )
+            })?;
 
             let mut settings = Settings::load()?;
 
@@ -526,20 +545,28 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
                     settings.auto_compaction = parse_config_bool(value)?;
                 }
                 "tool_timeout" | "tool_timeout_seconds" => {
-                    settings.tool_timeout_seconds = value.parse()
+                    settings.tool_timeout_seconds = value
+                        .parse()
                         .map_err(|_| anyhow::anyhow!("Invalid timeout: '{}'", value))?;
                 }
                 "max_tokens" => {
-                    settings.max_tokens = Some(value.parse()
-                        .map_err(|_| anyhow::anyhow!("Invalid max_tokens: '{}'", value))?);
+                    settings.max_tokens = Some(
+                        value
+                            .parse()
+                            .map_err(|_| anyhow::anyhow!("Invalid max_tokens: '{}'", value))?,
+                    );
                 }
                 "temperature" => {
-                    settings.default_temperature = Some(value.parse()
-                        .map_err(|_| anyhow::anyhow!("Invalid temperature: '{}'", value))?);
+                    settings.default_temperature = Some(
+                        value
+                            .parse()
+                            .map_err(|_| anyhow::anyhow!("Invalid temperature: '{}'", value))?,
+                    );
                 }
                 "session_history_size" => {
-                    settings.session_history_size = value.parse()
-                        .map_err(|_| anyhow::anyhow!("Invalid session_history_size: '{}'", value))?;
+                    settings.session_history_size = value.parse().map_err(|_| {
+                        anyhow::anyhow!("Invalid session_history_size: '{}'", value)
+                    })?;
                 }
                 _ => {
                     anyhow::bail!(
@@ -560,15 +587,31 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
 
             let value = match key.as_str() {
                 "theme" => settings.theme.clone(),
-                "default_model" | "model" => settings.default_model.clone().unwrap_or_else(|| "(not set)".to_string()),
-                "default_provider" | "provider" => settings.default_provider.clone().unwrap_or_else(|| "(not set)".to_string()),
-                "thinking_level" | "thinking" => format!("{:?}", settings.thinking_level).to_lowercase(),
+                "default_model" | "model" => settings
+                    .default_model
+                    .clone()
+                    .unwrap_or_else(|| "(not set)".to_string()),
+                "default_provider" | "provider" => settings
+                    .default_provider
+                    .clone()
+                    .unwrap_or_else(|| "(not set)".to_string()),
+                "thinking_level" | "thinking" => {
+                    format!("{:?}", settings.thinking_level).to_lowercase()
+                }
                 "extensions_enabled" => settings.extensions_enabled.to_string(),
                 "stream_responses" | "stream" => settings.stream_responses.to_string(),
                 "auto_compaction" => settings.auto_compaction.to_string(),
-                "tool_timeout" | "tool_timeout_seconds" => format!("{}s", settings.tool_timeout_seconds),
-                "max_tokens" => settings.max_tokens.map(|t| t.to_string()).unwrap_or_else(|| "(not set)".to_string()),
-                "temperature" => settings.effective_temperature().map(|t| t.to_string()).unwrap_or_else(|| "(not set)".to_string()),
+                "tool_timeout" | "tool_timeout_seconds" => {
+                    format!("{}s", settings.tool_timeout_seconds)
+                }
+                "max_tokens" => settings
+                    .max_tokens
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "(not set)".to_string()),
+                "temperature" => settings
+                    .effective_temperature()
+                    .map(|t| t.to_string())
+                    .unwrap_or_else(|| "(not set)".to_string()),
                 "session_history_size" => settings.session_history_size.to_string(),
                 "extensions" => format!("{:?}", settings.extensions),
                 "skills" => format!("{:?}", settings.skills),
@@ -591,8 +634,6 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
 
     Ok(())
 }
-
-
 
 async fn list_sessions(manager: &SessionManager) -> Result<()> {
     let sessions = manager.list_sessions().await?;
@@ -640,7 +681,11 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
     let branch_info = manager.get_branch_info(id).await?;
 
     if let Some(info) = branch_info {
-        println!("Session: {} (branched from {})", id, info.parent_session_id.unwrap());
+        println!(
+            "Session: {} (branched from {})",
+            id,
+            info.parent_session_id.unwrap()
+        );
     } else {
         println!("Session: {} (root)", id);
     }
@@ -655,17 +700,30 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
         };
 
         let content_preview = truncate(&entry.message.content(), 60);
-        let prefix = if entry.parent_id.is_some() { "├─" } else { "└─" };
+        let prefix = if entry.parent_id.is_some() {
+            "├─"
+        } else {
+            "└─"
+        };
 
-        println!("  {}{} [{:.8}] {}", prefix, role_marker, entry.id, content_preview);
+        println!(
+            "  {}{} [{:.8}] {}",
+            prefix, role_marker, entry.id, content_preview
+        );
     }
 
     Ok(())
 }
 
-async fn fork_session(manager: &SessionManager, parent_id_str: &str, entry_id_str: &str) -> Result<()> {
+async fn fork_session(
+    manager: &SessionManager,
+    parent_id_str: &str,
+    entry_id_str: &str,
+) -> Result<()> {
     let sessions = manager.list_sessions().await?;
-    let info = sessions.iter().find(|s| s.id.to_string().starts_with(parent_id_str))
+    let info = sessions
+        .iter()
+        .find(|s| s.id.to_string().starts_with(parent_id_str))
         .ok_or_else(|| anyhow::anyhow!("Session not found: {}", parent_id_str))?;
     let entry_id = Uuid::parse_str(entry_id_str)
         .map_err(|_| anyhow::anyhow!("Invalid entry ID: {}", entry_id_str))?;
@@ -677,7 +735,9 @@ async fn fork_session(manager: &SessionManager, parent_id_str: &str, entry_id_st
 
 async fn delete_session(manager: &SessionManager, session_id: &str) -> Result<()> {
     let sessions = manager.list_sessions().await?;
-    let info = sessions.iter().find(|s| s.id.to_string().starts_with(session_id))
+    let info = sessions
+        .iter()
+        .find(|s| s.id.to_string().starts_with(session_id))
         .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
     let path = manager.session_path(&info.id);
     manager.delete(info.id).await?;
@@ -734,7 +794,9 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
     }
 
     println!("oxi CLI - type your message and press Enter. Ctrl+C or 'exit' to quit.");
-    println!("Commands: /sessions, /tree, /fork <entry_id>, /model, /skill, /template, /history, /help");
+    println!(
+        "Commands: /sessions, /tree, /fork <entry_id>, /model, /skill, /template, /history, /help"
+    );
     println!("---");
 
     loop {
@@ -753,7 +815,16 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
 
         // Handle commands
         if line.starts_with('/') {
-            match handle_command(line, &mut session_manager, &mut session, &mut current_session_id, &template_manager, &app).await? {
+            match handle_command(
+                line,
+                &mut session_manager,
+                &mut session,
+                &mut current_session_id,
+                &template_manager,
+                &app,
+            )
+            .await?
+            {
                 CommandResult::Handled => continue,
                 CommandResult::NewSession(id) => current_session_id = Some(id.to_string()),
                 CommandResult::Quit => break,
@@ -849,7 +920,11 @@ async fn handle_command(
                         "  {:.8}  {}  [root: {}]",
                         info.id,
                         modified,
-                        if info.root_id.is_some() { "branched" } else { "root" }
+                        if info.root_id.is_some() {
+                            "branched"
+                        } else {
+                            "root"
+                        }
                     );
                 }
             }
@@ -1013,7 +1088,10 @@ async fn handle_command(
                 if let Ok(entry_id) = Uuid::parse_str(parts[1]) {
                     if let Some(ref session_id) = current_session_id {
                         let sessions = manager.list_sessions().await?;
-                        if let Some(info) = sessions.iter().find(|s| s.id.to_string().starts_with(session_id.as_str())) {
+                        if let Some(info) = sessions
+                            .iter()
+                            .find(|s| s.id.to_string().starts_with(session_id.as_str()))
+                        {
                             match manager.branch_from(info.id, entry_id).await {
                                 Ok((new_id, _)) => {
                                     println!("Created forked session: {}", new_id);

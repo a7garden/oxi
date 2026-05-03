@@ -85,26 +85,43 @@ impl Component for SettingsOverlay {
 
         if self.on_actions {
             match event {
-                Event::Key(KeyEvent { code: KeyCode::Left, .. })
-                | Event::Key(KeyEvent { code: KeyCode::Right, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Left,
+                    ..
+                })
+                | Event::Key(KeyEvent {
+                    code: KeyCode::Right,
+                    ..
+                }) => {
                     // Toggle between save/cancel (we only have 2 buttons, flip state)
                     // For simplicity, we just let Enter trigger save
                     self.dirty = true;
                     true
                 }
-                Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                }) => {
                     if let Some(ref cb) = self.on_save {
                         cb();
                     }
                     self.hide();
                     true
                 }
-                Event::Key(KeyEvent { code: KeyCode::Escape, .. })
-                | Event::Key(KeyEvent { code: KeyCode::Char('q'), .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Escape,
+                    ..
+                })
+                | Event::Key(KeyEvent {
+                    code: KeyCode::Char('q'),
+                    ..
+                }) => {
                     self.hide();
                     true
                 }
-                Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Tab, ..
+                }) => {
                     self.on_actions = false;
                     self.settings.on_focus();
                     self.dirty = true;
@@ -114,11 +131,16 @@ impl Component for SettingsOverlay {
             }
         } else {
             match event {
-                Event::Key(KeyEvent { code: KeyCode::Escape, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Escape,
+                    ..
+                }) => {
                     self.hide();
                     true
                 }
-                Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Tab, ..
+                }) => {
                     self.on_actions = true;
                     self.settings.on_unfocus();
                     self.dirty = true;
@@ -169,16 +191,36 @@ impl Component for SettingsOverlay {
         // Border
         let border_fg = Color::Indexed(12);
         surface.set(oy, ox, Cell::new('┌').with_fg(border_fg).with_bg(bg));
-        surface.set(oy, ox + overlay_w - 1, Cell::new('┐').with_fg(border_fg).with_bg(bg));
-        surface.set(oy + overlay_h - 1, ox, Cell::new('└').with_fg(border_fg).with_bg(bg));
-        surface.set(oy + overlay_h - 1, ox + overlay_w - 1, Cell::new('┘').with_fg(border_fg).with_bg(bg));
+        surface.set(
+            oy,
+            ox + overlay_w - 1,
+            Cell::new('┐').with_fg(border_fg).with_bg(bg),
+        );
+        surface.set(
+            oy + overlay_h - 1,
+            ox,
+            Cell::new('└').with_fg(border_fg).with_bg(bg),
+        );
+        surface.set(
+            oy + overlay_h - 1,
+            ox + overlay_w - 1,
+            Cell::new('┘').with_fg(border_fg).with_bg(bg),
+        );
         for c in ox + 1..ox + overlay_w - 1 {
             surface.set(oy, c, Cell::new('─').with_fg(border_fg).with_bg(bg));
-            surface.set(oy + overlay_h - 1, c, Cell::new('─').with_fg(border_fg).with_bg(bg));
+            surface.set(
+                oy + overlay_h - 1,
+                c,
+                Cell::new('─').with_fg(border_fg).with_bg(bg),
+            );
         }
         for r in oy + 1..oy + overlay_h - 1 {
             surface.set(r, ox, Cell::new('│').with_fg(border_fg).with_bg(bg));
-            surface.set(r, ox + overlay_w - 1, Cell::new('│').with_fg(border_fg).with_bg(bg));
+            surface.set(
+                r,
+                ox + overlay_w - 1,
+                Cell::new('│').with_fg(border_fg).with_bg(bg),
+            );
         }
 
         // Title
@@ -187,7 +229,11 @@ impl Component for SettingsOverlay {
         for (i, c) in title_str.chars().enumerate() {
             let col = title_start + i as u16;
             if col < ox + overlay_w - 1 {
-                surface.set(oy, col, Cell::new(c).with_fg(Color::White).with_bg(bg).with_bold());
+                surface.set(
+                    oy,
+                    col,
+                    Cell::new(c).with_fg(Color::White).with_bg(bg).with_bold(),
+                );
             }
         }
 
@@ -206,11 +252,20 @@ impl Component for SettingsOverlay {
         let btn_y = oy + overlay_h - 3;
         let save_label = "[ Save ]";
         let cancel_label = "[ Cancel ]";
-        let save_x = ox + overlay_w / 2 - (save_label.len() as u16 + cancel_label.len() as u16 + 4) / 2;
+        let save_x =
+            ox + overlay_w / 2 - (save_label.len() as u16 + cancel_label.len() as u16 + 4) / 2;
         let cancel_x = save_x + save_label.len() as u16 + 4;
 
-        let save_fg = if self.on_actions { Color::White } else { Color::Indexed(8) };
-        let cancel_fg = if self.on_actions { Color::White } else { Color::Indexed(8) };
+        let save_fg = if self.on_actions {
+            Color::White
+        } else {
+            Color::Indexed(8)
+        };
+        let cancel_fg = if self.on_actions {
+            Color::White
+        } else {
+            Color::Indexed(8)
+        };
 
         for (i, c) in save_label.chars().enumerate() {
             let col = save_x + i as u16;

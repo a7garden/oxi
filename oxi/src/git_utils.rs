@@ -130,10 +130,7 @@ pub fn git_checkpoint(repo_dir: &Path, message: Option<&str>) -> Result<String, 
     }
 
     let timestamp = chrono::Utc::now();
-    let default_msg = format!(
-        "Checkpoint: {}",
-        timestamp.format("%Y-%m-%d %H:%M:%S UTC")
-    );
+    let default_msg = format!("Checkpoint: {}", timestamp.format("%Y-%m-%d %H:%M:%S UTC"));
     let msg = message.unwrap_or(&default_msg);
 
     run_git_command(repo_dir, &["commit", "-m", msg])?;
@@ -149,8 +146,9 @@ pub fn git_diff(repo_dir: &Path, diff_type: &str) -> Result<String, String> {
         "all" => {
             let staged = run_git_command(repo_dir, &["diff", "--cached"]).unwrap_or_default();
             let unstaged = run_git_command(repo_dir, &["diff"]).unwrap_or_default();
-            let untracked = run_git_command(repo_dir, &["ls-files", "--others", "--exclude-standard"])
-                .unwrap_or_default();
+            let untracked =
+                run_git_command(repo_dir, &["ls-files", "--others", "--exclude-standard"])
+                    .unwrap_or_default();
             Ok(format!(
                 "=== STAGED ===\n{}\n\n=== UNSTAGED ===\n{}\n\n=== UNTRACKED ===\n{}",
                 staged, unstaged, untracked
@@ -165,7 +163,12 @@ pub fn git_log(repo_dir: &Path, count: usize) -> Result<Vec<GitLogEntry>, String
     let format_str = "%H|%h|%s|%an|%ae|%at";
     let output = run_git_command(
         repo_dir,
-        &["log", &format!("-{}", count), &format!("--format={}", format_str), "--all"],
+        &[
+            "log",
+            &format!("-{}", count),
+            &format!("--format={}", format_str),
+            "--all",
+        ],
     )?;
 
     let branch = get_current_branch(repo_dir);
@@ -257,7 +260,8 @@ pub fn git_status(repo_dir: &Path) -> Result<GitStatus, String> {
         }
     }
 
-    let is_dirty = !staged_files.is_empty() || !modified_files.is_empty() || !untracked_files.is_empty();
+    let is_dirty =
+        !staged_files.is_empty() || !modified_files.is_empty() || !untracked_files.is_empty();
 
     Ok(GitStatus {
         is_repo: true,
@@ -274,8 +278,8 @@ pub fn git_ahead_behind(repo_dir: &Path) -> Result<(usize, usize), String> {
     let current = get_current_branch(repo_dir).ok_or("Not on a branch")?;
     // Build upstream ref string: branch@ {u}
     let upstream_ref = format!("{}@{{u}}", current);
-    let remote_branch = run_git_command(repo_dir, &["rev-parse", "--abbrev-ref", &upstream_ref])
-        .ok();
+    let remote_branch =
+        run_git_command(repo_dir, &["rev-parse", "--abbrev-ref", &upstream_ref]).ok();
 
     let remote_branch = match remote_branch {
         Some(rb) => rb,
@@ -283,10 +287,16 @@ pub fn git_ahead_behind(repo_dir: &Path) -> Result<(usize, usize), String> {
     };
 
     let base = run_git_command(repo_dir, &["merge-base", &current, &remote_branch])?;
-    let ahead = run_git_command(repo_dir, &["log", &format!("{}..{}", base, current), "--oneline"])
-        .unwrap_or_default();
-    let behind = run_git_command(repo_dir, &["log", &format!("{}..{}", current, base), "--oneline"])
-        .unwrap_or_default();
+    let ahead = run_git_command(
+        repo_dir,
+        &["log", &format!("{}..{}", base, current), "--oneline"],
+    )
+    .unwrap_or_default();
+    let behind = run_git_command(
+        repo_dir,
+        &["log", &format!("{}..{}", current, base), "--oneline"],
+    )
+    .unwrap_or_default();
 
     Ok((ahead.lines().count(), behind.lines().count()))
 }

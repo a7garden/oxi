@@ -138,7 +138,9 @@ fn is_valid_sgr_mouse(payload: &[u8]) -> bool {
     if parts.len() != 3 {
         return false;
     }
-    parts.iter().all(|p| !p.is_empty() && p.iter().all(|&b| b.is_ascii_digit()))
+    parts
+        .iter()
+        .all(|p| !p.is_empty() && p.iter().all(|&b| b.is_ascii_digit()))
 }
 
 /// OSC sequences end with ST (ESC \\) or BEL (0x07).
@@ -626,9 +628,7 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() {
         return Some(0);
     }
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 // ---------------------------------------------------------------------------
@@ -933,28 +933,16 @@ mod tests {
         assert_eq!(is_complete_sequence(b"\x1b"), SequenceStatus::Incomplete);
 
         // Complete CSI
-        assert_eq!(
-            is_complete_sequence(b"\x1b[A"),
-            SequenceStatus::Complete
-        );
+        assert_eq!(is_complete_sequence(b"\x1b[A"), SequenceStatus::Complete);
 
         // Incomplete CSI
-        assert_eq!(
-            is_complete_sequence(b"\x1b["),
-            SequenceStatus::Incomplete
-        );
+        assert_eq!(is_complete_sequence(b"\x1b["), SequenceStatus::Incomplete);
 
         // SS3
-        assert_eq!(
-            is_complete_sequence(b"\x1bOP"),
-            SequenceStatus::Complete
-        );
+        assert_eq!(is_complete_sequence(b"\x1bOP"), SequenceStatus::Complete);
 
         // Meta (ESC + char)
-        assert_eq!(
-            is_complete_sequence(b"\x1ba"),
-            SequenceStatus::Complete
-        );
+        assert_eq!(is_complete_sequence(b"\x1ba"), SequenceStatus::Complete);
     }
 
     // -- Test 15: find_subsequence -----------------------------------------
@@ -1009,7 +997,10 @@ mod tests {
         buf.process_bytes(b"\x1b[M \x20\x20", &mut events);
 
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0], StdinBufferEvent::Data(vec![0x1b, b'[', b'M', b' ', 0x20, 0x20]));
+        assert_eq!(
+            events[0],
+            StdinBufferEvent::Data(vec![0x1b, b'[', b'M', b' ', 0x20, 0x20])
+        );
     }
 
     // -- Test 19: read_into_buffer -----------------------------------------

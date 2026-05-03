@@ -1,9 +1,9 @@
 //! Tool definitions and validation
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
-use serde_json::json;
 use jsonschema::Validator;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use serde_json::Value as JsonValue;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -20,17 +20,21 @@ pub fn progress_callback<F: Fn(String) + Send + Sync + 'static>(f: F) -> Progres
 pub struct Tool {
     /// Tool name
     pub name: String,
-    
+
     /// Human-readable description
     pub description: String,
-    
+
     /// JSON Schema for parameters
     pub parameters: JsonValue,
 }
 
 impl Tool {
     /// Create a new tool with the given name, description, and JSON Schema
-    pub fn new(name: impl Into<String>, description: impl Into<String>, parameters: JsonValue) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: JsonValue,
+    ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
@@ -47,21 +51,28 @@ impl Tool {
     ) -> Self {
         let param_name = param_name.into();
         let param_description = param_description.into();
-        
+
         // Build properties manually to avoid borrow issues
         let mut properties = serde_json::Map::new();
         properties.insert("type".to_string(), json!("object"));
-        
+
         let mut obj_properties = serde_json::Map::new();
-        obj_properties.insert(param_name.clone(), json!({
-            "type": "string",
-            "description": param_description
-        }));
-        properties.insert("properties".to_string(), serde_json::Value::Object(obj_properties));
-        
-        let required_arr = serde_json::Value::Array(vec![serde_json::Value::String(param_name.clone())]);
+        obj_properties.insert(
+            param_name.clone(),
+            json!({
+                "type": "string",
+                "description": param_description
+            }),
+        );
+        properties.insert(
+            "properties".to_string(),
+            serde_json::Value::Object(obj_properties),
+        );
+
+        let required_arr =
+            serde_json::Value::Array(vec![serde_json::Value::String(param_name.clone())]);
         properties.insert("required".to_string(), required_arr);
-        
+
         let params = serde_json::Value::Object(properties);
         Self::new(name, description, params)
     }
@@ -86,10 +97,10 @@ impl Tool {
 pub enum ValidationError {
     #[error("Invalid JSON: {0}")]
     InvalidJson(#[from] serde_json::Error),
-    
+
     #[error("Schema validation failed: {0}")]
     SchemaValidation(String),
-    
+
     #[error("Missing required field: {0}")]
     MissingRequiredField(String),
 }
@@ -100,12 +111,15 @@ pub fn validate_args(tool: &Tool, args: &JsonValue) -> Result<JsonValue, Validat
 }
 
 /// Internal validation implementation
-fn validate_args_internal(schema: &JsonValue, args: &JsonValue) -> Result<JsonValue, ValidationError> {
-    let validator = Validator::new(schema)
-        .map_err(|e| ValidationError::SchemaValidation(e.to_string()))?;
-    
+fn validate_args_internal(
+    schema: &JsonValue,
+    args: &JsonValue,
+) -> Result<JsonValue, ValidationError> {
+    let validator =
+        Validator::new(schema).map_err(|e| ValidationError::SchemaValidation(e.to_string()))?;
+
     let validation_result = validator.validate(args);
-    
+
     match validation_result {
         Ok(()) => Ok(args.clone()),
         Err(errors) => {
@@ -121,7 +135,7 @@ fn validate_args_internal(schema: &JsonValue, args: &JsonValue) -> Result<JsonVa
 pub fn create_schema(fields: &[(&str, &str, &str)]) -> JsonValue {
     let mut properties = serde_json::Map::new();
     let mut required: Vec<&str> = Vec::new();
-    
+
     for (name, schema_type, description) in fields {
         let prop = serde_json::json!({
             "type": schema_type,
@@ -130,7 +144,7 @@ pub fn create_schema(fields: &[(&str, &str, &str)]) -> JsonValue {
         properties.insert(name.to_string(), prop);
         required.push(name);
     }
-    
+
     serde_json::json!({
         "type": "object",
         "properties": properties,
@@ -150,15 +164,15 @@ mod tests {
             "location",
             "City name or coordinates",
         );
-        
+
         let valid_args = serde_json::json!({
             "location": "London"
         });
-        
+
         let result = tool.validate(&valid_args);
         assert!(result.is_ok());
     }
-    
+
     #[test]
     fn test_tool_validation_failure() {
         let tool = Tool::with_string_param(
@@ -167,10 +181,10 @@ mod tests {
             "location",
             "City name or coordinates",
         );
-        
+
         // Missing required field
         let invalid_args = serde_json::json!({});
-        
+
         let result = tool.validate(&invalid_args);
         assert!(result.is_err());
     }

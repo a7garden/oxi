@@ -429,10 +429,7 @@ impl RequirementsContext {
                     if !validation.issues.is_empty() {
                         md.push_str("**Validation Issues:**\n");
                         for issue in &validation.issues {
-                            md.push_str(&format!(
-                                "- [{}] {}\n",
-                                issue.severity, issue.description
-                            ));
+                            md.push_str(&format!("- [{}] {}\n", issue.severity, issue.description));
                         }
                         md.push('\n');
                     }
@@ -567,8 +564,7 @@ impl RequirementsContext {
 
     /// Write to file.
     pub fn write_to_file(&self, dir: &Path) -> Result<PathBuf> {
-        fs::create_dir_all(dir)
-            .with_context(|| format!("Failed to create {}", dir.display()))?;
+        fs::create_dir_all(dir).with_context(|| format!("Failed to create {}", dir.display()))?;
 
         let slug = slugify(&self.title);
         let date = &self.created_at[..10];
@@ -748,12 +744,22 @@ impl ContextBuilderSession {
             let mut req_issues: Vec<ValidationIssue> = Vec::new();
 
             // Check for ambiguity
-            let ambiguous_words = ["somehow", "maybe", "possibly", "might", "could", "should probably"];
+            let ambiguous_words = [
+                "somehow",
+                "maybe",
+                "possibly",
+                "might",
+                "could",
+                "should probably",
+            ];
             let desc_lower = req.description.to_lowercase();
             for word in &ambiguous_words {
                 if desc_lower.contains(word) {
                     req_issues.push(ValidationIssue {
-                        description: format!("Requirement {} contains ambiguous word: '{}'", req.id, word),
+                        description: format!(
+                            "Requirement {} contains ambiguous word: '{}'",
+                            req.id, word
+                        ),
                         severity: ValidationSeverity::Ambiguous,
                     });
                     ambiguous_count += 1;
@@ -797,7 +803,10 @@ impl ContextBuilderSession {
         }
         for (id, count) in &seen_ids {
             if *count > 1 {
-                issues.push(format!("Duplicate requirement ID: {} (appears {} times)", id, count));
+                issues.push(format!(
+                    "Duplicate requirement ID: {} (appears {} times)",
+                    id, count
+                ));
             }
         }
 
@@ -850,7 +859,9 @@ impl ContextBuilderSession {
 
     /// Write the context document to disk.
     pub fn write_document(&self, explicit_path: Option<&Path>) -> Result<PathBuf> {
-        let doc = self.document.as_ref()
+        let doc = self
+            .document
+            .as_ref()
             .context("Document not finalized — call finalize() first")?;
 
         if let Some(path) = explicit_path {
@@ -863,7 +874,9 @@ impl ContextBuilderSession {
                 .with_context(|| format!("Failed to write context to {}", path.display()))?;
             Ok(path.to_path_buf())
         } else {
-            let root = self.project_root.as_deref()
+            let root = self
+                .project_root
+                .as_deref()
                 .context("No project root and no explicit path")?;
             let ctx_dir = root.join("docs").join("context");
             doc.write_to_file(&ctx_dir)
@@ -1064,7 +1077,10 @@ mod tests {
     fn test_phase_display() {
         assert_eq!(format!("{}", ContextPhase::Ingest), "Ingest");
         assert_eq!(format!("{}", ContextPhase::Analyze), "Analyze");
-        assert_eq!(format!("{}", ContextPhase::CrossReference), "Cross-Reference");
+        assert_eq!(
+            format!("{}", ContextPhase::CrossReference),
+            "Cross-Reference"
+        );
         assert_eq!(format!("{}", ContextPhase::Structure), "Structure");
         assert_eq!(format!("{}", ContextPhase::Validate), "Validate");
         assert_eq!(format!("{}", ContextPhase::Document), "Document");
@@ -1089,7 +1105,10 @@ mod tests {
     #[test]
     fn test_requirement_category_display() {
         assert_eq!(format!("{}", RequirementCategory::Functional), "functional");
-        assert_eq!(format!("{}", RequirementCategory::NonFunctional), "non-functional");
+        assert_eq!(
+            format!("{}", RequirementCategory::NonFunctional),
+            "non-functional"
+        );
         assert_eq!(format!("{}", RequirementCategory::Security), "security");
     }
 
@@ -1111,7 +1130,10 @@ mod tests {
     fn test_validation_severity_display() {
         assert_eq!(format!("{}", ValidationSeverity::Ambiguous), "ambiguous");
         assert_eq!(format!("{}", ValidationSeverity::Incomplete), "incomplete");
-        assert_eq!(format!("{}", ValidationSeverity::Conflicting), "conflicting");
+        assert_eq!(
+            format!("{}", ValidationSeverity::Conflicting),
+            "conflicting"
+        );
         assert_eq!(format!("{}", ValidationSeverity::Untestable), "untestable");
     }
 
@@ -1161,7 +1183,13 @@ mod tests {
         let report = session.validate();
         assert!(report.is_complete);
         assert_eq!(report.requirements_with_issues, 0);
-        assert!(session.requirements[0].validation.as_ref().unwrap().is_valid);
+        assert!(
+            session.requirements[0]
+                .validation
+                .as_ref()
+                .unwrap()
+                .is_valid
+        );
     }
 
     #[test]
@@ -1175,7 +1203,13 @@ mod tests {
         let report = session.validate();
         assert!(!report.is_complete);
         assert_eq!(report.ambiguous_count, 1);
-        assert!(!session.requirements[0].validation.as_ref().unwrap().is_valid);
+        assert!(
+            !session.requirements[0]
+                .validation
+                .as_ref()
+                .unwrap()
+                .is_valid
+        );
     }
 
     #[test]
@@ -1216,7 +1250,10 @@ mod tests {
         session.add_requirement(sample_requirement("REQ-001"));
         let report = session.validate();
         assert!(!report.is_complete);
-        assert!(report.issues.iter().any(|i| i.contains("No success criteria")));
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.contains("No success criteria")));
     }
 
     #[test]
@@ -1233,8 +1270,7 @@ mod tests {
     #[test]
     fn test_finalize_and_write() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut session = ContextBuilderSession::new("Auth Context")
-            .with_project_root(tmp.path());
+        let mut session = ContextBuilderSession::new("Auth Context").with_project_root(tmp.path());
 
         session.set_raw_input("Build authentication for the API");
         session.add_requirement(sample_requirement("REQ-001"));

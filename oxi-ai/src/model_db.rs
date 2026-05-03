@@ -66,7 +66,13 @@ impl ModelEntry {
     }
 
     /// Calculate the cost for a given token usage
-    pub fn calculate_cost(&self, input_tokens: u64, output_tokens: u64, cache_read: u64, cache_write: u64) -> f64 {
+    pub fn calculate_cost(
+        &self,
+        input_tokens: u64,
+        output_tokens: u64,
+        cache_read: u64,
+        cache_write: u64,
+    ) -> f64 {
         let in_cost = (input_tokens as f64 / 1_000_000.0) * self.cost_input;
         let out_cost = (output_tokens as f64 / 1_000_000.0) * self.cost_output;
         let cr_cost = (cache_read as f64 / 1_000_000.0) * self.cost_cache_read;
@@ -7879,7 +7885,9 @@ pub fn get_provider_models(provider: &str) -> &'static [ModelEntry] {
 ///
 /// Returns a flat iterator over every `ModelEntry` in the database.
 pub fn get_all_models() -> impl Iterator<Item = &'static ModelEntry> {
-    ALL_PROVIDER_MODELS.iter().flat_map(|(_, models)| models.iter())
+    ALL_PROVIDER_MODELS
+        .iter()
+        .flat_map(|(_, models)| models.iter())
 }
 
 /// Get the total number of models in the database.
@@ -7896,9 +7904,7 @@ pub fn get_providers() -> Vec<&'static str> {
 pub fn search_models(pattern: &str) -> Vec<&'static ModelEntry> {
     let lower = pattern.to_lowercase();
     get_all_models()
-        .filter(|m| {
-            m.id.to_lowercase().contains(&lower) || m.name.to_lowercase().contains(&lower)
-        })
+        .filter(|m| m.id.to_lowercase().contains(&lower) || m.name.to_lowercase().contains(&lower))
         .collect()
 }
 
@@ -7915,7 +7921,11 @@ pub fn get_vision_models() -> Vec<&'static ModelEntry> {
 /// Find the cheapest models by input cost, returning up to `limit` results.
 pub fn get_cheapest_models(limit: usize) -> Vec<&'static ModelEntry> {
     let mut all: Vec<_> = get_all_models().collect();
-    all.sort_by(|a, b| a.cost_input.partial_cmp(&b.cost_input).unwrap_or(std::cmp::Ordering::Equal));
+    all.sort_by(|a, b| {
+        a.cost_input
+            .partial_cmp(&b.cost_input)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     all.truncate(limit);
     all
 }
@@ -7964,10 +7974,10 @@ mod tests {
     fn test_search_models() {
         let results = search_models("claude");
         assert!(!results.is_empty(), "Should find Claude models");
-        assert!(results.iter().all(|m|
-            m.name.to_lowercase().contains("claude") ||
-            m.id.to_lowercase().contains("claude")
-        ));
+        assert!(results
+            .iter()
+            .all(|m| m.name.to_lowercase().contains("claude")
+                || m.id.to_lowercase().contains("claude")));
     }
 
     #[test]
@@ -7976,8 +7986,12 @@ mod tests {
         // 1M input + 1M output tokens
         let cost = m.calculate_cost(1_000_000, 1_000_000, 0, 0);
         let expected = m.cost_input + m.cost_output;
-        assert!((cost - expected).abs() < 0.001,
-            "Cost calculation mismatch: got {}, expected {}", cost, expected);
+        assert!(
+            (cost - expected).abs() < 0.001,
+            "Cost calculation mismatch: got {}, expected {}",
+            cost,
+            expected
+        );
     }
 
     #[test]
@@ -8010,7 +8024,7 @@ mod tests {
         assert_eq!(cheapest.len(), 5);
         // Should be sorted by ascending input cost
         for i in 1..cheapest.len() {
-            assert!(cheapest[i].cost_input >= cheapest[i-1].cost_input);
+            assert!(cheapest[i].cost_input >= cheapest[i - 1].cost_input);
         }
     }
 }

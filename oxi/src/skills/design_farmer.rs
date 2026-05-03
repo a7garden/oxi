@@ -431,19 +431,25 @@ impl ColorPalette {
 
     /// Get the middle (500) color.
     pub fn mid(&self) -> &OklchColor {
-        &self.get_stop(500).expect("palette always has step 500").color
+        &self
+            .get_stop(500)
+            .expect("palette always has step 500")
+            .color
     }
 
     /// Convert this palette into a [`TokenGroup`].
     pub fn to_token_group(&self) -> TokenGroup {
-        let mut group = TokenGroup::new(&self.name)
-            .with_description(format!(
-                "{} palette (hue {:.0}°, chroma {:.3})",
-                self.name, self.hue, self.chroma
-            ));
+        let mut group = TokenGroup::new(&self.name).with_description(format!(
+            "{} palette (hue {:.0}°, chroma {:.3})",
+            self.name, self.hue, self.chroma
+        ));
 
         for stop in &self.stops {
-            group.add_token(DesignToken::color(&stop.token_name, stop.color, vec!["color".into(), self.name.clone()]));
+            group.add_token(DesignToken::color(
+                &stop.token_name,
+                stop.color,
+                vec!["color".into(), self.name.clone()],
+            ));
         }
 
         group
@@ -498,12 +504,7 @@ pub struct ContrastCheck {
 
 impl ContrastCheck {
     /// Run a contrast check between two tokens.
-    pub fn check(
-        fg_token: &str,
-        fg: OklchColor,
-        bg_token: &str,
-        bg: OklchColor,
-    ) -> Self {
+    pub fn check(fg_token: &str, fg: OklchColor, bg_token: &str, bg: OklchColor) -> Self {
         let ratio = fg.contrast_ratio(&bg);
         Self {
             foreground_token: fg_token.to_string(),
@@ -616,7 +617,9 @@ impl ComponentSpec {
 
     /// Whether all contrast checks pass at the required WCAG level.
     pub fn is_accessible(&self) -> bool {
-        self.contrast_checks.iter().all(|c| c.passes(self.wcag_level))
+        self.contrast_checks
+            .iter()
+            .all(|c| c.passes(self.wcag_level))
     }
 
     /// Get failing contrast checks.
@@ -841,16 +844,8 @@ impl DesignSystem {
             }
         }
 
-        passing.sort_by(|a, b| {
-            b.ratio
-                .partial_cmp(&a.ratio)
-                .unwrap_or(Ordering::Equal)
-        });
-        failing.sort_by(|a, b| {
-            a.ratio
-                .partial_cmp(&b.ratio)
-                .unwrap_or(Ordering::Equal)
-        });
+        passing.sort_by(|a, b| b.ratio.partial_cmp(&a.ratio).unwrap_or(Ordering::Equal));
+        failing.sort_by(|a, b| a.ratio.partial_cmp(&b.ratio).unwrap_or(Ordering::Equal));
 
         let all_pass = failing.is_empty();
         let min_ratio = passing
@@ -899,7 +894,10 @@ impl DesignSystem {
         let mut md = String::with_capacity(8192);
 
         md.push_str(&format!("# Design System: {}\n\n", self.name));
-        md.push_str(&format!("> Created: {} | Version: {}\n\n", self.created_at, self.version));
+        md.push_str(&format!(
+            "> Created: {} | Version: {}\n\n",
+            self.created_at, self.version
+        ));
 
         // Summary
         md.push_str(&format!(
@@ -919,7 +917,10 @@ impl DesignSystem {
             if !analysis.design_files.is_empty() {
                 md.push_str("### Design Files\n\n");
                 for f in &analysis.design_files {
-                    md.push_str(&format!("- `{}` — {} ({})\n", f.path, f.description, f.file_type));
+                    md.push_str(&format!(
+                        "- `{}` — {} ({})\n",
+                        f.path, f.description, f.file_type
+                    ));
                 }
                 md.push('\n');
             }
@@ -940,13 +941,18 @@ impl DesignSystem {
         if !self.palettes.is_empty() {
             md.push_str("## Color Palettes\n\n");
             for palette in &self.palettes {
-                md.push_str(&format!("### {} (hue {:.0}°)\n\n", palette.name, palette.hue));
+                md.push_str(&format!(
+                    "### {} (hue {:.0}°)\n\n",
+                    palette.name, palette.hue
+                ));
                 md.push_str("| Step | Token | Value |\n");
                 md.push_str("|------|-------|-------|\n");
                 for stop in &palette.stops {
                     md.push_str(&format!(
                         "| {} | `{}` | `{}` |\n",
-                        stop.step, stop.token_name, stop.color.to_css()
+                        stop.step,
+                        stop.token_name,
+                        stop.color.to_css()
                     ));
                 }
                 md.push('\n');
@@ -962,7 +968,11 @@ impl DesignSystem {
         if !self.components.is_empty() {
             md.push_str("## Components\n\n");
             for component in &self.components {
-                let accessible_icon = if component.is_accessible() { "✅" } else { "⚠️" };
+                let accessible_icon = if component.is_accessible() {
+                    "✅"
+                } else {
+                    "⚠️"
+                };
                 md.push_str(&format!(
                     "### {} {} [WCAG {}]\n\n",
                     component.name, accessible_icon, component.wcag_level
@@ -972,7 +982,8 @@ impl DesignSystem {
 
                 if !component.variants.is_empty() {
                     md.push_str("**Variants:** ");
-                    let names: Vec<&str> = component.variants.iter().map(|v| v.name.as_str()).collect();
+                    let names: Vec<&str> =
+                        component.variants.iter().map(|v| v.name.as_str()).collect();
                     md.push_str(&names.join(", "));
                     md.push_str("\n\n");
                 }
@@ -1056,7 +1067,12 @@ impl DesignSystem {
     /// Recursively render a token group as Markdown headings.
     fn render_token_group_md(group: &TokenGroup, md: &mut String, depth: usize) {
         let heading = "#".repeat(depth.min(4) + 3); // h3–h6
-        md.push_str(&format!("{} {} ({} tokens)\n\n", heading, group.name, group.token_count()));
+        md.push_str(&format!(
+            "{} {} ({} tokens)\n\n",
+            heading,
+            group.name,
+            group.token_count()
+        ));
 
         if let Some(ref desc) = group.description {
             md.push_str(&format!("{}\n\n", desc));
@@ -1105,8 +1121,8 @@ impl DesignSystem {
                 .with_context(|| format!("Failed to create {}", parent.display()))?;
         }
 
-        let json = serde_json::to_string_pretty(self)
-            .context("Failed to serialize design system")?;
+        let json =
+            serde_json::to_string_pretty(self).context("Failed to serialize design system")?;
         fs::write(path, &json)
             .with_context(|| format!("Failed to write design system to {}", path.display()))?;
 
@@ -1258,7 +1274,14 @@ impl DesignFarmer {
             };
 
             if path.is_dir() {
-                Self::walk_for_design_files(&path, &rel, depth + 1, max_depth, design_files, patterns)?;
+                Self::walk_for_design_files(
+                    &path,
+                    &rel,
+                    depth + 1,
+                    max_depth,
+                    design_files,
+                    patterns,
+                )?;
             } else {
                 let name_lower = name.to_lowercase();
 
@@ -1266,9 +1289,9 @@ impl DesignFarmer {
                 let (file_type, description) = if matches!(
                     name_lower.as_str(),
                     "tailwind.config.js"
-                    | "tailwind.config.ts"
-                    | "tailwind.config.mjs"
-                    | "tailwind.config.cjs"
+                        | "tailwind.config.ts"
+                        | "tailwind.config.mjs"
+                        | "tailwind.config.cjs"
                 ) {
                     (
                         DesignFileType::TailwindConfig,
@@ -1280,12 +1303,19 @@ impl DesignFarmer {
                         || name_lower.ends_with(".ts")
                         || name_lower.ends_with(".toml"))
                 {
-                    (DesignFileType::ThemeConfig, "Theme configuration".to_string())
+                    (
+                        DesignFileType::ThemeConfig,
+                        "Theme configuration".to_string(),
+                    )
                 } else if name_lower.contains("token")
-                    && (name_lower.ends_with(".json") || name_lower.ends_with(".yaml")
+                    && (name_lower.ends_with(".json")
+                        || name_lower.ends_with(".yaml")
                         || name_lower.ends_with(".yml"))
                 {
-                    (DesignFileType::TokenFile, "Design token definitions".to_string())
+                    (
+                        DesignFileType::TokenFile,
+                        "Design token definitions".to_string(),
+                    )
                 } else if name_lower.ends_with(".css")
                     || name_lower.ends_with(".scss")
                     || name_lower.ends_with(".less")
@@ -1296,7 +1326,10 @@ impl DesignFarmer {
                             DesignFileType::Stylesheet,
                             "Component stylesheet".to_string(),
                         )
-                    } else if rel.contains("global") || rel.contains("base") || name_lower.contains("reset") {
+                    } else if rel.contains("global")
+                        || rel.contains("base")
+                        || name_lower.contains("reset")
+                    {
                         (
                             DesignFileType::Stylesheet,
                             "Global/base stylesheet".to_string(),
@@ -1312,7 +1345,10 @@ impl DesignFarmer {
                     // Check if it's a story file
                     if name_lower.contains(".story.") {
                         (DesignFileType::Story, "Component story".to_string())
-                    } else if rel.contains("component") || rel.contains("ui") || rel.contains("design") {
+                    } else if rel.contains("component")
+                        || rel.contains("ui")
+                        || rel.contains("design")
+                    {
                         (DesignFileType::Component, "UI component".to_string())
                     } else {
                         continue; // Skip non-design TSX/JSX files
@@ -1342,7 +1378,8 @@ impl DesignFarmer {
                         name: "Color organization".to_string(),
                         category: PatternCategory::Color,
                         source: rel.clone(),
-                        description: "File is organized around color/palette definitions".to_string(),
+                        description: "File is organized around color/palette definitions"
+                            .to_string(),
                     });
                 }
                 if rel.contains("spacing") || rel.contains("space") {
@@ -1388,7 +1425,8 @@ impl DesignFarmer {
         // Root token groups
         let mut color_group = TokenGroup::new("color").with_description("Color tokens");
         let mut spacing_group = TokenGroup::new("spacing").with_description("Spacing scale");
-        let mut typography_group = TokenGroup::new("typography").with_description("Typography tokens");
+        let mut typography_group =
+            TokenGroup::new("typography").with_description("Typography tokens");
         let mut radius_group = TokenGroup::new("radius").with_description("Border radius tokens");
         let mut shadow_group = TokenGroup::new("shadow").with_description("Elevation shadows");
 
@@ -1436,24 +1474,44 @@ impl DesignFarmer {
         // Semantic aliases
         let mut semantic = TokenGroup::new("semantic").with_description("Semantic color aliases");
         semantic.add_token(
-            DesignToken::color("color.semantic.background", OklchColor::new(0.99, 0.002, primary_hue), vec!["color".into(), "semantic".into()])
-                .with_description("Application background"),
+            DesignToken::color(
+                "color.semantic.background",
+                OklchColor::new(0.99, 0.002, primary_hue),
+                vec!["color".into(), "semantic".into()],
+            )
+            .with_description("Application background"),
         );
         semantic.add_token(
-            DesignToken::color("color.semantic.foreground", OklchColor::new(0.15, 0.01, primary_hue), vec!["color".into(), "semantic".into()])
-                .with_description("Primary text color"),
+            DesignToken::color(
+                "color.semantic.foreground",
+                OklchColor::new(0.15, 0.01, primary_hue),
+                vec!["color".into(), "semantic".into()],
+            )
+            .with_description("Primary text color"),
         );
         semantic.add_token(
-            DesignToken::color("color.semantic.muted", OklchColor::new(0.55, 0.01, primary_hue), vec!["color".into(), "semantic".into()])
-                .with_description("Secondary/muted text"),
+            DesignToken::color(
+                "color.semantic.muted",
+                OklchColor::new(0.55, 0.01, primary_hue),
+                vec!["color".into(), "semantic".into()],
+            )
+            .with_description("Secondary/muted text"),
         );
         semantic.add_token(
-            DesignToken::color("color.semantic.accent", OklchColor::new(0.55, primary_chroma, (primary_hue + 180.0) % 360.0), vec!["color".into(), "semantic".into()])
-                .with_description("Accent / interactive color"),
+            DesignToken::color(
+                "color.semantic.accent",
+                OklchColor::new(0.55, primary_chroma, (primary_hue + 180.0) % 360.0),
+                vec!["color".into(), "semantic".into()],
+            )
+            .with_description("Accent / interactive color"),
         );
         semantic.add_token(
-            DesignToken::color("color.semantic.border", OklchColor::new(0.87, 0.005, primary_hue), vec!["color".into(), "semantic".into()])
-                .with_description("Default border color"),
+            DesignToken::color(
+                "color.semantic.border",
+                OklchColor::new(0.87, 0.005, primary_hue),
+                vec!["color".into(), "semantic".into()],
+            )
+            .with_description("Default border color"),
         );
         color_group.add_child(semantic);
 
@@ -1562,9 +1620,18 @@ impl DesignFarmer {
         // ── Shadow tokens ──
         let shadows: [(&str, &str); 4] = [
             ("sm", "0 1px 2px 0 rgb(0 0 0 / 0.05)"),
-            ("default", "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)"),
-            ("md", "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)"),
-            ("lg", "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)"),
+            (
+                "default",
+                "0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)",
+            ),
+            (
+                "md",
+                "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+            ),
+            (
+                "lg",
+                "0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)",
+            ),
         ];
         for (name, shadow) in &shadows {
             shadow_group.add_token(DesignToken::new(
@@ -1607,8 +1674,11 @@ impl DesignFarmer {
 
     /// Build an accessible Button component spec.
     fn build_button_spec() -> ComponentSpec {
-        let mut button = ComponentSpec::new("Button", "Interactive button element with multiple variants")
-            .with_wcag_level(WcagLevel::AA);
+        let mut button = ComponentSpec::new(
+            "Button",
+            "Interactive button element with multiple variants",
+        )
+        .with_wcag_level(WcagLevel::AA);
 
         button.add_a11y_note("Buttons must have visible focus indicators");
         button.add_a11y_note("Touch target size minimum 44×44px");
@@ -1636,12 +1706,18 @@ impl DesignFarmer {
         button.add_variant(ComponentVariant {
             name: "primary".to_string(),
             token_refs: vec![
-                ("color.primary.500".to_string(), "background-color".to_string()),
+                (
+                    "color.primary.500".to_string(),
+                    "background-color".to_string(),
+                ),
                 ("white".to_string(), "color".to_string()),
                 ("radius.default".to_string(), "border-radius".to_string()),
                 ("spacing.2".to_string(), "padding-y".to_string()),
                 ("spacing.4".to_string(), "padding-x".to_string()),
-                ("font-weight.semibold".to_string(), "font-weight".to_string()),
+                (
+                    "font-weight.semibold".to_string(),
+                    "font-weight".to_string(),
+                ),
             ],
             extra_styles: vec![
                 ("border".to_string(), "none".to_string()),
@@ -1652,7 +1728,10 @@ impl DesignFarmer {
         button.add_variant(ComponentVariant {
             name: "secondary".to_string(),
             token_refs: vec![
-                ("color.secondary.500".to_string(), "background-color".to_string()),
+                (
+                    "color.secondary.500".to_string(),
+                    "background-color".to_string(),
+                ),
                 ("white".to_string(), "color".to_string()),
                 ("radius.default".to_string(), "border-radius".to_string()),
             ],
@@ -1667,9 +1746,7 @@ impl DesignFarmer {
                 ("color.primary.500".to_string(), "border-color".to_string()),
                 ("radius.default".to_string(), "border-radius".to_string()),
             ],
-            extra_styles: vec![
-                ("border-width".to_string(), "1px".to_string()),
-            ],
+            extra_styles: vec![("border-width".to_string(), "1px".to_string())],
         });
 
         button.add_variant(ComponentVariant {
@@ -1678,9 +1755,7 @@ impl DesignFarmer {
                 ("transparent".to_string(), "background-color".to_string()),
                 ("color.neutral.700".to_string(), "color".to_string()),
             ],
-            extra_styles: vec![
-                ("border".to_string(), "none".to_string()),
-            ],
+            extra_styles: vec![("border".to_string(), "none".to_string())],
         });
 
         button
@@ -1688,8 +1763,11 @@ impl DesignFarmer {
 
     /// Build an accessible Card component spec.
     fn build_card_spec() -> ComponentSpec {
-        let mut card = ComponentSpec::new("Card", "Content container with optional header, body, and footer")
-            .with_wcag_level(WcagLevel::AA);
+        let mut card = ComponentSpec::new(
+            "Card",
+            "Content container with optional header, body, and footer",
+        )
+        .with_wcag_level(WcagLevel::AA);
 
         card.add_a11y_note("Card content should use semantic HTML (heading, paragraph)");
         card.add_a11y_note("Interactive cards must be focusable and keyboard navigable");
@@ -1710,27 +1788,32 @@ impl DesignFarmer {
         card.add_variant(ComponentVariant {
             name: "default".to_string(),
             token_refs: vec![
-                ("color.semantic.background".to_string(), "background-color".to_string()),
-                ("color.semantic.border".to_string(), "border-color".to_string()),
+                (
+                    "color.semantic.background".to_string(),
+                    "background-color".to_string(),
+                ),
+                (
+                    "color.semantic.border".to_string(),
+                    "border-color".to_string(),
+                ),
                 ("radius.lg".to_string(), "border-radius".to_string()),
                 ("shadow.default".to_string(), "box-shadow".to_string()),
                 ("spacing.4".to_string(), "padding".to_string()),
             ],
-            extra_styles: vec![
-                ("border-width".to_string(), "1px".to_string()),
-            ],
+            extra_styles: vec![("border-width".to_string(), "1px".to_string())],
         });
 
         card.add_variant(ComponentVariant {
             name: "elevated".to_string(),
             token_refs: vec![
-                ("color.semantic.background".to_string(), "background-color".to_string()),
+                (
+                    "color.semantic.background".to_string(),
+                    "background-color".to_string(),
+                ),
                 ("shadow.md".to_string(), "box-shadow".to_string()),
                 ("radius.lg".to_string(), "border-radius".to_string()),
             ],
-            extra_styles: vec![
-                ("border".to_string(), "none".to_string()),
-            ],
+            extra_styles: vec![("border".to_string(), "none".to_string())],
         });
 
         card
@@ -1738,8 +1821,11 @@ impl DesignFarmer {
 
     /// Build an accessible Input component spec.
     fn build_input_spec() -> ComponentSpec {
-        let mut input = ComponentSpec::new("Input", "Text input field with label, validation states, and error display")
-            .with_wcag_level(WcagLevel::AA);
+        let mut input = ComponentSpec::new(
+            "Input",
+            "Text input field with label, validation states, and error display",
+        )
+        .with_wcag_level(WcagLevel::AA);
 
         input.add_a11y_note("Every input must have an associated <label>");
         input.add_a11y_note("Error messages must be associated with aria-describedby");
@@ -1768,16 +1854,20 @@ impl DesignFarmer {
             name: "default".to_string(),
             token_refs: vec![
                 ("color.semantic.foreground".to_string(), "color".to_string()),
-                ("color.semantic.background".to_string(), "background-color".to_string()),
-                ("color.semantic.border".to_string(), "border-color".to_string()),
+                (
+                    "color.semantic.background".to_string(),
+                    "background-color".to_string(),
+                ),
+                (
+                    "color.semantic.border".to_string(),
+                    "border-color".to_string(),
+                ),
                 ("radius.default".to_string(), "border-radius".to_string()),
                 ("spacing.2".to_string(), "padding-y".to_string()),
                 ("spacing.3".to_string(), "padding-x".to_string()),
                 ("font-size.base".to_string(), "font-size".to_string()),
             ],
-            extra_styles: vec![
-                ("border-width".to_string(), "1px".to_string()),
-            ],
+            extra_styles: vec![("border-width".to_string(), "1px".to_string())],
         });
 
         input.add_variant(ComponentVariant {
@@ -1786,9 +1876,7 @@ impl DesignFarmer {
                 ("color.danger.500".to_string(), "border-color".to_string()),
                 ("color.danger.600".to_string(), "color".to_string()),
             ],
-            extra_styles: vec![
-                ("border-width".to_string(), "2px".to_string()),
-            ],
+            extra_styles: vec![("border-width".to_string(), "2px".to_string())],
         });
 
         input
@@ -1817,7 +1905,10 @@ impl DesignFarmer {
         badge.add_variant(ComponentVariant {
             name: "default".to_string(),
             token_refs: vec![
-                ("color.neutral.100".to_string(), "background-color".to_string()),
+                (
+                    "color.neutral.100".to_string(),
+                    "background-color".to_string(),
+                ),
                 ("color.neutral.700".to_string(), "color".to_string()),
                 ("radius.default".to_string(), "border-radius".to_string()),
                 ("spacing.1".to_string(), "padding-y".to_string()),
@@ -1831,7 +1922,10 @@ impl DesignFarmer {
         badge.add_variant(ComponentVariant {
             name: "info".to_string(),
             token_refs: vec![
-                ("color.primary.100".to_string(), "background-color".to_string()),
+                (
+                    "color.primary.100".to_string(),
+                    "background-color".to_string(),
+                ),
                 ("color.primary.700".to_string(), "color".to_string()),
             ],
             extra_styles: vec![],
@@ -1840,7 +1934,10 @@ impl DesignFarmer {
         badge.add_variant(ComponentVariant {
             name: "success".to_string(),
             token_refs: vec![
-                ("color.success.100".to_string(), "background-color".to_string()),
+                (
+                    "color.success.100".to_string(),
+                    "background-color".to_string(),
+                ),
                 ("color.success.700".to_string(), "color".to_string()),
             ],
             extra_styles: vec![],
@@ -1849,7 +1946,10 @@ impl DesignFarmer {
         badge.add_variant(ComponentVariant {
             name: "danger".to_string(),
             token_refs: vec![
-                ("color.danger.100".to_string(), "background-color".to_string()),
+                (
+                    "color.danger.100".to_string(),
+                    "background-color".to_string(),
+                ),
                 ("color.danger.700".to_string(), "color".to_string()),
             ],
             extra_styles: vec![],
@@ -1964,7 +2064,8 @@ Palette generation:
   Keep C and H constant, vary L from 0.14 (950) to 0.97 (50)
   Compress C at extreme L to avoid gamut clipping
 ```
-"#.to_string()
+"#
+        .to_string()
     }
 }
 
@@ -2094,7 +2195,12 @@ mod tests {
 
     #[test]
     fn test_token_new() {
-        let token = DesignToken::new("spacing.4", TokenCategory::Spacing, "1rem", vec!["spacing".into()]);
+        let token = DesignToken::new(
+            "spacing.4",
+            TokenCategory::Spacing,
+            "1rem",
+            vec!["spacing".into()],
+        );
         assert_eq!(token.name, "spacing.4");
         assert_eq!(token.category, TokenCategory::Spacing);
         assert_eq!(token.value, "1rem");
@@ -2105,7 +2211,11 @@ mod tests {
     #[test]
     fn test_token_color() {
         let color = OklchColor::new(0.5, 0.15, 250.0);
-        let token = DesignToken::color("color.primary.500", color, vec!["color".into(), "primary".into()]);
+        let token = DesignToken::color(
+            "color.primary.500",
+            color,
+            vec!["color".into(), "primary".into()],
+        );
         assert_eq!(token.category, TokenCategory::Color);
         assert!(token.oklch.is_some());
         assert_eq!(token.value, color.to_css());
@@ -2137,7 +2247,12 @@ mod tests {
     #[test]
     fn test_token_group_add_token() {
         let mut group = TokenGroup::new("spacing");
-        group.add_token(DesignToken::new("spacing.4", TokenCategory::Spacing, "1rem", vec![]));
+        group.add_token(DesignToken::new(
+            "spacing.4",
+            TokenCategory::Spacing,
+            "1rem",
+            vec![],
+        ));
         assert_eq!(group.tokens.len(), 1);
     }
 
@@ -2152,7 +2267,12 @@ mod tests {
     fn test_token_group_child_mut_creates() {
         let mut root = TokenGroup::new("root");
         let child = root.child_mut("color");
-        child.add_token(DesignToken::new("color.primary", TokenCategory::Color, "blue", vec![]));
+        child.add_token(DesignToken::new(
+            "color.primary",
+            TokenCategory::Color,
+            "blue",
+            vec![],
+        ));
         assert_eq!(root.children.len(), 1);
         assert_eq!(root.children[0].tokens.len(), 1);
     }
@@ -2171,11 +2291,21 @@ mod tests {
     fn test_token_group_all_tokens() {
         let mut root = TokenGroup::new("root");
         let mut color = TokenGroup::new("color");
-        color.add_token(DesignToken::new("color.primary", TokenCategory::Color, "blue", vec![]));
+        color.add_token(DesignToken::new(
+            "color.primary",
+            TokenCategory::Color,
+            "blue",
+            vec![],
+        ));
         let spacing = TokenGroup::new("spacing");
         root.add_child(color);
         root.add_child(spacing);
-        root.add_token(DesignToken::new("global.font", TokenCategory::Typography, "sans", vec![]));
+        root.add_token(DesignToken::new(
+            "global.font",
+            TokenCategory::Typography,
+            "sans",
+            vec![],
+        ));
 
         let all = root.all_tokens();
         assert_eq!(all.len(), 2); // color.primary + global.font
@@ -2276,7 +2406,11 @@ mod tests {
         let bg = OklchColor::white();
         let check = ContrastCheck::check("fg", fg, "bg", bg);
         // Light gray on white should fail AA
-        assert!(!check.aa_pass, "Expected ratio < 4.5 but got {:.2}", check.ratio);
+        assert!(
+            !check.aa_pass,
+            "Expected ratio < 4.5 but got {:.2}",
+            check.ratio
+        );
     }
 
     #[test]
@@ -2294,7 +2428,11 @@ mod tests {
         let fg = OklchColor::new(0.6, 0.0, 0.0);
         let bg = OklchColor::white();
         let check = ContrastCheck::check("fg", fg, "bg", bg);
-        assert!(!check.passes(WcagLevel::AA), "Expected ratio < 4.5 but got {:.2}", check.ratio);
+        assert!(
+            !check.passes(WcagLevel::AA),
+            "Expected ratio < 4.5 but got {:.2}",
+            check.ratio
+        );
         assert!(!check.passes(WcagLevel::AAA));
     }
 
@@ -2365,8 +2503,18 @@ mod tests {
     #[test]
     fn test_component_failing_checks() {
         let mut comp = ComponentSpec::new("Button", "A button");
-        comp.check_contrast("good", OklchColor::new(0.15, 0.0, 0.0), "white", OklchColor::white());
-        comp.check_contrast("bad", OklchColor::new(0.65, 0.0, 0.0), "white", OklchColor::white());
+        comp.check_contrast(
+            "good",
+            OklchColor::new(0.15, 0.0, 0.0),
+            "white",
+            OklchColor::white(),
+        );
+        comp.check_contrast(
+            "bad",
+            OklchColor::new(0.65, 0.0, 0.0),
+            "white",
+            OklchColor::white(),
+        );
         let failing = comp.failing_checks();
         assert_eq!(failing.len(), 1);
     }
@@ -2437,7 +2585,12 @@ mod tests {
     fn test_design_system_accessibility_report_all_pass() {
         let mut system = DesignSystem::new("test");
         let mut comp = ComponentSpec::new("Button", "A button");
-        comp.check_contrast("dark", OklchColor::new(0.15, 0.0, 0.0), "white", OklchColor::white());
+        comp.check_contrast(
+            "dark",
+            OklchColor::new(0.15, 0.0, 0.0),
+            "white",
+            OklchColor::white(),
+        );
         system.components.push(comp);
         let report = system.accessibility_report();
         assert!(report.all_pass);
@@ -2450,7 +2603,12 @@ mod tests {
     fn test_design_system_accessibility_report_with_failures() {
         let mut system = DesignSystem::new("test");
         let mut comp = ComponentSpec::new("Button", "A button");
-        comp.check_contrast("light", OklchColor::new(0.65, 0.0, 0.0), "white", OklchColor::white());
+        comp.check_contrast(
+            "light",
+            OklchColor::new(0.65, 0.0, 0.0),
+            "white",
+            OklchColor::white(),
+        );
         system.components.push(comp);
         let report = system.accessibility_report();
         assert!(!report.all_pass);
@@ -2465,7 +2623,11 @@ mod tests {
         assert_eq!(system.name, "test-system");
         assert!(!system.palettes.is_empty());
         assert!(!system.components.is_empty());
-        assert!(system.tokens.token_count() > 50, "Expected many tokens, got {}", system.tokens.token_count());
+        assert!(
+            system.tokens.token_count() > 50,
+            "Expected many tokens, got {}",
+            system.tokens.token_count()
+        );
         assert!(!system.decisions.is_empty());
     }
 
@@ -2482,7 +2644,12 @@ mod tests {
     #[test]
     fn test_build_design_system_has_all_token_groups() {
         let system = DesignFarmer::build_design_system("test", 250.0, 0.15, None);
-        let child_names: Vec<&str> = system.tokens.children.iter().map(|c| c.name.as_str()).collect();
+        let child_names: Vec<&str> = system
+            .tokens
+            .children
+            .iter()
+            .map(|c| c.name.as_str())
+            .collect();
         assert!(child_names.contains(&"color"));
         assert!(child_names.contains(&"spacing"));
         assert!(child_names.contains(&"typography"));
@@ -2526,7 +2693,11 @@ mod tests {
         let src = tmp.path().join("src");
         fs::create_dir_all(src.join("components")).unwrap();
         fs::write(src.join("global.css"), "body { margin: 0; }").unwrap();
-        fs::write(src.join("components").join("Button.css"), ".btn { color: blue; }").unwrap();
+        fs::write(
+            src.join("components").join("Button.css"),
+            ".btn { color: blue; }",
+        )
+        .unwrap();
         fs::write(src.join("components").join("Button.tsx"), "<button />").unwrap();
 
         let analysis = DesignFarmer::analyze_codebase(tmp.path()).unwrap();
@@ -2553,9 +2724,16 @@ mod tests {
     #[test]
     fn test_analyze_codebase_with_theme_files() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::write(tmp.path().join("theme.json"), "{\"colors\": {\"primary\": \"#0066ff\"}}").unwrap();
+        fs::write(
+            tmp.path().join("theme.json"),
+            "{\"colors\": {\"primary\": \"#0066ff\"}}",
+        )
+        .unwrap();
         let analysis = DesignFarmer::analyze_codebase(tmp.path()).unwrap();
-        assert!(analysis.design_files.iter().any(|f| f.file_type == DesignFileType::ThemeConfig));
+        assert!(analysis
+            .design_files
+            .iter()
+            .any(|f| f.file_type == DesignFileType::ThemeConfig));
     }
 
     // ── Markdown rendering tests ──
@@ -2583,7 +2761,12 @@ mod tests {
     fn test_render_markdown_with_components() {
         let mut system = DesignSystem::new("test");
         let mut comp = ComponentSpec::new("Button", "A button");
-        comp.check_contrast("dark", OklchColor::new(0.15, 0.0, 0.0), "white", OklchColor::white());
+        comp.check_contrast(
+            "dark",
+            OklchColor::new(0.15, 0.0, 0.0),
+            "white",
+            OklchColor::white(),
+        );
         system.components.push(comp);
         let md = system.render_markdown();
         assert!(md.contains("## Components"));
@@ -2668,7 +2851,12 @@ mod tests {
     #[test]
     fn test_component_spec_serde_roundtrip() {
         let mut comp = ComponentSpec::new("Button", "A button").with_wcag_level(WcagLevel::AA);
-        comp.check_contrast("fg", OklchColor::new(0.2, 0.0, 0.0), "bg", OklchColor::white());
+        comp.check_contrast(
+            "fg",
+            OklchColor::new(0.2, 0.0, 0.0),
+            "bg",
+            OklchColor::white(),
+        );
         comp.add_variant(ComponentVariant {
             name: "primary".to_string(),
             token_refs: vec![("bg".to_string(), "background-color".to_string())],
@@ -2734,7 +2922,10 @@ mod tests {
     #[test]
     fn test_design_file_type_display() {
         assert_eq!(format!("{}", DesignFileType::Stylesheet), "stylesheet");
-        assert_eq!(format!("{}", DesignFileType::TailwindConfig), "tailwind-config");
+        assert_eq!(
+            format!("{}", DesignFileType::TailwindConfig),
+            "tailwind-config"
+        );
         assert_eq!(format!("{}", DesignFileType::Component), "component");
     }
 

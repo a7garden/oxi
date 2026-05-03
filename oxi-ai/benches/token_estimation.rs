@@ -1,7 +1,7 @@
 //! Benchmarks for token estimation.
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use oxi_ai::{estimate, estimate_words, context_usage};
+use oxi_ai::{context_usage, estimate, estimate_words};
 
 /// Generate a realistic English prose sample of approximately `n` bytes.
 fn prose(n: usize) -> String {
@@ -124,5 +124,10 @@ fn bench_context_usage(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_estimate, bench_estimate_words, bench_context_usage);
+criterion_group!(
+    benches,
+    bench_estimate,
+    bench_estimate_words,
+    bench_context_usage
+);
 criterion_main!(benches);

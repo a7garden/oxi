@@ -135,7 +135,11 @@ pub struct Evidence {
 impl fmt::Display for Evidence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.lines {
-            Some((start, end)) => write!(f, "`{}:{}-{}` — {}", self.file, start, end, self.observation),
+            Some((start, end)) => write!(
+                f,
+                "`{}:{}-{}` — {}",
+                self.file, start, end, self.observation
+            ),
             None => write!(f, "`{}` — {}", self.file, self.observation),
         }
     }
@@ -451,8 +455,10 @@ impl SuperReviewSession {
         if cargo_toml.exists() {
             language = "Rust".to_string();
             if let Ok(content) = fs::read_to_string(&cargo_toml) {
-                name = extract_toml_value(&content, "name").unwrap_or_else(|| "unknown".to_string());
-                version = extract_toml_value(&content, "version").unwrap_or_else(|| "0.0.0".to_string());
+                name =
+                    extract_toml_value(&content, "name").unwrap_or_else(|| "unknown".to_string());
+                version =
+                    extract_toml_value(&content, "version").unwrap_or_else(|| "0.0.0".to_string());
                 key_files.push(("Cargo.toml".to_string(), summarize_cargo_toml(&content)));
                 Self::extract_deps_from_cargo(&content, &mut dependencies);
             }
@@ -499,12 +505,14 @@ impl SuperReviewSession {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().map_or(false, |e| e == "md") {
-                        let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let file_name = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
                         if let Ok(content) = fs::read_to_string(&path) {
-                            key_files.push((
-                                format!("docs/{}", file_name),
-                                truncate_str(&content, 300),
-                            ));
+                            key_files
+                                .push((format!("docs/{}", file_name), truncate_str(&content, 300)));
                         }
                     }
                 }
@@ -551,7 +559,12 @@ impl SuperReviewSession {
     }
 
     /// Build a text representation of the directory tree.
-    fn build_directory_tree(dir: &Path, depth: usize, max_depth: usize, max_bytes: usize) -> String {
+    fn build_directory_tree(
+        dir: &Path,
+        depth: usize,
+        max_depth: usize,
+        max_bytes: usize,
+    ) -> String {
         if depth > max_depth {
             return "  ".repeat(depth) + "...\n";
         }
@@ -627,7 +640,9 @@ impl SuperReviewSession {
             if in_deps {
                 if let Some((name, _)) = trimmed.split_once('=') {
                     deps.push(name.trim().to_string());
-                } else if trimmed.ends_with(",\"workspace\"") || trimmed.contains("workspace = true") {
+                } else if trimmed.ends_with(",\"workspace\"")
+                    || trimmed.contains("workspace = true")
+                {
                     // Workspace dependency — extract name from key
                     if let Some((name, _)) = trimmed.split_once('=') {
                         deps.push(format!("{} (workspace)", name.trim()));
@@ -639,9 +654,13 @@ impl SuperReviewSession {
 
     /// Render the review as a markdown string.
     pub fn render_markdown(&self) -> Result<String> {
-        let system = self.system_understanding.as_ref()
+        let system = self
+            .system_understanding
+            .as_ref()
             .context("System understanding not set — complete Phase 1 first")?;
-        let context = self.project_context.as_ref()
+        let context = self
+            .project_context
+            .as_ref()
             .context("Project context not set — complete Phase 1 first")?;
 
         if self.domains.is_empty() {
@@ -708,7 +727,10 @@ impl SuperReviewSession {
             if !domain.concerns.is_empty() {
                 md.push_str("**Concerns:**\n");
                 for concern in &domain.concerns {
-                    md.push_str(&format!("- [{}] {}\n", concern.severity, concern.description));
+                    md.push_str(&format!(
+                        "- [{}] {}\n",
+                        concern.severity, concern.description
+                    ));
                     for ev in &concern.evidence {
                         md.push_str(&format!("  - {}\n", ev));
                     }
@@ -793,10 +815,7 @@ impl SuperReviewSession {
                     rec.rationale,
                 ));
                 if !rec.addresses.is_empty() {
-                    md.push_str(&format!(
-                        "   Addresses: {}\n",
-                        rec.addresses.join(", ")
-                    ));
+                    md.push_str(&format!("   Addresses: {}\n", rec.addresses.join(", ")));
                 }
             }
             md.push('\n');
@@ -821,7 +840,9 @@ impl SuperReviewSession {
         let path = if let Some(explicit) = explicit_path {
             explicit.to_path_buf()
         } else {
-            let root = self.project_root.as_ref()
+            let root = self
+                .project_root
+                .as_ref()
                 .context("Project root not set and no explicit path given")?;
             let date = Utc::now().format("%Y-%m-%d").to_string();
             let scope_slug = self.scope.as_deref().unwrap_or("review");
@@ -1093,7 +1114,8 @@ mod tests {
         let mut session = SuperReviewSession::new();
         session.add_cross_cutting(CrossCuttingFinding {
             title: "Error handling ignores module boundaries".to_string(),
-            description: "Architecture defines clean boundaries but error handling leaks internals".to_string(),
+            description: "Architecture defines clean boundaries but error handling leaks internals"
+                .to_string(),
             connected_domains: vec!["Architecture".to_string(), "Error Handling".to_string()],
             evidence: vec![],
             severity: Severity::Important,
@@ -1127,7 +1149,10 @@ mod tests {
         });
 
         session.sort_recommendations();
-        assert_eq!(session.recommendations[0].action, "Add input validation layer");
+        assert_eq!(
+            session.recommendations[0].action,
+            "Add input validation layer"
+        );
         assert_eq!(session.recommendations[1].action, "Add integration tests");
         assert_eq!(session.recommendations[2].action, "Document public API");
     }
@@ -1167,7 +1192,11 @@ tempfile = "3"
         )
         .unwrap();
         fs::write(src.join("main.rs"), "fn main() {}").unwrap();
-        fs::write(tmp.path().join("README.md"), "# Test Project\nA test project.").unwrap();
+        fs::write(
+            tmp.path().join("README.md"),
+            "# Test Project\nA test project.",
+        )
+        .unwrap();
 
         let session = SuperReviewSession::new().with_project_root(tmp.path());
         let ctx = session.gather_project_context(10000).unwrap();
@@ -1446,8 +1475,14 @@ name = "my-crate"
 version = "0.1.0"
 edition = "2021"
 "#;
-        assert_eq!(extract_toml_value(content, "name"), Some("my-crate".to_string()));
-        assert_eq!(extract_toml_value(content, "version"), Some("0.1.0".to_string()));
+        assert_eq!(
+            extract_toml_value(content, "name"),
+            Some("my-crate".to_string())
+        );
+        assert_eq!(
+            extract_toml_value(content, "version"),
+            Some("0.1.0".to_string())
+        );
         assert_eq!(extract_toml_value(content, "missing"), None);
     }
 
@@ -1459,7 +1494,10 @@ version = "0.1.0"
 "#;
         // The braces form won't match the simple pattern, should return None
         assert_eq!(extract_toml_value(content, "name"), None);
-        assert_eq!(extract_toml_value(content, "version"), Some("0.1.0".to_string()));
+        assert_eq!(
+            extract_toml_value(content, "version"),
+            Some("0.1.0".to_string())
+        );
     }
 
     // ── Evidence display ───────────────────────────────────────

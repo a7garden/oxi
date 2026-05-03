@@ -6,8 +6,8 @@
 use crate::high_level::complete;
 use crate::high_level::tokens::estimate as estimate_tokens;
 use crate::{
-    Api, AssistantMessage, Context, Model, Message, Provider, StreamOptions,
-    TextContent, ContentBlock, UserMessage,
+    Api, AssistantMessage, ContentBlock, Context, Message, Model, Provider, StreamOptions,
+    TextContent, UserMessage,
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -312,7 +312,8 @@ impl std::fmt::Display for CompactionError {
                 write!(
                     f,
                     "Not enough messages ({}) to compact (need at least {} for keep_recent)",
-                    total, keep_recent + 1
+                    total,
+                    keep_recent + 1
                 )
             }
             CompactionError::CompactionDisabled => write!(f, "Compaction is disabled"),
@@ -369,7 +370,11 @@ impl LlmCompactor {
     }
 
     /// Create a new LLM compactor with custom configuration
-    pub fn with_config(model: Model, provider: Arc<dyn Provider>, config: CompactionConfig) -> Self {
+    pub fn with_config(
+        model: Model,
+        provider: Arc<dyn Provider>,
+        config: CompactionConfig,
+    ) -> Self {
         Self {
             model,
             provider,
@@ -426,7 +431,8 @@ impl LlmCompactor {
         }
 
         prompt.push_str("\n## Summary:\n");
-        prompt.push_str("Provide a concise summary that captures the essence of this conversation.");
+        prompt
+            .push_str("Provide a concise summary that captures the essence of this conversation.");
 
         prompt
     }
@@ -442,11 +448,8 @@ impl LlmCompactor {
         match self.summarize_with_llm(old_messages, instruction).await {
             Ok(summary) => {
                 // Build the summary message
-                let mut summary_msg = AssistantMessage::new(
-                    Api::AnthropicMessages,
-                    "compactor",
-                    &self.model.id,
-                );
+                let mut summary_msg =
+                    AssistantMessage::new(Api::AnthropicMessages, "compactor", &self.model.id);
                 summary_msg.content = vec![ContentBlock::Text(TextContent::new(format!(
                     "[Previous conversation summarized: {}]",
                     summary
@@ -555,7 +558,8 @@ impl LlmCompactor {
 
         let summary = summary_parts.join(" ");
 
-        let mut summary_msg = AssistantMessage::new(Api::AnthropicMessages, "compactor", &self.model.id);
+        let mut summary_msg =
+            AssistantMessage::new(Api::AnthropicMessages, "compactor", &self.model.id);
         summary_msg.content = vec![ContentBlock::Text(TextContent::new(format!(
             "[Previous conversation summary: {}]",
             summary
@@ -647,7 +651,11 @@ impl CompactionManager {
     }
 
     /// Create a new compaction manager with custom config
-    pub fn with_config(strategy: CompactionStrategy, context_window: usize, config: CompactionConfig) -> Self {
+    pub fn with_config(
+        strategy: CompactionStrategy,
+        context_window: usize,
+        config: CompactionConfig,
+    ) -> Self {
         Self {
             strategy,
             compactor: None,
@@ -669,7 +677,8 @@ impl CompactionManager {
 
     /// Check if compaction should be triggered
     pub fn should_compact(&self, context_tokens: usize, iteration: usize) -> bool {
-        self.strategy.should_compact(context_tokens, self.context_window, iteration)
+        self.strategy
+            .should_compact(context_tokens, self.context_window, iteration)
     }
 
     /// Get the current strategy
@@ -808,11 +817,11 @@ mod tests {
     #[test]
     fn test_compaction_metadata_success() {
         let metadata = CompactionMetadata::new(
-            1000,   // original_tokens
-            500,    // compacted_tokens
-            10,     // messages_compacted
-            5,      // messages_kept
-            0.5,    // target_ratio
+            1000, // original_tokens
+            500,  // compacted_tokens
+            10,   // messages_compacted
+            5,    // messages_kept
+            0.5,  // target_ratio
         );
 
         assert!(metadata.success);
@@ -829,7 +838,7 @@ mod tests {
     #[test]
     fn test_compaction_metadata_failure() {
         let metadata = CompactionError::LlmError("test error".to_string());
-        
+
         // Verify error message
         assert!(metadata.to_string().contains("test error"));
     }
@@ -972,7 +981,10 @@ mod tests {
         let err = CompactionError::NoMessagesToCompact;
         assert_eq!(err.to_string(), "No messages to compact");
 
-        let err = CompactionError::TooFewMessages { total: 3, keep_recent: 5 };
+        let err = CompactionError::TooFewMessages {
+            total: 3,
+            keep_recent: 5,
+        };
         assert!(err.to_string().contains("3"));
         // The error message says "need at least keep_recent + 1", so with keep_recent=5 it shows 6
         assert!(err.to_string().contains("6"));
@@ -990,7 +1002,10 @@ mod tests {
     #[test]
     fn test_compaction_manager_default() {
         let manager = CompactionManager::default();
-        assert!(matches!(manager.strategy(), CompactionStrategy::Threshold(_)));
+        assert!(matches!(
+            manager.strategy(),
+            CompactionStrategy::Threshold(_)
+        ));
         assert_eq!(manager.config().keep_recent, 4);
     }
 
@@ -1012,11 +1027,8 @@ mod tests {
             .with_keep_recent(8)
             .with_target_ratio(0.4);
 
-        let manager = CompactionManager::with_config(
-            CompactionStrategy::default(),
-            128_000,
-            config,
-        );
+        let manager =
+            CompactionManager::with_config(CompactionStrategy::default(), 128_000, config);
 
         assert_eq!(manager.config().keep_recent, 8);
         assert!((manager.config().target_ratio - 0.4).abs() < 0.001);
@@ -1024,10 +1036,7 @@ mod tests {
 
     #[test]
     fn test_compaction_manager_should_compact_integration() {
-        let manager = CompactionManager::new(
-            CompactionStrategy::Threshold(0.75),
-            100_000,
-        );
+        let manager = CompactionManager::new(CompactionStrategy::Threshold(0.75), 100_000);
 
         // Below threshold
         assert!(!manager.should_compact(70_000, 0));
@@ -1100,13 +1109,13 @@ mod tests {
     #[test]
     fn test_compaction_manager_config_updates() {
         let mut manager = CompactionManager::default();
-        
+
         let new_config = CompactionConfig::new()
             .with_keep_recent(12)
             .with_target_ratio(0.3);
-        
+
         manager.set_config(new_config);
-        
+
         assert_eq!(manager.config().keep_recent, 12);
         assert!((manager.config().target_ratio - 0.3).abs() < 0.001);
     }

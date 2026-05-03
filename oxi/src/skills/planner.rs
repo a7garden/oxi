@@ -256,7 +256,10 @@ impl PlanDocument {
         let mut md = String::with_capacity(4096);
 
         md.push_str(&format!("# {}\n\n", self.title));
-        md.push_str(&format!("> Created: {} | Version: {}\n\n", self.created_at, self.version));
+        md.push_str(&format!(
+            "> Created: {} | Version: {}\n\n",
+            self.created_at, self.version
+        ));
 
         // Objective
         md.push_str("## Objective\n\n");
@@ -310,7 +313,10 @@ impl PlanDocument {
                 }
 
                 if !task.depends_on.is_empty() {
-                    md.push_str(&format!("**Depends on:** {}\n\n", task.depends_on.join(", ")));
+                    md.push_str(&format!(
+                        "**Depends on:** {}\n\n",
+                        task.depends_on.join(", ")
+                    ));
                 }
 
                 if !task.acceptance_criteria.is_empty() {
@@ -556,10 +562,7 @@ impl PlannerSession {
                     continue;
                 }
                 // Check if all dependencies are assigned
-                let deps_met = task
-                    .depends_on
-                    .iter()
-                    .all(|dep| assigned.contains(dep));
+                let deps_met = task.depends_on.iter().all(|dep| assigned.contains(dep));
                 if deps_met {
                     ready.push(task.id.clone());
                 }
@@ -650,10 +653,7 @@ impl PlannerSession {
                     issues.push(ValidationIssue {
                         severity: ValidationSeverity::Error,
                         task_id: Some(task.id.clone()),
-                        message: format!(
-                            "Task {} depends on non-existent task '{}'",
-                            task.id, dep
-                        ),
+                        message: format!("Task {} depends on non-existent task '{}'", task.id, dep),
                     });
                 }
             }
@@ -1074,8 +1074,12 @@ mod tests {
         session.add_task(sample_task("T1", "Task", vec!["NONEXISTENT"]));
 
         let issues = session.validate();
-        assert!(issues.iter().any(|i| i.severity == ValidationSeverity::Error
-            && i.message.contains("non-existent")));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.severity == ValidationSeverity::Error
+                    && i.message.contains("non-existent"))
+        );
     }
 
     #[test]
@@ -1084,7 +1088,9 @@ mod tests {
         session.add_task(sample_task("T1", "Task", vec!["T1"]));
 
         let issues = session.validate();
-        assert!(issues.iter().any(|i| i.message.contains("depends on itself")));
+        assert!(issues
+            .iter()
+            .any(|i| i.message.contains("depends on itself")));
     }
 
     #[test]
@@ -1104,16 +1110,21 @@ mod tests {
         });
 
         let issues = session.validate();
-        assert!(issues.iter().any(|i| i.message.contains("no acceptance criteria")));
-        assert!(issues.iter().any(|i| i.message.contains("no verification method")));
-        assert!(issues.iter().any(|i| i.message.contains("no files specified")));
+        assert!(issues
+            .iter()
+            .any(|i| i.message.contains("no acceptance criteria")));
+        assert!(issues
+            .iter()
+            .any(|i| i.message.contains("no verification method")));
+        assert!(issues
+            .iter()
+            .any(|i| i.message.contains("no files specified")));
     }
 
     #[test]
     fn test_finalize_and_write() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut session = PlannerSession::new("Auth System Plan")
-            .with_project_root(tmp.path());
+        let mut session = PlannerSession::new("Auth System Plan").with_project_root(tmp.path());
         session.add_task(sample_task("T1", "Core auth", vec![]));
         session.build_batches().unwrap();
         session.finalize().unwrap();

@@ -5,6 +5,7 @@ pub mod chat_view;
 pub mod command_palette;
 pub mod completion;
 pub mod editor;
+pub mod footer;
 pub mod image;
 pub mod input;
 pub mod loader;
@@ -16,8 +17,10 @@ pub mod spacer;
 pub mod text;
 pub mod truncated_text;
 
-pub use box_comp::{Box, BorderStyle};
-pub use chat_view::{ChatMessageDisplay, ChatView, ContentBlockDisplay, MessageRole, StreamingState};
+pub use box_comp::{BorderStyle, Box};
+pub use chat_view::{
+    ChatMessageDisplay, ChatView, ContentBlockDisplay, MessageRole, StreamingState,
+};
 pub use command_palette::{Command, CommandPalette};
 pub use completion::{Completion, FileCompleter};
 pub use editor::{Editor, EditorOptions, Mention};

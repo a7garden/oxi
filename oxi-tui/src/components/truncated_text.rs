@@ -217,9 +217,14 @@ impl Component for TruncatedText {
     }
 
     fn desired_size(&self) -> Option<Size> {
-        let w = self.max_width.unwrap_or_else(|| self.content.len().min(80) as u16);
+        let w = self
+            .max_width
+            .unwrap_or_else(|| self.content.len().min(80) as u16);
         let h = self.max_height.unwrap_or(1);
-        Some(Size { width: w, height: h })
+        Some(Size {
+            width: w,
+            height: h,
+        })
     }
 
     fn on_focus(&mut self) {

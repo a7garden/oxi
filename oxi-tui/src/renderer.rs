@@ -74,7 +74,9 @@ impl SGR {
                 Color::Cyan => codes.push(36),
                 Color::White => codes.push(37),
                 Color::Indexed(n) => codes.extend_from_slice(&[38, 5, *n as u8]),
-                Color::Rgb(r, g, b) => codes.extend_from_slice(&[38, 2, *r as u8, *g as u8, *b as u8]),
+                Color::Rgb(r, g, b) => {
+                    codes.extend_from_slice(&[38, 2, *r as u8, *g as u8, *b as u8])
+                }
             }
         }
 
@@ -91,7 +93,9 @@ impl SGR {
                 Color::Cyan => codes.push(46),
                 Color::White => codes.push(47),
                 Color::Indexed(n) => codes.extend_from_slice(&[48, 5, *n as u8]),
-                Color::Rgb(r, g, b) => codes.extend_from_slice(&[48, 2, *r as u8, *g as u8, *b as u8]),
+                Color::Rgb(r, g, b) => {
+                    codes.extend_from_slice(&[48, 2, *r as u8, *g as u8, *b as u8])
+                }
             }
         }
 
@@ -144,8 +148,6 @@ impl Renderer {
 
     /// Apply SGR codes.
     fn apply_sgr(&mut self, cell: &Cell) -> Option<String> {
-        
-
         let new_sgr = SGR {
             bold: cell.attrs.bold,
             italic: cell.attrs.italic,
@@ -198,7 +200,12 @@ impl Renderer {
     }
 
     /// Render only dirty cells (differential rendering).
-    pub fn render_dirty(&mut self, surface: &Surface, first_dirty: u16, last_dirty: u16) -> io::Result<()> {
+    pub fn render_dirty(
+        &mut self,
+        surface: &Surface,
+        first_dirty: u16,
+        last_dirty: u16,
+    ) -> io::Result<()> {
         for row in first_dirty..=last_dirty {
             for col in 0..surface.width() {
                 if surface.is_dirty(row, col) {
@@ -307,8 +314,6 @@ pub trait RenderToSurface {
 
 impl RenderToSurface for Cell {
     fn to_ansi(&self) -> String {
-        
-
         let sgr = SGR {
             bold: self.attrs.bold,
             italic: self.attrs.italic,

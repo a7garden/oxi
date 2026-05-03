@@ -400,24 +400,37 @@ fn strip_ordered_marker(s: &str) -> &str {
     let digits_end = s.chars().take_while(|c| c.is_ascii_digit()).count();
     let rest = &s[digits_end..];
     // skip . or ) and following spaces
-    rest.trim_start_matches(|c: char| c == '.' || c == ')').trim_start()
+    rest.trim_start_matches(|c: char| c == '.' || c == ')')
+        .trim_start()
 }
 
 // ---------------------------------------------------------------------------
 // Inline parser – handles **bold**, *italic*, ~~strike~~, `code`, [links](url)
 // ---------------------------------------------------------------------------
 
-fn parse_inline_runs(text: &str, base_fg: Color, base_bg: Color, base_attrs: Attributes, theme: &MarkdownTheme) -> Vec<InlineRun> {
+fn parse_inline_runs(
+    text: &str,
+    base_fg: Color,
+    base_bg: Color,
+    base_attrs: Attributes,
+    theme: &MarkdownTheme,
+) -> Vec<InlineRun> {
     let mut runs: Vec<InlineRun> = Vec::new();
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();
     let mut i = 0;
 
-    let push_run = |runs: &mut Vec<InlineRun>, content: &str, fg: Color, bg: Color, attrs: Attributes| {
-        if !content.is_empty() {
-            runs.push(InlineRun { text: content.to_string(), fg, bg, attrs });
-        }
-    };
+    let push_run =
+        |runs: &mut Vec<InlineRun>, content: &str, fg: Color, bg: Color, attrs: Attributes| {
+            if !content.is_empty() {
+                runs.push(InlineRun {
+                    text: content.to_string(),
+                    fg,
+                    bg,
+                    attrs,
+                });
+            }
+        };
 
     while i < len {
         // ── Inline code ───────────────────────────────────────────
@@ -440,18 +453,33 @@ fn parse_inline_runs(text: &str, base_fg: Color, base_bg: Color, base_attrs: Att
             }
             if found {
                 let code_text: String = chars[code_start..i].iter().collect();
-                push_run(&mut runs, &code_text, theme.code_fg, theme.code_bg, Attributes::default());
+                push_run(
+                    &mut runs,
+                    &code_text,
+                    theme.code_fg,
+                    theme.code_bg,
+                    Attributes::default(),
+                );
                 i += total_fence;
             } else {
                 // No closing backtick – treat as literal
                 i = code_start;
-                push_run(&mut runs, &text[start..start+1], base_fg, base_bg, base_attrs);
+                push_run(
+                    &mut runs,
+                    &text[start..start + 1],
+                    base_fg,
+                    base_bg,
+                    base_attrs,
+                );
             }
             continue;
         }
 
         // ── Bold (**text** or __text__) ───────────────────────────
-        if i + 1 < len && ((chars[i] == '*' && chars[i + 1] == '*') || (chars[i] == '_' && chars[i + 1] == '_')) {
+        if i + 1 < len
+            && ((chars[i] == '*' && chars[i + 1] == '*')
+                || (chars[i] == '_' && chars[i + 1] == '_'))
+        {
             let marker = chars[i];
             let close: String = std::iter::repeat(marker).take(2).collect();
             let search_from = i + 2;
@@ -481,9 +509,7 @@ fn parse_inline_runs(text: &str, base_fg: Color, base_bg: Color, base_attrs: Att
         }
 
         // ── Italic (*text* or _text_) ─────────────────────────────
-        if (chars[i] == '*' || chars[i] == '_')
-            && (i + 1 < len && chars[i + 1] != chars[i])
-        {
+        if (chars[i] == '*' || chars[i] == '_') && (i + 1 < len && chars[i + 1] != chars[i]) {
             let marker = chars[i];
             let search_from = i + 1;
             if let Some(end) = find_single_closing(&chars, search_from, marker) {
@@ -635,65 +661,278 @@ fn highlight_line(source: &str, lang: &str, theme: &MarkdownTheme) -> Vec<(char,
 fn keywords_for_lang(lang: &str) -> &'static [&'static str] {
     match lang {
         "rust" | "rs" => &[
-            "fn", "let", "mut", "if", "else", "match", "return", "pub", "struct",
-            "enum", "impl", "trait", "use", "mod", "crate", "self", "Self", "super",
-            "where", "async", "await", "move", "dyn", "const", "static", "type",
-            "for", "while", "loop", "break", "continue", "in", "ref", "true",
-            "false", "as", "extern", "unsafe", "macro_rules",
+            "fn",
+            "let",
+            "mut",
+            "if",
+            "else",
+            "match",
+            "return",
+            "pub",
+            "struct",
+            "enum",
+            "impl",
+            "trait",
+            "use",
+            "mod",
+            "crate",
+            "self",
+            "Self",
+            "super",
+            "where",
+            "async",
+            "await",
+            "move",
+            "dyn",
+            "const",
+            "static",
+            "type",
+            "for",
+            "while",
+            "loop",
+            "break",
+            "continue",
+            "in",
+            "ref",
+            "true",
+            "false",
+            "as",
+            "extern",
+            "unsafe",
+            "macro_rules",
         ],
         "python" | "py" => &[
-            "def", "class", "if", "elif", "else", "return", "import", "from",
-            "as", "with", "for", "while", "break", "continue", "pass", "raise",
-            "try", "except", "finally", "yield", "lambda", "and", "or", "not",
-            "is", "in", "True", "False", "None", "async", "await", "global",
-            "nonlocal", "assert", "del",
+            "def", "class", "if", "elif", "else", "return", "import", "from", "as", "with", "for",
+            "while", "break", "continue", "pass", "raise", "try", "except", "finally", "yield",
+            "lambda", "and", "or", "not", "is", "in", "True", "False", "None", "async", "await",
+            "global", "nonlocal", "assert", "del",
         ],
         "javascript" | "js" | "ts" | "typescript" => &[
-            "function", "const", "let", "var", "if", "else", "return", "for",
-            "while", "do", "switch", "case", "break", "continue", "new", "this",
-            "class", "extends", "import", "export", "from", "default", "async",
-            "await", "try", "catch", "finally", "throw", "typeof", "instanceof",
-            "in", "of", "true", "false", "null", "undefined", "void", "delete",
-            "yield", "static", "get", "set", "implements", "interface", "type",
-            "enum", "declare", "abstract", "as", "keyof", "readonly",
+            "function",
+            "const",
+            "let",
+            "var",
+            "if",
+            "else",
+            "return",
+            "for",
+            "while",
+            "do",
+            "switch",
+            "case",
+            "break",
+            "continue",
+            "new",
+            "this",
+            "class",
+            "extends",
+            "import",
+            "export",
+            "from",
+            "default",
+            "async",
+            "await",
+            "try",
+            "catch",
+            "finally",
+            "throw",
+            "typeof",
+            "instanceof",
+            "in",
+            "of",
+            "true",
+            "false",
+            "null",
+            "undefined",
+            "void",
+            "delete",
+            "yield",
+            "static",
+            "get",
+            "set",
+            "implements",
+            "interface",
+            "type",
+            "enum",
+            "declare",
+            "abstract",
+            "as",
+            "keyof",
+            "readonly",
         ],
         "go" => &[
-            "func", "var", "const", "type", "struct", "interface", "map", "chan",
-            "if", "else", "for", "range", "switch", "case", "default", "return",
-            "break", "continue", "go", "select", "defer", "fallthrough", "goto",
-            "package", "import", "true", "false", "nil", "append", "make", "len",
-            "cap", "new",
+            "func",
+            "var",
+            "const",
+            "type",
+            "struct",
+            "interface",
+            "map",
+            "chan",
+            "if",
+            "else",
+            "for",
+            "range",
+            "switch",
+            "case",
+            "default",
+            "return",
+            "break",
+            "continue",
+            "go",
+            "select",
+            "defer",
+            "fallthrough",
+            "goto",
+            "package",
+            "import",
+            "true",
+            "false",
+            "nil",
+            "append",
+            "make",
+            "len",
+            "cap",
+            "new",
         ],
         "java" | "kotlin" | "kt" => &[
-            "class", "interface", "enum", "object", "fun", "val", "var", "if",
-            "else", "when", "for", "while", "do", "return", "break", "continue",
-            "try", "catch", "finally", "throw", "import", "package", "public",
-            "private", "protected", "internal", "abstract", "open", "sealed",
-            "data", "object", "companion", "override", "suspend", "inline",
-            "true", "false", "null", "this", "super", "new", "void", "static",
-            "final", "extends", "implements", "throws",
+            "class",
+            "interface",
+            "enum",
+            "object",
+            "fun",
+            "val",
+            "var",
+            "if",
+            "else",
+            "when",
+            "for",
+            "while",
+            "do",
+            "return",
+            "break",
+            "continue",
+            "try",
+            "catch",
+            "finally",
+            "throw",
+            "import",
+            "package",
+            "public",
+            "private",
+            "protected",
+            "internal",
+            "abstract",
+            "open",
+            "sealed",
+            "data",
+            "object",
+            "companion",
+            "override",
+            "suspend",
+            "inline",
+            "true",
+            "false",
+            "null",
+            "this",
+            "super",
+            "new",
+            "void",
+            "static",
+            "final",
+            "extends",
+            "implements",
+            "throws",
         ],
         "ruby" | "rb" => &[
-            "def", "end", "class", "module", "if", "else", "elsif", "unless",
-            "while", "until", "for", "do", "begin", "rescue", "ensure", "raise",
-            "return", "yield", "block_given?", "require", "include", "attr_reader",
-            "attr_writer", "attr_accessor", "self", "true", "false", "nil",
-            "and", "or", "not", "puts", "print", "new",
+            "def",
+            "end",
+            "class",
+            "module",
+            "if",
+            "else",
+            "elsif",
+            "unless",
+            "while",
+            "until",
+            "for",
+            "do",
+            "begin",
+            "rescue",
+            "ensure",
+            "raise",
+            "return",
+            "yield",
+            "block_given?",
+            "require",
+            "include",
+            "attr_reader",
+            "attr_writer",
+            "attr_accessor",
+            "self",
+            "true",
+            "false",
+            "nil",
+            "and",
+            "or",
+            "not",
+            "puts",
+            "print",
+            "new",
         ],
         "c" | "cpp" | "c++" | "h" => &[
-            "int", "char", "float", "double", "void", "long", "short", "unsigned",
-            "signed", "const", "static", "extern", "struct", "enum", "union",
-            "typedef", "class", "namespace", "template", "typename", "public",
-            "private", "protected", "virtual", "override", "if", "else", "for",
-            "while", "do", "switch", "case", "break", "continue", "return",
-            "new", "delete", "try", "catch", "throw", "true", "false", "nullptr",
-            "auto", "sizeof", "include", "define",
+            "int",
+            "char",
+            "float",
+            "double",
+            "void",
+            "long",
+            "short",
+            "unsigned",
+            "signed",
+            "const",
+            "static",
+            "extern",
+            "struct",
+            "enum",
+            "union",
+            "typedef",
+            "class",
+            "namespace",
+            "template",
+            "typename",
+            "public",
+            "private",
+            "protected",
+            "virtual",
+            "override",
+            "if",
+            "else",
+            "for",
+            "while",
+            "do",
+            "switch",
+            "case",
+            "break",
+            "continue",
+            "return",
+            "new",
+            "delete",
+            "try",
+            "catch",
+            "throw",
+            "true",
+            "false",
+            "nullptr",
+            "auto",
+            "sizeof",
+            "include",
+            "define",
         ],
         "sh" | "bash" | "zsh" | "shell" => &[
-            "if", "then", "else", "elif", "fi", "for", "while", "do", "done",
-            "case", "esac", "function", "return", "exit", "echo", "export",
-            "local", "readonly", "set", "unset", "shift", "source", "alias",
-            "true", "false", "in", "select", "until", "trap", "wait",
+            "if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac",
+            "function", "return", "exit", "echo", "export", "local", "readonly", "set", "unset",
+            "shift", "source", "alias", "true", "false", "in", "select", "until", "trap", "wait",
         ],
         _ => &[],
     }
@@ -719,17 +958,28 @@ fn tokenize_syntax(source: &str, lang: &str) -> Vec<SyntaxSpan> {
     while i < len {
         // ── Line comment ──────────────────────────────────────────
         if (chars[i] == '/' && i + 1 < len && chars[i + 1] == '/')
-            || (lang == "python" || lang == "py" || lang == "ruby" || lang == "rb" || lang == "sh" || lang == "bash")
+            || (lang == "python"
+                || lang == "py"
+                || lang == "ruby"
+                || lang == "rb"
+                || lang == "sh"
+                || lang == "bash")
                 && chars[i] == '#'
         {
             let comment: String = chars[i..].iter().collect();
-            spans.push(SyntaxSpan { text: comment, kind: SyntaxToken::Comment });
+            spans.push(SyntaxSpan {
+                text: comment,
+                kind: SyntaxToken::Comment,
+            });
             break;
         }
         // Rust line comments
         if chars[i] == '/' && i + 1 < len && chars[i + 1] == '/' {
             let comment: String = chars[i..].iter().collect();
-            spans.push(SyntaxSpan { text: comment, kind: SyntaxToken::Comment });
+            spans.push(SyntaxSpan {
+                text: comment,
+                kind: SyntaxToken::Comment,
+            });
             break;
         }
 
@@ -753,7 +1003,10 @@ fn tokenize_syntax(source: &str, lang: &str) -> Vec<SyntaxSpan> {
                 }
                 i += 1;
             }
-            spans.push(SyntaxSpan { text: s, kind: SyntaxToken::String });
+            spans.push(SyntaxSpan {
+                text: s,
+                kind: SyntaxToken::String,
+            });
             continue;
         }
 
@@ -770,7 +1023,10 @@ fn tokenize_syntax(source: &str, lang: &str) -> Vec<SyntaxSpan> {
                 s.push(chars[i]);
                 i += 1;
             }
-            spans.push(SyntaxSpan { text: s, kind: SyntaxToken::Number });
+            spans.push(SyntaxSpan {
+                text: s,
+                kind: SyntaxToken::Number,
+            });
             continue;
         }
 
@@ -830,7 +1086,11 @@ fn tokenize_syntax(source: &str, lang: &str) -> Vec<SyntaxSpan> {
 
 /// Lay out parsed blocks into a list of `StyledLine`s suitable for display
 /// at a given width. Word-wrapping is applied to paragraphs and list items.
-fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownTheme) -> Vec<StyledLine> {
+fn render_blocks_to_lines(
+    blocks: &[Block],
+    max_width: u16,
+    theme: &MarkdownTheme,
+) -> Vec<StyledLine> {
     let w = max_width as usize;
     // Pre-allocate: each block produces at least 2 lines (content + blank separator)
     let mut lines: Vec<StyledLine> = Vec::with_capacity(blocks.len() * 3);
@@ -840,7 +1100,12 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
             Block::HorizontalRule => {
                 let mut line = StyledLine::new();
                 for _ in 0..w {
-                    line.push(theme.hr_char, theme.hr_color, Color::Default, Attributes::default());
+                    line.push(
+                        theme.hr_char,
+                        theme.hr_color,
+                        Color::Default,
+                        Attributes::default(),
+                    );
                 }
                 lines.push(line);
                 lines.push(StyledLine::new()); // blank after
@@ -874,7 +1139,13 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
             }
 
             Block::Paragraph { text } => {
-                let runs = parse_inline_runs(text, Color::Default, Color::Default, Attributes::default(), theme);
+                let runs = parse_inline_runs(
+                    text,
+                    Color::Default,
+                    Color::Default,
+                    Attributes::default(),
+                    theme,
+                );
                 let row_lines = render_inline_runs_wrapped(&runs, w);
                 for rl in row_lines {
                     lines.push(rl);
@@ -889,11 +1160,21 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
                 if !language.is_empty() {
                     let label = format!(" {} ", language);
                     for c in label.chars() {
-                        header.push(c, theme.syntax_comment, theme.code_bg, Attributes::default());
+                        header.push(
+                            c,
+                            theme.syntax_comment,
+                            theme.code_bg,
+                            Attributes::default(),
+                        );
                     }
                     // Fill remainder
                     while header.len() < w {
-                        header.push(' ', theme.syntax_default, theme.code_bg, Attributes::default());
+                        header.push(
+                            ' ',
+                            theme.syntax_default,
+                            theme.code_bg,
+                            Attributes::default(),
+                        );
                     }
                     lines.push(header);
                 }
@@ -909,7 +1190,12 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
                     }
                     // Fill background
                     while line.len() < w {
-                        line.push(' ', theme.syntax_default, theme.code_bg, Attributes::default());
+                        line.push(
+                            ' ',
+                            theme.syntax_default,
+                            theme.code_bg,
+                            Attributes::default(),
+                        );
                     }
                     lines.push(line);
                 }
@@ -917,7 +1203,12 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
                 // Closing line (empty, with bg)
                 let mut close = StyledLine::new();
                 while close.len() < w {
-                    close.push(' ', theme.syntax_default, theme.code_bg, Attributes::default());
+                    close.push(
+                        ' ',
+                        theme.syntax_default,
+                        theme.code_bg,
+                        Attributes::default(),
+                    );
                 }
                 lines.push(close);
                 lines.push(StyledLine::new()); // blank after
@@ -933,8 +1224,18 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
                         theme,
                     );
                     let mut line = StyledLine::new();
-                    line.push(theme.blockquote_marker, theme.blockquote_fg, Color::Default, Attributes::default());
-                    line.push(' ', theme.blockquote_fg, Color::Default, Attributes::default());
+                    line.push(
+                        theme.blockquote_marker,
+                        theme.blockquote_fg,
+                        Color::Default,
+                        Attributes::default(),
+                    );
+                    line.push(
+                        ' ',
+                        theme.blockquote_fg,
+                        Color::Default,
+                        Attributes::default(),
+                    );
                     for run in &runs {
                         for c in run.text.chars() {
                             line.push(c, run.fg, run.bg, run.attrs);
@@ -960,10 +1261,20 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
                     for rl in row_lines {
                         let mut line = StyledLine::new();
                         if first {
-                            line.push_str(&marker, theme.blockquote_fg, Color::Default, Attributes::default());
+                            line.push_str(
+                                &marker,
+                                theme.blockquote_fg,
+                                Color::Default,
+                                Attributes::default(),
+                            );
                             first = false;
                         } else {
-                            line.push_str("  ", Color::Default, Color::Default, Attributes::default());
+                            line.push_str(
+                                "  ",
+                                Color::Default,
+                                Color::Default,
+                                Attributes::default(),
+                            );
                         }
                         // Append the wrapped run line
                         line.chars.extend(rl.chars);
@@ -985,17 +1296,28 @@ fn render_blocks_to_lines(blocks: &[Block], max_width: u16, theme: &MarkdownThem
                         theme,
                     );
                     let marker_width = marker.len();
-                    let row_lines = render_inline_runs_wrapped(&runs, w.saturating_sub(marker_width));
+                    let row_lines =
+                        render_inline_runs_wrapped(&runs, w.saturating_sub(marker_width));
                     let mut first = true;
                     for rl in row_lines {
                         let mut line = StyledLine::new();
                         if first {
-                            line.push_str(&marker, theme.blockquote_fg, Color::Default, Attributes::default());
+                            line.push_str(
+                                &marker,
+                                theme.blockquote_fg,
+                                Color::Default,
+                                Attributes::default(),
+                            );
                             first = false;
                         } else {
                             let pad = marker_width;
                             for _ in 0..pad {
-                                line.push(' ', Color::Default, Color::Default, Attributes::default());
+                                line.push(
+                                    ' ',
+                                    Color::Default,
+                                    Color::Default,
+                                    Attributes::default(),
+                                );
                             }
                         }
                         line.chars.extend(rl.chars);
@@ -1439,7 +1761,13 @@ mod tests {
     #[test]
     fn test_inline_bold() {
         let theme = MarkdownTheme::default();
-        let runs = parse_inline_runs("**bold text**", Color::Default, Color::Default, Attributes::default(), &theme);
+        let runs = parse_inline_runs(
+            "**bold text**",
+            Color::Default,
+            Color::Default,
+            Attributes::default(),
+            &theme,
+        );
         // Should have one bold run
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].text, "bold text");
@@ -1449,7 +1777,13 @@ mod tests {
     #[test]
     fn test_inline_italic() {
         let theme = MarkdownTheme::default();
-        let runs = parse_inline_runs("*italic text*", Color::Default, Color::Default, Attributes::default(), &theme);
+        let runs = parse_inline_runs(
+            "*italic text*",
+            Color::Default,
+            Color::Default,
+            Attributes::default(),
+            &theme,
+        );
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].text, "italic text");
         assert!(runs[0].attrs.italic);
@@ -1458,7 +1792,13 @@ mod tests {
     #[test]
     fn test_inline_code() {
         let theme = MarkdownTheme::default();
-        let runs = parse_inline_runs("`code here`", Color::Default, Color::Default, Attributes::default(), &theme);
+        let runs = parse_inline_runs(
+            "`code here`",
+            Color::Default,
+            Color::Default,
+            Attributes::default(),
+            &theme,
+        );
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].text, "code here");
         assert_eq!(runs[0].fg, theme.code_fg);
@@ -1468,7 +1808,13 @@ mod tests {
     #[test]
     fn test_inline_link() {
         let theme = MarkdownTheme::default();
-        let runs = parse_inline_runs("[click me](http://example.com)", Color::Default, Color::Default, Attributes::default(), &theme);
+        let runs = parse_inline_runs(
+            "[click me](http://example.com)",
+            Color::Default,
+            Color::Default,
+            Attributes::default(),
+            &theme,
+        );
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].text, "click me");
         assert!(runs[0].attrs.underline);
@@ -1478,7 +1824,13 @@ mod tests {
     #[test]
     fn test_inline_mixed() {
         let theme = MarkdownTheme::default();
-        let runs = parse_inline_runs("hello **bold** and `code` world", Color::Default, Color::Default, Attributes::default(), &theme);
+        let runs = parse_inline_runs(
+            "hello **bold** and `code` world",
+            Color::Default,
+            Color::Default,
+            Attributes::default(),
+            &theme,
+        );
         // "hello ", "**bold**", " and ", "`code`", " world"
         assert!(runs.len() >= 4);
     }
@@ -1486,7 +1838,10 @@ mod tests {
     #[test]
     fn test_syntax_highlighting_keywords() {
         let spans = tokenize_syntax("fn main() { let x = 1; }", "rust");
-        let keyword_spans: Vec<_> = spans.iter().filter(|s| s.kind == SyntaxToken::Keyword).collect();
+        let keyword_spans: Vec<_> = spans
+            .iter()
+            .filter(|s| s.kind == SyntaxToken::Keyword)
+            .collect();
         assert!(!keyword_spans.is_empty());
         let texts: Vec<&str> = keyword_spans.iter().map(|s| s.text.as_str()).collect();
         assert!(texts.contains(&"fn"));
@@ -1496,14 +1851,20 @@ mod tests {
     #[test]
     fn test_syntax_highlighting_strings() {
         let spans = tokenize_syntax("let s = \"hello\";", "rust");
-        let string_spans: Vec<_> = spans.iter().filter(|s| s.kind == SyntaxToken::String).collect();
+        let string_spans: Vec<_> = spans
+            .iter()
+            .filter(|s| s.kind == SyntaxToken::String)
+            .collect();
         assert!(!string_spans.is_empty());
     }
 
     #[test]
     fn test_syntax_highlighting_comments() {
         let spans = tokenize_syntax("let x = 1; // comment", "rust");
-        let comment_spans: Vec<_> = spans.iter().filter(|s| s.kind == SyntaxToken::Comment).collect();
+        let comment_spans: Vec<_> = spans
+            .iter()
+            .filter(|s| s.kind == SyntaxToken::Comment)
+            .collect();
         assert!(!comment_spans.is_empty());
     }
 
@@ -1535,7 +1896,13 @@ mod tests {
     #[test]
     fn test_strikethrough() {
         let theme = MarkdownTheme::default();
-        let runs = parse_inline_runs("~~deleted~~", Color::Default, Color::Default, Attributes::default(), &theme);
+        let runs = parse_inline_runs(
+            "~~deleted~~",
+            Color::Default,
+            Color::Default,
+            Attributes::default(),
+            &theme,
+        );
         assert_eq!(runs.len(), 1);
         assert!(runs[0].attrs.strikethrough);
     }

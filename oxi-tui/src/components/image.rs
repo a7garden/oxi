@@ -175,12 +175,7 @@ impl Image {
         // We emit the Kitty escape on the first row.
         let header = format!(
             "a=t,f={},s={},c={},r={},C=1,q=2,m={};{}",
-            format,
-            data_len,
-            display_w,
-            display_h,
-            more,
-            first_chunk,
+            format, data_len, display_w, display_h, more, first_chunk,
         );
         lines.push(format!("\x1b_G{}\x1b\\", header));
 
@@ -253,10 +248,7 @@ impl Image {
 
         // Top border: ┌───┐
         let inner = display_w.saturating_sub(2);
-        lines.push(format!(
-            "┌{}┐",
-            "─".repeat(inner.max(1))
-        ));
+        lines.push(format!("┌{}┐", "─".repeat(inner.max(1))));
 
         // Content line(s): │ [image/...] │
         let label = format!(" {} ", self.mime_type);
@@ -271,8 +263,12 @@ impl Image {
         // Size info if it fits
         let size_str = format!(
             " {}×{} ",
-            self.width.map(|w| w.to_string()).unwrap_or_else(|| "?".to_string()),
-            self.height.map(|h| h.to_string()).unwrap_or_else(|| "?".to_string())
+            self.width
+                .map(|w| w.to_string())
+                .unwrap_or_else(|| "?".to_string()),
+            self.height
+                .map(|h| h.to_string())
+                .unwrap_or_else(|| "?".to_string())
         );
         let padded_size = if size_str.len() < inner.max(1) {
             let pad = inner.max(1) - size_str.len();
@@ -290,10 +286,7 @@ impl Image {
         }
 
         // Bottom border: └───┘
-        lines.push(format!(
-            "└{}┘",
-            "─".repeat(inner.max(1))
-        ));
+        lines.push(format!("└{}┘", "─".repeat(inner.max(1))));
 
         lines
     }
@@ -426,7 +419,10 @@ impl Component for Image {
     fn desired_size(&self) -> Option<Size> {
         let w = self.width.unwrap_or(40) as u16;
         let h = self.height.unwrap_or(10) as u16;
-        Some(Size { width: w, height: h })
+        Some(Size {
+            width: w,
+            height: h,
+        })
     }
 }
 
@@ -461,8 +457,8 @@ mod tests {
             0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, // 1x1
             0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, // 8-bit RGB
             0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, // IDAT chunk
-            0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00,
-            0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC, 0x33, // compressed data
+            0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21,
+            0xBC, 0x33, // compressed data
             0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, // IEND chunk
             0xAE, 0x42, 0x60, 0x82,
         ]
@@ -488,8 +484,7 @@ mod tests {
 
     #[test]
     fn test_image_with_protocol() {
-        let img = Image::new(sample_png_data(), "image/png")
-            .with_protocol(ImageProtocol::Kitty);
+        let img = Image::new(sample_png_data(), "image/png").with_protocol(ImageProtocol::Kitty);
         assert_eq!(img.protocol, ImageProtocol::Kitty);
         assert_eq!(img.effective_protocol(), ImageProtocol::Kitty);
     }
@@ -504,9 +499,9 @@ mod tests {
         // First line should start with Kitty escape
         assert!(lines[0].starts_with("\x1b_G"));
         assert!(lines[0].contains("f=100")); // PNG format
-        assert!(lines[0].contains("c=20"));  // width
-        assert!(lines[0].contains("r=5"));   // height
-        // Should have at least 5 rows (placeholder)
+        assert!(lines[0].contains("c=20")); // width
+        assert!(lines[0].contains("r=5")); // height
+                                           // Should have at least 5 rows (placeholder)
         assert!(lines.len() >= 5);
     }
 
@@ -563,7 +558,10 @@ mod tests {
         assert_eq!(mime_from_extension(Path::new("photo.webp")), "image/webp");
         assert_eq!(mime_from_extension(Path::new("photo.bmp")), "image/bmp");
         assert_eq!(mime_from_extension(Path::new("icon.svg")), "image/svg+xml");
-        assert_eq!(mime_from_extension(Path::new("file.unknown")), "application/octet-stream");
+        assert_eq!(
+            mime_from_extension(Path::new("file.unknown")),
+            "application/octet-stream"
+        );
     }
 
     #[test]

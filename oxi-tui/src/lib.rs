@@ -16,29 +16,37 @@ pub mod surface;
 pub mod terminal;
 pub mod terminal_image;
 pub mod theme;
-pub mod undo_stack;
 pub mod tui;
+pub mod undo_stack;
 pub mod utils;
 
 pub use autocomplete::FuzzyMatcher;
-pub use fuzzy::{fuzzy_match, fuzzy_rank, FuzzyResult};
-pub use kill_ring::KillRing;
-pub use undo_stack::UndoStack;
 pub use cell::{Attributes, Cell, CellBuilder, Color};
 pub use component::Component;
-pub use components::{AutocompleteProvider, BorderStyle, Box, ChatMessageDisplay, ChatView, Command, CommandPalette, Completion, ContentBlockDisplay, Editor, EditorOptions, FileCompleter, Image, ImageProtocol, Input, InputOptions, Loader, Markdown, MarkdownTheme, Mention, MessageRole, SelectItem, SelectList, SettingEntry, SettingValue, SettingsList, SettingsOverlay, Spacer, StreamingState, Text, TruncatedText};
-pub use event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent};
+pub use components::{
+    AutocompleteProvider, BorderStyle, Box, ChatMessageDisplay, ChatView, Command, CommandPalette,
+    Completion, ContentBlockDisplay, Editor, EditorOptions, FileCompleter, Footer, FooterData,
+    FooterTheme, Image, ImageProtocol, Input, InputOptions, Loader, Markdown, MarkdownTheme,
+    Mention, MessageRole, SelectItem, SelectList, SettingEntry, SettingValue, SettingsList,
+    SettingsOverlay, Spacer, StreamingState, Text, TruncatedText,
+};
+pub use event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent,
+};
+pub use fuzzy::{fuzzy_match, fuzzy_rank, FuzzyResult};
+pub use kill_ring::KillRing;
 pub use overlay::{OverlayBox, OverlayContent, OverlayHandle, OverlayOptions};
 pub use renderer::Renderer;
+pub use stdin_buffer::{BufferingMode, StdinBuffer, StdinBufferEvent, StdinBufferOptions};
 pub use surface::{Rect, Surface};
 pub use terminal::{CrosstermTerminal, Position, Size, Terminal};
 pub use terminal_image::{
     calculate_image_rows, delete_all_kitty_images, delete_kitty_image, detect_capabilities,
     detect_format, encode_iterm2, encode_kitty, format_from_extension, get_image_dimensions,
     image_fallback, is_image_line, prepare_image, render_terminal_image, CellDimensions,
-    ImageCache, ImageDimensions, ImageFormat, ImagePlaceholder, ImageProtocol as TerminalImageProtocol,
-    RenderOptions, RenderedImage, TerminalCapabilities,
+    ImageCache, ImageDimensions, ImageFormat, ImagePlaceholder,
+    ImageProtocol as TerminalImageProtocol, RenderOptions, RenderedImage, TerminalCapabilities,
 };
 pub use theme::{ColorScheme, FontScheme, Spacing, Theme, ThemeFile, ThemeManager};
-pub use stdin_buffer::{BufferingMode, StdinBuffer, StdinBufferEvent, StdinBufferOptions};
 pub use tui::TUI;
+pub use undo_stack::UndoStack;

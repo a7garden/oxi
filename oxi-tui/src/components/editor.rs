@@ -3,16 +3,16 @@
 //! Provides a text editing area with support for file path completion
 //! via @ mentions and Tab completion for paths.
 
-use std::path::Path;
+use crate::autocomplete::FuzzyMatcher;
 use crate::cell::Cell;
 use crate::component::Component;
+use crate::components::{Completion, FileCompleter};
 use crate::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crate::surface::Surface;
-use crate::Size;
 use crate::Rect;
-use crate::autocomplete::FuzzyMatcher;
-use crate::components::{Completion, FileCompleter};
+use crate::Size;
 use crate::Theme;
+use std::path::Path;
 
 /// Editor content with cursor tracking.
 #[derive(Debug, Clone)]
@@ -297,7 +297,9 @@ impl Editor {
 
         // Check for @ mention trigger
         if self.options.enable_mention_completion {
-            if let Some((trigger_pos, pattern)) = Self::find_mention_trigger(&line_content, cursor_pos) {
+            if let Some((trigger_pos, pattern)) =
+                Self::find_mention_trigger(&line_content, cursor_pos)
+            {
                 self.trigger_start = trigger_pos;
                 let pattern = pattern.to_string();
                 self.request_mention_completions(&pattern[1..]); // Remove @ prefix
@@ -307,7 +309,8 @@ impl Editor {
 
         // Check for file path trigger
         if self.options.enable_file_completion {
-            if let Some((trigger_pos, pattern)) = Self::find_path_trigger(&line_content, cursor_pos) {
+            if let Some((trigger_pos, pattern)) = Self::find_path_trigger(&line_content, cursor_pos)
+            {
                 self.trigger_start = trigger_pos;
                 let pattern = pattern.to_string();
                 self.request_file_completions(&pattern);
@@ -322,10 +325,10 @@ impl Editor {
     fn find_mention_trigger(line: &str, cursor: usize) -> Option<(usize, &str)> {
         // Only look at content up to cursor
         let line_up_to_cursor = &line[..cursor.min(line.len())];
-        
+
         // Find the last @ that's not preceded by alphanumeric
         let mut last_at = None;
-        
+
         for (i, c) in line_up_to_cursor.char_indices().rev() {
             if c == '@' {
                 // Check that there's nothing between this @ and cursor
@@ -347,9 +350,9 @@ impl Editor {
     /// Find path trigger (after /, ~, or ./).
     fn find_path_trigger(line: &str, cursor: usize) -> Option<(usize, &str)> {
         let trigger_chars = ['/', '~'];
-        
+
         let mut last_trigger_pos = 0;
-        
+
         for (i, c) in line.char_indices() {
             if i >= cursor {
                 break;
@@ -360,7 +363,10 @@ impl Editor {
         }
 
         if last_trigger_pos < cursor {
-            Some((last_trigger_pos, &line[last_trigger_pos..cursor.min(line.len())]))
+            Some((
+                last_trigger_pos,
+                &line[last_trigger_pos..cursor.min(line.len())],
+            ))
         } else {
             None
         }
@@ -380,17 +386,22 @@ impl Editor {
     /// Request mention completions using fuzzy matching.
     fn request_mention_completions(&mut self, pattern: &str) {
         let pattern_lower = pattern.to_lowercase();
-        
-        let mut results: Vec<Completion> = self.mention_candidates
+
+        let mut results: Vec<Completion> = self
+            .mention_candidates
             .iter()
             .filter_map(|m| {
-                let matches = m.name.to_lowercase().starts_with(&pattern_lower) ||
-                    self.mention_matcher.matches(pattern, &m.name).is_some();
-                
+                let matches = m.name.to_lowercase().starts_with(&pattern_lower)
+                    || self.mention_matcher.matches(pattern, &m.name).is_some();
+
                 if matches {
                     Some(Completion {
                         text: format!("@{}", m.name),
-                        display: format!("@{} ({})", m.name, if m.is_file { "file" } else { "user" }),
+                        display: format!(
+                            "@{} ({})",
+                            m.name,
+                            if m.is_file { "file" } else { "user" }
+                        ),
                         is_dir: m.is_file,
                         score: 50, // Base score for mention matches
                     })
@@ -402,7 +413,7 @@ impl Editor {
 
         // Sort by score
         results.sort_by(|a, b| b.score.cmp(&a.score));
-        
+
         self.completions = results;
         self.completion_index = 0;
         self.completion_active = !self.completions.is_empty();
@@ -416,25 +427,25 @@ impl Editor {
 
         let trigger_start = self.trigger_start;
         let trigger_len = self.cursor() - trigger_start;
-        
+
         // Get the completion text
         let completion_text = self.completions[self.completion_index].text.clone();
-        
+
         // Modify the line
         let line = self.current_mut();
-        
+
         // Remove the trigger prefix
         for _ in 0..trigger_len {
             line.content.remove(trigger_start);
         }
-        
+
         // Insert completion
         for c in completion_text.chars() {
             line.content.insert(trigger_start, c);
         }
-        
+
         line.cursor = trigger_start + completion_text.len();
-        
+
         self.clear_completions();
         self.dirty = true;
         true
@@ -494,7 +505,9 @@ impl Editor {
             let prev_len = self.lines[self.current_line - 1].len();
             let current = self.lines.remove(self.current_line);
             self.current_line -= 1;
-            self.lines[self.current_line].content.push_str(&current.content);
+            self.lines[self.current_line]
+                .content
+                .push_str(&current.content);
             self.lines[self.current_line].cursor = prev_len;
             self.dirty = true;
             true
@@ -506,7 +519,7 @@ impl Editor {
     /// Delete character at cursor.
     fn delete_forward(&mut self) -> bool {
         let cursor = Self::line_cursor(&self.lines[self.current_line]);
-        
+
         // Check if we can delete within current line
         if cursor < self.lines[self.current_line].len() {
             self.current_mut().remove(cursor);
@@ -579,28 +592,50 @@ impl Component for Editor {
         // Handle completion navigation
         if self.completion_active {
             match event {
-                Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Tab, ..
+                }) => {
                     self.next_completion();
                     return true;
                 }
-                Event::Key(KeyEvent { code: KeyCode::Up, modifiers: KeyModifiers { shift: true, .. }, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Up,
+                    modifiers: KeyModifiers { shift: true, .. },
+                    ..
+                }) => {
                     self.prev_completion();
                     return true;
                 }
-                Event::Key(KeyEvent { code: KeyCode::Down, modifiers: KeyModifiers { shift: true, .. }, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Down,
+                    modifiers: KeyModifiers { shift: true, .. },
+                    ..
+                }) => {
                     self.next_completion();
                     return true;
                 }
-                Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Enter,
+                    ..
+                }) => {
                     return self.accept_completion();
                 }
-                Event::Key(KeyEvent { code: KeyCode::Escape, .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Escape,
+                    ..
+                }) => {
                     self.clear_completions();
                     self.dirty = true;
                     return true;
                 }
-                Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) |
-                Event::Key(KeyEvent { code: KeyCode::Char(_), .. }) => {
+                Event::Key(KeyEvent {
+                    code: KeyCode::Backspace,
+                    ..
+                })
+                | Event::Key(KeyEvent {
+                    code: KeyCode::Char(_),
+                    ..
+                }) => {
                     self.clear_completions();
                     // Continue to normal handling
                 }
@@ -636,12 +671,12 @@ impl Component for Editor {
                     let after = line.content[cursor..].to_string();
                     line.content.truncate(cursor);
                     line.cursor = 0;
-                    
+
                     // Insert new line
                     let new_line = Line::from(&after);
                     self.current_line += 1;
                     self.lines.insert(self.current_line, new_line);
-                    
+
                     self.dirty = true;
                     true
                 }
@@ -726,10 +761,10 @@ impl Component for Editor {
         for row in 0..visible_lines.min(self.lines.len()) {
             let line_idx = row + self.scroll_offset;
             let line = &self.lines[line_idx];
-            
+
             let y = area.y + row as u16;
             let mut x = area.x + content_start_col as u16;
-            
+
             // Render line number
             if self.options.show_line_numbers {
                 let line_num = (line_idx + 1).to_string();
@@ -739,7 +774,7 @@ impl Component for Editor {
                     surface.set(y, x + i as u16, cell);
                 }
                 x += line_num_width as u16;
-                
+
                 // Separator
                 let mut sep = Cell::new(' ');
                 sep.fg = crate::Color::Indexed(8);
@@ -750,23 +785,23 @@ impl Component for Editor {
             // Render line content
             let content = &line.content;
             let cursor_in_line = Self::line_cursor(line);
-            
+
             for (i, c) in content.chars().enumerate() {
                 if x >= area.x + area.width {
                     break;
                 }
-                
+
                 let mut cell = Cell::new(c);
                 if let Some(color) = self.options.text_color {
                     cell.fg = color;
                 }
-                
+
                 // Highlight cursor position
                 if i == cursor_in_line && self.focused {
                     cell.fg = crate::Color::Indexed(0);
                     cell.bg = crate::Color::Indexed(15);
                 }
-                
+
                 surface.set(y, x, cell);
                 x += 1;
             }
@@ -847,7 +882,7 @@ impl Editor {
         // Clamp cursor to line length
         let line = &mut self.lines[self.current_line];
         line.cursor = line.cursor.min(line.content.len());
-        
+
         // Could add scroll logic here if needed
     }
 }
@@ -883,8 +918,16 @@ mod tests {
     fn test_mention_candidates() {
         let mut editor = Editor::new();
         let mentions = vec![
-            Mention { name: "alice".to_string(), path: "".to_string(), is_file: false },
-            Mention { name: "bob".to_string(), path: "".to_string(), is_file: false },
+            Mention {
+                name: "alice".to_string(),
+                path: "".to_string(),
+                is_file: false,
+            },
+            Mention {
+                name: "bob".to_string(),
+                path: "".to_string(),
+                is_file: false,
+            },
         ];
         editor.set_mention_candidates(mentions);
         // Can't easily test completion without simulating events
