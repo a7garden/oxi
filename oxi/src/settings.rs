@@ -13,10 +13,10 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Current settings format version.
-const SETTINGS_VERSION: u32 = 1;
+const SETTINGS_VERSION: u32 = 2;
 
 /// Environment variable prefix for oxi settings.
 #[allow(dead_code)]
@@ -167,22 +167,99 @@ impl Settings {
         Ok(base.join(".oxi"))
     }
 
-    /// Get the global settings file path (`~/.oxi/settings.toml`).
-    pub fn settings_path() -> Result<PathBuf> {
+    /// Get the global settings TOML file path (`~/.oxi/settings.toml`).
+    pub fn settings_toml_path() -> Result<PathBuf> {
         Ok(Self::settings_dir()?.join("settings.toml"))
+    }
+
+    /// Get the global settings JSON file path (`~/.oxi/settings.json`).
+    pub fn settings_json_path() -> Result<PathBuf> {
+        Ok(Self::settings_dir()?.join("settings.json"))
+    }
+
+    /// Get the global settings file path (JSON takes priority).
+    ///
+    /// Returns the path to the settings file that should be used.
+    /// If both JSON and TOML exist, JSON is returned (takes priority).
+    /// If only one exists, that path is returned.
+    /// If neither exists, returns the JSON path by default.
+    pub fn settings_path() -> Result<PathBuf> {
+        let json_path = Self::settings_json_path()?;
+        let toml_path = Self::settings_toml_path()?;
+
+        if json_path.exists() && toml_path.exists() {
+            // Both exist: JSON takes priority
+            tracing::debug!(
+                "Both settings.json and settings.toml exist, using settings.json"
+            );
+            return Ok(json_path);
+        }
+
+        if json_path.exists() {
+            return Ok(json_path);
+        }
+
+        if toml_path.exists() {
+            return Ok(toml_path);
+        }
+
+        // Neither exists: default to JSON
+        Ok(json_path)
+    }
+
+    /// Get the effective settings file path, preferring the specified format.
+    ///
+    /// If `prefer_json` is true, checks JSON first; otherwise checks TOML first.
+    /// Returns the first existing file, or the preferred path if neither exists.
+    pub fn settings_path_with_preference(prefer_json: bool) -> Result<PathBuf> {
+        let json_path = Self::settings_json_path()?;
+        let toml_path = Self::settings_toml_path()?;
+
+        let (primary, secondary) = if prefer_json {
+            (&json_path, &toml_path)
+        } else {
+            (&toml_path, &json_path)
+        };
+
+        if primary.exists() {
+            return Ok(primary.clone());
+        }
+
+        if secondary.exists() {
+            return Ok(secondary.clone());
+        }
+
+        // Neither exists: return preferred path
+        Ok(primary.clone())
+    }
+
+    /// Detect the settings file format from its path.
+    pub fn detect_format(path: &Path) -> SettingsFormat {
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("json") => SettingsFormat::Json,
+            Some("toml") => SettingsFormat::Toml,
+            _ => SettingsFormat::Json, // Default to JSON for unknown extensions
+        }
     }
 
     /// Get the project-local settings file path.
     ///
-    /// Walks from `start_dir` upward looking for `.oxi/settings.toml`,
-    /// stopping at the filesystem root.
+    /// Searches for `.oxi/settings.json` first, then `.oxi/settings.toml`.
+    /// Returns the first one found, or None if neither exists.
     pub fn find_project_settings(start_dir: &std::path::Path) -> Option<PathBuf> {
         let mut dir = start_dir.to_path_buf();
         loop {
-            let candidate = dir.join(".oxi").join("settings.toml");
-            if candidate.exists() {
-                return Some(candidate);
+            // Check JSON first (priority), then TOML
+            let json_candidate = dir.join(".oxi").join("settings.json");
+            if json_candidate.exists() {
+                return Some(json_candidate);
             }
+
+            let toml_candidate = dir.join(".oxi").join("settings.toml");
+            if toml_candidate.exists() {
+                return Some(toml_candidate);
+            }
+
             if !dir.pop() {
                 return None;
             }
@@ -246,38 +323,40 @@ impl Settings {
         Self::load_from(&cwd)
     }
 
-    /// Parse a TOML file and overlay its values onto `base`.
+    /// Parse a settings file (TOML or JSON) and overlay its values onto `base`.
     ///
+    /// The format is auto-detected based on the file extension.
     /// Fields present in the file replace those in `base`; absent fields
     /// are left untouched.
     fn layer_file(base: &Settings, path: &std::path::Path) -> Result<Settings> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read settings from {}", path.display()))?;
 
-        // We parse into a partial overlay so that only explicitly-set
-        // fields are applied.
-        let overlay: toml::Value = toml::from_str(&content)
-            .with_context(|| format!("Failed to parse settings from {}", path.display()))?;
+        let format = Self::detect_format(path);
+        let overlay: serde_json::Value = match format {
+            SettingsFormat::Toml => {
+                let toml_value: toml::Value = toml::from_str(&content)
+                    .with_context(|| format!("Failed to parse TOML settings from {}", path.display()))?;
+                // Convert TOML to JSON Value for uniform merging
+                toml_value_to_json(toml_value)
+            }
+            SettingsFormat::Json => {
+                serde_json::from_str(&content)
+                    .with_context(|| format!("Failed to parse JSON settings from {}", path.display()))?
+            }
+        };
 
-        // Re-serialize the base, merge with the overlay table, then
+        // Re-serialize the base to JSON, merge with the overlay, then
         // deserialize back. This gives correct "only override what's
         // present" semantics.
-        let mut base_table = toml::Value::try_from(base)
+        let base_json = serde_json::to_value(base)
             .context("Failed to serialize base settings for merge")?;
 
-        if let (toml::Value::Table(ref mut base_t), toml::Value::Table(ref overlay_t)) =
-            (&mut base_table, &overlay)
-        {
-            for (key, value) in overlay_t {
-                base_t.insert(key.clone(), value.clone());
-            }
-        }
-
-        let merged: Settings = base_table
-            .try_into()
+        let merged = merge_json_values(base_json, overlay);
+        let result: Settings = serde_json::from_value(merged)
             .context("Failed to deserialize merged settings")?;
 
-        Ok(merged)
+        Ok(result)
     }
 
     // ── Environment variables ────────────────────────────────────────
@@ -359,7 +438,10 @@ impl Settings {
 
     // ── Persistence ──────────────────────────────────────────────────
 
-    /// Save settings to the global config file (`~/.oxi/settings.toml`).
+    /// Save settings to the global config file.
+    ///
+    /// Uses the format of the existing file if present, otherwise saves as JSON.
+    /// Preserves backward compatibility with existing TOML files.
     pub fn save(&self) -> Result<()> {
         let dir = Self::settings_dir()?;
         let path = Self::settings_path()?;
@@ -369,7 +451,8 @@ impl Settings {
                 .with_context(|| format!("Failed to create settings directory {}", dir.display()))?;
         }
 
-        let content = toml::to_string_pretty(self).context("Failed to serialize settings")?;
+        let format = Self::detect_format(&path);
+        let content = Self::serialize_for_format(self, format)?;
 
         fs::write(&path, content)
             .with_context(|| format!("Failed to write settings to {}", path.display()))?;
@@ -377,22 +460,75 @@ impl Settings {
         Ok(())
     }
 
-    /// Save settings to the project-local config file (`.oxi/settings.toml`).
+    /// Save settings to a specific path, using the format determined by the file extension.
+    pub fn save_to(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+            }
+        }
+
+        let format = Self::detect_format(path);
+        let content = Self::serialize_for_format(self, format)?;
+
+        fs::write(path, content)
+            .with_context(|| format!("Failed to write settings to {}", path.display()))?;
+
+        Ok(())
+    }
+
+    /// Save settings to the project-local config file.
+    ///
+    /// Uses the format of the existing file if present, otherwise saves as JSON.
     pub fn save_project(&self, project_dir: &std::path::Path) -> Result<()> {
         let dir = project_dir.join(".oxi");
-        let path = dir.join("settings.toml");
 
         if !dir.exists() {
             fs::create_dir_all(&dir)
                 .with_context(|| format!("Failed to create project settings directory {}", dir.display()))?;
         }
 
-        let content = toml::to_string_pretty(self).context("Failed to serialize settings")?;
+        // Check if a settings file already exists in project
+        let json_path = dir.join("settings.json");
+        let toml_path = dir.join("settings.toml");
 
-        fs::write(&path, content)
+        let path = if json_path.exists() {
+            &json_path
+        } else if toml_path.exists() {
+            &toml_path
+        } else {
+            // Default to JSON for new files
+            &json_path
+        };
+
+        let format = Self::detect_format(path);
+        let content = Self::serialize_for_format(self, format)?;
+
+        fs::write(path, content)
             .with_context(|| format!("Failed to write settings to {}", path.display()))?;
 
         Ok(())
+    }
+
+    /// Serialize settings to a string in the specified format.
+    pub fn serialize_for_format(settings: &Settings, format: SettingsFormat) -> Result<String> {
+        match format {
+            SettingsFormat::Toml => toml::to_string_pretty(settings)
+                .context("Failed to serialize settings to TOML"),
+            SettingsFormat::Json => serde_json::to_string_pretty(settings)
+                .context("Failed to serialize settings to JSON"),
+        }
+    }
+
+    /// Parse settings from a string in the specified format.
+    pub fn parse_from_str(content: &str, format: SettingsFormat) -> Result<Settings> {
+        match format {
+            SettingsFormat::Toml => toml::from_str(content)
+                .context("Failed to parse TOML settings"),
+            SettingsFormat::Json => serde_json::from_str(content)
+                .context("Failed to parse JSON settings"),
+        }
     }
 
     // ── CLI overrides ────────────────────────────────────────────────
@@ -440,7 +576,9 @@ impl Settings {
 
     /// Migrate settings from an older format version to the current one.
     ///
-    /// Currently handles version `0` (no version field) → version `1`.
+    /// Currently handles:
+    /// - Version 0 → Version 2 (adds JSON support, version bump)
+    /// - Version 1 → Version 2 (adds JSON support)
     fn migrate(settings: Settings) -> Result<Settings> {
         let mut settings = settings;
 
@@ -482,7 +620,72 @@ impl Settings {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// ── Settings format detection ──────────────────────────────────────
+
+/// Supported settings file formats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsFormat {
+    #[default]
+    Json,
+    Toml,
+}
+
+impl SettingsFormat {
+    /// Get the file extension for this format.
+    pub fn extension(&self) -> &'static str {
+        match self {
+            SettingsFormat::Json => "json",
+            SettingsFormat::Toml => "toml",
+        }
+    }
+}
+
+// ── JSON/TOML conversion helpers ────────────────────────────────────
+
+/// Convert a TOML Value to a serde_json::Value.
+fn toml_value_to_json(toml: toml::Value) -> serde_json::Value {
+    match toml {
+        toml::Value::String(s) => serde_json::Value::String(s),
+        toml::Value::Integer(i) => serde_json::Value::Number(i.into()),
+        toml::Value::Float(f) => {
+            serde_json::Number::from_f64(f).map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null)
+        }
+        toml::Value::Boolean(b) => serde_json::Value::Bool(b),
+        toml::Value::Datetime(dt) => serde_json::Value::String(dt.to_string()),
+        toml::Value::Array(arr) => {
+            serde_json::Value::Array(arr.into_iter().map(toml_value_to_json).collect())
+        }
+        toml::Value::Table(table) => {
+            let obj = table
+                .into_iter()
+                .map(|(k, v)| (k, toml_value_to_json(v)))
+                .collect();
+            serde_json::Value::Object(obj)
+        }
+    }
+}
+
+/// Deep merge two JSON values. The second value overrides the first.
+fn merge_json_values(base: serde_json::Value, override_: serde_json::Value) -> serde_json::Value {
+    match (base, override_) {
+        // If either is not an object, the override wins
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(override_map)) => {
+            let mut result = base_map;
+            for (key, override_value) in override_map {
+                let base_value = result.remove(&key);
+                let merged = match base_value {
+                    Some(base_v) => merge_json_values(base_v, override_value),
+                    None => override_value,
+                };
+                result.insert(key, merged);
+            }
+            serde_json::Value::Object(result)
+        }
+        // Override wins for non-objects
+        (_, override_) => override_,
+    }
+}
 
 /// Parse a thinking level from a string.
 pub fn parse_thinking_level(s: &str) -> Option<ThinkingLevel> {
@@ -574,7 +777,7 @@ mod tests {
     fn test_layer_file_overrides() {
         let base = Settings::default();
 
-        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let tmp = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
         let toml_content = r#"
 default_model = "openai/gpt-4o"
 theme = "dracula"
@@ -594,7 +797,7 @@ theme = "dracula"
         let mut base = Settings::default();
         base.default_provider = Some("deepseek".to_string());
 
-        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let tmp = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
         // Only override theme — provider should remain
         let toml_content = "theme = \"monokai\"\n";
         tmp.as_file().write_all(toml_content.as_bytes()).unwrap();
@@ -837,5 +1040,348 @@ theme = "dracula"
         assert!(!parsed.auto_compaction);
         assert!(!parsed.extensions_enabled);
         assert_eq!(parsed.session_dir, Some(PathBuf::from("/custom/sessions")));
+    }
+
+    // ── JSON format tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_json_roundtrip() {
+        let mut settings = Settings::default();
+        settings.default_model = Some("openai/gpt-4o".to_string());
+        settings.theme = "dracula".to_string();
+        settings.tool_timeout_seconds = 60;
+        settings.default_temperature = Some(0.8);
+        settings.max_response_tokens = Some(8192);
+
+        let json_str = serde_json::to_string_pretty(&settings).unwrap();
+        let parsed: Settings = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed.default_model, settings.default_model);
+        assert_eq!(parsed.theme, settings.theme);
+        assert_eq!(parsed.tool_timeout_seconds, settings.tool_timeout_seconds);
+        assert_eq!(parsed.default_temperature, settings.default_temperature);
+        assert_eq!(parsed.max_response_tokens, settings.max_response_tokens);
+    }
+
+    #[test]
+    fn test_json_serialize_for_format() {
+        let mut settings = Settings::default();
+        settings.default_model = Some("anthropic/claude-3".to_string());
+        settings.thinking_level = ThinkingLevel::Minimal;
+
+        let json_content = Settings::serialize_for_format(&settings, SettingsFormat::Json).unwrap();
+        let parsed: Settings = serde_json::from_str(&json_content).unwrap();
+
+        assert_eq!(parsed.default_model, Some("anthropic/claude-3".to_string()));
+        assert_eq!(parsed.thinking_level, ThinkingLevel::Minimal);
+    }
+
+    #[test]
+    fn test_toml_serialize_for_format() {
+        let mut settings = Settings::default();
+        settings.default_model = Some("google/gemini-pro".to_string());
+        settings.thinking_level = ThinkingLevel::Thorough;
+
+        let toml_content = Settings::serialize_for_format(&settings, SettingsFormat::Toml).unwrap();
+        let parsed: Settings = toml::from_str(&toml_content).unwrap();
+
+        assert_eq!(parsed.default_model, Some("google/gemini-pro".to_string()));
+        assert_eq!(parsed.thinking_level, ThinkingLevel::Thorough);
+    }
+
+    #[test]
+    fn test_parse_from_str_json() {
+        let json_content = r#"{
+            "default_model": "openai/gpt-4",
+            "theme": "nord",
+            "tool_timeout_seconds": 90
+        }"#;
+
+        let settings = Settings::parse_from_str(json_content, SettingsFormat::Json).unwrap();
+        assert_eq!(settings.default_model, Some("openai/gpt-4".to_string()));
+        assert_eq!(settings.theme, "nord");
+        assert_eq!(settings.tool_timeout_seconds, 90);
+        // Unchanged fields retain defaults
+        assert_eq!(settings.thinking_level, ThinkingLevel::Standard);
+        assert!(settings.extensions_enabled);
+    }
+
+    #[test]
+    fn test_parse_from_str_toml() {
+        let toml_content = r#"
+default_model = "anthropic/claude-opus"
+theme = "monokai"
+tool_timeout_seconds = 45
+"#;
+
+        let settings = Settings::parse_from_str(toml_content, SettingsFormat::Toml).unwrap();
+        assert_eq!(settings.default_model, Some("anthropic/claude-opus".to_string()));
+        assert_eq!(settings.theme, "monokai");
+        assert_eq!(settings.tool_timeout_seconds, 45);
+        assert_eq!(settings.thinking_level, ThinkingLevel::Standard);
+    }
+
+    #[test]
+    fn test_layer_file_json() {
+        let base = Settings::default();
+
+        let tmp = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+        let json_content = r#"{
+            "default_model": "openai/gpt-4o",
+            "theme": "dracula",
+            "auto_compaction": false
+        }"#;
+        tmp.as_file().write_all(json_content.as_bytes()).unwrap();
+
+        let merged = Settings::layer_file(&base, tmp.path()).unwrap();
+        assert_eq!(merged.default_model, Some("openai/gpt-4o".to_string()));
+        assert_eq!(merged.theme, "dracula");
+        assert!(!merged.auto_compaction);
+        // Unchanged fields retain defaults
+        assert_eq!(merged.thinking_level, ThinkingLevel::Standard);
+        assert!(merged.extensions_enabled);
+        assert_eq!(merged.tool_timeout_seconds, 120);
+    }
+
+    #[test]
+    fn test_layer_file_json_preserves_unset() {
+        let mut base = Settings::default();
+        base.default_provider = Some("deepseek".to_string());
+
+        let tmp = tempfile::NamedTempFile::with_suffix(".json").unwrap();
+        let json_content = r#"{ "theme": "nord" }"#;
+        tmp.as_file().write_all(json_content.as_bytes()).unwrap();
+
+        let merged = Settings::layer_file(&base, tmp.path()).unwrap();
+        assert_eq!(merged.theme, "nord");
+        assert_eq!(merged.default_provider, Some("deepseek".to_string()));
+    }
+
+    #[test]
+    fn test_save_to_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.json");
+
+        let mut settings = Settings::default();
+        settings.default_model = Some("openai/gpt-4o".to_string());
+        settings.theme = "dracula".to_string();
+        settings.tool_timeout_seconds = 60;
+
+        settings.save_to(&settings_path).unwrap();
+
+        // Verify it's valid JSON
+        let content = fs::read_to_string(&settings_path).unwrap();
+        let parsed: Settings = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed.default_model, Some("openai/gpt-4o".to_string()));
+        assert_eq!(parsed.theme, "dracula");
+        assert_eq!(parsed.tool_timeout_seconds, 60);
+    }
+
+    #[test]
+    fn test_save_to_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let settings_path = tmp.path().join("settings.toml");
+
+        let mut settings = Settings::default();
+        settings.default_model = Some("google/gemini-pro".to_string());
+        settings.theme = "monokai".to_string();
+        settings.tool_timeout_seconds = 90;
+
+        settings.save_to(&settings_path).unwrap();
+
+        // Verify it's valid TOML
+        let content = fs::read_to_string(&settings_path).unwrap();
+        let parsed: Settings = toml::from_str(&content).unwrap();
+        assert_eq!(parsed.default_model, Some("google/gemini-pro".to_string()));
+        assert_eq!(parsed.theme, "monokai");
+        assert_eq!(parsed.tool_timeout_seconds, 90);
+    }
+
+    #[test]
+    fn test_load_from_dir_with_json_project_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let oxi_dir = tmp.path().join(".oxi");
+        fs::create_dir_all(&oxi_dir).unwrap();
+        let settings_path = oxi_dir.join("settings.json");
+        let json_content = r#"{ "default_model": "google/gemini-2.0-flash" }"#;
+        fs::write(&settings_path, json_content).unwrap();
+
+        let settings = Settings::load_from(tmp.path()).unwrap();
+        assert_eq!(settings.default_model, Some("google/gemini-2.0-flash".to_string()));
+    }
+
+    #[test]
+    fn test_find_project_settings_json_priority() {
+        let tmp = tempfile::tempdir().unwrap();
+        let oxi_dir = tmp.path().join(".oxi");
+        fs::create_dir_all(&oxi_dir).unwrap();
+
+        // Create both files
+        let json_path = oxi_dir.join("settings.json");
+        let toml_path = oxi_dir.join("settings.toml");
+        fs::write(&json_path, r#"{ "theme": "json-theme" }"#).unwrap();
+        fs::write(&toml_path, r#"theme = "toml-theme""#).unwrap();
+
+        // JSON takes priority
+        let found = Settings::find_project_settings(tmp.path());
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().file_name().unwrap().to_str().unwrap(), "settings.json");
+    }
+
+    #[test]
+    fn test_find_project_settings_json_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let oxi_dir = tmp.path().join(".oxi");
+        fs::create_dir_all(&oxi_dir).unwrap();
+
+        let json_path = oxi_dir.join("settings.json");
+        fs::write(&json_path, r#"{ "theme": "test" }"#).unwrap();
+
+        let found = Settings::find_project_settings(tmp.path());
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().file_name().unwrap().to_str().unwrap(), "settings.json");
+    }
+
+    #[test]
+    fn test_find_project_settings_toml_fallback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let oxi_dir = tmp.path().join(".oxi");
+        fs::create_dir_all(&oxi_dir).unwrap();
+
+        let toml_path = oxi_dir.join("settings.toml");
+        fs::write(&toml_path, r#"theme = "test""#).unwrap();
+
+        let found = Settings::find_project_settings(tmp.path());
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().file_name().unwrap().to_str().unwrap(), "settings.toml");
+    }
+
+    #[test]
+    fn test_detect_format() {
+        let json_path = PathBuf::from("/test/settings.json");
+        let toml_path = PathBuf::from("/test/settings.toml");
+        let unknown_path = PathBuf::from("/test/settings");
+
+        assert_eq!(Settings::detect_format(&json_path), SettingsFormat::Json);
+        assert_eq!(Settings::detect_format(&toml_path), SettingsFormat::Toml);
+        assert_eq!(Settings::detect_format(&unknown_path), SettingsFormat::Json); // Default
+    }
+
+    #[test]
+    fn test_settings_format_extension() {
+        assert_eq!(SettingsFormat::Json.extension(), "json");
+        assert_eq!(SettingsFormat::Toml.extension(), "toml");
+    }
+
+    #[test]
+    fn test_layer_json_over_toml() {
+        // Test that when loading, JSON takes priority over TOML
+        let tmp = tempfile::tempdir().unwrap();
+        let oxi_dir = tmp.path().join(".oxi");
+        fs::create_dir_all(&oxi_dir).unwrap();
+
+        let json_path = oxi_dir.join("settings.json");
+        let toml_path = oxi_dir.join("settings.toml");
+
+        // JSON has model set to "json-model"
+        fs::write(&json_path, r#"{ "default_model": "json-model" }"#).unwrap();
+        // TOML has model set to "toml-model"
+        fs::write(&toml_path, r#"default_model = "toml-model""#).unwrap();
+
+        // JSON takes priority
+        let settings = Settings::load_from(tmp.path()).unwrap();
+        assert_eq!(settings.default_model, Some("json-model".to_string()));
+    }
+
+    #[test]
+    fn test_mixed_format_loading() {
+        // Test loading a TOML file through the generic layer_file
+        let tmp = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
+        let toml_content = r#"
+default_model = "loaded-via-toml"
+theme = "loaded-theme"
+stream_responses = false
+"#;
+        tmp.as_file().write_all(toml_content.as_bytes()).unwrap();
+
+        let merged = Settings::layer_file(&Settings::default(), tmp.path()).unwrap();
+        assert_eq!(merged.default_model, Some("loaded-via-toml".to_string()));
+        assert_eq!(merged.theme, "loaded-theme");
+        assert!(!merged.stream_responses);
+    }
+
+    #[test]
+    fn test_merge_json_values() {
+        use std::collections::HashMap;
+
+        let base = serde_json::json!({
+            "version": 1,
+            "theme": "default",
+            "extensions": ["ext1"],
+            "nested": {
+                "a": 1,
+                "b": 2
+            }
+        });
+
+        let override_ = serde_json::json!({
+            "version": 2,
+            "theme": "dark",
+            "extensions": ["ext2"],
+            "nested": {
+                "b": 20,
+                "c": 30
+            }
+        });
+
+        let merged = merge_json_values(base, override_);
+
+        assert_eq!(merged["version"], 2);
+        assert_eq!(merged["theme"], "dark");
+        // Arrays are replaced, not merged
+        assert_eq!(merged["extensions"], serde_json::json!(["ext2"]));
+        // Nested objects are deeply merged
+        assert_eq!(merged["nested"]["a"], 1);
+        assert_eq!(merged["nested"]["b"], 20);
+        assert_eq!(merged["nested"]["c"], 30);
+    }
+
+    #[test]
+    fn test_save_project_preserves_existing_format() {
+        let tmp = tempfile::tempdir().unwrap();
+        let oxi_dir = tmp.path().join(".oxi");
+        fs::create_dir_all(&oxi_dir).unwrap();
+
+        // Create existing TOML file
+        let toml_path = oxi_dir.join("settings.toml");
+        fs::write(&toml_path, "theme = 'old-theme'").unwrap();
+
+        let mut settings = Settings::default();
+        settings.theme = "new-theme".to_string();
+        settings.save_project(tmp.path()).unwrap();
+
+        // Should still be TOML
+        let content = fs::read_to_string(&toml_path).unwrap();
+        assert!(content.contains("new-theme"));
+        assert!(serde_json::from_str::<serde_json::Value>(&content).is_err());
+    }
+
+    #[test]
+    fn test_save_project_creates_json_by_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let oxi_dir = tmp.path().join(".oxi");
+        fs::create_dir_all(&oxi_dir).unwrap();
+        // Don't create any settings file
+
+        let mut settings = Settings::default();
+        settings.theme = "json-theme".to_string();
+        settings.save_project(tmp.path()).unwrap();
+
+        // Should create JSON file
+        let json_path = oxi_dir.join("settings.json");
+        assert!(json_path.exists());
+        let content = fs::read_to_string(&json_path).unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&content).is_ok());
+        assert!(content.contains("json-theme"));
     }
 }

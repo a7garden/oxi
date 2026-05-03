@@ -4,6 +4,7 @@ mod trait_def;
 mod event;
 mod options;
 mod openai;
+mod openai_responses;
 mod anthropic;
 mod google;
 mod vertex;
@@ -24,6 +25,8 @@ use crate::error::ProviderError;
 pub use options::{StreamOptions, ThinkingBudgets};
 #[allow(unused_imports)]
 pub use openai::OpenAiProvider;
+#[allow(unused_imports)]
+pub use openai_responses::OpenAiResponsesProvider;
 #[allow(unused_imports)]
 pub use anthropic::AnthropicProvider;
 #[allow(unused_imports)]
@@ -73,6 +76,9 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         "copilot" | "github-copilot" => {
             Some(Box::new(copilot::CopilotProvider::new()))
         }
+        "openai-responses" => {
+            Some(Box::new(openai_responses::OpenAiResponsesProvider::new()))
+        }
         _ => None,
     }
 }
@@ -95,6 +101,7 @@ pub fn provider_names() -> Vec<&'static str> {
         "bedrock",
         "cloudflare",
         "copilot",
+        "openai-responses",
     ]
 }
 
@@ -116,6 +123,7 @@ pub fn providers() -> Vec<(&'static str, &'static str)> {
         ("bedrock", "Amazon Bedrock"),
         ("cloudflare", "Cloudflare Workers AI"),
         ("copilot", "GitHub Copilot"),
+        ("openai-responses", "OpenAI Responses API"),
     ]
 }
 
