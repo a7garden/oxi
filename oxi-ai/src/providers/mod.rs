@@ -6,7 +6,10 @@ mod options;
 mod openai;
 mod anthropic;
 mod google;
+mod vertex;
 mod deepseek;
+mod bedrock;
+mod azure;
 
 use std::pin::Pin;
 use futures::Stream;
@@ -20,6 +23,8 @@ pub use options::{StreamOptions, ThinkingBudgets};
 pub use openai::OpenAiProvider;
 #[allow(unused_imports)]
 pub use anthropic::AnthropicProvider;
+#[allow(unused_imports)]
+pub use azure::AzureProvider;
 pub use crate::CacheRetention;
 #[allow(unused_imports)]
 pub use crate::ThinkingLevel;
@@ -31,14 +36,20 @@ pub use crate::Model;
 /// Get a provider by name
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
     match name {
-        "openai" | "azure-openai" | "groq" | "cerebras" | "xai" | "openrouter" | "fireworks" | "huggingface" => {
+        "openai" | "groq" | "cerebras" | "xai" | "openrouter" | "fireworks" | "huggingface" => {
             Some(Box::new(openai::OpenAiProvider::new()))
+        }
+        "azure" | "azure-openai" => {
+            Some(Box::new(azure::AzureProvider::new()))
         }
         "anthropic" => {
             Some(Box::new(anthropic::AnthropicProvider::new()))
         }
         "google" => {
             Some(Box::new(google::GoogleProvider::new()))
+        }
+        "vertex" | "google-vertex" => {
+            Some(Box::new(vertex::VertexProvider::new()))
         }
         "deepseek" => {
             Some(Box::new(deepseek::DeepSeekProvider::new()))
@@ -48,6 +59,9 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
             Some(Box::new(deepseek::DeepSeekProvider::with_api_key(
                 std::env::var("MISTRAL_API_KEY").unwrap_or_default()
             )))
+        }
+        "bedrock" | "amazon-bedrock" | "aws-bedrock" => {
+            Some(Box::new(bedrock::BedrockProvider::new()))
         }
         _ => None,
     }
@@ -66,7 +80,9 @@ pub fn provider_names() -> Vec<&'static str> {
         "cerebras",
         "xai",
         "openrouter",
-        "azure-openai",
+        "azure",
+        "vertex",
+        "bedrock",
     ]
 }
 
@@ -83,7 +99,9 @@ pub fn providers() -> Vec<(&'static str, &'static str)> {
         ("cerebras", "Cerebras"),
         ("xai", "xAI"),
         ("openrouter", "OpenRouter"),
-        ("azure-openai", "Azure OpenAI"),
+        ("azure", "Azure OpenAI"),
+        ("vertex", "Google Vertex AI"),
+        ("bedrock", "Amazon Bedrock"),
     ]
 }
 
