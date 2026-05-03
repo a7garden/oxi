@@ -367,7 +367,7 @@ fn parse_completions_sse(text: &str, provider: &str, model_id: &str) -> Vec<Prov
             if !text_delta.is_empty() {
                 events.push(ProviderEvent::TextDelta {
                     content_index: 0,
-                    delta: text_delta.clone(),
+                    delta: (*text_delta).clone(),
                     partial: partial_message.clone(),
                 });
             }
@@ -375,7 +375,7 @@ fn parse_completions_sse(text: &str, provider: &str, model_id: &str) -> Vec<Prov
 
         // Check for completion
         if chunk.choices.first().map(|c| c.finish_reason.is_some()).unwrap_or(false) {
-            let reason = match chunk.choices.first().and_then(|c| c.finish_reason.as_ref()) {
+            let reason = match chunk.choices.first().and_then(|c| c.finish_reason.as_ref()).map(|s| s.as_str()) {
                 Some("stop") => StopReason::Stop,
                 Some("length") => StopReason::Length,
                 _ => StopReason::Stop,
@@ -390,6 +390,8 @@ fn parse_completions_sse(text: &str, provider: &str, model_id: &str) -> Vec<Prov
                     cache_read: usage.prompt_tokens_details.as_ref()
                         .map(|d| d.cached_tokens)
                         .unwrap_or(0),
+                    cache_write: 0,
+                    cost: crate::types::Cost::default(),
                 };
             }
 
@@ -487,7 +489,7 @@ mod tests {
     #[test]
     fn test_build_prompt_with_user_message() {
         let mut context = Context::new();
-        context.add_user_message("Hello, world!");
+        context.add_message(crate::Message::user("Hello, world!"));
 
         let prompt = build_prompt_from_context(&context).unwrap();
         assert!(prompt.contains("User: Hello, world!"));
@@ -498,7 +500,7 @@ mod tests {
     fn test_build_prompt_full_conversation() {
         let mut context = Context::new();
         context.set_system_prompt("You are a coding assistant");
-        context.add_user_message("How do I write a loop?");
+        context.add_message(crate::Message::user("How do I write a loop?"));
         
         // Note: Completions API doesn't support tool results in the same way
         // This test verifies the basic structure works
@@ -594,7 +596,7 @@ data: {"id":"2","object":"text_completion","choices":[{"text":"lo","index":0,"fi
         context.set_system_prompt("You are helpful");
         
         // Add user message first
-        context.add_user_message("Hi");
+        context.add_message(crate::Message::user("Hi"));
         
         // Build prompt
         let prompt = build_prompt_from_context(&context).unwrap();
