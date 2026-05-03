@@ -9,6 +9,7 @@ authors = ["Won <won@mariozechner.com>"]
 repository = "https://github.com/a7garden/oxi"
 keywords = ["ai", "coding", "assistant", "llm", "cli"]
 categories = ["command-line-utilities", "development-tools"]
+exclude = ["target/", "benches/"]
 
 [[bin]]
 name = "oxi"
