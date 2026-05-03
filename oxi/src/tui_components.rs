@@ -77,7 +77,9 @@ impl SessionSelector {
 
     /// Get currently selected session
     pub fn selected(&self) -> Option<&SessionInfo> {
-        self.filtered_sessions().into_iter().nth(self.selected_index)
+        self.filtered_sessions()
+            .into_iter()
+            .nth(self.selected_index)
     }
 
     /// Update filter text
@@ -109,7 +111,11 @@ impl SessionSelector {
         let filtered: Vec<_> = self.filtered_sessions();
         for (i, session) in filtered.iter().enumerate() {
             let marker = if i == self.selected_index { "▶" } else { " " };
-            let branch = if session.parent_id.is_some() { "├─ " } else { "  " };
+            let branch = if session.parent_id.is_some() {
+                "├─ "
+            } else {
+                "  "
+            };
             let name = if session.name.is_empty() {
                 &session.id[..8.min(session.id.len())]
             } else {
@@ -264,7 +270,8 @@ impl FooterData {
         } else {
             String::new()
         };
-        let elapsed = self.elapsed_seconds
+        let elapsed = self
+            .elapsed_seconds
             .map(|s| format!("{}m{}s", s / 60, s % 60))
             .unwrap_or_default();
 
@@ -281,7 +288,13 @@ impl FooterData {
         let content_len = left.len() + session_part.len() + right.len() + 2;
         if content_len < width {
             let padding = width - content_len;
-            format!("{}{}{:>width$}", left, session_part, right, width = padding + right.len())
+            format!(
+                "{}{}{:>width$}",
+                left,
+                session_part,
+                right,
+                width = padding + right.len()
+            )
         } else {
             format!("{}{} {}", left, session_part, right)
         }
@@ -313,7 +326,9 @@ impl LoginDialog {
 
     /// Get selected provider
     pub fn selected_provider(&self) -> Option<&str> {
-        self.providers.get(self.selected_provider_index).map(|s| s.as_str())
+        self.providers
+            .get(self.selected_provider_index)
+            .map(|s| s.as_str())
     }
 
     /// Input a character
@@ -335,7 +350,8 @@ impl LoginDialog {
     /// Cycle provider selection
     pub fn next_provider(&mut self) {
         if !self.providers.is_empty() {
-            self.selected_provider_index = (self.selected_provider_index + 1) % self.providers.len();
+            self.selected_provider_index =
+                (self.selected_provider_index + 1) % self.providers.len();
             self.api_key.clear();
             self.cursor_pos = 0;
             self.error_message = None;
@@ -397,10 +413,24 @@ impl LoginDialog {
 /// Diff line for the diff viewer
 #[derive(Debug, Clone)]
 pub enum DiffLine {
-    Context { content: String, line_num: usize },
-    Added { content: String, line_num: usize },
-    Removed { content: String, line_num: usize },
-    Header { old_start: usize, old_count: usize, new_start: usize, new_count: usize },
+    Context {
+        content: String,
+        line_num: usize,
+    },
+    Added {
+        content: String,
+        line_num: usize,
+    },
+    Removed {
+        content: String,
+        line_num: usize,
+    },
+    Header {
+        old_start: usize,
+        old_count: usize,
+        new_start: usize,
+        new_count: usize,
+    },
 }
 
 /// Diff viewer state
@@ -449,7 +479,8 @@ impl DiffViewer {
         output.push_str(&format!("Diff: {}\n", self.file_path));
         output.push_str(&format!("{}\n", "─".repeat(60)));
 
-        let visible: Vec<_> = self.lines
+        let visible: Vec<_> = self
+            .lines
             .iter()
             .skip(self.scroll_offset)
             .take(self.visible_height)
@@ -457,7 +488,12 @@ impl DiffViewer {
 
         for line in &visible {
             match line {
-                DiffLine::Header { old_start, old_count, new_start, new_count } => {
+                DiffLine::Header {
+                    old_start,
+                    old_count,
+                    new_start,
+                    new_count,
+                } => {
                     output.push_str(&format!(
                         "@@ -{},{} +{},{} @@\n",
                         old_start, old_count, new_start, new_count
@@ -487,7 +523,10 @@ impl DiffViewer {
             }
         }
 
-        let remaining = self.lines.len().saturating_sub(self.scroll_offset + self.visible_height);
+        let remaining = self
+            .lines
+            .len()
+            .saturating_sub(self.scroll_offset + self.visible_height);
         if remaining > 0 {
             output.push_str(&format!("... {} more lines\n", remaining));
         }
@@ -528,15 +567,24 @@ fn parse_diff_lines(diff: &str) -> Vec<DiffLine> {
             }
         } else if raw_line.starts_with('+') {
             let content = raw_line[1..].to_string();
-            lines.push(DiffLine::Added { content, line_num: new_line });
+            lines.push(DiffLine::Added {
+                content,
+                line_num: new_line,
+            });
             new_line += 1;
         } else if raw_line.starts_with('-') {
             let content = raw_line[1..].to_string();
-            lines.push(DiffLine::Removed { content, line_num: old_line });
+            lines.push(DiffLine::Removed {
+                content,
+                line_num: old_line,
+            });
             old_line += 1;
         } else if raw_line.starts_with(' ') {
             let content = raw_line[1..].to_string();
-            lines.push(DiffLine::Context { content, line_num: new_line });
+            lines.push(DiffLine::Context {
+                content,
+                line_num: new_line,
+            });
             old_line += 1;
             new_line += 1;
         }
@@ -793,10 +841,7 @@ mod tests {
 
     #[test]
     fn test_login_dialog() {
-        let mut dialog = LoginDialog::new(vec![
-            "anthropic".to_string(),
-            "openai".to_string(),
-        ]);
+        let mut dialog = LoginDialog::new(vec!["anthropic".to_string(), "openai".to_string()]);
         assert_eq!(dialog.selected_provider(), Some("anthropic"));
         dialog.next_provider();
         assert_eq!(dialog.selected_provider(), Some("openai"));
@@ -829,11 +874,16 @@ mod tests {
     fn test_diff_viewer_scroll() {
         let mut diff = "@@ -1,5 +1,5 @@\n".to_string();
         for i in 0..100 {
-            diff.push_str(&format!(" line {}\n", i));  // context lines start with space
+            diff.push_str(&format!(" line {}\n", i)); // context lines start with space
         }
         let mut viewer = DiffViewer::new("test.txt".to_string(), &diff);
         viewer.visible_height = 10;
-        assert!(viewer.lines.len() > 10, "need {} lines, got {}", 11, viewer.lines.len());
+        assert!(
+            viewer.lines.len() > 10,
+            "need {} lines, got {}",
+            11,
+            viewer.lines.len()
+        );
         viewer.scroll_down(10);
         assert!(viewer.scroll_offset > 0);
         viewer.scroll_up(5);

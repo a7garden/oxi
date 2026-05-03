@@ -9,8 +9,8 @@
 //! - File mutation queue for concurrent write safety
 
 use super::edit_diff::{
-    self, Edit, EditDiffError,
-    detect_line_ending, has_bom, normalize_to_lf, restore_line_endings, strip_bom,
+    self, detect_line_ending, has_bom, normalize_to_lf, restore_line_endings, strip_bom, Edit,
+    EditDiffError,
 };
 use super::file_mutation_queue::global_mutation_queue;
 use super::{AgentTool, AgentToolResult, ToolError};
@@ -58,8 +58,14 @@ impl EditTool {
         // Legacy mode: old_text + new_text
         if edits.is_empty() {
             if let (Some(old), Some(new)) = (
-                params.get("old_text").or(params.get("oldText")).and_then(|v| v.as_str()),
-                params.get("new_text").or(params.get("newText")).and_then(|v| v.as_str()),
+                params
+                    .get("old_text")
+                    .or(params.get("oldText"))
+                    .and_then(|v| v.as_str()),
+                params
+                    .get("new_text")
+                    .or(params.get("newText"))
+                    .and_then(|v| v.as_str()),
             ) {
                 edits.push(EditEntry {
                     old_text: old.to_string(),
@@ -73,7 +79,11 @@ impl EditTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        EditInput { path, edits, dry_run }
+        EditInput {
+            path,
+            edits,
+            dry_run,
+        }
     }
 
     /// Apply edits to a file with full BOM/line-ending handling and diff output.
@@ -87,7 +97,9 @@ impl EditTool {
 
         // Validate edits
         if input.edits.is_empty() {
-            return Err("No edits provided. Either use old_text/new_text or edits array.".to_string());
+            return Err(
+                "No edits provided. Either use old_text/new_text or edits array.".to_string(),
+            );
         }
 
         // Read file content
@@ -101,10 +113,14 @@ impl EditTool {
         let content = normalize_to_lf(strip_bom(&raw_content));
 
         // Convert to Edit structs with normalized text
-        let edits: Vec<Edit> = input.edits.iter().map(|e| Edit {
-            old_text: normalize_to_lf(&e.old_text),
-            new_text: normalize_to_lf(&e.new_text),
-        }).collect();
+        let edits: Vec<Edit> = input
+            .edits
+            .iter()
+            .map(|e| Edit {
+                old_text: normalize_to_lf(&e.old_text),
+                new_text: normalize_to_lf(&e.new_text),
+            })
+            .collect();
 
         // Compute diff for preview
         let diff_result = edit_diff::generate_diff_string(&content, &edits, 4)
@@ -145,11 +161,7 @@ impl EditTool {
             diff: diff_result.diff,
             first_changed_line: diff_result.first_changed_line,
             applied: true,
-            message: format!(
-                "Applied {} edit(s) to {}",
-                edits.len(),
-                input.path
-            ),
+            message: format!("Applied {} edit(s) to {}", edits.len(), input.path),
         })
     }
 }
@@ -254,22 +266,19 @@ impl AgentTool for EditTool {
         _signal: Option<oneshot::Receiver<()>>,
     ) -> Result<AgentToolResult, ToolError> {
         let input = Self::prepare_arguments(&params);
-        
+
         match Self::apply_edits(&input).await {
             Ok(output) => {
-                let mut result = AgentToolResult::success(format!(
-                    "{}\n\n{}",
-                    output.message,
-                    output.diff
-                ));
-                
+                let mut result =
+                    AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
+
                 // Add metadata with first changed line for editor navigation
                 if let Some(line) = output.first_changed_line {
                     result = result.with_metadata(json!({
                         "firstChangedLine": line,
                     }));
                 }
-                
+
                 Ok(result)
             }
             Err(e) => Ok(AgentToolResult::error(e)),
@@ -375,7 +384,9 @@ mod tests {
     async fn test_apply_edits_single_edit() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
-        fs::write(&file_path, "hello world\nfoo bar\n").await.unwrap();
+        fs::write(&file_path, "hello world\nfoo bar\n")
+            .await
+            .unwrap();
 
         let input = EditInput {
             path: file_path.to_str().unwrap().to_string(),
@@ -402,8 +413,14 @@ mod tests {
         let input = EditInput {
             path: file_path.to_str().unwrap().to_string(),
             edits: vec![
-                EditEntry { old_text: "aaa".to_string(), new_text: "AAA".to_string() },
-                EditEntry { old_text: "ccc".to_string(), new_text: "CCC".to_string() },
+                EditEntry {
+                    old_text: "aaa".to_string(),
+                    new_text: "AAA".to_string(),
+                },
+                EditEntry {
+                    old_text: "ccc".to_string(),
+                    new_text: "CCC".to_string(),
+                },
             ],
             dry_run: false,
         };
@@ -439,7 +456,9 @@ mod tests {
     async fn test_apply_edits_bom_preserved() {
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.txt");
-        fs::write(&file_path, "\u{feff}hello world\n").await.unwrap();
+        fs::write(&file_path, "\u{feff}hello world\n")
+            .await
+            .unwrap();
 
         let input = EditInput {
             path: file_path.to_str().unwrap().to_string(),
