@@ -70,7 +70,7 @@ impl OAuthCallbackServer {
         listener.set_nonblocking(true)?;
 
         // Create oneshot channels for communication with the server task
-        let (tx, mut rx) = oneshot::channel::<Result<OAuthCallbackData, OAuthError>>();
+        let (tx, rx) = oneshot::channel::<Result<OAuthCallbackData, OAuthError>>();
 
         // Spawn the async server task
         tokio::task::spawn_local(async move {

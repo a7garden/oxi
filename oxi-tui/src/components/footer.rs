@@ -322,6 +322,7 @@ impl Footer {
     }
 
     /// Get the color for context window percentage.
+    #[allow(dead_code)]
     fn context_color(pct: f32) -> Color {
         if pct > 90.0 {
             Color::Red
@@ -356,25 +357,6 @@ impl Footer {
         }
 
         result
-    }
-
-    /// Check if a character is wide (typically CJK or emoji).
-    fn is_wide_char(c: char) -> bool {
-        // Check Unicode character width categories
-        // Fullwidth forms, CJK unified ideographs, etc.
-        let code = c as u32;
-        // Fullwidth ASCII variants (FF01-FF5E)
-        (0xFF01..=0xFF5E).contains(&code)
-            // CJK Unified Ideographs (4E00-9FFF)
-            || (0x4E00..=0x9FFF).contains(&code)
-            // CJK Unified Ideographs Extension A (3400-4DBF)
-            || (0x3400..=0x4DBF).contains(&code)
-            // CJK Compatibility Forms (FE30-FE4F)
-            || (0xFE30..=0xFE4F).contains(&code)
-            // Halfwidth and Fullwidth Forms (FF00-FFEF)
-            || (0xFF00..=0xFFEF).contains(&code)
-            // Common CJK symbols (3000-303F)
-            || (0x3000..=0x303F).contains(&code)
     }
 
     /// Render the main footer line.

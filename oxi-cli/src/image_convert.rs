@@ -4,7 +4,7 @@
 //! Also provides dimension extraction for display calculations.
 
 use anyhow::{Context, Result};
-use image::{DynamicImage, GenericImage, GenericImageView, ImageBuffer, Rgba, RgbaImage};
+use image::{DynamicImage, GenericImageView};
 use std::io::Cursor;
 
 /// Convert image bytes to PNG format
