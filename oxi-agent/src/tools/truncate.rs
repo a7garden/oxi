@@ -279,7 +279,7 @@ fn truncate_string_to_bytes_from_end(s: &str, max_bytes: usize) -> String {
 }
 
 /// Format bytes for human-readable display
-fn format_bytes(bytes: usize) -> String {
+pub fn format_bytes(bytes: usize) -> String {
     if bytes < 1024 {
         format!("{}B", bytes)
     } else if bytes < 1024 * 1024 {
