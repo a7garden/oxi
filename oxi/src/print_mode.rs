@@ -221,7 +221,7 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
         AgentEvent::ToolComplete { result } => serde_json::json!({
             "type": "tool_complete",
             "content": result.content.chars().take(2000).collect::<String>(),
-            "is_error": result.is_error,
+            "is_error": result.is_error(),
         }),
         AgentEvent::ToolError { error, tool_call_id } => serde_json::json!({
             "type": "tool_error",
@@ -300,10 +300,12 @@ mod tests {
     #[test]
     fn test_event_to_json_tool_call() {
         let event = AgentEvent::ToolCall {
-            tool_call: oxi_agent::types::ToolCall {
+            tool_call: oxi_ai::ToolCall {
+                content_type: oxi_ai::ToolCallType::ToolCall,
                 id: "tc-1".to_string(),
                 name: "read_file".to_string(),
-                arguments: serde_json::json!({"path": "/tmp/test.rs"}).to_string(),
+                arguments: serde_json::json!({"path": "/tmp/test.rs"}),
+                thought_signature: None,
             },
         };
         let json = event_to_json(&event);
@@ -335,10 +337,10 @@ mod tests {
     #[test]
     fn test_event_to_json_tool_complete() {
         let event = AgentEvent::ToolComplete {
-            result: oxi_agent::types::ToolResult {
+            result: oxi_ai::ToolResult {
                 tool_call_id: "tc-1".to_string(),
                 content: "file contents here".to_string(),
-                is_error: false,
+                status: "success".to_string(),
             },
         };
         let json = event_to_json(&event);
