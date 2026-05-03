@@ -69,6 +69,9 @@ impl CloudflareProvider {
         gateway_id: &str,
     ) -> Option<Model> {
         let account_id = self.account_id.as_ref()?;
+        if account_id.is_empty() {
+            return None;
+        }
         let id = model_id.into();
         let base_url = format!(
             "https://api.cloudflare.com/client/v4/accounts/{}/ai/gateways/{}/v1",
@@ -381,7 +384,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
             accumulated_usage.cache_read = chunk_usage
                 .prompt_tokens_details
                 .as_ref()
-                .map(|d| d.cached_tokens)
+                .and_then(|d| d.cached_tokens)
                 .unwrap_or(0);
             accumulated_usage.total_tokens = chunk_usage.total_tokens;
         }
@@ -455,7 +458,7 @@ struct UsageInfo {
 #[derive(Debug, Deserialize, Clone)]
 struct PromptTokensDetails {
     #[serde(rename = "cached_tokens")]
-    cached_tokens: usize,
+    cached_tokens: Option<usize>,
 }
 
 #[cfg(test)]
