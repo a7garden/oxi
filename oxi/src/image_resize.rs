@@ -4,6 +4,7 @@
 //! Uses the `image` crate for decoding and resizing.
 
 use anyhow::{Context, Result};
+use image::io::Reader as ImageReader;
 use image::{imageops::FilterType, DynamicImage, GenericImageView, ImageBuffer, Rgba, RgbaImage};
 use std::io::Cursor;
 
@@ -81,10 +82,10 @@ fn decode_image(bytes: &[u8]) -> Result<DynamicImage> {
 
 /// Get image dimensions without full decode
 pub fn get_image_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
-    let reader = image::Reader::new(Cursor::new(bytes))
+    let reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .context("Failed to guess image format")?;
-    let (width, height) = reader.into_dimensions();
+    let (width, height) = reader.into_dimensions().context("Failed to get image dimensions")?;
     Ok((width, height))
 }
 

@@ -3,10 +3,13 @@
 //! Loads and manages skills, extensions, themes, and prompts from various locations.
 //! Also handles discovery and loading of project context files (AGENTS.md, CLAUDE.md).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+// Re-export types from resource_loader_compat
+pub use crate::resource_loader_compat::{Skill, Theme, Prompt};
 
 // ============================================================================
 // Context Files
@@ -268,51 +271,55 @@ impl ResourceLoader {
     }
 
     /// Set base directory
-    pub fn with_base_dir(mut self, base_dir: PathBuf) -> Self {
+    pub fn with_base_dir(&mut self, base_dir: PathBuf) -> &mut Self {
         self.base_dir = base_dir;
         self
     }
 
     /// Set current working directory
-    pub fn with_cwd(mut self, cwd: PathBuf) -> Self {
+    pub fn with_cwd(&mut self, cwd: PathBuf) -> &mut Self {
         self.cwd = cwd;
         self
     }
 
     /// Add an extension source
-    pub fn add_extension(&mut self, path: PathBuf) {
+    pub fn add_extension(&mut self, path: PathBuf) -> &mut Self {
         self.extensions.push(ExtensionSource {
             path,
             metadata: PathMetadata::default(),
         });
+        self
     }
 
     /// Add a skill source
-    pub fn add_skill(&mut self, path: PathBuf) {
+    pub fn add_skill(&mut self, path: PathBuf) -> &mut Self {
         self.skills.push(SkillSource {
             path,
             metadata: PathMetadata::default(),
         });
+        self
     }
 
     /// Add a theme source
-    pub fn add_theme(&mut self, path: PathBuf) {
+    pub fn add_theme(&mut self, path: PathBuf) -> &mut Self {
         self.themes.push(ThemeSource {
             path,
             metadata: PathMetadata::default(),
         });
+        self
     }
 
     /// Add a prompt source
-    pub fn add_prompt(&mut self, path: PathBuf) {
+    pub fn add_prompt(&mut self, path: PathBuf) -> &mut Self {
         self.prompts.push(PromptSource {
             path,
             metadata: PathMetadata::default(),
         });
+        self
     }
 
     /// Load all resources
-    pub fn load_all(&self) -> Result<LoadedResources> {
+    pub fn load_all(&self) -> Result<LoadedResources, anyhow::Error> {
         let mut errors = Vec::new();
         let mut diagnostics = Vec::new();
 
@@ -373,7 +380,7 @@ impl ResourceLoader {
     }
 
     /// Load project context files (AGENTS.md, CLAUDE.md, etc.)
-    pub fn load_project_context_files(&self, cwd: &Path) -> Result<Vec<ContextFile>> {
+    pub fn load_project_context_files(&self, cwd: &Path) -> Result<Vec<ContextFile>, anyhow::Error> {
         let mut context_files = Vec::new();
         let seen_paths = &mut HashMap::new();
 
@@ -528,16 +535,19 @@ impl ResourceLoader {
     }
 
     /// Load a system prompt file by name
-    pub fn load_system_prompt_file(&self, name: &str) -> Result<Option<String>> {
-        let paths_to_try = vec![
+    pub fn load_system_prompt_file(&self, name: &str) -> Result<Option<String>, anyhow::Error> {
+        let mut paths_to_try: Vec<PathBuf> = vec![
             // Project-level
             self.cwd.join(".oxi").join("system-prompts").join(name),
             // Global
             self.base_dir.join("system-prompts").join(name),
             // Home directory
-            dirs::home_dir()
-                .map(|h| h.join(".oxi").join("system-prompts").join(name)),
         ];
+        
+        // Add home directory path if available
+        if let Some(home) = dirs::home_dir() {
+            paths_to_try.push(home.join(".oxi").join("system-prompts").join(name));
+        }
 
         for path in paths_to_try {
             if path.exists() && path.is_file() {
@@ -551,7 +561,7 @@ impl ResourceLoader {
     }
 
     /// Read a context file, handling potential errors
-    fn read_context_file(&self, path: &Path) -> Result<Option<String>> {
+    fn read_context_file(&self, path: &Path) -> Result<Option<String>, anyhow::Error> {
         match fs::read_to_string(path) {
             Ok(content) => Ok(Some(content)),
             Err(e) => {
@@ -679,7 +689,7 @@ impl ResourceLoader {
     }
 
     /// Reload resources
-    pub fn reload(&self) -> Result<LoadedResources> {
+    pub fn reload(&self) -> Result<LoadedResources, anyhow::Error> {
         self.clear_cache();
         self.load_all()
     }
@@ -999,11 +1009,11 @@ mod tests {
 
     #[test]
     fn test_loader_builder_pattern() {
-        let loader = ResourceLoader::new()
-            .with_base_dir(PathBuf::from("/base"))
-            .with_cwd(PathBuf::from("/cwd"))
-            .add_extension(PathBuf::from("/ext"))
-            .add_skill(PathBuf::from("/skill"));
+        let mut loader = ResourceLoader::new();
+        loader.with_base_dir(PathBuf::from("/base"));
+        loader.with_cwd(PathBuf::from("/cwd"));
+        loader.add_extension(PathBuf::from("/ext"));
+        loader.add_skill(PathBuf::from("/skill"));
         
         assert_eq!(loader.extensions.len(), 1);
         assert_eq!(loader.skills.len(), 1);

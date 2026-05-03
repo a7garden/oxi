@@ -368,7 +368,7 @@ impl AutoCompactor {
         };
 
         // Perform the summarization
-        let summary = oxi_ai::high_level::complete(&self.model, &context, Some(options))
+        let summary = oxi_ai::complete(&self.model, &context, Some(options))
             .await
             .context("LLM summarization failed")?;
 
@@ -490,8 +490,23 @@ mod tests {
 
     fn create_test_provider() -> Arc<dyn Provider> {
         // Create a mock provider for testing
-        use oxi_ai::providers::CloudflareProvider;
-        Arc::new(CloudflareProvider::new())
+        struct MockProvider;
+        #[async_trait]
+        impl oxi_ai::Provider for MockProvider {
+            async fn stream(
+                &self,
+                _model: &oxi_ai::Model,
+                _context: &oxi_ai::Context,
+                _options: Option<oxi_ai::StreamOptions>,
+            ) -> std::pin::Pin<Box<dyn futures::Stream<Item = oxi_ai::ProviderEvent> + Send>> {
+                // Return an empty stream - use Empty from futures
+                use futures::StreamExt;
+                let stream = futures::stream::empty::<oxi_ai::ProviderEvent>();
+                Box::pin(stream)
+            }
+            fn name(&self) -> &str { "mock" }
+        }
+        Arc::new(MockProvider)
     }
 
     fn create_test_model() -> Model {
