@@ -12,15 +12,216 @@
 
 use crate::InteractiveSession;
 use anyhow::Result;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use oxi_agent::{Agent, AgentEvent};
 use oxi_tui::{
     ChatMessageDisplay, ChatView, Component, ContentBlockDisplay, Input, MessageRole, Rect, Surface, Theme,
 };
+use std::collections::HashMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
 use std::os::unix::process::ExitStatusExt;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 // ── UI events from agent → TUI ─────────────────────────────────────────────
+
+/// Image content for message attachment
+#[derive(Debug, Clone)]
+pub struct ImageAttachment {
+    pub mime_type: String,
+    pub base64_data: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+impl ImageAttachment {
+    /// Parse a base64-encoded image data URI
+    pub fn from_data_uri(uri: &str) -> Option<Self> {
+        if !uri.starts_with("data:") {
+            return None;
+        }
+        let (mime_part, data_part) = uri.split_once(',')?;
+        let mime_type = mime_part
+            .strip_prefix("data:")
+            .and_then(|s| s.split(';').next())
+            .unwrap_or("image/png")
+            .to_string();
+        let base64_data = data_part.trim().to_string();
+        if BASE64.decode(&base64_data).is_err() {
+            return None;
+        }
+        Some(Self { mime_type, base64_data, width: None, height: None })
+    }
+
+    /// Get the file extension for the mime type
+    pub fn extension(&self) -> &'static str {
+        match self.mime_type.as_str() {
+            "image/png" => "png",
+            "image/jpeg" | "image/jpg" => "jpg",
+            "image/gif" => "gif",
+            "image/webp" => "webp",
+            _ => "png",
+        }
+    }
+
+    /// Detect mime type from magic bytes
+    pub fn detect_mime_type(data: &[u8]) -> &'static str {
+        if data.len() >= 8 {
+            if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) { return "image/png"; }
+            if data.starts_with(&[0xFF, 0xD8, 0xFF]) { return "image/jpeg"; }
+            if data.starts_with(&[0x47, 0x49, 0x46]) { return "image/gif"; }
+            if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" { return "image/webp"; }
+        }
+        "image/png"
+    }
+
+    /// Create from raw bytes
+    pub fn from_bytes(data: Vec<u8>) -> Option<Self> {
+        let mime_type = Self::detect_mime_type(&data);
+        let base64_data = BASE64.encode(&data);
+        Some(Self { mime_type: mime_type.to_string(), base64_data, width: None, height: None })
+    }
+}
+
+/// Session persistence for auto-save/load
+pub struct SessionPersistence {
+    session_dir: PathBuf,
+    last_save: RwLock<Instant>,
+    last_user_message: RwLock<String>,
+}
+
+impl SessionPersistence {
+    /// Create new session persistence manager
+    pub fn new() -> Option<Self> {
+        let home = std::env::var("HOME").ok()?;
+        let session_dir = PathBuf::from(home).join(".oxi").join("sessions");
+        fs::create_dir_all(&session_dir).ok()?;
+        Some(Self {
+            session_dir,
+            last_save: RwLock::new(Instant::now()),
+            last_user_message: RwLock::new(String::new()),
+        })
+    }
+
+    fn session_file_path(&self, session_id: &str) -> PathBuf {
+        self.session_dir.join(format!("{}.jsonl", session_id))
+    }
+
+    /// Save a user message to the session file
+    pub fn save_user_message(&self, session_id: &str, content: &str, timestamp: i64) -> Result<(), std::io::Error> {
+        use std::io::Write;
+        let path = self.session_file_path(session_id);
+        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let entry = serde_json::json!({"type": "user", "content": content, "timestamp": timestamp });
+        writeln!(file, "{}", entry)?;
+        *self.last_save.write().unwrap() = Instant::now();
+        Ok(())
+    }
+
+    /// Save an assistant message to the session file
+    pub fn save_assistant_message(&self, session_id: &str, content: &str, timestamp: i64) -> Result<(), std::io::Error> {
+        use std::io::Write;
+        let path = self.session_file_path(session_id);
+        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let entry = serde_json::json!({"type": "assistant", "content": content, "timestamp": timestamp });
+        writeln!(file, "{}", entry)?;
+        *self.last_save.write().unwrap() = Instant::now();
+        Ok(())
+    }
+
+    /// Load a session from the session file
+    pub fn load_session(&self, session_id: &str) -> Result<Vec<SessionEntry>, std::io::Error> {
+        let path = self.session_file_path(session_id);
+        let file = File::open(&path)?;
+        let reader = BufReader::new(file);
+        let mut entries = Vec::new();
+        for line in reader.lines() {
+            if let Ok(entry) = serde_json::from_str::<SessionEntry>(&line?) {
+                entries.push(entry);
+            }
+        }
+        Ok(entries)
+    }
+
+    /// Check if a session file exists
+    pub fn session_exists(&self, session_id: &str) -> bool {
+        self.session_file_path(session_id).exists()
+    }
+
+    /// Check if it's time to auto-save
+    pub fn should_auto_save(&self) -> bool {
+        self.last_save.read().unwrap().elapsed() >= Duration::from_secs(AUTO_SAVE_INTERVAL_SECS)
+    }
+
+    /// Update the last user message
+    pub fn set_last_user_message(&self, msg: String) {
+        *self.last_user_message.write().unwrap() = msg;
+    }
+
+    /// Get the last user message
+    pub fn get_last_user_message(&self) -> String {
+        self.last_user_message.read().unwrap().clone()
+    }
+}
+
+/// Session entry from JSONL file
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SessionEntry {
+    #[serde(rename = "type")]
+    pub entry_type: String,
+    pub content: String,
+    pub timestamp: i64,
+}
+
+/// Keybinding hints display
+pub struct KeybindingHints {
+    expanded: bool,
+}
+
+impl KeybindingHints {
+    pub fn new() -> Self {
+        Self { expanded: false }
+    }
+
+    /// Get the compact hints string (shown at startup)
+    pub fn compact_display(&self) -> String {
+        let hints = vec![
+            ("Ctrl+C", "quit"), ("/clear", "clear"), ("/", "commands"), ("!", "bash"),
+        ];
+        hints.iter().map(|(key, desc)| format!("[{}] {}", key, desc)).collect::<Vec<_>>().join(" • ")
+    }
+
+    /// Get the expanded hints string (shown on demand)
+    pub fn expanded_display(&self) -> String {
+        let hints = vec![
+            ("Ctrl+C", "quit"), ("Ctrl+L", "clear screen"), ("Ctrl+U", "clear line"),
+            ("Ctrl+A", "go to line start"), ("Ctrl+E", "go to line end"),
+            ("/model", "select model"), ("/clear", "clear chat"), ("/compact", "compact context"),
+            ("/undo", "undo"), ("/redo", "redo"), ("/session", "session info"),
+            ("/export", "export session"), ("/settings", "show settings"),
+            ("/help", "show help"), ("/new", "new session"),
+            ("!", "bash command"), ("!!", "bash (excluded)"),
+            ("PageUp/Down", "scroll chat"), ("Mouse", "scroll chat"),
+        ];
+        hints.iter().map(|(key, desc)| format!("  {:20} {}", key, desc)).collect::<Vec<_>>().join("\n")
+    }
+
+    /// Toggle expanded state
+    pub fn toggle(&mut self) { self.expanded = !self.expanded; }
+
+    /// Check if expanded
+    pub fn is_expanded(&self) -> bool { self.expanded }
+}
+
+impl Default for KeybindingHints {
+    fn default() -> Self { Self::new() }
+}
+
+/// Auto-save interval in seconds
+const AUTO_SAVE_INTERVAL_SECS: u64 = 30;
 
 #[derive(Debug)]
 enum UiEvent {
@@ -1006,6 +1207,116 @@ fn run_bash_command(command: &str) -> String {
         result.push_str(&format!("\nExit code: {}", output.status.code().unwrap_or(-1)));
     }
     result
+}
+
+// ── Diff viewer with intra-line highlighting ────────────────────────────────
+
+/// Compute word-level diff between two strings
+pub fn compute_word_diff(old: &str, new: &str) -> DiffResult {
+    let old_words: Vec<&str> = old.split_whitespace().collect();
+    let new_words: Vec<&str> = new.split_whitespace().collect();
+    let lcs = longest_common_subsequence(&old_words, &new_words);
+
+    let mut changes = Vec::new();
+    let mut old_idx = 0usize;
+    let mut new_idx = 0usize;
+
+    for (matched_old, matched_new) in lcs {
+        while old_idx < matched_old {
+            changes.push(DiffChange::Removed(old_words[old_idx].to_string()));
+            old_idx += 1;
+        }
+        while new_idx < matched_new {
+            changes.push(DiffChange::Added(new_words[new_idx].to_string()));
+            new_idx += 1;
+        }
+        changes.push(DiffChange::Unchanged(new_words[new_idx].to_string()));
+        old_idx += 1;
+        new_idx += 1;
+    }
+    while old_idx < old_words.len() {
+        changes.push(DiffChange::Removed(old_words[old_idx].to_string()));
+        old_idx += 1;
+    }
+    while new_idx < new_words.len() {
+        changes.push(DiffChange::Added(new_words[new_idx].to_string()));
+        new_idx += 1;
+    }
+
+    DiffResult { changes }
+}
+
+/// Longest common subsequence for word arrays
+fn longest_common_subsequence<'a>(a: &[&'a str], b: &[&'a str]) -> Vec<(usize, usize)> {
+    let m = a.len();
+    let n = b.len();
+    let mut dp = vec![vec![0usize; n + 1]; m + 1];
+
+    for i in 1..=m {
+        for j in 1..=n {
+            if a[i - 1] == b[j - 1] { dp[i][j] = dp[i - 1][j - 1] + 1; }
+            else { dp[i][j] = dp[i - 1][j].max(dp[i][j - 1]); }
+        }
+    }
+
+    let mut lcs = Vec::new();
+    let mut i = m;
+    let mut j = n;
+    while i > 0 && j > 0 {
+        if a[i - 1] == b[j - 1] {
+            lcs.push((i - 1, j - 1));
+            i -= 1;
+            j -= 1;
+        } else if dp[i - 1][j] > dp[i][j - 1] { i -= 1; }
+        else { j -= 1; }
+    }
+    lcs.reverse();
+    lcs
+}
+
+/// Result of word-level diff computation
+#[derive(Debug, Clone)]
+pub struct DiffResult {
+    pub changes: Vec<DiffChange>,
+}
+
+/// Individual change in a diff
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiffChange {
+    Unchanged(String),
+    Added(String),
+    Removed(String),
+}
+
+impl DiffResult {
+    /// Format the diff result with ANSI colors
+    pub fn format_ansi(&self) -> String {
+        use std::fmt::Write;
+        let mut result = String::new();
+        for change in &self.changes {
+            match change {
+                DiffChange::Unchanged(s) => { write!(&mut result, "{} ", s).unwrap(); }
+                DiffChange::Added(s) => { write!(&mut result, "\x1b[32m{}\x1b[0m ", s).unwrap(); }
+                DiffChange::Removed(s) => { write!(&mut result, "\x1b[31m{}\x1b[0m ", s).unwrap(); }
+            }
+        }
+        result.trim_end().to_string()
+    }
+
+    /// Get summary statistics
+    pub fn summary(&self) -> (usize, usize, usize) {
+        let mut added = 0usize;
+        let mut removed = 0usize;
+        let mut unchanged = 0usize;
+        for change in &self.changes {
+            match change {
+                DiffChange::Unchanged(_) => unchanged += 1,
+                DiffChange::Added(_) => added += 1,
+                DiffChange::Removed(_) => removed += 1,
+            }
+        }
+        (added, removed, unchanged)
+    }
 }
 
 /// Copy text to clipboard (best-effort, uses pbcopy/xclip/wl-copy).
