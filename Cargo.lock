@@ -1959,35 +1959,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
-name = "oxi"
-version = "0.1.0-alpha"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "crossterm 0.27.0",
- "dirs",
- "futures",
- "libloading",
- "once_cell",
- "oxi-agent",
- "oxi-ai",
- "oxi-tui",
- "parking_lot",
- "regex",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "oxi-agent"
 version = "0.1.0-alpha"
 dependencies = [
@@ -2042,6 +2013,35 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid",
+]
+
+[[package]]
+name = "oxi-cli"
+version = "0.1.0-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "crossterm 0.27.0",
+ "dirs",
+ "futures",
+ "libloading",
+ "once_cell",
+ "oxi-agent",
+ "oxi-ai",
+ "oxi-tui",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

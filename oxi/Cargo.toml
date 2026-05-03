@@ -1,5 +1,5 @@
 [package]
-name = "oxi"
+name = "oxi-cli"
 version = "0.1.0-alpha"
 edition = "2021"
 description = "Terminal-based AI coding assistant — multi-provider, streaming-first, extensible"
@@ -14,6 +14,10 @@ exclude = ["target/", "benches/"]
 [[bin]]
 name = "oxi"
 path = "src/main.rs"
+
+[lib]
+name = "oxi"
+path = "src/lib.rs"
 
 [dependencies]
 oxi-ai = { version = "0.1.0-alpha", path = "../oxi-ai" }
