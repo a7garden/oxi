@@ -2051,6 +2051,7 @@ name = "oxi-cli"
 version = "0.1.5-alpha"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64",
  "chrono",
  "clap",
