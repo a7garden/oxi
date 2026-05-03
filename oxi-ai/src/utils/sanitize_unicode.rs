@@ -1,0 +1,130 @@
+//! Unicode sanitization utilities
+//!
+//! Removes unpaired Unicode surrogate characters from strings.
+//! Unpaired surrogates cause JSON serialization errors in many API providers.
+//! Valid emoji and other characters outside the Basic Multilingual Plane use
+//! properly paired surrogates and will NOT be affected.
+
+/// Removes unpaired Unicode surrogate characters from a string.
+///
+/// Unpaired surrogates (high surrogates 0xD800-0xDBFF without matching low surrogates
+/// 0xDC00-0xDFFF, or vice versa) cause JSON serialization errors in many API providers.
+///
+/// Valid emoji and other characters outside the Basic Multilingual Plane use properly paired
+/// surrogates and will NOT be affected by this function.
+///
+/// # Examples
+/// ```
+/// use oxi_ai::utils::sanitize_unicode::sanitize_surrogates;
+///
+/// // Valid emoji (properly paired surrogates) are preserved
+/// assert_eq!(sanitize_surrogates("Hello 🙈 World"), "Hello 🙈 World");
+///
+/// // Unpaired high surrogate is removed
+/// let unpaired = unsafe { char::from_u32_unchecked(0xD83D) };
+/// let input = format!("Text {} here", unpaired);
+/// assert_eq!(sanitize_surrogates(&input), "Text  here");
+/// ```
+pub fn sanitize_surrogates(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        let code = ch as u32;
+
+        // Check if this is a high surrogate (0xD800-0xDBFF)
+        if (0xD800..=0xDBFF).contains(&code) {
+            // Check if next char is a low surrogate
+            if let Some(&next_ch) = chars.peek() {
+                let next_code = next_ch as u32;
+                if (0xDC00..=0xDFFF).contains(&next_code) {
+                    // Properly paired surrogate - keep both
+                    result.push(ch);
+                    result.push(chars.next().unwrap());
+                    continue;
+                }
+            }
+            // Unpaired high surrogate - skip it
+            continue;
+        }
+
+        // Check if this is a low surrogate (0xDC00-0xDFFF) without preceding high surrogate
+        if (0xDC00..=0xDFFF).contains(&code) {
+            // Unpaired low surrogate - skip it
+            continue;
+        }
+
+        // Normal character - keep it
+        result.push(ch);
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_emoji_preserved() {
+        assert_eq!(sanitize_surrogates("Hello 🙈 World"), "Hello 🙈 World");
+    }
+
+    #[test]
+    fn test_normal_text_unchanged() {
+        assert_eq!(sanitize_surrogates("Hello, world!"), "Hello, world!");
+    }
+
+    #[test]
+    fn test_empty_string() {
+        assert_eq!(sanitize_surrogates(""), "");
+    }
+
+    #[test]
+    fn test_ascii_preserved() {
+        assert_eq!(sanitize_surrogates("abc123!@#"), "abc123!@#");
+    }
+
+    #[test]
+    fn test_multiple_emoji_preserved() {
+        assert_eq!(
+            sanitize_surrogates("🎉🚀✨🔥"),
+            "🎉🚀✨🔥"
+        );
+    }
+
+    #[test]
+    fn test_cjk_characters_preserved() {
+        assert_eq!(sanitize_surrogates("你好世界"), "你好世界");
+    }
+
+    #[test]
+    fn test_unpaired_high_surrogate_removed() {
+        // Create a string with an unpaired high surrogate
+        let unpaired_high = unsafe { char::from_u32_unchecked(0xD83D) };
+        let input = format!("Text {} here", unpaired_high);
+        assert_eq!(sanitize_surrogates(&input), "Text  here");
+    }
+
+    #[test]
+    fn test_unpaired_low_surrogate_removed() {
+        // Create a string with an unpaired low surrogate
+        let unpaired_low = unsafe { char::from_u32_unchecked(0xDC00) };
+        let input = format!("Text {} here", unpaired_low);
+        assert_eq!(sanitize_surrogates(&input), "Text  here");
+    }
+
+    #[test]
+    fn test_trailing_unpaired_high_surrogate() {
+        let unpaired_high = unsafe { char::from_u32_unchecked(0xD800) };
+        let input = format!("Hello{}", unpaired_high);
+        assert_eq!(sanitize_surrogates(&input), "Hello");
+    }
+
+    #[test]
+    fn test_leading_unpaired_low_surrogate() {
+        let unpaired_low = unsafe { char::from_u32_unchecked(0xDFFF) };
+        let input = format!("{}Hello", unpaired_low);
+        assert_eq!(sanitize_surrogates(&input), "Hello");
+    }
+}

@@ -56,6 +56,9 @@ impl ThemeInfo {
 /// Callback type for when a theme is selected.
 pub type OnThemeSelectFn = Box<dyn Fn(&str) + Send>;
 
+/// Callback type for when a theme is previewed (selection changes).
+pub type OnThemePreviewFn = Box<dyn Fn(&str) + Send>;
+
 /// Theme selector component.
 pub struct ThemeSelector {
     /// Available themes
@@ -74,6 +77,8 @@ pub struct ThemeSelector {
     dirty: bool,
     /// Callback when theme is selected
     on_select: Option<OnThemeSelectFn>,
+    /// Callback when theme is previewed (selection changes)
+    on_preview: Option<OnThemePreviewFn>,
     /// Fuzzy matcher for search
     matcher: FuzzyMatcher,
 }
@@ -91,6 +96,7 @@ impl ThemeSelector {
             focused: false,
             dirty: true,
             on_select: None,
+            on_preview: None,
             matcher: FuzzyMatcher::new(),
         }
     }
@@ -98,6 +104,13 @@ impl ThemeSelector {
     /// Set callback for when a theme is selected.
     pub fn on_select(mut self, f: impl Fn(&str) + Send + 'static) -> Self {
         self.on_select = Some(Box::new(f));
+        self
+    }
+
+    /// Set callback for live preview when the selection changes.
+    /// Called on every navigation event (up/down) with the newly highlighted theme.
+    pub fn on_preview(mut self, f: impl Fn(&str) + Send + 'static) -> Self {
+        self.on_preview = Some(Box::new(f));
         self
     }
 
@@ -166,6 +179,7 @@ impl ThemeSelector {
         if self.selected > 0 {
             self.selected -= 1;
             self.adjust_scroll();
+            self.notify_preview();
             self.dirty = true;
         }
     }
@@ -174,7 +188,17 @@ impl ThemeSelector {
         if self.selected < self.filtered_indices.len().saturating_sub(1) {
             self.selected += 1;
             self.adjust_scroll();
+            self.notify_preview();
             self.dirty = true;
+        }
+    }
+
+    /// Notify the preview callback about the current selection.
+    fn notify_preview(&self) {
+        if let Some(ref cb) = self.on_preview {
+            if let Some(theme) = self.selected_theme() {
+                cb(&theme.name);
+            }
         }
     }
 
