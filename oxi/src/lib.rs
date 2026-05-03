@@ -18,6 +18,12 @@ pub mod tui_interactive;
 // RPC mode for headless operation
 pub mod rpc_mode;
 
+// Image processing modules
+pub mod clipboard_image;
+pub mod image_convert;
+pub mod image_resize;
+pub mod file_processor;
+
 // Utility modules
 pub mod auth_storage;
 pub mod auto_compaction;
@@ -25,6 +31,47 @@ pub mod bash_executor;
 pub mod cli;
 pub mod diagnostics;
 pub mod error_recovery;
+
+// Re-exports for extension hooks
+pub use crate::error_recovery::{RetryConfig, RetryableError, RetryStrategy};
+
+/// Context for compaction operations, passed to extension hooks
+#[derive(Debug, Clone)]
+pub struct CompactionContext {
+    /// Messages being compacted
+    pub messages_count: usize,
+    /// Estimated tokens before compaction
+    pub tokens_before: usize,
+    /// Target token count after compaction
+    pub target_tokens: usize,
+    /// Strategy being used
+    pub strategy: String,
+}
+
+impl CompactionContext {
+    /// Create a new compaction context
+    pub fn new(
+        messages_count: usize,
+        tokens_before: usize,
+        target_tokens: usize,
+        strategy: impl Into<String>,
+    ) -> Self {
+        Self {
+            messages_count,
+            tokens_before,
+            target_tokens,
+            strategy: strategy.into(),
+        }
+    }
+
+    /// Get expected compression ratio
+    pub fn compression_ratio(&self) -> f32 {
+        if self.tokens_before == 0 {
+            return 1.0;
+        }
+        self.target_tokens as f32 / self.tokens_before as f32
+    }
+}
 pub mod event_bus;
 pub mod footer_data;
 pub mod git_utils;
