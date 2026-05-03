@@ -428,11 +428,11 @@ pub fn parse_key_sequence(sequence: &str) -> Vec<(bool, bool, char)> {
     let mut result = Vec::new();
     let parts: Vec<&str> = sequence.split('+').collect();
 
+    let mut ctrl = false;
+    let mut alt = false;
+
     for part in parts {
         let part_lower = part.to_lowercase();
-        let mut ctrl = false;
-        let mut alt = false;
-        let mut key_char = part;
 
         if part_lower == "ctrl" || part_lower == "control" {
             ctrl = true;
@@ -443,8 +443,7 @@ pub fn parse_key_sequence(sequence: &str) -> Vec<(bool, bool, char)> {
             continue;
         }
 
-        // Handle special keys
-        key_char = match part_lower.as_str() {
+        let key_char = match part_lower.as_str() {
             "space" => " ",
             "tab" => "\t",
             "enter" | "return" => "\n",
@@ -464,6 +463,9 @@ pub fn parse_key_sequence(sequence: &str) -> Vec<(bool, bool, char)> {
 
         let first_char = key_char.chars().next().unwrap_or(' ');
         result.push((ctrl, alt, first_char));
+        // Reset modifiers after use
+        ctrl = false;
+        alt = false;
     }
 
     result
@@ -473,11 +475,25 @@ pub fn parse_key_sequence(sequence: &str) -> Vec<(bool, bool, char)> {
 pub fn format_key_sequence(keys: &[String]) -> String {
     keys.iter()
         .map(|k| {
-            let formatted = k
-                .replace("ctrl+", "Ctrl+")
-                .replace("alt+", "Alt+")
-                .replace("shift+", "Shift+");
-            formatted
+            let parts: Vec<&str> = k.split('+').collect();
+            let mut formatted_parts = Vec::new();
+            for (i, part) in parts.iter().enumerate() {
+                let lower = part.to_lowercase();
+                if lower == "ctrl" {
+                    formatted_parts.push("Ctrl".to_string());
+                } else if lower == "alt" || lower == "meta" {
+                    formatted_parts.push("Alt".to_string());
+                } else if lower == "shift" {
+                    formatted_parts.push("Shift".to_string());
+                } else if i == parts.len() - 1 {
+                    // Last part (the key) — uppercase single chars
+                    let c = part.chars().next().unwrap_or(' ');
+                    formatted_parts.push(c.to_uppercase().collect::<String>());
+                } else {
+                    formatted_parts.push(part.to_string());
+                }
+            }
+            formatted_parts.join("+")
         })
         .collect::<Vec<_>>()
         .join(", ")

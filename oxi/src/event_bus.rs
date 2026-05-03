@@ -335,9 +335,9 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        bus.subscribe("test", Arc::new(move |event| {
+        bus.subscribe_sync("test", Arc::new(move |event| {
             received_clone.lock().unwrap().push(event);
-        }));
+        })).await;
 
         let event = AgentSessionEvent::SessionStart {
             session_id: "123".to_string(),
@@ -357,12 +357,12 @@ mod tests {
         let count1_clone = count1.clone();
         let count2_clone = count2.clone();
 
-        bus.subscribe("test", Arc::new(move |_| {
+        bus.subscribe_sync("test", Arc::new(move |_| {
             *count1_clone.lock().unwrap() += 1;
-        }));
-        bus.subscribe("test", Arc::new(move |_| {
+        })).await;
+        bus.subscribe_sync("test", Arc::new(move |_| {
             *count2_clone.lock().unwrap() += 1;
-        }));
+        })).await;
 
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
 
@@ -378,9 +378,9 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        let subscriber = bus.subscribe("test", Arc::new(move |_| {
+        let subscriber = bus.subscribe_sync("test", Arc::new(move |_| {
             received_clone.lock().unwrap().push(1);
-        }));
+        })).await;
 
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -399,9 +399,9 @@ mod tests {
         let received = Arc::new(std::sync::Mutex::new(Vec::new()));
         let received_clone = received.clone();
 
-        bus.subscribe("test", Arc::new(move |_| {
+        bus.subscribe_sync("test", Arc::new(move |_| {
             received_clone.lock().unwrap().push(1);
-        }));
+        })).await;
 
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -420,8 +420,8 @@ mod tests {
 
         assert_eq!(bus.subscription_count().await, 0);
 
-        let _sub1 = bus.subscribe("test", Arc::new(|_| {}));
-        let _sub2 = bus.subscribe("test", Arc::new(|_| {}));
+        let _sub1 = bus.subscribe_sync("test", Arc::new(|_| {})).await;
+        let _sub2 = bus.subscribe_sync("test", Arc::new(|_| {})).await;
 
         assert_eq!(bus.subscription_count().await, 2);
     }
