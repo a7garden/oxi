@@ -525,6 +525,7 @@ struct VertexPart {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct VertexFunctionCall {
     name: String,
     args: JsonValue,
@@ -543,6 +544,7 @@ struct VertexUsageMetadata {
 // OAuth token exchange response
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct TokenResponse {
     access_token: String,
     expires_in: usize,
@@ -552,6 +554,7 @@ struct TokenResponse {
 // Service account credentials structure
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct ServiceAccountCreds {
     #[serde(rename = "type")]
     _type: String,

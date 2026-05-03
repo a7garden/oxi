@@ -9,7 +9,6 @@
 //! - Bash execution display (streaming output, timer, cancel)
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 /// Session info for display in session selector
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -406,6 +406,7 @@ impl SafetyCheck {
         "rm -rf", "rm -r", "rm -f", "rmdir", "del /", "format", "mkfs", "dd if=", ":(){:|:&};:", "> /dev/sd", "dd of=/dev",
     ];
 
+    #[allow(dead_code)]
     const DANGEROUS_PIPE_PATTERNS: &'static [&'static str] = &[
         "curl | sh", "curl | bash", "wget | sh", "wget | bash", "curl | sudo", "wget | sudo",
     ];

@@ -300,8 +300,8 @@ fn build_hunk<'a>(
     let end = (change_end + context + 1).min(ops.len());
     
     let mut lines = Vec::new();
-    let mut old_pos = usize::MAX;
-    let mut new_pos = usize::MAX;
+    let mut _old_pos = usize::MAX;
+    let mut _new_pos = usize::MAX;
     let mut old_count = 0;
     let mut new_count = 0;
     let mut first_old = None;
@@ -316,8 +316,8 @@ fn build_hunk<'a>(
                 if first_new.is_none() {
                     first_new = Some(*ni);
                 }
-                old_pos = *oi;
-                new_pos = *ni;
+                _old_pos = *oi;
+                _new_pos = *ni;
                 lines.push(DiffLine::Context(old_lines[*oi]));
                 old_count += 1;
                 new_count += 1;
@@ -326,7 +326,7 @@ fn build_hunk<'a>(
                 if first_old.is_none() {
                     first_old = Some(*oi);
                 }
-                old_pos = *oi;
+                _old_pos = *oi;
                 lines.push(DiffLine::Remove(old_lines[*oi]));
                 old_count += 1;
             }
@@ -334,7 +334,7 @@ fn build_hunk<'a>(
                 if first_new.is_none() {
                     first_new = Some(*ni);
                 }
-                new_pos = *ni;
+                _new_pos = *ni;
                 lines.push(DiffLine::Add(new_lines[*ni]));
                 new_count += 1;
             }

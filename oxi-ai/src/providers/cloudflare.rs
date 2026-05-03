@@ -9,7 +9,7 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, Provider, TextContent,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider,
     error::ProviderError, ProviderEvent, StopReason, StreamOptions, Usage,
 };
 

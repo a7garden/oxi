@@ -136,7 +136,7 @@ impl LsTool {
         let output = if long_format {
             let mut lines: Vec<String> = entries
                 .iter()
-                .map(|(name, is_dir, size, meta)| {
+                .map(|(name, _is_dir, size, meta)| {
                     let type_indicator = Self::get_type_indicator(meta);
                     format!(
                         "{:<10} {}{}",
