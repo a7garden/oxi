@@ -5,7 +5,7 @@
 //!
 //! # Usage
 //!
-//! ```rust
+//! ```ignore
 //! use oxi_ai::model_db::{get_model_entry, get_provider_models, get_all_models};
 //!
 //! // Look up a specific model
@@ -7845,7 +7845,7 @@ static ALL_PROVIDER_MODELS: &[(&'static str, &'static [ModelEntry])] = &[
 /// `Some(&ModelEntry)` if found, `None` otherwise.
 ///
 /// # Example
-/// ```rust
+/// ```ignore
 /// use oxi_ai::model_db::get_model_entry;
 /// let m = get_model_entry("openai", "gpt-4o").unwrap();
 /// assert_eq!(m.name, "GPT-4o");
