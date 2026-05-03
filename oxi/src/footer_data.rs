@@ -4,8 +4,6 @@
 //! such as model info, token usage, and keybinding hints.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Footer data containing all status information

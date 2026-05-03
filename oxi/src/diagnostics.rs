@@ -4,7 +4,6 @@
 //! the system, environment, and runtime state.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::process::Command;
 
 /// Diagnostic report entry

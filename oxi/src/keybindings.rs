@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::fmt;
 use std::path::Path;
-use std::sync::Arc;
 
 /// Keybinding action identifiers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

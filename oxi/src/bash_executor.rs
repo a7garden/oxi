@@ -290,7 +290,7 @@ impl BashExecutor {
         // Read stdout
         let mut stdout = String::new();
         if let Some(ref mut out) = child.stdout {
-            use std::io::{BufRead, Read};
+            use std::io::BufRead;
             let reader = std::io::BufReader::new(out);
             for line in reader.lines() {
                 if let Ok(line) = line {
@@ -304,7 +304,7 @@ impl BashExecutor {
         // Read stderr
         let mut stderr = String::new();
         if let Some(ref mut err) = child.stderr {
-            use std::io::{BufRead, Read};
+            use std::io::BufRead;
             let reader = std::io::BufReader::new(err);
             for line in reader.lines() {
                 if let Ok(line) = line {
