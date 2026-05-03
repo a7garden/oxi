@@ -375,7 +375,7 @@ impl RpcServer {
                     // Parse data URI
                     let parts: Vec<&str> = img.source.splitn(2, ',').collect();
                     if parts.len() == 2 {
-                        let header = parts[0];
+                        let _header = parts[0];
                         let data = parts[1];
                         // Remove any potential metadata from header
                         let base64_data = data.split(';').next().unwrap_or(data);
@@ -489,16 +489,16 @@ fn handle_command(
 }
 
 /// Execute an RPC command and return the response
-fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> RpcResponse {
+fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> RpcResponse {
     match command {
         // ── Prompting ──────────────────────────────────────────────
         RpcCommand::Prompt {
             id,
-            message,
+            message: _,
             images,
         } => {
             // Parse images
-            let image_sources = RpcServer::parse_images(images);
+            let _image_sources = RpcServer::parse_images(images);
 
             // In a real implementation, this would send to the agent
             // For now, we just update state
@@ -518,8 +518,8 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
 
         RpcCommand::Steer {
             id,
-            message,
-            images,
+            message: _,
+            images: _,
         } => {
             server.update_session_state(|s| {
                 s.steering_mode = "one_at_a_time".to_string();
@@ -536,8 +536,8 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
 
         RpcCommand::FollowUp {
             id,
-            message,
-            images,
+            message: _,
+            images: _,
         } => {
             server.update_session_state(|s| {
                 s.follow_up_mode = "one_at_a_time".to_string();
@@ -956,8 +956,10 @@ pub struct PasteHandler {
     state: PasteState,
     buffer: Vec<u8>,
     /// Bracketed paste start sequence: ESC [ 2 0 0 ~
+    #[allow(dead_code)]
     start_sequence: Vec<u8>,
     /// Bracketed paste end sequence: ESC [ 2 0 1 ~
+    #[allow(dead_code)]
     end_sequence: Vec<u8>,
 }
 

@@ -6,7 +6,6 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::future::Future;
-use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
@@ -160,7 +159,8 @@ impl RetryableError {
     pub fn from_status_code(code: u16) -> Option<Self> {
         match code {
             408 | 429 => Some(Self::RateLimitError { retry_after: 0 }),
-            500 | 502 | 503 | 504 => Some(Self::ServerError { code }),
+            408 | 429 => Some(Self::RateLimitError { retry_after: 0 }),
+            500 | 502 | 504 => Some(Self::ServerError { code }),
             503 => Some(Self::ServiceUnavailable { retry_after: 0 }),
             _ if code >= 500 => Some(Self::ServerError { code }),
             _ => None,

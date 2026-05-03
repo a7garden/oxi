@@ -18,9 +18,8 @@ use oxi_tui::{
     ChatMessageDisplay, ChatView, Component, ContentBlockDisplay, Input, MessageRole, Rect,
     Surface, Theme,
 };
-use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -31,7 +30,7 @@ use tokio::sync::mpsc;
 use crate::clipboard_image;
 use crate::image_convert::convert_to_png;
 use crate::image_resize::{resize_image, ResizeOptions, ResizedImage};
-use crate::file_processor::{process_file_args, FileProcessorOptions};
+use crate::file_processor::FileProcessorOptions;
 use crate::rpc_mode::{PasteHandler, PasteState};
 
 // ── Image Paste Handler ───────────────────────────────────────────────────
@@ -241,8 +240,8 @@ impl FileAttachmentProcessor {
 
     /// Process a single file
     fn process_single_file(&self, path: &PathBuf) -> Result<Vec<oxi_ai::ContentBlock>> {
-        use crate::image_convert::{convert_to_png, detect_format};
-        use crate::image_resize::{resize_image, ResizeOptions};
+        // NOTE: image_convert and image_resize utilities available for future inline
+        // image conversion. Currently unused in process_single_file.
 
         let data = fs::read(path)?;
         let mime = self.detect_mime(path, &data);
@@ -297,7 +296,7 @@ impl FileAttachmentProcessor {
     /// Process an image file
     fn process_image_file(
         &self,
-        path: &PathBuf,
+        _path: &PathBuf,
         data: &[u8],
         mime: &str,
     ) -> Result<Vec<oxi_ai::ContentBlock>> {
@@ -332,7 +331,7 @@ impl FileAttachmentProcessor {
     }
 
     /// Process a text file
-    fn process_text_file(&self, path: &PathBuf, data: &[u8]) -> Result<Vec<oxi_ai::ContentBlock>> {
+    fn process_text_file(&self, _path: &PathBuf, data: &[u8]) -> Result<Vec<oxi_ai::ContentBlock>> {
         let content = String::from_utf8_lossy(&data);
         Ok(vec![oxi_ai::ContentBlock::Text(oxi_ai::TextContent::new(
             content.to_string(),
@@ -1465,7 +1464,6 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                     chat_view.stream_thinking_end();
                     chat_view.finish_streaming();
                     let _display_state = InteractiveState::Display;
-                    state = InteractiveState::Input;
 
                     // Capture the response text into session
                     let st = app.agent_state();
