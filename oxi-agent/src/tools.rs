@@ -18,6 +18,10 @@ pub struct AgentToolResult {
     pub success: bool,
     pub output: String,
     pub metadata: Option<serde_json::Value>,
+    /// Optional content blocks (e.g., image blocks) to include in the tool result message.
+    /// When present, these are used as the content of the ToolResultMessage instead of
+    /// wrapping `output` in a Text block.
+    pub content_blocks: Option<Vec<oxi_ai::ContentBlock>>,
 }
 
 impl AgentToolResult {
@@ -26,6 +30,7 @@ impl AgentToolResult {
             success: true,
             output: output.into(),
             metadata: None,
+            content_blocks: None,
         }
     }
 
@@ -34,11 +39,17 @@ impl AgentToolResult {
             success: false,
             output: output.into(),
             metadata: None,
+            content_blocks: None,
         }
     }
 
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = Some(metadata);
+        self
+    }
+
+    pub fn with_content_blocks(mut self, blocks: Vec<oxi_ai::ContentBlock>) -> Self {
+        self.content_blocks = Some(blocks);
         self
     }
 }

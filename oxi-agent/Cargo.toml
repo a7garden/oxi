@@ -20,6 +20,7 @@ parking_lot = "0.12"
 anyhow = "1"
 thiserror = "1"
 regex = "1"
+base64 = "0.22"
 
 [dev-dependencies]
 tokio-test = "0.4"
