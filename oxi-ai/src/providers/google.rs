@@ -121,7 +121,7 @@ impl Provider for GoogleProvider {
         let model_name = model.id.clone();
         
         let stream = response.bytes_stream()
-            .flat_map(|chunk| {
+            .flat_map(move |chunk| {
                 match chunk {
                     Ok(bytes) => {
                         let text = String::from_utf8_lossy(&bytes);
@@ -288,11 +288,11 @@ fn parse_google_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                 }
                 
                 // Check if done
-                if let Some(finish_reason) = &response.candidates.first().and_then(|c| c.finish_reason.as_deref()) {
-                    let reason = match finish_reason.as_deref() {
-                        Some("STOP") => StopReason::Stop,
-                        Some("MAX_TOKENS") => StopReason::Length,
-                        Some("SAFETY") | Some("OTHER") => StopReason::Error,
+                if let Some(ref finish_reason) = response.candidates.first().and_then(|c| c.finish_reason.clone()) {
+                    let reason = match finish_reason.as_str() {
+                        "STOP" => StopReason::Stop,
+                        "MAX_TOKENS" => StopReason::Length,
+                        "SAFETY" | "OTHER" => StopReason::Error,
                         _ => StopReason::Stop,
                     };
                     

@@ -5,6 +5,8 @@ mod event;
 mod options;
 mod openai;
 mod anthropic;
+mod google;
+mod deepseek;
 
 use std::pin::Pin;
 use futures::Stream;
@@ -29,11 +31,23 @@ pub use crate::Model;
 /// Get a provider by name
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
     match name {
-        "openai" | "azure-openai" | "deepseek" | "groq" | "cerebras" | "xai" | "mistral" | "openrouter" | "fireworks" | "huggingface" => {
+        "openai" | "azure-openai" | "groq" | "cerebras" | "xai" | "openrouter" | "fireworks" | "huggingface" => {
             Some(Box::new(openai::OpenAiProvider::new()))
         }
         "anthropic" => {
             Some(Box::new(anthropic::AnthropicProvider::new()))
+        }
+        "google" => {
+            Some(Box::new(google::GoogleProvider::new()))
+        }
+        "deepseek" => {
+            Some(Box::new(deepseek::DeepSeekProvider::new()))
+        }
+        "mistral" => {
+            // Mistral is OpenAI-compatible with minor differences
+            Some(Box::new(deepseek::DeepSeekProvider::with_api_key(
+                std::env::var("MISTRAL_API_KEY").unwrap_or_default()
+            )))
         }
         _ => None,
     }
