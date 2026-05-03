@@ -44,9 +44,13 @@ pub use compaction::{Compactor, CompactionStrategy, CompactionManager, Compacted
 // Cross-provider message transformation
 pub use transform::{transform_messages, TransformOptions, anthropic_to_openai, openai_to_anthropic, google_to_openai, anthropic_to_google};
 
-// Model registry
+// Model registry (runtime mutable registry)
 mod model_registry;
 pub use model_registry::{ModelRegistry, get_model, get_providers, get_models};
+
+// Static model database (comprehensive, auto-generated from pi-mono)
+pub mod model_db;
+pub use model_db::{ModelEntry, get_model_entry, get_provider_models, get_all_models, model_count, search_models, get_reasoning_models, get_vision_models, get_cheapest_models};
 
 /// Re-export AssistantMessage from messages
 pub use messages::AssistantMessage;
