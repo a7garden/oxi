@@ -262,7 +262,7 @@ impl Provider for CodexProvider {
 
         // Add tools if present (codex supports function calling)
         if !context.tools.is_empty() {
-            body["tools"] = Self::build_tools(&context.tools)?;
+            body["tools"] = build_tools(&context.tools)?;
         }
 
         // Build headers
@@ -332,7 +332,7 @@ impl Provider for CodexProvider {
             move |chunk: Result<Bytes, reqwest::Error>| match chunk {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes).to_string();
-                    futures::stream::iter(Self::parse_sse_events(&text, &provider_name, &model_id_str))
+                    futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id_str))
                 }
                 Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
                     reason: StopReason::Error,

@@ -349,6 +349,71 @@ pub trait Compactor: Send + Sync {
             .map(|msg| estimate_tokens(&msg.text_content().unwrap_or_default()))
             .sum()
     }
+
+    /// Summarize a conversation branch for comparison purposes.
+    ///
+    /// This is used when branching occurs and you want to understand
+    /// what changed compared to another branch (e.g., main).
+    ///
+    /// # Arguments
+    /// * `messages` - The messages in this branch
+    /// * `branch_name` - Name of this branch for context
+    ///
+    /// # Returns
+    /// A summary string describing the conversation branch
+    async fn summarize_branch(
+        &self,
+        messages: &[Message],
+        branch_name: &str,
+    ) -> std::result::Result<String, CompactionError> {
+        if messages.is_empty() {
+            return Ok(format!("Branch '{}' is empty", branch_name));
+        }
+
+        let mut prompt = String::new();
+        prompt.push_str(&format!(
+            "Summarize the conversation branch '{}' concisely. ",
+            branch_name
+        ));
+        prompt.push_str("Focus on: what was discussed, decisions made, and current state.\n\n");
+
+        prompt.push_str("## Branch messages:\n");
+        for (i, msg) in messages.iter().enumerate() {
+            let role = match msg {
+                Message::User(_) => "User",
+                Message::Assistant(_) => "Assistant",
+                Message::ToolResult(_) => "Tool",
+            };
+            let content = msg.text_content().unwrap_or_default();
+            let content_preview = if content.len() > 300 {
+                format!("{}...", &content[..300])
+            } else {
+                content
+            };
+            prompt.push_str(&format!("[{} {}]: {}\n", role, i + 1, content_preview));
+        }
+
+        prompt.push_str("\n## Summary (be concise):\n");
+
+        // Use LLM to generate summary
+        let mut context = Context::new();
+        context.set_system_prompt(
+            "You are a helpful assistant that summarizes conversation branches. ",
+        );
+        context.add_message(Message::User(UserMessage::new(prompt)));
+
+        let options = StreamOptions {
+            temperature: Some(0.3),
+            max_tokens: Some(512),
+            ..Default::default()
+        };
+
+        let summary_message = complete(&self.model, &context, Some(options))
+            .await
+            .map_err(|e| CompactionError::LlmError(e.to_string()))?;
+
+        Ok(summary_message.text_content())
+    }
 }
 
 /// LLM-based compactor that uses the model itself to summarize

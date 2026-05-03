@@ -547,6 +547,52 @@ pub trait Extension: Send + Sync {
     /// This is the low-level catch-all. Prefer the typed hooks above
     /// when possible.
     fn on_event(&self, _event: &AgentEvent) {}
+
+    // ── Enhanced tool call hooks ─────────────────────────────────────
+
+    /// Called immediately before a tool is executed.
+    ///
+    /// Use this for pre-processing, validation, or logging tool calls.
+    /// Return `Err` to abort the tool execution (optional, implement
+    /// [`on_before_tool_call_with_result`] for that).
+    fn on_before_tool_call(&self, _tool: &str, _args: &Value) -> Result<(), crate::error::Error> {
+        Ok(())
+    }
+
+    /// Called immediately after a tool finishes execution.
+    ///
+    /// This is similar to [`on_tool_result`] but provides access to the
+    /// full [`AgentToolResult`] including metadata.
+    fn on_after_tool_call(&self, _tool: &str, _result: &AgentToolResult) -> Result<(), crate::error::Error> {
+        Ok(())
+    }
+
+    // ── Compaction hooks ─────────────────────────────────────────────
+
+    /// Called before context compaction begins.
+    ///
+    /// Use this to save any state that should be preserved through compaction,
+    /// or to log that compaction is starting.
+    fn on_before_compaction(&self, _ctx: &crate::CompactionContext) -> Result<(), crate::error::Error> {
+        Ok(())
+    }
+
+    /// Called after context compaction completes.
+    ///
+    /// The `summary` contains the generated summary of the compacted messages.
+    /// Use this to restore state, update indices, or log compaction results.
+    fn on_after_compaction(&self, _summary: &str) -> Result<(), crate::error::Error> {
+        Ok(())
+    }
+
+    // ── Error hook ──────────────────────────────────────────────────
+
+    /// Called when an error occurs in the agent.
+    ///
+    /// Use this to log errors, send notifications, or perform recovery actions.
+    fn on_error(&self, _error: &crate::error::Error) -> Result<(), crate::error::Error> {
+        Ok(())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -880,6 +926,109 @@ impl ExtensionRegistry {
                 entry.extension.on_event(event);
             });
         }
+    }
+
+    // ── Enhanced Tool Hook Broadcasts ─────────────────────────────────
+
+    /// Broadcast `on_before_tool_call` to all enabled extensions.
+    pub fn emit_before_tool_call(
+        &self,
+        tool: &str,
+        args: &Value,
+    ) -> Vec<(String, crate::error::Error)> {
+        let mut errors = Vec::new();
+        for entry in self.entries.values().filter(|e| e.enabled) {
+            let name = entry.extension.name();
+            match entry.extension.on_before_tool_call(tool, args) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::warn!(extension = name, tool = tool, error = %e, "on_before_tool_call failed");
+                    errors.push((name.to_string(), e));
+                }
+            }
+        }
+        errors
+    }
+
+    /// Broadcast `on_after_tool_call` to all enabled extensions.
+    pub fn emit_after_tool_call(
+        &self,
+        tool: &str,
+        result: &AgentToolResult,
+    ) -> Vec<(String, crate::error::Error)> {
+        let mut errors = Vec::new();
+        for entry in self.entries.values().filter(|e| e.enabled) {
+            let name = entry.extension.name();
+            match entry.extension.on_after_tool_call(tool, result) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::warn!(extension = name, tool = tool, error = %e, "on_after_tool_call failed");
+                    errors.push((name.to_string(), e));
+                }
+            }
+        }
+        errors
+    }
+
+    // ── Compaction Hook Broadcasts ────────────────────────────────────
+
+    /// Broadcast `on_before_compaction` to all enabled extensions.
+    pub fn emit_before_compaction(
+        &self,
+        ctx: &crate::CompactionContext,
+    ) -> Vec<(String, crate::error::Error)> {
+        let mut errors = Vec::new();
+        for entry in self.entries.values().filter(|e| e.enabled) {
+            let name = entry.extension.name();
+            match entry.extension.on_before_compaction(ctx) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::warn!(extension = name, error = %e, "on_before_compaction failed");
+                    errors.push((name.to_string(), e));
+                }
+            }
+        }
+        errors
+    }
+
+    /// Broadcast `on_after_compaction` to all enabled extensions.
+    pub fn emit_after_compaction(
+        &self,
+        summary: &str,
+    ) -> Vec<(String, crate::error::Error)> {
+        let mut errors = Vec::new();
+        for entry in self.entries.values().filter(|e| e.enabled) {
+            let name = entry.extension.name();
+            match entry.extension.on_after_compaction(summary) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::warn!(extension = name, error = %e, "on_after_compaction failed");
+                    errors.push((name.to_string(), e));
+                }
+            }
+        }
+        errors
+    }
+
+    // ── Error Hook Broadcast ──────────────────────────────────────────
+
+    /// Broadcast `on_error` to all enabled extensions.
+    pub fn emit_error(
+        &self,
+        error: &crate::error::Error,
+    ) -> Vec<(String, crate::error::Error)> {
+        let mut errors = Vec::new();
+        for entry in self.entries.values().filter(|e| e.enabled) {
+            let name = entry.extension.name();
+            match entry.extension.on_error(error) {
+                Ok(()) => {}
+                Err(e) => {
+                    tracing::warn!(extension = name, error = %e, "on_error hook failed");
+                    errors.push((name.to_string(), e));
+                }
+            }
+        }
+        errors
     }
 
     // ── Querying ─────────────────────────────────────────────────────

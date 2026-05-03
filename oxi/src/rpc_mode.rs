@@ -3,6 +3,8 @@
 //! Implements a JSON-RPC 2.0 protocol over stdio for embedding oxi in other applications.
 //! Commands are received on stdin, responses and events are emitted on stdout.
 
+#![allow(unused_imports)]
+
 use crate::App;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -37,14 +39,18 @@ pub enum RpcCommand {
         message: String,
         images: Option<Vec<ImageData>>,
     },
-    Abort { id: Option<String> },
+    Abort {
+        id: Option<String>,
+    },
     NewSession {
         id: Option<String>,
         parent_session: Option<String>,
     },
 
     // ── State ───────────────────────────────────────────────────────
-    GetState { id: Option<String> },
+    GetState {
+        id: Option<String>,
+    },
 
     // ── Model ──────────────────────────────────────────────────────
     SetModel {
@@ -52,35 +58,68 @@ pub enum RpcCommand {
         provider: String,
         model_id: String,
     },
-    CycleModel { id: Option<String> },
-    GetAvailableModels { id: Option<String> },
+    CycleModel {
+        id: Option<String>,
+    },
+    GetAvailableModels {
+        id: Option<String>,
+    },
 
     // ── Thinking ────────────────────────────────────────────────────
-    SetThinkingLevel { id: Option<String>, level: String },
-    CycleThinkingLevel { id: Option<String> },
+    SetThinkingLevel {
+        id: Option<String>,
+        level: String,
+    },
+    CycleThinkingLevel {
+        id: Option<String>,
+    },
 
     // ── Queue modes ─────────────────────────────────────────────────
-    SetSteeringMode { id: Option<String>, mode: String },
-    SetFollowUpMode { id: Option<String>, mode: String },
+    SetSteeringMode {
+        id: Option<String>,
+        mode: String,
+    },
+    SetFollowUpMode {
+        id: Option<String>,
+        mode: String,
+    },
 
     // ── Compaction ──────────────────────────────────────────────────
     Compact {
         id: Option<String>,
         custom_instructions: Option<String>,
     },
-    SetAutoCompaction { id: Option<String>, enabled: bool },
+    SetAutoCompaction {
+        id: Option<String>,
+        enabled: bool,
+    },
 
     // ── Retry ───────────────────────────────────────────────────────
-    SetAutoRetry { id: Option<String>, enabled: bool },
-    AbortRetry { id: Option<String> },
+    SetAutoRetry {
+        id: Option<String>,
+        enabled: bool,
+    },
+    AbortRetry {
+        id: Option<String>,
+    },
 
     // ── Bash ────────────────────────────────────────────────────────
-    Bash { id: Option<String>, command: String },
-    AbortBash { id: Option<String> },
+    Bash {
+        id: Option<String>,
+        command: String,
+    },
+    AbortBash {
+        id: Option<String>,
+    },
 
     // ── Session ────────────────────────────────────────────────────
-    GetSessionStats { id: Option<String> },
-    ExportHtml { id: Option<String>, output_path: Option<String> },
+    GetSessionStats {
+        id: Option<String>,
+    },
+    ExportHtml {
+        id: Option<String>,
+        output_path: Option<String>,
+    },
     SwitchSession {
         id: Option<String>,
         session_path: String,
@@ -89,16 +128,29 @@ pub enum RpcCommand {
         id: Option<String>,
         entry_id: String,
     },
-    Clone { id: Option<String> },
-    GetForkMessages { id: Option<String> },
-    GetLastAssistantText { id: Option<String> },
-    SetSessionName { id: Option<String>, name: String },
+    Clone {
+        id: Option<String>,
+    },
+    GetForkMessages {
+        id: Option<String>,
+    },
+    GetLastAssistantText {
+        id: Option<String>,
+    },
+    SetSessionName {
+        id: Option<String>,
+        name: String,
+    },
 
     // ── Messages ───────────────────────────────────────────────────
-    GetMessages { id: Option<String> },
+    GetMessages {
+        id: Option<String>,
+    },
 
     // ── Commands ────────────────────────────────────────────────────
-    GetCommands { id: Option<String> },
+    GetCommands {
+        id: Option<String>,
+    },
 }
 
 /// Image data for RPC commands
@@ -182,8 +234,14 @@ pub enum RpcExtensionUiRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         widget_placement: Option<String>,
     },
-    SetTitle { id: String, title: String },
-    SetEditorText { id: String, text: String },
+    SetTitle {
+        id: String,
+        title: String,
+    },
+    SetEditorText {
+        id: String,
+        text: String,
+    },
 }
 
 /// Extension UI response from client
@@ -320,7 +378,9 @@ impl RpcServer {
                         let data = parts[1];
                         // Remove any potential metadata from header
                         let base64_data = data.split(';').next().unwrap_or(data);
-                        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(base64_data) {
+                        if let Ok(decoded) =
+                            base64::engine::general_purpose::STANDARD.decode(base64_data)
+                        {
                             return Some(RpcImageSource {
                                 data: decoded,
                                 mime_type: img.media_type,
@@ -397,7 +457,11 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
 }
 
 /// Handle a single RPC command
-fn handle_command(server: &Arc<RpcServer>, app: &App, value: serde_json::Value) -> Option<RpcResponse> {
+fn handle_command(
+    server: &Arc<RpcServer>,
+    app: &App,
+    value: serde_json::Value,
+) -> Option<RpcResponse> {
     // Handle extension UI responses
     if let Some(obj) = value.as_object() {
         if obj.get("type").and_then(|v| v.as_str()) == Some("extension_ui_response") {
@@ -427,10 +491,14 @@ fn handle_command(server: &Arc<RpcServer>, app: &App, value: serde_json::Value) 
 fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> RpcResponse {
     match command {
         // ── Prompting ──────────────────────────────────────────────
-        RpcCommand::Prompt { id, message, images } => {
+        RpcCommand::Prompt {
+            id,
+            message,
+            images,
+        } => {
             // Parse images
             let image_sources = server.parse_images(images);
-            
+
             // In a real implementation, this would send to the agent
             // For now, we just update state
             server.update_session_state(|s| {
@@ -446,12 +514,16 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
-        RpcCommand::Steer { id, message, images } => {
+
+        RpcCommand::Steer {
+            id,
+            message,
+            images,
+        } => {
             server.update_session_state(|s| {
                 s.steering_mode = "one_at_a_time".to_string();
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "steer".to_string(),
@@ -460,12 +532,16 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
-        RpcCommand::FollowUp { id, message, images } => {
+
+        RpcCommand::FollowUp {
+            id,
+            message,
+            images,
+        } => {
             server.update_session_state(|s| {
                 s.follow_up_mode = "one_at_a_time".to_string();
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "follow_up".to_string(),
@@ -474,12 +550,12 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
+
         RpcCommand::Abort { id } => {
             server.update_session_state(|s| {
                 s.is_streaming = false;
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "abort".to_string(),
@@ -488,14 +564,17 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
-        RpcCommand::NewSession { id, parent_session: _ } => {
+
+        RpcCommand::NewSession {
+            id,
+            parent_session: _,
+        } => {
             server.update_session_state(|s| {
                 s.session_id = uuid::Uuid::new_v4().to_string();
                 s.message_count = 0;
                 s.pending_message_count = 0;
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "new_session".to_string(),
@@ -508,7 +587,7 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
         // ── State ──────────────────────────────────────────────────
         RpcCommand::GetState { id } => {
             let state = server.get_session_state();
-            
+
             RpcResponse::Response {
                 id,
                 command: "get_state".to_string(),
@@ -519,7 +598,11 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
         }
 
         // ── Model ──────────────────────────────────────────────────
-        RpcCommand::SetModel { id, provider, model_id } => {
+        RpcCommand::SetModel {
+            id,
+            provider,
+            model_id,
+        } => {
             // In a real implementation, this would switch the model
             RpcResponse::Response {
                 id,
@@ -532,39 +615,35 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
-        RpcCommand::CycleModel { id } => {
-            RpcResponse::Response {
-                id,
-                command: "cycle_model".to_string(),
-                success: true,
-                data: Some(serde_json::json!({
-                    "model": null,
-                    "thinking_level": "default",
-                    "is_scoped": false
-                })),
-                error: None,
-            }
-        }
-        
-        RpcCommand::GetAvailableModels { id } => {
-            RpcResponse::Response {
-                id,
-                command: "get_available_models".to_string(),
-                success: true,
-                data: Some(serde_json::json!({
-                    "models": []
-                })),
-                error: None,
-            }
-        }
+
+        RpcCommand::CycleModel { id } => RpcResponse::Response {
+            id,
+            command: "cycle_model".to_string(),
+            success: true,
+            data: Some(serde_json::json!({
+                "model": null,
+                "thinking_level": "default",
+                "is_scoped": false
+            })),
+            error: None,
+        },
+
+        RpcCommand::GetAvailableModels { id } => RpcResponse::Response {
+            id,
+            command: "get_available_models".to_string(),
+            success: true,
+            data: Some(serde_json::json!({
+                "models": []
+            })),
+            error: None,
+        },
 
         // ── Thinking ───────────────────────────────────────────────
         RpcCommand::SetThinkingLevel { id, level } => {
             server.update_session_state(|s| {
                 s.thinking_level = level;
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "set_thinking_level".to_string(),
@@ -573,7 +652,7 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
+
         RpcCommand::CycleThinkingLevel { id } => {
             let current = server.get_session_state().thinking_level;
             let next = match current.as_str() {
@@ -582,11 +661,11 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 "medium" => "high",
                 _ => "off",
             };
-            
+
             server.update_session_state(|s| {
                 s.thinking_level = next.to_string();
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "cycle_thinking_level".to_string(),
@@ -601,7 +680,7 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
             server.update_session_state(|s| {
                 s.steering_mode = mode;
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "set_steering_mode".to_string(),
@@ -610,12 +689,12 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
+
         RpcCommand::SetFollowUpMode { id, mode } => {
             server.update_session_state(|s| {
                 s.follow_up_mode = mode;
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "set_follow_up_mode".to_string(),
@@ -626,11 +705,14 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
         }
 
         // ── Compaction ─────────────────────────────────────────────
-        RpcCommand::Compact { id, custom_instructions: _ } => {
+        RpcCommand::Compact {
+            id,
+            custom_instructions: _,
+        } => {
             server.update_session_state(|s| {
                 s.is_compacting = true;
             });
-            
+
             // Simulate compaction
             let state = server.get_session_state();
             let result = CompactionResult {
@@ -638,12 +720,12 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 compacted_count: (state.message_count as f32 * 0.7) as usize,
                 tokens_saved: Some(1000),
             };
-            
+
             server.update_session_state(|s| {
                 s.is_compacting = false;
                 s.message_count = result.compacted_count;
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "compact".to_string(),
@@ -652,12 +734,12 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
+
         RpcCommand::SetAutoCompaction { id, enabled } => {
             server.update_session_state(|s| {
                 s.auto_compaction_enabled = enabled;
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "set_auto_compaction".to_string(),
@@ -668,25 +750,21 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
         }
 
         // ── Retry ─────────────────────────────────────────────────
-        RpcCommand::SetAutoRetry { id, enabled: _ } => {
-            RpcResponse::Response {
-                id,
-                command: "set_auto_retry".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
-        
-        RpcCommand::AbortRetry { id } => {
-            RpcResponse::Response {
-                id,
-                command: "abort_retry".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
+        RpcCommand::SetAutoRetry { id, enabled: _ } => RpcResponse::Response {
+            id,
+            command: "set_auto_retry".to_string(),
+            success: true,
+            data: None,
+            error: None,
+        },
+
+        RpcCommand::AbortRetry { id } => RpcResponse::Response {
+            id,
+            command: "abort_retry".to_string(),
+            success: true,
+            data: None,
+            error: None,
+        },
 
         // ── Bash ───────────────────────────────────────────────────
         RpcCommand::Bash { id, command } => {
@@ -694,42 +772,36 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 .arg("-c")
                 .arg(&command)
                 .output();
-            
+
             match output {
-                Ok(output) => {
-                    RpcResponse::Response {
-                        id,
-                        command: "bash".to_string(),
-                        success: true,
-                        data: Some(serde_json::json!({
-                            "stdout": String::from_utf8_lossy(&output.stdout),
-                            "stderr": String::from_utf8_lossy(&output.stderr),
-                            "exit_code": output.status.code()
-                        })),
-                        error: None,
-                    }
-                }
-                Err(e) => {
-                    RpcResponse::Response {
-                        id,
-                        command: "bash".to_string(),
-                        success: false,
-                        data: None,
-                        error: Some(e.to_string()),
-                    }
-                }
+                Ok(output) => RpcResponse::Response {
+                    id,
+                    command: "bash".to_string(),
+                    success: true,
+                    data: Some(serde_json::json!({
+                        "stdout": String::from_utf8_lossy(&output.stdout),
+                        "stderr": String::from_utf8_lossy(&output.stderr),
+                        "exit_code": output.status.code()
+                    })),
+                    error: None,
+                },
+                Err(e) => RpcResponse::Response {
+                    id,
+                    command: "bash".to_string(),
+                    success: false,
+                    data: None,
+                    error: Some(e.to_string()),
+                },
             }
         }
-        
-        RpcCommand::AbortBash { id } => {
-            RpcResponse::Response {
-                id,
-                command: "abort_bash".to_string(),
-                success: true,
-                data: None,
-                error: None,
-            }
-        }
+
+        RpcCommand::AbortBash { id } => RpcResponse::Response {
+            id,
+            command: "abort_bash".to_string(),
+            success: true,
+            data: None,
+            error: None,
+        },
 
         // ── Session ────────────────────────────────────────────────
         RpcCommand::GetSessionStats { id } => {
@@ -739,7 +811,7 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 token_count: None,
                 last_activity: None,
             };
-            
+
             RpcResponse::Response {
                 id,
                 command: "get_session_stats".to_string(),
@@ -748,23 +820,24 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
-        RpcCommand::ExportHtml { id, output_path: _ } => {
-            RpcResponse::Response {
-                id,
-                command: "export_html".to_string(),
-                success: true,
-                data: Some(serde_json::json!({ "path": "session.html" })),
-                error: None,
-            }
-        }
-        
-        RpcCommand::SwitchSession { id, session_path: _ } => {
+
+        RpcCommand::ExportHtml { id, output_path: _ } => RpcResponse::Response {
+            id,
+            command: "export_html".to_string(),
+            success: true,
+            data: Some(serde_json::json!({ "path": "session.html" })),
+            error: None,
+        },
+
+        RpcCommand::SwitchSession {
+            id,
+            session_path: _,
+        } => {
             server.update_session_state(|s| {
                 s.session_id = uuid::Uuid::new_v4().to_string();
                 s.message_count = 0;
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "switch_session".to_string(),
@@ -773,59 +846,51 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                 error: None,
             }
         }
-        
-        RpcCommand::Fork { id, entry_id: _ } => {
-            RpcResponse::Response {
-                id,
-                command: "fork".to_string(),
-                success: true,
-                data: Some(serde_json::json!({
-                    "text": "",
-                    "cancelled": false
-                })),
-                error: None,
-            }
-        }
-        
-        RpcCommand::Clone { id } => {
-            RpcResponse::Response {
-                id,
-                command: "clone".to_string(),
-                success: true,
-                data: Some(serde_json::json!({ "cancelled": false })),
-                error: None,
-            }
-        }
-        
-        RpcCommand::GetForkMessages { id } => {
-            RpcResponse::Response {
-                id,
-                command: "get_fork_messages".to_string(),
-                success: true,
-                data: Some(serde_json::json!({
-                    "messages": []
-                })),
-                error: None,
-            }
-        }
-        
-        RpcCommand::GetLastAssistantText { id } => {
-            RpcResponse::Response {
-                id,
-                command: "get_last_assistant_text".to_string(),
-                success: true,
-                data: Some(serde_json::json!({
-                    "text": null
-                })),
-                error: None,
-            }
-        }
-        
+
+        RpcCommand::Fork { id, entry_id: _ } => RpcResponse::Response {
+            id,
+            command: "fork".to_string(),
+            success: true,
+            data: Some(serde_json::json!({
+                "text": "",
+                "cancelled": false
+            })),
+            error: None,
+        },
+
+        RpcCommand::Clone { id } => RpcResponse::Response {
+            id,
+            command: "clone".to_string(),
+            success: true,
+            data: Some(serde_json::json!({ "cancelled": false })),
+            error: None,
+        },
+
+        RpcCommand::GetForkMessages { id } => RpcResponse::Response {
+            id,
+            command: "get_fork_messages".to_string(),
+            success: true,
+            data: Some(serde_json::json!({
+                "messages": []
+            })),
+            error: None,
+        },
+
+        RpcCommand::GetLastAssistantText { id } => RpcResponse::Response {
+            id,
+            command: "get_last_assistant_text".to_string(),
+            success: true,
+            data: Some(serde_json::json!({
+                "text": null
+            })),
+            error: None,
+        },
+
         RpcCommand::SetSessionName { id, name } => {
             server.update_session_state(|s| {
                 s.session_name = if name.is_empty() { None } else { Some(name) };
             });
-            
+
             RpcResponse::Response {
                 id,
                 command: "set_session_name".to_string(),
@@ -836,17 +901,15 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
         }
 
         // ── Messages ───────────────────────────────────────────────
-        RpcCommand::GetMessages { id } => {
-            RpcResponse::Response {
-                id,
-                command: "get_messages".to_string(),
-                success: true,
-                data: Some(serde_json::json!({
-                    "messages": []
-                })),
-                error: None,
-            }
-        }
+        RpcCommand::GetMessages { id } => RpcResponse::Response {
+            id,
+            command: "get_messages".to_string(),
+            success: true,
+            data: Some(serde_json::json!({
+                "messages": []
+            })),
+            error: None,
+        },
 
         // ── Commands ────────────────────────────────────────────────
         RpcCommand::GetCommands { id } => {
@@ -862,7 +925,7 @@ fn execute_command(server: &Arc<RpcServer>, app: &App, command: RpcCommand) -> R
                     source: "builtin".to_string(),
                 },
             ];
-            
+
             RpcResponse::Response {
                 id,
                 command: "get_commands".to_string(),
@@ -904,7 +967,7 @@ impl PasteHandler {
             state: PasteState::Normal,
             buffer: Vec::new(),
             start_sequence: vec![0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7E], // \x1b[200~
-            end_sequence: vec![0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E], // \x1b[201~
+            end_sequence: vec![0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7E],   // \x1b[201~
         }
     }
 
@@ -936,16 +999,38 @@ impl PasteHandler {
                 } else if self.buffer.len() >= 1 && self.buffer[0] == 0x1B && byte == 0x5B {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 2 && self.buffer[0] == 0x1B && self.buffer[1] == 0x5B && byte == 0x32 {
+                } else if self.buffer.len() >= 2
+                    && self.buffer[0] == 0x1B
+                    && self.buffer[1] == 0x5B
+                    && byte == 0x32
+                {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 3 && self.buffer[0] == 0x1B && self.buffer[1] == 0x5B && self.buffer[2] == 0x32 && byte == 0x30 {
+                } else if self.buffer.len() >= 3
+                    && self.buffer[0] == 0x1B
+                    && self.buffer[1] == 0x5B
+                    && self.buffer[2] == 0x32
+                    && byte == 0x30
+                {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 4 && self.buffer[0] == 0x1B && self.buffer[1] == 0x5B && self.buffer[2] == 0x32 && self.buffer[3] == 0x30 && byte == 0x30 {
+                } else if self.buffer.len() >= 4
+                    && self.buffer[0] == 0x1B
+                    && self.buffer[1] == 0x5B
+                    && self.buffer[2] == 0x32
+                    && self.buffer[3] == 0x30
+                    && byte == 0x30
+                {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 5 && self.buffer[0] == 0x1B && self.buffer[1] == 0x5B && self.buffer[2] == 0x32 && self.buffer[3] == 0x30 && self.buffer[4] == 0x30 && byte == 0x7E {
+                } else if self.buffer.len() >= 5
+                    && self.buffer[0] == 0x1B
+                    && self.buffer[1] == 0x5B
+                    && self.buffer[2] == 0x32
+                    && self.buffer[3] == 0x30
+                    && self.buffer[4] == 0x30
+                    && byte == 0x7E
+                {
                     // Paste start detected
                     self.buffer.clear();
                     self.state = PasteState::Pasting;
@@ -966,16 +1051,38 @@ impl PasteHandler {
                 } else if self.buffer.len() >= 1 && self.buffer[0] == 0x1B && byte == 0x5B {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 2 && self.buffer[0] == 0x1B && self.buffer[1] == 0x5B && byte == 0x32 {
+                } else if self.buffer.len() >= 2
+                    && self.buffer[0] == 0x1B
+                    && self.buffer[1] == 0x5B
+                    && byte == 0x32
+                {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 3 && self.buffer[0] == 0x1B && self.buffer[1] == 0x5B && self.buffer[2] == 0x32 && byte == 0x30 {
+                } else if self.buffer.len() >= 3
+                    && self.buffer[0] == 0x1B
+                    && self.buffer[1] == 0x5B
+                    && self.buffer[2] == 0x32
+                    && byte == 0x30
+                {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 4 && self.buffer[0] == 0x1B && self.buffer[1] == 0x5B && self.buffer[2] == 0x32 && self.buffer[3] == 0x30 && byte == 0x31 {
+                } else if self.buffer.len() >= 4
+                    && self.buffer[0] == 0x1B
+                    && self.buffer[1] == 0x5B
+                    && self.buffer[2] == 0x32
+                    && self.buffer[3] == 0x30
+                    && byte == 0x31
+                {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 5 && self.buffer[0] == 0x1B && self.buffer[1] == 0x5B && self.buffer[2] == 0x32 && self.buffer[3] == 0x30 && self.buffer[4] == 0x31 && byte == 0x7E {
+                } else if self.buffer.len() >= 5
+                    && self.buffer[0] == 0x1B
+                    && self.buffer[1] == 0x5B
+                    && self.buffer[2] == 0x32
+                    && self.buffer[3] == 0x30
+                    && self.buffer[4] == 0x31
+                    && byte == 0x7E
+                {
                     // Paste end detected
                     self.buffer.clear();
                     self.state = PasteState::Normal;
@@ -1079,12 +1186,10 @@ mod tests {
 
     #[test]
     fn test_parse_images_data_uri() {
-        let images = vec![
-            ImageData {
-                source: "data:image/png;base64,iVBORw0KGgo=".to_string(),
-                media_type: "image/png".to_string(),
-            }
-        ];
+        let images = vec![ImageData {
+            source: "data:image/png;base64,iVBORw0KGgo=".to_string(),
+            media_type: "image/png".to_string(),
+        }];
         let parsed = RpcServer::parse_images(Some(images));
         assert_eq!(parsed.len(), 1);
         // iVBORw0KGgo= decodes to partial PNG header
@@ -1100,12 +1205,10 @@ mod tests {
 
     #[test]
     fn test_parse_images_non_data_uri() {
-        let images = vec![
-            ImageData {
-                source: "https://example.com/image.png".to_string(),
-                media_type: "image/png".to_string(),
-            }
-        ];
+        let images = vec![ImageData {
+            source: "https://example.com/image.png".to_string(),
+            media_type: "image/png".to_string(),
+        }];
         let parsed = RpcServer::parse_images(Some(images));
         // Non-data URI should be filtered out
         assert!(parsed.is_empty());
@@ -1128,9 +1231,9 @@ mod tests {
         handler.buffer.push(b'e');
         handler.buffer.push(b's');
         handler.state = PasteState::Pasting;
-        
+
         handler.reset();
-        
+
         assert_eq!(handler.state(), PasteState::Normal);
         assert!(handler.buffer().is_empty());
     }
@@ -1138,32 +1241,32 @@ mod tests {
     #[test]
     fn test_paste_handler_paste_start_sequence() {
         let mut handler = PasteHandler::new();
-        
+
         // Process ESC
         let result = handler.process_byte(0x1B);
         assert!(result.is_none());
         assert_eq!(handler.state(), PasteState::Normal);
-        
+
         // Process [
         let result = handler.process_byte(0x5B);
         assert!(result.is_none());
-        
+
         // Process 2
         let result = handler.process_byte(0x32);
         assert!(result.is_none());
-        
+
         // Process 0
         let result = handler.process_byte(0x30);
         assert!(result.is_none());
-        
+
         // Process another 0
         let result = handler.process_byte(0x30);
         assert!(result.is_none());
-        
+
         // Process ~
         let result = handler.process_byte(0x7E);
         assert!(result.is_none());
-        
+
         // Now we should be in pasting mode
         assert_eq!(handler.state(), PasteState::Pasting);
     }
@@ -1171,39 +1274,39 @@ mod tests {
     #[test]
     fn test_paste_handler_paste_end_sequence() {
         let mut handler = PasteHandler::new();
-        
+
         // First start paste
         for byte in &[0x1B, 0x5B, 0x32, 0x30, 0x30, 0x7Eu8] {
             handler.process_byte(*byte);
         }
         assert_eq!(handler.state(), PasteState::Pasting);
-        
+
         // Add some paste data
         handler.buffer.push(b'h');
         handler.buffer.push(b'e');
         handler.buffer.push(b'l');
         handler.buffer.push(b'l');
         handler.buffer.push(b'o');
-        
+
         // Process end sequence
         for byte in &[0x1B, 0x5B, 0x32, 0x30, 0x31, 0x7Eu8] {
             handler.process_byte(*byte);
         }
-        
+
         assert_eq!(handler.state(), PasteState::Normal);
     }
 
     #[test]
     fn test_paste_handler_normal_text() {
         let mut handler = PasteHandler::new();
-        
+
         // Regular text should be passed through
         let result = handler.process_byte(b'h');
         assert_eq!(result, Some(b'h'));
-        
+
         let result = handler.process_byte(b'e');
         assert_eq!(result, Some(b'e'));
-        
+
         let result = handler.process_byte(b'l');
         assert_eq!(result, Some(b'l'));
     }
@@ -1211,19 +1314,19 @@ mod tests {
     #[test]
     fn test_paste_handler_extract_image_png() {
         let handler = PasteHandler::new();
-        
+
         // Create a buffer with PNG magic bytes
         let mut buffer = vec![
             0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG header
             0x00, 0x00, 0x00, 0x0D, // IHDR length
             0x49, 0x48, 0x44, 0x52, // IHDR
         ];
-        
+
         let mut handler = PasteHandler::new();
         // This is a simplified test - in real usage we'd populate the buffer through process_byte
         // For now, just test the extract function directly
         assert!(handler.extract_image_data().is_none()); // Empty buffer
-        
+
         // Test with non-empty buffer (manually set)
         let mut test_handler = PasteHandler::new();
         test_handler.buffer = buffer;
@@ -1235,13 +1338,13 @@ mod tests {
     #[test]
     fn test_paste_handler_extract_image_jpeg() {
         let mut handler = PasteHandler::new();
-        
+
         // JPEG magic bytes
         let buffer = vec![
             0xFF, 0xD8, 0xFF, 0xE0, // JPEG header
             0x00, 0x10, 0x4A, 0x46, // JFIF
         ];
-        
+
         handler.buffer = buffer;
         let result = handler.extract_image_data();
         assert!(result.is_some());
@@ -1251,7 +1354,7 @@ mod tests {
     #[test]
     fn test_paste_handler_extract_image_none() {
         let mut handler = PasteHandler::new();
-        
+
         // Plain text - no image data
         handler.buffer = b"hello world".to_vec();
         let result = handler.extract_image_data();
@@ -1268,7 +1371,7 @@ mod tests {
     #[test]
     fn test_paste_handler_extract_image_with_nulls() {
         let mut handler = PasteHandler::new();
-        
+
         // Binary data with null bytes (potential image)
         let mut buffer = vec![0u8; 100];
         buffer[0] = b'A';
@@ -1281,7 +1384,7 @@ mod tests {
         for i in 10..20 {
             buffer[i] = 0;
         }
-        
+
         handler.buffer = buffer;
         let result = handler.extract_image_data();
         assert!(result.is_some());
@@ -1303,7 +1406,7 @@ mod tests {
             message_count: 42,
             pending_message_count: 1,
         };
-        
+
         let json = serde_json::to_string(&state).unwrap();
         assert!(json.contains("\"thinking_level\":\"high\""));
         assert!(json.contains("\"is_streaming\":true"));
@@ -1317,7 +1420,7 @@ mod tests {
             description: Some("Test command".to_string()),
             source: "builtin".to_string(),
         };
-        
+
         let json = serde_json::to_string(&cmd).unwrap();
         assert!(json.contains("\"name\":\"test\""));
         assert!(json.contains("\"source\":\"builtin\""));
@@ -1344,7 +1447,7 @@ mod tests {
             data: Some(serde_json::json!({"result": "ok"})),
             error: None,
         };
-        
+
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("\"success\":true"));
         assert!(json.contains("\"command\":\"test\""));
@@ -1359,7 +1462,7 @@ mod tests {
             data: None,
             error: Some("Something went wrong".to_string()),
         };
-        
+
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("\"success\":false"));
         assert!(json.contains("\"error\":\"Something went wrong\""));
@@ -1373,7 +1476,7 @@ mod tests {
             options: vec!["Option 1".to_string(), "Option 2".to_string()],
             timeout: Some(5000),
         };
-        
+
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"method\":\"select\""));
         assert!(json.contains("\"title\":\"Select an option\""));
@@ -1386,7 +1489,7 @@ mod tests {
             message: "Hello!".to_string(),
             notify_type: Some("info".to_string()),
         };
-        
+
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("\"method\":\"notify\""));
         assert!(json.contains("\"message\":\"Hello!\""));
@@ -1401,7 +1504,7 @@ mod tests {
             compacted_count: 30,
             tokens_saved: Some(5000),
         };
-        
+
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"original_count\":100"));
         assert!(json.contains("\"compacted_count\":30"));
@@ -1414,7 +1517,7 @@ mod tests {
             token_count: Some(10000),
             last_activity: Some(1699000000),
         };
-        
+
         let json = serde_json::to_string(&stats).unwrap();
         assert!(json.contains("\"message_count\":50"));
         assert!(json.contains("\"token_count\":10000"));
