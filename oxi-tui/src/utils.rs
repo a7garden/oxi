@@ -305,7 +305,8 @@ fn truncate_fragment(text: &str, max_width: usize) -> String {
     result
 }
 
-/// Build the final truncated string: prefix + reset + ellipsis + reset + optional padding.
+/// Build the final truncated string: prefix + [reset] + ellipsis + optional padding.
+/// Only emits ANSI resets when the prefix contains ANSI codes.
 fn finalize_truncation(
     prefix: &str,
     prefix_w: usize,
@@ -314,9 +315,13 @@ fn finalize_truncation(
     max_width: usize,
     pad: bool,
 ) -> String {
-    let reset = "\x1b[0m";
+    let has_ansi = prefix.contains('\x1b');
     let total_w = prefix_w + ellipsis_w;
-    let mut result = format!("{prefix}{reset}{ellipsis}{reset}");
+    let mut result = if has_ansi {
+        format!("{}\x1b[0m{}", prefix, ellipsis)
+    } else {
+        format!("{}{}", prefix, ellipsis)
+    };
     if pad && total_w < max_width {
         let _ = write!(result, "{:width$}", "", width = max_width - total_w);
     }
@@ -766,8 +771,8 @@ pub fn word_at(text: &str, pos: usize) -> Option<(usize, usize)> {
         }
     };
 
-    // Find the start of the run
-    let mut start = pos;
+    // Find the start of the run by scanning backward from pos
+    let mut start = 0;
     for (i, ch) in text[..pos].char_indices().rev() {
         if is_word(ch) == target_is_word {
             continue;
@@ -1330,15 +1335,14 @@ mod tests {
 
     #[test]
     fn test_truncate_wide_chars() {
-        // 你 = 2 cols, 好 = 2 cols. Total = 4
-        assert_eq!(truncate_to_width("你好ab", 4, None, false), "你好ab");
+        // 你=2, 好=2, a=1, b=1 → total 6
+        assert_eq!(truncate_to_width("你好ab", 6, None, false), "你好ab");
     }
 
     #[test]
     fn test_truncate_wide_chars_with_ellipsis() {
         let result = truncate_to_width("你好世界", 5, None, false);
-        // 你好 = 4 cols, need ellipsis → "你好..." (4+3=7 > 5)
-        // Actually: target = 5-3 = 2, so only "你" (2 cols) + "..."
+        // target = 5-3 = 2, "你" = 2 cols → "你..." = 5 cols
         assert!(result.contains("你"));
         assert!(result.contains("..."));
         assert_eq!(visible_width(&strip_ansi(&result)), 5);
