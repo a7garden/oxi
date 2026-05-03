@@ -710,4 +710,25 @@ data: [DONE]"#;
         assert!(url.contains("my-resource"));
         assert!(url.contains("gpt-4o"));
     }
+
+    #[test]
+    fn test_azure_endpoint_format() {
+        let provider = AzureProvider {
+            client: Client::new(),
+            api_key: Some("key".to_string()),
+            resource_name: Some("my-resource".to_string()),
+            deployment_name: Some("gpt-4-turbo".to_string()),
+        };
+        
+        let model = make_test_model("default", "");
+        let url = provider.build_url(&model).unwrap();
+        
+        // Verify the complete Azure endpoint format
+        assert!(url.starts_with("https://"));
+        assert!(url.contains(".openai.azure.com"));
+        assert!(url.contains("/openai/deployments/"));
+        assert!(url.contains("gpt-4-turbo"));
+        assert!(url.contains("chat/completions"));
+        assert!(url.contains("api-version=2024-02-15-preview"));
+    }
 }
