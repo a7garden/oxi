@@ -24,11 +24,13 @@ pub use autocomplete::FuzzyMatcher;
 pub use cell::{Attributes, Cell, CellBuilder, Color};
 pub use component::Component;
 pub use components::{
-    AutocompleteProvider, BorderStyle, Box, ChatMessageDisplay, ChatView, Command, CommandPalette,
-    Completion, ContentBlockDisplay, Editor, EditorOptions, FileCompleter, Footer, FooterData,
-    FooterTheme, Image, ImageProtocol, Input, InputOptions, Loader, Markdown, MarkdownTheme,
-    Mention, MessageRole, SelectItem, SelectList, SettingEntry, SettingValue, SettingsList,
-    SettingsOverlay, Spacer, StreamingState, Text, ThemeInfo, ThemeSelector, TruncatedText,
+    AutocompleteProvider, BorderStyle, Box, CancellableLoader, ChatMessageDisplay, ChatView,
+    Command, CommandPalette, Completion, ContentBlockDisplay, Editor, EditorComponent,
+    EditorOptions, FileCompleter, Footer, FooterData, FooterTheme, Image, ImageProtocol, Input,
+    InputOptions, Loader, Markdown, MarkdownTheme, Mention, MessageRole, ModelItem,
+    ModelSelectorOverlay, ModelSelectorTheme, OnThemePreviewFn, SelectItem, SelectList,
+    SettingEntry, SettingValue, SettingsList, SettingsOverlay, Spacer, StreamingState, Text,
+    ThemeInfo, ThemeSelector, TruncatedText,
 };
 pub use event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent,
