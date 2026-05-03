@@ -104,12 +104,12 @@ impl AuthStorageBackend for FileAuthStorage {
                 .map_err(|e| AuthError::WriteError(e.to_string()))?;
         }
 
-        // Set file permissions to owner-only
+        // Set file permissions to owner-only on Unix
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::Permissions::mode(0o600);
-            std::fs::set_permissions(&self.path, perms.mode(0o600))
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(&self.path, perms)
                 .map_err(|e| AuthError::WriteError(e.to_string()))?;
         }
 

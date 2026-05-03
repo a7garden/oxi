@@ -98,7 +98,7 @@ fn is_alias(id: &str) -> bool {
         return true;
     }
     // Check if ends with date pattern (-YYYYMMDD)
-    let date_pattern = regex_lite::Regex::new(r"-\d{8}$").ok();
+    let date_pattern = regex::Regex::new(r"-\d{8}$").ok();
     match date_pattern {
         Some(re) => !re.is_match(id),
         None => true,
@@ -352,7 +352,7 @@ pub fn resolve_cli_model(
         };
 
         ResolveCliModelResult {
-            model: fallback_model,
+            model: fallback_model.clone(),
             thinking_level: parsed.thinking_level,
             warning: parsed.warning,
             error: fallback_model.is_none().then(|| {
@@ -411,7 +411,7 @@ pub fn find_initial_model(
                 if model.is_some() {
                     return InitialModelResult {
                         model,
-                        thinking_level: s.thinking_level.to_string(),
+                        thinking_level: format!("{:?}", s.thinking_level),
                         fallback_message: None,
                     };
                 }

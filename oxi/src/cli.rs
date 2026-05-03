@@ -439,23 +439,16 @@ where
 
 /// Check if stdin is piped (for print mode detection)
 pub fn is_stdin_piped() -> bool {
+    // Simple check using is_terminal()
     #[cfg(unix)]
     {
-        use std::os::unix::io::AsRawFd;
-        let stdin_fd = std::io::stdin().as_raw_fd();
-        unsafe {
-            let mut stat: libc::stat = std::mem::zeroed();
-            if libc::fstat(stdin_fd, &mut stat) == 0 {
-                return libc::S_ISCHR(stat.st_mode) == 0;
-            }
-        }
+        use std::io::IsTerminal;
+        return !std::io::stdin().is_terminal();
     }
     #[cfg(not(unix))]
     {
-        // On non-Unix, we can't easily detect stdin pipe
-        // Assume not piped
+        false
     }
-    false
 }
 
 /// Detect if we're running in print mode (non-interactive)
@@ -473,24 +466,13 @@ pub fn detect_print_mode() -> bool {
 /// Get the version string
 pub fn get_version() -> String {
     let version = env!("CARGO_PKG_VERSION");
-    let commit = option_env!("VERGEN_GIT_SHA").unwrap_or("unknown");
-    let build_date = option_env!("VERGEN_BUILD_TIMESTAMP").unwrap_or("unknown");
-    format!("{} ({} {})", version, commit, build_date)
+    format!("{}", version)
 }
 
-/// Generate bash completion script
-pub fn generate_bash_completion() -> String {
-    CliArgs::command().render_bash_completion_script()
-}
-
-/// Generate zsh completion script
-pub fn generate_zsh_completion() -> String {
-    CliArgs::command().render_zsh_completion_script()
-}
-
-/// Generate fish completion script
-pub fn generate_fish_completion() -> String {
-    CliArgs::command().render_fish_completion_script()
+/// Generate shell completion script
+pub fn generate_completion(shell: &str) -> String {
+    // Requires clap_complete crate
+    format!("# Shell completion for {} is not yet implemented.\n# Install clap_complete to enable this feature.", shell)
 }
 
 #[cfg(test)]

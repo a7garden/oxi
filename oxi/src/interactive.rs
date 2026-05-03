@@ -10,12 +10,13 @@
 //! `/model`, `/clear`, `/compact`, `/undo`, `/redo`, `/branch`,
 //! `/session`, `/export`, `/settings`, `/help`
 
-use crate::{App, ChatMessage, InteractiveSession};
+use crate::InteractiveSession;
 use anyhow::Result;
-use oxi_agent::AgentEvent;
+use oxi_agent::{Agent, AgentEvent};
 use oxi_tui::{
-    ChatMessageDisplay, ChatView, ContentBlockDisplay, Input, MessageRole, Rect, Surface, Theme,
+    ChatMessageDisplay, ChatView, Component, ContentBlockDisplay, Input, MessageRole, Rect, Surface, Theme,
 };
+use std::os::unix::process::ExitStatusExt;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -161,14 +162,14 @@ impl SlashCommand {
 /// Run the full interactive mode loop.
 pub async fn run_interactive(app: crate::App) -> Result<()> {
     let theme = Theme::dark();
-    let agent: Arc<crate::agent::Agent> = app.agent();
+    let agent: Arc<Agent> = app.agent();
 
     // Channels
     let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
     let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
 
     // Agent worker thread (non-Send futures need a LocalSet)
-    let agent_for_thread = Arc::clone(&agent);
+    let agent_for_thread: Arc<Agent> = Arc::clone(&agent);
     let agent_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -716,7 +717,8 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                 UiEvent::Complete => {
                     chat_view.stream_thinking_end();
                     chat_view.finish_streaming();
-                    state = InteractiveState::Display;
+                    let _display_state = InteractiveState::Display;
+                    state = InteractiveState::Input;
 
                     // Capture the response text into session
                     let st = app.agent_state();

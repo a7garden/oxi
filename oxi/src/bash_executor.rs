@@ -67,10 +67,12 @@ pub struct BashExecutor {
 impl BashExecutor {
     /// Create a new bash executor
     pub fn new(config: BashExecutorConfig) -> Self {
+        let cwd = RwLock::new(config.cwd.clone());
+        let env = RwLock::new(config.env.clone());
         Self {
             config,
-            cwd: RwLock::new(config.cwd.clone()),
-            env: RwLock::new(config.env.clone()),
+            cwd,
+            env,
             history: RwLock::new(Vec::new()),
         }
     }

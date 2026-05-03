@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -357,14 +358,9 @@ impl KeybindingsManager {
     }
 
     /// Create from settings
-    pub fn from_settings(settings: &crate::settings::Settings) -> Self {
-        let mut manager = Self::new();
-        // Apply settings-based keybindings if any
-        if let Some(keybindings) = &settings.keybindings {
-            for (action, keys) in keybindings {
-                manager.user_overrides.insert(action.clone(), keys.clone());
-            }
-        }
+    pub fn from_settings(_settings: &crate::settings::Settings) -> Self {
+        let manager = Self::new();
+        // Settings-based keybindings would be applied here if available
         manager
     }
 

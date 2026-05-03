@@ -14,6 +14,20 @@ pub mod templates;
 pub mod tui_interactive;
 pub mod tui_components;
 
+// Utility modules
+pub mod event_bus;
+pub mod model_resolver;
+pub mod cli;
+pub mod git_utils;
+pub mod keybindings;
+pub mod output_guard;
+pub mod messages;
+pub mod auth_storage;
+pub mod bash_executor;
+pub mod diagnostics;
+pub mod resource_loader;
+pub mod footer_data;
+
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use oxi_ai::{get_model, get_provider};
