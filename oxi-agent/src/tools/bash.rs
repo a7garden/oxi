@@ -9,8 +9,8 @@
 //! - Separate stdout/stderr capture combined at end
 //! - Process tree kill on abort/cancel via signal
 
-use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
+use super::truncate::{self, TruncationOptions, TruncationResult};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -41,11 +41,7 @@ impl BashTool {
         if secs >= 60 {
             let mins = secs / 60;
             let remain_secs = secs % 60;
-            format!(
-                "{}m {:.1}s",
-                mins,
-                remain_secs as f64 + millis as f64 / 1000.0
-            )
+            format!("{}m {:.1}s", mins, remain_secs as f64 + millis as f64 / 1000.0)
         } else {
             format!("{:.1}s", secs as f64 + millis as f64 / 1000.0)
         }
@@ -66,11 +62,7 @@ impl BashTool {
                     "\n\n[Truncated: showing {} of {} lines. {} bytes remaining]",
                     truncation.output_lines,
                     truncation.total_lines,
-                    truncate::format_bytes(
-                        truncation
-                            .total_bytes
-                            .saturating_sub(truncation.output_bytes)
-                    )
+                    truncate::format_bytes(truncation.total_bytes.saturating_sub(truncation.output_bytes))
                 ),
                 truncate::TruncatedBy::Bytes => format!(
                     "\n\n[Truncated: {} lines shown ({} byte limit). Total was {} lines, {}]",
@@ -215,17 +207,18 @@ impl BashTool {
         let elapsed = start.elapsed();
 
         // Collect stdout and stderr
-        let stdout_bytes = stdout_handle.await.unwrap_or_default();
-        let stderr_bytes = stderr_handle.await.unwrap_or_default();
+        let stdout_bytes = stdout_handle
+            .await
+            .unwrap_or_default();
+        let stderr_bytes = stderr_handle
+            .await
+            .unwrap_or_default();
 
         let stdout_str = String::from_utf8_lossy(&stdout_bytes).to_string();
         let stderr_str = String::from_utf8_lossy(&stderr_bytes).to_string();
 
         if let Some(cb) = progress_cb {
-            cb(format!(
-                "Process completed in {}",
-                Self::format_duration(elapsed)
-            ));
+            cb(format!("Process completed in {}", Self::format_duration(elapsed)));
         }
 
         match result {
@@ -246,15 +239,15 @@ impl BashTool {
 
                 // Apply truncation
                 let truncation = truncate::truncate_head(
-                    if combined.is_empty() {
-                        "(no output)"
-                    } else {
-                        &combined
-                    },
+                    if combined.is_empty() { "(no output)" } else { &combined },
                     &TruncationOptions::default(),
                 );
 
-                let output = Self::build_output(&truncation, elapsed, exit_code);
+                let output = Self::build_output(
+                    &truncation,
+                    elapsed,
+                    exit_code,
+                );
 
                 if status.success() {
                     Ok(AgentToolResult::success(output))
@@ -276,8 +269,7 @@ impl BashTool {
                 }
 
                 if !output.is_empty() {
-                    let truncation =
-                        truncate::truncate_head(&output, &TruncationOptions::default());
+                    let truncation = truncate::truncate_head(&output, &TruncationOptions::default());
                     output = truncation.content;
                 }
 
@@ -423,11 +415,11 @@ mod tests {
     #[tokio::test]
     async fn test_missing_command_param() {
         let tool = BashTool::new();
-        let result = tool.execute("test-4", json!({}), None).await;
+        let result = tool
+            .execute("test-4", json!({}), None)
+            .await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Missing required parameter: command"));
+        assert!(result.unwrap_err().contains("Missing required parameter: command"));
     }
 
     #[tokio::test]
@@ -445,7 +437,11 @@ mod tests {
     async fn test_stderr_capture() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-6", make_params("echo error_msg >&2"), None)
+            .execute(
+                "test-6",
+                make_params("echo error_msg >&2"),
+                None,
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -456,7 +452,11 @@ mod tests {
     async fn test_timeout_kills_process() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-7", make_params_with_timeout("sleep 300", 1), None)
+            .execute(
+                "test-7",
+                make_params_with_timeout("sleep 300", 1),
+                None,
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -475,7 +475,11 @@ mod tests {
     async fn test_working_directory() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-8", make_params_with_cwd("pwd", "/tmp"), None)
+            .execute(
+                "test-8",
+                make_params_with_cwd("pwd", "/tmp"),
+                None,
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -579,7 +583,11 @@ mod tests {
         let tool = BashTool::new();
         // Generate more than 2000 lines to trigger truncation
         let result = tool
-            .execute("test-15", make_params("seq 1 3000"), None)
+            .execute(
+                "test-15",
+                make_params("seq 1 3000"),
+                None,
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -598,7 +606,11 @@ mod tests {
         });
 
         let result = tool
-            .execute("test-16", make_params("sleep 300"), Some(rx))
+            .execute(
+                "test-16",
+                make_params("sleep 300"),
+                Some(rx),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -647,18 +659,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_format_duration() {
-        assert_eq!(
-            BashTool::format_duration(Duration::from_millis(500)),
-            "0.5s"
-        );
+        assert_eq!(BashTool::format_duration(Duration::from_millis(500)), "0.5s");
         assert_eq!(BashTool::format_duration(Duration::from_secs(1)), "1.0s");
-        assert_eq!(
-            BashTool::format_duration(Duration::from_secs(65)),
-            "1m 5.0s"
-        );
-        assert_eq!(
-            BashTool::format_duration(Duration::from_secs(120)),
-            "2m 0.0s"
-        );
+        assert_eq!(BashTool::format_duration(Duration::from_secs(65)), "1m 5.0s");
+        assert_eq!(BashTool::format_duration(Duration::from_secs(120)), "2m 0.0s");
     }
 }

@@ -1,11 +1,9 @@
 //! Agent configuration
 
-use oxi_ai::CompactionStrategy;
 use serde::{Deserialize, Serialize};
+use oxi_ai::CompactionStrategy;
 
-fn default_context_window() -> usize {
-    128_000
-}
+fn default_context_window() -> usize { 128_000 }
 
 /// Agent runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

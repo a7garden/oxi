@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 use once_cell::sync::Lazy;
 
 /// Cache for Vertex ADC credentials check (expensive fs check)
@@ -33,7 +33,8 @@ fn get_env(key: &str) -> Option<String> {
 }
 
 /// Bun/Linux sandbox fallback: read from /proc/self/environ
-fn get_proc_env(key: &str) -> Option<String> {
+#[allow(dead_code)]
+fn get_proc_env(_key: &str) -> Option<String> {
     use std::os::unix::ffi::OsStrExt;
     
     // Only try this on Linux where Bun sandbox may empty process.env
@@ -319,28 +320,29 @@ pub fn has_bedrock_creds_full() -> bool {
 pub fn get_all_env_keys() -> HashMap<String, String> {
     let mut result = HashMap::new();
     
-    let providers = [
-        ("anthropic", ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"]),
-        ("openai", ["OPENAI_API_KEY"]),
-        ("github-copilot", ["GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN"]),
-        ("google", ["GEMINI_API_KEY"]),
-        ("vertex", ["GOOGLE_CLOUD_API_KEY"]),
-        ("groq", ["GROQ_API_KEY"]),
-        ("cerebras", ["CEREBRAS_API_KEY"]),
-        ("xai", ["XAI_API_KEY"]),
-        ("openrouter", ["OPENROUTER_API_KEY"]),
-        ("mistral", ["MISTRAL_API_KEY"]),
-        ("deepseek", ["DEEPSEEK_API_KEY"]),
-        ("azure", ["AZURE_OPENAI_API_KEY"]),
-        ("cloudflare", ["CLOUDFLARE_API_KEY"]),
-        ("huggingface", ["HF_TOKEN"]),
-        ("fireworks", ["FIREWORKS_API_KEY"]),
-        ("moonshotai", ["MOONSHOT_API_KEY"]),
-        ("bedrock", ["AWS_ACCESS_KEY_ID", "AWS_PROFILE"]),
+    // Map provider names to their possible env vars
+    let mappings: [(&str, fn() -> Option<String>); 17] = [
+        ("anthropic", || first_of(&["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"])),
+        ("openai", || first_of(&["OPENAI_API_KEY"])),
+        ("github-copilot", || first_of(&["GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN"])),
+        ("google", || first_of(&["GEMINI_API_KEY"])),
+        ("vertex", || first_of(&["GOOGLE_CLOUD_API_KEY"])),
+        ("groq", || first_of(&["GROQ_API_KEY"])),
+        ("cerebras", || first_of(&["CEREBRAS_API_KEY"])),
+        ("xai", || first_of(&["XAI_API_KEY"])),
+        ("openrouter", || first_of(&["OPENROUTER_API_KEY"])),
+        ("mistral", || first_of(&["MISTRAL_API_KEY"])),
+        ("deepseek", || first_of(&["DEEPSEEK_API_KEY"])),
+        ("azure", || first_of(&["AZURE_OPENAI_API_KEY"])),
+        ("cloudflare", || first_of(&["CLOUDFLARE_API_KEY"])),
+        ("huggingface", || first_of(&["HF_TOKEN"])),
+        ("fireworks", || first_of(&["FIREWORKS_API_KEY"])),
+        ("moonshotai", || first_of(&["MOONSHOT_API_KEY"])),
+        ("bedrock", || first_of(&["AWS_ACCESS_KEY_ID", "AWS_PROFILE"])),
     ];
     
-    for (provider, keys) in providers {
-        if let Some(value) = first_of(&keys) {
+    for (provider, get_key) in mappings.iter() {
+        if let Some(value) = get_key() {
             result.insert(provider.to_string(), value);
         }
     }
@@ -412,24 +414,24 @@ mod tests {
 
     #[test]
     fn test_get_env_api_key() {
-        env::set_var("TEST_PROVIDER_API_KEY", "sk-test-key-123");
+        env::set_var("ANTHROPIC_API_KEY", "sk-test-key-123");
         
         // Provider with known keys
         let result = get_env_api_key("anthropic");
         assert_eq!(result, Some("sk-test-key-123".to_string()));
         
-        env::remove_var("TEST_PROVIDER_API_KEY");
+        env::remove_var("ANTHROPIC_API_KEY");
     }
 
     #[test]
     fn test_has_env_key() {
-        env::set_var("TEST_HAS_ENV_KEY", "some-value");
+        env::set_var("DEEPSEEK_API_KEY", "test-value");
         
-        // Add test provider to env keys
+        // Check that deepseek has an env key
         let result = has_env_key("deepseek");  // DEEPSEEK_API_KEY
-        // Result depends on whether DEEPSEEK_API_KEY was set
+        assert!(result);
         
-        env::remove_var("TEST_HAS_ENV_KEY");
+        env::remove_var("DEEPSEEK_API_KEY");
     }
 
     #[test]

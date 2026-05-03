@@ -1,7 +1,9 @@
 //! Ls tool - list directory contents
 
 use super::{AgentTool, AgentToolResult, ToolError};
-use crate::tools::truncate::{format_bytes, truncate_head, TruncationOptions};
+use crate::tools::truncate::{
+    format_bytes, truncate_head, TruncationOptions,
+};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -109,10 +111,12 @@ impl LsTool {
         }
 
         // Sort: directories first, then alphabetically (case-insensitive)
-        entries.sort_by(|a, b| match (a.1, b.1) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.0.to_lowercase().cmp(&b.0.to_lowercase()),
+        entries.sort_by(|a, b| {
+            match (a.1, b.1) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.0.to_lowercase().cmp(&b.0.to_lowercase()),
+            }
         });
 
         // Apply entry limit if specified
@@ -144,9 +148,8 @@ impl LsTool {
                 .collect();
 
             // Add entry count summary - matching pi-mono format
-            lines.push(format!(
-                "\n{} director{}, {} file{}",
-                dir_count,
+            lines.push(format!("\n{} director{}, {} file{}", 
+                dir_count, 
                 if dir_count == 1 { "y" } else { "ies" },
                 file_count,
                 if file_count == 1 { "" } else { "s" }
@@ -169,7 +172,8 @@ impl LsTool {
         let output = if limited {
             format!(
                 "{}\n\n... [limit reached: {} entries total, use limit=N to see more]",
-                output, total_entries
+                output,
+                total_entries
             )
         } else {
             output
@@ -276,7 +280,7 @@ mod tests {
 
     fn create_test_dir() -> TempDir {
         let temp_dir = TempDir::new().unwrap();
-
+        
         // Create test files and directories
         let test_files = vec![
             ("alpha.txt", false),
@@ -305,12 +309,10 @@ mod tests {
     fn test_basic_ls() {
         let temp_dir = create_test_dir();
         let rt = tokio::runtime::Runtime::new().unwrap();
-
-        let result = rt
-            .block_on(async {
-                LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, false, None).await
-            })
-            .unwrap();
+        
+        let result = rt.block_on(async {
+            LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, false, None).await
+        }).unwrap();
 
         // Should include visible files and directories
         assert!(result.contains("alpha.txt"));
@@ -324,12 +326,10 @@ mod tests {
     fn test_ls_all() {
         let temp_dir = create_test_dir();
         let rt = tokio::runtime::Runtime::new().unwrap();
-
-        let result = rt
-            .block_on(async {
-                LsTool::ls_impl(temp_dir.path().to_str().unwrap(), true, false, None).await
-            })
-            .unwrap();
+        
+        let result = rt.block_on(async {
+            LsTool::ls_impl(temp_dir.path().to_str().unwrap(), true, false, None).await
+        }).unwrap();
 
         // Should show hidden file with all flag
         assert!(result.contains(".hidden"));
@@ -339,12 +339,10 @@ mod tests {
     fn test_ls_long_format() {
         let temp_dir = create_test_dir();
         let rt = tokio::runtime::Runtime::new().unwrap();
-
-        let result = rt
-            .block_on(async {
-                LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, true, None).await
-            })
-            .unwrap();
+        
+        let result = rt.block_on(async {
+            LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, true, None).await
+        }).unwrap();
 
         // Long format should have sizes
         assert!(result.contains("B") || result.contains("KB") || result.contains("MB"));
@@ -354,12 +352,10 @@ mod tests {
     fn test_entry_count_summary() {
         let temp_dir = create_test_dir();
         let rt = tokio::runtime::Runtime::new().unwrap();
-
-        let result = rt
-            .block_on(async {
-                LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, true, None).await
-            })
-            .unwrap();
+        
+        let result = rt.block_on(async {
+            LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, true, None).await
+        }).unwrap();
 
         // Should have entry count summary in long format
         assert!(result.contains("directories") || result.contains("directory"));
@@ -370,13 +366,11 @@ mod tests {
     fn test_entry_limit() {
         let temp_dir = create_test_dir();
         let rt = tokio::runtime::Runtime::new().unwrap();
-
+        
         // Set limit to 2
-        let result = rt
-            .block_on(async {
-                LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, false, Some(2)).await
-            })
-            .unwrap();
+        let result = rt.block_on(async {
+            LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, false, Some(2)).await
+        }).unwrap();
 
         // Should show limit reached notice
         assert!(result.contains("limit reached") || result.contains("limit=N"));
@@ -385,18 +379,16 @@ mod tests {
     #[test]
     fn test_case_insensitive_sort() {
         let temp_dir = TempDir::new().unwrap();
-
+        
         // Create files with various cases
         fs::write(temp_dir.path().join("Zebra.rs"), "").unwrap();
         fs::write(temp_dir.path().join("apple.rs"), "").unwrap();
         fs::write(temp_dir.path().join("Banana.rs"), "").unwrap();
-
+        
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt
-            .block_on(async {
-                LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, false, None).await
-            })
-            .unwrap();
+        let result = rt.block_on(async {
+            LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, false, None).await
+        }).unwrap();
 
         let _lines: Vec<&str> = result.lines().collect();
         // Should be sorted case-insensitely: apple, Banana, Zebra
@@ -408,18 +400,16 @@ mod tests {
     #[test]
     fn test_type_indicators() {
         let temp_dir = TempDir::new().unwrap();
-
+        
         // Create directory
         fs::create_dir(temp_dir.path().join("test_dir")).unwrap();
         // Create regular file
         fs::write(temp_dir.path().join("test_file.txt"), "").unwrap();
-
+        
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt
-            .block_on(async {
-                LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, false, None).await
-            })
-            .unwrap();
+        let result = rt.block_on(async {
+            LsTool::ls_impl(temp_dir.path().to_str().unwrap(), false, false, None).await
+        }).unwrap();
 
         // Directories should have / indicator
         assert!(result.contains("test_dir/"));
@@ -431,7 +421,9 @@ mod tests {
     #[test]
     fn test_path_traversal_prevention() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(async { LsTool::ls_impl("../etc", false, false, None).await });
+        let result = rt.block_on(async {
+            LsTool::ls_impl("../etc", false, false, None).await
+        });
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("traversal"));
@@ -453,13 +445,11 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("single_file.txt");
         fs::write(&file_path, "content").unwrap();
-
+        
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt
-            .block_on(async {
-                LsTool::ls_impl(file_path.to_str().unwrap(), false, false, None).await
-            })
-            .unwrap();
+        let result = rt.block_on(async {
+            LsTool::ls_impl(file_path.to_str().unwrap(), false, false, None).await
+        }).unwrap();
 
         assert!(result.contains("single_file.txt"));
     }

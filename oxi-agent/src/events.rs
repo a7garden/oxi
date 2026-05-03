@@ -7,128 +7,52 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AgentEvent {
     // ── Lifecycle events (from pi-mono agent-loop) ──────────────────
-    AgentStart {
-        prompts: Vec<oxi_ai::Message>,
-    },
-    AgentEnd {
-        messages: Vec<oxi_ai::Message>,
-        stop_reason: Option<String>,
-    },
-    TurnStart {
-        turn_number: u32,
-    },
-    TurnEnd {
-        turn_number: u32,
-        assistant_message: oxi_ai::Message,
-        tool_results: Vec<oxi_ai::ToolResultMessage>,
-    },
-
+    AgentStart { prompts: Vec<oxi_ai::Message> },
+    AgentEnd { messages: Vec<oxi_ai::Message>, stop_reason: Option<String> },
+    TurnStart { turn_number: u32 },
+    TurnEnd { turn_number: u32, assistant_message: oxi_ai::Message, tool_results: Vec<oxi_ai::ToolResultMessage> },
+    
     // ── Message events (from pi-mono agent-loop) ────────────────────
-    MessageStart {
-        message: oxi_ai::Message,
-    },
-    MessageUpdate {
-        message: oxi_ai::Message,
-        delta: Option<String>,
-    },
-    MessageEnd {
-        message: oxi_ai::Message,
-    },
-
+    MessageStart { message: oxi_ai::Message },
+    MessageUpdate { message: oxi_ai::Message, delta: Option<String> },
+    MessageEnd { message: oxi_ai::Message },
+    
     // ── Tool execution events (from pi-mono agent-loop) ────────────
-    ToolExecutionStart {
-        tool_call_id: String,
-        tool_name: String,
-        args: serde_json::Value,
-    },
-    ToolExecutionUpdate {
-        tool_call_id: String,
-        tool_name: String,
-        partial_result: String,
-    },
-    ToolExecutionEnd {
-        tool_call_id: String,
-        tool_name: String,
-        result: oxi_ai::ToolResult,
-        is_error: bool,
-    },
-
+    ToolExecutionStart { tool_call_id: String, tool_name: String, args: serde_json::Value },
+    ToolExecutionUpdate { tool_call_id: String, tool_name: String, partial_result: String },
+    ToolExecutionEnd { tool_call_id: String, tool_name: String, result: oxi_ai::ToolResult, is_error: bool },
+    
     // ── Legacy events (kept for backward compatibility) ──────────
     #[serde(rename = "start")]
-    Start {
-        prompt: String,
-    },
+    Start { prompt: String },
     Thinking,
-    ThinkingDelta {
-        text: String,
-    },
-    TextChunk {
-        text: String,
-    },
-    ToolCall {
-        tool_call: oxi_ai::ToolCall,
-    },
-    ToolStart {
-        tool_call_id: String,
-        tool_name: String,
-    },
-    ToolProgress {
-        tool_call_id: String,
-        message: String,
-    },
-    ToolComplete {
-        result: oxi_ai::ToolResult,
-    },
-    ToolError {
-        tool_call_id: String,
-        error: String,
-    },
-    Complete {
-        content: String,
-        stop_reason: String,
-    },
-    Error {
-        message: String,
-    },
-    Iteration {
-        number: usize,
-    },
-    Usage {
-        input_tokens: usize,
-        output_tokens: usize,
-    },
-    Compaction {
-        event: CompactionEvent,
-    },
-    Retry {
-        attempt: usize,
-        max_retries: usize,
-        retry_after_secs: u64,
-        reason: String,
-    },
-    Fallback {
-        from_model: String,
-        to_model: String,
-    },
+    ThinkingDelta { text: String },
+    TextChunk { text: String },
+    ToolCall { tool_call: oxi_ai::ToolCall },
+    ToolStart { tool_call_id: String, tool_name: String },
+    ToolProgress { tool_call_id: String, message: String },
+    ToolComplete { result: oxi_ai::ToolResult },
+    ToolError { tool_call_id: String, error: String },
+    Complete { content: String, stop_reason: String },
+    Error { message: String },
+    Iteration { number: usize },
+    Usage { input_tokens: usize, output_tokens: usize },
+    Compaction { event: CompactionEvent },
+    Retry { attempt: usize, max_retries: usize, retry_after_secs: u64, reason: String },
+    Fallback { from_model: String, to_model: String },
     Cancelled,
-    PartialResponse {
-        content: String,
-    },
-
+    PartialResponse { content: String },
+    
     // ── Loop-specific steering events ─────────────────────────────
-    SteeringMessage {
-        message: oxi_ai::Message,
-    },
-    FollowUpMessage {
-        message: oxi_ai::Message,
-    },
+    SteeringMessage { message: oxi_ai::Message },
+    FollowUpMessage { message: oxi_ai::Message },
 }
 
 impl AgentEvent {
     pub fn is_terminal(&self) -> bool {
         matches!(self, AgentEvent::AgentEnd { .. })
     }
-
+    
     pub fn type_name(&self) -> &'static str {
         match self {
             AgentEvent::AgentStart { .. } => "agent_start",

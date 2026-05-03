@@ -879,6 +879,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "futures"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1960,7 +1970,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "oxi-agent"
-version = "0.1.3-alpha"
+version = "0.1.4-alpha"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1983,7 +1993,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-ai"
-version = "0.1.3-alpha"
+version = "0.1.4-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1992,6 +2002,8 @@ dependencies = [
  "chrono",
  "criterion",
  "digest",
+ "dirs",
+ "fs2",
  "futures",
  "hmac",
  "jsonschema",
@@ -1999,6 +2011,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "pkcs8",
+ "raii_flock",
  "rand 0.8.6",
  "reqwest",
  "rsa",
@@ -2018,7 +2031,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-cli"
-version = "0.1.3-alpha"
+version = "0.1.4-alpha"
 dependencies = [
  "anyhow",
  "base64",
@@ -2049,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-tui"
-version = "0.1.3-alpha"
+version = "0.1.4-alpha"
 dependencies = [
  "anyhow",
  "base64",
@@ -2288,6 +2301,15 @@ name = "r-efi"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
+
+[[package]]
+name = "raii_flock"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "646f231f0e9fccc745827d693665ab56ca1ca354d811859efed326f3f7a910ff"
+dependencies = [
+ "fs2",
+]
 
 [[package]]
 name = "rand"

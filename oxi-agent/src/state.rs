@@ -1,7 +1,7 @@
 //! Agent state management
 
 use crate::types::{StopReason, ToolResult};
-use oxi_ai::{ContentBlock, Message, TextContent};
+use oxi_ai::{Message, ContentBlock, TextContent};
 use parking_lot::RwLock;
 
 /// Agent execution state
@@ -37,14 +37,16 @@ impl AgentState {
 
     /// Add a user message
     pub fn add_user_message(&mut self, content: String) {
-        self.messages
-            .push(Message::User(oxi_ai::UserMessage::new(content)));
+        self.messages.push(Message::User(oxi_ai::UserMessage::new(content)));
     }
 
     /// Add an assistant message
     pub fn add_assistant_message(&mut self, content: String) {
-        let mut assistant =
-            oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "agent", "agent-model");
+        let mut assistant = oxi_ai::AssistantMessage::new(
+            oxi_ai::Api::AnthropicMessages,
+            "agent",
+            "agent-model",
+        );
         assistant.content = vec![ContentBlock::Text(TextContent::new(content))];
         self.messages.push(Message::Assistant(assistant));
     }
@@ -57,10 +59,8 @@ impl AgentState {
             "tool",
             vec![ContentBlock::Text(TextContent::new(content))],
         );
-        self.messages
-            .push(oxi_ai::Message::ToolResult(tool_result_msg));
-        self.tool_results
-            .push(ToolResult::success(tool_call_id, content_for_result));
+        self.messages.push(oxi_ai::Message::ToolResult(tool_result_msg));
+        self.tool_results.push(ToolResult::success(tool_call_id, content_for_result));
     }
 
     /// Increment iteration counter
