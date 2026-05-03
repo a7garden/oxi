@@ -122,13 +122,9 @@ pub enum CompactorEvent {
         tokens_after: usize,
     },
     /// Compaction was aborted
-    Aborted {
-        reason: String,
-    },
+    Aborted { reason: String },
     /// Compaction failed
-    Failed {
-        error: String,
-    },
+    Failed { error: String },
     /// Context is approaching threshold
     Warning {
         current_ratio: f32,
@@ -269,7 +265,10 @@ impl AutoCompactor {
 
     /// Queue a message for processing after compaction
     pub fn queue_for_compaction(&self, msg: AgentMessage) {
-        debug!("Queueing message for post-compaction processing: {}", msg.role);
+        debug!(
+            "Queueing message for post-compaction processing: {}",
+            msg.role
+        );
         self.pending_queue.write().push(msg);
     }
 
@@ -302,7 +301,11 @@ impl AutoCompactor {
     }
 
     /// Get notification for UI display
-    pub fn get_notification(&self, context_tokens: usize, max_tokens: usize) -> Option<CompactionNotification> {
+    pub fn get_notification(
+        &self,
+        context_tokens: usize,
+        max_tokens: usize,
+    ) -> Option<CompactionNotification> {
         if !self.config.show_notification {
             return None;
         }
@@ -330,10 +333,7 @@ impl AutoCompactor {
     }
 
     /// Perform compaction on a list of messages
-    pub async fn compact(
-        &self,
-        messages: &[AgentMessage],
-    ) -> Result<CompactedContext> {
+    pub async fn compact(&self, messages: &[AgentMessage]) -> Result<CompactedContext> {
         if messages.is_empty() {
             return Ok(CompactedContext::new(String::new(), 0, 0));
         }
@@ -351,9 +351,8 @@ impl AutoCompactor {
         let prompt = self.build_summarization_prompt(messages);
 
         // Convert to LLM messages
-        let llm_messages: Vec<oxi_ai::Message> = vec![
-            oxi_ai::Message::User(UserMessage::new(prompt)),
-        ];
+        let llm_messages: Vec<oxi_ai::Message> =
+            vec![oxi_ai::Message::User(UserMessage::new(prompt))];
 
         // Create a context for the completion
         let mut context = oxi_ai::Context::new();
@@ -379,11 +378,7 @@ impl AutoCompactor {
         let summary_tokens = self.estimate_tokens_string(&summary_text);
         let tokens_saved = tokens_before.saturating_sub(summary_tokens);
 
-        let result = CompactedContext::new(
-            summary_text,
-            messages.len(),
-            tokens_saved,
-        );
+        let result = CompactedContext::new(summary_text, messages.len(), tokens_saved);
 
         *self.compaction_count.write() += 1;
         *self.state.write() = CompactorState::Idle;
@@ -425,7 +420,8 @@ impl AutoCompactor {
         }
 
         prompt.push_str("\n## Summary:\n");
-        prompt.push_str("Provide a concise summary that captures the essence of this conversation.");
+        prompt
+            .push_str("Provide a concise summary that captures the essence of this conversation.");
 
         prompt
     }
@@ -705,11 +701,7 @@ mod tests {
 
     #[test]
     fn test_compacted_context() {
-        let ctx = CompactedContext::new(
-            "Test summary".to_string(),
-            10,
-            500,
-        );
+        let ctx = CompactedContext::new("Test summary".to_string(), 10, 500);
 
         assert_eq!(ctx.compacted_count, 10);
         assert_eq!(ctx.tokens_saved, 500);
@@ -721,7 +713,14 @@ mod tests {
         assert_eq!(CompactionReason::Manual.to_string(), "manual");
         assert_eq!(CompactionReason::Automatic.to_string(), "automatic");
         assert_eq!(CompactionReason::Overflow.to_string(), "overflow");
-        assert_eq!(CompactionReason::Iteration { current: 5, every_n: 10 }.to_string(), "iteration 5/10");
+        assert_eq!(
+            CompactionReason::Iteration {
+                current: 5,
+                every_n: 10
+            }
+            .to_string(),
+            "iteration 5/10"
+        );
     }
 
     #[test]
@@ -788,7 +787,7 @@ mod tests {
 
         // At 60%, should trigger
         assert!(compactor.should_compact(76800, 128000)); // 60%
-        
+
         // At 59%, should not trigger
         assert!(!compactor.should_compact(75500, 128000)); // 59%
     }

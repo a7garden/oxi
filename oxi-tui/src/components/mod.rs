@@ -15,6 +15,7 @@ pub mod settings_list;
 pub mod settings_overlay;
 pub mod spacer;
 pub mod text;
+pub mod theme_selector;
 pub mod truncated_text;
 
 pub use box_comp::{BorderStyle, Box};
@@ -24,6 +25,7 @@ pub use chat_view::{
 pub use command_palette::{Command, CommandPalette};
 pub use completion::{Completion, FileCompleter};
 pub use editor::{Editor, EditorOptions, Mention};
+pub use footer::{Footer, FooterData, FooterTheme};
 pub use image::{Image, ImageProtocol};
 pub use input::{AutocompleteProvider, Input, InputOptions};
 pub use loader::Loader;
@@ -33,4 +35,5 @@ pub use settings_list::{SettingEntry, SettingValue, SettingsList};
 pub use settings_overlay::SettingsOverlay;
 pub use spacer::Spacer;
 pub use text::Text;
+pub use theme_selector::{ThemeInfo, ThemeSelector};
 pub use truncated_text::TruncatedText;

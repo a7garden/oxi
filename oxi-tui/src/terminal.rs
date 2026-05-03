@@ -11,6 +11,12 @@ pub struct Size {
     pub height: u16,
 }
 
+impl Size {
+    pub fn new(width: u16, height: u16) -> Self {
+        Self { width, height }
+    }
+}
+
 /// Terminal position (0-indexed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
