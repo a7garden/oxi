@@ -9,7 +9,7 @@
 //! - File mutation queue for concurrent write safety
 
 use super::edit_diff::{
-    self, Edit, EditDiffError, EditDiffResult,
+    self, Edit, EditDiffError,
     detect_line_ending, has_bom, normalize_to_lf, restore_line_endings, strip_bom,
 };
 use super::file_mutation_queue::global_mutation_queue;
@@ -178,6 +178,7 @@ struct EditEntry {
 
 /// Result of edit operation
 #[derive(Debug)]
+#[allow(dead_code)]
 struct EditOutput {
     diff: String,
     first_changed_line: Option<usize>,

@@ -6,13 +6,11 @@ use futures::stream::StreamExt;
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use std::collections::HashMap;
 use std::pin::Pin;
 
 use super::{Provider, ProviderEvent, ProviderError, StreamOptions};
 use crate::{
-    Api, AssistantMessage, ContentBlock, Context, Model, StopReason, TextContent,
-    ToolCall, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, StopReason, Usage,
 };
 
 /// Google Generative AI provider
@@ -30,6 +28,7 @@ impl GoogleProvider {
         }
     }
     
+    #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
             client: Client::new(),
@@ -351,6 +350,7 @@ struct Part {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct FunctionCall {
     name: String,
     args: JsonValue,
