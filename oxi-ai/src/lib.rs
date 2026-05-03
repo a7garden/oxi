@@ -11,6 +11,7 @@ mod providers;
 mod error;
 mod high_level;
 mod compaction;
+pub mod oauth;
 
 pub mod prelude {
     pub use crate::types::*;
