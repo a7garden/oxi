@@ -454,8 +454,12 @@ impl Settings {
         let format = Self::detect_format(&path);
         let content = Self::serialize_for_format(self, format)?;
 
-        fs::write(&path, content)
-            .with_context(|| format!("Failed to write settings to {}", path.display()))?;
+        // Atomic write: write to temp file first, then rename
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, &content)
+            .with_context(|| format!("Failed to write settings to {}", tmp_path.display()))?;
+        fs::rename(&tmp_path, &path)
+            .with_context(|| format!("Failed to rename settings to {}", path.display()))?;
 
         Ok(())
     }
@@ -472,8 +476,12 @@ impl Settings {
         let format = Self::detect_format(path);
         let content = Self::serialize_for_format(self, format)?;
 
-        fs::write(path, content)
-            .with_context(|| format!("Failed to write settings to {}", path.display()))?;
+        // Atomic write
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, &content)
+            .with_context(|| format!("Failed to write settings to {}", tmp_path.display()))?;
+        fs::rename(&tmp_path, path)
+            .with_context(|| format!("Failed to rename settings to {}", path.display()))?;
 
         Ok(())
     }
@@ -505,8 +513,12 @@ impl Settings {
         let format = Self::detect_format(path);
         let content = Self::serialize_for_format(self, format)?;
 
-        fs::write(path, content)
-            .with_context(|| format!("Failed to write settings to {}", path.display()))?;
+        // Atomic write
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, &content)
+            .with_context(|| format!("Failed to write settings to {}", tmp_path.display()))?;
+        fs::rename(&tmp_path, path)
+            .with_context(|| format!("Failed to rename settings to {}", path.display()))?;
 
         Ok(())
     }
