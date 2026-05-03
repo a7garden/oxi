@@ -3,7 +3,6 @@
 //! Parses YAML frontmatter from markdown and text files.
 //! Frontmatter is enclosed between --- markers at the start of the file.
 
-use anyhow::Result;
 use std::collections::HashMap;
 
 /// Parsed frontmatter result
@@ -112,7 +111,7 @@ fn parse_yaml_value(value: &str) -> serde_json::Value {
 
     // Unquoted string (may contain spaces)
     // Check for special characters that indicate non-string types
-    let words: Vec<&str> = value.split_whitespace().collect();
+    let _words: Vec<&str> = value.split_whitespace().collect();
 
     // Boolean values
     match value.to_lowercase().as_str() {

@@ -196,8 +196,7 @@ pub fn detect_format(bytes: &[u8]) -> ImageFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use image::ImageBuffer;
-    use image::Rgba;
+    use image::{ImageBuffer, RgbaImage, Rgba};
 
     fn create_test_png() -> Vec<u8> {
         let img: RgbaImage = ImageBuffer::from_pixel(10, 10, Rgba([255, 0, 0, 255]));

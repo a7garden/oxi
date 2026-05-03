@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 /// Version information from crates.io

@@ -231,7 +231,7 @@ impl FooterData {
 
     /// Render the footer as display strings for the TUI
     /// Returns up to 2 lines: [pwd_line, stats_line]
-    pub fn render_lines(&self, width: usize) -> Vec<String> {
+    pub fn render_lines(&self, _width: usize) -> Vec<String> {
         let mut lines = Vec::new();
 
         // Build pwd line

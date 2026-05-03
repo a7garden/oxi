@@ -6,7 +6,7 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use std::future::Future;
-use std::task::{Context, Poll};
+// unused: use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 

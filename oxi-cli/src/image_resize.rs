@@ -295,6 +295,7 @@ pub fn format_dimension_note(result: &ResizedImage) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{RgbaImage, Rgba};
 
     #[test]
     fn test_resize_options_default() {

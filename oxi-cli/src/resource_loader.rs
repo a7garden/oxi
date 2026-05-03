@@ -6,7 +6,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 // Re-export types from resource_loader_compat
 pub use crate::resource_loader_compat::{Skill, Theme, Prompt};
