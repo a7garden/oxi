@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn test_footer_new() {
         let data = FooterData::new();
-        let mut footer = Footer::new(data);
+        let footer = Footer::new(data);
         assert!(footer.data.model_name.is_empty());
     }
 
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     fn test_footer_height_basic() {
         let data = create_test_footer_data();
-        let mut footer = Footer::new(data);
+        let footer = Footer::new(data);
         assert_eq!(footer.height(), 1);
     }
 
@@ -669,7 +669,7 @@ mod tests {
     #[test]
     fn test_footer_render_main_line() {
         let data = create_test_footer_data();
-        let mut footer = Footer::new(data);
+        let footer = Footer::new(data);
 
         let line = footer.render_main_line();
 
@@ -681,7 +681,7 @@ mod tests {
     fn test_footer_render_main_line_context_color() {
         let mut data = create_test_footer_data();
         data.context_window_pct = 85.0;
-        let mut footer = Footer::new(data);
+        let footer = Footer::new(data);
 
         // Should render without panic
         let line = footer.render_main_line();
@@ -692,7 +692,7 @@ mod tests {
     fn test_footer_render_main_line_high_context() {
         let mut data = create_test_footer_data();
         data.context_window_pct = 95.0;
-        let mut footer = Footer::new(data);
+        let footer = Footer::new(data);
 
         let line = footer.render_main_line();
         assert!(!line.is_empty());
@@ -701,7 +701,7 @@ mod tests {
     #[test]
     fn test_footer_render_main_line_empty_data() {
         let data = FooterData::new();
-        let mut footer = Footer::new(data);
+        let footer = Footer::new(data);
 
         let line = footer.render_main_line();
         // Empty data should produce empty line
@@ -711,7 +711,7 @@ mod tests {
     #[test]
     fn test_footer_truncate_to_width() {
         let _data = create_test_footer_data();
-        let mut footer = Footer::new(FooterData::new());
+        let _footer = Footer::new(FooterData::new());
 
         let truncated = Footer::truncate_to_width("hello world", 5);
         // Should truncate or fit
@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn test_footer_min_size() {
-        let mut footer = Footer::new(FooterData::new());
+        let footer = Footer::new(FooterData::new());
         let min = footer.min_size();
         assert_eq!(min.height, 1);
         assert_eq!(min.width, 40);

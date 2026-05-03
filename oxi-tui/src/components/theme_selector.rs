@@ -482,7 +482,7 @@ mod tests {
     #[test]
     fn test_selected_theme() {
         let themes = make_test_themes();
-        let mut selector = ThemeSelector::new(themes);
+        let selector = ThemeSelector::new(themes);
         assert!(selector.selected_theme().is_some());
         assert_eq!(selector.selected_theme().unwrap().name, "oxi_dark");
     }
