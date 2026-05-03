@@ -58,10 +58,11 @@ impl DynamicTool {
             + Sync
             + 'static,
     ) -> Self {
+        let name_for_label = def.name.clone();
         let schema = serde_json::to_value(&def.input_schema).unwrap_or(Value::Object(Default::default()));
         Self {
             name: def.name,
-            label: def.name.clone(), // Use name as label fallback
+            label: name_for_label, // Use name as label fallback
             description: def.description,
             parameters: schema,
             execute_fn: Arc::new(execute_fn),
