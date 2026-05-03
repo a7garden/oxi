@@ -4,7 +4,9 @@
 
 pub mod export;
 pub mod extensions;
+pub mod interactive;
 pub mod packages;
+pub mod print_mode;
 pub mod session;
 pub mod settings;
 pub mod skills;

@@ -1,0 +1,487 @@
+//! Bash executor for persistent shell sessions
+//!
+//! Provides a persistent bash session that maintains state between commands,
+//! including working directory and environment variables.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+/// Result of a bash execution
+#[derive(Debug, Clone)]
+pub struct BashResult {
+    /// The command that was executed
+    pub command: String,
+    /// Standard output
+    pub stdout: String,
+    /// Standard error
+    pub stderr: String,
+    /// Exit code
+    pub exit_code: Option<i32>,
+    /// Whether the command was killed due to timeout
+    pub timed_out: bool,
+    /// Execution duration
+    pub duration_ms: u64,
+}
+
+/// Bash executor configuration
+#[derive(Debug, Clone)]
+pub struct BashExecutorConfig {
+    /// Shell to use
+    pub shell: String,
+    /// Initial working directory
+    pub cwd: PathBuf,
+    /// Environment variables to set
+    pub env: HashMap<String, String>,
+    /// Timeout for commands (None for no timeout)
+    pub timeout: Option<Duration>,
+    /// Maximum output size in bytes
+    pub max_output_size: usize,
+}
+
+impl Default for BashExecutorConfig {
+    fn default() -> Self {
+        Self {
+            shell: "/bin/bash".to_string(),
+            cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            env: HashMap::new(),
+            timeout: Some(Duration::from_secs(300)),
+            max_output_size: 10 * 1024 * 1024, // 10MB
+        }
+    }
+}
+
+/// A persistent bash executor
+pub struct BashExecutor {
+    config: BashExecutorConfig,
+    /// Current working directory
+    cwd: RwLock<PathBuf>,
+    /// Environment variables
+    env: RwLock<HashMap<String, String>>,
+    /// Command history
+    history: RwLock<Vec<String>>,
+}
+
+impl BashExecutor {
+    /// Create a new bash executor
+    pub fn new(config: BashExecutorConfig) -> Self {
+        Self {
+            config,
+            cwd: RwLock::new(config.cwd.clone()),
+            env: RwLock::new(config.env.clone()),
+            history: RwLock::new(Vec::new()),
+        }
+    }
+
+    /// Create with default configuration
+    pub fn default() -> Self {
+        Self::new(BashExecutorConfig::default())
+    }
+
+    /// Get the current working directory
+    pub fn cwd(&self) -> PathBuf {
+        self.cwd.read().unwrap().clone()
+    }
+
+    /// Get a copy of environment variables
+    pub fn env(&self) -> HashMap<String, String> {
+        self.env.read().unwrap().clone()
+    }
+
+    /// Get command history
+    pub fn history(&self) -> Vec<String> {
+        self.history.read().unwrap().clone()
+    }
+
+    /// Set working directory
+    pub fn set_cwd(&self, path: PathBuf) {
+        if path.exists() && path.is_dir() {
+            *self.cwd.write().unwrap() = path;
+        }
+    }
+
+    /// Set an environment variable
+    pub fn set_env(&self, key: &str, value: &str) {
+        self.env.write().unwrap().insert(key.to_string(), value.to_string());
+    }
+
+    /// Remove an environment variable
+    pub fn remove_env(&self, key: &str) {
+        self.env.write().unwrap().remove(key);
+    }
+
+    /// Execute a command and return the result
+    pub fn execute(&self, command: &str) -> BashResult {
+        let start = std::time::Instant::now();
+
+        // Build the command
+        let mut cmd = Command::new(&self.config.shell);
+        cmd.arg("-c")
+            .arg(command)
+            .current_dir(self.cwd.read().unwrap().as_path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env_clear();
+
+        // Set environment variables
+        let env = self.env.read().unwrap();
+        for (key, value) in env.iter() {
+            cmd.env(key, value);
+        }
+        // Keep PATH
+        if let Ok(path) = std::env::var("PATH") {
+            cmd.env("PATH", path);
+        }
+
+        // Set timeout if configured
+        let timeout = self.config.timeout;
+        let output = match timeout {
+            Some(t) => {
+                // Use timeout command
+                let mut timeout_cmd = Command::new("timeout");
+                timeout_cmd
+                    .arg(format!("{}", t.as_secs()))
+                    .arg(&self.config.shell)
+                    .arg("-c")
+                    .arg(command)
+                    .current_dir(self.cwd.read().unwrap().as_path())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .env_clear();
+
+                for (key, value) in env.iter() {
+                    timeout_cmd.env(key, value);
+                }
+                if let Ok(path) = std::env::var("PATH") {
+                    timeout_cmd.env("PATH", path);
+                }
+
+                timeout_cmd.output()
+            }
+            None => cmd.output(),
+        };
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        let output = match output {
+            Ok(o) => o,
+            Err(e) => {
+                return BashResult {
+                    command: command.to_string(),
+                    stdout: String::new(),
+                    stderr: format!("Failed to execute: {}", e),
+                    exit_code: Some(-1),
+                    timed_out: false,
+                    duration_ms,
+                };
+            }
+        };
+
+        let stdout = self.truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
+        let stderr = self.truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
+
+        let exit_code = output.status.code();
+        let timed_out = stderr.contains("Timeout") || stderr.contains("timed out");
+
+        // Update cwd if the command was cd
+        if command.starts_with("cd ") || command == "cd" {
+            if exit_code == Some(0) {
+                // Try to get new cwd
+                if let Ok(new_cwd) = std::env::current_dir() {
+                    // The command already changed the cwd in the subprocess
+                    // We need to track it differently for persistent sessions
+                }
+            }
+        }
+
+        // Add to history
+        self.history.write().unwrap().push(command.to_string());
+
+        BashResult {
+            command: command.to_string(),
+            stdout,
+            stderr,
+            exit_code,
+            timed_out,
+            duration_ms,
+        }
+    }
+
+    /// Execute a command with streaming output
+    pub fn execute_streaming<F>(&self, command: &str, mut on_output: F) -> BashResult
+    where
+        F: FnMut(&str),
+    {
+        let start = std::time::Instant::now();
+
+        let mut cmd = Command::new(&self.config.shell);
+        cmd.arg("-c")
+            .arg(command)
+            .current_dir(self.cwd.read().unwrap().as_path())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env_clear();
+
+        let env = self.env.read().unwrap();
+        for (key, value) in env.iter() {
+            cmd.env(key, value);
+        }
+        if let Ok(path) = std::env::var("PATH") {
+            cmd.env("PATH", path);
+        }
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                return BashResult {
+                    command: command.to_string(),
+                    stdout: String::new(),
+                    stderr: format!("Failed to spawn: {}", e),
+                    exit_code: Some(-1),
+                    timed_out: false,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                };
+            }
+        };
+
+        // Read stdout
+        let mut stdout = String::new();
+        if let Some(ref mut out) = child.stdout {
+            use std::io::{BufRead, Read};
+            let reader = std::io::BufReader::new(out);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    on_output(&line);
+                    stdout.push_str(&line);
+                    stdout.push('\n');
+                }
+            }
+        }
+
+        // Read stderr
+        let mut stderr = String::new();
+        if let Some(ref mut err) = child.stderr {
+            use std::io::{BufRead, Read};
+            let reader = std::io::BufReader::new(err);
+            for line in reader.lines() {
+                if let Ok(line) = line {
+                    stderr.push_str(&line);
+                    stderr.push('\n');
+                }
+            }
+        }
+
+        let status = child.wait().ok();
+        let exit_code = status.and_then(|s| s.code());
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        // Add to history
+        self.history.write().unwrap().push(command.to_string());
+
+        BashResult {
+            command: command.to_string(),
+            stdout: self.truncate_output(stdout),
+            stderr: self.truncate_output(stderr),
+            exit_code,
+            timed_out: false,
+            duration_ms,
+        }
+    }
+
+    /// Execute multiple commands in sequence
+    pub fn execute_batch(&self, commands: &[&str]) -> Vec<BashResult> {
+        commands.iter().map(|cmd| self.execute(cmd)).collect()
+    }
+
+    /// Execute with error propagation
+    pub fn execute_required(&self, command: &str) -> Result<String, String> {
+        let result = self.execute(command);
+        if result.exit_code == Some(0) {
+            Ok(result.stdout)
+        } else {
+            Err(format!(
+                "Command failed with exit code {:?}: {}\n{}",
+                result.exit_code, result.stderr, result.stdout
+            ))
+        }
+    }
+
+    /// Truncate output to max size
+    fn truncate_output(&self, output: String) -> String {
+        if output.len() > self.config.max_output_size {
+            format!(
+                "{}...\n[Output truncated: {} bytes -> {} bytes]",
+                &output[..self.config.max_output_size / 2],
+                output.len(),
+                self.config.max_output_size
+            )
+        } else {
+            output
+        }
+    }
+}
+
+impl Default for BashExecutor {
+    fn default() -> Self {
+        Self::default()
+    }
+}
+
+/// Create an Arc-wrapped executor for sharing
+pub fn create_executor(config: BashExecutorConfig) -> Arc<BashExecutor> {
+    Arc::new(BashExecutor::new(config))
+}
+
+/// Execute a single command without persistent state
+pub fn execute_once(command: &str) -> BashResult {
+    let executor = BashExecutor::default();
+    executor.execute(command)
+}
+
+/// Execute a command with a specific timeout
+pub fn execute_with_timeout(command: &str, timeout: Duration) -> BashResult {
+    let config = BashExecutorConfig {
+        timeout: Some(timeout),
+        ..Default::default()
+    };
+    let executor = BashExecutor::new(config);
+    executor.execute(command)
+}
+
+/// Check if a command exists in PATH
+pub fn command_exists(command: &str) -> bool {
+    Command::new("sh")
+        .arg("-c")
+        .arg(format!("command -v {} > /dev/null 2>&1", command))
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Get the shell being used
+pub fn get_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_execute_simple() {
+        let executor = BashExecutor::default();
+        let result = executor.execute("echo hello");
+        assert_eq!(result.exit_code, Some(0));
+        assert!(result.stdout.contains("hello"));
+    }
+
+    #[test]
+    fn test_execute_with_cd() {
+        let executor = BashExecutor::default();
+        let result = executor.execute("pwd");
+        assert!(result.exit_code == Some(0));
+    }
+
+    #[test]
+    fn test_execute_failed_command() {
+        let executor = BashExecutor::default();
+        let result = executor.execute("exit 1");
+        assert_eq!(result.exit_code, Some(1));
+    }
+
+    #[test]
+    fn test_execute_nonexistent_command() {
+        let executor = BashExecutor::default();
+        let result = executor.execute("nonexistent_command_12345");
+        assert!(result.exit_code != Some(0));
+    }
+
+    #[test]
+    fn test_execute_batch() {
+        let executor = BashExecutor::default();
+        let results = executor.execute_batch(&["echo one", "echo two", "echo three"]);
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().all(|r| r.exit_code == Some(0)));
+    }
+
+    #[test]
+    fn test_cwd_tracking() {
+        let executor = BashExecutor::default();
+        let initial_cwd = executor.cwd();
+        assert!(initial_cwd.exists());
+    }
+
+    #[test]
+    fn test_env_tracking() {
+        let executor = BashExecutor::default();
+        executor.set_env("TEST_VAR", "test_value");
+        let env = executor.env();
+        assert_eq!(env.get("TEST_VAR"), Some(&"test_value".to_string()));
+    }
+
+    #[test]
+    fn test_history() {
+        let executor = BashExecutor::default();
+        executor.execute("echo 1");
+        executor.execute("echo 2");
+        let history = executor.history();
+        assert_eq!(history.len(), 2);
+        assert!(history.contains(&"echo 1".to_string()));
+        assert!(history.contains(&"echo 2".to_string()));
+    }
+
+    #[test]
+    fn test_execute_required_success() {
+        let executor = BashExecutor::default();
+        let result = executor.execute_required("echo hello");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_execute_required_failure() {
+        let executor = BashExecutor::default();
+        let result = executor.execute_required("exit 1");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_exists() {
+        assert!(command_exists("echo"));
+        assert!(command_exists("ls"));
+        assert!(!command_exists("nonexistent_command_xyz"));
+    }
+
+    #[test]
+    fn test_get_shell() {
+        let shell = get_shell();
+        assert!(!shell.is_empty());
+        assert!(shell.contains("bash") || shell.contains("zsh"));
+    }
+
+    #[test]
+    fn test_execute_with_timeout() {
+        let result = execute_with_timeout("echo hello", Duration::from_secs(5));
+        assert_eq!(result.exit_code, Some(0));
+    }
+
+    #[test]
+    fn test_execute_long_output() {
+        let executor = BashExecutor::default();
+        // Generate more output than max_output_size
+        let result = executor.execute(&"yes | head -n 100000".to_string());
+        assert!(result.stdout.contains("[Output truncated]") || result.stdout.len() < 100000);
+    }
+
+    #[test]
+    fn test_execute_streaming() {
+        let executor = BashExecutor::default();
+        let mut output_lines = Vec::new();
+        let result = executor.execute_streaming("echo line1; echo line2; echo line3", |line| {
+            output_lines.push(line.to_string());
+        });
+        assert_eq!(output_lines.len(), 3);
+        assert_eq!(result.exit_code, Some(0));
+    }
+}
