@@ -65,140 +65,6 @@ impl std::fmt::Display for OutputMode {
 }
 
 /// CLI arguments for the main chat command
-#[derive(Debug, Clone, Parser)]
-#[command(name = "oxi")]
-#[command(about = "AI coding assistant with read, bash, edit, write tools")]
-#[command(long_about = None)]
-pub struct ChatArgs {
-    /// Provider name (e.g., anthropic, openai, google)
-    #[arg(short, long, help = "Provider name")]
-    pub provider: Option<String>,
-
-    /// Model pattern or ID
-    #[arg(short, long, help = "Model pattern or ID (supports 'provider/id' format)")]
-    pub model: Option<String>,
-
-    /// API key for the provider
-    #[arg(long, help = "API key (defaults to env vars)")]
-    pub api_key: Option<String>,
-
-    /// System prompt
-    #[arg(long, help = "System prompt")]
-    pub system_prompt: Option<String>,
-
-    /// Append to system prompt (can be used multiple times)
-    #[arg(long = "append-system-prompt", help = "Append text or file contents to the system prompt")]
-    pub append_system_prompt: Vec<String>,
-
-    /// Set thinking level
-    #[arg(long, value_enum, help = "Thinking level: off, minimal, low, medium, high, xhigh")]
-    pub thinking: Option<ThinkingLevel>,
-
-    /// Continue previous session
-    #[arg(short = 'c', long, help = "Continue previous session")]
-    pub continue_session: bool,
-
-    /// Resume a session
-    #[arg(short = 'r', long, help = "Select a session to resume")]
-    pub resume: bool,
-
-    /// Use specific session file or partial UUID
-    #[arg(long, help = "Use specific session")]
-    pub session: Option<String>,
-
-    /// Fork a session into a new one
-    #[arg(long, help = "Fork specific session into a new session")]
-    pub fork: Option<String>,
-
-    /// Session storage directory
-    #[arg(long, help = "Directory for session storage")]
-    pub session_dir: Option<PathBuf>,
-
-    /// Don't save session (ephemeral mode)
-    #[arg(long, help = "Don't save session")]
-    pub no_session: bool,
-
-    /// Comma-separated model patterns for cycling
-    #[arg(long, help = "Comma-separated model patterns for Ctrl+P cycling")]
-    pub models: Option<String>,
-
-    /// Disable all tools
-    #[arg(long = "no-tools", short = 't', help = "Disable all tools")]
-    pub no_tools: bool,
-
-    /// Disable built-in tools but keep extension tools
-    #[arg(long = "no-builtin-tools", help = "Disable built-in tools")]
-    pub no_builtin_tools: bool,
-
-    /// Comma-separated allowlist of tool names
-    #[arg(short = 'o', long, help = "Comma-separated allowlist of tool names")]
-    pub tools: Option<String>,
-
-    /// Print mode (non-interactive)
-    #[arg(short = 'p', long, help = "Non-interactive mode: process prompt and exit")]
-    pub print: bool,
-
-    /// Export session to file
-    #[arg(long, help = "Export session file")]
-    pub export: Option<PathBuf>,
-
-    /// Load extension (can be used multiple times)
-    #[arg(short = 'e', long, help = "Load an extension")]
-    pub extension: Vec<PathBuf>,
-
-    /// Disable extensions
-    #[arg(long, help = "Disable extension discovery")]
-    pub no_extensions: bool,
-
-    /// Load skill (can be used multiple times)
-    #[arg(long, help = "Load a skill")]
-    pub skill: Vec<PathBuf>,
-
-    /// Disable skills
-    #[arg(long = "no-skills", help = "Disable skills discovery")]
-    pub no_skills: bool,
-
-    /// Load prompt template (can be used multiple times)
-    #[arg(long, help = "Load a prompt template")]
-    pub prompt_template: Vec<PathBuf>,
-
-    /// Disable prompt templates
-    #[arg(long = "no-prompt-templates", help = "Disable prompt template discovery")]
-    pub no_prompt_templates: bool,
-
-    /// Load theme (can be used multiple times)
-    #[arg(long, help = "Load a theme")]
-    pub theme: Vec<PathBuf>,
-
-    /// Disable themes
-    #[arg(long, help = "Disable theme discovery")]
-    pub no_themes: bool,
-
-    /// Disable context files (AGENTS.md, CLAUDE.md)
-    #[arg(long = "no-context-files", short, help = "Disable context file discovery")]
-    pub no_context_files: bool,
-
-    /// List available models
-    #[arg(long, help = "List available models (with optional search)")]
-    pub list_models: Option<Option<String>>,
-
-    /// Verbose output
-    #[arg(long, help = "Force verbose output")]
-    pub verbose: bool,
-
-    /// Offline mode
-    #[arg(long, help = "Disable network operations")]
-    pub offline: bool,
-
-    /// Additional positional arguments (messages)
-    #[arg(help = "Initial prompt or messages", last = true)]
-    pub messages: Vec<String>,
-
-    /// File arguments (prefixed with @)
-    #[arg(short = 'f', long, help = "File arguments")]
-    pub file_args: Vec<PathBuf>,
-}
-
 /// CLI arguments for the install command
 #[derive(Debug, Clone, Parser)]
 pub struct InstallArgs {
@@ -279,11 +145,6 @@ pub enum Commands {
     List(ListArgs),
     /// Open config selector TUI
     Config,
-    /// Show help for a command
-    Help {
-        #[arg(default_value = "")]
-        command: String,
-    },
 }
 
 /// Main CLI arguments
@@ -356,7 +217,7 @@ pub struct CliArgs {
     pub tools: Option<String>,
 
     /// Print mode
-    #[arg(short = 'p', long)]
+    #[arg(long)]
     pub print: bool,
 
     /// Export

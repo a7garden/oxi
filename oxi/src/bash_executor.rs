@@ -118,58 +118,92 @@ impl BashExecutor {
     pub fn execute(&self, command: &str) -> BashResult {
         let start = std::time::Instant::now();
 
-        // Build the command
+        // Build the command — wrap with cwd tracking
+        // We prefix with a pwd capture so we can track directory changes
+        let wrapped = format!(
+            "{}; __oxi_cwd=$(pwd)",
+            command
+        );
+
         let mut cmd = Command::new(&self.config.shell);
         cmd.arg("-c")
-            .arg(command)
+            .arg(&wrapped)
             .current_dir(self.cwd.read().unwrap().as_path())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .env_clear();
+            .stderr(Stdio::piped());
 
-        // Set environment variables
+        // Set custom environment variables
         let env = self.env.read().unwrap();
         for (key, value) in env.iter() {
             cmd.env(key, value);
         }
-        // Keep PATH
-        if let Ok(path) = std::env::var("PATH") {
-            cmd.env("PATH", path);
-        }
 
-        // Set timeout if configured
-        let timeout = self.config.timeout;
-        let output = match timeout {
+        // Execute with timeout
+        let output_result = match self.config.timeout {
             Some(t) => {
-                // Use timeout command
-                let mut timeout_cmd = Command::new("timeout");
-                timeout_cmd
-                    .arg(format!("{}", t.as_secs()))
-                    .arg(&self.config.shell)
-                    .arg("-c")
-                    .arg(command)
-                    .current_dir(self.cwd.read().unwrap().as_path())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped())
-                    .env_clear();
-
-                for (key, value) in env.iter() {
-                    timeout_cmd.env(key, value);
+                match cmd.spawn() {
+                    Ok(mut child) => {
+                        let deadline = std::time::Instant::now() + t;
+                        loop {
+                            match child.try_wait() {
+                                Ok(Some(_status)) => {
+                                    break child.wait_with_output();
+                                }
+                                Ok(None) => {
+                                    if std::time::Instant::now() >= deadline {
+                                        let _ = child.kill();
+                                        let _ = child.wait();
+                                        let duration_ms = start.elapsed().as_millis() as u64;
+                                        self.history.write().unwrap().push(command.to_string());
+                                        return BashResult {
+                                            command: command.to_string(),
+                                            stdout: String::new(),
+                                            stderr: "Command timed out".to_string(),
+                                            exit_code: Some(-1),
+                                            timed_out: true,
+                                            duration_ms,
+                                        };
+                                    }
+                                    std::thread::sleep(Duration::from_millis(50));
+                                }
+                                Err(e) => {
+                                    let duration_ms = start.elapsed().as_millis() as u64;
+                                    self.history.write().unwrap().push(command.to_string());
+                                    return BashResult {
+                                        command: command.to_string(),
+                                        stdout: String::new(),
+                                        stderr: format!("Failed to wait: {}", e),
+                                        exit_code: Some(-1),
+                                        timed_out: false,
+                                        duration_ms,
+                                    };
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let duration_ms = start.elapsed().as_millis() as u64;
+                        self.history.write().unwrap().push(command.to_string());
+                        return BashResult {
+                            command: command.to_string(),
+                            stdout: String::new(),
+                            stderr: format!("Failed to spawn: {}", e),
+                            exit_code: Some(-1),
+                            timed_out: false,
+                            duration_ms,
+                        };
+                    }
                 }
-                if let Ok(path) = std::env::var("PATH") {
-                    timeout_cmd.env("PATH", path);
-                }
-
-                timeout_cmd.output()
             }
             None => cmd.output(),
         };
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
-        let output = match output {
+        let output = match output_result {
             Ok(o) => o,
             Err(e) => {
+                self.history.write().unwrap().push(command.to_string());
                 return BashResult {
                     command: command.to_string(),
                     stdout: String::new(),
@@ -183,18 +217,23 @@ impl BashExecutor {
 
         let stdout = self.truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
         let stderr = self.truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
-
         let exit_code = output.status.code();
-        let timed_out = stderr.contains("Timeout") || stderr.contains("timed out");
 
-        // Update cwd if the command was cd
-        if command.starts_with("cd ") || command == "cd" {
-            if exit_code == Some(0) {
-                // Try to get new cwd
-                if let Ok(new_cwd) = std::env::current_dir() {
-                    // The command already changed the cwd in the subprocess
-                    // We need to track it differently for persistent sessions
-                }
+        // Track cd commands — re-resolve cwd after cd
+        if command.trim().starts_with("cd ") && exit_code == Some(0) {
+            let target = command.trim().strip_prefix("cd ").unwrap().trim();
+            let target = if target.starts_with("~/") {
+                format!("{}/{}", dirs::home_dir().map(|p| p.display().to_string()).unwrap_or_default(), &target[2..])
+            } else {
+                target.to_string()
+            };
+            let new_cwd = if target.starts_with('/') {
+                PathBuf::from(target)
+            } else {
+                self.cwd.read().unwrap().join(&target)
+            };
+            if new_cwd.is_dir() {
+                *self.cwd.write().unwrap() = new_cwd;
             }
         }
 
@@ -206,7 +245,7 @@ impl BashExecutor {
             stdout,
             stderr,
             exit_code,
-            timed_out,
+            timed_out: false,
             duration_ms,
         }
     }
