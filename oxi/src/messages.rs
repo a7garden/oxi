@@ -1,9 +1,14 @@
-//! Message utilities for formatting and processing messages
+//! SimpleMessage utilities for formatting and processing messages
 //!
 //! Provides utilities for formatting messages, truncating long content,
 //! estimating token counts, and summarizing conversation history.
 
-use crate::settings::Message;
+/// A simple message type for utilities
+#[derive(Debug, Clone)]
+pub struct SimpleMessage {
+    pub role: String,
+    pub content: String,
+}
 
 /// Maximum message length before truncation
 pub const DEFAULT_MAX_MESSAGE_LENGTH: usize = 10_000;
@@ -99,7 +104,7 @@ pub fn estimate_tokens(content: &str) -> usize {
 }
 
 /// Estimate token count for multiple messages
-pub fn estimate_messages_tokens(messages: &[Message]) -> usize {
+pub fn estimate_messages_tokens(messages: &[SimpleMessage]) -> usize {
     messages.iter().map(|m| estimate_tokens(&m.content)).sum()
 }
 
@@ -112,7 +117,7 @@ pub fn exceeds_token_limit(content: &str, limit: usize) -> bool {
 ///
 /// This is a simple extractive summarization that takes the first
 /// and last messages plus any tool results.
-pub fn summarize_conversation(messages: &[Message], max_length: usize) -> String {
+pub fn summarize_conversation(messages: &[SimpleMessage], max_length: usize) -> String {
     if messages.is_empty() {
         return String::new();
     }
@@ -163,11 +168,11 @@ pub fn summarize_conversation(messages: &[Message], max_length: usize) -> String
 /// Returns a compacted version that keeps the most recent messages
 /// and summarizes older ones.
 pub fn compact_messages(
-    messages: &[Message],
+    messages: &[SimpleMessage],
     max_messages: usize,
     summary_prefix: &str,
     summary_suffix: &str,
-) -> Vec<Message> {
+) -> Vec<SimpleMessage> {
     if messages.len() <= max_messages {
         return messages.to_vec();
     }
@@ -176,18 +181,16 @@ pub fn compact_messages(
     let to_summarize = messages.len() - to_keep;
 
     // Keep the first few messages
-    let kept: Vec<Message> = messages.iter().take(to_keep).cloned().collect();
+    let kept: Vec<SimpleMessage> = messages.iter().take(to_keep).cloned().collect();
 
     // Summarize the rest
     let to_summarize_msgs = &messages[to_keep..messages.len()];
     let summary = summarize_conversation(to_summarize_msgs, 300);
 
     let mut result = kept;
-    result.push(Message {
+    result.push(SimpleMessage {
         role: "system".to_string(),
         content: format!("{}{}{}", summary_prefix, summary, summary_suffix),
-        name: None,
-        tool_call_id: None,
     });
 
     // Add the most recent messages
@@ -241,7 +244,7 @@ pub fn get_preview(content: &str, max_length: usize) -> String {
 }
 
 /// Count messages by role
-pub fn count_messages_by_role(messages: &[Message]) -> std::collections::HashMap<String, usize> {
+pub fn count_messages_by_role(messages: &[SimpleMessage]) -> std::collections::HashMap<String, usize> {
     let mut counts = std::collections::HashMap::new();
     for msg in messages {
         *counts.entry(msg.role.clone()).or_insert(0) += 1;
@@ -250,7 +253,7 @@ pub fn count_messages_by_role(messages: &[Message]) -> std::collections::HashMap
 }
 
 /// Calculate context window usage
-pub fn calculate_context_usage(messages: &[Message], context_window: usize) -> (usize, f64) {
+pub fn calculate_context_usage(messages: &[SimpleMessage], context_window: usize) -> (usize, f64) {
     let total_tokens = estimate_messages_tokens(messages);
     let usage = (total_tokens as f64 / context_window as f64) * 100.0;
     (total_tokens, usage)
@@ -268,12 +271,12 @@ pub fn format_tokens(tokens: usize) -> String {
 }
 
 /// Check if a message is empty or only whitespace
-pub fn is_empty_message(msg: &Message) -> bool {
+pub fn is_empty_message(msg: &SimpleMessage) -> bool {
     msg.content.trim().is_empty()
 }
 
 /// Filter out empty messages
-pub fn filter_empty_messages(messages: &[Message]) -> Vec<Message> {
+pub fn filter_empty_messages(messages: &[SimpleMessage]) -> Vec<SimpleMessage> {
     messages.iter().filter(|m| !is_empty_message(m)).cloned().collect()
 }
 
@@ -305,7 +308,7 @@ mod tests {
 
     #[test]
     fn test_truncate_message_at_newline() {
-        let content = "line1\nline2\nline3\n" + &"a".repeat(200);
+        let content = format!("line1\nline2\nline3\n{}", "a".repeat(200));
         let result = truncate_message(&content, 20, "...");
         assert!(result.contains("line1\nline2\nline3"));
     }
@@ -327,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_summarize_conversation_empty() {
-        let messages: Vec<Message> = vec![];
+        let messages: Vec<SimpleMessage> = vec![];
         let summary = summarize_conversation(&messages, 100);
         assert!(summary.is_empty());
     }
@@ -335,17 +338,13 @@ mod tests {
     #[test]
     fn test_summarize_conversation() {
         let messages = vec![
-            Message {
+            SimpleMessage {
                 role: "user".to_string(),
                 content: "Hello, I need help with Rust".to_string(),
-                name: None,
-                tool_call_id: None,
             },
-            Message {
+            SimpleMessage {
                 role: "assistant".to_string(),
                 content: "I'd be happy to help with Rust! What specifically do you need?".to_string(),
-                name: None,
-                tool_call_id: None,
             },
         ];
         let summary = summarize_conversation(&messages, 200);
@@ -356,12 +355,10 @@ mod tests {
 
     #[test]
     fn test_compact_messages() {
-        let messages: Vec<Message> = (0..10)
-            .map(|i| Message {
+        let messages: Vec<SimpleMessage> = (0..10)
+            .map(|i| SimpleMessage {
                 role: "user".to_string(),
-                content: format!("Message {}", i),
-                name: None,
-                tool_call_id: None,
+                content: format!("SimpleMessage {}", i),
             })
             .collect();
 
@@ -390,23 +387,17 @@ mod tests {
     #[test]
     fn test_count_messages_by_role() {
         let messages = vec![
-            Message {
+            SimpleMessage {
                 role: "user".to_string(),
                 content: "msg1".to_string(),
-                name: None,
-                tool_call_id: None,
             },
-            Message {
+            SimpleMessage {
                 role: "assistant".to_string(),
                 content: "msg2".to_string(),
-                name: None,
-                tool_call_id: None,
             },
-            Message {
+            SimpleMessage {
                 role: "user".to_string(),
                 content: "msg3".to_string(),
-                name: None,
-                tool_call_id: None,
             },
         ];
         let counts = count_messages_by_role(&messages);
@@ -416,11 +407,9 @@ mod tests {
 
     #[test]
     fn test_calculate_context_usage() {
-        let messages = vec![Message {
+        let messages = vec![SimpleMessage {
             role: "user".to_string(),
             content: "a".repeat(1000),
-            name: None,
-            tool_call_id: None,
         }];
         let (tokens, usage) = calculate_context_usage(&messages, 10000);
         assert!(tokens > 0);
@@ -436,19 +425,15 @@ mod tests {
 
     #[test]
     fn test_is_empty_message() {
-        let empty = Message {
+        let empty = SimpleMessage {
             role: "user".to_string(),
             content: "   ".to_string(),
-            name: None,
-            tool_call_id: None,
         };
         assert!(is_empty_message(&empty));
 
-        let non_empty = Message {
+        let non_empty = SimpleMessage {
             role: "user".to_string(),
             content: "Hello".to_string(),
-            name: None,
-            tool_call_id: None,
         };
         assert!(!is_empty_message(&non_empty));
     }
@@ -456,23 +441,17 @@ mod tests {
     #[test]
     fn test_filter_empty_messages() {
         let messages = vec![
-            Message {
+            SimpleMessage {
                 role: "user".to_string(),
                 content: "Hello".to_string(),
-                name: None,
-                tool_call_id: None,
             },
-            Message {
+            SimpleMessage {
                 role: "user".to_string(),
                 content: "   ".to_string(),
-                name: None,
-                tool_call_id: None,
             },
-            Message {
+            SimpleMessage {
                 role: "assistant".to_string(),
                 content: "Hi there".to_string(),
-                name: None,
-                tool_call_id: None,
             },
         ];
         let filtered = filter_empty_messages(&messages);

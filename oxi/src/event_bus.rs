@@ -84,32 +84,35 @@ pub enum AgentSessionEvent {
     },
 }
 
-/// Async event handler type
-pub type EventHandler = Arc<dyn Fn(AgentSessionEvent) -> Box<dyn std::future::Future<Output = ()> + Send + '_> + Send + Sync>;
+/// Async event handler type - returns a pinned boxed future
+pub type EventHandler = Arc<dyn Fn(AgentSessionEvent) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> + Send + Sync>;
 
 /// Sync event handler type (for simpler handlers)
 pub type SyncEventHandler = Arc<dyn Fn(AgentSessionEvent) + Send + Sync>;
 
-/// A subscriber handle that can be used to unsubscribe
+/// A subscriber handle
 pub struct Subscriber {
-    channel: String,
-    id: u64,
-    #[allow(dead_code)]
-    bus: Arc<EventBus>,
+    pub channel: String,
+    pub id: u64,
 }
 
 impl Subscriber {
     /// Unsubscribe from the event channel
     pub fn unsubscribe(self) {
-        // Subscriber is dropped, which signals removal
+        // Subscriber is dropped
     }
+}
+
+/// Internal subscriber storage
+struct BusInner {
+    subscribers: RwLock<HashMap<String, HashMap<u64, EventHandler>>>,
+    sync_subscribers: RwLock<HashMap<String, HashMap<u64, SyncEventHandler>>>,
+    next_id: RwLock<u64>,
 }
 
 /// Thread-safe async event bus for publish/subscribe pattern
 pub struct EventBus {
-    subscribers: RwLock<HashMap<String, HashMap<u64, EventHandler>>>,
-    sync_subscribers: RwLock<HashMap<String, HashMap<u64, SyncEventHandler>>>,
-    next_id: RwLock<u64>,
+    inner: Arc<BusInner>,
 }
 
 impl Default for EventBus {
@@ -122,9 +125,11 @@ impl EventBus {
     /// Create a new event bus
     pub fn new() -> Self {
         Self {
-            subscribers: RwLock::new(HashMap::new()),
-            sync_subscribers: RwLock::new(HashMap::new()),
-            next_id: RwLock::new(0),
+            inner: Arc::new(BusInner {
+                subscribers: RwLock::new(HashMap::new()),
+                sync_subscribers: RwLock::new(HashMap::new()),
+                next_id: RwLock::new(0),
+            }),
         }
     }
 
@@ -139,20 +144,19 @@ impl EventBus {
         F: Fn(AgentSessionEvent) -> Fut + Send + Sync + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
-        let mut next_id = self.next_id.write().await;
+        let mut next_id = self.inner.next_id.write().await;
         let id = *next_id;
         *next_id = id + 1;
         drop(next_id);
 
         let handler: EventHandler = Arc::new(move |event| {
             let fut = handler(event);
-            Box::pin(async move {
-                fut.await;
-            }) as Box<dyn std::future::Future<Output = ()> + Send + '_>
+            Box::pin(fut)
         });
 
-        let channel_subscribers = &mut self.subscribers.write().await;
-        channel_subscribers
+        self.inner.subscribers
+            .write()
+            .await
             .entry(channel.to_string())
             .or_insert_with(HashMap::new)
             .insert(id, handler);
@@ -160,23 +164,19 @@ impl EventBus {
         Subscriber {
             channel: channel.to_string(),
             id,
-            bus: Arc::new(EventBus {
-                subscribers: self.subscribers.clone(),
-                sync_subscribers: self.sync_subscribers.clone(),
-                next_id: RwLock::new(0),
-            }),
         }
     }
 
     /// Subscribe to an event channel with a sync handler
     pub async fn subscribe_sync(&self, channel: &str, handler: SyncEventHandler) -> Subscriber {
-        let mut next_id = self.next_id.write().await;
+        let mut next_id = self.inner.next_id.write().await;
         let id = *next_id;
         *next_id = id + 1;
         drop(next_id);
 
-        let channel_subscribers = &mut self.sync_subscribers.write().await;
-        channel_subscribers
+        self.inner.sync_subscribers
+            .write()
+            .await
             .entry(channel.to_string())
             .or_insert_with(HashMap::new)
             .insert(id, handler);
@@ -184,46 +184,22 @@ impl EventBus {
         Subscriber {
             channel: channel.to_string(),
             id,
-            bus: Arc::new(EventBus {
-                subscribers: self.subscribers.clone(),
-                sync_subscribers: self.sync_subscribers.clone(),
-                next_id: RwLock::new(0),
-            }),
         }
     }
 
     /// Subscribe to an event channel (sync version for convenience)
     pub fn subscribe(&self, channel: &str, handler: SyncEventHandler) -> Subscriber {
-        // Use block_on for sync subscription
-        tokio::runtime::Handle::current().block_on(async {
-            let mut next_id = self.next_id.write().await;
-            let id = *next_id;
-            *next_id = id + 1;
-            drop(next_id);
-
-            let channel_subscribers = &mut self.sync_subscribers.write().await;
-            channel_subscribers
-                .entry(channel.to_string())
-                .or_insert_with(HashMap::new)
-                .insert(id, handler);
-
-            Subscriber {
-                channel: channel.to_string(),
-                id,
-                bus: Arc::new(EventBus {
-                    subscribers: self.subscribers.clone(),
-                    sync_subscribers: self.sync_subscribers.clone(),
-                    next_id: RwLock::new(0),
-                }),
-            }
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            self.subscribe_sync(channel, handler).await
         })
     }
 
     /// Publish an event to a channel
     pub async fn publish(&self, channel: &str, event: AgentSessionEvent) {
-        // First, notify sync handlers
+        // Notify sync handlers first
         {
-            let sync_handlers = self.sync_subscribers.read().await;
+            let sync_handlers = self.inner.sync_subscribers.read().await;
             if let Some(handlers) = sync_handlers.get(channel) {
                 for handler in handlers.values() {
                     handler(event.clone());
@@ -231,9 +207,9 @@ impl EventBus {
             }
         }
 
-        // Then, notify async handlers
+        // Then notify async handlers
         let handlers: Vec<EventHandler> = {
-            let async_handlers = self.subscribers.read().await;
+            let async_handlers = self.inner.subscribers.read().await;
             async_handlers
                 .get(channel)
                 .map(|h| h.values().cloned().collect())
@@ -242,7 +218,6 @@ impl EventBus {
 
         for handler in handlers {
             let event_clone = event.clone();
-            // Spawn each handler as a separate task to avoid blocking
             tokio::spawn(async move {
                 handler(event_clone).await;
             });
@@ -251,32 +226,30 @@ impl EventBus {
 
     /// Unsubscribe a specific handler
     pub async fn unsubscribe(&self, channel: &str, id: u64) {
-        // Remove from async subscribers
-        if let Some(handlers) = self.subscribers.write().await.get_mut(channel) {
+        if let Some(handlers) = self.inner.subscribers.write().await.get_mut(channel) {
             handlers.remove(&id);
         }
-        // Remove from sync subscribers
-        if let Some(handlers) = self.sync_subscribers.write().await.get_mut(channel) {
+        if let Some(handlers) = self.inner.sync_subscribers.write().await.get_mut(channel) {
             handlers.remove(&id);
         }
     }
 
     /// Unsubscribe all handlers for a channel
     pub async fn unsubscribe_all(&self, channel: &str) {
-        self.subscribers.write().await.remove(channel);
-        self.sync_subscribers.write().await.remove(channel);
+        self.inner.subscribers.write().await.remove(channel);
+        self.inner.sync_subscribers.write().await.remove(channel);
     }
 
     /// Clear all subscriptions
     pub async fn clear(&self) {
-        self.subscribers.write().await.clear();
-        self.sync_subscribers.write().await.clear();
+        self.inner.subscribers.write().await.clear();
+        self.inner.sync_subscribers.write().await.clear();
     }
 
     /// Get the number of active subscriptions
     pub async fn subscription_count(&self) -> usize {
-        let async_count: usize = self.subscribers.read().await.values().map(|h| h.len()).sum();
-        let sync_count: usize = self.sync_subscribers.read().await.values().map(|h| h.len()).sum();
+        let async_count: usize = self.inner.subscribers.read().await.values().map(|h| h.len()).sum();
+        let sync_count: usize = self.inner.sync_subscribers.read().await.values().map(|h| h.len()).sum();
         async_count + sync_count
     }
 }
@@ -287,24 +260,18 @@ pub struct EventBusBuilder {
 }
 
 impl EventBusBuilder {
-    /// Create a new builder
     pub fn new() -> Self {
-        Self {
-            channels: Vec::new(),
-        }
+        Self { channels: Vec::new() }
     }
 
-    /// Add a channel to the bus
     pub fn with_channel(mut self, channel: impl Into<String>) -> Self {
         self.channels.push(channel.into());
         self
     }
 
-    /// Build the event bus
     pub fn build(self) -> Arc<EventBus> {
         let bus = EventBus::arc();
-        // Note: channels are created on-demand, so no special setup needed
-        let _ = self.channels; // Silence unused warning
+        let _ = self.channels; // Channels are created on-demand
         bus
     }
 }
@@ -317,23 +284,14 @@ impl Default for EventBusBuilder {
 
 /// Common channel names
 pub mod channels {
-    /// All session events
     pub const SESSION: &str = "session:*";
-    /// Message events
     pub const MESSAGE: &str = "session:message";
-    /// Tool events
     pub const TOOL: &str = "session:tool";
-    /// Error events
     pub const ERROR: &str = "session:error";
-    /// Token usage events
     pub const TOKEN_USAGE: &str = "session:token_usage";
-    /// Model events
     pub const MODEL: &str = "session:model";
-    /// Thinking events
     pub const THINKING: &str = "session:thinking";
-    /// Stream events
     pub const STREAM: &str = "session:stream";
-    /// Custom extension events
     pub const CUSTOM: &str = "session:custom";
 }
 
@@ -362,7 +320,6 @@ mod tests {
 
         bus.publish("test", event.clone()).await;
 
-        // Give time for async handlers
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         let captured = received.read().await;
@@ -427,14 +384,13 @@ mod tests {
 
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        assert_eq!(*received.lock().unwrap(), 1);
+        assert_eq!(received.lock().unwrap().len(), 1);
 
-        // Unsubscribe
         bus.unsubscribe("test", subscriber.id).await;
 
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        assert_eq!(*received.lock().unwrap(), 1);
+        assert_eq!(received.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -455,7 +411,7 @@ mod tests {
         bus.publish("test", AgentSessionEvent::ThinkingStart).await;
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
-        assert_eq!(*received.lock().unwrap(), 1);
+        assert_eq!(received.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]

@@ -44,24 +44,11 @@ pub struct GitStatus {
 }
 
 /// Check if a directory is a git repository
-///
-/// # Arguments
-/// * `dir` - Directory to check
-///
-/// # Returns
-/// `true` if the directory is inside a git repository
 pub fn is_git_repo(dir: &Path) -> bool {
-    let dir = dir.to_path_buf();
-    find_git_root(&dir).is_some()
+    find_git_root(dir).is_some()
 }
 
 /// Find the git root directory by walking up from a path
-///
-/// # Arguments
-/// * `path` - Starting path
-///
-/// # Returns
-/// The git root directory, or `None` if not in a git repo
 pub fn find_git_root(path: &Path) -> Option<PathBuf> {
     let mut current = path.to_path_buf();
 
@@ -71,11 +58,9 @@ pub fn find_git_root(path: &Path) -> Option<PathBuf> {
             return Some(current);
         }
 
-        // Also check for worktree (.git as file)
         if git_dir.is_file() {
             if let Ok(content) = std::fs::read_to_string(&git_dir) {
                 if content.starts_with("gitdir: ") {
-                    // This is a worktree, find the main repo
                     let gitdir_path = content.trim_start_matches("gitdir: ").trim();
                     if let Ok(main_git) = PathBuf::from(gitdir_path).canonicalize() {
                         if let Some(main_dir) = main_git.parent() {
@@ -87,13 +72,11 @@ pub fn find_git_root(path: &Path) -> Option<PathBuf> {
             return Some(current);
         }
 
-        // Move to parent directory
         current = match current.parent() {
             Some(parent) => parent.to_path_buf(),
             None => return None,
         };
 
-        // Prevent infinite loop
         if current.to_string_lossy() == "/" {
             return None;
         }
@@ -101,12 +84,6 @@ pub fn find_git_root(path: &Path) -> Option<PathBuf> {
 }
 
 /// Get the git root for a given directory
-///
-/// # Arguments
-/// * `cwd` - Current working directory
-///
-/// # Returns
-/// The git root, or the original directory if not in a repo
 pub fn get_git_root(cwd: &Path) -> PathBuf {
     find_git_root(cwd).unwrap_or_else(|| cwd.to_path_buf())
 }
@@ -143,46 +120,27 @@ pub fn is_detached_head(repo_dir: &Path) -> bool {
     }
 }
 
-/// Create a checkpoint commit with a generated message
-///
-/// # Arguments
-/// * `repo_dir` - Repository directory
-/// * `message` - Optional commit message
-///
-/// # Returns
-/// The short SHA of the checkpoint commit
+/// Create a checkpoint commit
 pub fn git_checkpoint(repo_dir: &Path, message: Option<&str>) -> Result<String, String> {
-    // Stage all changes
     run_git_command(repo_dir, &["add", "-A"])?;
 
-    // Check if there are changes to commit
     let status = run_git_command(repo_dir, &["status", "--porcelain"])?;
     if status.trim().is_empty() {
         return Err("No changes to checkpoint".to_string());
     }
 
-    // Generate a timestamp-based message
     let timestamp = chrono::Utc::now();
-    let msg = message.unwrap_or(&format!(
+    let default_msg = format!(
         "Checkpoint: {}",
         timestamp.format("%Y-%m-%d %H:%M:%S UTC")
-    ));
+    );
+    let msg = message.unwrap_or(&default_msg);
 
-    // Create the commit
     run_git_command(repo_dir, &["commit", "-m", msg])?;
-
-    // Return the short SHA
     run_git_command(repo_dir, &["rev-parse", "--short", "HEAD"])
 }
 
 /// Get the git diff output
-///
-/// # Arguments
-/// * `repo_dir` - Repository directory
-/// * `diff_type` - Type of diff ("staged", "unstaged", "untracked", or "all")
-///
-/// # Returns
-/// The diff output as a string
 pub fn git_diff(repo_dir: &Path, diff_type: &str) -> Result<String, String> {
     match diff_type {
         "staged" => run_git_command(repo_dir, &["diff", "--cached"]),
@@ -203,23 +161,11 @@ pub fn git_diff(repo_dir: &Path, diff_type: &str) -> Result<String, String> {
 }
 
 /// Get the git log
-///
-/// # Arguments
-/// * `repo_dir` - Repository directory
-/// * `count` - Number of entries to retrieve
-///
-/// # Returns
-/// A vector of log entries
 pub fn git_log(repo_dir: &Path, count: usize) -> Result<Vec<GitLogEntry>, String> {
-    let format = "%H|%h|%s|%an|%ae|%at";
+    let format_str = "%H|%h|%s|%an|%ae|%at";
     let output = run_git_command(
         repo_dir,
-        &[
-            "log",
-            &format!("-{}", count),
-            &format!("--format={}", format),
-            "--all",
-        ],
+        &["log", &format!("-{}", count), &format!("--format={}", format_str), "--all"],
     )?;
 
     let branch = get_current_branch(repo_dir);
@@ -257,19 +203,10 @@ pub fn git_log(repo_dir: &Path, count: usize) -> Result<Vec<GitLogEntry>, String
 }
 
 /// Restore a file or path to a specific commit
-///
-/// # Arguments
-/// * `repo_dir` - Repository directory
-/// * `sha` - Commit SHA or ref to restore from
-/// * `path` - Path to restore (defaults to entire repo)
-///
-/// # Returns
-/// `Ok(())` if successful
 pub fn git_restore(repo_dir: &Path, sha: &str, path: Option<&str>) -> Result<(), String> {
-    let target = if sha.starts_with("HEAD~") || sha.starts_with("HEAD^") || sha.contains("~") {
+    let target = if sha.starts_with("HEAD~") || sha.starts_with("HEAD^") || sha.contains('~') {
         sha.to_string()
     } else {
-        // Verify the SHA exists
         run_git_command(repo_dir, &["rev-parse", "--verify", sha])?;
         sha.to_string()
     };
@@ -309,9 +246,9 @@ pub fn git_status(repo_dir: &Path) -> Result<GitStatus, String> {
         let filename = line[3..].to_string();
 
         if index_status == '?' && worktree_status == '?' {
-            untracked_files.push(filename);
+            untracked_files.push(filename.clone());
         } else if index_status != ' ' && index_status != '?' {
-            staged_files.push(filename);
+            staged_files.push(filename.clone());
         }
         if worktree_status != ' ' && worktree_status != '?' {
             if !staged_files.contains(&filename) {
@@ -335,7 +272,9 @@ pub fn git_status(repo_dir: &Path) -> Result<GitStatus, String> {
 /// Get the number of commits ahead/behind a remote branch
 pub fn git_ahead_behind(repo_dir: &Path) -> Result<(usize, usize), String> {
     let current = get_current_branch(repo_dir).ok_or("Not on a branch")?;
-    let remote_branch = run_git_command(repo_dir, &["rev-parse", "--abbrev-ref", &format!("{current}@{{u}}"]))
+    // Build upstream ref string: branch@ {u}
+    let upstream_ref = format!("{}@{{u}}", current);
+    let remote_branch = run_git_command(repo_dir, &["rev-parse", "--abbrev-ref", &upstream_ref])
         .ok();
 
     let remote_branch = match remote_branch {
@@ -360,15 +299,12 @@ pub fn git_tags_containing(repo_dir: &Path, sha: &str) -> Result<Vec<String>, St
 
 /// Get the last modified date of a file in the repo
 pub fn git_file_last_modified(repo_dir: &Path, file_path: &str) -> Result<SystemTime, String> {
-    let output = run_git_command(
-        repo_dir,
-        &["log", "-1", "--format=%at", "--", file_path],
-    )?;
+    let output = run_git_command(repo_dir, &["log", "-1", "--format=%at", "--", file_path])?;
 
     let timestamp: i64 = output.trim().parse().map_err(|_| "Invalid timestamp")?;
     SystemTime::UNIX_EPOCH
         .checked_add(std::time::Duration::from_secs(timestamp as u64))
-        .ok_or("Invalid timestamp")
+        .ok_or_else(|| "Invalid timestamp".to_string())
 }
 
 /// Check if a file has uncommitted changes
@@ -383,22 +319,18 @@ mod tests {
     use std::env;
 
     fn test_repo_path() -> PathBuf {
-        // Use the current directory for testing
         env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
     }
 
     #[test]
     fn test_is_git_repo() {
-        // We can't guarantee we're in a git repo, so just check the function works
         let result = is_git_repo(&test_repo_path());
-        // Just ensure no panic
         assert!(result == true || result == false);
     }
 
     #[test]
     fn test_find_git_root() {
         let result = find_git_root(&test_repo_path());
-        // Just ensure no panic
         assert!(result.is_some());
     }
 
@@ -411,7 +343,6 @@ mod tests {
     #[test]
     fn test_git_status() {
         let status = git_status(&test_repo_path());
-        // Just ensure no panic
         assert!(status.is_ok());
         let status = status.unwrap();
         assert!(!status.is_repo || status.branch.is_some() || !status.branch.is_none());
@@ -420,7 +351,6 @@ mod tests {
     #[test]
     fn test_git_log_returns_vec() {
         let result = git_log(&test_repo_path(), 5);
-        // May fail if not in a git repo, which is fine
         assert!(result.is_ok() || result.is_err());
     }
 
@@ -432,31 +362,25 @@ mod tests {
 
     #[test]
     fn test_git_checkpoint_no_changes() {
-        // This should fail gracefully if there are no changes
         let result = git_checkpoint(&test_repo_path(), None);
-        // Either success or "no changes" error is acceptable
         assert!(result.is_ok() || result == Err("No changes to checkpoint".to_string()));
     }
 
     #[test]
     fn test_git_file_last_modified() {
-        // Test with a known file
         let result = git_file_last_modified(&test_repo_path(), "Cargo.toml");
-        // May fail if not in repo or file not tracked
         assert!(result.is_ok() || result.is_err());
     }
 
     #[test]
     fn test_git_file_is_modified() {
         let result = git_file_is_modified(&test_repo_path(), "Cargo.toml");
-        // Just ensure no panic
         assert!(result.is_ok() || result.is_err());
     }
 
     #[test]
     fn test_git_tags_containing() {
         let result = git_tags_containing(&test_repo_path(), "HEAD");
-        // Just ensure no panic, tags may be empty
         assert!(result.is_ok());
     }
 }

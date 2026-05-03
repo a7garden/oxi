@@ -9,7 +9,7 @@
 
 use crate::App;
 use anyhow::Result;
-use oxi_agent::AgentEvent;
+use oxi_agent::{Agent, AgentEvent};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -53,7 +53,7 @@ pub async fn run_print_mode(app: &App, options: PrintModeOptions) -> Result<i32>
         initial_message,
     } = options;
 
-    let agent: Arc<crate::agent::Agent> = app.agent();
+    let agent: Arc<Agent> = app.agent();
     let mut exit_code = 0;
 
     // Register signal handlers for graceful shutdown
@@ -112,7 +112,7 @@ enum PromptError {
 
 /// Run a single prompt through the agent, outputting events/results as appropriate.
 async fn run_single_prompt(
-    agent: &Arc<crate::agent::Agent>,
+    agent: &Arc<Agent>,
     prompt: &str,
     mode: PrintMode,
     shutdown_rx: &mut mpsc::Receiver<()>,
@@ -120,7 +120,7 @@ async fn run_single_prompt(
     let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
 
     // Spawn agent run on a LocalSet (non-Send futures)
-    let agent_clone = Arc::clone(agent);
+    let agent_clone: Arc<Agent> = Arc::clone(agent);
     let prompt_owned = prompt.to_string();
 
     let agent_handle = tokio::task::spawn_blocking(move || {
@@ -142,7 +142,7 @@ async fn run_single_prompt(
     let mut last_text = String::new();
     let mut had_error = false;
     let mut error_message = String::new();
-    let mut stop_reason: Option<String> = None;
+    let mut _stop_reason: Option<String> = None;
 
     loop {
         tokio::select! {
@@ -154,12 +154,12 @@ async fn run_single_prompt(
                                 last_text.push_str(text);
                             }
                             AgentEvent::Complete { .. } => {
-                                stop_reason = Some("complete".to_string());
+                                _stop_reason = Some("complete".to_string());
                             }
                             AgentEvent::Error { message } => {
                                 had_error = true;
                                 error_message = message.clone();
-                                stop_reason = Some("error".to_string());
+                                _stop_reason = Some("error".to_string());
                             }
                             _ => {}
                         }
@@ -221,12 +221,11 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
         AgentEvent::ToolComplete { result } => serde_json::json!({
             "type": "tool_complete",
             "content": result.content.chars().take(2000).collect::<String>(),
-            "is_error": false,
+            "is_error": result.is_error,
         }),
-        AgentEvent::ToolError { error, tool_name, tool_call_id } => serde_json::json!({
+        AgentEvent::ToolError { error, tool_call_id } => serde_json::json!({
             "type": "tool_error",
             "error": error,
-            "tool_name": tool_name,
             "tool_call_id": tool_call_id,
         }),
         AgentEvent::Complete { .. } => serde_json::json!({
@@ -244,10 +243,19 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
 
 /// Set up Ctrl+C handler to signal graceful shutdown.
 fn ctrlc_handler(shutdown_tx: mpsc::Sender<()>) -> Result<()> {
-    ctrlc::set_handler(move || {
-        let _ = shutdown_tx.try_send(());
-    })
-    .map_err(|e| anyhow::anyhow!("Failed to set Ctrl+C handler: {}", e))
+    // Use tokio signal handling via a background thread.
+    std::thread::spawn(move || {
+        let _ = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map(|rt| {
+                rt.block_on(async {
+                    tokio::signal::ctrl_c().await.ok();
+                    let _ = shutdown_tx.try_send(());
+                });
+            });
+    });
+    Ok(())
 }
 
 /// Read a prompt from stdin (for piping).
@@ -267,7 +275,7 @@ mod tests {
     #[test]
     fn test_event_to_json_start() {
         let event = AgentEvent::Start {
-            session_id: "test".to_string(),
+            prompt: "test".to_string(),
         };
         let json = event_to_json(&event);
         assert_eq!(json["type"], "start");
@@ -292,10 +300,10 @@ mod tests {
     #[test]
     fn test_event_to_json_tool_call() {
         let event = AgentEvent::ToolCall {
-            tool_call: oxi_agent::ToolCall {
+            tool_call: oxi_agent::types::ToolCall {
                 id: "tc-1".to_string(),
                 name: "read_file".to_string(),
-                arguments: serde_json::json!({"path": "/tmp/test.rs"}),
+                arguments: serde_json::json!({"path": "/tmp/test.rs"}).to_string(),
             },
         };
         let json = event_to_json(&event);
@@ -317,6 +325,7 @@ mod tests {
     #[test]
     fn test_event_to_json_complete() {
         let event = AgentEvent::Complete {
+            content: "done".to_string(),
             stop_reason: "end_turn".to_string(),
         };
         let json = event_to_json(&event);
@@ -326,8 +335,10 @@ mod tests {
     #[test]
     fn test_event_to_json_tool_complete() {
         let event = AgentEvent::ToolComplete {
-            result: oxi_agent::ToolResult {
+            result: oxi_agent::types::ToolResult {
+                tool_call_id: "tc-1".to_string(),
                 content: "file contents here".to_string(),
+                is_error: false,
             },
         };
         let json = event_to_json(&event);
