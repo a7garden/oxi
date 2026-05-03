@@ -4,6 +4,7 @@
 //! Queues messages during compaction and resumes processing afterward.
 
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use oxi_ai::{
     Api, AssistantMessage, ContentBlock, Message, Model, Provider, TextContent, UserMessage,
 };
@@ -498,11 +499,10 @@ mod tests {
                 _model: &oxi_ai::Model,
                 _context: &oxi_ai::Context,
                 _options: Option<oxi_ai::StreamOptions>,
-            ) -> std::pin::Pin<Box<dyn futures::Stream<Item = oxi_ai::ProviderEvent> + Send>> {
-                // Return an empty stream - use Empty from futures
+            ) -> Result<std::pin::Pin<Box<dyn futures::Stream<Item = oxi_ai::ProviderEvent> + Send>>, oxi_ai::ProviderError> {
                 use futures::StreamExt;
                 let stream = futures::stream::empty::<oxi_ai::ProviderEvent>();
-                Box::pin(stream)
+                Ok(Box::pin(stream))
             }
             fn name(&self) -> &str { "mock" }
         }

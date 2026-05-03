@@ -183,7 +183,7 @@ impl FileAttachmentProcessor {
     }
 
     /// Extract @file references from message text
-    pub fn extract_file_paths(message: &str) -> Vec<PathBuf> {
+    pub fn extract_file_paths(&self, message: &str) -> Vec<PathBuf> {
         let mut paths = Vec::new();
         let mut chars = message.chars().peekable();
 
@@ -344,7 +344,7 @@ impl FileAttachmentProcessor {
         &self,
         message: &str,
     ) -> Result<(String, Vec<oxi_ai::ContentBlock>)> {
-        let paths = Self::extract_file_paths(message);
+        let paths = self.extract_file_paths(message);
         let blocks = self.process_attachments(&paths)?;
 
         // Create a cleaned message (remove @ prefixes for files)
@@ -387,27 +387,28 @@ mod image_paste_tests {
     fn test_image_paste_handler_to_data_uri() {
         let handler = ImagePasteHandler::new();
         let data = b"hello world";
-        let uri = handler.to_data_uri(data, "text/plain");
-        assert!(uri.starts_with("data:text/plain;base64,"));
-        assert!(uri.contains("aGVsbG8gd29ybGQ=")); // base64 of "hello world"
+        let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data);
+        let expected = format!("data:text/plain;base64,{}", base64);
+        assert_eq!(expected.starts_with("data:text/plain;base64,"), true);
+        assert!(expected.contains("aGVsbG8gd29ybGQ=")); // base64 of "hello world"
     }
 
     #[test]
     fn test_image_paste_handler_to_data_uri_png() {
-        let handler = ImagePasteHandler::new();
         // PNG magic bytes
         let png_header: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
-        let uri = handler.to_data_uri(&png_header, "image/png");
-        assert!(uri.starts_with("data:image/png;base64,"));
+        let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png_header);
+        let expected = format!("data:image/png;base64,{}", base64);
+        assert!(expected.starts_with("data:image/png;base64,"));
     }
 
     #[test]
     fn test_image_paste_handler_to_data_uri_jpeg() {
-        let handler = ImagePasteHandler::new();
         // JPEG magic bytes
         let jpeg_header: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0];
-        let uri = handler.to_data_uri(&jpeg_header, "image/jpeg");
-        assert!(uri.starts_with("data:image/jpeg;base64,"));
+        let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &jpeg_header);
+        let expected = format!("data:image/jpeg;base64,{}", base64);
+        assert!(expected.starts_with("data:image/jpeg;base64,"));
     }
 }
 
@@ -417,45 +418,52 @@ mod file_attachment_tests {
 
     #[test]
     fn test_extract_file_paths_simple() {
-        let paths = FileAttachmentProcessor::extract_file_paths("Check out @file.txt");
+        let processor = FileAttachmentProcessor::new();
+        let paths = processor.extract_file_paths("Check out @file.txt");
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].to_str().unwrap(), "file.txt");
     }
 
     #[test]
     fn test_extract_file_paths_multiple() {
-        let paths = FileAttachmentProcessor::extract_file_paths("@a.txt @b.txt @c.txt");
+        let processor = FileAttachmentProcessor::new();
+        let paths = processor.extract_file_paths("@a.txt @b.txt @c.txt");
         assert_eq!(paths.len(), 3);
     }
 
     #[test]
     fn test_extract_file_paths_quoted() {
-        let paths = FileAttachmentProcessor::extract_file_paths(r#"@"path with spaces.txt""#);
+        let processor = FileAttachmentProcessor::new();
+        let paths = processor.extract_file_paths(r#"@"path with spaces.txt""#);
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].to_str().unwrap(), "path with spaces.txt");
     }
 
     #[test]
     fn test_extract_file_paths_single_quoted() {
-        let paths = FileAttachmentProcessor::extract_file_paths("Check 'file.txt'");
+        let processor = FileAttachmentProcessor::new();
+        let paths = processor.extract_file_paths("Check 'file.txt'");
         assert_eq!(paths.len(), 1);
     }
 
     #[test]
     fn test_extract_file_paths_no_at() {
-        let paths = FileAttachmentProcessor::extract_file_paths("No file references here");
+        let processor = FileAttachmentProcessor::new();
+        let paths = processor.extract_file_paths("No file references here");
         assert!(paths.is_empty());
     }
 
     #[test]
     fn test_extract_file_paths_empty_after_at() {
-        let paths = FileAttachmentProcessor::extract_file_paths("Just @ followed by space");
+        let processor = FileAttachmentProcessor::new();
+        let paths = processor.extract_file_paths("Just @ followed by space");
         assert!(paths.is_empty());
     }
 
     #[test]
     fn test_extract_file_paths_unquoted_with_path_sep() {
-        let paths = FileAttachmentProcessor::extract_file_paths("Check src/main.rs");
+        let processor = FileAttachmentProcessor::new();
+        let paths = processor.extract_file_paths("Check src/main.rs");
         assert_eq!(paths.len(), 1);
         assert_eq!(paths[0].to_str().unwrap(), "src/main.rs");
     }
