@@ -313,8 +313,8 @@ impl FooterData {
     ///
     /// This method handles common agent events and updates the
     /// corresponding footer data fields accordingly.
-    pub fn update_from_event(&mut self, event: &crate::AgentEvent) {
-        use crate::AgentEvent;
+    pub fn update_from_event(&mut self, event: &oxi_agent::AgentEvent) {
+        use oxi_agent::AgentEvent;
 
         match event {
             AgentEvent::Start { .. } => {
@@ -323,43 +323,28 @@ impl FooterData {
             AgentEvent::Thinking => {
                 // Agent is thinking
             }
+            AgentEvent::ThinkingDelta { .. } => {
+                // Thinking being streamed
+            }
             AgentEvent::TextChunk { .. } => {
                 // Text being streamed
             }
-            AgentEvent::ThinkingEnd => {
-                // Thinking finished
-            }
-            AgentEvent::MessageEnd => {
-                // Message complete - tokens already updated via streaming
-            }
-            AgentEvent::TokensUpdate {
-                input,
-                output,
-                cache_read,
-                cache_write,
-            } => {
-                self.update_all_tokens(*input, *output, *cache_read, *cache_write);
-            }
-            AgentEvent::CostUpdate { cost } => {
-                self.total_cost = *cost;
-            }
-            AgentEvent::ContextUpdate { percent } => {
-                self.context_window_pct = *percent;
-            }
-            AgentEvent::ModelChange { model, provider } => {
-                self.model_name = model.clone();
-                if let Some(p) = provider {
-                    self.provider_name = p.clone();
+            AgentEvent::MessageEnd { message } => {
+                // Message complete - extract usage if available
+                if let oxi_ai::Message::Assistant(a) = message {
+                    if let Some(usage) = &a.usage {
+                        self.update_tokens(
+                            usage.input_tokens as u32,
+                            usage.output_tokens as u32,
+                        );
+                    }
                 }
             }
-            AgentEvent::ThinkingLevelChange { level } => {
-                self.thinking_level = level.clone();
+            AgentEvent::Usage { input_tokens, output_tokens } => {
+                self.update_tokens(*input_tokens as u32, *output_tokens as u32);
             }
-            AgentEvent::SessionInfoChange { name, .. } => {
-                self.session_name = name.clone();
-            }
-            AgentEvent::GitBranchChange { branch } => {
-                self.git_branch = branch.clone();
+            AgentEvent::Complete { content: _, stop_reason: _ } => {
+                // Message complete
             }
             _ => {
                 // Other events not handled by footer
