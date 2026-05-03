@@ -56,6 +56,9 @@ rand = "0.8"
 sha2 = "0.10"
 url = "2"
 
+# Image processing
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+
 # Dynamic loading for extensions
 libloading = "0.8"
 tempfile = "3"

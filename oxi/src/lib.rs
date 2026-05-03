@@ -81,6 +81,7 @@ pub mod keybindings;
 pub mod messages;
 pub mod model_resolver;
 pub mod resource_loader;
+pub mod frontmatter;
 pub mod resource_loader_compat;
 pub mod output_guard;
 pub mod tmux_detect;
