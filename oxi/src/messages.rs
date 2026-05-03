@@ -303,7 +303,7 @@ mod tests {
         let content = "a".repeat(200);
         let result = truncate_message(&content, 100, "...[truncated]");
         assert!(result.ends_with("...[truncated]"));
-        assert!(result.len() <= 100 + 12);
+        assert!(result.len() <= 100 + "...[truncated]".len());
     }
 
     #[test]

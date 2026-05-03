@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn test_parse_print_mode() {
-        let args = parse_args_from(["oxi", "-p", "Hello"]).unwrap();
+        let args = parse_args_from(["oxi", "--print", "Hello"]).unwrap();
         assert!(args.print);
     }
 
