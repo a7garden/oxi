@@ -27,6 +27,456 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
+
+use crate::clipboard_image;
+use crate::image_resize::{resize_image, ResizeOptions, ResizedImage};
+use crate::file_processor::{process_file_args, FileProcessorOptions};
+use crate::rpc_mode::{PasteHandler, PasteState};
+
+// ── Image Paste Handler ───────────────────────────────────────────────────
+
+/// Image paste handler for interactive mode
+pub struct ImagePasteHandler {
+    /// Options for image resizing
+    resize_opts: ResizeOptions,
+    /// Paste handler for bracketed paste mode
+    paste_handler: PasteHandler,
+    /// Maximum image size for API (2MB base64 encoded)
+    max_api_bytes: usize,
+}
+
+impl ImagePasteHandler {
+    /// Create a new image paste handler
+    pub fn new() -> Self {
+        Self {
+            resize_opts: ResizeOptions::new(2000, 2000).max_bytes(2 * 1024 * 1024),
+            paste_handler: PasteHandler::new(),
+            max_api_bytes: 2 * 1024 * 1024,
+        }
+    }
+
+    /// Reset the paste handler
+    pub fn reset(&mut self) {
+        self.paste_handler.reset();
+    }
+
+    /// Get current paste state
+    pub fn paste_state(&self) -> PasteState {
+        self.paste_handler.state()
+    }
+
+    /// Process raw image data from clipboard
+    pub fn process_image_paste(&mut self, data: Vec<u8>) -> Result<ImageAttachment> {
+        // 1. Detect MIME from magic bytes
+        let mime = clipboard_image::detect_image_mime_type(&data);
+
+        // 2. Resize if too large
+        let resized = resize_image(&data, &self.resize_opts)
+            .or_else(|_| {
+                // If resize fails, try with more aggressive settings
+                let aggressive_opts = ResizeOptions::new(1000, 1000)
+                    .max_bytes(self.max_api_bytes)
+                    .jpeg_quality(60);
+                resize_image(&data, &aggressive_opts)
+            })?;
+
+        // 3. Convert to base64
+        let base64_data = BASE64.encode(&resized.bytes);
+
+        // 4. Create data URI
+        let mime_type = if resized.mime_type == "image/jpeg" {
+            "image/jpeg"
+        } else {
+            mime
+        };
+
+        Ok(ImageAttachment {
+            mime_type: mime_type.to_string(),
+            base64_data,
+            width: Some(resized.width),
+            height: Some(resized.height),
+        })
+    }
+
+    /// Handle raw paste data and check for image content
+    pub fn handle_paste_data(&mut self, data: Vec<u8>) -> Option<ImageAttachment> {
+        // Check if the data looks like an image
+        if let Some(image_data) = self.paste_handler.extract_image_data() {
+            self.process_image_paste(image_data).ok()
+        } else {
+            // Check if the raw data itself is an image
+            if data.len() >= 8 {
+                let magic = &data[..8];
+                if magic.starts_with(&[0x89, 0x50, 0x4E, 0x47]) // PNG
+                    || magic.starts_with(&[0xFF, 0xD8, 0xFF]) // JPEG
+                    || magic.starts_with(&[0x47, 0x49, 0x46]) // GIF
+                {
+                    return self.process_image_paste(data).ok();
+                }
+            }
+            None
+        }
+    }
+
+    /// Try to read image from system clipboard
+    pub fn read_from_clipboard(&self) -> Result<ImageAttachment> {
+        let image = clipboard_image::read_image_from_clipboard()?;
+        let mime = clipboard_image::detect_image_mime_type(&image.bytes);
+
+        // Resize if needed
+        let resized = resize_image(&image.bytes, &self.resize_opts)
+            .unwrap_or_else(|_| {
+                // If resize fails, use original (might still work)
+                ResizedImage {
+                    bytes: image.bytes.clone(),
+                    mime_type: mime.to_string(),
+                    original_width: 0,
+                    original_height: 0,
+                    width: 0,
+                    height: 0,
+                    was_resized: false,
+                }
+            });
+
+        let base64_data = BASE64.encode(&resized.bytes);
+
+        Ok(ImageAttachment {
+            mime_type: resized.mime_type,
+            base64_data,
+            width: Some(resized.width),
+            height: Some(resized.height),
+        })
+    }
+
+    /// Create a data URI from bytes and mime type
+    pub fn to_data_uri(bytes: &[u8], mime: &str) -> String {
+        let base64 = BASE64.encode(bytes);
+        format!("data:{};base64,{}", mime, base64)
+    }
+}
+
+impl Default for ImagePasteHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── @File Attachment Processor ────────────────────────────────────────────
+
+/// Process @file attachments in user input
+pub struct FileAttachmentProcessor {
+    options: FileProcessorOptions,
+}
+
+impl FileAttachmentProcessor {
+    /// Create a new file attachment processor
+    pub fn new() -> Self {
+        Self {
+            options: FileProcessorOptions::default(),
+        }
+    }
+
+    /// Create with custom options
+    pub fn with_options(options: FileProcessorOptions) -> Self {
+        Self { options }
+    }
+
+    /// Extract @file references from message text
+    pub fn extract_file_paths(message: &str) -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+        let mut chars = message.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '@' {
+                // Collect the file path
+                let mut path_str = String::new();
+
+                // Check for quoted path
+                if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
+                    let quote = chars.next().unwrap();
+                    while let Some(&next) = chars.peek() {
+                        if next == quote {
+                            chars.next();
+                            break;
+                        }
+                        path_str.push(chars.next().unwrap());
+                    }
+                } else {
+                    // Unquoted path - collect until whitespace
+                    while let Some(&next) = chars.peek() {
+                        if next.is_whitespace() {
+                            break;
+                        }
+                        path_str.push(chars.next().unwrap());
+                    }
+                }
+
+                if !path_str.is_empty() {
+                    paths.push(PathBuf::from(&path_str));
+                }
+            }
+        }
+
+        paths
+    }
+
+    /// Process file attachments and return content blocks
+    pub fn process_attachments(&self, paths: &[PathBuf]) -> Result<Vec<oxi_ai::ContentBlock>> {
+        let mut blocks = Vec::new();
+
+        for path in paths {
+            match self.process_single_file(path) {
+                Ok(content) => blocks.extend(content),
+                Err(e) => {
+                    // Add error text instead of failing
+                    let error_text = format!("[Error reading file: {}: {}]", path.display(), e);
+                    blocks.push(oxi_ai::ContentBlock::Text(oxi_ai::TextContent::new(error_text)));
+                }
+            }
+        }
+
+        Ok(blocks)
+    }
+
+    /// Process a single file
+    fn process_single_file(&self, path: &PathBuf) -> Result<Vec<oxi_ai::ContentBlock>> {
+        use crate::image_convert::{convert_to_png, detect_format};
+        use crate::image_resize::{resize_image, ResizeOptions};
+
+        let data = fs::read(path)?;
+        let mime = self.detect_mime(path, &data);
+
+        if self.is_image_mime(&mime) {
+            self.process_image_file(path, &data, &mime)
+        } else {
+            self.process_text_file(path, &data)
+        }
+    }
+
+    /// Detect MIME type
+    fn detect_mime(&self, path: &PathBuf, data: &[u8]) -> String {
+        // Check magic bytes first
+        if data.len() >= 8 {
+            if data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                return "image/png".to_string();
+            }
+            if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
+                return "image/jpeg".to_string();
+            }
+            if data.starts_with(&[0x47, 0x49, 0x46]) {
+                return "image/gif".to_string();
+            }
+            if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+                return "image/webp".to_string();
+            }
+        }
+
+        // Fall back to extension
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| match e.to_lowercase().as_str() {
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                "bmp" => "image/bmp",
+                "svg" => "image/svg+xml",
+                "txt" | "md" | "rs" | "js" | "ts" | "py" | "json" | "html" | "css" | "xml" => "text/plain",
+                _ => "application/octet-stream",
+            })
+            .unwrap_or("application/octet-stream")
+            .to_string()
+    }
+
+    /// Check if MIME is an image
+    fn is_image_mime(&self, mime: &str) -> bool {
+        mime.starts_with("image/")
+    }
+
+    /// Process an image file
+    fn process_image_file(
+        &self,
+        path: &PathBuf,
+        data: &[u8],
+        mime: &str,
+    ) -> Result<Vec<oxi_ai::ContentBlock>> {
+        // Resize if needed
+        let resize_opts = ResizeOptions::new(self.options.max_image_width, self.options.max_image_height)
+            .max_bytes(self.options.max_image_bytes)
+            .jpeg_quality(self.options.jpeg_quality);
+
+        let resized = resize_image(data, &resize_opts).unwrap_or_else(|_| ResizedImage {
+            bytes: data.to_vec(),
+            mime_type: mime.to_string(),
+            original_width: 0,
+            original_height: 0,
+            width: 0,
+            height: 0,
+            was_resized: false,
+        });
+
+        // Convert to PNG if needed
+        let png_data = if resized.mime_type != "image/png" {
+            convert_to_png(&resized.bytes, &resized.mime_type)?
+        } else {
+            resized.bytes.clone()
+        };
+
+        let base64_data = BASE64.encode(&png_data);
+
+        Ok(vec![oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(
+            base64_data,
+            resized.mime_type,
+        ))])
+    }
+
+    /// Process a text file
+    fn process_text_file(&self, path: &PathBuf, data: &[u8]) -> Result<Vec<oxi_ai::ContentBlock>> {
+        let content = String::from_utf8_lossy(&data);
+        Ok(vec![oxi_ai::ContentBlock::Text(oxi_ai::TextContent::new(
+            content.to_string(),
+        ))])
+    }
+
+    /// Process message with @file references - extracts files and replaces references
+    pub fn process_message_with_attachments(
+        &self,
+        message: &str,
+    ) -> Result<(String, Vec<oxi_ai::ContentBlock>)> {
+        let paths = Self::extract_file_paths(message);
+        let blocks = self.process_attachments(&paths)?;
+
+        // Create a cleaned message (remove @ prefixes for files)
+        let mut cleaned = message.to_string();
+        for path in &paths {
+            let pattern = format!("@{}", path.display());
+            cleaned = cleaned.replace(&pattern, &format!("[Attached: {}]", path.display()));
+        }
+
+        Ok((cleaned, blocks))
+    }
+}
+
+impl Default for FileAttachmentProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Tests for new functionality ────────────────────────────────────────────
+
+#[cfg(test)]
+mod image_paste_tests {
+    use super::*;
+
+    #[test]
+    fn test_image_paste_handler_new() {
+        let handler = ImagePasteHandler::new();
+        assert_eq!(handler.paste_state(), PasteState::Normal);
+    }
+
+    #[test]
+    fn test_image_paste_handler_reset() {
+        let mut handler = ImagePasteHandler::new();
+        handler.reset();
+        assert_eq!(handler.paste_state(), PasteState::Normal);
+    }
+
+    #[test]
+    fn test_image_paste_handler_to_data_uri() {
+        let handler = ImagePasteHandler::new();
+        let data = b"hello world";
+        let uri = handler.to_data_uri(data, "text/plain");
+        assert!(uri.starts_with("data:text/plain;base64,"));
+        assert!(uri.contains("aGVsbG8gd29ybGQ=")); // base64 of "hello world"
+    }
+
+    #[test]
+    fn test_image_paste_handler_to_data_uri_png() {
+        let handler = ImagePasteHandler::new();
+        // PNG magic bytes
+        let png_header: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+        let uri = handler.to_data_uri(&png_header, "image/png");
+        assert!(uri.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn test_image_paste_handler_to_data_uri_jpeg() {
+        let handler = ImagePasteHandler::new();
+        // JPEG magic bytes
+        let jpeg_header: Vec<u8> = vec![0xFF, 0xD8, 0xFF, 0xE0];
+        let uri = handler.to_data_uri(&jpeg_header, "image/jpeg");
+        assert!(uri.starts_with("data:image/jpeg;base64,"));
+    }
+}
+
+#[cfg(test)]
+mod file_attachment_tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_file_paths_simple() {
+        let paths = FileAttachmentProcessor::extract_file_paths("Check out @file.txt");
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].to_str().unwrap(), "file.txt");
+    }
+
+    #[test]
+    fn test_extract_file_paths_multiple() {
+        let paths = FileAttachmentProcessor::extract_file_paths("@a.txt @b.txt @c.txt");
+        assert_eq!(paths.len(), 3);
+    }
+
+    #[test]
+    fn test_extract_file_paths_quoted() {
+        let paths = FileAttachmentProcessor::extract_file_paths(r#"@"path with spaces.txt""#);
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].to_str().unwrap(), "path with spaces.txt");
+    }
+
+    #[test]
+    fn test_extract_file_paths_single_quoted() {
+        let paths = FileAttachmentProcessor::extract_file_paths("Check 'file.txt'");
+        assert_eq!(paths.len(), 1);
+    }
+
+    #[test]
+    fn test_extract_file_paths_no_at() {
+        let paths = FileAttachmentProcessor::extract_file_paths("No file references here");
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_extract_file_paths_empty_after_at() {
+        let paths = FileAttachmentProcessor::extract_file_paths("Just @ followed by space");
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_extract_file_paths_unquoted_with_path_sep() {
+        let paths = FileAttachmentProcessor::extract_file_paths("Check src/main.rs");
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].to_str().unwrap(), "src/main.rs");
+    }
+
+    #[test]
+    fn test_file_attachment_processor_default() {
+        let processor = FileAttachmentProcessor::default();
+        // Should use default options
+        let paths = processor.extract_file_paths("@test.txt");
+        assert_eq!(paths.len(), 1);
+    }
+
+    #[test]
+    fn test_file_attachment_processor_with_options() {
+        let opts = FileProcessorOptions::new()
+            .max_image_bytes(1024 * 1024)
+            .extract_frontmatter(false);
+        let processor = FileAttachmentProcessor::with_options(opts);
+        let paths = processor.extract_file_paths("@test.png");
+        assert_eq!(paths.len(), 1);
+    }
+}
 // ── UI events from agent → TUI ─────────────────────────────────────────────
 
 /// Image content for message attachment

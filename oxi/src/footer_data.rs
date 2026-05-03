@@ -420,8 +420,19 @@ impl FooterData {
     /// Calculate visible width of a string (accounts for fullwidth chars).
     fn visible_width(s: &str) -> usize {
         s.chars()
-            .map(|c| if c.is_fullwidth() { 2 } else { 1 })
+            .map(|c| if Self::is_wide_char(c) { 2 } else { 1 })
             .sum()
+    }
+
+    /// Check if a character is wide (typically CJK or emoji).
+    fn is_wide_char(c: char) -> bool {
+        let code = c as u32;
+        (0xFF01..=0xFF5E).contains(&code)
+            || (0x4E00..=0x9FFF).contains(&code)
+            || (0x3400..=0x4DBF).contains(&code)
+            || (0xFE30..=0xFE4F).contains(&code)
+            || (0xFF00..=0xFFEF).contains(&code)
+            || (0x3000..=0x303F).contains(&code)
     }
 
     /// Truncate string to visible width.
@@ -430,7 +441,7 @@ impl FooterData {
         let mut width = 0;
 
         for c in s.chars() {
-            let char_width = if c.is_fullwidth() { 2 } else { 1 };
+            let char_width = if Self::is_wide_char(c) { 2 } else { 1 };
             if width + char_width > max_width {
                 // Add ellipsis if we have room
                 if width >= 3 {

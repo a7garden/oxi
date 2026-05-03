@@ -5,11 +5,13 @@ mod azure;
 mod bedrock;
 mod cloudflare;
 mod copilot;
+mod codex;
 mod deepseek;
 mod event;
 mod google;
 mod mistral;
 mod openai;
+mod openai_completions;
 mod openai_responses;
 mod options;
 mod trait_def;
@@ -31,10 +33,14 @@ pub use azure::AzureProvider;
 #[allow(unused_imports)]
 pub use cloudflare::CloudflareProvider;
 #[allow(unused_imports)]
+pub use codex::CodexProvider;
+#[allow(unused_imports)]
 pub use copilot::CopilotProvider;
 pub use event::ProviderEvent;
 #[allow(unused_imports)]
 pub use openai::OpenAiProvider;
+#[allow(unused_imports)]
+pub use openai_completions::OpenAICompletionsProvider;
 #[allow(unused_imports)]
 pub use openai_responses::OpenAiResponsesProvider;
 #[allow(unused_imports)]
@@ -61,6 +67,8 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         "cloudflare" | "workers-ai" => Some(Box::new(cloudflare::CloudflareProvider::new())),
         "copilot" | "github-copilot" => Some(Box::new(copilot::CopilotProvider::new())),
         "openai-responses" => Some(Box::new(openai_responses::OpenAiResponsesProvider::new())),
+        "openai-completions" | "completions" => Some(Box::new(openai_completions::OpenAICompletionsProvider::new())),
+        "codex" | "github-codex" | "copilot-codex" => Some(Box::new(codex::CodexProvider::new())),
         _ => None,
     }
 }
@@ -84,6 +92,8 @@ pub fn provider_names() -> Vec<&'static str> {
         "cloudflare",
         "copilot",
         "openai-responses",
+        "openai-completions",
+        "codex",
     ]
 }
 
@@ -106,6 +116,8 @@ pub fn providers() -> Vec<(&'static str, &'static str)> {
         ("cloudflare", "Cloudflare Workers AI"),
         ("copilot", "GitHub Copilot"),
         ("openai-responses", "OpenAI Responses API"),
+        ("openai-completions", "OpenAI Completions API (Legacy)"),
+        ("codex", "GitHub Codex"),
     ]
 }
 
