@@ -327,7 +327,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
             continue;
         }
 
-        let data = &line[6..].trim();
+        let data = line[6..].trim();
         if data.is_empty() || data == "[DONE]" {
             continue;
         }
@@ -335,7 +335,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
         // Parse the event data
         if let Ok(event) = serde_json::from_str::<ResponsesEvent>(data) {
             match event {
-                ResponsesEvent::ResponseCreated { response } => {
+                ResponsesEvent::ResponseCreatedData { response } => {
                     if let Some(id) = response.id {
                         partial_message.response_id = Some(id);
                     }
@@ -387,22 +387,30 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         _ => {}
                     }
                 }
-                ResponsesEvent::OutputTextDelta { delta } => {
-                    if let Some(idx) = current_text_index {
-                        events.push(ProviderEvent::TextDelta {
-                            content_index: idx,
-                            delta: delta.slice.unwrap_or_default(),
-                            partial: partial_message.clone(),
-                        });
+                ResponsesEvent::OutputTextDelta { output_text: delta } => {
+                    // Use the index from the delta if available, otherwise use current tracked index
+                    let content_idx = delta.content_index.or(current_text_index).unwrap_or(0);
+                    events.push(ProviderEvent::TextDelta {
+                        content_index: content_idx,
+                        delta: delta.slice.unwrap_or_default(),
+                        partial: partial_message.clone(),
+                    });
+                    // Update the current text index if not already set
+                    if current_text_index.is_none() {
+                        current_text_index = Some(content_idx);
                     }
                 }
-                ResponsesEvent::FunctionCallArgumentsDelta { delta } => {
-                    if let Some(idx) = current_tool_call_index {
-                        events.push(ProviderEvent::ToolCallDelta {
-                            content_index: idx,
-                            delta: delta.arguments.unwrap_or_default(),
-                            partial: partial_message.clone(),
-                        });
+                ResponsesEvent::FunctionCallArgumentsDelta { function_call: delta } => {
+                    // Use the index from the delta if available
+                    let content_idx = delta.content_index.or(current_tool_call_index).unwrap_or(0);
+                    events.push(ProviderEvent::ToolCallDelta {
+                        content_index: content_idx,
+                        delta: delta.arguments.unwrap_or_default(),
+                        partial: partial_message.clone(),
+                    });
+                    // Update the current tool call index if not set
+                    if current_tool_call_index.is_none() {
+                        current_tool_call_index = Some(content_idx);
                     }
                 }
                 ResponsesEvent::OutputTextDone { output_text } => {
@@ -432,7 +440,10 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         }
                     }
                 }
-                ResponsesEvent::Completed { response } => {
+                ResponsesEvent::ResponseWithUsage { response } => {
+                    // Check if this is incomplete or completed
+                    let is_incomplete = response.incomplete_details.is_some();
+                    
                     // Update usage if available
                     if let Some(usage) = response.usage {
                         accumulated_usage.input = usage.input_tokens;
@@ -443,9 +454,17 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         }
                     }
 
-                    // Determine stop reason
-                    let stop_reason = if response.status == Some("incomplete".to_string()) {
-                        StopReason::Length
+                    // Determine stop reason based on whether response is incomplete
+                    let stop_reason = if is_incomplete {
+                        if let Some(incomplete) = response.incomplete_details {
+                            match incomplete.reason.as_str() {
+                                "max_output_tokens" => StopReason::Length,
+                                "content_filter" => StopReason::Error,
+                                _ => StopReason::Stop,
+                            }
+                        } else {
+                            StopReason::Stop
+                        }
                     } else {
                         StopReason::Stop
                     };
@@ -456,21 +475,6 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         reason: stop_reason,
                         message: done_msg,
                     });
-                }
-                ResponsesEvent::Incomplete { response } => {
-                    if let Some(incomplete) = response.incomplete_details {
-                        let reason = match incomplete.reason.as_str() {
-                            "max_output_tokens" => StopReason::Length,
-                            "content_filter" => StopReason::Error,
-                            _ => StopReason::Stop,
-                        };
-                        let mut done_msg = partial_message.clone();
-                        done_msg.usage = accumulated_usage.clone();
-                        events.push(ProviderEvent::Done {
-                            reason,
-                            message: done_msg,
-                        });
-                    }
                 }
                 _ => {}
             }
@@ -496,47 +500,45 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum ResponsesEvent {
-    ResponseCreated {
-        event: String,
-        response: ResponseCreatedData,
+    // Response-related events (check for usage field to distinguish)
+    ResponseWithUsage {
+        response: ResponseWithUsageData,
     },
+    // Output item added
     OutputItemAdded {
-        event: String,
         output_item: OutputItem,
     },
+    // Content part added
     ContentPartAdded {
-        event: String,
         content_part: ContentPart,
     },
+    // Output text delta
     OutputTextDelta {
-        event: String,
         output_text: TextDelta,
     },
+    // Function call arguments delta
     FunctionCallArgumentsDelta {
-        event: String,
         function_call: FunctionCallDelta,
     },
+    // Output text done
     OutputTextDone {
-        event: String,
         output_text: OutputTextDone,
     },
+    // Reasoning done
     ReasoningDone {
-        event: String,
         reasoning: ReasoningDone,
     },
-    Completed {
-        event: String,
-        response: CompletedResponse,
+    // General response created (no usage field)
+    ResponseCreatedData {
+        response: ResponseCreatedData,
     },
-    Incomplete {
-        event: String,
-        response: IncompleteResponse,
-    },
+    // Fallback for unrecognized formats
     Unknown(JsonValue),
 }
 
 #[derive(Debug, Deserialize)]
 struct ResponseCreatedData {
+    #[allow(dead_code)]
     id: Option<String>,
     #[serde(rename = "object")]
     object: Option<String>,
@@ -604,6 +606,15 @@ struct SummaryItem {
     text: Option<String>,
 }
 
+/// Unified response data that can match both completed and incomplete responses
+#[derive(Debug, Deserialize)]
+struct ResponseWithUsageData {
+    id: Option<String>,
+    status: Option<String>,
+    usage: Option<UsageData>,
+    incomplete_details: Option<IncompleteDetails>,
+}
+
 #[derive(Debug, Deserialize)]
 struct CompletedResponse {
     id: Option<String>,
@@ -645,7 +656,7 @@ struct InputTokensDetails {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Context, Message, Model, ToolCall, TextContent};
+    use crate::{Context, Message, Model, TextContent};
     use serde_json::json;
 
     fn create_test_model() -> Model {
@@ -741,8 +752,8 @@ mod tests {
 
     #[test]
     fn test_parse_response_created_event() {
-        let sse_data = r#"event: response.created
-data: {"response":{"id":"resp_123","status":"in_progress","model":"gpt-4o"}}"#;
+        // Data-only format
+        let sse_data = r#"data: {"response":{"id":"resp_123","status":"in_progress","model":"gpt-4o"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         assert!(!events.is_empty());
@@ -753,8 +764,8 @@ data: {"response":{"id":"resp_123","status":"in_progress","model":"gpt-4o"}}"#;
 
     #[test]
     fn test_parse_output_item_added_event() {
-        let sse_data = r#"event: response.output_item.added
-data: {"output_item":{"index":0,"id":"msg_123","type":"message","status":"in_progress"}}"#;
+        // Data-only format
+        let sse_data = r#"data: {"output_item":{"index":0,"id":"msg_123","type":"message","status":"in_progress"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         // Should contain a ToolCallStart event
@@ -763,8 +774,8 @@ data: {"output_item":{"index":0,"id":"msg_123","type":"message","status":"in_pro
 
     #[test]
     fn test_parse_text_delta_event() {
-        let sse_data = r#"event: response.output_text.delta
-data: {"output_text":{"content_index":0,"slice":"Hello"}}"#;
+        // Data-only format (the parser processes data lines, event lines are metadata)
+        let sse_data = r#"data: {"output_text":{"content_index":0,"slice":"Hello"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         assert!(events.iter().any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
@@ -772,8 +783,8 @@ data: {"output_text":{"content_index":0,"slice":"Hello"}}"#;
 
     #[test]
     fn test_parse_function_call_delta_event() {
-        let sse_data = r#"event: response.function_call_arguments.delta
-data: {"function_call":{"content_index":0,"arguments":"{\"location"}}"#;
+        // Data-only format
+        let sse_data = r#"data: {"function_call":{"content_index":0,"arguments":"{\"location"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         assert!(events.iter().any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. })));
@@ -781,8 +792,8 @@ data: {"function_call":{"content_index":0,"arguments":"{\"location"}}"#;
 
     #[test]
     fn test_parse_completed_event_with_usage() {
-        let sse_data = r#"event: response.completed
-data: {"response":{"id":"resp_123","status":"completed","usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150}}}"#;
+        // Data-only format
+        let sse_data = r#"data: {"response":{"id":"resp_123","status":"completed","usage":{"input_tokens":100,"output_tokens":50,"total_tokens":150}}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { reason: StopReason::Stop, .. })));
@@ -790,8 +801,8 @@ data: {"response":{"id":"resp_123","status":"completed","usage":{"input_tokens":
 
     #[test]
     fn test_parse_reasoning_event() {
-        let sse_data = r#"event: response.reasoning.done
-data: {"reasoning":{"content_index":0,"summary":[{"type":"summary_text","text":"Thinking process..."}]}}"#;
+        // Data-only format
+        let sse_data = r#"data: {"reasoning":{"content_index":0,"summary":[{"type":"summary_text","text":"Thinking process..."}]}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         assert!(events.iter().any(|e| matches!(e, ProviderEvent::ThinkingEnd { .. })));
@@ -806,13 +817,10 @@ data: {"reasoning":{"content_index":0,"summary":[{"type":"summary_text","text":"
 
     #[test]
     fn test_multiple_events_in_stream() {
-        let sse_data = r#"event: response.created
-data: {"response":{"id":"resp_123"}}
-event: response.output_item.added
+        // Multiple data lines
+        let sse_data = r#"data: {"response":{"id":"resp_123"}}
 data: {"output_item":{"index":0,"type":"message"}}
-event: response.output_text.delta
 data: {"output_text":{"slice":"Hello"}}
-event: response.completed
 data: {"response":{"status":"completed"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
@@ -844,8 +852,8 @@ data: [DONE]"#;
 
     #[test]
     fn test_incomplete_response() {
-        let sse_data = r#"event: response.incomplete
-data: {"response":{"id":"resp_123","incomplete_details":{"reason":"max_output_tokens"}}}"#;
+        // Data-only format
+        let sse_data = r#"data: {"response":{"id":"resp_123","incomplete_details":{"reason":"max_output_tokens"}}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         assert!(events.iter().any(|e| matches!(e, ProviderEvent::Done { reason: StopReason::Length, .. })));
