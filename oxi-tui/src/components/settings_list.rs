@@ -93,7 +93,12 @@ impl SettingsList {
                 }
                 self.dirty = true;
             }
-            SettingValue::Text(s) | SettingValue::Number(_) => {
+            SettingValue::Text(ref s) => {
+                self.edit_buffer = s.clone();
+                self.editing = true;
+                self.dirty = true;
+            }
+            SettingValue::Number(_) => {
                 self.edit_buffer = setting.value.display();
                 self.editing = true;
                 self.dirty = true;
@@ -201,19 +206,23 @@ impl Component for SettingsList {
         }
 
         match event {
-            Event::Key(KeyEvent { code: KeyCode::Up, .. })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('k'),
-                modifiers,
-            }) if !modifiers.ctrl && !modifiers.alt => {
+            Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
                 self.navigate_prev();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Down, .. })
-            | Event::Key(KeyEvent {
-                code: KeyCode::Char('j'),
-                modifiers,
-            }) if !modifiers.ctrl && !modifiers.alt => {
+            Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+                self.navigate_next();
+                true
+            }
+            Event::Key(KeyEvent { code: KeyCode::Char('k'), modifiers })
+                if !modifiers.ctrl && !modifiers.alt =>
+            {
+                self.navigate_prev();
+                true
+            }
+            Event::Key(KeyEvent { code: KeyCode::Char('j'), modifiers })
+                if !modifiers.ctrl && !modifiers.alt =>
+            {
                 self.navigate_next();
                 true
             }
@@ -287,13 +296,6 @@ impl Component for SettingsList {
 
                     // Value
                     let val_start = sep_col + 2;
-                    let display_val = if self.editing && is_selected {
-                        &self.edit_buffer
-                    } else {
-                        // We need a temporary; use a display string
-                        &entry.value.display()
-                    };
-                    // Since we can't hold a reference to a temporary, we'll inline:
                     let val_display = if self.editing && is_selected {
                         self.edit_buffer.clone()
                     } else {

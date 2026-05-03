@@ -23,7 +23,7 @@ pub use kill_ring::KillRing;
 pub use undo_stack::UndoStack;
 pub use cell::{Attributes, Cell, CellBuilder, Color};
 pub use component::Component;
-pub use components::{AutocompleteProvider, ChatMessageDisplay, ChatView, Completion, ContentBlockDisplay, Editor, EditorOptions, FileCompleter, Image, ImageProtocol, Input, InputOptions, Markdown, MarkdownTheme, Mention, MessageRole, StreamingState, Text};
+pub use components::{AutocompleteProvider, BorderStyle, Box, ChatMessageDisplay, ChatView, Command, CommandPalette, Completion, ContentBlockDisplay, Editor, EditorOptions, FileCompleter, Image, ImageProtocol, Input, InputOptions, Loader, Markdown, MarkdownTheme, Mention, MessageRole, SelectItem, SelectList, SettingEntry, SettingValue, SettingsList, SettingsOverlay, Spacer, StreamingState, Text, TruncatedText};
 pub use event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent};
 pub use overlay::{OverlayBox, OverlayContent, OverlayHandle, OverlayOptions};
 pub use renderer::Renderer;
