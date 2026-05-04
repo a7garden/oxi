@@ -1396,7 +1396,7 @@ mod tests {
         let registry = ModelRegistry::create(AuthStorage::in_memory(), None);
         let model = registry.resolve_model("claude-sonnet-4-20250514");
         assert!(model.is_some());
-        assert_eq!(model.id, "claude-sonnet-4-20250514");
+        assert_eq!(model.unwrap().id, "claude-sonnet-4-20250514");
     }
 
     #[test]
