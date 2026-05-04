@@ -526,27 +526,6 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         })
                         .await;
                 }
-                SessionEvent::AutoRetryStart {
-                    attempt,
-                    max_attempts,
-                    delay_ms: _,
-                    error_message,
-                } => {
-                    let _ = ui_tx
-                        .send(UiEvent::RetryStart {
-                            attempt,
-                            max_attempts,
-                            error_message,
-                        })
-                        .await;
-                }
-                SessionEvent::AutoRetryEnd {
-                    success: _,
-                    attempt: _,
-                    final_error: _,
-                } => {
-                    // Retry ended, no specific UI action needed
-                }
                 SessionEvent::ThinkingLevelChanged { level } => {
                     let _ = ui_tx
                         .send(UiEvent::ThinkingLevelChanged {

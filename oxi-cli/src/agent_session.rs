@@ -38,7 +38,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex, Notify};
+use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -65,19 +65,6 @@ pub enum SessionEvent {
         aborted: bool,
         will_retry: bool,
         error_message: Option<String>,
-    },
-    /// Auto-retry started.
-    AutoRetryStart {
-        attempt: u32,
-        max_attempts: u32,
-        delay_ms: u64,
-        error_message: String,
-    },
-    /// Auto-retry ended.
-    AutoRetryEnd {
-        success: bool,
-        attempt: u32,
-        final_error: Option<String>,
     },
     /// Session display name changed.
     SessionInfoChanged {
@@ -209,30 +196,6 @@ pub struct TokenStats {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Retry settings (session-level, read from Settings)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Retry settings derived from the global [`Settings`].
-#[derive(Debug, Clone)]
-pub struct SessionRetrySettings {
-    pub enabled: bool,
-    pub max_retries: u32,
-    pub base_delay_ms: u64,
-}
-
-impl SessionRetrySettings {
-    /// Read from the global settings.
-    pub fn from_settings(_settings: &Settings) -> Self {
-        // For now, use reasonable defaults; the settings module can be extended.
-        Self {
-            enabled: true,
-            max_retries: 3,
-            base_delay_ms: 1000,
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // AgentSession
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -266,12 +229,6 @@ pub struct AgentSession {
     compaction_abort: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     overflow_recovery_attempted: Arc<RwLock<bool>>,
 
-    // ── Retry state ──────────────────────────────────────────────────
-    retry_settings: Arc<RwLock<SessionRetrySettings>>,
-    retry_attempt: Arc<RwLock<u32>>,
-    retry_abort: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    retry_notify: Arc<Notify>,
-
     // ── Session persistence ──────────────────────────────────────────
     session_id: Arc<RwLock<String>>,
 
@@ -294,7 +251,6 @@ impl AgentSession {
         cwd: String,
     ) -> Self {
         let session_id = session_manager.get_session_id();
-        let retry_settings = SessionRetrySettings::from_settings(&settings);
         let compaction_config = CompactionConfig {
             enabled: settings.auto_compaction,
             ..CompactionConfig::default()
@@ -314,10 +270,6 @@ impl AgentSession {
             compaction_config: Arc::new(RwLock::new(compaction_config)),
             compaction_abort: Arc::new(Mutex::new(None)),
             overflow_recovery_attempted: Arc::new(RwLock::new(false)),
-            retry_settings: Arc::new(RwLock::new(retry_settings)),
-            retry_attempt: Arc::new(RwLock::new(0)),
-            retry_abort: Arc::new(Mutex::new(None)),
-            retry_notify: Arc::new(Notify::new()),
             session_id: Arc::new(RwLock::new(session_id)),
             cwd,
             streaming: Arc::new(AtomicBool::new(false)),
@@ -371,9 +323,14 @@ impl AgentSession {
         }
     }
 
-    /// Whether auto-retry is in progress.
-    pub fn is_retrying(&self) -> bool {
-        *self.retry_attempt.read() > 0
+    /// Check if auto-retry is enabled.
+    ///
+    /// Delegates to the agent loop's retry configuration.
+    /// Auto-retry is now handled entirely by the agent loop
+    /// (`oxi_agent::AgentLoopConfig::auto_retry_enabled`).
+    pub fn auto_retry_enabled(&self) -> bool {
+        // Agent loop defaults to enabled; we reflect that here.
+        true
     }
 
     /// Get the current session stats.
@@ -447,11 +404,6 @@ impl AgentSession {
     /// Check if auto-compaction is enabled.
     pub fn auto_compaction_enabled(&self) -> bool {
         self.compaction_config.read().enabled
-    }
-
-    /// Check if auto-retry is enabled.
-    pub fn auto_retry_enabled(&self) -> bool {
-        self.retry_settings.read().enabled
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -644,7 +596,6 @@ impl AgentSession {
 
     /// Abort current operation.
     pub async fn abort(&self) {
-        self.abort_retry();
         // Agent abort is not yet exposed; best-effort
         tracing::debug!("AgentSession::abort() requested");
     }
@@ -979,101 +930,6 @@ impl AgentSession {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Auto-retry
-    // ══════════════════════════════════════════════════════════════════
-
-    /// Check if the last response indicates a retryable error and retry if so.
-    async fn check_auto_retry(&self, events: &[AgentEvent]) -> bool {
-        let retry_settings = self.retry_settings.read().clone();
-        if !retry_settings.enabled {
-            return false;
-        }
-
-        // Look for error events
-        let has_error = events.iter().any(|e| matches!(e, AgentEvent::Error { .. }));
-        if !has_error {
-            // Reset retry counter on success
-            let mut attempt = self.retry_attempt.write();
-            if *attempt > 0 {
-                self.emit(SessionEvent::AutoRetryEnd {
-                    success: true,
-                    attempt: *attempt,
-                    final_error: None,
-                });
-                *attempt = 0;
-            }
-            return false;
-        }
-
-        // Extract error message
-        let error_msg = events
-            .iter()
-            .find_map(|e| match e {
-                AgentEvent::Error { message } => Some(message.clone()),
-                _ => None,
-            })
-            .unwrap_or_default();
-
-        // Check if error is retryable
-        let retryable = is_retryable_error(&error_msg);
-        if !retryable {
-            return false;
-        }
-
-        let mut attempt = self.retry_attempt.write();
-        *attempt += 1;
-
-        if *attempt > retry_settings.max_retries {
-            self.emit(SessionEvent::AutoRetryEnd {
-                success: false,
-                attempt: *attempt - 1,
-                final_error: Some(error_msg),
-            });
-            *attempt = 0;
-            return false;
-        }
-
-        let current_attempt = *attempt;
-        let delay_ms = retry_settings.base_delay_ms * 2u64.pow(current_attempt - 1);
-
-        self.emit(SessionEvent::AutoRetryStart {
-            attempt: current_attempt,
-            max_attempts: retry_settings.max_retries,
-            delay_ms,
-            error_message: error_msg.clone(),
-        });
-
-        // Wait with exponential backoff
-        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
-
-        tracing::info!(
-            "Auto-retry attempt {}/{}",
-            current_attempt,
-            retry_settings.max_retries
-        );
-
-        true
-    }
-
-    /// Abort in-progress retry.
-    pub fn abort_retry(&self) {
-        *self.retry_attempt.write() = 0;
-        self.retry_notify.notify_one();
-    }
-
-    /// Wait for any in-progress retry to complete.
-    pub async fn wait_for_retry(&self) {
-        if *self.retry_attempt.read() > 0 {
-            self.retry_notify.notified().await;
-        }
-    }
-
-    /// Enable or disable auto-retry.
-    pub fn set_auto_retry_enabled(&self, enabled: bool) {
-        self.retry_settings.write().enabled = enabled;
-    }
-
-    // ══════════════════════════════════════════════════════════════════
     // Session persistence
     // ══════════════════════════════════════════════════════════════════
 
@@ -1219,13 +1075,6 @@ impl AgentSession {
             }
         }
 
-        // Check for retryable errors
-        let will_retry = self.check_auto_retry(&events).await;
-        if will_retry {
-            // Retry was initiated; the retry will produce new events
-            return Ok(());
-        }
-
         // Check auto-compaction after successful completion
         let has_complete = events.iter().any(|e| {
             matches!(
@@ -1301,10 +1150,6 @@ impl AgentSession {
             compaction_config: Arc::clone(&self.compaction_config),
             compaction_abort: Arc::clone(&self.compaction_abort),
             overflow_recovery_attempted: Arc::clone(&self.overflow_recovery_attempted),
-            retry_settings: Arc::clone(&self.retry_settings),
-            retry_attempt: Arc::clone(&self.retry_attempt),
-            retry_abort: Arc::clone(&self.retry_abort),
-            retry_notify: Arc::clone(&self.retry_notify),
             session_id: Arc::clone(&self.session_id),
             cwd: self.cwd.clone(),
             streaming: Arc::clone(&self.streaming),
@@ -1613,33 +1458,6 @@ fn default_model_list() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Check if an error message indicates a retryable condition.
-fn is_retryable_error(error: &str) -> bool {
-    let lower = error.to_lowercase();
-    // Context overflow is NOT retryable (handled by compaction)
-    if lower.contains("context") && lower.contains("overflow") {
-        return false;
-    }
-    // Match common retryable patterns
-    lower.contains("overloaded")
-        || lower.contains("rate limit")
-        || lower.contains("too many requests")
-        || lower.contains("429")
-        || lower.contains("500")
-        || lower.contains("502")
-        || lower.contains("503")
-        || lower.contains("504")
-        || lower.contains("service unavailable")
-        || lower.contains("server error")
-        || lower.contains("internal error")
-        || lower.contains("network error")
-        || lower.contains("connection error")
-        || lower.contains("connection refused")
-        || lower.contains("fetch failed")
-        || lower.contains("timeout")
-        || lower.contains("timed out")
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1647,24 +1465,6 @@ fn is_retryable_error(error: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_is_retryable_error() {
-        assert!(is_retryable_error("Error 429: Too many requests"));
-        assert!(is_retryable_error("server error 503"));
-        assert!(is_retryable_error("overloaded_error"));
-        assert!(is_retryable_error("connection refused"));
-        assert!(is_retryable_error("fetch failed"));
-        assert!(is_retryable_error("request timed out"));
-
-        // Context overflow is NOT retryable
-        assert!(!is_retryable_error("context overflow"));
-        assert!(!is_retryable_error("Context length exceeded"));
-
-        // Normal errors are not retryable
-        assert!(!is_retryable_error("Invalid tool call"));
-        assert!(!is_retryable_error("Unknown command"));
-    }
 
     #[test]
     fn test_default_model_list() {
@@ -1675,15 +1475,6 @@ mod tests {
                 .iter()
                 .any(|(p, m)| *p == "anthropic" && *m == "claude-sonnet-4-20250514")
         );
-    }
-
-    #[test]
-    fn test_session_retry_settings_default() {
-        let settings = Settings::default();
-        let retry = SessionRetrySettings::from_settings(&settings);
-        assert!(retry.enabled);
-        assert_eq!(retry.max_retries, 3);
-        assert_eq!(retry.base_delay_ms, 1000);
     }
 
     #[test]
