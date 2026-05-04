@@ -1633,10 +1633,9 @@ mod tests {
 
     fn make_entry(msg: AgentMessage) -> SessionEntry {
         SessionEntry {
-            id: Uuid::new_v4(),
+            id: Uuid::new_v4().to_string(),
             parent_id: None,
             message: msg,
-            label: None,
             timestamp: 1_700_000_000_000,
         }
     }
