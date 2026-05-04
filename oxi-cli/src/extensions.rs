@@ -2738,6 +2738,7 @@ impl Drop for ExtensionErrorHandle {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Internal state shared between a wrapped tool and its runner.
+#[allow(dead_code)]
 struct RunnerState {
     errors: Arc<RwLock<Vec<ExtensionErrorRecord>>>,
     error_listeners: Vec<Arc<ExtensionErrorListener>>,
@@ -2751,6 +2752,7 @@ struct RunnerState {
 /// 3. Notifies extensions via `on_after_tool_call` and `on_tool_result`
 struct WrappedTool {
     inner: Arc<dyn AgentTool>,
+    #[allow(dead_code)]
     runner_state: Arc<RwLock<RunnerState>>,
 }
 

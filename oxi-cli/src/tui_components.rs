@@ -7867,7 +7867,7 @@ impl TreeSelector {
             let mut _skip_set: std::collections::HashSet<String> = std::collections::HashSet::new();
             for flat_node in &self.flat_nodes {
                 // Walk up to check if any ancestor is folded
-                let mut current_id = flat_node.node_id.as_str();
+                let current_id = flat_node.node_id.as_str();
                 // We need parent info - use flat_nodes parent tracking
                 // For simplicity, check if the node's ID or any ancestor in folded set
                 if self.folded_nodes.contains(current_id) {

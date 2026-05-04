@@ -1342,8 +1342,8 @@ impl SessionManager {
         &mut self,
         branch_from_id: Option<&str>,
         summary: &str,
-        details: Option<serde_json::Value>,
-        from_hook: Option<bool>,
+        _details: Option<serde_json::Value>,
+        _from_hook: Option<bool>,
     ) -> String {
         if let Some(id) = branch_from_id {
             if !self.by_id.read().contains_key(id) {
@@ -1640,12 +1640,12 @@ impl SessionManager {
         parent_id: Uuid,
         entry_id: Uuid,
     ) -> Result<(Uuid, Vec<SessionEntry>)> {
-        let entry_id_str = entry_id.to_string();
-        let parent_id_str = parent_id.to_string();
+        let _entry_id_str = entry_id.to_string();
+        let _parent_id_str = parent_id.to_string();
         
         // Get entries up to the branch point
-        let entries = self.get_entries();
-        let path = self.get_branch(Some(&entry_id_str));
+        let _entries = self.get_entries();
+        let path = self.get_branch(Some(&entry_id.to_string()));
         
         let new_id = Uuid::new_v4();
         let new_entries: Vec<SessionEntry> = path.into_iter().map(|e| {
@@ -1660,7 +1660,7 @@ impl SessionManager {
     }
 
     /// Get branch info for a session
-    pub async fn get_branch_info(&self, id: Uuid) -> Result<Option<BranchInfo>> {
+    pub async fn get_branch_info(&self, _id: Uuid) -> Result<Option<BranchInfo>> {
         // Simplified implementation
         Ok(None)
     }
@@ -1676,7 +1676,7 @@ impl SessionManager {
     }
 
     /// Load metadata (backward compat)
-    pub async fn load_meta(&self, id: Uuid) -> Result<Option<SessionMeta>> {
+    pub async fn load_meta(&self, _id: Uuid) -> Result<Option<SessionMeta>> {
         Ok(None)
     }
 

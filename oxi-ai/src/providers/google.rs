@@ -10,7 +10,7 @@ use super::google_shared::{
     build_request_body, convert_messages, convert_tools, create_error_message, parse_google_events,
 };
 use super::{Provider, ProviderError, ProviderEvent, StreamOptions};
-use crate::{Api, AssistantMessage, Context, Model, StopReason};
+use crate::{Api, Context, Model, StopReason};
 
 /// Google Generative AI provider
 #[derive(Clone)]
