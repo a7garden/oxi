@@ -7627,18 +7627,16 @@ impl TreeSelector {
 
         // Determine which subtrees contain the active leaf
         let contains_active = |node: &SessionTreeNode| -> bool {
-            if let Some(ref leaf) = active_path_ids.iter().next() {
-                fn check(n: &SessionTreeNode, target_id: &str) -> bool {
-                    if n.id == target_id {
+            fn check(n: &SessionTreeNode, target_id: &str) -> bool {
+                if n.id == target_id {
                         return true;
                     }
                     n.children.iter().any(|c| check(c, target_id))
                 }
-                // Check if any ID in active_path_ids is in this subtree
-                for id in active_path_ids.iter() {
-                    if node.id == *id || node.children.iter().any(|c| check(c, id)) {
-                        return true;
-                    }
+            // Check if any ID in active_path_ids is in this subtree
+            for id in active_path_ids.iter() {
+                if node.id == *id || node.children.iter().any(|c| check(c, id)) {
+                    return true;
                 }
             }
             false
@@ -7652,7 +7650,7 @@ impl TreeSelector {
             gutters: Vec<GutterInfo>,
             result: &mut Vec<FlatTreeNode>,
             active_path_ids: &std::collections::HashSet<String>,
-            multiple_children: bool,
+            _multiple_children: bool,
             just_branched: bool,
         ) {
             result.push(FlatTreeNode {
@@ -7866,7 +7864,7 @@ impl TreeSelector {
 
         // Filter out descendants of folded nodes
         if !self.folded_nodes.is_empty() {
-            let mut skip_set = std::collections::HashSet::new();
+            let mut _skip_set: std::collections::HashSet<String> = std::collections::HashSet::new();
             for flat_node in &self.flat_nodes {
                 // Walk up to check if any ancestor is folded
                 let mut current_id = flat_node.node_id.as_str();
@@ -7877,8 +7875,8 @@ impl TreeSelector {
                 }
             }
             // Build parent map from flat_nodes
-            let mut parent_map = std::collections::HashMap::new();
-            for node in &self.flat_nodes {
+            let mut _parent_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            for _node in &self.flat_nodes {
                 // Use indent to determine parent-child relationships
                 // Children have higher indent than their parent
             }

@@ -1,10 +1,36 @@
 //! TUI-based interactive mode using oxi-tui components.
 //!
 //! Wires together ChatView, Input, Markdown, and Image components
-//! into a cohesive terminal chat experience.
+//! into a cohesive terminal chat experience, using [`AgentSession`]
+//! as the core session abstraction instead of bare [`Agent`].
+//!
+//! # Architecture
+//!
+//! ```text
+//! main.rs
+//!   └─ run_tui_interactive(app)
+//!        │
+//!        ├─ AgentSession  (session wrapper)
+//!        │    └─ Agent  (core agent loop)
+//!        │
+//!        ├─ SessionManager  (persistence)
+//!        ├─ Settings  (configuration)
+//!        ├─ ExtensionRunner  (extension hooks)
+//!        │
+//!        └─ TUI event loop  (ChatView + Input)
+//! ```
 
+use crate::agent_session::{
+    AgentSession, CompactionReason, PromptOptions, SessionEvent, StreamingBehavior,
+};
+use crate::agent_session_runtime::{
+    create_agent_session_from_services, create_agent_session_services,
+    CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
+};
+use crate::session::SessionManager;
+use crate::settings::Settings;
 use anyhow::Result;
-use oxi_agent::{Agent, AgentEvent};
+use oxi_agent::AgentEvent;
 use oxi_tui::component::Component;
 use oxi_tui::{
     ChatMessageDisplay, ChatView, ContentBlockDisplay, Input, MessageRole, Surface, Theme,
@@ -12,7 +38,11 @@ use oxi_tui::{
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-/// Messages sent from the agent task to the TUI event loop.
+// ═══════════════════════════════════════════════════════════════════════════
+// UI events (from agent → TUI)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Messages sent from the agent/session layer to the TUI event loop.
 #[derive(Debug)]
 enum UiEvent {
     /// Agent started.
@@ -37,23 +67,96 @@ enum UiEvent {
     Complete,
     /// Agent error.
     Error(String),
+    /// Compaction started.
+    CompactionStart {
+        reason: CompactionReason,
+    },
+    /// Compaction finished.
+    CompactionEnd {
+        reason: CompactionReason,
+        error_message: Option<String>,
+    },
+    /// Auto-retry started.
+    RetryStart {
+        attempt: u32,
+        max_attempts: u32,
+        error_message: String,
+    },
+    /// Model changed.
+    ModelChanged {
+        model_id: String,
+    },
+    /// Thinking level changed.
+    ThinkingLevelChanged {
+        level: String,
+    },
+    /// Queue updated.
+    QueueUpdate {
+        pending: usize,
+    },
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Main entry point
+// ═══════════════════════════════════════════════════════════════════════════
+
 /// Run the TUI-based interactive mode.
+///
+/// Creates an [`AgentSession`] from the app's settings, wiring up
+/// session persistence, auto-compaction, auto-retry, extension hooks,
+/// and settings changes.
 pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let theme = Theme::dark();
-    let agent: Arc<Agent> = app.agent();
+    let settings = app.settings().clone();
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| ".".to_string());
 
-    // Channel for agent → UI communication
+    // ── Build AgentSession via the runtime factory ───────────────────
+    let session_manager = SessionManager::create(&cwd, None);
+    let session_id = session_manager.get_session_id();
+
+    // Create services
+    let services = create_agent_session_services(
+        CreateAgentSessionServicesOptions::new(std::env::current_dir().unwrap_or_default()),
+    )?;
+    let services = Arc::new(services);
+
+    // Create agent session from services
+    let create_result = create_agent_session_from_services(
+        CreateAgentSessionFromServicesOptions {
+            services: services.clone(),
+            session_manager,
+            model_id: Some(app.model_id()),
+            thinking_level: Some(settings.thinking_level),
+            scoped_models: Vec::new(),
+        },
+    )?;
+
+    let agent_session = create_result.session;
+
+    // Show model fallback message if any
+    if let Some(msg) = create_result.model_fallback_message {
+        tracing::warn!("Model fallback: {}", msg);
+    }
+
+    // ── Subscribe to session events ──────────────────────────────────
+    let (session_event_tx, mut session_event_rx) = mpsc::unbounded_channel::<SessionEvent>();
+
+    agent_session.subscribe(Box::new(move |event| {
+        let _ = session_event_tx.send(event.clone());
+    }));
+
+    // Channel for agent → UI communication (for streaming text/tool events)
     let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
 
     // Channel for user input → agent execution
     let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
 
-    // Spawn agent worker on a dedicated thread with its own LocalSet runtime.
-    // The agent uses non-Send futures internally, so it needs a single-threaded
-    // runtime with LocalSet.
-    let agent_for_thread: Arc<Agent> = Arc::clone(&agent);
+    // ── Agent worker thread ──────────────────────────────────────────
+    // The agent uses non-Send futures internally, so it needs a
+    // single-threaded runtime with LocalSet.
+    let session_handle = agent_session.clone_handle();
     let ui_tx_for_thread = ui_tx.clone();
     let agent_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -68,7 +171,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
 
                         // Forward agent events to UI
-                        let ui_fwd = ui_tx_for_thread.clone();
+                        let ui_fwd = ui_tx.clone();
                         let event_forwarder = tokio::task::spawn_local(async move {
                             while let Some(event) = event_rx.recv().await {
                                 let ui_event = match event {
@@ -103,9 +206,10 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             }
                         });
 
-                        // Run agent with channel on the local set
-                        let a: Arc<Agent> = Arc::clone(&agent_for_thread);
-                        let _ = a.run_with_channel(prompt, event_tx).await;
+                        // Run agent with channel using the session's underlying agent
+                        let sh = session_handle.clone_handle();
+                        let agent = sh.agent_ref();
+                        let _ = agent.run_with_channel(prompt, event_tx).await;
                         let _ = event_forwarder.await;
                     }
                 })
@@ -113,11 +217,24 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         });
     });
 
-    // Build TUI components
+    // ── Build TUI components ─────────────────────────────────────────
     let mut chat_view = ChatView::new(theme.clone());
     let mut input = Input::with_placeholder("Type a message... (Ctrl+C to quit)");
     input.on_focus();
     let mut is_agent_busy = false;
+
+    // Display session info at start
+    chat_view.add_message(ChatMessageDisplay {
+        role: MessageRole::Assistant,
+        content_blocks: vec![ContentBlockDisplay::Text {
+            content: format!(
+                "oxi ready. Session: {}\nModel: {}\nType /help for commands.",
+                session_id,
+                agent_session.model_id(),
+            ),
+        }],
+        timestamp: now_millis(),
+    });
 
     use std::io::{self, Write};
 
@@ -199,6 +316,22 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             if !is_agent_busy {
                                 let value = input.value().to_string();
                                 if !value.is_empty() {
+                                    // Handle slash commands
+                                    if value.starts_with('/') {
+                                        let handled = handle_slash_command(
+                                            &value,
+                                            &agent_session,
+                                            &mut chat_view,
+                                            &theme,
+                                            &mut running,
+                                        );
+                                        input.clear();
+                                        if handled {
+                                            continue;
+                                        }
+                                        // If not handled, fall through to send as prompt
+                                    }
+
                                     // Add user message to chat view
                                     chat_view.add_message(ChatMessageDisplay {
                                         role: MessageRole::User,
@@ -225,7 +358,17 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                 .modifiers
                                 .contains(crossterm::event::KeyModifiers::CONTROL) =>
                         {
-                            running = false;
+                            if is_agent_busy {
+                                // Abort current operation
+                                let sh = agent_session.clone_handle();
+                                tokio::spawn(async move {
+                                    sh.abort().await;
+                                });
+                                is_agent_busy = false;
+                                chat_view.finish_streaming_error("Interrupted");
+                            } else {
+                                running = false;
+                            }
                         }
                         crossterm::event::KeyCode::PageUp => {
                             chat_view.scroll_up(10);
@@ -261,7 +404,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             }
         }
 
-        // Drain agent events from the channel
+        // ── Drain agent events from the channel ──────────────────────
         while let Ok(ui_event) = ui_rx.try_recv() {
             match ui_event {
                 UiEvent::Start => {}
@@ -295,6 +438,168 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     chat_view.finish_streaming_error(&msg);
                     is_agent_busy = false;
                 }
+                UiEvent::CompactionStart { reason } => {
+                    let reason_str = match reason {
+                        CompactionReason::Manual => "manual",
+                        CompactionReason::Threshold => "auto-threshold",
+                        CompactionReason::Overflow => "overflow-recovery",
+                    };
+                    chat_view.add_message(ChatMessageDisplay {
+                        role: MessageRole::Assistant,
+                        content_blocks: vec![ContentBlockDisplay::Text {
+                            content: format!("\u{1f4e6} Compacting context ({})...", reason_str),
+                        }],
+                        timestamp: now_millis(),
+                    });
+                }
+                UiEvent::CompactionEnd {
+                    reason: _,
+                    error_message,
+                } => {
+                    let msg = if let Some(err) = error_message {
+                        format!("\u{26a0}\u{fe0f} Compaction failed: {}", err)
+                    } else {
+                        "\u{2705} Compaction complete.".to_string()
+                    };
+                    chat_view.add_message(ChatMessageDisplay {
+                        role: MessageRole::Assistant,
+                        content_blocks: vec![ContentBlockDisplay::Text { content: msg }],
+                        timestamp: now_millis(),
+                    });
+                }
+                UiEvent::RetryStart {
+                    attempt,
+                    max_attempts,
+                    error_message,
+                } => {
+                    chat_view.add_message(ChatMessageDisplay {
+                        role: MessageRole::Assistant,
+                        content_blocks: vec![ContentBlockDisplay::Text {
+                            content: format!(
+                                "\u{1f504} Retrying ({}/{}): {}",
+                                attempt, max_attempts, error_message
+                            ),
+                        }],
+                        timestamp: now_millis(),
+                    });
+                }
+                UiEvent::ModelChanged { model_id } => {
+                    chat_view.add_message(ChatMessageDisplay {
+                        role: MessageRole::Assistant,
+                        content_blocks: vec![ContentBlockDisplay::Text {
+                            content: format!("\u{1f916} Model: {}", model_id),
+                        }],
+                        timestamp: now_millis(),
+                    });
+                }
+                UiEvent::ThinkingLevelChanged { level } => {
+                    chat_view.add_message(ChatMessageDisplay {
+                        role: MessageRole::Assistant,
+                        content_blocks: vec![ContentBlockDisplay::Text {
+                            content: format!("\u{1f4ad} Thinking level: {}", level),
+                        }],
+                        timestamp: now_millis(),
+                    });
+                }
+                UiEvent::QueueUpdate { pending } => {
+                    if pending > 0 {
+                        tracing::debug!("Queue updated: {} pending messages", pending);
+                    }
+                }
+            }
+        }
+
+        // ── Drain session events ─────────────────────────────────────
+        while let Ok(session_event) = session_event_rx.try_recv() {
+            match session_event {
+                SessionEvent::CompactionStart { reason } => {
+                    let _ = ui_tx.send(UiEvent::CompactionStart { reason }).await;
+                }
+                SessionEvent::CompactionEnd {
+                    reason,
+                    result: _,
+                    aborted: _,
+                    will_retry: _,
+                    error_message,
+                } => {
+                    let _ = ui_tx
+                        .send(UiEvent::CompactionEnd {
+                            reason,
+                            error_message,
+                        })
+                        .await;
+                }
+                SessionEvent::AutoRetryStart {
+                    attempt,
+                    max_attempts,
+                    delay_ms: _,
+                    error_message,
+                } => {
+                    let _ = ui_tx
+                        .send(UiEvent::RetryStart {
+                            attempt,
+                            max_attempts,
+                            error_message,
+                        })
+                        .await;
+                }
+                SessionEvent::AutoRetryEnd {
+                    success: _,
+                    attempt: _,
+                    final_error: _,
+                } => {
+                    // Retry ended, no specific UI action needed
+                }
+                SessionEvent::ThinkingLevelChanged { level } => {
+                    let _ = ui_tx
+                        .send(UiEvent::ThinkingLevelChanged {
+                            level: format!("{:?}", level),
+                        })
+                        .await;
+                }
+                SessionEvent::QueueUpdate { steering, follow_up } => {
+                    let pending = steering.len() + follow_up.len();
+                    let _ = ui_tx.send(UiEvent::QueueUpdate { pending }).await;
+                }
+                SessionEvent::SessionInfoChanged { name: _ } => {
+                    // Could update title bar in future
+                }
+                SessionEvent::Agent(event) => {
+                    // Agent events are handled by the agent worker thread's
+                    // event forwarder; we only get them here if we subscribed
+                    // to the session channel directly (which we do via subscribe).
+                    // Forward relevant ones to UI.
+                    match &event {
+                        AgentEvent::Fallback {
+                            from_model,
+                            to_model,
+                        } => {
+                            let _ = ui_tx
+                                .send(UiEvent::ModelChanged {
+                                    model_id: to_model.clone(),
+                                })
+                                .await;
+                        }
+                        AgentEvent::Retry {
+                            attempt,
+                            max_retries,
+                            retry_after_secs: _,
+                            reason,
+                        } => {
+                            let _ = ui_tx
+                                .send(UiEvent::RetryStart {
+                                    attempt: *attempt as u32,
+                                    max_attempts: *max_retries as u32,
+                                    error_message: reason.clone(),
+                                })
+                                .await;
+                        }
+                        AgentEvent::Compaction { event: _ } => {
+                            // Compaction events are handled by SessionEvent above
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
 
@@ -302,7 +607,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         chat_view.scroll_to_bottom();
     }
 
-    // Cleanup
+    // ── Cleanup ──────────────────────────────────────────────────────
     drop(prompt_tx);
     let _ = agent_handle.join();
     crossterm::execute!(io::stdout(), crossterm::cursor::Show)?;
@@ -313,9 +618,178 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
+// Slash command handling
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Handle a slash command. Returns `true` if the command was handled
+/// (and should NOT be sent to the agent).
+fn handle_slash_command(
+    input: &str,
+    session: &AgentSession,
+    chat_view: &mut ChatView,
+    theme: &Theme,
+    running: &mut bool,
+) -> bool {
+    let trimmed = input.trim();
+    let (cmd, arg) = if let Some(space) = trimmed.find(' ') {
+        (&trimmed[..space], Some(trimmed[space + 1..].trim()))
+    } else {
+        (trimmed, None)
+    };
+    let cmd_lower = cmd.to_lowercase();
+
+    match cmd_lower.as_str() {
+        "/help" | "/?" => {
+            let help_text = format_help();
+            chat_view.add_message(ChatMessageDisplay {
+                role: MessageRole::Assistant,
+                content_blocks: vec![ContentBlockDisplay::Text {
+                    content: help_text,
+                }],
+                timestamp: now_millis(),
+            });
+            true
+        }
+        "/quit" | "/exit" | "/q" => {
+            *running = false;
+            true
+        }
+        "/clear" => {
+            *chat_view = ChatView::new(theme.clone());
+            session.reset();
+            true
+        }
+        "/model" => {
+            if let Some(model_id) = arg {
+                match session.set_model(model_id) {
+                    Ok(()) => {
+                        chat_view.add_message(ChatMessageDisplay {
+                            role: MessageRole::Assistant,
+                            content_blocks: vec![ContentBlockDisplay::Text {
+                                content: format!("Switched to model: {}", model_id),
+                            }],
+                            timestamp: now_millis(),
+                        });
+                    }
+                    Err(e) => {
+                        chat_view.add_message(ChatMessageDisplay {
+                            role: MessageRole::Assistant,
+                            content_blocks: vec![ContentBlockDisplay::Text {
+                                content: format!("Error switching model: {}", e),
+                            }],
+                            timestamp: now_millis(),
+                        });
+                    }
+                }
+            } else {
+                chat_view.add_message(ChatMessageDisplay {
+                    role: MessageRole::Assistant,
+                    content_blocks: vec![ContentBlockDisplay::Text {
+                        content: format!(
+                            "Current model: {}\nUse /model <provider/model> to switch.",
+                            session.model_id(),
+                        ),
+                    }],
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        "/compact" => {
+            let instructions = arg.map(|s| s.to_string());
+            // Compact runs asynchronously, but we fire and forget here
+            // The session events will show progress
+            let sh = session.clone_handle();
+            tokio::spawn(async move {
+                match sh.compact(instructions).await {
+                    Ok(result) => {
+                        tracing::info!("Compaction complete: {} tokens before", result.tokens_before);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Compaction failed: {}", e);
+                    }
+                }
+            });
+            true
+        }
+        "/session" => {
+            let stats = session.session_stats();
+            let info = format!(
+                "Session Info:\n\
+                 ID: {}\n\
+                 Messages: {} total ({} user, {} assistant)\n\
+                 Tool calls: {}, Results: {}\n\
+                 Model: {}\n\
+                 Thinking: {:?}\n\
+                 Auto-compaction: {}\n\
+                 Auto-retry: {}",
+                stats.session_id,
+                stats.total_messages,
+                stats.user_messages,
+                stats.assistant_messages,
+                stats.tool_calls,
+                stats.tool_results,
+                session.model_id(),
+                session.thinking_level(),
+                session.auto_compaction_enabled(),
+                session.auto_retry_enabled(),
+            );
+            chat_view.add_message(ChatMessageDisplay {
+                role: MessageRole::Assistant,
+                content_blocks: vec![ContentBlockDisplay::Text { content: info }],
+                timestamp: now_millis(),
+            });
+            true
+        }
+        "/settings" => {
+            let settings_info = format!(
+                "Model: {}\n\
+                 Thinking Level: {:?}\n\
+                 Auto-compaction: {}\n\
+                 Auto-retry: {}",
+                session.model_id(),
+                session.thinking_level(),
+                session.auto_compaction_enabled(),
+                session.auto_retry_enabled(),
+            );
+            chat_view.add_message(ChatMessageDisplay {
+                role: MessageRole::Assistant,
+                content_blocks: vec![ContentBlockDisplay::Text {
+                    content: settings_info,
+                }],
+                timestamp: now_millis(),
+            });
+            true
+        }
+        "/name" => {
+            if let Some(name) = arg {
+                session.set_session_name(name.to_string());
+                chat_view.add_message(ChatMessageDisplay {
+                    role: MessageRole::Assistant,
+                    content_blocks: vec![ContentBlockDisplay::Text {
+                        content: format!("Session named: {}", name),
+                    }],
+                    timestamp: now_millis(),
+                });
+            } else {
+                chat_view.add_message(ChatMessageDisplay {
+                    role: MessageRole::Assistant,
+                    content_blocks: vec![ContentBlockDisplay::Text {
+                        content: "Usage: /name <name>".to_string(),
+                    }],
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        _ => false, // Not a recognized command, send to agent
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Surface rendering
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
 
 /// Render a surface to the terminal using efficient SGR sequences.
 fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
@@ -409,9 +883,9 @@ fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
     print!("\x1b[?2026l"); // End synchronized update
 }
 
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
 // Event conversion helpers
-// ---------------------------------------------------------------------------
+// ═══════════════════════════════════════════════════════════════════════════
 
 /// Convert a crossterm key event to an oxi-tui Event.
 /// Returns None for special keys handled separately (Enter, Ctrl+C).
@@ -456,6 +930,29 @@ fn convert_key_event(key: crossterm::event::KeyEvent) -> Option<oxi_tui::Event> 
     Some(oxi_tui::Event::Key(oxi_tui::KeyEvent::with_modifiers(
         code, modifiers,
     )))
+}
+
+/// Format the help text.
+fn format_help() -> String {
+    r#"oxi — AI Coding Assistant
+
+Commands:
+  /model [id]        Switch or show model
+  /clear             Clear conversation history
+  /compact [instr]   Compact context with optional instructions
+  /session           Show session info and stats
+  /settings          Show current settings
+  /name <name>       Set session display name
+  /help              Show this help message
+  /quit              Quit oxi
+
+Keybindings:
+  Enter              Send message or command
+  Ctrl+C             Interrupt agent or quit
+  PageUp/PageDown    Scroll chat history
+  Mouse scroll       Scroll chat history
+"#
+    .to_string()
 }
 
 /// Get current timestamp in milliseconds.

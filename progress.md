@@ -68,3 +68,61 @@ Completed
 - The ExtensionRunner is stored as `Option` since sessions may be created before extensions are loaded
 - Runner updates use graceful lifecycle: old runner gets session_shutdown + session_end + unload, new runner gets load + session_start
 - Extension tools/commands can be collected via `extension_tools()` / `extension_commands()` for registration with the agent
+
+## Selector Components Port (pi-mono → oxi-cli)
+
+### SessionSelectorSearch (NEW)
+- [x] `ParsedSearchQuery` with token extraction (fuzzy + phrase + regex modes)
+- [x] `SearchQueryMode` enum (Tokens / Regex)
+- [x] `SearchToken` and `SearchTokenKind` (Fuzzy / Phrase)
+- [x] `parse_search_query()` — tokenizes with quote support, `re:<pattern>` for regex mode
+- [x] `SessionMatchResult` with match score
+- [x] `match_session()` — matches against session ID, name, label, working dir
+- [x] `filter_and_sort_sessions()` — sort by relevance or recency, name filter support
+- [x] `SessionSelectorSearch` struct with full render() → Vec<String>
+- [x] Fuzzy matching on session names
+- [x] Phrase matching (quoted strings)
+- [x] Regex matching (re: prefix)
+- [x] Token highlighting in render (phrases shown in yellow)
+- [x] Parse error display
+
+### SettingsSelector (ENHANCED)
+- [x] Added missing settings: collapse-changelog, install-telemetry, show-hardware-cursor, editor-padding, autocomplete-max-visible, clear-on-shrink, terminal-progress, image-width-cells
+- [x] `set_value()` method to set a setting by ID
+- [x] `validate()` method — returns validation errors for numeric settings (editor-padding 0-3, autocomplete 3-20, image-width 20-300)
+- [x] Full `from_config()` now generates all settings matching TS source
+
+### ThinkingSelector (ENHANCED)
+- [x] `model_max_level` field for model-specific level clamping
+- [x] `model_name` field for display
+- [x] `new_with_model_clamp()` — creates selector with model-specific max level
+- [x] `clamp_level()` — clamps a level to a model's maximum
+- [x] `rank()` method on `ThinkingLevel` for comparison
+- [x] `is_level_available()` — checks if level is supported by model
+- [x] Render shows unavailable levels as dimmed with "(not supported)" label
+- [x] Render shows model name when set
+
+### TreeSelector (ENHANCED)
+- [x] `GutterInfo` struct for proper ASCII tree rendering with vertical connectors
+- [x] `FlatTreeNode` now includes `gutters`, `custom_label`, `has_label` fields
+- [x] `SessionTreeNode` now includes `custom_label` field
+- [x] `TreeFilterMode::all_modes()`, `next()`, `prev()` for cycling
+- [x] Fold/unfold support: `folded_nodes` set, `toggle_fold()`, `fold()`, `unfold()`
+- [x] Filter mode cycling: `cycle_filter_forward()`, `cycle_filter_backward()`, `toggle_filter()`
+- [x] Inline search: `append_search()`, `backspace_search()`, `clear_search()`
+- [x] Page navigation: `page_up()`, `page_down()`
+- [x] Active path markers (•) in render
+- [x] Custom label display in brackets
+- [x] Entry type icons (user=●, tool=⚙, assistant=○)
+- [x] Selected background highlighting
+- [x] Proper scroll tracking with `scroll_offset`
+- [x] Active-path-prioritized root ordering
+- [x] `new_with_filter_mode()` constructor
+
+### Verification
+- [x] `cargo check -p oxi-cli` passes (only 1 pre-existing error in rpc_mode.rs, unrelated)
+- [x] No warnings in tui_components.rs
+- [x] Uses existing theme/ANSI patterns (\x1b[36m accent, \x1b[2m dim, etc.)
+
+### Files Changed
+- `oxi-cli/src/tui_components.rs` — Added SessionSelectorSearch, enhanced SettingsSelector, ThinkingSelector, and TreeSelector

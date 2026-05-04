@@ -1187,6 +1187,13 @@ impl AgentSession {
         self.clear_queue();
     }
 
+    /// Get a reference to the underlying [`Agent`].
+    ///
+    /// Use this when you need direct agent access (e.g., `run_with_channel`).
+    pub fn agent_ref(&self) -> Arc<Agent> {
+        Arc::clone(&self.agent)
+    }
+
     /// Get a cheap cloneable handle that references the same underlying session.
     pub fn clone_handle(&self) -> AgentSessionHandle {
         AgentSessionHandle {
