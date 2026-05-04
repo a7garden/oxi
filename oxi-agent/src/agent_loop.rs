@@ -1111,7 +1111,7 @@ struct PreparedToolCallOutcome {
 }
 
 fn should_terminate_batch(finalized_calls: &[FinalizedToolCall]) -> bool {
-    !finalized_calls.is_empty() && finalized_calls.iter().all(|f| f.result.success)
+    finalized_calls.iter().any(|f| f.result.terminate)
 }
 
 fn create_tool_result_message(finalized: &FinalizedToolCall) -> oxi_ai::ToolResultMessage {
