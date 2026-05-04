@@ -5,90 +5,82 @@ In Progress
 
 ## Tasks
 
-### Port pi-mono's agent-session.ts core to Rust — DONE
+### Port pi-mono's session-manager.ts to Rust — DONE
 
-Created `oxi-cli/src/agent_session.rs` — the missing link between `oxi_agent::Agent` and `interactive.rs`.
+Replaced/enhanced `oxi-cli/src/session.rs` with full implementation ported from pi-mono's `packages/coding-agent/src/core/session-manager.ts` (1425 lines).
 
-#### What was ported (from pi-mono `agent-session.ts`, 3108 lines):
+#### What was ported:
 
-1. **AgentSession struct** — session wrapper around Agent
-   - Holds: agent, settings, session_manager, scoped_models, event listeners
-   - Methods: `prompt()`, `steer()`, `follow_up()`, `abort()`
-   - Properties: `model_id()`, `thinking_level()`, `is_streaming()`, `messages()`, `session_id()`
+1. **SessionEntry types** — All entry types from pi-mono:
+   - SessionMessageEntry (user, assistant, toolResult messages)
+   - ThinkingLevelChangeEntry
+   - ModelChangeEntry
+   - CompactionEntry (with summary, firstKeptEntryId, tokensBefore, details)
+   - BranchSummaryEntry (with fromId, summary, details, fromHook)
+   - CustomEntry (for extensions)
+   - CustomMessageEntry (for extensions injecting into LLM context)
+   - LabelEntry (bookmarks/markers)
+   - SessionInfoEntry (metadata like display name)
 
-2. **Model management**
-   - `set_model()` — switch model mid-conversation, persists to session + settings
-   - `cycle_model()` — cycle through scoped models or default list, forward/backward
-   - `ScopedModel` struct for --models flag cycling
+2. **SessionHeader** with version migration (v1→v2, v2→v3)
+   - CURRENT_SESSION_VERSION = 3
+   - `migrate_v1_to_v2()`: adds id/parentId tree structure
+   - `migrate_v2_to_v3()`: renames hookMessage role to custom
+   - `migrate_to_current_version()`: runs all migrations
 
-3. **Thinking level management**
-   - `set_thinking_level()` — change level, persist to session
-   - `cycle_thinking_level()` — cycle through None/Minimal/Standard/Thorough
+3. **JSONL format** read/write (one JSON object per line)
+   - `load_entries_from_file()` reads JSONL
+   - `_rewrite_file()` writes JSONL
+   - `_persist()` does append-only writes
+   - `parse_session_entries()` for parsing content strings
+   - `is_valid_session_file()` for validation
+   - `find_most_recent_session()` for resuming
 
-4. **Auto-compaction** (integrated)
-   - `compact()` — manual compaction trigger with event emission
-   - `check_auto_compaction()` — automatic threshold-based check after responses
-   - `run_compaction()` — uses agent's CompactionManager
-   - `abort_compaction()` — cancel in-progress compaction
-   - CompactionReason enum: Manual, Threshold, Overflow
-   - CompactionResult with summary, tokens_before, details
+4. **SessionManager** with full API:
+   - **Constructors**: `create()`, `open()`, `continue_recent()`, `in_memory()`, `new()` (async compat)
+   - **Append methods**: `append_message()`, `append_thinking_level_change()`, `append_model_change()`, `append_compaction()`, `append_custom_entry()`, `append_session_info()`, `append_custom_message_entry()`
+   - **Tree traversal**: `get_branch()`, `get_children()`, `get_parent()`, `get_path_to_root()`, `get_ancestry()`, `get_depth()`, `get_tree()`
+   - **Branching**: `branch()`, `reset_leaf()`, `branch_with_summary()`, `createBranchedSession()`
+   - **Labels**: `add_label()`, `remove_label()`, `get_label()`
+   - **Compaction**: `get_latest_compaction_entry()`, `get_compaction_entries()`
+   - **Stats**: `get_session_stats()` (token counts, message counts)
+   - **Session management**: `list()`, `list_all()`, `delete_session()`, `rename_session()`, `fork_from()`
+   - **Context building**: `build_session_context()`
+   - **Info**: `get_session_name()`, `get_header()`, `get_entries()`, `get_leaf_id()`, `get_leaf_entry()`, `get_entry()`
 
-5. **Auto-retry** (integrated)
-   - `check_auto_retry()` — detect retryable errors (429, 500-504, overloaded, etc.)
-   - Exponential backoff with configurable settings
-   - `abort_retry()`, `wait_for_retry()`
-   - SessionEvent::AutoRetryStart/AutoRetryEnd events
+5. **AgentMessage types** matching pi-mono:
+   - User, Assistant, ToolResult, System
+   - BashExecution (with command, output, exitCode, truncated, etc.)
+   - Custom (extension-injected with customType, display, details)
+   - BranchSummary, CompactionSummary
 
-6. **Session persistence**
-   - `persist_session()` — sync agent state to SessionManager on each event
-   - Auto-save on prompt completion via `process_events()`
-   - Handles User, Assistant, ToolResult message types
+6. **Content types**: ContentValue (String or Blocks), ContentBlock (Text/Image), AssistantContentBlock (Text/Thinking/ToolCall/ToolPlan/ImageResult/Refusal)
 
-7. **Event system**
-   - `SessionEvent` enum — extends AgentEvent with session-level events
-   - `subscribe()` — listener registration with RAII guard (SessionListenerGuard)
-   - `subscribe_channel()` — convenience for async event consumption
-   - QueueUpdate, CompactionStart/End, AutoRetryStart/End, SessionInfoChanged, ThinkingLevelChanged
-
-8. **Steering/follow-up queues**
-   - `steer()` / `follow_up()` — queue messages during streaming
-   - `clear_queue()` — drain and return queued messages
-   - Automatic follow-up processing after agent completion
-
-9. **Streaming support**
-   - `prompt_streaming()` — returns event channel, uses LocalSet for !Send agent
-
-10. **Extension integration hooks**
-    - `forward_event_to_extensions()` — stub for ExtensionRunner wiring
-    - `has_extension_handlers()` — check for registered handlers
-
-11. **Utility types**
-    - `AgentSessionHandle` — cheaply-clonable Arc handle
-    - `PromptOptions`, `StreamingBehavior`, `InputSource`
-    - `SessionStats`, `TokenStats`, `SessionRetrySettings`
-    - `CycleDirection`, `ModelCycleResult`
+7. **Backward compatibility**: SessionMeta, BranchInfo, and async method wrappers for main.rs compatibility
 
 #### Tests included:
-- `test_is_retryable_error` — verifies retryable/non-retryable error patterns
-- `test_default_model_list` — default model cycling list
-- `test_session_retry_settings_default`
-- `test_cycle_direction_default`
-- `test_thinking_level_ordering` — cycle wraps correctly
-- `test_scoped_model`
-- `test_compaction_reason`
-- `test_model_cycle_result`
-- `test_session_stats_default`
-- `test_streaming_behavior`
-- `test_input_source_default`
-- `test_prompt_options_default`
+- `test_session_creation` — basic creation
+- `test_append_message` — message appending
+- `test_tree_traversal` — get_branch, get_children, get_parent
+- `test_branching` — branch creation and tree structure
+- `test_session_context` — context building
+- `test_compaction_entry` — compaction support
+- `test_labels` — label add/remove
 
 ## Files Changed
-- `oxi-cli/src/agent_session.rs` — NEW: ~1100 lines, core session abstraction
-- `oxi-cli/src/lib.rs` — added `pub mod agent_session;`
+- `oxi-cli/src/session.rs` — COMPLETE REWRITE: ~2100 lines, full session manager port
+- `oxi-cli/src/export.rs` — updated render_entry for new AgentMessage types
+- `oxi-cli/src/branch_summarization.rs` — updated for String-based IDs and new message types
+- `oxi-cli/src/compaction_utils.rs` — updated for new AgentMessage types
+- `oxi-cli/src/lib.rs` — updated SessionEntry usage for new API
+- `oxi-cli/src/agent_session.rs` — updated save_session for new API
+- `oxi-cli/src/main.rs` — updated SessionManager usage
 
 ## Notes
-- `cargo check -p oxi-cli` passes for agent_session.rs (no errors from this module)
-- Pre-existing errors in other modules (export.rs, compaction_utils.rs, session.rs) are unrelated
-- The Agent struct's internal RwLock is !Send, so `prompt_streaming()` uses `spawn_blocking` + `LocalSet`
-- `is_streaming()` returns `false` as Agent doesn't yet expose streaming state; TODO for future
-- Extension integration is stubbed (`has_extension_handlers` returns false) pending full ExtensionRunner wiring
+- `cargo check -p oxi-cli` passes (0 errors, some warnings)
+- Entry IDs changed from Uuid to String for compatibility with pi-mono's 8-char hex IDs
+- JSONL format matches pi-mono's format exactly
+- Internal FileEntry/SessionEntryEnum types handle JSONL serialization/deserialization
+- SessionEntry simple struct provides backward-compatible API for existing code
+- SessionMeta kept for backward compatibility with main.rs session listing
+- Pre-existing issues in extensions.rs and agent_session.rs are unrelated to this port
