@@ -1166,6 +1166,9 @@ mod tests {
             transport: None,
             compact_on_start: false,
             max_retry_delay_ms: None,
+            auto_retry_enabled: true,
+            auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
+            auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
         };
         
         let tools = Arc::new(ToolRegistry::new());
@@ -1209,6 +1212,9 @@ mod tests {
             transport: None,
             compact_on_start: false,
             max_retry_delay_ms: None,
+            auto_retry_enabled: true,
+            auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
+            auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
             auto_retry_enabled: true,
             auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
             auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
@@ -1280,6 +1286,9 @@ mod tests {
             transport: None,
             compact_on_start: false,
             max_retry_delay_ms: None,
+            auto_retry_enabled: true,
+            auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
+            auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
         };
         
         let tools = Arc::new(ToolRegistry::new());
@@ -1354,6 +1363,9 @@ mod tests {
             transport: None,
             compact_on_start: false,
             max_retry_delay_ms: None,
+            auto_retry_enabled: true,
+            auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
+            auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
         };
         
         let tools = Arc::new(ToolRegistry::new());
@@ -1421,6 +1433,9 @@ mod tests {
             transport: None,
             compact_on_start: false,
             max_retry_delay_ms: None,
+            auto_retry_enabled: true,
+            auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
+            auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
         };
         
         let tools = Arc::new(ToolRegistry::new());
