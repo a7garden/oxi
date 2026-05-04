@@ -776,7 +776,10 @@ mod tests {
                 stop_reason: None,
             },
         };
-        SessionEntry::new(message)
+        match parent {
+            Some(pid) => SessionEntry::branched(message, &pid),
+            None => SessionEntry::new(message),
+        }
     }
 
     #[test]
@@ -820,7 +823,7 @@ mod tests {
         let result = collect_entries_for_branch_summary(
             &entries,
             Some(c_id),
-            a_id,
+            a_id.clone(),
         );
         
         // Should collect b and c
@@ -837,20 +840,20 @@ mod tests {
         // Create: root -> a -> b1
         //              -> a -> b2 (different branch)
         let root = create_test_entry("user", "Root", None);
-        let root_id = root.id;
+        let root_id = root.id.clone();
         entries.push(root);
         
         let a = create_test_entry("user", "A", Some(root_id));
-        let a_id = a.id;
+        let a_id = a.id.clone();
         entries.push(a);
         
-        let b1 = create_test_entry("user", "B1", Some(a_id));
-        let b1_id = b1.id;
+        let b1 = create_test_entry("user", "B1", Some(a_id.clone()));
+        let b1_id = b1.id.clone();
         entries.push(b1);
         
         // Add another branch from a
-        let b2 = create_test_entry("user", "B2", Some(a_id));
-        let b2_id = b2.id;
+        let b2 = create_test_entry("user", "B2", Some(a_id.clone()));
+        let b2_id = b2.id.clone();
         entries.push(b2);
         
         // Navigate from b1 to b2 (common ancestor should be a)

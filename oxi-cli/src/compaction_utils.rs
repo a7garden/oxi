@@ -573,7 +573,8 @@ fn format_tool_call_args(args: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxi_ai::{Api, AssistantMessage, TextContent, ToolCallType};
+    use oxi_ai::{Api, AssistantMessage, TextContent};
+    use crate::session::AssistantContentBlock;
 
     fn make_user_message(content: &str) -> Message {
         Message::User(oxi_ai::UserMessage::new(content))
@@ -628,8 +629,8 @@ mod tests {
     fn test_should_compact_with_entries() {
         let entries: Vec<SessionEntry> = (0..10)
             .map(|i| SessionEntry::new(AgentMessage::User {
-                content: "Hello world, this is a test message with some content.".to_string()
-                    + &"x".repeat(i * 100),
+                content: ("Hello world, this is a test message with some content.".to_string()
+                    + &"x".repeat(i * 100)).into(),
             }))
             .collect();
 
@@ -669,10 +670,14 @@ mod tests {
     fn test_calculate_context_tokens_entries() {
         let entries = vec![
             SessionEntry::new(AgentMessage::User {
-                content: "Hello world".to_string(),
+                content: "Hello world".into(),
             }),
             SessionEntry::new(AgentMessage::Assistant {
-                content: "Hi there".to_string(),
+                content: vec![AssistantContentBlock::Text { text: "Hi there".into() }],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
             }),
         ];
         let tokens = calculate_context_tokens(&entries);
@@ -685,7 +690,7 @@ mod tests {
     fn test_collect_entries_too_few() {
         let entries: Vec<SessionEntry> = (0..3)
             .map(|_| SessionEntry::new(AgentMessage::User {
-                content: "test".to_string(),
+                content: "test".into(),
             }))
             .collect();
         assert!(collect_entries_for_compaction(&entries, 4).is_none());
@@ -695,7 +700,7 @@ mod tests {
     fn test_collect_entries_exact() {
         let entries: Vec<SessionEntry> = (0..4)
             .map(|_| SessionEntry::new(AgentMessage::User {
-                content: "test".to_string(),
+                content: "test".into(),
             }))
             .collect();
         assert!(collect_entries_for_compaction(&entries, 4).is_none());
@@ -705,7 +710,7 @@ mod tests {
     fn test_collect_entries_enough() {
         let entries: Vec<SessionEntry> = (0..10)
             .map(|_| SessionEntry::new(AgentMessage::User {
-                content: "test".to_string(),
+                content: "test".into(),
             }))
             .collect();
         let sel = collect_entries_for_compaction(&entries, 4).unwrap();
@@ -719,10 +724,14 @@ mod tests {
     fn test_prepare_compaction_basic() {
         let entries = vec![
             SessionEntry::new(AgentMessage::User {
-                content: "Hello".to_string(),
+                content: "Hello".into(),
             }),
             SessionEntry::new(AgentMessage::Assistant {
-                content: "Hi there".to_string(),
+                content: vec![AssistantContentBlock::Text { text: "Hi there".into() }],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
             }),
         ];
         let prepared = prepare_compaction(&entries);
@@ -876,13 +885,17 @@ mod tests {
     fn test_serialize_session_entries() {
         let entries = vec![
             SessionEntry::new(AgentMessage::User {
-                content: "Hello".to_string(),
+                content: "Hello".into(),
             }),
             SessionEntry::new(AgentMessage::Assistant {
-                content: "World".to_string(),
+                content: vec![AssistantContentBlock::Text { text: "World".into() }],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
             }),
             SessionEntry::new(AgentMessage::System {
-                content: "System msg".to_string(),
+                content: "System msg".into(),
             }),
         ];
         let mut ops = FileOperations::new();
