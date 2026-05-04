@@ -449,7 +449,8 @@ impl Component for Input {
                     true
                 }
                 KeyCode::Delete => {
-                    if self.cursor_pos < self.value.len() {
+                    let char_count = self.value.chars().count();
+                    if self.cursor_pos < char_count {
                         let byte_pos = self.char_to_byte(self.cursor_pos);
                         self.value.remove(byte_pos);
                         self.dirty = true;
@@ -464,7 +465,8 @@ impl Component for Input {
                     true
                 }
                 KeyCode::Right => {
-                    if self.cursor_pos < self.value.len() {
+                    let char_count = self.value.chars().count();
+                    if self.cursor_pos < char_count {
                         self.cursor_pos += 1;
                         self.dirty = true;
                     }
