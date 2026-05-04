@@ -83,12 +83,14 @@ pub struct AgentLoop {
     config: AgentLoopConfig,
     tools: Arc<ToolRegistry>,
     state: SharedState,
-    compaction_manager: OxCompactionManager,
+    #[allow(dead_code)]
+    compaction_manager: OxCompactionManager, // TODO: wire into auto-compaction flow
     before_tool_call: Option<BeforeToolCallHook>,
     after_tool_call: Option<AfterToolCallHook>,
     steering_queue: RwLock<Vec<Message>>,
     follow_up_queue: RwLock<Vec<Message>>,
-    session_id: Option<String>,
+    #[allow(dead_code)]
+    session_id: Option<String>, // TODO: wire into telemetry
     /// Tracks the current auto-retry attempt count (atomically so it can
     /// be read from any thread without holding the async runtime).
     auto_retry_attempt: AtomicUsize,
@@ -1099,6 +1101,7 @@ enum PreparedToolCallKind {
 }
 
 struct PreparedToolCallOutcome {
+    #[allow(dead_code)]
     kind: PreparedToolCallKind,
     immediate_result: Option<AgentToolResult>,
     is_error: bool,
