@@ -85,3 +85,43 @@ All tests pass with `cargo check -p oxi-cli --all-targets`
 - Full hot-reload requires `App::reload()` method which is a future enhancement
 - OAuth callbacks require async runtime integration (currently shows instructions)
 - The unused import warnings are intentional for future use
+
+### `oxi-cli/src/extensions.rs` — Enhanced extension system with pi-mono parity hooks
+
+#### New Event Data Types (15 structs/enums)
+- `SessionSwitchReason` enum: `New`, `Resume`
+- `SessionShutdownReason` enum: `Quit`, `Reload`, `New`, `Resume`, `Fork`
+- `ModelSelectSource` enum: `Set`, `Cycle`, `Restore`
+- `InputSource` enum: `Interactive`, `Rpc`, `Extension`
+- `InputEventResult` enum: `Continue`, `Transform`, `Handled`
+- `SessionBeforeSwitchEvent`, `SessionBeforeForkEvent`, `SessionBeforeCompactEvent`, `SessionCompactEvent`, `SessionShutdownEvent`, `SessionBeforeTreeEvent`, `SessionTreeEvent`, `ContextEvent`, `BeforeProviderRequestEvent`, `AfterProviderResponseEvent`, `ModelSelectEvent`, `ThinkingLevelSelectEvent`, `BashEvent`, `InputEvent`
+
+#### New Extension Trait Methods (14 hooks, all with default no-op implementations)
+1. `session_before_switch` — Before session switch (cancellable)
+2. `session_before_fork` — Before session fork (cancellable)
+3. `session_before_compact` — Before compaction (fine-grained variant)
+4. `session_compact` — After compaction
+5. `session_shutdown` — Session shutting down
+6. `session_before_tree` — Before tree navigation (cancellable)
+7. `session_tree` — After tree navigation
+8. `context` — Context/message injection before agent loop
+9. `before_provider_request` — Before LLM API call
+10. `after_provider_response` — After LLM API response
+11. `model_select` — Model selection event
+12. `thinking_level_select` — Thinking level change
+13. `bash` — Bash execution event
+14. `input` — Input transform hook
+
+#### New ExtensionContext Methods (8 methods)
+- `get_tools()`, `set_tools()`, `set_model()`, `set_thinking_level()`, `append_system_prompt()`, `set_session_name()`, `get_session_entries()`, `fork_session()`
+
+#### New ExtensionRegistry Broadcast Methods (14 emitters)
+- All 14 new emit methods corresponding to the new trait hooks
+- Fire-and-forget methods use `call_hook_safe` for panic safety
+- Result-collecting methods return `Vec<(String, anyhow::Error)>`
+
+#### Backward Compatibility
+- All new trait methods have default no-op implementations
+- All 48 existing tests pass unchanged
+- New context callbacks default to no-ops when not configured
+- `ExtensionContext::new()` signature unchanged
