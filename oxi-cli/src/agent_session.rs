@@ -1614,7 +1614,7 @@ mod tests {
         ];
         // Ensure we can cycle through all levels
         let mut current = 0;
-        for _ in 0..levels.len() + 1 {
+        for _ in 0..levels.len() {
             current = (current + 1) % levels.len();
         }
         assert_eq!(current, 0); // Wraps back to start

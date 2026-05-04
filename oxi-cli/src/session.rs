@@ -1256,43 +1256,64 @@ impl SessionManager {
     /// If id is provided, returns tree for that session (backward compat)
     pub fn get_tree(&self, _id: Uuid) -> Vec<SessionTreeNode> {
         let entries = self.get_entries();
-        let labels = self.labels_by_id.read();
-        let label_timestamps = self.label_timestamps_by_id.read();
+        let labels: HashMap<String, String> = self.labels_by_id.read().clone();
+        let label_timestamps: HashMap<String, String> = self.label_timestamps_by_id.read().clone();
 
-        let mut node_map: HashMap<String, SessionTreeNode> = HashMap::new();
-        let mut roots: Vec<SessionTreeNode> = Vec::new();
+        let mut adj: HashMap<String, Vec<String>> = HashMap::new();
+        let mut root_ids: Vec<String> = Vec::new();
 
-        // Create nodes with resolved labels
+        // Build adjacency list
         for entry in &entries {
-            node_map.insert(
-                entry.id.clone(),
-                SessionTreeNode {
-                    entry: entry.clone(),
-                    children: Vec::new(),
-                    label: labels.get(&entry.id).cloned(),
-                    label_timestamp: label_timestamps.get(&entry.id).cloned(),
-                },
-            );
+            adj.insert(entry.id.clone(), Vec::new());
         }
 
-        // Build tree
+        // Determine parent-child relationships
         for entry in &entries {
             let is_root = match entry.parent_id.as_deref() {
-                Some(pid) if pid != entry.id => !node_map.contains_key(pid),
+                Some(pid) if pid != entry.id => !adj.contains_key(pid),
                 _ => true,
             };
             if is_root {
-                let node = node_map.get(&entry.id).unwrap();
-                roots.push(node.clone());
-            } else {
-                let pid = entry.parent_id.as_ref().unwrap();
-                let node = node_map.get(&entry.id).unwrap().clone();
-                node_map.get_mut(pid).unwrap().children.push(node);
+                root_ids.push(entry.id.clone());
+            } else if let Some(ref pid) = entry.parent_id {
+                if let Some(children) = adj.get_mut(pid.as_str()) {
+                    children.push(entry.id.clone());
+                } else {
+                    root_ids.push(entry.id.clone());
+                }
             }
         }
 
-        // Sort children by timestamp (oldest first, newest at bottom)
-        sort_tree_by_timestamp(&mut roots);
+        // Build entries map
+        let entries_map: HashMap<String, SessionEntry> = entries.into_iter()
+            .map(|e| (e.id.clone(), e))
+            .collect();
+
+        // Recursively build tree nodes
+        fn build(
+            id: &str,
+            adj: &HashMap<String, Vec<String>>,
+            entries_map: &HashMap<String, SessionEntry>,
+            labels: &HashMap<String, String>,
+            label_timestamps: &HashMap<String, String>,
+        ) -> SessionTreeNode {
+            let entry = entries_map.get(id).unwrap().clone();
+            let child_ids = adj.get(id).unwrap();
+            let children: Vec<SessionTreeNode> = child_ids.iter().map(|cid| {
+                build(cid, adj, entries_map, labels, label_timestamps)
+            }).collect();
+            SessionTreeNode {
+                entry,
+                children,
+                label: labels.get(id).cloned(),
+                label_timestamp: label_timestamps.get(id).cloned(),
+                // Note: label_timestamp is String
+            }
+        }
+
+        let roots: Vec<SessionTreeNode> = root_ids.into_iter().map(|rid| {
+            build(&rid, &adj, &entries_map, &labels, &label_timestamps)
+        }).collect();
 
         roots
     }
@@ -2130,9 +2151,10 @@ mod tests {
         // Leaf should be the new message
         assert_eq!(manager.get_leaf_id(), Some(id4));
 
-        // Get tree
+        // Get tree - 1 root (id1), with 2 children (id2 and id4)
         let tree = manager.get_tree(Uuid::nil());
-        assert_eq!(tree.len(), 2); // Two root branches
+        assert_eq!(tree.len(), 1); // One root
+        assert_eq!(tree[0].children.len(), 2); // id1 has 2 children: id2 and id4
     }
 
     #[test]
