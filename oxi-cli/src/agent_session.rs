@@ -361,13 +361,13 @@ impl AgentSession {
 
     /// Whether compaction is in progress.
     pub fn is_compacting(&self) -> bool {
-        // try_lock() succeeds only when no one holds the mutex.
+        // try_lock() succeeds only when no one holds the tokio Mutex.
         // If compaction is running, the handle is Some AND the mutex is
         // held by the compaction task, so try_lock fails → return true.
         // If try_lock succeeds, the mutex was uncontended; check the handle.
         match self.compaction_abort.try_lock() {
-            Some(guard) => guard.is_some(),  // lock acquired: check if handle present
-            None => true,                     // lock contested → compaction is running
+            Ok(guard) => guard.is_some(),  // lock acquired: check if handle present
+            Err(_) => true,                 // lock contested → compaction is running
         }
     }
 
@@ -551,6 +551,11 @@ impl AgentSession {
     /// The returned receiver yields [`AgentEvent`]s as they are produced
     /// by the agent. When the agent finishes (or errors), the channel is
     /// closed and `is_streaming()` returns `false`.
+    ///
+    /// **Note:** The agent's `run_with_channel` produces a `!Send` future
+    /// because `parking_lot::RwLockReadGuard` is intentionally `!Send`
+    /// (contains `GuardNoSend`). We use `spawn_blocking` + `LocalSet` to
+    /// run it on a dedicated thread.
     pub fn prompt_streaming(
         &self,
         text: String,
@@ -563,39 +568,50 @@ impl AgentSession {
         let agent = Arc::clone(&self.agent);
         let streaming = Arc::clone(&self.streaming);
 
-        tokio::spawn(async move {
-            // Create a bounded channel for the agent's run_with_channel
-            let (agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(256);
+        // Agent's run_with_channel produces a !Send future (parking_lot
+        // guard held across .await), so we need LocalSet + spawn_local
+        // inside a blocking thread.
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let local = tokio::task::LocalSet::new();
+                local
+                    .run_until(async move {
+                        let (agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(256);
 
-            // Spawn the agent run in a separate task so we can forward events
-            let agent_handle = tokio::spawn(async move {
-                agent.run_with_channel(text, agent_tx).await
+                        // Run agent inside LocalSet
+                        let agent_for_task = Arc::clone(&agent);
+                        let agent_handle = tokio::task::spawn_local(async move {
+                            agent_for_task.run_with_channel(text, agent_tx).await
+                        });
+
+                        // Forward events from the agent channel to our unbounded output
+                        while let Some(event) = agent_rx.recv().await {
+                            let _ = tx.send(event);
+                        }
+
+                        // Wait for agent to finish and handle errors
+                        match agent_handle.await {
+                            Ok(Ok(_response)) => {
+                                // Agent completed successfully; events already forwarded
+                            }
+                            Ok(Err(e)) => {
+                                let _ = tx.send(AgentEvent::Error {
+                                    message: e.to_string(),
+                                });
+                            }
+                            Err(join_err) => {
+                                let _ = tx.send(AgentEvent::Error {
+                                    message: format!("Agent task failed: {}", join_err),
+                                });
+                            }
+                        }
+
+                        // Clear streaming flag when done
+                        streaming.store(false, Ordering::SeqCst);
+                    })
+                    .await;
             });
-
-            // Forward events from the agent channel to our unbounded output channel
-            while let Some(event) = agent_rx.recv().await {
-                let _ = tx.send(event);
-            }
-
-            // Wait for the agent task to complete and handle errors
-            match agent_handle.await {
-                Ok(Ok(_response)) => {
-                    // Agent completed successfully; events already forwarded
-                }
-                Ok(Err(e)) => {
-                    let _ = tx.send(AgentEvent::Error {
-                        message: e.to_string(),
-                    });
-                }
-                Err(join_err) => {
-                    let _ = tx.send(AgentEvent::Error {
-                        message: format!("Agent task failed: {}", join_err),
-                    });
-                }
-            }
-
-            // Clear streaming flag when done
-            streaming.store(false, Ordering::SeqCst);
         });
 
         rx
@@ -1126,7 +1142,7 @@ impl AgentSession {
                             oxi_ai::ContentBlock::Image(img) => {
                                 crate::session::AssistantContentBlock::ImageResult {
                                     data: img.data.clone(),
-                                    media_type: img.media_type.clone(),
+                                    media_type: img.mime_type.clone(),
                                 }
                             }
                             oxi_ai::ContentBlock::Unknown(v) => {
@@ -1143,11 +1159,11 @@ impl AgentSession {
                         provider: Some(a.provider.clone()),
                         model_id: Some(a.model.clone()),
                         usage: Some(crate::session::Usage {
-                            input: a.usage.input_tokens.map(|v| v as i64),
-                            output: a.usage.output_tokens.map(|v| v as i64),
-                            cache_read: a.usage.cache_read_tokens.map(|v| v as i64),
-                            cache_write: a.usage.cache_write_tokens.map(|v| v as i64),
-                            total_tokens: None,
+                            input: Some(a.usage.input as i64),
+                            output: Some(a.usage.output as i64),
+                            cache_read: Some(a.usage.cache_read as i64),
+                            cache_write: Some(a.usage.cache_write as i64),
+                            total_tokens: Some(a.usage.total_tokens as i64),
                         }),
                         stop_reason: Some(format!("{:?}", a.stop_reason)),
                     });

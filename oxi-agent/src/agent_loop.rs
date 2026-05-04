@@ -785,7 +785,7 @@ impl AgentLoop {
             Some(t) => t,
             None => {
                 return PreparedToolCallOutcome {
-                    _kind: PreparedToolCallKind::Immediate,
+                    kind: PreparedToolCallKind::Immediate,
                     immediate_result: Some(AgentToolResult::error(format!(
                         "Tool '{}' not found",
                         tool_call.name
@@ -803,7 +803,7 @@ impl AgentLoop {
         if let Some(ref hook) = self.before_tool_call {
             if let Some(blocked) = hook(&tool_call.name, &validated_args).await.ok().flatten() {
                 return PreparedToolCallOutcome {
-                    _kind: PreparedToolCallKind::Immediate,
+                    kind: PreparedToolCallKind::Immediate,
                     immediate_result: Some(blocked),
                     is_error: true,
                     tool: None,
@@ -814,7 +814,7 @@ impl AgentLoop {
         }
         
         PreparedToolCallOutcome {
-            _kind: PreparedToolCallKind::Prepared,
+            kind: PreparedToolCallKind::Prepared,
             immediate_result: None,
             is_error: false,
             tool: Some(Arc::clone(&tool)),
