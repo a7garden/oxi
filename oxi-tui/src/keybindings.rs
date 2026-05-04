@@ -110,36 +110,33 @@ impl KeySequence {
 
     /// Format the key sequence back to string notation.
     pub fn to_notation(&self) -> String {
-        let mut parts = Vec::new();
+        let mut parts: Vec<String> = Vec::new();
         if self.ctrl {
-            parts.push("ctrl");
+            parts.push("ctrl".to_string());
         }
         if self.alt {
-            parts.push("alt");
+            parts.push("alt".to_string());
         }
         if self.shift {
-            parts.push("shift");
+            parts.push("shift".to_string());
         }
         match self.key {
-            KeyName::Char(c) => parts.push(&c.to_string()),
-            KeyName::Enter => parts.push("enter"),
-            KeyName::Escape => parts.push("escape"),
-            KeyName::Tab => parts.push("tab"),
-            KeyName::Backspace => parts.push("backspace"),
-            KeyName::Delete => parts.push("delete"),
-            KeyName::Insert => parts.push("insert"),
-            KeyName::Up => parts.push("up"),
-            KeyName::Down => parts.push("down"),
-            KeyName::Left => parts.push("left"),
-            KeyName::Right => parts.push("right"),
-            KeyName::Home => parts.push("home"),
-            KeyName::End => parts.push("end"),
-            KeyName::PageUp => parts.push("pageup"),
-            KeyName::PageDown => parts.push("pagedown"),
-            KeyName::F(n) => {
-                let s = format!("f{}", n);
-                parts.push(&s);
-            }
+            KeyName::Char(c) => parts.push(c.to_string()),
+            KeyName::Enter => parts.push("enter".to_string()),
+            KeyName::Escape => parts.push("escape".to_string()),
+            KeyName::Tab => parts.push("tab".to_string()),
+            KeyName::Backspace => parts.push("backspace".to_string()),
+            KeyName::Delete => parts.push("delete".to_string()),
+            KeyName::Insert => parts.push("insert".to_string()),
+            KeyName::Up => parts.push("up".to_string()),
+            KeyName::Down => parts.push("down".to_string()),
+            KeyName::Left => parts.push("left".to_string()),
+            KeyName::Right => parts.push("right".to_string()),
+            KeyName::Home => parts.push("home".to_string()),
+            KeyName::End => parts.push("end".to_string()),
+            KeyName::PageUp => parts.push("pageup".to_string()),
+            KeyName::PageDown => parts.push("pagedown".to_string()),
+            KeyName::F(n) => parts.push(format!("f{}", n)),
         }
         parts.join("+")
     }
