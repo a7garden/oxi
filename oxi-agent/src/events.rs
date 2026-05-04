@@ -115,6 +115,19 @@ pub enum AgentEvent {
         content: String,
     },
 
+    // ── Auto-retry events ─────────────────────────────────────────
+    AutoRetryStart {
+        attempt: usize,
+        max_attempts: usize,
+        delay_ms: u64,
+        error_message: String,
+    },
+    AutoRetryEnd {
+        success: bool,
+        attempt: usize,
+        final_error: Option<String>,
+    },
+
     // ── Loop-specific steering events ─────────────────────────────
     SteeringMessage {
         message: oxi_ai::Message,
@@ -159,6 +172,8 @@ impl AgentEvent {
             AgentEvent::Fallback { .. } => "fallback",
             AgentEvent::Cancelled => "cancelled",
             AgentEvent::PartialResponse { .. } => "partial_response",
+            AgentEvent::AutoRetryStart { .. } => "auto_retry_start",
+            AgentEvent::AutoRetryEnd { .. } => "auto_retry_end",
             AgentEvent::SteeringMessage { .. } => "steering_message",
             AgentEvent::FollowUpMessage { .. } => "follow_up_message",
         }

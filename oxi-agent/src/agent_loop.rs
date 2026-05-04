@@ -185,7 +185,7 @@ impl AgentLoop {
         all_messages.extend(prompts.clone());
         
         emit(AgentEvent::AgentStart { prompts: prompts.clone() });
-        all_events.push(AgentEvent::AgentStart { prompts });
+        all_events.push(AgentEvent::AgentStart { prompts: prompts.clone() });
         
         let (result_messages, events) = self.run_loop(prompts, emit.clone()).await?;
         
@@ -968,7 +968,7 @@ impl AgentLoop {
             oxi_ai::get_model("anthropic", &self.config.model_id)
         };
         
-        model.ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
+        model.cloned().ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
     }
 
     fn should_stop_after_turn(&self, messages: &[Message], assistant_message: &AssistantMessage) -> bool {
