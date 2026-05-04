@@ -13,10 +13,12 @@ use crate::{
     ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
+use super::shared_client;
+
 /// Cloudflare Workers AI provider
 #[derive(Clone)]
 pub struct CloudflareProvider {
-    client: Client,
+    client: &'static Client,
     api_token: Option<String>,
     account_id: Option<String>,
 }
@@ -25,7 +27,7 @@ impl CloudflareProvider {
     /// Create a new Cloudflare provider using environment variables
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_token: std::env::var("CLOUDFLARE_API_TOKEN").ok(),
             account_id: std::env::var("CLOUDFLARE_ACCOUNT_ID").ok(),
         }
@@ -35,7 +37,7 @@ impl CloudflareProvider {
     #[allow(dead_code)]
     pub fn with_credentials(api_token: impl Into<String>, account_id: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_token: Some(api_token.into()),
             account_id: Some(account_id.into()),
         }

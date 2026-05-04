@@ -20,10 +20,12 @@ use crate::{
     ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
+use super::shared_client;
+
 /// OpenAI Responses API provider
 #[derive(Clone)]
 pub struct OpenAiResponsesProvider {
-    client: Client,
+    client: &'static Client,
     api_key: Option<String>,
 }
 
@@ -31,7 +33,7 @@ impl OpenAiResponsesProvider {
     /// Create a new provider using the OPENAI_API_KEY environment variable
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: std::env::var("OPENAI_API_KEY").ok(),
         }
     }
@@ -40,7 +42,7 @@ impl OpenAiResponsesProvider {
     #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some(api_key.into()),
         }
     }

@@ -20,6 +20,7 @@ use crate::{
     StreamOptions, Usage,
 };
 
+use super::shared_client;
 use super::ProviderError;
 
 /// Configuration for Codex provider
@@ -61,7 +62,7 @@ impl Default for CodexConfig {
 /// - Both completions and chat-style interactions
 #[derive(Clone)]
 pub struct CodexProvider {
-    client: Client,
+    client: &'static Client,
     config: CodexConfig,
 }
 
@@ -69,7 +70,7 @@ impl CodexProvider {
     /// Create a new Codex provider with default configuration
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             config: CodexConfig::default(),
         }
     }
@@ -80,7 +81,7 @@ impl CodexProvider {
         let mut config = CodexConfig::default();
         config.api_key = Some(api_key.into());
         Self {
-            client: Client::new(),
+            client: shared_client(),
             config,
         }
     }
@@ -89,7 +90,7 @@ impl CodexProvider {
     #[allow(dead_code)]
     pub fn with_config(config: CodexConfig) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             config,
         }
     }

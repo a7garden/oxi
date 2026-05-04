@@ -7,6 +7,7 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
+use super::shared_client;
 use crate::{
     error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
     ProviderEvent, StopReason, StreamOptions, Usage,
@@ -15,14 +16,14 @@ use crate::{
 /// Anthropic provider
 #[derive(Clone)]
 pub struct AnthropicProvider {
-    client: Client,
+    client: &'static Client,
     api_key: Option<String>,
 }
 
 impl AnthropicProvider {
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: std::env::var("ANTHROPIC_API_KEY").ok(),
         }
     }
@@ -30,7 +31,7 @@ impl AnthropicProvider {
     #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some(api_key.into()),
         }
     }

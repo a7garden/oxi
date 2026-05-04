@@ -1,5 +1,7 @@
 //! Provider abstraction layer
 
+use std::sync::OnceLock;
+
 mod anthropic;
 mod azure;
 mod bedrock;
@@ -51,6 +53,15 @@ pub use options::{StreamOptions, ThinkingBudgets};
 pub use trait_def::Provider;
 
 /// Provider factory functions
+
+/// Returns a shared, lazily-initialized `reqwest::Client`.
+///
+/// All providers should use this instead of creating their own `Client::new()`
+/// to benefit from connection pooling and avoid unnecessary resource allocation.
+pub fn shared_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
 
 /// Get a provider by name
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
