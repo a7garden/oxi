@@ -7,6 +7,7 @@ Completed
 - [x] Port tools-manager.ts to Rust
 - [x] Port auto-retry logic from pi-mono agent-session to oxi-agent
 - [x] Port session tree navigation (navigateTree) to Rust
+- [x] Port small utilities from pi-mono (mime.ts, paths.ts, fs-watch.ts, sleep.ts, changelog.ts, child-process.ts)
 
 ## Files Changed
 - `oxi/oxi-cli/src/tools_manager.rs` — New file: Rust port of tools-manager.ts (575 lines)
@@ -58,3 +59,49 @@ Completed
 - Pre-existing broken modules in the repo are unrelated to these changes
 - The `Summarizer` trait uses async/await allowing real LLM integration or mock implementations
 - Extension hooks use `Fn(TreePreparation) -> BeforeTreeHookResult` callback pattern
+
+## Additional Files (Small Utilities Port)
+- `oxi-cli/src/mime_detect.rs` — MIME type detection from file magic bytes
+  - `detect_supported_image_mime_type_from_file(path)` — detects image MIME from file
+  - `detect_mime_from_bytes(bytes)` — magic byte matching for PNG, JPEG, GIF, WebP, BMP
+  - `is_supported_image_mime(mime)` — checks if MIME is supported
+  - Uses std::fs and manual magic byte matching (no external crate needed)
+  - 2 unit tests
+- `oxi-cli/src/paths.rs` — Path utility functions
+  - `canonicalize_path(path)` — resolve symlinks, fallback to raw path
+  - `is_local_path(value)` — check for non-local prefixes (npm:, git:, http:, etc.)
+  - `expand_tilde(path)` — expand ~ to home directory
+  - `is_file(path)`, `is_dir(path)` — path type checks
+  - 2 unit tests
+- `oxi-cli/src/fs_watch.rs` — Filesystem watching with notify crate
+  - `FsWatcher` struct — wraps notify::RecommendedWatcher with proper cleanup
+  - `close_watcher(watcher)` — safe watcher cleanup
+  - `watch_with_error_handler(path, on_error)` — watch with error callback
+  - `FS_WATCH_RETRY_DELAY_MS` constant
+  - 3 unit tests
+- `oxi-cli/src/sleep.rs` — Async sleep with abort signal support
+  - `sleep(ms, signal)` — sleep with abort signal support
+  - `sleep_until_aborted(ms, abort)` — abort-first sleep
+  - `sleep_or_abort(ms, abort)` — returns bool indicating completion
+  - `SleepError` enum (Aborted, TimerError)
+  - Uses tokio::select! for cancellation
+  - 4 unit tests
+- `oxi-cli/src/changelog.rs` — CHANGELOG.md parsing
+  - `ChangelogEntry` struct with major, minor, patch, content
+  - `parse_changelog(path)` / `parse_changelog_content(content)` — parse changelog
+  - `compare_versions(v1, v2)` — compare version entries
+  - `get_new_entries(entries, last_version)` — filter entries newer than version
+  - `get_latest_version(entries)` — find newest version
+  - `format_changelog_entry(entry, include_header)` — format for display
+  - Uses regex crate (already in dependencies)
+  - 6 unit tests
+- `oxi-cli/src/child_process.rs` — Child process utilities
+  - `should_use_windows_shell(command)` — Windows shell detection
+  - `wait_for_child_process(child)` — wait with stdio grace period
+  - `spawn_with_signal(program, args)` — spawn with proper signal handling
+  - `run_command(program, args)` — run and capture output
+  - `run_shell(command)` — run shell command with expansion
+  - `run_capture(program, args)` — run and return stdout
+  - 4 unit tests
+- `oxi-cli/Cargo.toml` — Added `notify = "6"` dependency for fs_watch.rs
+- `oxi-cli/src/lib.rs` — Added module declarations for all new modules
