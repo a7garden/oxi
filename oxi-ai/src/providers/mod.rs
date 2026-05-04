@@ -9,6 +9,7 @@ mod codex;
 mod deepseek;
 mod event;
 mod google;
+mod google_shared;
 mod mistral;
 mod openai;
 mod openai_completions;
