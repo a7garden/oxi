@@ -1,45 +1,49 @@
-# oxi Progress
+# Progress
 
-## 2026-05-04: Port google-shared.ts → google_shared.rs
+## Status
+Completed
 
-### Completed
-- **Created `oxi-ai/src/providers/google_shared.rs`** (782 lines)
-  - `GoogleThinkingLevel` enum (THINKING_LEVEL_UNSPECIFIED, MINIMAL, LOW, MEDIUM, HIGH)
-  - `is_thinking_part()` — detect thinking content in streaming parts via `thought: true`
-  - `retain_thought_signature()` — preserve thought signatures across streaming deltas
-  - `map_stop_reason()` — map all Google FinishReason strings to oxi StopReason
-  - `convert_messages()` — transform Context messages to Google Content[] format
-  - `convert_tools()` — transform Tool[] to Google functionDeclarations with optional OpenAPI mode
-  - `blocks_to_google_parts()` — convert ContentBlock[] to Google parts JSON
-  - `build_request_body()` — shared request body builder
-  - `parse_google_events()` — unified SSE event parser for both providers
-  - `create_error_message()` — shared error message factory
-  - Shared response structs: GoogleResponse, GoogleCandidate, GoogleContent, GooglePart, GoogleFunctionCall, GoogleUsageMetadata
-  - `requires_tool_call_id()` and `normalize_tool_call_id()` helpers
-  - `sanitize_for_openapi()` — strip JSON Schema meta-declarations
-  - 20 comprehensive unit tests
+## Tasks
+- [x] Port auth-storage.ts enhancements to auth_storage.rs
+- [x] Port resource-loader.ts enhancements to resource_loader.rs
+- [x] Fix pre-existing oxi-ai compilation issues (text_signature field)
+- [x] Verify cargo check -p oxi-cli passes
 
-- **Updated `google.rs`** (365 → 190 lines)
-  - Removed duplicate message conversion, tool conversion, SSE parsing, and response structs
-  - Now imports all shared logic from `google_shared` module
-  - Retains provider-specific: GoogleProvider struct, API key handling, stream() implementation
-  - 5 provider-specific tests
+## Files Changed
+- `oxi-cli/src/auth_storage.rs` — Major enhancement:
+  - Added `Session` credential variant (browser-based auth with optional expiry)
+  - Added credential validation (`validate()`, `validate_all()`)
+  - Added `FallbackResolver` trait and `FnFallbackResolver` for custom provider config
+  - Added environment variable key discovery (`find_env_keys()`, `get_env_api_key()`)
+  - Added multi-provider support (`has_multiple_providers()`, `configured_providers()`, `primary_provider()`, `migrate_provider()`)
+  - Added error tracking (`drain_errors()`, `load_error()`)
+  - Added `update_oauth_tokens()` for token refresh
+  - Added `get_api_key_with_options()` to include/exclude fallback
+  - Added `AuthStatus` Display impl and `type_name()` on credentials
+  - Added `CredentialValidationError` type
+  - Migrated from `std::sync::RwLock` to `parking_lot::RwLock`
+  - Added 35+ tests covering all new functionality
 
-- **Updated `vertex.rs`** (715 → 314 lines)
-  - Removed duplicate message conversion, tool conversion, SSE parsing, and response structs
-  - Now imports all shared logic from `google_shared` module
-  - Retains provider-specific: VertexProvider struct, OAuth/JWT auth, gcloud token handling
-  - 5 provider-specific tests
+- `oxi-cli/src/resource_loader.rs` — Major enhancement:
+  - Added `ResourceLoaderOptions` builder for configurable loading
+  - Added `SYSTEM.md` / `APPEND_SYSTEM.md` system prompt discovery
+  - Added resource deduplication with collision diagnostics (`ResourceCollision`)
+  - Added hot-reload support (`is_cache_stale()`, `load_if_stale()`, `modification_times`)
+  - Added resource type detection (`detect_resource_type()`, `validate_resource_path()`)
+  - Added `SourceInfo` for tracking where resources came from
+  - Added `PathMetadata` shortcuts (`cli()`, `project()`, `user()`)
+  - Added `extend_resources()` for extension-provided paths
+  - Added `LoadedResources` with system_prompt, append_system_prompt, collisions fields
+  - Added `ContextFileType::from_filename()` detection
+  - Added `resolve_prompt_input()` for file-or-text resolution
+  - Added accessor methods (`get_skills()`, `get_themes()`, etc.)
+  - Added 30+ tests covering all new functionality
 
-- **Updated `mod.rs`** — added `mod google_shared;` declaration
+- `oxi-ai/src/high_level.rs` — Fixed missing `text_signature` field (pre-existing issue)
+- `oxi-ai/src/transform.rs` — Fixed missing `text_signature` fields (pre-existing issue)
 
-### Metrics
-- Net code reduction: ~576 lines of duplicate code eliminated
-- `cargo check -p oxi-ai` passes ✓
-- `cargo test -p oxi-ai --lib` passes: 351 tests ✓ (was 305 before, +46 from shared module tests)
-
-### Files Changed
-- `oxi-ai/src/providers/google_shared.rs` — NEW: shared module (782 lines)
-- `oxi-ai/src/providers/google.rs` — refactored to use shared module (190 lines)
-- `oxi-ai/src/providers/vertex.rs` — refactored to use shared module (314 lines)
-- `oxi-ai/src/providers/mod.rs` — added `mod google_shared` declaration
+## Notes
+- Pre-existing test compilation errors in `compaction_utils.rs`, `session.rs` prevent running `cargo test` (unrelated to these changes)
+- Pre-existing `oxi-ai` issues required fixing `text_signature` field in `TextContent` initializations
+- All changes use existing storage patterns (parking_lot::RwLock, serde, etc.)
+- Backward compatible: all existing API methods preserved

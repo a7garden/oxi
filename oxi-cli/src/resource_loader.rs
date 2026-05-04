@@ -1314,7 +1314,7 @@ pub fn resolve_path(path: &std::path::Path) -> std::path::PathBuf {
 /// Deduplicate skills by ID, keeping first occurrence
 fn dedupe_skills(skills: Vec<Skill>) -> (Vec<Skill>, Vec<ResourceCollision>) {
     let mut seen: HashMap<String, usize> = HashMap::new();
-    let mut result = Vec::new();
+    let mut result: Vec<Skill> = Vec::new();
     let mut collisions = Vec::new();
 
     for skill in skills {
@@ -1337,7 +1337,7 @@ fn dedupe_skills(skills: Vec<Skill>) -> (Vec<Skill>, Vec<ResourceCollision>) {
 /// Deduplicate themes by ID, keeping first occurrence
 fn dedupe_themes(themes: Vec<Theme>) -> (Vec<Theme>, Vec<ResourceCollision>) {
     let mut seen: HashMap<String, usize> = HashMap::new();
-    let mut result = Vec::new();
+    let mut result: Vec<Theme> = Vec::new();
     let mut collisions = Vec::new();
 
     for theme in themes {
@@ -1361,7 +1361,7 @@ fn dedupe_themes(themes: Vec<Theme>) -> (Vec<Theme>, Vec<ResourceCollision>) {
 /// Deduplicate prompts by name, keeping first occurrence
 fn dedupe_prompts(prompts: Vec<Prompt>) -> (Vec<Prompt>, Vec<ResourceCollision>) {
     let mut seen: HashMap<String, usize> = HashMap::new();
-    let mut result = Vec::new();
+    let mut result: Vec<Prompt> = Vec::new();
     let mut collisions = Vec::new();
 
     for prompt in prompts {
