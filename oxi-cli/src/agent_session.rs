@@ -36,6 +36,7 @@ use oxi_ai::Message;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
 use uuid::Uuid;
@@ -277,6 +278,9 @@ pub struct AgentSession {
     // ── CWD ──────────────────────────────────────────────────────────
     cwd: String,
 
+    // ── Streaming state ──────────────────────────────────────────────
+    streaming: Arc<AtomicBool>,
+
     // ── Extensions ───────────────────────────────────────────────────
     extension_runner: Arc<RwLock<Option<ExtensionRunner>>>,
 }
@@ -316,6 +320,7 @@ impl AgentSession {
             retry_notify: Arc::new(Notify::new()),
             session_id: Arc::new(RwLock::new(session_id)),
             cwd,
+            streaming: Arc::new(AtomicBool::new(false)),
             extension_runner: Arc::new(RwLock::new(None)),
         }
     }
@@ -341,9 +346,7 @@ impl AgentSession {
 
     /// Whether the agent is currently streaming.
     pub fn is_streaming(&self) -> bool {
-        // The agent doesn't expose is_streaming yet; approximate from state.
-        // When streaming is in progress, there will be an active run.
-        false // TODO: wire up when Agent exposes is_streaming
+        self.streaming.load(Ordering::SeqCst)
     }
 
     /// All messages in the agent state.
@@ -358,7 +361,14 @@ impl AgentSession {
 
     /// Whether compaction is in progress.
     pub fn is_compacting(&self) -> bool {
-        self.compaction_abort.try_lock().map(|g| g.is_some()).unwrap_or(false)
+        // try_lock() succeeds only when no one holds the mutex.
+        // If compaction is running, the handle is Some AND the mutex is
+        // held by the compaction task, so try_lock fails → return true.
+        // If try_lock succeeds, the mutex was uncontended; check the handle.
+        match self.compaction_abort.try_lock() {
+            Some(guard) => guard.is_some(),  // lock acquired: check if handle present
+            None => true,                     // lock contested → compaction is running
+        }
     }
 
     /// Whether auto-retry is in progress.
@@ -538,49 +548,54 @@ impl AgentSession {
 
     /// Run a prompt and get a channel of events for streaming display.
     ///
-    /// **Note:** Due to the Agent's internal locks not being `Send`, this
-    /// uses `tokio::task::LocalSet` internally. Callers should prefer
-    /// [`prompt`] when full streaming control is not needed.
+    /// The returned receiver yields [`AgentEvent`]s as they are produced
+    /// by the agent. When the agent finishes (or errors), the channel is
+    /// closed and `is_streaming()` returns `false`.
     pub fn prompt_streaming(
         &self,
         text: String,
     ) -> mpsc::UnboundedReceiver<AgentEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
-        let (_agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(100);
 
-        // Clone tx for the forwarding task
-        let tx_clone = tx.clone();
+        // Mark streaming as active
+        self.streaming.store(true, Ordering::SeqCst);
 
-        // Forward agent events through our channel
+        let agent = Arc::clone(&self.agent);
+        let streaming = Arc::clone(&self.streaming);
+
         tokio::spawn(async move {
-            while let Some(event) = agent_rx.recv().await {
-                let _ = tx_clone.send(event);
-            }
-        });
+            // Create a bounded channel for the agent's run_with_channel
+            let (agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(256);
 
-        // Run the agent in a LocalSet (because Agent's internal RwLock is !Send)
-        let agent_clone = Arc::clone(&self.agent);
-        let _session_clone = self.clone_handle();
-        tokio::task::spawn_blocking(move || {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                let local = tokio::task::LocalSet::new();
-                let _ = local.run_until(async move {
-                    let (inner_tx, mut inner_rx) = mpsc::channel(100);
-                    // Use agent.run_with_channel inside LocalSet
-                    let agent_for_task = Arc::clone(&agent_clone);
-                    let handle = tokio::task::spawn_local(async move {
-                        let _ = agent_for_task.run_with_channel(text, inner_tx).await;
-                    });
-
-                    // Forward events from inner to outer
-                    while let Some(event) = inner_rx.recv().await {
-                        let _ = tx.send(event);
-                    }
-
-                    let _ = handle.await;
-                });
+            // Spawn the agent run in a separate task so we can forward events
+            let agent_handle = tokio::spawn(async move {
+                agent.run_with_channel(text, agent_tx).await
             });
+
+            // Forward events from the agent channel to our unbounded output channel
+            while let Some(event) = agent_rx.recv().await {
+                let _ = tx.send(event);
+            }
+
+            // Wait for the agent task to complete and handle errors
+            match agent_handle.await {
+                Ok(Ok(_response)) => {
+                    // Agent completed successfully; events already forwarded
+                }
+                Ok(Err(e)) => {
+                    let _ = tx.send(AgentEvent::Error {
+                        message: e.to_string(),
+                    });
+                }
+                Err(join_err) => {
+                    let _ = tx.send(AgentEvent::Error {
+                        message: format!("Agent task failed: {}", join_err),
+                    });
+                }
+            }
+
+            // Clear streaming flag when done
+            streaming.store(false, Ordering::SeqCst);
         });
 
         rx
@@ -1047,11 +1062,28 @@ impl AgentSession {
     // ══════════════════════════════════════════════════════════════════
 
     /// Persist the current agent state to the session manager.
+    ///
+    /// Only appends messages that are new since the last persist call,
+    /// tracked via `persisted_count`.
     fn persist_session(&self) {
         let state = self.agent.state();
-        let mut sm = self.session_manager.write();
+        let messages = &state.messages;
+        let total = messages.len();
 
-        for msg in &state.messages {
+        // Nothing to persist (no messages at all, or already up to date)
+        if total == 0 {
+            return;
+        }
+
+        let mut sm = self.session_manager.write();
+        let persisted = sm.persisted_count();
+
+        if persisted >= total {
+            return; // already fully persisted
+        }
+
+        // Append only the new messages
+        for msg in &messages[persisted..] {
             match msg {
                 Message::User(u) => {
                     let content = match &u.content {
@@ -1069,21 +1101,56 @@ impl AgentSession {
                     });
                 }
                 Message::Assistant(a) => {
-                    let content_str = a
+                    // Convert oxi_ai ContentBlocks → session AssistantContentBlocks
+                    let content_blocks: Vec<crate::session::AssistantContentBlock> = a
                         .content
                         .iter()
-                        .filter_map(|b| b.as_text())
-                        .collect::<Vec<_>>()
-                        .join("");
+                        .map(|b| match b {
+                            oxi_ai::ContentBlock::Text(t) => {
+                                crate::session::AssistantContentBlock::Text {
+                                    text: t.text.clone(),
+                                }
+                            }
+                            oxi_ai::ContentBlock::Thinking(t) => {
+                                crate::session::AssistantContentBlock::Thinking {
+                                    thinking: t.thinking.clone(),
+                                }
+                            }
+                            oxi_ai::ContentBlock::ToolCall(tc) => {
+                                crate::session::AssistantContentBlock::ToolCall {
+                                    id: tc.id.clone(),
+                                    name: tc.name.clone(),
+                                    arguments: tc.arguments.clone(),
+                                }
+                            }
+                            oxi_ai::ContentBlock::Image(img) => {
+                                crate::session::AssistantContentBlock::ImageResult {
+                                    data: img.data.clone(),
+                                    media_type: img.media_type.clone(),
+                                }
+                            }
+                            oxi_ai::ContentBlock::Unknown(v) => {
+                                // Best-effort: try to extract text from unknown JSON
+                                crate::session::AssistantContentBlock::Text {
+                                    text: v.to_string(),
+                                }
+                            }
+                        })
+                        .collect();
+
                     sm.append_message(AgentMessage::Assistant {
-                        content: vec![],
-                        provider: None,
-                        model_id: None,
-                        usage: None,
-                        stop_reason: None,
+                        content: content_blocks,
+                        provider: Some(a.provider.clone()),
+                        model_id: Some(a.model.clone()),
+                        usage: Some(crate::session::Usage {
+                            input: a.usage.input_tokens.map(|v| v as i64),
+                            output: a.usage.output_tokens.map(|v| v as i64),
+                            cache_read: a.usage.cache_read_tokens.map(|v| v as i64),
+                            cache_write: a.usage.cache_write_tokens.map(|v| v as i64),
+                            total_tokens: None,
+                        }),
+                        stop_reason: Some(format!("{:?}", a.stop_reason)),
                     });
-                    let _ = content_str; // will be used when AssistantMessage
-                    // variant supports storing text content
                 }
                 Message::ToolResult(t) => {
                     let content = t
@@ -1099,6 +1166,9 @@ impl AgentSession {
                 }
             }
         }
+
+        // Update the persisted count so we don't re-add these messages
+        sm.set_persisted_count(total);
     }
 
     /// Process a batch of agent events for session concerns.
@@ -1221,6 +1291,7 @@ impl AgentSession {
             retry_notify: Arc::clone(&self.retry_notify),
             session_id: Arc::clone(&self.session_id),
             cwd: self.cwd.clone(),
+            streaming: Arc::clone(&self.streaming),
             extension_runner: Arc::clone(&self.extension_runner),
         }
     }

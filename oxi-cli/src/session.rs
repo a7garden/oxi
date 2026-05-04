@@ -682,6 +682,9 @@ pub struct SessionManager {
     cwd: String,
     persist: bool,
     flushed: bool,
+    /// Tracks how many agent messages have been persisted so far,
+    /// so that `persist_session()` only appends new messages.
+    persisted_count: RwLock<usize>,
     file_entries: RwLock<Vec<FileEntry>>,
     by_id: RwLock<HashMap<String, SessionEntry>>,
     labels_by_id: RwLock<HashMap<String, String>>,
@@ -754,6 +757,7 @@ impl SessionManager {
             cwd,
             persist,
             flushed: false,
+            persisted_count: RwLock::new(0),
             file_entries: RwLock::new(Vec::new()),
             by_id: RwLock::new(HashMap::new()),
             labels_by_id: RwLock::new(HashMap::new()),
@@ -827,6 +831,7 @@ impl SessionManager {
         self.labels_by_id.write().clear();
         self.label_timestamps_by_id.write().clear();
         *self.leaf_id.write() = None;
+        *self.persisted_count.write() = 0;
         self.flushed = false;
 
         if self.persist {
@@ -874,22 +879,38 @@ impl SessionManager {
             return;
         }
 
-        let file = self.session_file.as_ref().unwrap();
+        let file = match self.session_file.as_ref() {
+            Some(f) => f,
+            None => return,
+        };
+
         let content: String = self
             .file_entries
             .read()
             .iter()
-            .map(|e| serde_json::to_string(e).unwrap())
+            .map(|e| serde_json::to_string(e).unwrap_or_default())
             .collect::<Vec<_>>()
             .join("\n")
             + "\n";
 
-        let _ = fs::write(file, content);
+        if let Err(e) = fs::write(file, content) {
+            tracing::warn!("Failed to rewrite session file {}: {}", file, e);
+        }
     }
 
     /// Check if session is persisted to disk
     pub fn is_persisted(&self) -> bool {
         self.persist
+    }
+
+    /// Get the number of agent messages that have already been persisted.
+    pub fn persisted_count(&self) -> usize {
+        *self.persisted_count.read()
+    }
+
+    /// Set the number of agent messages that have been persisted.
+    pub fn set_persisted_count(&self, count: usize) {
+        *self.persisted_count.write() = count;
     }
 
     /// Get working directory
@@ -933,21 +954,31 @@ impl SessionManager {
             return;
         }
 
-        let mut handle = fs::OpenOptions::new()
+        let mut handle = match fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(file)
-            .unwrap();
+        {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!("Failed to open session file for append {}: {}", file, e);
+                return;
+            }
+        };
 
         if !self.flushed {
             for e in self.file_entries.read().iter() {
-                writeln!(&mut handle, "{}", serde_json::to_string(e).unwrap()).ok();
+                if let Ok(line) = serde_json::to_string(e) {
+                    let _ = writeln!(&mut handle, "{}", line);
+                }
             }
             self.flushed = true;
         } else {
             // Convert SessionEntry back to FileEntry for writing
             let file_entry = convert_from_session_entry(entry);
-            writeln!(&mut handle, "{}", serde_json::to_string(&file_entry).unwrap()).ok();
+            if let Ok(line) = serde_json::to_string(&file_entry) {
+                let _ = writeln!(&mut handle, "{}", line);
+            }
         }
     }
 
