@@ -97,7 +97,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sleep_aborted() {
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         
         // Spawn a task to abort after a short delay
         tokio::spawn(async move {
@@ -105,7 +105,11 @@ mod tests {
             let _ = tx.send(());
         });
 
-        let result = sleep(1000, rx).await;
+        // Convert receiver to a future that resolves to ()
+        let abort = async {
+            let _ = rx.await;
+        };
+        let result = sleep(1000, abort).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), SleepError::Aborted);
     }
@@ -118,14 +122,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_sleep_or_abort_aborts() {
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
         
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
             let _ = tx.send(());
         });
 
-        let result = sleep_or_abort(1000, rx).await;
+        // Convert receiver to a future that resolves to ()
+        let abort = async {
+            let _ = rx.await;
+        };
+        let result = sleep_or_abort(1000, abort).await;
         assert!(!result);
     }
 }

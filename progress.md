@@ -6,6 +6,7 @@ Completed
 ## Tasks
 - [x] Port tools-manager.ts to Rust
 - [x] Port auto-retry logic from pi-mono agent-session to oxi-agent
+- [x] Port session tree navigation (navigateTree) to Rust
 
 ## Files Changed
 - `oxi/oxi-cli/src/tools_manager.rs` — New file: Rust port of tools-manager.ts (575 lines)
@@ -35,11 +36,25 @@ Completed
   - `run_loop()` now checks assistant messages for retryable errors before returning, retries with backoff
   - On successful response after retry, emits `AutoRetryEnd { success: true }` and resets counter
   - All existing tests continue to pass
+- `oxi/oxi-cli/src/session_navigation.rs` — New file: Rust port of navigateTree() and helpers (~950 lines)
+  - `SessionEntryType` enum (Message, BranchSummary, Compaction, Label, SessionInfo, Custom, CustomMessage)
+  - `NavigationOptions` struct for navigate options (summarize, custom_instructions, label)
+  - `NavigationResult` struct (editor_text, cancelled, aborted, summary_entry_id)
+  - `TreePreparation` struct for extension hooks
+  - `Summarizer` trait for LLM-based summarization (callback-based)
+  - `SessionNavigator` struct with:
+    - `navigate_tree()` — main navigation method (port of navigateTree)
+    - `collect_entries_for_branch_summary()` — find entries from old leaf to common ancestor
+    - `determine_leaf_and_editor()` — entry type detection and leaf switching logic
+    - `branch()`, `reset_leaf()`, `branch_with_summary()` — tree traversal helpers
+    - `append_label_change()` — label attachment
+    - `get_branch()`, `get_children()`, `get_entry()` — tree traversal
+  - Utility functions: `extract_user_message_text()`, `is_user_message()`, `is_custom_message()`, etc.
+  - 6 unit tests covering navigation, summarization, labels
+- `oxi/oxi-cli/src/lib.rs` — Added `pub mod session_navigation;`
 
 ## Notes
-- `cargo check -p oxi-agent` compiles cleanly
-- All 220 tests pass (`cargo test -p oxi-agent`)
-- The regex for retryable error detection mirrors the pi-mono pattern exactly
-- Exponential backoff: `base_delay_ms * 2^(attempt-1)` (same formula as pi-mono)
-- Cancellation uses `tokio::select!` + a boolean flag (lighter than a full CancellationToken)
+- `cargo check -p oxi-cli --lib` compiles cleanly for the lib target
 - Pre-existing broken modules in the repo are unrelated to these changes
+- The `Summarizer` trait uses async/await allowing real LLM integration or mock implementations
+- Extension hooks use `Fn(TreePreparation) -> BeforeTreeHookResult` callback pattern
