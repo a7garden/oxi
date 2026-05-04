@@ -4,11 +4,12 @@
 //! a conversation session with:
 //! - Color-coded user / assistant / system messages
 //! - Markdown → HTML rendering (basic, no external deps)
-//! - Tool calls and results in styled blocks
+//! - ANSI escape code → HTML span conversion (full 256-color + true-color support)
+//! - Tool calls and results in styled blocks (bash, file ops, search)
 //! - Collapsible thinking blocks
 //! - Metadata header (model, provider, date, token counts)
 //! - Dark theme (default) with light-theme toggle
-//! - Syntax highlighting for code blocks (JS-only, via highlight.js CDN)
+//! - Syntax highlighting for code blocks (via highlight.js CDN)
 //! - Session tree navigation for branched sessions
 
 use anyhow::Result;
@@ -20,6 +21,30 @@ use uuid::Uuid;
 use crate::session::{AgentMessage, SessionEntry, SessionMeta};
 
 // ── Public types ─────────────────────────────────────────────────────
+
+/// Options for HTML export.
+#[derive(Debug, Clone)]
+pub struct HtmlExportOptions {
+    /// Whether to include thinking blocks in the output.
+    pub include_thinking: bool,
+    /// Whether to include tool call/result blocks in the output.
+    pub include_tool_calls: bool,
+    /// Whether to use dark theme (default: true).
+    pub dark_theme: bool,
+    /// Optional custom title for the HTML document.
+    pub title: Option<String>,
+}
+
+impl Default for HtmlExportOptions {
+    fn default() -> Self {
+        Self {
+            include_thinking: true,
+            include_tool_calls: true,
+            dark_theme: true,
+            title: None,
+        }
+    }
+}
 
 /// Metadata attached to an export (optional but encouraged).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,7 +77,688 @@ pub struct TreeNode {
     pub children: Vec<TreeNode>,
 }
 
-// ── Core export function ─────────────────────────────────────────────
+// ── ANSI-to-HTML conversion ──────────────────────────────────────────
+
+/// Standard ANSI color palette (0–15).
+const ANSI_COLORS: [&str; 16] = [
+    "#000000", // 0: black
+    "#800000", // 1: red
+    "#008000", // 2: green
+    "#808000", // 3: yellow
+    "#000080", // 4: blue
+    "#800080", // 5: magenta
+    "#008080", // 6: cyan
+    "#c0c0c0", // 7: white
+    "#808080", // 8: bright black
+    "#ff0000", // 9: bright red
+    "#00ff00", // 10: bright green
+    "#ffff00", // 11: bright yellow
+    "#0000ff", // 12: bright blue
+    "#ff00ff", // 13: bright magenta
+    "#00ffff", // 14: bright cyan
+    "#ffffff", // 15: bright white
+];
+
+/// Convert a 256-color index to a hex color string.
+fn color_256_to_hex(index: u8) -> String {
+    let idx = index as usize;
+
+    // Standard colors (0–15)
+    if idx < 16 {
+        return ANSI_COLORS[idx].to_string();
+    }
+
+    // Color cube (16–231): 6×6×6 = 216 colors
+    if idx < 232 {
+        let cube = idx - 16;
+        let r = cube / 36;
+        let g = (cube % 36) / 6;
+        let b = cube % 6;
+        let component = |n: usize| -> u8 {
+            if n == 0 {
+                0
+            } else {
+                (55 + n * 40) as u8
+            }
+        };
+        return format!(
+            "#{:02x}{:02x}{:02x}",
+            component(r),
+            component(g),
+            component(b)
+        );
+    }
+
+    // Grayscale (232–255): 24 shades
+    let gray = 8 + (idx - 232) * 10;
+    format!("#{gray:02x}{gray:02x}{gray:02x}", gray = gray as u8)
+}
+
+/// Tracked text style state during ANSI SGR processing.
+#[derive(Clone, Default)]
+struct TextStyle {
+    fg: Option<String>,
+    bg: Option<String>,
+    bold: bool,
+    dim: bool,
+    italic: bool,
+    underline: bool,
+    strikethrough: bool,
+}
+
+impl TextStyle {
+    fn to_inline_css(&self) -> String {
+        let mut parts = Vec::new();
+        if let Some(ref fg) = self.fg {
+            parts.push(format!("color:{fg}"));
+        }
+        if let Some(ref bg) = self.bg {
+            parts.push(format!("background-color:{bg}"));
+        }
+        if self.bold {
+            parts.push("font-weight:bold".to_string());
+        }
+        if self.dim {
+            parts.push("opacity:0.6".to_string());
+        }
+        if self.italic {
+            parts.push("font-style:italic".to_string());
+        }
+        if self.underline {
+            parts.push("text-decoration:underline".to_string());
+        }
+        if self.strikethrough {
+            let deco = if self.underline {
+                "text-decoration:underline line-through"
+            } else {
+                "text-decoration:line-through"
+            };
+            parts.push(deco.to_string());
+        }
+        parts.join(";")
+    }
+
+    fn has_style(&self) -> bool {
+        self.fg.is_some()
+            || self.bg.is_some()
+            || self.bold
+            || self.dim
+            || self.italic
+            || self.underline
+            || self.strikethrough
+    }
+
+    fn reset(&mut self) {
+        self.fg = None;
+        self.bg = None;
+        self.bold = false;
+        self.dim = false;
+        self.italic = false;
+        self.underline = false;
+        self.strikethrough = false;
+    }
+}
+
+/// Apply ANSI SGR (Select Graphic Rendition) parameters to a style.
+fn apply_sgr_codes(params: &[u16], style: &mut TextStyle) {
+    let mut i = 0;
+    while i < params.len() {
+        let code = params[i];
+        match code {
+            0 => {
+                style.reset();
+            }
+            1 => {
+                style.bold = true;
+            }
+            2 => {
+                style.dim = true;
+            }
+            3 => {
+                style.italic = true;
+            }
+            4 => {
+                style.underline = true;
+            }
+            9 => {
+                style.strikethrough = true;
+            }
+            22 => {
+                style.bold = false;
+                style.dim = false;
+            }
+            23 => {
+                style.italic = false;
+            }
+            24 => {
+                style.underline = false;
+            }
+            29 => {
+                style.strikethrough = false;
+            }
+            // Standard foreground colors (30–37)
+            30..=37 => {
+                style.fg = Some(ANSI_COLORS[(code - 30) as usize].to_string());
+            }
+            // Extended foreground color (38;5;N or 38;2;R;G;B)
+            38 => {
+                if i + 1 < params.len() {
+                    match params[i + 1] {
+                        5 => {
+                            // 256-color: 38;5;N
+                            if i + 2 < params.len() {
+                                style.fg = Some(color_256_to_hex(params[i + 2] as u8));
+                                i += 2;
+                            }
+                        }
+                        2 => {
+                            // RGB: 38;2;R;G;B
+                            if i + 4 < params.len() {
+                                let r = params[i + 2];
+                                let g = params[i + 3];
+                                let b = params[i + 4];
+                                style.fg = Some(format!("rgb({r},{g},{b})"));
+                                i += 4;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            39 => {
+                // Default foreground
+                style.fg = None;
+            }
+            // Standard background colors (40–47)
+            40..=47 => {
+                style.bg = Some(ANSI_COLORS[(code - 40) as usize].to_string());
+            }
+            // Extended background color (48;5;N or 48;2;R;G;B)
+            48 => {
+                if i + 1 < params.len() {
+                    match params[i + 1] {
+                        5 => {
+                            if i + 2 < params.len() {
+                                style.bg = Some(color_256_to_hex(params[i + 2] as u8));
+                                i += 2;
+                            }
+                        }
+                        2 => {
+                            if i + 4 < params.len() {
+                                let r = params[i + 2];
+                                let g = params[i + 3];
+                                let b = params[i + 4];
+                                style.bg = Some(format!("rgb({r},{g},{b})"));
+                                i += 4;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            49 => {
+                // Default background
+                style.bg = None;
+            }
+            // Bright foreground colors (90–97)
+            90..=97 => {
+                style.fg = Some(ANSI_COLORS[(code - 90 + 8) as usize].to_string());
+            }
+            // Bright background colors (100–107)
+            100..=107 => {
+                style.bg = Some(ANSI_COLORS[(code - 100 + 8) as usize].to_string());
+            }
+            _ => {
+                // Ignore unrecognized SGR codes
+            }
+        }
+        i += 1;
+    }
+}
+
+/// Convert ANSI-escaped text to HTML with inline styles.
+///
+/// Supports:
+/// - Standard foreground colors (30–37) and bright variants (90–97)
+/// - Standard background colors (40–47) and bright variants (100–107)
+/// - 256-color palette (38;5;N and 48;5;N)
+/// - RGB true color (38;2;R;G;B and 48;2;R;G;B)
+/// - Text styles: bold (1), dim (2), italic (3), underline (4), strikethrough (9)
+/// - Reset (0)
+pub fn ansi_to_html(text: &str) -> String {
+    let mut style = TextStyle::default();
+    let mut result = String::with_capacity(text.len() * 2);
+    let mut last_end = 0;
+    let mut in_span = false;
+
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut pos = 0;
+
+    while pos < len {
+        // Look for ESC[ ... m
+        if bytes[pos] == 0x1b && pos + 1 < len && bytes[pos + 1] == b'[' {
+            // Find 'm' terminator
+            let seq_start = pos + 2;
+            let mut seq_end = seq_start;
+            while seq_end < len && bytes[seq_end] != b'm' {
+                seq_end += 1;
+            }
+            if seq_end >= len {
+                // No closing 'm', not a valid sequence
+                pos += 1;
+                continue;
+            }
+
+            // Emit text before this sequence
+            if pos > last_end {
+                result.push_str(&html_escape(&text[last_end..pos]));
+            }
+
+            // Close existing span
+            if in_span {
+                result.push_str("</span>");
+                in_span = false;
+            }
+
+            // Parse parameters
+            let param_str = &text[seq_start..seq_end];
+            let params: Vec<u16> = if param_str.is_empty() {
+                vec![0]
+            } else {
+                param_str
+                    .split(';')
+                    .map(|p| p.parse::<u16>().unwrap_or(0))
+                    .collect()
+            };
+
+            // Apply SGR codes
+            apply_sgr_codes(&params, &mut style);
+
+            // Open new span if styled
+            if style.has_style() {
+                result.push_str("<span style=\"");
+                result.push_str(&style.to_inline_css());
+                result.push_str("\">");
+                in_span = true;
+            }
+
+            last_end = seq_end + 1; // skip past 'm'
+            pos = seq_end + 1;
+        } else {
+            pos += 1;
+        }
+    }
+
+    // Emit remaining text
+    if last_end < len {
+        result.push_str(&html_escape(&text[last_end..]));
+    }
+
+    // Close any open span
+    if in_span {
+        result.push_str("</span>");
+    }
+
+    result
+}
+
+/// Convert an array of ANSI-escaped lines to HTML.
+/// Each line is wrapped in a `<div class="ansi-line">` element.
+pub fn ansi_lines_to_html(lines: &[&str]) -> String {
+    lines
+        .iter()
+        .map(|line| {
+            let rendered = ansi_to_html(line);
+            if rendered.is_empty() {
+                "<div class=\"ansi-line\">&nbsp;</div>".to_string()
+            } else {
+                format!("<div class=\"ansi-line\">{rendered}</div>")
+            }
+        })
+        .collect()
+}
+
+// ── Tool rendering ───────────────────────────────────────────────────
+
+/// Information about a detected tool operation in message text.
+#[derive(Debug, Clone)]
+enum ToolOp {
+    Bash {
+        command: String,
+        output: String,
+        exit_code: Option<i32>,
+    },
+    FileRead {
+        path: String,
+        content: String,
+    },
+    FileWrite {
+        path: String,
+        content: String,
+    },
+    FileEdit {
+        path: String,
+        old_text: String,
+        new_text: String,
+    },
+    Search {
+        query: String,
+        results: Vec<String>,
+    },
+}
+
+/// Detect and render tool operations embedded in assistant message content.
+fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String> {
+    if !include_tool_calls {
+        return None;
+    }
+
+    let mut html = String::new();
+    let mut found = false;
+    let mut lines = content.lines().peekable();
+
+    while let Some(line) = lines.next() {
+        // Detect bash tool call: 🔧 followed by bash command in code block
+        if (line.starts_with("🔧 Running bash") || line.starts_with("🔧 bash"))
+            && lines.peek().map_or(false, |l| l.starts_with("```"))
+        {
+            found = true;
+            // Consume the ``` line
+            let _code_fence = lines.next();
+            let mut cmd = String::new();
+            let mut output_lines = Vec::new();
+            let mut in_output = false;
+
+            // Read command (single line typically)
+            if let Some(cmd_line) = lines.next() {
+                cmd.push_str(cmd_line);
+            }
+
+            // Look for output section
+            while let Some(line) = lines.next() {
+                if line.starts_with("```") {
+                    // End of code block
+                    break;
+                }
+                if line.starts_with("📤") || line.starts_with("result:") {
+                    in_output = true;
+                    continue;
+                }
+                if in_output {
+                    output_lines.push(line.to_string());
+                } else {
+                    // Still in command or before result marker
+                    cmd.push('\n');
+                    cmd.push_str(line);
+                }
+            }
+
+            html.push_str(&render_bash_tool(&cmd, &output_lines.join("\n")));
+            continue;
+        }
+
+        // Detect file read: lines with "📄" or "read" + path + code block
+        if (line.starts_with("📄 Reading") || line.starts_with("📄 read"))
+            && lines.peek().map_or(false, |l| l.starts_with("```"))
+        {
+            found = true;
+            let path = extract_path_from_line(line);
+            let _fence = lines.next(); // ```
+            let _lang = "";
+            let mut content_buf = String::new();
+            while let Some(line) = lines.next() {
+                if line.starts_with("```") {
+                    break;
+                }
+                content_buf.push_str(line);
+                content_buf.push('\n');
+            }
+            html.push_str(&render_file_read_tool(&path, &content_buf));
+            continue;
+        }
+
+        // Detect file write: "📝 Writing" or "📝 write" + path + code block
+        if (line.starts_with("📝 Writing") || line.starts_with("📝 write"))
+            && lines.peek().map_or(false, |l| l.starts_with("```"))
+        {
+            found = true;
+            let path = extract_path_from_line(line);
+            let _fence = lines.next();
+            let mut content_buf = String::new();
+            while let Some(line) = lines.next() {
+                if line.starts_with("```") {
+                    break;
+                }
+                content_buf.push_str(line);
+                content_buf.push('\n');
+            }
+            html.push_str(&render_file_write_tool(&path, &content_buf));
+            continue;
+        }
+
+        // Detect file edit: "✏️ Editing" or "✏️ edit" + path
+        if line.starts_with("✏️ Editing") || line.starts_with("✏️ edit") {
+            found = true;
+            let path = extract_path_from_line(line);
+            let mut old_text = String::new();
+            let mut new_text = String::new();
+
+            // Consume lines looking for old/new sections
+            while let Some(next) = lines.peek() {
+                if next.starts_with("🔧") || next.starts_with("📄") || next.starts_with("📝")
+                    || next.starts_with("✏️")
+                    || next.starts_with("📤")
+                {
+                    break;
+                }
+                let l = lines.next().unwrap();
+                if l.contains("old:") || l.contains("Old text:") {
+                    // Collect old text
+                    while let Some(next) = lines.peek() {
+                        if next.contains("new:") || next.contains("New text:") {
+                            break;
+                        }
+                        let ol = lines.next().unwrap();
+                        if ol.starts_with("```") {
+                            continue;
+                        }
+                        old_text.push_str(ol);
+                        old_text.push('\n');
+                    }
+                } else if l.contains("new:") || l.contains("New text:") {
+                    while let Some(next) = lines.peek() {
+                        if next.starts_with("🔧")
+                            || next.starts_with("📄")
+                            || next.starts_with("📝")
+                            || next.starts_with("✏️")
+                            || next.starts_with("📤")
+                        {
+                            break;
+                        }
+                        let nl = lines.next().unwrap();
+                        if nl.starts_with("```") {
+                            continue;
+                        }
+                        new_text.push_str(nl);
+                        new_text.push('\n');
+                    }
+                }
+            }
+            html.push_str(&render_file_edit_tool(&path, &old_text, &new_text));
+            continue;
+        }
+
+        // Detect search: "🔍" or "grep"/"find"
+        if line.starts_with("🔍 Searching") || line.starts_with("🔍 grep")
+            || line.starts_with("🔍 find")
+        {
+            found = true;
+            let query = line.trim_start_matches(|c: char| !c.is_alphanumeric())
+                .trim()
+                .to_string();
+            let mut results = Vec::new();
+
+            while let Some(next) = lines.peek() {
+                if next.starts_with("🔧")
+                    || next.starts_with("📄")
+                    || next.starts_with("📝")
+                    || next.starts_with("✏️")
+                    || next.starts_with("📤")
+                    || next.trim().is_empty()
+                {
+                    break;
+                }
+                results.push(lines.next().unwrap().to_string());
+            }
+            html.push_str(&render_search_tool(&query, &results));
+            continue;
+        }
+    }
+
+    if found {
+        Some(html)
+    } else {
+        None
+    }
+}
+
+/// Extract a file path from a tool operation header line.
+fn extract_path_from_line(line: &str) -> String {
+    // Try to extract path after common patterns
+    let line = line.trim();
+    for prefix in &[
+        "📄 Reading ",
+        "📄 reading ",
+        "📄 Read ",
+        "📄 read ",
+        "📝 Writing ",
+        "📝 writing ",
+        "📝 Write ",
+        "📝 write ",
+        "✏️ Editing ",
+        "✏️ editing ",
+        "✏️ Edit ",
+        "✏️ edit ",
+    ] {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            return rest.trim().trim_end_matches(':').to_string();
+        }
+    }
+    line.to_string()
+}
+
+/// Render a bash tool call and its output as styled HTML.
+fn render_bash_tool(command: &str, output: &str) -> String {
+    let mut html = String::new();
+    html.push_str("<div class=\"tool-block tool-bash\">\n");
+    html.push_str("<div class=\"tool-label\">⌨ Bash</div>\n");
+    html.push_str("<pre class=\"tool-command\"><code>");
+    html.push_str(&html_escape(command.trim()));
+    html.push_str("</code></pre>\n");
+    if !output.trim().is_empty() {
+        html.push_str("<details class=\"tool-output-details\">\n");
+        html.push_str("<summary>Output</summary>\n");
+        html.push_str("<pre class=\"tool-output\"><code>");
+        html.push_str(&html_escape(output.trim()));
+        html.push_str("</code></pre>\n");
+        html.push_str("</details>\n");
+    }
+    html.push_str("</div>\n");
+    html
+}
+
+/// Render a file read operation as styled HTML.
+fn render_file_read_tool(path: &str, content: &str) -> String {
+    let mut html = String::new();
+    html.push_str("<div class=\"tool-block tool-file-read\">\n");
+    html.push_str("<div class=\"tool-label\">📄 Read: ");
+    html.push_str(&html_escape(path));
+    html.push_str("</div>\n");
+    html.push_str("<details class=\"tool-output-details\" open>\n");
+    html.push_str("<summary>Content</summary>\n");
+    html.push_str("<pre class=\"tool-output\"><code>");
+    html.push_str(&html_escape(content.trim()));
+    html.push_str("</code></pre>\n");
+    html.push_str("</details>\n");
+    html.push_str("</div>\n");
+    html
+}
+
+/// Render a file write operation as styled HTML.
+fn render_file_write_tool(path: &str, content: &str) -> String {
+    let mut html = String::new();
+    html.push_str("<div class=\"tool-block tool-file-write\">\n");
+    html.push_str("<div class=\"tool-label\">📝 Write: ");
+    html.push_str(&html_escape(path));
+    html.push_str("</div>\n");
+    html.push_str("<details class=\"tool-output-details\">\n");
+    html.push_str("<summary>Content</summary>\n");
+    html.push_str("<pre class=\"tool-output\"><code>");
+    html.push_str(&html_escape(content.trim()));
+    html.push_str("</code></pre>\n");
+    html.push_str("</details>\n");
+    html.push_str("</div>\n");
+    html
+}
+
+/// Render a file edit operation as styled HTML.
+fn render_file_edit_tool(path: &str, old_text: &str, new_text: &str) -> String {
+    let mut html = String::new();
+    html.push_str("<div class=\"tool-block tool-file-edit\">\n");
+    html.push_str("<div class=\"tool-label\">✏️ Edit: ");
+    html.push_str(&html_escape(path));
+    html.push_str("</div>\n");
+
+    if !old_text.trim().is_empty() {
+        html.push_str("<div class=\"edit-section edit-old\">\n");
+        html.push_str("<div class=\"edit-label\">− Removed</div>\n");
+        html.push_str("<pre class=\"tool-output\"><code>");
+        html.push_str(&html_escape(old_text.trim()));
+        html.push_str("</code></pre>\n");
+        html.push_str("</div>\n");
+    }
+
+    if !new_text.trim().is_empty() {
+        html.push_str("<div class=\"edit-section edit-new\">\n");
+        html.push_str("<div class=\"edit-label\">+ Added</div>\n");
+        html.push_str("<pre class=\"tool-output\"><code>");
+        html.push_str(&html_escape(new_text.trim()));
+        html.push_str("</code></pre>\n");
+        html.push_str("</div>\n");
+    }
+
+    html.push_str("</div>\n");
+    html
+}
+
+/// Render search results as styled HTML.
+fn render_search_tool(query: &str, results: &[String]) -> String {
+    let mut html = String::new();
+    html.push_str("<div class=\"tool-block tool-search\">\n");
+    html.push_str("<div class=\"tool-label\">🔍 Search: ");
+    html.push_str(&html_escape(query));
+    html.push_str("</div>\n");
+
+    if results.is_empty() {
+        html.push_str("<div class=\"tool-no-results\">No results found</div>\n");
+    } else {
+        html.push_str("<div class=\"search-results\">\n");
+        for result in results {
+            // Render with ANSI support (grep output often has colors)
+            let rendered = ansi_to_html(result);
+            html.push_str("<div class=\"search-result-line\">");
+            html.push_str(&rendered);
+            html.push_str("</div>\n");
+        }
+        html.push_str("</div>\n");
+    }
+
+    html.push_str("</div>\n");
+    html
+}
+
+// ── Core export functions ────────────────────────────────────────────
 
 /// Render a flat list of session entries into a self-contained HTML string.
 ///
@@ -64,6 +770,18 @@ pub fn export_html(
     session_meta: Option<&SessionMeta>,
     tree: Option<&TreeNode>,
 ) -> Result<String> {
+    export_html_with_options(entries, meta, session_meta, tree, &HtmlExportOptions::default())
+}
+
+/// Render a flat list of session entries into a self-contained HTML string
+/// with fine-grained control over the output via [`HtmlExportOptions`].
+pub fn export_html_with_options(
+    entries: &[SessionEntry],
+    meta: &ExportMeta,
+    session_meta: Option<&SessionMeta>,
+    tree: Option<&TreeNode>,
+    options: &HtmlExportOptions,
+) -> Result<String> {
     let mut html = String::with_capacity(64 * 1024);
 
     // ── Head ──────────────────────────────────────────────────────
@@ -71,10 +789,12 @@ pub fn export_html(
     html.push_str("<meta charset=\"utf-8\">\n");
     html.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
 
-    let title = session_meta
-        .and_then(|m| m.name.clone())
-        .unwrap_or_else(|| "oxi session export".to_string());
-    write!(html, "<title>{}</title>\n", html_escape(&title))?;
+    let title = options
+        .title
+        .as_deref()
+        .or(session_meta.and_then(|m| m.name.as_deref()))
+        .unwrap_or("oxi session export");
+    write!(html, "<title>{}</title>\n", html_escape(title))?;
 
     // highlight.js CDN for syntax highlighting
     html.push_str(
@@ -94,7 +814,12 @@ pub fn export_html(
     html.push_str("</head>\n");
 
     // ── Body ──────────────────────────────────────────────────────
-    html.push_str("<body class=\"dark\">\n");
+    let theme_class = if options.dark_theme {
+        "dark"
+    } else {
+        "light"
+    };
+    write!(html, "<body class=\"{}\">\n", theme_class)?;
 
     // Theme toggle button
     html.push_str(
@@ -117,7 +842,7 @@ pub fn export_html(
 
     // Messages
     for entry in entries {
-        render_entry(&mut html, entry)?;
+        render_entry(&mut html, entry, options)?;
     }
 
     html.push_str("</main>\n");
@@ -129,6 +854,16 @@ pub fn export_html(
 
     html.push_str("</body>\n</html>\n");
     Ok(html)
+}
+
+/// Convenience function: export session entries to an HTML string using the
+/// given [`HtmlExportOptions`].
+pub fn export_to_html(
+    entries: &[SessionEntry],
+    meta: &ExportMeta,
+    options: &HtmlExportOptions,
+) -> Result<String> {
+    export_html_with_options(entries, meta, None, None, options)
 }
 
 // ── Internal rendering helpers ───────────────────────────────────────
@@ -184,7 +919,7 @@ fn render_meta_row(html: &mut String, label: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn render_entry(html: &mut String, entry: &SessionEntry) -> Result<()> {
+fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOptions) -> Result<()> {
     let ts = DateTime::from_timestamp_millis(entry.timestamp)
         .map(|dt| dt.format("%H:%M:%S").to_string())
         .unwrap_or_else(|| "".to_string());
@@ -196,7 +931,7 @@ fn render_entry(html: &mut String, entry: &SessionEntry) -> Result<()> {
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            html.push_str(&render_markdown(content));
+            html.push_str(&render_markdown_with_options(content, options));
             html.push_str("</div>\n</div>\n");
         }
         AgentMessage::Assistant { content } => {
@@ -205,7 +940,16 @@ fn render_entry(html: &mut String, entry: &SessionEntry) -> Result<()> {
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            html.push_str(&render_markdown(content));
+
+            // Try tool rendering first for assistant messages
+            if let Some(tool_html) = render_tool_blocks(content, options.include_tool_calls) {
+                html.push_str(&tool_html);
+                // Also render the non-tool content via markdown
+                html.push_str(&render_markdown_with_options(content, options));
+            } else {
+                html.push_str(&render_markdown_with_options(content, options));
+            }
+
             html.push_str("</div>\n</div>\n");
         }
         AgentMessage::System { content } => {
@@ -214,7 +958,7 @@ fn render_entry(html: &mut String, entry: &SessionEntry) -> Result<()> {
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            html.push_str(&render_markdown(content));
+            html.push_str(&render_markdown_with_options(content, options));
             html.push_str("</div>\n</div>\n");
         }
     }
@@ -248,6 +992,10 @@ fn render_tree_node(html: &mut String, node: &TreeNode, depth: usize) -> Result<
 // This is intentionally lightweight to avoid pulling in a heavy crate.
 
 fn render_markdown(input: &str) -> String {
+    render_markdown_with_options(input, &HtmlExportOptions::default())
+}
+
+fn render_markdown_with_options(input: &str, options: &HtmlExportOptions) -> String {
     let mut out = String::with_capacity(input.len() * 2);
     let mut in_code_block = false;
     let mut code_lang = String::new();
@@ -287,6 +1035,15 @@ fn render_markdown(input: &str) -> String {
             continue;
         }
         if line.trim() == "<think" || line.trim() == "<thinking>" {
+            if !options.include_thinking {
+                // Skip thinking blocks if not included
+                while let Some(l) = lines.next() {
+                    if l.trim() == "</think" || l.trim() == "</thinking>" {
+                        break;
+                    }
+                }
+                continue;
+            }
             in_thinking = true;
             continue;
         }
@@ -305,18 +1062,29 @@ fn render_markdown(input: &str) -> String {
             continue;
         }
 
-        // ── Tool calls ────────────────────────────────────────────
-        if line.starts_with("🔧 ") || line.starts_with("tool:") {
-            out.push_str("<div class=\"tool-call\">");
-            out.push_str(&render_inline(line));
-            out.push_str("</div>\n");
-            continue;
-        }
-        if line.starts_with("📤 ") || line.starts_with("result:") {
-            out.push_str("<div class=\"tool-result\">");
-            out.push_str(&render_inline(line));
-            out.push_str("</div>\n");
-            continue;
+        // ── Tool calls (emoji-prefixed) ───────────────────────────
+        if options.include_tool_calls {
+            if line.starts_with("🔧 ") || line.starts_with("tool:") {
+                out.push_str("<div class=\"tool-call\">");
+                out.push_str(&render_inline(line));
+                out.push_str("</div>\n");
+                continue;
+            }
+            if line.starts_with("📤 ") || line.starts_with("result:") {
+                out.push_str("<div class=\"tool-result\">");
+                out.push_str(&render_inline(line));
+                out.push_str("</div>\n");
+                continue;
+            }
+        } else {
+            // Skip tool call lines
+            if line.starts_with("🔧 ")
+                || line.starts_with("tool:")
+                || line.starts_with("📤 ")
+                || line.starts_with("result:")
+            {
+                continue;
+            }
         }
 
         // ── Headings ──────────────────────────────────────────────
@@ -657,6 +1425,118 @@ body.dark .tool-result { background: #1a2d2d; border-left: 3px solid #73daca; }
 body.light .tool-call  { background: #faf5ff; border-left: 3px solid #a78bfa; }
 body.light .tool-result { background: #f0fdfa; border-left: 3px solid #14b8a6; }
 
+/* ── Tool blocks (structured) ──────────────────────────────────── */
+.tool-block {
+  border-radius: 8px;
+  margin: 0.5rem 0;
+  overflow: hidden;
+}
+.tool-label {
+  padding: 0.35rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+/* Bash tool */
+body.dark .tool-bash { border: 1px solid #3b2d5d; }
+body.light .tool-bash { border: 1px solid #e0d4f5; }
+body.dark .tool-bash .tool-label { background: #2d1f3d; color: #bb9af7; }
+body.light .tool-bash .tool-label { background: #faf5ff; color: #7c3aed; }
+.tool-bash .tool-command {
+  background: #0d1117;
+  border-radius: 4px;
+  margin: 0.35rem 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+}
+body.light .tool-bash .tool-command { background: #f6f8fa; }
+
+/* File read tool */
+body.dark .tool-file-read { border: 1px solid #1e3a5f; }
+body.light .tool-file-read { border: 1px solid #d0e0f0; }
+body.dark .tool-file-read .tool-label { background: #1a2d44; color: #7aa2f7; }
+body.light .tool-file-read .tool-label { background: #eff6ff; color: #2563eb; }
+
+/* File write tool */
+body.dark .tool-file-write { border: 1px solid #2d4a2d; }
+body.light .tool-file-write { border: 1px solid #d0f0d0; }
+body.dark .tool-file-write .tool-label { background: #1a2d1a; color: #9ece6a; }
+body.light .tool-file-write .tool-label { background: #f0fdf4; color: #16a34a; }
+
+/* File edit tool */
+body.dark .tool-file-edit { border: 1px solid #4a3a1a; }
+body.light .tool-file-edit { border: 1px solid #f0e0c0; }
+body.dark .tool-file-edit .tool-label { background: #2d2a1a; color: #e0af68; }
+body.light .tool-file-edit .tool-label { background: #fffbeb; color: #d97706; }
+.edit-section { margin: 0.35rem 0.5rem; }
+.edit-old { border-left: 3px solid #f7768e; }
+.edit-new { border-left: 3px solid #9ece6a; }
+body.light .edit-old { border-left-color: #ef4444; }
+body.light .edit-new { border-left-color: #22c55e; }
+.edit-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.15rem 0.5rem;
+}
+.edit-old .edit-label { color: #f7768e; }
+.edit-new .edit-label { color: #9ece6a; }
+body.light .edit-old .edit-label { color: #ef4444; }
+body.light .edit-new .edit-label { color: #22c55e; }
+
+/* Search tool */
+body.dark .tool-search { border: 1px solid #1a3a3a; }
+body.light .tool-search { border: 1px solid #d0f0f0; }
+body.dark .tool-search .tool-label { background: #1a2d2d; color: #73daca; }
+body.light .tool-search .tool-label { background: #f0fdfa; color: #14b8a6; }
+.search-results {
+  margin: 0.35rem 0.5rem;
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+.search-result-line {
+  padding: 0.15rem 0.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+body.light .search-result-line { border-bottom-color: rgba(0,0,0,0.05); }
+.search-result-line:last-child { border-bottom: none; }
+.tool-no-results {
+  padding: 0.5rem 0.75rem;
+  opacity: 0.6;
+  font-style: italic;
+}
+
+/* Tool output details (collapsible) */
+.tool-output-details {
+  margin: 0.35rem 0.5rem;
+}
+.tool-output-details summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: #7982a9;
+  padding: 0.2rem 0;
+  user-select: none;
+}
+body.light .tool-output-details summary { color: #6b7280; }
+.tool-output-details summary:hover { color: inherit; }
+.tool-output {
+  background: #0d1117;
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  max-height: 400px;
+  overflow: auto;
+}
+body.light .tool-output { background: #f6f8fa; }
+
+/* ── ANSI lines ────────────────────────────────────────────────── */
+.ansi-line {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre;
+}
+
 /* ── Links ─────────────────────────────────────────────────────── */
 a { color: #7aa2f7; text-decoration: underline; }
 body.light a { color: #2563eb; }
@@ -707,6 +1587,8 @@ mod tests {
         }
     }
 
+    // ── HTML export tests ────────────────────────────────────────
+
     #[test]
     fn export_produces_valid_html_structure() {
         let entries = vec![
@@ -727,7 +1609,6 @@ mod tests {
         assert!(html.contains("</head>"));
         assert!(html.contains("<body"));
         assert!(html.contains("</body>"));
-        // Contains both messages
         assert!(html.contains("msg-user"));
         assert!(html.contains("msg-assistant"));
         assert!(html.contains("You"));
@@ -829,6 +1710,279 @@ mod tests {
         assert!(html.contains("theme-toggle"));
     }
 
+    // ── HtmlExportOptions tests ──────────────────────────────────
+
+    #[test]
+    fn export_options_light_theme() {
+        let options = HtmlExportOptions {
+            dark_theme: false,
+            ..Default::default()
+        };
+        let meta = ExportMeta::default();
+        let html =
+            export_html_with_options(&[], &meta, None, None, &options).unwrap();
+        assert!(html.contains("class=\"light\""));
+    }
+
+    #[test]
+    fn export_options_custom_title() {
+        let options = HtmlExportOptions {
+            title: Some("My Session".into()),
+            ..Default::default()
+        };
+        let meta = ExportMeta::default();
+        let html =
+            export_html_with_options(&[], &meta, None, None, &options).unwrap();
+        assert!(html.contains("<title>My Session</title>"));
+    }
+
+    #[test]
+    fn export_options_skip_thinking() {
+        let entries = vec![make_entry(AgentMessage::Assistant {
+            content: "<think\nSecret thoughts\n</think\n\nVisible answer.".into(),
+        })];
+        let options = HtmlExportOptions {
+            include_thinking: false,
+            ..Default::default()
+        };
+        let meta = ExportMeta::default();
+        let html =
+            export_html_with_options(&entries, &meta, None, None, &options).unwrap();
+        assert!(!html.contains("thinking-block"));
+        assert!(!html.contains("Secret thoughts"));
+        assert!(html.contains("Visible answer"));
+    }
+
+    #[test]
+    fn export_options_skip_tool_calls() {
+        let entries = vec![make_entry(AgentMessage::Assistant {
+            content: "🔧 Running bash\n📤 Done".into(),
+        })];
+        let options = HtmlExportOptions {
+            include_tool_calls: false,
+            ..Default::default()
+        };
+        let meta = ExportMeta::default();
+        let html =
+            export_html_with_options(&entries, &meta, None, None, &options).unwrap();
+        assert!(!html.contains("tool-call"));
+        assert!(!html.contains("tool-result"));
+    }
+
+    #[test]
+    fn export_to_html_convenience() {
+        let entries = vec![make_entry(AgentMessage::User {
+            content: "Hello".into(),
+        })];
+        let meta = ExportMeta::default();
+        let options = HtmlExportOptions::default();
+        let html = export_to_html(&entries, &meta, &options).unwrap();
+        assert!(html.contains("Hello"));
+    }
+
+    // ── ANSI-to-HTML tests ───────────────────────────────────────
+
+    #[test]
+    fn ansi_to_html_plain_text_unchanged() {
+        assert_eq!(ansi_to_html("Hello world"), "Hello world");
+    }
+
+    #[test]
+    fn ansi_to_html_escapes_html_chars() {
+        assert_eq!(
+            ansi_to_html("<script>alert('xss')</script>"),
+            "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"
+        );
+    }
+
+    #[test]
+    fn ansi_to_html_standard_foreground_colors() {
+        // Red foreground: ESC[31m
+        let input = "\x1b[31mError\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("color:#800000"));
+        assert!(result.contains("Error"));
+        assert!(result.contains("</span>"));
+    }
+
+    #[test]
+    fn ansi_to_html_bright_foreground_colors() {
+        // Bright red: ESC[91m
+        let input = "\x1b[91mWarning\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("color:#ff0000"));
+        assert!(result.contains("Warning"));
+    }
+
+    #[test]
+    fn ansi_to_html_standard_background_colors() {
+        // Blue background: ESC[44m
+        let input = "\x1b[44mBlue bg\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("background-color:#000080"));
+        assert!(result.contains("Blue bg"));
+    }
+
+    #[test]
+    fn ansi_to_html_bright_background_colors() {
+        // Bright yellow background: ESC[103m
+        let input = "\x1b[103mBright yellow\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("background-color:#ffff00"));
+        assert!(result.contains("Bright yellow"));
+    }
+
+    #[test]
+    fn ansi_to_html_bold() {
+        let input = "\x1b[1mBold text\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("font-weight:bold"));
+        assert!(result.contains("Bold text"));
+    }
+
+    #[test]
+    fn ansi_to_html_italic() {
+        let input = "\x1b[3mItalic text\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("font-style:italic"));
+        assert!(result.contains("Italic text"));
+    }
+
+    #[test]
+    fn ansi_to_html_underline() {
+        let input = "\x1b[4mUnderlined\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("text-decoration:underline"));
+        assert!(result.contains("Underlined"));
+    }
+
+    #[test]
+    fn ansi_to_html_strikethrough() {
+        let input = "\x1b[9mStruck\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("text-decoration:line-through"));
+        assert!(result.contains("Struck"));
+    }
+
+    #[test]
+    fn ansi_to_html_dim() {
+        let input = "\x1b[2mDimmed\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("opacity:0.6"));
+        assert!(result.contains("Dimmed"));
+    }
+
+    #[test]
+    fn ansi_to_html_256_color() {
+        // 256-color: ESC[38;5;196m (bright red from color cube)
+        let input = "\x1b[38;5;196mCustom color\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("color:#"));
+        assert!(result.contains("Custom color"));
+    }
+
+    #[test]
+    fn ansi_to_html_true_color_rgb() {
+        // True color: ESC[38;2;255;128;0m (orange)
+        let input = "\x1b[38;2;255;128;0mOrange\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("color:rgb(255,128,0)"));
+        assert!(result.contains("Orange"));
+    }
+
+    #[test]
+    fn ansi_to_html_background_true_color() {
+        let input = "\x1b[48;2;0;128;255mBlue bg\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("background-color:rgb(0,128,255)"));
+        assert!(result.contains("Blue bg"));
+    }
+
+    #[test]
+    fn ansi_to_html_reset_clears_styles() {
+        let input = "\x1b[1;31mBold Red\x1b[0m Normal";
+        let result = ansi_to_html(input);
+        assert!(result.contains("font-weight:bold"));
+        assert!(result.contains("color:#800000"));
+        assert!(result.contains(" Normal"));
+    }
+
+    #[test]
+    fn ansi_to_html_multiple_styles_combined() {
+        // Bold + Red + Underline
+        let input = "\x1b[1;4;31mBold Red Underlined\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("font-weight:bold"));
+        assert!(result.contains("text-decoration:underline"));
+        assert!(result.contains("color:#800000"));
+        assert!(result.contains("Bold Red Underlined"));
+    }
+
+    #[test]
+    fn ansi_to_html_no_escapes_returns_plain() {
+        assert_eq!(ansi_to_html("No escapes here"), "No escapes here");
+    }
+
+    #[test]
+    fn ansi_to_html_256_color_standard_range() {
+        // Color index 2 = green
+        let input = "\x1b[38;5;2mGreen\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("color:#008000"));
+    }
+
+    #[test]
+    fn ansi_to_html_256_color_grayscale() {
+        // Grayscale index 232 = very dark gray
+        let input = "\x1b[38;5;232mDark gray\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("color:#"));
+        assert!(result.contains("Dark gray"));
+    }
+
+    #[test]
+    fn ansi_to_html_background_256() {
+        let input = "\x1b[48;5;4mBlue bg\x1b[0m";
+        let result = ansi_to_html(input);
+        assert!(result.contains("background-color:#000080"));
+    }
+
+    #[test]
+    fn ansi_lines_to_html_wraps_lines() {
+        let lines = vec!["Line 1", "Line 2", ""];
+        let result = ansi_lines_to_html(&lines);
+        assert!(result.contains("<div class=\"ansi-line\">Line 1</div>"));
+        assert!(result.contains("<div class=\"ansi-line\">Line 2</div>"));
+        assert!(result.contains("&nbsp;</div>"));
+    }
+
+    // ── Color conversion tests ───────────────────────────────────
+
+    #[test]
+    fn color_256_standard_colors() {
+        assert_eq!(color_256_to_hex(0), "#000000");
+        assert_eq!(color_256_to_hex(7), "#c0c0c0");
+        assert_eq!(color_256_to_hex(15), "#ffffff");
+    }
+
+    #[test]
+    fn color_256_cube_colors() {
+        // Index 16 = first cube color (black)
+        assert_eq!(color_256_to_hex(16), "#000000");
+        // Index 231 = last cube color (white)
+        assert_eq!(color_256_to_hex(231), "#ffffff");
+    }
+
+    #[test]
+    fn color_256_grayscale() {
+        // Index 232 = darkest gray
+        assert_eq!(color_256_to_hex(232), "#080808");
+        // Index 255 = lightest gray
+        assert_eq!(color_256_to_hex(255), "#eeeeee");
+    }
+
+    // ── Markdown tests ───────────────────────────────────────────
+
     #[test]
     fn markdown_renders_bold_and_italic() {
         let result = render_markdown("This is **bold** and *italic* text.");
@@ -853,5 +2007,62 @@ mod tests {
         let escaped = html_escape("<script>alert('xss')</script>");
         assert!(!escaped.contains('<'));
         assert!(escaped.contains("&lt;script"));
+    }
+
+    // ── Tool rendering tests ─────────────────────────────────────
+
+    #[test]
+    fn bash_tool_renders_command_and_output() {
+        let html = render_bash_tool("ls -la", "file1.txt\nfile2.txt");
+        assert!(html.contains("tool-bash"));
+        assert!(html.contains("ls -la"));
+        assert!(html.contains("file1.txt"));
+        assert!(html.contains("tool-output-details"));
+    }
+
+    #[test]
+    fn file_read_tool_renders_path_and_content() {
+        let html = render_file_read_tool("/path/to/file.rs", "fn main() {}");
+        assert!(html.contains("tool-file-read"));
+        assert!(html.contains("/path/to/file.rs"));
+        assert!(html.contains("fn main()"));
+    }
+
+    #[test]
+    fn file_write_tool_renders_path_and_content() {
+        let html = render_file_write_tool("/path/to/output.txt", "Hello world");
+        assert!(html.contains("tool-file-write"));
+        assert!(html.contains("/path/to/output.txt"));
+        assert!(html.contains("Hello world"));
+    }
+
+    #[test]
+    fn file_edit_tool_renders_diff() {
+        let html = render_file_edit_tool("/src/main.rs", "old code", "new code");
+        assert!(html.contains("tool-file-edit"));
+        assert!(html.contains("/src/main.rs"));
+        assert!(html.contains("edit-old"));
+        assert!(html.contains("edit-new"));
+        assert!(html.contains("old code"));
+        assert!(html.contains("new code"));
+    }
+
+    #[test]
+    fn search_tool_renders_results() {
+        let results = vec![
+            "src/main.rs:10:found match".to_string(),
+            "src/lib.rs:42:another match".to_string(),
+        ];
+        let html = render_search_tool("TODO", &results);
+        assert!(html.contains("tool-search"));
+        assert!(html.contains("TODO"));
+        assert!(html.contains("found match"));
+        assert!(html.contains("another match"));
+    }
+
+    #[test]
+    fn search_tool_shows_no_results() {
+        let html = render_search_tool("missing", &[]);
+        assert!(html.contains("No results found"));
     }
 }

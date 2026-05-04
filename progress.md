@@ -4,105 +4,56 @@
 Completed
 
 ## Tasks
-- [x] Port tools-manager.ts to Rust
-- [x] Port auto-retry logic from pi-mono agent-session to oxi-agent
-- [x] Port session tree navigation (navigateTree) to Rust
-- [x] Port small utilities from pi-mono (mime.ts, paths.ts, fs-watch.ts, sleep.ts, changelog.ts, child-process.ts)
-- [x] Port compaction utilities from pi-mono compaction/utils.ts
+- [x] Port interactive mode components from pi-mono to oxi-cli
 
 ## Files Changed
-- `oxi/oxi-cli/src/tools_manager.rs` — New file: Rust port of tools-manager.ts (575 lines)
-  - `ToolName` enum (Fd, Rg) with `key()` and `config()` methods
-  - `ToolConfig` struct with platform-specific asset name resolution
-  - `get_tool_path(tool: ToolName) -> Option<PathBuf>` — checks local dir first, then system PATH
-  - `ensure_tool(tool: ToolName) -> Result<PathBuf>` — downloads from GitHub releases if not found
-  - `command_exists(cmd: &str) -> bool` — checks if command is available on system PATH
-  - `download_tool()` — downloads and extracts .tar.gz / .zip archives from GitHub
-  - `extract_tar_gz()` / `extract_zip()` — archive extraction via flate2+tar and zip crates
-  - Platform support: macOS (aarch64, x86_64), Linux (aarch64, x86_64), Windows (x86_64)
-  - Offline mode via `OXI_OFFLINE` env var
-  - 12 unit tests (all passing)
-- `oxi/oxi-cli/Cargo.toml` — Added `flate2 = "1"`, `tar = "0.4"`, `zip = "2"` dependencies
-- `oxi/oxi-cli/src/lib.rs` — Added `pub mod tools_manager;`
-- `oxi/oxi-agent/src/events.rs` — Added `AutoRetryStart` and `AutoRetryEnd` event variants
-  - `AutoRetryStart { attempt, max_attempts, delay_ms, error_message }`
-  - `AutoRetryEnd { success, attempt, final_error }`
-  - Updated `type_name()` to return `"auto_retry_start"` / `"auto_retry_end"`
-- `oxi/oxi-agent/src/agent_loop.rs` — Enhanced auto-retry logic (port of pi-mono agent-session retry)
-  - Added `AgentLoopConfig` fields: `auto_retry_enabled`, `auto_retry_max_attempts`, `auto_retry_base_delay_ms`
-  - Added `AgentLoop` fields: `auto_retry_attempt` (AtomicUsize), `auto_retry_cancel` (RwLock<bool>)
-  - `is_retryable_error(message)` — regex-based detection of overloaded/rate-limit/server/network/timeout errors
-  - `handle_retryable_error()` — exponential backoff with abort support, emits AutoRetryStart/End events
-  - `cancel_auto_retry()` — public method to cancel in-progress retry
-  - `auto_retry_attempt()` — read current attempt counter
-  - `run_loop()` now checks assistant messages for retryable errors before returning, retries with backoff
-  - On successful response after retry, emits `AutoRetryEnd { success: true }` and resets counter
-  - All existing tests continue to pass
-- `oxi/oxi-cli/src/session_navigation.rs` — New file: Rust port of navigateTree() and helpers (~950 lines)
-  - `SessionEntryType` enum (Message, BranchSummary, Compaction, Label, SessionInfo, Custom, CustomMessage)
-  - `NavigationOptions` struct for navigate options (summarize, custom_instructions, label)
-  - `NavigationResult` struct (editor_text, cancelled, aborted, summary_entry_id)
-  - `TreePreparation` struct for extension hooks
-  - `Summarizer` trait for LLM-based summarization (callback-based)
-  - `SessionNavigator` struct with:
-    - `navigate_tree()` — main navigation method (port of navigateTree)
-    - `collect_entries_for_branch_summary()` — find entries from old leaf to common ancestor
-    - `determine_leaf_and_editor()` — entry type detection and leaf switching logic
-    - `branch()`, `reset_leaf()`, `branch_with_summary()` — tree traversal helpers
-    - `append_label_change()` — label attachment
-    - `get_branch()`, `get_children()`, `get_entry()` — tree traversal
-  - Utility functions: `extract_user_message_text()`, `is_user_message()`, `is_custom_message()`, etc.
-  - 6 unit tests covering navigation, summarization, labels
-- `oxi/oxi-cli/src/lib.rs` — Added `pub mod session_navigation;`
+
+### `oxi-cli/src/tui_components.rs` — Enhanced with interactive mode rendering components (~500 lines added)
+
+#### Assistant Message Rendering
+- `AssistantMessage` struct with `content: Vec<AssistantContentBlock>`
+- `AssistantContentBlock` enum: `Text`, `Thinking`, `ToolCall`
+- `StopReason` enum: `EndTurn`, `MaxTokens`, `StopSequence`, `Aborted`, `Error`
+- `AssistantMessageRenderOptions`: `hide_thinking`, `hidden_thinking_label`, `use_osc133`
+- `AssistantMessageRenderer` with builder pattern for options
+- Render output includes ANSI escape codes for:
+  - Italic/dimmed thinking blocks
+  - Markdown-style formatting (bold, italic, inline code)
+  - Error messages in red
+  - OSC 133 terminal escape codes (optional)
+
+#### Tool Execution Rendering
+- `ToolContentBlock` enum: `Text`, `Image` (for result content)
+- `ToolResult` struct with text output, error state, and image support
+- `ToolExecutionState` enum: `Pending`, `Running`, `Success`, `Error`
+- `ToolExecution` struct with:
+  - Tool name, call ID, arguments (pretty-printed JSON)
+  - State management with `start()`, `complete()` methods
+  - `expanded` toggle for showing full/truncated output
+  - `render()` method with colored status indicators
+
+#### Bash Execution (Enhanced)
+- Added `expanded` field for preview vs. full output
+- Added `truncation_info` and `full_output_path` for context limit truncation
+- `append_output()` strips ANSI codes and normalizes line endings
+- Preview mode shows last 20 lines with "X more lines" indicator
+- `complete_with_truncation()` for handling large outputs
+- Helper function `strip_ansi()` for cleaning streaming output
+
+#### Summary Message Rendering
+- `SummaryMessageType` enum: `Compaction`, `Branch`
+- `SummaryMessage` struct with collapsible rendering
+- `SummaryMessageRenderer` helper for one-off rendering
+- Compacted token count display with expand hint
+
+#### Unit Tests Added
+- 30+ new unit tests covering all new components
+- Tests for markdown rendering, tool execution states
+- Tests for bash execution truncation and ANSI stripping
+- Tests for summary message types
 
 ## Notes
-- `cargo check -p oxi-cli --lib` compiles cleanly for the lib target
-- Pre-existing broken modules in the repo are unrelated to these changes
-- The `Summarizer` trait uses async/await allowing real LLM integration or mock implementations
-- Extension hooks use `Fn(TreePreparation) -> BeforeTreeHookResult` callback pattern
-
-## Additional Files (Small Utilities Port)
-- `oxi-cli/src/mime_detect.rs` — MIME type detection from file magic bytes
-  - `detect_supported_image_mime_type_from_file(path)` — detects image MIME from file
-  - `detect_mime_from_bytes(bytes)` — magic byte matching for PNG, JPEG, GIF, WebP, BMP
-  - `is_supported_image_mime(mime)` — checks if MIME is supported
-  - Uses std::fs and manual magic byte matching (no external crate needed)
-  - 2 unit tests
-- `oxi-cli/src/paths.rs` — Path utility functions
-  - `canonicalize_path(path)` — resolve symlinks, fallback to raw path
-  - `is_local_path(value)` — check for non-local prefixes (npm:, git:, http:, etc.)
-  - `expand_tilde(path)` — expand ~ to home directory
-  - `is_file(path)`, `is_dir(path)` — path type checks
-  - 2 unit tests
-- `oxi-cli/src/fs_watch.rs` — Filesystem watching with notify crate
-  - `FsWatcher` struct — wraps notify::RecommendedWatcher with proper cleanup
-  - `close_watcher(watcher)` — safe watcher cleanup
-  - `watch_with_error_handler(path, on_error)` — watch with error callback
-  - `FS_WATCH_RETRY_DELAY_MS` constant
-  - 3 unit tests
-- `oxi-cli/src/sleep.rs` — Async sleep with abort signal support
-  - `sleep(ms, signal)` — sleep with abort signal support
-  - `sleep_until_aborted(ms, abort)` — abort-first sleep
-  - `sleep_or_abort(ms, abort)` — returns bool indicating completion
-  - `SleepError` enum (Aborted, TimerError)
-  - Uses tokio::select! for cancellation
-  - 4 unit tests
-- `oxi-cli/src/changelog.rs` — CHANGELOG.md parsing
-  - `ChangelogEntry` struct with major, minor, patch, content
-  - `parse_changelog(path)` / `parse_changelog_content(content)` — parse changelog
-  - `compare_versions(v1, v2)` — compare version entries
-  - `get_new_entries(entries, last_version)` — filter entries newer than version
-  - `get_latest_version(entries)` — find newest version
-  - `format_changelog_entry(entry, include_header)` — format for display
-  - Uses regex crate (already in dependencies)
-  - 6 unit tests
-- `oxi-cli/src/child_process.rs` — Child process utilities
-  - `should_use_windows_shell(command)` — Windows shell detection
-  - `wait_for_child_process(child)` — wait with stdio grace period
-  - `spawn_with_signal(program, args)` — spawn with proper signal handling
-  - `run_command(program, args)` — run and capture output
-  - `run_shell(command)` — run shell command with expansion
-  - `run_capture(program, args)` — run and return stdout
-  - 4 unit tests
-- `oxi-cli/Cargo.toml` — Added `notify = "6"` dependency for fs_watch.rs
-- `oxi-cli/src/lib.rs` — Added module declarations for all new modules
+- All components are rendering utilities, not full TUI components
+- Output uses ANSI escape codes compatible with most terminals
+- Pre-existing errors in `interactive.rs` are unrelated to this change
+- `cargo check -p oxi-cli` passes for the tui_components module
