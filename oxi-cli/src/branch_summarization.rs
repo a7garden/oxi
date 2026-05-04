@@ -280,11 +280,11 @@ pub fn collect_entries_for_branch_summary(
     };
 
     // Build path from old leaf to root
-    let old_path = build_path_to_root(entries, old_leaf_id);
+    let old_path = build_path_to_root(entries, &old_leaf_id);
     let old_path_set: HashSet<String> = old_path.iter().map(|e| e.id.clone()).collect();
 
     // Build path from target to root
-    let target_path = build_path_to_root(entries, target_id);
+    let target_path = build_path_to_root(entries, &target_id);
 
     // target_path is root-first, so iterate backwards to find deepest common ancestor
     let mut common_ancestor_id: Option<String> = None;
@@ -299,14 +299,14 @@ pub fn collect_entries_for_branch_summary(
     let mut entries_to_summarize: Vec<SessionEntry> = Vec::new();
     let mut current_id: Option<String> = Some(old_leaf_id);
 
-    while let Some(id) = current_id {
-        if common_ancestor_id == Some(id) {
+    while let Some(ref id) = current_id {
+        if common_ancestor_id.as_ref() == Some(id) {
             break;
         }
 
-        if let Some(entry) = entries.iter().find(|e| e.id == id) {
+        if let Some(entry) = entries.iter().find(|e| e.id == *id) {
             entries_to_summarize.push(entry.clone());
-            current_id = entry.parent_id;
+            current_id = entry.parent_id.clone();
         } else {
             break;
         }
@@ -324,12 +324,12 @@ pub fn collect_entries_for_branch_summary(
 /// Build path from an entry to the root (entry, parent, grandparent, etc.)
 fn build_path_to_root(entries: &[SessionEntry], start_id: &str) -> Vec<SessionEntry> {
     let mut path = Vec::new();
-    let mut current_id: Option<String> = Some(start_id);
+    let mut current_id: Option<String> = Some(start_id.to_string());
 
     while let Some(id) = current_id {
         if let Some(entry) = entries.iter().find(|e| e.id == id) {
             path.push(entry.clone());
-            current_id = entry.parent_id;
+            current_id = entry.parent_id.clone();
         } else {
             break;
         }

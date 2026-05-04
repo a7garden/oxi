@@ -126,7 +126,7 @@ pub fn calculate_context_tokens(entries: &[SessionEntry]) -> usize {
         .iter()
         .map(|e| {
             let text = e.message.content();
-            estimate_tokens(text) + 4 // overhead per entry
+            estimate_tokens(&text) + 4 // overhead per entry
         })
         .sum()
 }

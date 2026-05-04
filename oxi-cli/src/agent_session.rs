@@ -367,8 +367,8 @@ impl AgentSession {
         let mut assistant_messages = 0usize;
         let mut tool_results = 0usize;
         let mut tool_calls = 0usize;
-        let mut input_tokens = 0usize;
-        let mut output_tokens = 0usize;
+        let input_tokens = 0usize;
+        let output_tokens = 0usize;
 
         for msg in &state.messages {
             match msg {
@@ -384,7 +384,6 @@ impl AgentSession {
                     let _ = &a; // suppress unused warning
                 }
                 Message::ToolResult(_) => tool_results += 1,
-                _ => {}
             }
         }
 
@@ -543,36 +542,37 @@ impl AgentSession {
         let (tx, rx) = mpsc::unbounded_channel();
         let (agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(100);
 
+        // Clone tx for the forwarding task
+        let tx_clone = tx.clone();
+
         // Forward agent events through our channel
         tokio::spawn(async move {
             while let Some(event) = agent_rx.recv().await {
-                let _ = tx.send(event);
+                let _ = tx_clone.send(event);
             }
         });
 
         // Run the agent in a LocalSet (because Agent's internal RwLock is !Send)
         let agent_clone = Arc::clone(&self.agent);
-        let text_clone = text;
-        let session_clone = self.clone_handle();
+        let _session_clone = self.clone_handle();
         tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let local = tokio::task::LocalSet::new();
                 local.run_until(async move {
-                    let (agent_tx_for_inner, mut agent_rx_for_inner) = mpsc::channel(100);
+                    let (inner_tx, mut inner_rx) = mpsc::channel(100);
                     // Use agent.run_with_channel inside LocalSet
                     let agent_for_task = Arc::clone(&agent_clone);
                     let handle = tokio::task::spawn_local(async move {
-                        let _ = agent_for_task.run_with_channel(text_clone, agent_tx_for_inner).await;
+                        let _ = agent_for_task.run_with_channel(text, inner_tx).await;
                     });
 
                     // Forward events from inner to outer
-                    while let Some(event) = agent_rx_for_inner.recv().await {
+                    while let Some(event) = inner_rx.recv().await {
                         let _ = tx.send(event);
                     }
 
                     let _ = handle.await;
-                    drop(session_clone); // keep alive during run
                 });
             });
         });
@@ -1091,7 +1091,6 @@ impl AgentSession {
                         tool_call_id: t.tool_call_id.clone(),
                     });
                 }
-                _ => {}
             }
         }
     }
