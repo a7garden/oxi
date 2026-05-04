@@ -1311,10 +1311,11 @@ impl SessionManager {
             }
         }
 
-        let roots: Vec<SessionTreeNode> = root_ids.into_iter().map(|rid| {
+        let mut roots: Vec<SessionTreeNode> = root_ids.into_iter().map(|rid| {
             build(&rid, &adj, &entries_map, &labels, &label_timestamps)
         }).collect();
 
+        sort_tree_by_timestamp(&mut roots);
         roots
     }
 
