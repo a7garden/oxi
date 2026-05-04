@@ -218,6 +218,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let mut chat_view = ChatView::new(theme.clone());
     let mut input = Input::with_placeholder("Type a message... (Ctrl+C to quit)");
     input.on_focus();
+    input.set_theme(&theme);
     let mut is_agent_busy = false;
 
     // Display session info at start
@@ -240,66 +241,69 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     crossterm::execute!(io::stdout(), crossterm::cursor::Hide)?;
     crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
 
+    // ── Render tracking ──────────────────────────────────────────────
+    let mut prev_surface: Option<Surface> = None;
+    let mut needs_render = true; // First render
+    let mut was_streaming = false;
+
     let mut running = true;
 
     while running {
         // Get terminal size
         let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
-        let input_height: u16 = 3;
-        let chat_height = height.saturating_sub(input_height);
 
-        // Create surface and render layout
+        // ── Create surface and render layout ──────────────────────
         let mut surface = Surface::new(width, height);
 
-        // Render chat view in upper area
-        let chat_area = oxi_tui::Rect::new(0, 0, width, chat_height);
-        chat_view.render(&mut surface, chat_area);
+        // Only render when something changed
+        if needs_render {
+            let input_height: u16 = 3;
+            let chat_height = height.saturating_sub(input_height);
 
-        // Render separator
-        if chat_height < height {
-            let sep_y = chat_height;
-            for col in 0..width {
-                let cell = oxi_tui::Cell::new('\u{2500}').with_fg(theme.colors.border);
-                surface.set(sep_y, col, cell);
-            }
+            // Render chat view in upper area
+            let chat_area = oxi_tui::Rect::new(0, 0, width, chat_height);
+            chat_view.render(&mut surface, chat_area);
 
-            // Render prompt indicator
-            surface.set(
-                chat_height + 1,
-                0,
-                oxi_tui::Cell::new('\u{276F}').with_fg(theme.colors.primary),
-            );
+            // Render separator
+            if chat_height < height {
+                let sep_y = chat_height;
+                for col in 0..width {
+                    let cell = oxi_tui::Cell::new('\u{2500}').with_fg(theme.colors.border);
+                    surface.set(sep_y, col, cell);
+                }
 
-            // Render input area
-            let input_area = oxi_tui::Rect::new(2, chat_height + 1, width.saturating_sub(4), 1);
-            input.render(&mut surface, input_area);
+                // Render prompt indicator
+                surface.set(
+                    chat_height + 1,
+                    0,
+                    oxi_tui::Cell::new('\u{276F}').with_fg(theme.colors.primary),
+                );
 
-            // Status indicator in bottom-right
-            let status_text = if is_agent_busy {
-                "\u{25CF} thinking..."
-            } else {
-                ""
-            };
-            let status_fg = if is_agent_busy {
-                theme.colors.warning
-            } else {
-                theme.colors.muted
-            };
-            for (i, ch) in status_text.chars().enumerate() {
-                let col = width as usize - status_text.len() + i;
-                if col < width as usize {
-                    surface.set(
-                        chat_height + 2,
-                        col as u16,
-                        oxi_tui::Cell::new(ch).with_fg(status_fg),
-                    );
+                // Render input area
+                let input_area =
+                    oxi_tui::Rect::new(2, chat_height + 1, width.saturating_sub(4), 1);
+                input.render(&mut surface, input_area);
+
+                // Status indicator in bottom-right
+                let status_text = if is_agent_busy { "\u{25CF} thinking..." } else { "" };
+                let status_fg = if is_agent_busy { theme.colors.warning } else { theme.colors.muted };
+                for (i, ch) in status_text.chars().enumerate() {
+                    let col = width as usize - status_text.len() + i;
+                    if col < width as usize {
+                        surface.set(
+                            chat_height + 2,
+                            col as u16,
+                            oxi_tui::Cell::new(ch).with_fg(status_fg),
+                        );
+                    }
                 }
             }
-        }
 
-        // Render surface to terminal
-        render_surface_to_terminal(&surface, width, height);
-        io::stdout().flush()?;
+            // Render surface to terminal with differential updates
+            render_surface_to_terminal(&surface, &mut prev_surface, width, height);
+            io::stdout().flush()?;
+            needs_render = false;
+        }
 
         // Poll for events with timeout (~30fps)
         let timeout = std::time::Duration::from_millis(33);
@@ -377,25 +381,29 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             // Forward keyboard events to input component
                             if let Some(tui_event) = convert_key_event(key) {
                                 input.handle_event(&tui_event);
+                                needs_render = true;
                             }
                         }
                     }
                 }
                 crossterm::event::Event::Mouse(mouse) => match mouse.kind {
                     crossterm::event::MouseEventKind::ScrollUp => {
-                        if mouse.row < chat_height {
+                        if mouse.row < height - 3 {
                             chat_view.scroll_up(3);
+                            needs_render = true;
                         }
                     }
                     crossterm::event::MouseEventKind::ScrollDown => {
-                        if mouse.row < chat_height {
+                        if mouse.row < height - 3 {
                             chat_view.scroll_down(3);
+                            needs_render = true;
                         }
                     }
                     _ => {}
                 },
                 crossterm::event::Event::Resize(_, _) => {
                     // Handled on next render cycle via crossterm::terminal::size()
+                    needs_render = true;
                 }
                 _ => {}
             }
@@ -407,9 +415,11 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 UiEvent::Start => {}
                 UiEvent::Thinking => {
                     chat_view.stream_thinking_start();
+                    needs_render = true;
                 }
                 UiEvent::TextDelta(text) => {
                     chat_view.stream_text_delta(&text);
+                    needs_render = true;
                 }
                 UiEvent::ToolCall {
                     id,
@@ -418,6 +428,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 } => {
                     chat_view.stream_thinking_end();
                     chat_view.stream_tool_call(id, name, arguments);
+                    needs_render = true;
                 }
                 UiEvent::ToolResult {
                     tool_name,
@@ -425,15 +436,18 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     is_error,
                 } => {
                     chat_view.stream_tool_result(tool_name, content, is_error);
+                    needs_render = true;
                 }
                 UiEvent::Complete => {
                     chat_view.stream_thinking_end();
                     chat_view.finish_streaming();
                     is_agent_busy = false;
+                    needs_render = true;
                 }
                 UiEvent::Error(msg) => {
                     chat_view.finish_streaming_error(&msg);
                     is_agent_busy = false;
+                    needs_render = true;
                 }
                 UiEvent::CompactionStart { reason } => {
                     let reason_str = match reason {
@@ -448,6 +462,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         }],
                         timestamp: now_millis(),
                     });
+                    needs_render = true;
                 }
                 UiEvent::CompactionEnd {
                     _reason: _,
@@ -463,6 +478,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         content_blocks: vec![ContentBlockDisplay::Text { content: msg }],
                         timestamp: now_millis(),
                     });
+                    needs_render = true;
                 }
                 UiEvent::RetryStart {
                     attempt,
@@ -479,6 +495,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         }],
                         timestamp: now_millis(),
                     });
+                    needs_render = true;
                 }
                 UiEvent::ModelChanged { model_id } => {
                     chat_view.add_message(ChatMessageDisplay {
@@ -488,6 +505,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         }],
                         timestamp: now_millis(),
                     });
+                    needs_render = true;
                 }
                 UiEvent::ThinkingLevelChanged { level } => {
                     chat_view.add_message(ChatMessageDisplay {
@@ -497,6 +515,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         }],
                         timestamp: now_millis(),
                     });
+                    needs_render = true;
                 }
                 UiEvent::QueueUpdate { pending } => {
                     if pending > 0 {
@@ -511,6 +530,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             match session_event {
                 SessionEvent::CompactionStart { reason } => {
                     let _ = ui_tx.send(UiEvent::CompactionStart { reason }).await;
+                    needs_render = true;
                 }
                 SessionEvent::CompactionEnd {
                     reason,
@@ -525,6 +545,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             error_message,
                         })
                         .await;
+                    needs_render = true;
                 }
                 SessionEvent::ThinkingLevelChanged { level } => {
                     let _ = ui_tx
@@ -532,10 +553,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             level: format!("{:?}", level),
                         })
                         .await;
+                    needs_render = true;
                 }
                 SessionEvent::QueueUpdate { steering, follow_up } => {
                     let pending = steering.len() + follow_up.len();
                     let _ = ui_tx.send(UiEvent::QueueUpdate { pending }).await;
+                    needs_render = true;
                 }
                 SessionEvent::SessionInfoChanged { name: _ } => {
                     // Could update title bar in future
@@ -555,6 +578,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                     model_id: to_model.clone(),
                                 })
                                 .await;
+                            needs_render = true;
                         }
                         AgentEvent::Retry {
                             attempt,
@@ -569,6 +593,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                     error_message: reason.clone(),
                                 })
                                 .await;
+                            needs_render = true;
                         }
                         AgentEvent::Compaction { event: _ } => {
                             // Compaction events are handled by SessionEvent above
@@ -579,8 +604,16 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             }
         }
 
-        // Auto-scroll to bottom
-        chat_view.scroll_to_bottom();
+        // Auto-scroll only when streaming or new content arrives
+        let is_streaming_now = chat_view.is_streaming();
+        if is_streaming_now != was_streaming {
+            needs_render = true;
+            was_streaming = is_streaming_now;
+        }
+        if is_streaming_now {
+            chat_view.scroll_to_bottom();
+            needs_render = true;
+        }
     }
 
     // ── Cleanup ──────────────────────────────────────────────────────
@@ -767,11 +800,16 @@ fn handle_slash_command(
 // Surface rendering
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Render a surface to the terminal using efficient SGR sequences.
-fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
-    // Begin synchronized update
+/// Render a surface to the terminal using differential rendering.
+/// Only outputs cells that differ from the previous frame.
+fn render_surface_to_terminal(
+    surface: &Surface,
+    prev_surface: &mut Option<Surface>,
+    width: u16,
+    height: u16,
+) {
+    // Begin synchronized update to prevent flickering
     print!("\x1b[?2026h");
-    print!("\x1b[H"); // Move to top-left
 
     let mut last_fg = oxi_tui::Color::Default;
     let mut last_bg = oxi_tui::Color::Default;
@@ -780,83 +818,163 @@ fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
     let mut last_underline = false;
     let mut last_strike = false;
 
-    for row in 0..height {
-        if row > 0 {
-            print!("\r\n");
-        }
-        for col in 0..width {
-            if let Some(cell) = surface.get(row, col) {
-                // Check if style changed
-                let fg_changed = cell.fg != last_fg;
-                let bg_changed = cell.bg != last_bg;
-                let attrs_changed = cell.attrs.bold != last_bold
-                    || cell.attrs.italic != last_italic
-                    || cell.attrs.underline != last_underline
-                    || cell.attrs.strikethrough != last_strike;
+    if let Some(ref prev) = prev_surface {
+        // Differential rendering - only output changed cells
+        let default_cell = oxi_tui::Cell::default();
+        for row in 0..height {
+            let mut row_changed = false;
+            let mut col_iter = 0u16;
 
-                if fg_changed || bg_changed || attrs_changed {
-                    print!("\x1b[0m");
+            while col_iter < width {
+                let cur_cell = match surface.get(row, col_iter) {
+                    Some(c) => c,
+                    None => &default_cell,
+                };
+                let prev_cell = match prev.get(row, col_iter) {
+                    Some(c) => c,
+                    None => &default_cell,
+                };
 
-                    // Foreground
-                    match cell.fg {
-                        oxi_tui::Color::Default => {}
-                        oxi_tui::Color::Black => print!("\x1b[30m"),
-                        oxi_tui::Color::Red => print!("\x1b[31m"),
-                        oxi_tui::Color::Green => print!("\x1b[32m"),
-                        oxi_tui::Color::Yellow => print!("\x1b[33m"),
-                        oxi_tui::Color::Blue => print!("\x1b[34m"),
-                        oxi_tui::Color::Magenta => print!("\x1b[35m"),
-                        oxi_tui::Color::Cyan => print!("\x1b[36m"),
-                        oxi_tui::Color::White => print!("\x1b[37m"),
-                        oxi_tui::Color::Indexed(n) => print!("\x1b[38;5;{}m", n),
-                        oxi_tui::Color::Rgb(r, g, b) => print!("\x1b[38;2;{};{};{}m", r, g, b),
+                if cur_cell != prev_cell {
+                    if !row_changed {
+                        // First change in this row - move cursor to row start
+                        print!("\x1b[{};1H", row + 1);
+                        row_changed = true;
                     }
 
-                    // Background
-                    match cell.bg {
-                        oxi_tui::Color::Default => {}
-                        oxi_tui::Color::Black => print!("\x1b[40m"),
-                        oxi_tui::Color::Red => print!("\x1b[41m"),
-                        oxi_tui::Color::Green => print!("\x1b[42m"),
-                        oxi_tui::Color::Yellow => print!("\x1b[43m"),
-                        oxi_tui::Color::Blue => print!("\x1b[44m"),
-                        oxi_tui::Color::Magenta => print!("\x1b[45m"),
-                        oxi_tui::Color::Cyan => print!("\x1b[46m"),
-                        oxi_tui::Color::White => print!("\x1b[47m"),
-                        oxi_tui::Color::Indexed(n) => print!("\x1b[48;5;{}m", n),
-                        oxi_tui::Color::Rgb(r, g, b) => print!("\x1b[48;2;{};{};{}m", r, g, b),
-                    }
+                    // Move cursor to exact column
+                    print!("\x1b[{};{}H", row + 1, col_iter + 1);
 
-                    if cell.attrs.bold {
-                        print!("\x1b[1m");
-                    }
-                    if cell.attrs.italic {
-                        print!("\x1b[3m");
-                    }
-                    if cell.attrs.underline {
-                        print!("\x1b[4m");
-                    }
-                    if cell.attrs.strikethrough {
-                        print!("\x1b[9m");
-                    }
+                    // Apply style changes
+                    apply_cell_style(
+                        cur_cell,
+                        &mut last_fg,
+                        &mut last_bg,
+                        &mut last_bold,
+                        &mut last_italic,
+                        &mut last_underline,
+                        &mut last_strike,
+                    );
 
-                    last_fg = cell.fg;
-                    last_bg = cell.bg;
-                    last_bold = cell.attrs.bold;
-                    last_italic = cell.attrs.italic;
-                    last_underline = cell.attrs.underline;
-                    last_strike = cell.attrs.strikethrough;
+                    print!("{}", cur_cell.char);
                 }
-
+                col_iter += 1;
+            }
+        }
+    } else {
+        // First render - write everything with optimized row-by-row approach
+        print!("\x1b[H"); // Move to top-left
+        let default_cell = oxi_tui::Cell::default();
+        for row in 0..height {
+            if row > 0 {
+                print!("\r\n");
+            }
+            for col in 0..width {
+                let cell = match surface.get(row, col) {
+                    Some(c) => c,
+                    None => &default_cell,
+                };
+                apply_cell_style(
+                    cell,
+                    &mut last_fg,
+                    &mut last_bg,
+                    &mut last_bold,
+                    &mut last_italic,
+                    &mut last_underline,
+                    &mut last_strike,
+                );
                 print!("{}", cell.char);
-            } else {
-                print!(" ");
             }
         }
     }
 
-    print!("\x1b[0m");
+    print!("\x1b[0m"); // Reset SGR
     print!("\x1b[?2026l"); // End synchronized update
+
+    // Store current surface as previous
+    *prev_surface = Some(surface.clone());
+}
+
+/// Apply cell style changes without full reset
+fn apply_cell_style(
+    cell: &oxi_tui::Cell,
+    last_fg: &mut oxi_tui::Color,
+    last_bg: &mut oxi_tui::Color,
+    last_bold: &mut bool,
+    last_italic: &mut bool,
+    last_underline: &mut bool,
+    last_strike: &mut bool,
+) {
+    let fg_changed = cell.fg != *last_fg;
+    let bg_changed = cell.bg != *last_bg;
+    let attrs_changed = cell.attrs.bold != *last_bold
+        || cell.attrs.italic != *last_italic
+        || cell.attrs.underline != *last_underline
+        || cell.attrs.strikethrough != *last_strike;
+
+    if fg_changed || bg_changed || attrs_changed {
+        let mut codes = Vec::new();
+
+        // Only change individual attributes, don't reset everything
+        if cell.attrs.bold != *last_bold {
+            codes.push(if cell.attrs.bold { 1 } else { 22 });
+        }
+        if cell.attrs.italic != *last_italic {
+            codes.push(if cell.attrs.italic { 3 } else { 23 });
+        }
+        if cell.attrs.underline != *last_underline {
+            codes.push(if cell.attrs.underline { 4 } else { 24 });
+        }
+        if cell.attrs.strikethrough != *last_strike {
+            codes.push(if cell.attrs.strikethrough { 9 } else { 29 });
+        }
+
+        if fg_changed {
+            match cell.fg {
+                oxi_tui::Color::Default => codes.push(39),
+                oxi_tui::Color::Black => codes.push(30),
+                oxi_tui::Color::Red => codes.push(31),
+                oxi_tui::Color::Green => codes.push(32),
+                oxi_tui::Color::Yellow => codes.push(33),
+                oxi_tui::Color::Blue => codes.push(34),
+                oxi_tui::Color::Magenta => codes.push(35),
+                oxi_tui::Color::Cyan => codes.push(36),
+                oxi_tui::Color::White => codes.push(37),
+                oxi_tui::Color::Indexed(n) => codes.extend_from_slice(&[38, 5, n]),
+                oxi_tui::Color::Rgb(r, g, b) => codes.extend_from_slice(&[38, 2, r, g, b]),
+            }
+        }
+
+        if bg_changed {
+            match cell.bg {
+                oxi_tui::Color::Default => codes.push(49),
+                oxi_tui::Color::Black => codes.push(40),
+                oxi_tui::Color::Red => codes.push(41),
+                oxi_tui::Color::Green => codes.push(42),
+                oxi_tui::Color::Yellow => codes.push(43),
+                oxi_tui::Color::Blue => codes.push(44),
+                oxi_tui::Color::Magenta => codes.push(45),
+                oxi_tui::Color::Cyan => codes.push(46),
+                oxi_tui::Color::White => codes.push(47),
+                oxi_tui::Color::Indexed(n) => codes.extend_from_slice(&[48, 5, n]),
+                oxi_tui::Color::Rgb(r, g, b) => codes.extend_from_slice(&[48, 2, r, g, b]),
+            }
+        }
+
+        if !codes.is_empty() {
+            print!(
+                "\x1b[{}m",
+                codes.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(";")
+            );
+        }
+
+        *last_fg = cell.fg;
+        *last_bg = cell.bg;
+        *last_bold = cell.attrs.bold;
+        *last_italic = cell.attrs.italic;
+        *last_underline = cell.attrs.underline;
+        *last_strike = cell.attrs.strikethrough;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
