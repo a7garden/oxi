@@ -3,7 +3,76 @@
 ## Status
 In Progress
 
-## Tasks
+---
+
+### Port pi-mono's sdk.ts to Rust — DONE
+
+Created `oxi-cli/src/sdk.rs` — full SDK module ported from `pi-mono/packages/coding-agent/src/core/sdk.ts` (413 lines).
+
+#### What was ported:
+
+1. **`SdkConfig`** — configuration struct with all options from `CreateAgentSessionOptions`:
+   - `cwd`, `agent_dir` — path configuration
+   - `auth_storage`, `model_registry` — dependency injection
+   - `model`, `thinking_level` — model selection
+   - `scoped_models` — model cycling support (Ctrl+P)
+   - `no_tools`, `tools` — tool enable/disable modes
+   - `session_manager`, `settings` — session and settings injection
+
+2. **`NoTools` enum** — tool suppression modes (`All`, `Builtin`)
+
+3. **`ScopedModel`** — model with optional thinking level override for cycling
+
+4. **`Sdk` struct** — main SDK entry point wrapping Agent:
+   - `new(config)` — async factory with full initialization pipeline
+   - `run_prompt()` / `run_prompt_streaming()` / `run_prompt_channel()` — prompt execution
+   - `register_tool()` / `tool_registry()` — tool registration
+   - `enable_tools()` / `disable_tools()` / `active_tools()` — tool management
+   - `switch_model()` / `model_id()` — model management
+   - `session_id()` / `session_manager()` — session access
+   - `reset()` / `cwd()` / `settings()` / `agent()` / `agent_state()` — general accessors
+   - `set_system_prompt()` — prompt customization
+
+5. **Model resolution** — `resolve_model()` matching pi-mono logic:
+   - Explicit config → existing session → settings default → first available
+   - Fallback warnings when model can't be restored
+
+6. **Provider creation** — `create_provider_for_model()` factory
+
+7. **Tool configuration** — `resolve_tool_config()` matching pi-mono logic:
+   - Explicit allowlist → no-tools modes → default builtin tools
+
+8. **Factory functions** — convenience constructors:
+   - `create_sdk()` — minimal defaults
+   - `create_sdk_with_model()` — specific model
+   - `create_sdk_with_cwd()` — specific working directory
+   - `create_readonly_sdk()` — read-only mode
+
+9. **Re-exports** — SessionEvent, tool types, settings
+
+#### Helper functions ported:
+- `default_agent_dir()` → `~/.oxi`
+- `build_sdk_system_prompt()` — thinking-level-based prompts
+- `find_default_model()` — settings/registry fallback chain
+- `get_attribution_headers()` — OpenRouter/Cloudflare headers (kept for future use)
+
+## Files Changed
+- `oxi-cli/src/sdk.rs` — NEW: ~580 lines, full SDK module
+- `oxi-cli/src/lib.rs` — added `pub mod sdk;`
+
+#### Also fixed (pre-existing issues):
+- `oxi-ai/src/high_level.rs` — added missing `text_signature: None` to TextContent
+- `oxi-ai/src/transform.rs` — added `text_signature: None` to TextContent instances + `transform_messages_for_model()` function
+
+## Notes
+- `cargo check -p oxi-cli` passes (0 errors)
+- SDK uses `ResourceLoader` (not DefaultResourceLoader — that TS concept doesn't exist in Rust)
+- `AuthStorage::new()` uses default file backend (same as TS `AuthStorage.create()`)
+- `ModelRegistry::create()` matches TS `ModelRegistry.create()`
+- `SessionManager::create()` matches TS `SessionManager.create()`
+- Session ID is parsed from SessionManager's string ID (TS uses string everywhere)
+
+---
 
 ### Port pi-mono's session-manager.ts to Rust — DONE
 

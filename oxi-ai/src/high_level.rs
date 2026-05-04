@@ -202,6 +202,7 @@ fn push_text_block(msg: &mut Option<AssistantMessage>, index: usize, text: &str)
         let content = ContentBlock::Text(TextContent {
             content_type: crate::TextContentType::Text,
             text: text.to_string(),
+            text_signature: None,
         });
 
         // Ensure the content array is large enough
@@ -209,6 +210,7 @@ fn push_text_block(msg: &mut Option<AssistantMessage>, index: usize, text: &str)
             m.content.push(ContentBlock::Text(TextContent {
                 content_type: crate::TextContentType::Text,
                 text: String::new(),
+                text_signature: None,
             }));
         }
 
