@@ -22,6 +22,10 @@ pub struct AgentToolResult {
     /// When present, these are used as the content of the ToolResultMessage instead of
     /// wrapping `output` in a Text block.
     pub content_blocks: Option<Vec<oxi_ai::ContentBlock>>,
+    /// When `true`, signals that the agent loop should terminate after this batch
+    /// of tool calls completes.  Defaults to `false` so that the loop continues
+    /// unless a tool explicitly opts-in to termination.
+    pub terminate: bool,
 }
 
 impl AgentToolResult {
@@ -31,6 +35,7 @@ impl AgentToolResult {
             output: output.into(),
             metadata: None,
             content_blocks: None,
+            terminate: false,
         }
     }
 
@@ -40,6 +45,7 @@ impl AgentToolResult {
             output: output.into(),
             metadata: None,
             content_blocks: None,
+            terminate: false,
         }
     }
 
@@ -50,6 +56,12 @@ impl AgentToolResult {
 
     pub fn with_content_blocks(mut self, blocks: Vec<oxi_ai::ContentBlock>) -> Self {
         self.content_blocks = Some(blocks);
+        self
+    }
+
+    /// Mark this result as requesting agent-loop termination.
+    pub fn with_terminate(mut self) -> Self {
+        self.terminate = true;
         self
     }
 }
