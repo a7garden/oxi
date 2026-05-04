@@ -29,6 +29,7 @@ pub enum KeyName {
     Tab,
     Backspace,
     Delete,
+    Insert,
     Up,
     Down,
     Left,
@@ -41,34 +42,106 @@ pub enum KeyName {
 }
 
 impl KeySequence {
-    /// Parse a key string like `"ctrl+c"`, `"alt+enter"`, `"shift+tab"`.
+    /// Parse a key string like `"ctrl+c"`, `"alt+enter"`, `"shift+tab"`,
+    /// `"ctrl+shift+f1"`, `"insert"`, `"pageup"`.
     pub fn parse(s: &str) -> Option<Self> {
         let mut ctrl = false;
         let mut alt = false;
         let mut shift = false;
         let mut remaining = s.trim();
+
+        // Consume modifier prefixes in any order
         loop {
-            if let Some(rest) = remaining.strip_prefix("ctrl+") { ctrl = true; remaining = rest; continue; }
-            if let Some(rest) = remaining.strip_prefix("alt+")   { alt = true; remaining = rest; continue; }
-            if let Some(rest) = remaining.strip_prefix("shift+") { shift = true; remaining = rest; continue; }
+            if let Some(rest) = remaining.strip_prefix("ctrl+") {
+                ctrl = true;
+                remaining = rest;
+                continue;
+            }
+            if let Some(rest) = remaining.strip_prefix("alt+") {
+                alt = true;
+                remaining = rest;
+                continue;
+            }
+            if let Some(rest) = remaining.strip_prefix("shift+") {
+                shift = true;
+                remaining = rest;
+                continue;
+            }
             break;
         }
-        let key = match remaining {
+
+        let lower = remaining.to_lowercase();
+        let key = match lower.as_str() {
             "enter" | "return" => KeyName::Enter,
             "escape" | "esc" => KeyName::Escape,
             "tab" => KeyName::Tab,
             "backspace" | "bs" => KeyName::Backspace,
             "delete" | "del" => KeyName::Delete,
-            "up" => KeyName::Up, "down" => KeyName::Down,
-            "left" => KeyName::Left, "right" => KeyName::Right,
-            "home" => KeyName::Home, "end" => KeyName::End,
+            "insert" | "ins" => KeyName::Insert,
+            "up" => KeyName::Up,
+            "down" => KeyName::Down,
+            "left" => KeyName::Left,
+            "right" => KeyName::Right,
+            "home" => KeyName::Home,
+            "end" => KeyName::End,
             "pageup" | "page_up" => KeyName::PageUp,
             "pagedown" | "page_down" => KeyName::PageDown,
-            s if s.starts_with('f') && s.len() == 2 => KeyName::F(s[1..].parse::<u8>().ok()?),
-            s if s.len() == 1 => KeyName::Char(s.chars().next()?),
+            // F-keys: f1..f12
+            s if s.starts_with('f') && s.len() <= 3 => {
+                let num: u8 = s[1..].parse().ok()?;
+                if num >= 1 && num <= 12 {
+                    KeyName::F(num)
+                } else {
+                    return None;
+                }
+            }
+            // Single character key
+            _ if remaining.len() == 1 => KeyName::Char(remaining.chars().next()?),
             _ => return None,
         };
-        Some(Self { ctrl, alt, shift, key })
+
+        Some(Self {
+            ctrl,
+            alt,
+            shift,
+            key,
+        })
+    }
+
+    /// Format the key sequence back to string notation.
+    pub fn to_notation(&self) -> String {
+        let mut parts = Vec::new();
+        if self.ctrl {
+            parts.push("ctrl");
+        }
+        if self.alt {
+            parts.push("alt");
+        }
+        if self.shift {
+            parts.push("shift");
+        }
+        match self.key {
+            KeyName::Char(c) => parts.push(&c.to_string()),
+            KeyName::Enter => parts.push("enter"),
+            KeyName::Escape => parts.push("escape"),
+            KeyName::Tab => parts.push("tab"),
+            KeyName::Backspace => parts.push("backspace"),
+            KeyName::Delete => parts.push("delete"),
+            KeyName::Insert => parts.push("insert"),
+            KeyName::Up => parts.push("up"),
+            KeyName::Down => parts.push("down"),
+            KeyName::Left => parts.push("left"),
+            KeyName::Right => parts.push("right"),
+            KeyName::Home => parts.push("home"),
+            KeyName::End => parts.push("end"),
+            KeyName::PageUp => parts.push("pageup"),
+            KeyName::PageDown => parts.push("pagedown"),
+            KeyName::F(n) => {
+                let s = format!("f{}", n);
+                parts.push(&s);
+            }
+        }
+        parts.join("+")
     }
 }
 
@@ -200,9 +273,85 @@ pub enum KeybindingError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn parse_ctrl_c() { let s = KeySequence::parse("ctrl+c").unwrap(); assert!(s.ctrl); assert_eq!(s.key, KeyName::Char('c')); }
-    #[test] fn parse_shift_tab() { let s = KeySequence::parse("shift+tab").unwrap(); assert!(s.shift); assert_eq!(s.key, KeyName::Tab); }
-    #[test] fn parse_escape() { let s = KeySequence::parse("escape").unwrap(); assert_eq!(s.key, KeyName::Escape); }
-    #[test] fn registry_matches() { let r = KeybindingRegistry::new(); assert!(r.matches(actions::INTERRUPT, &KeySequence::parse("escape").unwrap())); }
-    #[test] fn registry_action_for() { let r = KeybindingRegistry::new(); assert_eq!(r.action_for(&KeySequence::parse("ctrl+d").unwrap()), Some(actions::EXIT)); }
+
+    #[test]
+    fn parse_ctrl_c() {
+        let s = KeySequence::parse("ctrl+c").unwrap();
+        assert!(s.ctrl);
+        assert_eq!(s.key, KeyName::Char('c'));
+    }
+
+    #[test]
+    fn parse_shift_tab() {
+        let s = KeySequence::parse("shift+tab").unwrap();
+        assert!(s.shift);
+        assert_eq!(s.key, KeyName::Tab);
+    }
+
+    #[test]
+    fn parse_escape() {
+        let s = KeySequence::parse("escape").unwrap();
+        assert_eq!(s.key, KeyName::Escape);
+    }
+
+    #[test]
+    fn parse_f1_through_f12() {
+        for n in 1..=12u8 {
+            let key = format!("f{}", n);
+            let s = KeySequence::parse(&key).unwrap();
+            assert_eq!(s.key, KeyName::F(n));
+        }
+    }
+
+    #[test]
+    fn parse_f0_invalid() {
+        assert!(KeySequence::parse("f0").is_none());
+    }
+
+    #[test]
+    fn parse_f13_invalid() {
+        assert!(KeySequence::parse("f13").is_none());
+    }
+
+    #[test]
+    fn parse_insert() {
+        let s = KeySequence::parse("insert").unwrap();
+        assert_eq!(s.key, KeyName::Insert);
+    }
+
+    #[test]
+    fn parse_ctrl_shift_f5() {
+        let s = KeySequence::parse("ctrl+shift+f5").unwrap();
+        assert!(s.ctrl);
+        assert!(s.shift);
+        assert_eq!(s.key, KeyName::F(5));
+    }
+
+    #[test]
+    fn notation_round_trip() {
+        let notations = vec![
+            "ctrl+c", "alt+enter", "shift+tab", "escape", "f1", "f12",
+            "pageup", "pagedown", "home", "end", "delete", "insert",
+        ];
+        for notation in notations {
+            let seq = KeySequence::parse(notation)
+                .unwrap_or_else(|| panic!("Failed to parse: {}", notation));
+            let round = seq.to_notation();
+            let re = KeySequence::parse(&round)
+                .unwrap_or_else(|| panic!("Failed to re-parse: {}", round));
+            assert_eq!(seq, re, "Round-trip failed for {}", notation);
+        }
+    }
+
+    #[test]
+    fn registry_matches() {
+        let r = KeybindingRegistry::new();
+        assert!(r.matches(actions::INTERRUPT, &KeySequence::parse("escape").unwrap()));
+    }
+
+    #[test]
+    fn registry_action_for() {
+        let r = KeybindingRegistry::new();
+        assert_eq!(r.action_for(&KeySequence::parse("ctrl+d").unwrap()), Some(actions::EXIT));
+    }
 }

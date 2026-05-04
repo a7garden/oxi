@@ -9,7 +9,7 @@
 //! Key notation: `"ctrl+c"`, `"alt+enter"`, `"shift+tab"`, `"f1"`, `"pageup"`, etc.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
