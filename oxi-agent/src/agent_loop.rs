@@ -13,12 +13,20 @@ use oxi_ai::{
     CompactionManager as OxCompactionManager, AssistantMessage,
 };
 use parking_lot::RwLock;
+use regex::Regex;
 use serde_json::Value;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const MAX_RETRIES: usize = 3;
 const BACKOFF_BASE_SECS: u64 = 2;
+
+/// Default max auto-retry attempts (for errors detected in assistant
+/// messages, not provider-level errors).
+const AUTO_RETRY_MAX_ATTEMPTS: usize = 3;
+/// Default base delay in ms for exponential backoff during auto-retry.
+const AUTO_RETRY_BASE_DELAY_MS: u64 = 2000;
 
 #[derive(Clone)]
 pub struct AgentLoopConfig {
@@ -35,6 +43,13 @@ pub struct AgentLoopConfig {
     pub transport: Option<String>,
     pub compact_on_start: bool,
     pub max_retry_delay_ms: Option<u64>,
+    /// Enable auto-retry on retryable errors detected in assistant
+    /// messages (overloaded, rate-limit, server errors).
+    pub auto_retry_enabled: bool,
+    /// Maximum number of auto-retry attempts.
+    pub auto_retry_max_attempts: usize,
+    /// Base delay in ms for exponential backoff during auto-retry.
+    pub auto_retry_base_delay_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,6 +87,11 @@ pub struct AgentLoop {
     steering_queue: RwLock<Vec<Message>>,
     follow_up_queue: RwLock<Vec<Message>>,
     session_id: Option<String>,
+    /// Tracks the current auto-retry attempt count (atomically so it can
+    /// be read from any thread without holding the async runtime).
+    auto_retry_attempt: AtomicUsize,
+    /// Set to `true` to cancel an in-progress auto-retry wait.
+    auto_retry_cancel: RwLock<bool>,
 }
 
 impl AgentLoop {
@@ -97,6 +117,8 @@ impl AgentLoop {
             steering_queue: RwLock::new(Vec::new()),
             follow_up_queue: RwLock::new(Vec::new()),
             session_id: config.session_id.clone(),
+            auto_retry_attempt: AtomicUsize::new(0),
+            auto_retry_cancel: RwLock::new(false),
         }
     }
 
@@ -279,18 +301,72 @@ impl AgentLoop {
                 
                 new_messages.push(Message::Assistant(assistant_message.clone()));
                 
-                if matches!(assistant_message.stop_reason, StopReason::Error | StopReason::Aborted) {
-                    emit(AgentEvent::TurnEnd { 
-                        turn_number, 
+                if matches!(assistant_message.stop_reason, StopReason::Error) {
+                    // Check for retryable errors (overloaded, rate-limit, server errors)
+                    if Self::is_retryable_error(&assistant_message) {
+                        let did_retry = self.handle_retryable_error(&assistant_message, &mut messages, &emit).await;
+                        if did_retry {
+                            // Emit turn end for the failed turn, then continue loop.
+                            emit(AgentEvent::TurnEnd {
+                                turn_number,
+                                assistant_message: Message::Assistant(assistant_message.clone()),
+                                tool_results: vec![],
+                            });
+                            events.push(AgentEvent::TurnEnd {
+                                turn_number,
+                                assistant_message: Message::Assistant(assistant_message.clone()),
+                                tool_results: vec![],
+                            });
+                            has_more_tool_calls = true; // Force another iteration to retry.
+                            continue;
+                        }
+                        // Retry not initiated – fall through to normal error handling.
+                    }
+
+                    emit(AgentEvent::TurnEnd {
+                        turn_number,
                         assistant_message: Message::Assistant(assistant_message.clone()),
                         tool_results: vec![],
                     });
-                    events.push(AgentEvent::TurnEnd { 
-                        turn_number, 
+                    events.push(AgentEvent::TurnEnd {
+                        turn_number,
                         assistant_message: Message::Assistant(assistant_message.clone()),
                         tool_results: vec![],
                     });
                     return Ok((messages, events));
+                }
+                if matches!(assistant_message.stop_reason, StopReason::Aborted) {
+                    // On a successful (non-error) response, reset the retry counter.
+                    if self.auto_retry_attempt.load(Ordering::Relaxed) > 0 {
+                        emit(AgentEvent::AutoRetryEnd {
+                            success: true,
+                            attempt: self.auto_retry_attempt.load(Ordering::Relaxed),
+                            final_error: None,
+                        });
+                        self.auto_retry_attempt.store(0, Ordering::Relaxed);
+                    }
+
+                    emit(AgentEvent::TurnEnd {
+                        turn_number,
+                        assistant_message: Message::Assistant(assistant_message.clone()),
+                        tool_results: vec![],
+                    });
+                    events.push(AgentEvent::TurnEnd {
+                        turn_number,
+                        assistant_message: Message::Assistant(assistant_message.clone()),
+                        tool_results: vec![],
+                    });
+                    return Ok((messages, events));
+                }
+
+                // Successful response – reset auto-retry counter.
+                if self.auto_retry_attempt.load(Ordering::Relaxed) > 0 {
+                    emit(AgentEvent::AutoRetryEnd {
+                        success: true,
+                        attempt: self.auto_retry_attempt.load(Ordering::Relaxed),
+                        final_error: None,
+                    });
+                    self.auto_retry_attempt.store(0, Ordering::Relaxed);
                 }
                 
                 let tool_calls = self.extract_tool_calls(&assistant_message);
@@ -758,6 +834,132 @@ impl AgentLoop {
         ExecutedToolCallOutcome { result, is_error }
     }
 
+    /// Cancel any in-progress auto-retry wait.
+    pub fn cancel_auto_retry(&self) {
+        *self.auto_retry_cancel.write() = true;
+    }
+
+    /// Returns the current auto-retry attempt number (0 = no retry in progress).
+    pub fn auto_retry_attempt(&self) -> usize {
+        self.auto_retry_attempt.load(Ordering::Relaxed)
+    }
+
+    /// Detect whether an assistant message contains a retryable error.
+    ///
+    /// This mirrors the pi-mono `_isRetryableError` logic: checks that
+    /// the stop_reason is `Error`, that an `error_message` is present,
+    /// and that the error text matches known retryable patterns
+    /// (overloaded, rate-limit, 5xx, network errors, timeouts, etc.).
+    fn is_retryable_error(message: &AssistantMessage) -> bool {
+        if message.stop_reason != StopReason::Error {
+            return false;
+        }
+        let err = match message.error_message.as_deref() {
+            Some(e) if !e.is_empty() => e,
+            _ => return false,
+        };
+
+        // Lazy-init a static regex so it's compiled only once.
+        static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+        let re = RE.get_or_init(|| {
+            Regex::new(
+                r"(?i)overloaded|provider.?returned.?error|rate.?limit|too many requests\
+                 |429|500|502|503|504|service.?unavailable|server.?error|internal.?error\
+                 |network.?error|connection.?error|connection.?refused|connection.?lost\
+                 |other side closed|fetch failed|upstream.?connect|reset before headers\
+                 |socket hang up|ended without|http2 request did not get a response\
+                 |timed? out|timeout|terminated|retry delay",
+            )
+            .expect("auto-retry regex should compile")
+        });
+
+        re.is_match(err)
+    }
+
+    /// Attempt an auto-retry for a retryable assistant error.
+    ///
+    /// Returns `true` if a retry was initiated (the caller should *not*
+    /// proceed to compaction/finish), or `false` if retries are disabled,
+    /// max attempts were exceeded, or the retry was cancelled.
+    async fn handle_retryable_error(
+        &self,
+        message: &AssistantMessage,
+        messages: &mut Vec<Message>,
+        emit: &EmitFn,
+    ) -> bool {
+        if !self.config.auto_retry_enabled {
+            return false;
+        }
+
+        let attempt = self.auto_retry_attempt.fetch_add(1, Ordering::Relaxed) + 1;
+        let max_attempts = self.config.auto_retry_max_attempts;
+
+        if attempt > max_attempts {
+            // Exhausted all retries – emit final failure and reset.
+            emit(AgentEvent::AutoRetryEnd {
+                success: false,
+                attempt: attempt - 1,
+                final_error: message.error_message.clone(),
+            });
+            self.auto_retry_attempt.store(0, Ordering::Relaxed);
+            return false;
+        }
+
+        let delay_ms = self.config.auto_retry_base_delay_ms * 2u64.pow((attempt - 1) as u32);
+
+        emit(AgentEvent::AutoRetryStart {
+            attempt,
+            max_attempts,
+            delay_ms,
+            error_message: message.error_message.clone().unwrap_or_else(|| "Unknown error".into()),
+        });
+
+        // Remove the error assistant message from the conversation so the
+        // next LLM call doesn't see it (keep it in session history via
+        // the emitted events).
+        if messages
+            .last()
+            .map_or(false, |m| matches!(m, Message::Assistant(_)))
+        {
+            messages.pop();
+        }
+
+        // Reset cancellation flag.
+        *self.auto_retry_cancel.write() = false;
+
+        // Wait with exponential backoff (cancellable).
+        tokio::select! {
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {
+                // Sleep completed normally – proceed to retry.
+            }
+            _ = tokio::task::yield_now() => {
+                // Check cancellation.
+                if *self.auto_retry_cancel.read() {
+                    emit(AgentEvent::AutoRetryEnd {
+                        success: false,
+                        attempt,
+                        final_error: Some("Retry cancelled".into()),
+                    });
+                    self.auto_retry_attempt.store(0, Ordering::Relaxed);
+                    return false;
+                }
+            }
+        }
+
+        // If cancelled during sleep, bail out.
+        if *self.auto_retry_cancel.read() {
+            emit(AgentEvent::AutoRetryEnd {
+                success: false,
+                attempt,
+                final_error: Some("Retry cancelled".into()),
+            });
+            self.auto_retry_attempt.store(0, Ordering::Relaxed);
+            return false;
+        }
+
+        true // Caller should retry the LLM call.
+    }
+
     fn resolve_model(&self) -> Result<oxi_ai::Model> {
         let parts: Vec<&str> = self.config.model_id.split('/').collect();
         let model = if parts.len() >= 2 {
@@ -1007,8 +1209,10 @@ mod tests {
             transport: None,
             compact_on_start: false,
             max_retry_delay_ms: None,
+            auto_retry_enabled: true,
+            auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
+            auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
         };
-        
         assert_eq!(config.max_iterations, 10);
         assert_eq!(config.tool_execution, ToolExecutionMode::Parallel);
     }
