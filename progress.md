@@ -84,3 +84,42 @@ Replaced/enhanced `oxi-cli/src/session.rs` with full implementation ported from 
 - SessionEntry simple struct provides backward-compatible API for existing code
 - SessionMeta kept for backward compatibility with main.rs session listing
 - Pre-existing issues in extensions.rs and agent_session.rs are unrelated to this port
+
+---
+
+### Port exec.ts and auth-guidance.ts — DONE
+
+Ported small utility files from pi-mono.
+
+#### exec.ts (107 lines) → bash_executor.rs enhancements:
+- `ExecOptions` struct — cancel token (`watch::Receiver<bool>`), timeout_ms, cwd
+- `ExecResult` struct — stdout, stderr, code, killed
+- `exec_command()` async function — spawns child process, captures output, supports timeout and cancellation
+  - Pipes stdout/stderr to spawned tasks for concurrent reading
+  - Uses `tokio::select!` for timeout and cancellation handling
+  - Properly kills child on timeout/cancel and waits for cleanup
+
+#### auth-guidance.ts (25 lines) → new auth_guidance.rs:
+- `get_provider_login_help()` — formats login guidance message with docs paths
+- `format_no_models_available_message()` — no models available message
+- `format_no_model_selected_message()` — no model selected message
+- `format_no_api_key_found_message(provider)` — provider-specific missing API key message
+  - Handles "unknown" provider gracefully (shows "the selected model")
+
+#### Also fixed in bash_executor.rs:
+- Fixed recursive `Default for BashExecutor` that would stack-overflow (called `Self::default()` instead of `Self::new(BashExecutorConfig::default())`)
+- Renamed `BashExecutor::default()` to `BashExecutor::with_defaults()` to avoid confusion
+- Added `Path` import for `exec_command`'s `cwd` parameter
+- Added tokio imports (`AsyncReadExt`, `TokioCommand`, `watch`)
+- Added async tests for `exec_command`
+
+## Files Changed
+- `oxi-cli/src/session.rs` — COMPLETE REWRITE: ~2100 lines, full session manager port
+- `oxi-cli/src/export.rs` — updated render_entry for new AgentMessage types
+- `oxi-cli/src/branch_summarization.rs` — updated for String-based IDs and new message types
+- `oxi-cli/src/compaction_utils.rs` — updated for new AgentMessage types
+- `oxi-cli/src/lib.rs` — updated SessionEntry usage for new API + added auth_guidance module
+- `oxi-cli/src/agent_session.rs` — updated save_session for new API
+- `oxi-cli/src/main.rs` — updated SessionManager usage
+- `oxi-cli/src/bash_executor.rs` — enhanced with ExecOptions, ExecResult, exec_command + fixed Default impl
+- `oxi-cli/src/auth_guidance.rs` — NEW: auth guidance utilities ported from auth-guidance.ts
