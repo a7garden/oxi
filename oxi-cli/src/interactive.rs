@@ -88,7 +88,7 @@ use crate::agent_session::AgentSession;
 use crate::session::SessionManager;
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use oxi_agent::{Agent, AgentEvent};
+use oxi_agent::AgentEvent;
 use oxi_tui::{
     ChatMessageDisplay, ChatView, Component, ContentBlockDisplay, Input, MessageRole, Rect,
     Surface, Theme,
@@ -1809,7 +1809,7 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
     let settings = app.settings().clone();
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string());
+        .unwrap_or_else(|_| ".".to_string());
 
     let sm = SessionManager::create(&cwd, None);
 
@@ -1838,7 +1838,7 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                 .run_until(async {
                     while let Some(prompt) = prompt_rx.recv().await {
                         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
-                        let ui_fwd = ui_tx.clone();
+                        let ui_fwd = ui_tx_for_thread.clone();
                         let forwarder = tokio::task::spawn_local(async move {
                             while let Some(event) = event_rx.recv().await {
                                 let ui_event = match event {
@@ -2003,7 +2003,7 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                             // If model selector is visible, confirm selection
                             if imode.model_selector.is_visible() {
                                 if let Some(model_id) = imode.handle_model_confirm() {
-                                    match app.switch_model(&model_id) {
+                                    match agent_session.set_model(&model_id) {
                                         Ok(()) => {
                                             chat_view.add_message(ChatMessageDisplay {
                                                 role: MessageRole::Assistant,
@@ -2063,11 +2063,11 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                 let model_info = format!(
                                                     "Current model: {}\n\
                                                      Use /model <provider/model> to switch.",
-                                                    app.model_id(),
+                                                    agent_session.model_id(),
                                                 );
                                                 if let Some(query) = search {
                                                     // Attempt to switch model directly
-                                                    match app.switch_model(&query) {
+                                                    match agent_session.set_model(&query) {
                                                         Ok(()) => {
                                                             chat_view.add_message(
                                                                 ChatMessageDisplay {
@@ -2254,18 +2254,12 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                      Max Tokens: {}\n\
                                                      Auto-compaction: {}\n\
                                                      Tool Timeout: {}s",
-                                                    app.settings().effective_model(None),
-                                                    app.settings().thinking_level,
-                                                    app.settings()
-                                                        .effective_temperature()
-                                                        .map(|t| t.to_string())
-                                                        .unwrap_or_else(|| "default".to_string()),
-                                                    app.settings()
-                                                        .effective_max_tokens()
-                                                        .map(|t| t.to_string())
-                                                        .unwrap_or_else(|| "default".to_string()),
-                                                    app.settings().auto_compaction,
-                                                    app.settings().tool_timeout_seconds,
+                                                    agent_session.model_id(),
+                                                    agent_session.thinking_level(),
+                                                    "default",
+                                                    "default",
+                                                    agent_session.auto_compaction_enabled(),
+                                                    "default",
                                                 );
                                                 chat_view.add_message(ChatMessageDisplay {
                                                     role: MessageRole::Assistant,
@@ -2297,7 +2291,7 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                 chat_view = ChatView::new(theme.clone());
                                                 session = InteractiveSession::new();
                                                 undo_stack.clear();
-                                                app.reset();
+                                                agent_session.reset();
                                                 input.clear();
                                                 continue;
                                             }
@@ -2728,7 +2722,7 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                     let _display_state = InteractiveState::Display;
 
                     // Capture the response text into session
-                    let st = app.agent_state();
+                    let st = agent_session.state();
                     for msg in st.messages.iter().rev() {
                         if let oxi_ai::Message::Assistant(a) = msg {
                             session.add_assistant_message(a.text_content());
