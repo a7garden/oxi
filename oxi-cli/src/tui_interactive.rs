@@ -70,6 +70,7 @@ enum MessageRole {
 struct ChatMessage {
     role: MessageRole,
     content: String,
+    #[allow(dead_code)]
     timestamp: i64,
 }
 
@@ -162,9 +163,13 @@ struct Theme {
     placeholder_fg: Color,
     prompt_indicator_fg: Color,
     thinking_fg: Color,
+    #[allow(dead_code)]
     tool_name_fg: Color,
+    #[allow(dead_code)]
     tool_border_fg: Color,
+    #[allow(dead_code)]
     error_fg: Color,
+    #[allow(dead_code)]
     success_fg: Color,
     status_fg: Color,
 }
