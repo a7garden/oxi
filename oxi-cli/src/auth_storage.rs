@@ -178,7 +178,7 @@ impl std::fmt::Display for AuthStatus {
 pub type AuthResult<T> = Result<T, AuthError>;
 
 /// Authentication errors
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum AuthError {
     #[error("Failed to read auth storage: {0}")]
     ReadError(String),

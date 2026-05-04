@@ -762,7 +762,7 @@ mod tests {
             Some(0.7),
             Some(1024),
         );
-        assert_eq!(body["contents"], contents);
+        assert_eq!(&body["contents"], &serde_json::json!(contents));
         assert_eq!(body["generationConfig"]["temperature"], 0.7);
         assert_eq!(body["generationConfig"]["maxOutputTokens"], 1024);
         assert_eq!(
