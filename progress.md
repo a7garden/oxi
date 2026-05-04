@@ -1,12 +1,20 @@
-# oxi 버전 업그레이드 진행 상황
+# Progress
 
-## 작업 상태: ✅ 완료
+## Status
+Completed
 
-### 수행된 작업
-- [x] 루트 Cargo.toml 확인 (workspace only, 버전 없음)
-- [x] oxi-ai/Cargo.toml: 0.3.1 → 0.4.0
-- [x] oxi-agent/Cargo.toml: 0.3.1 → 0.4.0 + oxi-ai 의존성 0.3.1 → 0.4.0
-- [x] oxi-tui/Cargo.toml: 0.3.1 → 0.4.0
-- [x] oxi-cli/Cargo.toml: 0.3.1 → 0.4.0 + 모든 oxi-* 의존성 0.3.1 → 0.4.0
-- [x] oxi-cli/src/main.rs: clap version 0.1.0 → 0.4.0 (기존 불일치 수정)
-- [x] 결과 보고서: /tmp/oxi-version-bump.md
+## Tasks
+- [x] oxios ↔ oxi integration final verification (2026-05-05)
+
+## Files Changed
+- `/tmp/oxios-integration-review.md` — Full review report
+
+## Notes
+- All 5 verification checks passed with no blockers
+- `engine.rs`: EngineProvider trait + OxiEngineProvider correctly wraps oxi-ai registry
+- `agent_runtime.rs`: AgentLoop V2 pattern with ToolRegistry::with_builtins() + spawn_blocking
+- Cargo.toml: local path deps `../oxi/oxi-ai` and `../oxi/oxi-agent` confirmed
+- Build: SUCCESS (warnings only, 0 errors)
+- Tests: 209 passed, 0 failed across entire workspace
+- All core APIs (AgentLoop, ToolRegistry, Provider, Model, CompactionStrategy, etc.) verified as correctly exported and imported
+- Non-blocking: 56 missing_docs warnings, 8 dead_code warnings, 2 unused_mut warnings
