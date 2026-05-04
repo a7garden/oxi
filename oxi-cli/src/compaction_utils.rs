@@ -12,7 +12,7 @@
 use std::collections::HashSet;
 
 use oxi_ai::estimate as estimate_tokens;
-use oxi_ai::{ContentBlock, Message, MessageContent, ToolCall};
+use oxi_ai::{Api, AssistantMessage, ContentBlock, Message, MessageContent, TextContent, ToolCall, ToolCallType};
 
 use crate::session::{AgentMessage, SessionEntry};
 

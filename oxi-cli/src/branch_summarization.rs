@@ -5,7 +5,7 @@
 
 use crate::session::{SessionEntry, AgentMessage as SessionAgentMessage};
 use oxi_ai::{
-    Model, Provider, UserMessage, ContentBlock, TextContent,
+    AssistantMessage, Model, Provider, UserMessage, ContentBlock, TextContent,
     complete, Context as AiContext,
 };
 use serde::{Deserialize, Serialize};
@@ -115,8 +115,9 @@ impl FileOperations {
         let mut modified: HashSet<String> = self.edited.clone();
         modified.extend(self.written.iter().cloned());
         
-        let read_only: Vec<String> = self.read.iter()
-            .filter(|f| !modified.contains(&f))
+        // Collect read files that are not in modified
+        let mut read_only: Vec<String> = self.read.iter()
+            .filter(|f| !modified.contains(f.as_str()))
             .cloned()
             .collect();
         read_only.sort();
@@ -350,7 +351,7 @@ fn get_message_from_entry(entry: &SessionEntry) -> Option<oxi_ai::Message> {
         }
         SessionAgentMessage::Assistant { content } => {
             Some(oxi_ai::Message::Assistant({
-                let mut msg = oxi_ai::AssistantMessage::new(
+                let mut msg = AssistantMessage::new(
                     oxi_ai::Api::AnthropicMessages,
                     "session",
                     "unknown",
@@ -757,27 +758,31 @@ mod tests {
         
         // Create a chain: root -> a -> b -> c
         let root = create_test_entry("user", "Root", None);
+        let root_id = root.id;
         entries.push(root);
         
-        let a = create_test_entry("user", "A", Some(entries[0].id));
+        let a = create_test_entry("user", "A", Some(root_id));
+        let a_id = a.id;
         entries.push(a);
         
-        let b = create_test_entry("user", "B", Some(entries[1].id));
+        let b = create_test_entry("user", "B", Some(a_id));
+        let b_id = b.id;
         entries.push(b);
         
-        let c = create_test_entry("user", "C", Some(entries[2].id));
+        let c = create_test_entry("user", "C", Some(b_id));
+        let c_id = c.id;
         entries.push(c);
         
         // Navigate from c to a (common ancestor should be a)
         let result = collect_entries_for_branch_summary(
             &entries,
-            Some(c.id),
-            a.id,
+            Some(c_id),
+            a_id,
         );
         
         // Should collect b and c
         assert_eq!(result.entries.len(), 2);
-        assert_eq!(result.common_ancestor_id, Some(a.id));
+        assert_eq!(result.common_ancestor_id, Some(a_id));
         assert_eq!(result.entries[0].message.content(), "B");
         assert_eq!(result.entries[1].message.content(), "C");
     }
@@ -789,28 +794,32 @@ mod tests {
         // Create: root -> a -> b1
         //              -> a -> b2 (different branch)
         let root = create_test_entry("user", "Root", None);
+        let root_id = root.id;
         entries.push(root);
         
-        let a = create_test_entry("user", "A", Some(entries[0].id));
+        let a = create_test_entry("user", "A", Some(root_id));
+        let a_id = a.id;
         entries.push(a);
         
-        let b1 = create_test_entry("user", "B1", Some(entries[1].id));
+        let b1 = create_test_entry("user", "B1", Some(a_id));
+        let b1_id = b1.id;
         entries.push(b1);
         
         // Add another branch from a
-        let b2 = create_test_entry("user", "B2", Some(a.id));
+        let b2 = create_test_entry("user", "B2", Some(a_id));
+        let b2_id = b2.id;
         entries.push(b2);
         
         // Navigate from b1 to b2 (common ancestor should be a)
         let result = collect_entries_for_branch_summary(
             &entries,
-            Some(b1.id),
-            b2.id,
+            Some(b1_id),
+            b2_id,
         );
         
         // Should collect b1
         assert_eq!(result.entries.len(), 1);
-        assert_eq!(result.common_ancestor_id, Some(a.id));
+        assert_eq!(result.common_ancestor_id, Some(a_id));
         assert_eq!(result.entries[0].message.content(), "B1");
     }
 
