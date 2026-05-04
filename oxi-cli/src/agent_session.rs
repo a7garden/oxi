@@ -27,6 +27,7 @@
 //! ```
 
 use crate::auto_compaction::CompactionConfig;
+use crate::extensions::{ExtensionContext, ExtensionContextBuilder, ExtensionRunner, InputEvent as ExtInputEvent, InputEventResult as ExtInputEventResult, SessionShutdownEvent, SessionShutdownReason};
 use crate::session::{AgentMessage, SessionManager};
 use crate::settings::{Settings, ThinkingLevel};
 use anyhow::{Context, Result};
@@ -34,6 +35,7 @@ use oxi_agent::{Agent, AgentEvent, AgentState};
 use oxi_ai::Message;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, Notify};
 use uuid::Uuid;
@@ -274,6 +276,9 @@ pub struct AgentSession {
 
     // ── CWD ──────────────────────────────────────────────────────────
     cwd: String,
+
+    // ── Extensions ───────────────────────────────────────────────────
+    extension_runner: Arc<RwLock<Option<ExtensionRunner>>>,
 }
 
 impl AgentSession {
@@ -311,6 +316,7 @@ impl AgentSession {
             retry_notify: Arc::new(Notify::new()),
             session_id: Arc::new(RwLock::new(session_id)),
             cwd,
+            extension_runner: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -1183,6 +1189,7 @@ impl AgentSession {
             retry_notify: Arc::clone(&self.retry_notify),
             session_id: Arc::clone(&self.session_id),
             cwd: self.cwd.clone(),
+            extension_runner: Arc::clone(&self.extension_runner),
         }
     }
 
