@@ -72,5 +72,13 @@ serde_yaml = "0.9"
 # OAuth support
 urlencoding = "2.1"
 
+# Filesystem watching
+notify = "6"
+
+# Archive extraction for tools-manager
+flate2 = "1"
+tar = "0.4"
+zip = "2"
+
 [dev-dependencies]
 tempfile = "3"
