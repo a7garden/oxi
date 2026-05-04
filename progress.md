@@ -8,6 +8,7 @@ Completed
 - [x] Port auto-retry logic from pi-mono agent-session to oxi-agent
 - [x] Port session tree navigation (navigateTree) to Rust
 - [x] Port small utilities from pi-mono (mime.ts, paths.ts, fs-watch.ts, sleep.ts, changelog.ts, child-process.ts)
+- [x] Port compaction utilities from pi-mono compaction/utils.ts
 
 ## Files Changed
 - `oxi/oxi-cli/src/tools_manager.rs` — New file: Rust port of tools-manager.ts (575 lines)

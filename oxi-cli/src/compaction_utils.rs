@@ -12,7 +12,7 @@
 use std::collections::HashSet;
 
 use oxi_ai::estimate as estimate_tokens;
-use oxi_ai::{Api, AssistantMessage, ContentBlock, Message, MessageContent, TextContent, ToolCall, ToolCallType};
+use oxi_ai::{ContentBlock, Message, MessageContent, ToolCall};
 
 use crate::session::{AgentMessage, SessionEntry};
 
@@ -567,7 +567,7 @@ fn format_tool_call_args(args: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxi_ai::{Api, TextContent, ToolCallType};
+    use oxi_ai::{Api, AssistantMessage, TextContent, ToolCallType};
 
     fn make_user_message(content: &str) -> Message {
         Message::User(oxi_ai::UserMessage::new(content))
