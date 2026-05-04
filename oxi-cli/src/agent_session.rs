@@ -540,7 +540,7 @@ impl AgentSession {
         text: String,
     ) -> mpsc::UnboundedReceiver<AgentEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
-        let (agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(100);
+        let (_agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(100);
 
         // Clone tx for the forwarding task
         let tx_clone = tx.clone();

@@ -518,6 +518,12 @@ pub fn serialize_session_entries(
             AgentMessage::System { .. } => {
                 parts.push(format!("[System]: {}", content));
             }
+            // Handle other message types
+            _ => {
+                if !content.is_empty() {
+                    parts.push(format!("[System]: {}", content));
+                }
+            }
         }
     }
 

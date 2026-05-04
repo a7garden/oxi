@@ -526,7 +526,7 @@ impl<'a> InteractiveLoop<'a> {
 
     /// Get entry by ID
     pub fn get_entry(&self, id: Uuid) -> Option<&session::SessionEntry> {
-        self.session.get_entry_by_id(id)
+        self.session.get_entry_by_id(&id.to_string())
     }
 
     /// Switch the model used for future LLM calls
