@@ -32,10 +32,31 @@ All 5 interactive components have been ported and added to `oxi-cli/src/tui_comp
 - Added 22 new tests covering all 5 new components.
 - Fixed `strip_ansi` usage in tests to use `.chars().count()` instead of `.len()` for proper Unicode character counting.
 
+### Port extension-related interactive components from pi-mono to Rust
+All 8 extension-related UI components have been ported and added to `oxi-cli/src/tui_components.rs`.
+
+1. **ExtensionEditor** - Multi-line editor for extension-provided input with title, prefill support, external editor detection ($VISUAL/$EDITOR), cursor-aware input/backspace, and bordered rendering with keybinding hints.
+2. **ExtensionInput** - Single-line text input with title, optional countdown timeout (tick-based), cursor-aware input/backspace, and bordered rendering.
+3. **ExtensionSelector** - Generic option selector with up/down navigation, selected option tracking, optional countdown timeout, and bordered rendering with navigation hints.
+4. **CustomEditor** - Custom editor buffer for extension-registered shortcuts with action registration (deduplication), autocomplete state tracking, empty detection (for Ctrl+D), and simple text rendering.
+5. **CustomMessageComponent** - Custom message type rendering with styled type label (`[customType]`), expand/collapse toggle, purple background styling, line preview in collapsed mode, and multi-line display in expanded mode.
+6. **ProviderLoginDialog** - Provider login dialog with state machine phases (Init → ShowAuth → ManualInput → Prompt → Info → Waiting → Completed), cursor-aware input for ManualInput/Prompt phases, progress message appending, success/failure completion, and styled rendering per phase.
+7. **OAuthSelector** - OAuth provider selection list with login/logout modes, fuzzy search filtering, scroll offset management, config status indicators (Configured/PartiallyConfigured/Unconfigured), and empty state messages.
+8. **BorderedLoader** - Loading indicator with border, spinner animation (⠋⠙⠹⠸ cycle), cancellable mode with cancel hint, and non-cancellable mode.
+
+### Supporting types added:
+- `LoginDialogPhase` enum with 7 variants for login flow state machine
+- `AuthProviderInfo` struct with id, name, and `AuthType` (OAuth/ApiKey)
+- `ProviderConfigStatus` enum (Unconfigured/Configured/PartiallyConfigured)
+- `OAuthSelectorMode` enum (Login/Logout)
+
+### Tests added:
+- 38 new tests covering all 8 extension components.
+
 ## Files Changed
-- `oxi-cli/src/tui_components.rs` — Added ~700 lines of interactive component implementations plus ~250 lines of tests.
+- `oxi-cli/src/tui_components.rs` — Added ~700 lines of interactive component implementations plus ~250 lines of tests (selectors task). Added ~500 lines of extension component implementations plus ~350 lines of tests (extension task).
 
 ## Notes
-- All 5 components follow the same pattern: struct with state fields and `render()` returning `Vec<String>`.
+- All 8 extension components follow the same pattern: struct with state fields and `render() -> Vec<String>`.
 - `cargo check -p oxi-cli` passes cleanly.
-- All 22 new tests pass (7 pre-existing test failures are unrelated to this change).
+- All 38 new extension component tests pass.
