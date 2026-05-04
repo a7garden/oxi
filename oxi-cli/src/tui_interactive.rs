@@ -327,6 +327,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                             &mut running,
                                         );
                                         input.clear();
+                                        needs_render = true;
                                         if handled {
                                             continue;
                                         }
@@ -345,6 +346,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                     // Start agent streaming
                                     chat_view.start_streaming();
                                     is_agent_busy = true;
+                                    needs_render = true;
 
                                     // Send prompt to agent worker
                                     let _ = prompt_tx.send(value).await;
@@ -367,15 +369,18 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                 });
                                 is_agent_busy = false;
                                 chat_view.finish_streaming_error("Interrupted");
+                                needs_render = true;
                             } else {
                                 running = false;
                             }
                         }
                         crossterm::event::KeyCode::PageUp => {
                             chat_view.scroll_up(10);
+                            needs_render = true;
                         }
                         crossterm::event::KeyCode::PageDown => {
                             chat_view.scroll_down(10);
+                            needs_render = true;
                         }
                         _ => {
                             // Forward keyboard events to input component
