@@ -932,8 +932,8 @@ fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOpt
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            let content_str = match content {
-                crate::session::ContentValue::String(s) => s.as_str(),
+            let content_str: String = match content {
+                crate::session::ContentValue::String(s) => s.clone(),
                 crate::session::ContentValue::Blocks(blocks) => {
                     let mut text = String::new();
                     for block in blocks {
@@ -942,10 +942,10 @@ fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOpt
                             text.push('\n');
                         }
                     }
-                    text.trim()
+                    text.trim().to_string()
                 }
             };
-            html.push_str(&render_markdown_with_options(content_str, options));
+            html.push_str(&render_markdown_with_options(&content_str, options));
             html.push_str("</div>\n</div>\n");
         }
         AgentMessage::Assistant { content, .. } => {
@@ -964,16 +964,16 @@ fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOpt
                 }
             }
 
-            let text_str = text_content.trim();
+            let text_str = text_content.trim().to_string();
 
 
             // Try tool rendering first for assistant messages
-            if let Some(tool_html) = render_tool_blocks(text_str, options.include_tool_calls) {
+            if let Some(tool_html) = render_tool_blocks(&text_str, options.include_tool_calls) {
                 html.push_str(&tool_html);
                 // Also render the non-tool content via markdown
-                html.push_str(&render_markdown_with_options(text_str, options));
+                html.push_str(&render_markdown_with_options(&text_str, options));
             } else {
-                html.push_str(&render_markdown_with_options(text_str, options));
+                html.push_str(&render_markdown_with_options(&text_str, options));
             }
 
             html.push_str("</div>\n</div>\n");
@@ -984,8 +984,8 @@ fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOpt
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            let content_str = match content {
-                crate::session::ContentValue::String(s) => s.as_str(),
+            let content_str: String = match content {
+                crate::session::ContentValue::String(s) => s.clone(),
                 crate::session::ContentValue::Blocks(blocks) => {
                     let mut text = String::new();
                     for block in blocks {
@@ -994,10 +994,10 @@ fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOpt
                             text.push('\n');
                         }
                     }
-                    text.trim()
+                    text.trim().to_string()
                 }
             };
-            html.push_str(&render_markdown_with_options(content_str, options));
+            html.push_str(&render_markdown_with_options(&content_str, options));
             html.push_str("</div>\n</div>\n");
         }
         // Handle other message types (render them as system for simplicity)
