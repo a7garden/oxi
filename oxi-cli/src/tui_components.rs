@@ -4942,6 +4942,19 @@ impl ThinkingLevel {
         ]
     }
 
+    /// Get the rank of this thinking level (0=Off, 5=XHigh).
+    /// Used for model-specific level clamping.
+    pub fn rank(&self) -> usize {
+        match self {
+            ThinkingLevel::Off => 0,
+            ThinkingLevel::Minimal => 1,
+            ThinkingLevel::Low => 2,
+            ThinkingLevel::Medium => 3,
+            ThinkingLevel::High => 4,
+            ThinkingLevel::XHigh => 5,
+        }
+    }
+
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "off" => Some(ThinkingLevel::Off),
@@ -5020,6 +5033,555 @@ pub fn fuzzy_filter_indices(items: &[impl AsRef<str>], query: &str) -> Vec<usize
         .collect();
     scored.sort_by(|a, b| b.1.cmp(&a.1));
     scored.into_iter().map(|(i, _)| i).collect()
+}
+
+// ── 0. SessionSelectorSearch ─────────────────────────────────────────────────
+
+/// A parsed search query with token extraction.
+///
+/// Supports:
+/// - Plain tokens (fuzzy matched)
+/// - Quoted phrases (exact substring matched)
+/// - Regex mode: `re:<pattern>`
+#[derive(Debug, Clone)]
+pub struct ParsedSearchQuery {
+    /// Query mode: tokens or regex.
+    pub mode: SearchQueryMode,
+    /// Extracted tokens.
+    pub tokens: Vec<SearchToken>,
+    /// Compiled regex (only in regex mode).
+    pub regex: Option<regex::Regex>,
+    /// Error message if parsing failed.
+    pub error: Option<String>,
+}
+
+/// Search query mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchQueryMode {
+    Tokens,
+    Regex,
+}
+
+/// A single search token.
+#[derive(Debug, Clone)]
+pub struct SearchToken {
+    /// Token kind: fuzzy or phrase.
+    pub kind: SearchTokenKind,
+    /// Token value.
+    pub value: String,
+}
+
+/// Search token kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchTokenKind {
+    Fuzzy,
+    Phrase,
+}
+
+/// Result of matching a session against a parsed query.
+#[derive(Debug, Clone)]
+pub struct SessionMatchResult {
+    /// Whether the session matches.
+    pub matches: bool,
+    /// Match score (lower is better).
+    pub score: usize,
+}
+
+/// Parse a search query string into tokens.
+///
+/// Supports:
+/// - `re:<pattern>` for regex mode
+/// - Quoted phrases: `"exact phrase"`
+/// - Plain words (fuzzy matched)
+/// - Mixed: `foo "node cve" bar`
+pub fn parse_search_query(query: &str) -> ParsedSearchQuery {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return ParsedSearchQuery {
+            mode: SearchQueryMode::Tokens,
+            tokens: Vec::new(),
+            regex: None,
+            error: None,
+        };
+    }
+
+    // Regex mode: re:<pattern>
+    if let Some(pattern) = trimmed.strip_prefix("re:") {
+        let pattern = pattern.trim();
+        if pattern.is_empty() {
+            return ParsedSearchQuery {
+                mode: SearchQueryMode::Regex,
+                tokens: Vec::new(),
+                regex: None,
+                error: Some("Empty regex".to_string()),
+            };
+        }
+        match regex::Regex::new(&format!("(?i){}", pattern)) {
+            Ok(re) => ParsedSearchQuery {
+                mode: SearchQueryMode::Regex,
+                tokens: Vec::new(),
+                regex: Some(re),
+                error: None,
+            },
+            Err(e) => ParsedSearchQuery {
+                mode: SearchQueryMode::Regex,
+                tokens: Vec::new(),
+                regex: None,
+                error: Some(e.to_string()),
+            },
+        }
+    } else {
+        // Token mode with quote support
+        let mut tokens = Vec::new();
+        let mut buf = String::new();
+        let mut in_quote = false;
+        let mut had_unclosed_quote = false;
+
+        let flush = |buf: &mut String, kind: SearchTokenKind, tokens: &mut Vec<SearchToken>| {
+            let v = buf.trim().to_string();
+            buf.clear();
+            if !v.is_empty() {
+                tokens.push(SearchToken { kind, value: v });
+            }
+        };
+
+        for ch in trimmed.chars() {
+            if ch == '"' {
+                if in_quote {
+                    flush(&mut buf, SearchTokenKind::Phrase, &mut tokens);
+                    in_quote = false;
+                } else {
+                    flush(&mut buf, SearchTokenKind::Fuzzy, &mut tokens);
+                    in_quote = true;
+                }
+                continue;
+            }
+
+            if !in_quote && ch.is_whitespace() {
+                flush(&mut buf, SearchTokenKind::Fuzzy, &mut tokens);
+                continue;
+            }
+
+            buf.push(ch);
+        }
+
+        if in_quote {
+            had_unclosed_quote = true;
+        }
+
+        // If quotes were unbalanced, fall back to plain whitespace tokenization
+        if had_unclosed_quote {
+            tokens = trimmed
+                .split_whitespace()
+                .filter(|t| !t.is_empty())
+                .map(|t| SearchToken {
+                    kind: SearchTokenKind::Fuzzy,
+                    value: t.to_string(),
+                })
+                .collect();
+        } else {
+            flush(&mut buf, if in_quote { SearchTokenKind::Phrase } else { SearchTokenKind::Fuzzy }, &mut tokens);
+        }
+
+        ParsedSearchQuery {
+            mode: SearchQueryMode::Tokens,
+            tokens,
+            regex: None,
+            error: None,
+        }
+    }
+}
+
+/// Match an enhanced session info against a parsed query.
+///
+/// The session's ID, name, label, working directory, and model are used as search text.
+pub fn match_session(session: &EnhancedSessionInfo, parsed: &ParsedSearchQuery) -> SessionMatchResult {
+    let text = format!(
+        "{} {} {} {}",
+        session.id,
+        session.name,
+        session.label.as_deref().unwrap_or(""),
+        session.working_dir.as_deref().unwrap_or("")
+    );
+
+    if parsed.mode == SearchQueryMode::Regex {
+        if let Some(ref re) = parsed.regex {
+            if let Some(mat) = re.find(&text) {
+                return SessionMatchResult {
+                    matches: true,
+                    score: mat.start(),
+                };
+            }
+        }
+        return SessionMatchResult {
+            matches: false,
+            score: 0,
+        };
+    }
+
+    if parsed.tokens.is_empty() {
+        return SessionMatchResult {
+            matches: true,
+            score: 0,
+        };
+    }
+
+    let mut total_score = 0usize;
+    let text_lower = text.to_lowercase().replace(char::is_whitespace, " ");
+
+    for token in &parsed.tokens {
+        if token.kind == SearchTokenKind::Phrase {
+            let phrase = token.value.to_lowercase().replace(char::is_whitespace, " ");
+            if phrase.is_empty() {
+                continue;
+            }
+            if let Some(idx) = text_lower.find(&phrase) {
+                total_score += idx;
+            } else {
+                return SessionMatchResult {
+                    matches: false,
+                    score: 0,
+                };
+            }
+        } else {
+            // Fuzzy match
+            match fuzzy_score(&token.value, &text) {
+                Some(score) => {
+                    // Invert: fuzzy_score returns higher=better, we want lower=better
+                    total_score += 10000 - score.min(9999);
+                }
+                None => {
+                    return SessionMatchResult {
+                        matches: false,
+                        score: 0,
+                    };
+                }
+            }
+        }
+    }
+
+    SessionMatchResult {
+        matches: true,
+        score: total_score,
+    }
+}
+
+/// Filter and sort sessions using a parsed query.
+///
+/// Supports three sort modes:
+/// - `Recent`: Keep input order (filter only)
+/// - `Fuzzy` / `Threaded`: Sort by match score, tie-break by modified date
+pub fn filter_and_sort_sessions(
+    sessions: &[EnhancedSessionInfo],
+    query: &str,
+    sort_mode: SessionSortMode,
+    name_filter: SessionNameFilter,
+) -> Vec<EnhancedSessionInfo> {
+    let name_filtered: Vec<_> = if name_filter == SessionNameFilter::Named {
+        sessions.iter().filter(|s| !s.name.is_empty()).cloned().collect()
+    } else {
+        sessions.to_vec()
+    };
+
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return name_filtered;
+    }
+
+    let parsed = parse_search_query(query);
+    if parsed.error.is_some() {
+        return Vec::new();
+    }
+
+    if sort_mode == SessionSortMode::Recent {
+        return name_filtered
+            .into_iter()
+            .filter(|s| match_session(s, &parsed).matches)
+            .collect();
+    }
+
+    // Relevance mode: sort by score
+    let mut scored: Vec<(EnhancedSessionInfo, usize)> = name_filtered
+        .into_iter()
+        .filter_map(|s| {
+            let result = match_session(&s, &parsed);
+            if result.matches {
+                Some((s, result.score))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    scored.sort_by(|a, b| {
+        a.1.cmp(&b.1).then_with(|| {
+            // Tie-break by updated_at descending
+            b.0.updated_at.cmp(&a.0.updated_at)
+        })
+    });
+
+    scored.into_iter().map(|(s, _)| s).collect()
+}
+
+/// Session selector with advanced search (parsed query, fuzzy + phrase + regex).
+///
+/// This is the search/filter component from `session-selector-search.ts`, providing:
+/// - Token-based search with quoted phrase support
+/// - Regex mode via `re:<pattern>`
+/// - Fuzzy matching on session names and IDs
+/// - Sort by relevance or recency
+/// - Name filtering (all / named-only)
+#[derive(Debug, Clone)]
+pub struct SessionSelectorSearch {
+    /// All sessions.
+    pub sessions: Vec<EnhancedSessionInfo>,
+    /// Filtered sessions after search.
+    pub filtered_sessions: Vec<EnhancedSessionInfo>,
+    /// Current raw search query.
+    pub query: String,
+    /// Parsed search query.
+    pub parsed_query: ParsedSearchQuery,
+    /// Sort mode.
+    pub sort_mode: SessionSortMode,
+    /// Name filter mode.
+    pub name_filter: SessionNameFilter,
+    /// Selected index in filtered_sessions.
+    pub selected_index: usize,
+    /// Scroll offset for rendering.
+    pub scroll_offset: usize,
+    /// Maximum visible items.
+    pub max_visible: usize,
+}
+
+impl SessionSelectorSearch {
+    /// Create a new session selector search.
+    pub fn new(sessions: Vec<EnhancedSessionInfo>) -> Self {
+        let filtered_sessions = sessions.clone();
+        Self {
+            sessions,
+            filtered_sessions,
+            query: String::new(),
+            parsed_query: parse_search_query(""),
+            sort_mode: SessionSortMode::Recent,
+            name_filter: SessionNameFilter::All,
+            selected_index: 0,
+            scroll_offset: 0,
+            max_visible: 15,
+        }
+    }
+
+    /// Set the search query and re-filter.
+    pub fn set_query(&mut self, query: String) {
+        self.query = query;
+        self.parsed_query = parse_search_query(&self.query);
+        self.apply_filter();
+    }
+
+    /// Set the sort mode.
+    pub fn set_sort_mode(&mut self, mode: SessionSortMode) {
+        self.sort_mode = mode;
+        self.apply_filter();
+    }
+
+    /// Set the name filter.
+    pub fn set_name_filter(&mut self, filter: SessionNameFilter) {
+        self.name_filter = filter;
+        self.apply_filter();
+    }
+
+    /// Toggle name filter.
+    pub fn toggle_name_filter(&mut self) {
+        self.name_filter = match self.name_filter {
+            SessionNameFilter::All => SessionNameFilter::Named,
+            SessionNameFilter::Named => SessionNameFilter::All,
+        };
+        self.apply_filter();
+    }
+
+    /// Toggle sort mode.
+    pub fn toggle_sort(&mut self) {
+        self.sort_mode = match self.sort_mode {
+            SessionSortMode::Recent => SessionSortMode::Threaded,
+            SessionSortMode::Threaded => SessionSortMode::Fuzzy,
+            SessionSortMode::Fuzzy => SessionSortMode::Recent,
+        };
+        self.apply_filter();
+    }
+
+    fn apply_filter(&mut self) {
+        self.filtered_sessions = filter_and_sort_sessions(
+            &self.sessions,
+            &self.query,
+            self.sort_mode,
+            self.name_filter,
+        );
+        self.selected_index = self
+            .selected_index
+            .min(self.filtered_sessions.len().saturating_sub(1));
+    }
+
+    /// Move selection up.
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+            self.adjust_scroll();
+        }
+    }
+
+    /// Move selection down.
+    pub fn move_down(&mut self) {
+        let max = self.filtered_sessions.len().saturating_sub(1);
+        if self.selected_index < max {
+            self.selected_index += 1;
+            self.adjust_scroll();
+        }
+    }
+
+    fn adjust_scroll(&mut self) {
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        } else if self.selected_index >= self.scroll_offset + self.max_visible {
+            self.scroll_offset = self.selected_index - self.max_visible + 1;
+        }
+    }
+
+    /// Get the currently selected session.
+    pub fn selected(&self) -> Option<&EnhancedSessionInfo> {
+        self.filtered_sessions.get(self.selected_index)
+    }
+
+    /// Get the parse error, if any.
+    pub fn parse_error(&self) -> Option<&str> {
+        self.parsed_query.error.as_deref()
+    }
+
+    /// Render the session selector search as a vector of lines.
+    pub fn render(&self, width: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+
+        // Header
+        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines.push("\x1b[1mSearch Sessions\x1b[0m".to_string());
+
+        // Query display with token highlighting
+        if !self.query.is_empty() {
+            if let Some(ref err) = self.parsed_query.error {
+                lines.push(format!("\x1b[31mQuery error: {}\x1b[0m", err));
+            } else {
+                let mode_label = match self.parsed_query.mode {
+                    SearchQueryMode::Tokens => "tokens",
+                    SearchQueryMode::Regex => "regex",
+                };
+                let token_count = self.parsed_query.tokens.len();
+                lines.push(format!(
+                    "\x1b[2m[{}]\x1b[0m {}",
+                    mode_label,
+                    if token_count > 0 {
+                        self.parsed_query
+                            .tokens
+                            .iter()
+                            .map(|t| match t.kind {
+                                SearchTokenKind::Fuzzy => format!("{}", t.value),
+                                SearchTokenKind::Phrase => format!("\"\x1b[33m{}\x1b[0m\"", t.value),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    } else {
+                        self.query.clone()
+                    }
+                ));
+            }
+        }
+
+        // Sort and filter indicators
+        lines.push(format!(
+            "\x1b[2mSort: \x1b[36m{}\x1b[0m \x1b[2mFilter: \x1b[36m{}\x1b[0m",
+            self.sort_mode.label(),
+            match self.name_filter {
+                SessionNameFilter::All => "All",
+                SessionNameFilter::Named => "Named",
+            }
+        ));
+
+        lines.push(String::new());
+
+        if self.filtered_sessions.is_empty() {
+            lines.push("\x1b[2m  No matching sessions\x1b[0m".to_string());
+            lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+            return lines;
+        }
+
+        // Render visible sessions
+        let visible: Vec<_> = self
+            .filtered_sessions
+            .iter()
+            .skip(self.scroll_offset)
+            .take(self.max_visible)
+            .collect();
+
+        for (i, session) in visible.iter().enumerate() {
+            let real_idx = self.scroll_offset + i;
+            let is_selected = real_idx == self.selected_index;
+
+            let marker = if is_selected {
+                "\x1b[36m▶\x1b[0m"
+            } else {
+                " "
+            };
+
+            let branch = if session.parent_id.is_some() {
+                "├─ "
+            } else {
+                "  "
+            };
+
+            let name = if session.name.is_empty() {
+                &session.id[..8.min(session.id.len())]
+            } else {
+                &session.name
+            };
+
+            let label = session
+                .label
+                .as_ref()
+                .map(|l| format!(" \x1b[33m[{}]\x1b[0m", l))
+                .unwrap_or_default();
+
+            let time = format_relative_time(
+                session.updated_at.as_ref().unwrap_or(&session.created_at),
+            );
+
+            let line = format!(
+                "{} {}{:<30} {} msg:{}",
+                marker,
+                branch,
+                name,
+                time,
+                session.message_count,
+            );
+            let mut line = truncate_str(&line, width);
+            line.push_str(&label);
+            lines.push(line);
+        }
+
+        // Scroll indicator
+        if self.filtered_sessions.len() > self.max_visible {
+            lines.push(format!(
+                "\x1b[2m  ({}/{})\x1b[0m",
+                self.selected_index + 1,
+                self.filtered_sessions.len()
+            ));
+        }
+
+        lines.push(String::new());
+        lines.push(
+            "\x1b[2mType to search · \"quotes\" for phrases · re: for regex\x1b[0m".to_string(),
+        );
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+
+        lines
+    }
 }
 
 // ── 1. ConfigSelector ─────────────────────────────────────────────────────────
@@ -6224,6 +6786,90 @@ impl SettingsSelector {
             vec!["true".to_string(), "false".to_string()],
         ));
 
+        items.push(SettingItem::new(
+            "collapse-changelog",
+            "Collapse changelog",
+            "Show condensed changelog after updates",
+            if config.collapse_changelog {
+                "true"
+            } else {
+                "false"
+            },
+            vec!["true".to_string(), "false".to_string()],
+        ));
+
+        items.push(SettingItem::new(
+            "install-telemetry",
+            "Install telemetry",
+            "Send an anonymous version/update ping after changelog-detected updates",
+            if config.enable_install_telemetry {
+                "true"
+            } else {
+                "false"
+            },
+            vec!["true".to_string(), "false".to_string()],
+        ));
+
+        items.push(SettingItem::new(
+            "show-hardware-cursor",
+            "Show hardware cursor",
+            "Show the terminal cursor while still positioning it for IME support",
+            if config.show_hardware_cursor {
+                "true"
+            } else {
+                "false"
+            },
+            vec!["true".to_string(), "false".to_string()],
+        ));
+
+        items.push(SettingItem::new(
+            "editor-padding",
+            "Editor padding",
+            "Horizontal padding for input editor (0-3)",
+            config.editor_padding_x.to_string(),
+            vec!["0".to_string(), "1".to_string(), "2".to_string(), "3".to_string()],
+        ));
+
+        items.push(SettingItem::new(
+            "autocomplete-max-visible",
+            "Autocomplete max items",
+            "Max visible items in autocomplete dropdown (3-20)",
+            config.autocomplete_max_visible.to_string(),
+            vec!["3".to_string(), "5".to_string(), "7".to_string(), "10".to_string(), "15".to_string(), "20".to_string()],
+        ));
+
+        items.push(SettingItem::new(
+            "clear-on-shrink",
+            "Clear on shrink",
+            "Clear empty rows when content shrinks (may cause flicker)",
+            if config.clear_on_shrink {
+                "true"
+            } else {
+                "false"
+            },
+            vec!["true".to_string(), "false".to_string()],
+        ));
+
+        items.push(SettingItem::new(
+            "terminal-progress",
+            "Terminal progress",
+            "Show OSC 9;4 progress indicators in the terminal tab bar",
+            if config.show_terminal_progress {
+                "true"
+            } else {
+                "false"
+            },
+            vec!["true".to_string(), "false".to_string()],
+        ));
+
+        items.push(SettingItem::new(
+            "image-width-cells",
+            "Image width",
+            "Preferred inline image width in terminal cells",
+            config.image_width_cells.to_string(),
+            vec!["60".to_string(), "80".to_string(), "120".to_string()],
+        ));
+
         Self::new(items)
     }
 
@@ -6294,6 +6940,56 @@ impl SettingsSelector {
             }
         }
         None
+    }
+
+    /// Set the value of a setting by ID.
+    pub fn set_value(&mut self, id: &str, value: String) -> bool {
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
+            if item.values.contains(&value) {
+                item.current_value = value;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Validate the current settings.
+    /// Returns a list of (setting_id, error_message) for invalid values.
+    pub fn validate(&self) -> Vec<(String, String)> {
+        let mut errors = Vec::new();
+        for item in &self.items {
+            match item.id.as_str() {
+                "editor-padding" => {
+                    if let Ok(v) = item.current_value.parse::<usize>() {
+                        if v > 3 {
+                            errors.push((item.id.clone(), "Editor padding must be 0-3".to_string()));
+                        }
+                    } else {
+                        errors.push((item.id.clone(), "Editor padding must be a number".to_string()));
+                    }
+                }
+                "autocomplete-max-visible" => {
+                    if let Ok(v) = item.current_value.parse::<usize>() {
+                        if v < 3 || v > 20 {
+                            errors.push((item.id.clone(), "Autocomplete max visible must be 3-20".to_string()));
+                        }
+                    } else {
+                        errors.push((item.id.clone(), "Autocomplete max visible must be a number".to_string()));
+                    }
+                }
+                "image-width-cells" => {
+                    if let Ok(v) = item.current_value.parse::<usize>() {
+                        if v < 20 || v > 300 {
+                            errors.push((item.id.clone(), "Image width must be 20-300".to_string()));
+                        }
+                    } else {
+                        errors.push((item.id.clone(), "Image width must be a number".to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        errors
     }
 
     /// Render the settings selector.
@@ -6549,6 +7245,10 @@ pub struct ThinkingSelector {
     pub selected_index: usize,
     /// Current active thinking level.
     pub current_level: ThinkingLevel,
+    /// Maximum thinking level allowed for the current model.
+    pub model_max_level: Option<ThinkingLevel>,
+    /// Model name for display.
+    pub model_name: Option<String>,
 }
 
 impl ThinkingSelector {
@@ -6562,12 +7262,50 @@ impl ThinkingSelector {
             levels: available_levels,
             selected_index,
             current_level,
+            model_max_level: None,
+            model_name: None,
         }
     }
 
     /// Create with all levels.
     pub fn new_with_all_levels(current_level: ThinkingLevel) -> Self {
         Self::new(current_level, ThinkingLevel::all())
+    }
+
+    /// Create with model-specific level clamping.
+    ///
+    /// If the model has a maximum thinking level, levels above it are
+    /// shown but dimmed and marked as unavailable.
+    pub fn new_with_model_clamp(
+        current_level: ThinkingLevel,
+        available_levels: Vec<ThinkingLevel>,
+        model_max_level: ThinkingLevel,
+        model_name: String,
+    ) -> Self {
+        // Clamp current level to model max
+        let clamped_level = Self::clamp_level(current_level, model_max_level);
+        let selected_index = available_levels
+            .iter()
+            .position(|l| l == &clamped_level)
+            .unwrap_or(0);
+        Self {
+            levels: available_levels,
+            selected_index,
+            current_level: clamped_level,
+            model_max_level: Some(model_max_level),
+            model_name: Some(model_name),
+        }
+    }
+
+    /// Clamp a thinking level to a maximum level.
+    ///
+    /// Off < Minimal < Low < Medium < High < XHigh
+    pub fn clamp_level(level: ThinkingLevel, max: ThinkingLevel) -> ThinkingLevel {
+        if level.rank() > max.rank() {
+            max
+        } else {
+            level
+        }
     }
 
     /// Move selection up.
@@ -6590,6 +7328,14 @@ impl ThinkingSelector {
         self.levels.get(self.selected_index).copied()
     }
 
+    /// Check if a level is available for the current model.
+    pub fn is_level_available(&self, level: ThinkingLevel) -> bool {
+        match self.model_max_level {
+            Some(max) => level.rank() <= max.rank(),
+            None => true,
+        }
+    }
+
     /// Render the thinking selector.
     pub fn render(&self, width: usize) -> Vec<String> {
         let mut lines = Vec::new();
@@ -6598,11 +7344,18 @@ impl ThinkingSelector {
             .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
         lines.push("\x1b[1mThinking Level\x1b[0m".to_string());
         lines.push("\x1b[2mSelect reasoning depth for thinking-capable models\x1b[0m".to_string());
+
+        // Show model name if set
+        if let Some(ref model) = self.model_name {
+            lines.push(format!("\x1b[2mModel: \x1b[36m{}\x1b[0m", model));
+        }
+
         lines.push(String::new());
 
         for (i, level) in self.levels.iter().enumerate() {
             let is_selected = i == self.selected_index;
             let is_current = *level == self.current_level;
+            let is_available = self.is_level_available(*level);
 
             let prefix = if is_selected {
                 "\x1b[36m→ \x1b[0m"
@@ -6610,20 +7363,33 @@ impl ThinkingSelector {
                 "  "
             };
 
-            let name = if is_selected {
+            let name = if !is_available {
+                format!("\x1b[2m{}\x1b[0m", level.as_str())
+            } else if is_selected {
                 format!("\x1b[36m{}\x1b[0m", level.as_str())
             } else {
                 level.as_str().to_string()
             };
 
-            let desc = format!("\x1b[2m{}\x1b[0m", level.description());
+            let desc = if !is_available {
+                format!("\x1b[31m(not supported)\x1b[0m")
+            } else {
+                format!("\x1b[2m{}\x1b[0m", level.description())
+            };
+
             let current_badge = if is_current {
                 " \x1b[32m✓\x1b[0m".to_string()
             } else {
                 String::new()
             };
 
-            let line = format!("{}{:<12} {}{}", prefix, name, desc, current_badge);
+            let clamped_marker = if is_current && *level != self.current_level {
+                " \x1b[33m(clamped)\x1b[0m".to_string()
+            } else {
+                String::new()
+            };
+
+            let line = format!("{}{:<12} {}{}{}", prefix, name, desc, current_badge, clamped_marker);
             lines.push(truncate_str(&line, width));
         }
 

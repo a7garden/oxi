@@ -1103,9 +1103,34 @@ impl AgentSession {
 
     /// Process a batch of agent events for session concerns.
     async fn process_events(&self, events: Vec<AgentEvent>) -> Result<()> {
-        // Forward all events to listeners
+        // Forward all events to listeners and extensions
         for event in &events {
             self.emit(SessionEvent::Agent(event.clone()));
+
+            // Forward to extension runner for typed hooks
+            let guard = self.extension_runner.read();
+            if let Some(runner) = guard.as_ref() {
+                runner.registry().emit_event(event);
+
+                // Dispatch typed hooks
+                match event {
+                    AgentEvent::ToolCall { tool_call } => {
+                        runner.emit_tool_call(&tool_call.name, &tool_call.arguments);
+                    }
+                    AgentEvent::ToolExecutionStart { tool_name, args, .. } => {
+                        runner.emit_tool_call(tool_name, args);
+                    }
+                    AgentEvent::ToolExecutionEnd { tool_name, result, .. } => {
+                        let tool_result = oxi_agent::AgentToolResult::success(&result.content);
+                        runner.emit_tool_result_event(tool_name, &tool_result);
+                    }
+                    AgentEvent::Error { message } => {
+                        let err = anyhow::anyhow!("{}", message);
+                        runner.registry().emit_error(&err);
+                    }
+                    _ => {}
+                }
+            }
         }
 
         // Check for retryable errors
@@ -1194,23 +1219,231 @@ impl AgentSession {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Extension integration hooks
+    // Extension integration
     // ══════════════════════════════════════════════════════════════════
 
-    /// Forward an agent event to extension system.
+    /// Set or replace the [`ExtensionRunner`] used by this session.
     ///
-    /// Extensions can register hooks for various event types. This method
-    /// is called during event processing to allow extensions to react.
+    /// This is called by the runtime after CLI parsing to inject the
+    /// extension runner. If a runner was already set, its extensions are
+    /// unloaded first via `emit_session_shutdown`.
+    pub fn set_extension_runner(&self, runner: ExtensionRunner) {
+        // If there is an existing runner, notify its extensions about shutdown
+        {
+            let guard = self.extension_runner.read();
+            if let Some(existing) = guard.as_ref() {
+                let session_id = self.session_id();
+                let shutdown_event = SessionShutdownEvent {
+                    reason: SessionShutdownReason::Reload,
+                    target_session_file: None,
+                };
+                existing.emit_session_shutdown_event(&shutdown_event);
+                existing.registry().emit_session_end(&session_id);
+                existing.registry().emit_unload();
+            }
+        }
+
+        // Install the new runner
+        {
+            let mut guard = self.extension_runner.write();
+            *guard = Some(runner);
+        }
+
+        // Fire lifecycle hooks on the new runner
+        {
+            let guard = self.extension_runner.read();
+            if let Some(runner) = guard.as_ref() {
+                let ctx = self.build_extension_context();
+                runner.registry().emit_load(&ctx);
+                let session_id = self.session_id();
+                runner.registry().emit_session_start(&session_id);
+            }
+        }
+
+        tracing::debug!("ExtensionRunner installed into AgentSession");
+    }
+
+    /// Get a reference to the current [`ExtensionRunner`], if any.
+    pub fn extension_runner(&self) -> parking_lot::RwLockReadGuard<'_, Option<ExtensionRunner>> {
+        self.extension_runner.read()
+    }
+
+    /// Take the [`ExtensionRunner`] out of this session, shutting down extensions first.
+    pub fn take_extension_runner(&self) -> Option<ExtensionRunner> {
+        {
+            let guard = self.extension_runner.read();
+            if let Some(runner) = guard.as_ref() {
+                let session_id = self.session_id();
+                let shutdown_event = SessionShutdownEvent {
+                    reason: SessionShutdownReason::Quit,
+                    target_session_file: None,
+                };
+                runner.emit_session_shutdown_event(&shutdown_event);
+                runner.registry().emit_session_end(&session_id);
+                runner.registry().emit_unload();
+            }
+        }
+        self.extension_runner.write().take()
+    }
+
+    /// Build an [`ExtensionContext`] for the current session state.
+    ///
+    /// The context provides extensions with access to settings, tools,
+    /// session state, and other host capabilities.
+    pub fn build_extension_context(&self) -> ExtensionContext {
+        ExtensionContextBuilder::new(PathBuf::from(&self.cwd))
+            .settings(Arc::clone(&self.settings))
+            .session_id(self.session_id())
+            .build()
+    }
+
+    /// Forward an agent event to the extension system.
+    ///
+    /// If an [`ExtensionRunner`] is installed, the event is broadcast to
+    /// all enabled extensions. The event is *also* emitted as a
+    /// [`SessionEvent::Agent`] to regular session listeners.
     pub fn forward_event_to_extensions(&self, event: &AgentEvent) {
-        // Extension system integration is delegated to the ExtensionRunner.
-        // For now, we emit the event to session listeners.
+        // Always emit to session listeners
         self.emit(SessionEvent::Agent(event.clone()));
+
+        // Forward to extension runner if installed
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            runner.registry().emit_event(event);
+
+            // Dispatch to typed hooks based on event variant
+            match event {
+                AgentEvent::ToolCall { tool_call } => {
+                    runner.emit_tool_call(&tool_call.name, &tool_call.arguments);
+                }
+                AgentEvent::ToolExecutionStart { tool_name, args, .. } => {
+                    runner.emit_tool_call(tool_name, args);
+                }
+                AgentEvent::ToolExecutionEnd { tool_name, result, .. } => {
+                    let tool_result = oxi_agent::AgentToolResult::success(&result.content);
+                    runner.emit_tool_result_event(tool_name, &tool_result);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Check if extension handlers are registered for an event type.
-    pub fn has_extension_handlers(&self, _event_type: &str) -> bool {
-        // Will be wired to ExtensionRunner when extensions are fully integrated
-        false
+    pub fn has_extension_handlers(&self, event_type: &str) -> bool {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            runner.has_handlers(event_type)
+        } else {
+            false
+        }
+    }
+
+    /// Collect all tools contributed by extensions.
+    ///
+    /// Returns an empty vector when no extension runner is installed.
+    pub fn extension_tools(&self) -> Vec<Arc<dyn oxi_agent::AgentTool>> {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            runner.all_tools()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Collect all commands contributed by extensions.
+    ///
+    /// Returns an empty vector when no extension runner is installed.
+    pub fn extension_commands(&self) -> Vec<crate::extensions::Command> {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            runner.all_commands()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Emit a before-tool-call event to extensions.
+    ///
+    /// Extensions may block the tool call by returning an error.
+    /// Returns the [`ToolCallEmitResult`] with blocking status.
+    pub fn emit_before_tool_call(
+        &self,
+        tool_name: &str,
+        params: &serde_json::Value,
+    ) -> crate::extensions::ToolCallEmitResult {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            runner.emit_tool_call(tool_name, params)
+        } else {
+            crate::extensions::ToolCallEmitResult::default()
+        }
+    }
+
+    /// Emit an after-tool-result event to extensions.
+    ///
+    /// Extensions can inspect and log tool results.
+    pub fn emit_after_tool_result(
+        &self,
+        tool_name: &str,
+        result: &oxi_agent::AgentToolResult,
+    ) -> crate::extensions::ToolResultEmitResult {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            runner.emit_tool_result_event(tool_name, result)
+        } else {
+            crate::extensions::ToolResultEmitResult::default()
+        }
+    }
+
+    /// Process user input through extension hooks before agent processing.
+    ///
+    /// Extensions may transform or handle the input. Returns the final
+    /// [`InputEventResult`](ExtInputEventResult).
+    pub fn process_input_through_extensions(
+        &self,
+        text: &str,
+        source: InputSource,
+    ) -> ExtInputEventResult {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            let ext_source = match source {
+                InputSource::Interactive => crate::extensions::InputSource::Interactive,
+                InputSource::Extension => crate::extensions::InputSource::Extension,
+                InputSource::Rpc => crate::extensions::InputSource::Rpc,
+            };
+            let mut event = ExtInputEvent {
+                text: text.to_string(),
+                source: ext_source,
+            };
+            runner.emit_input_event(&mut event)
+        } else {
+            ExtInputEventResult::Continue
+        }
+    }
+
+    /// Notify extensions that a message was sent.
+    pub fn notify_extensions_message_sent(&self, msg: &str) {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            runner.registry().emit_message_sent(msg);
+        }
+    }
+
+    /// Notify extensions that a message was received.
+    pub fn notify_extensions_message_received(&self, msg: &str) {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            runner.registry().emit_message_received(msg);
+        }
+    }
+
+    /// Notify extensions that settings have changed.
+    pub fn notify_extensions_settings_changed(&self) {
+        let guard = self.extension_runner.read();
+        if let Some(runner) = guard.as_ref() {
+            let settings = self.settings.read().clone();
+            runner.registry().emit_settings_changed(&settings);
+        }
     }
 }
 

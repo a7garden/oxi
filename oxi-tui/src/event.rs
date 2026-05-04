@@ -88,7 +88,7 @@ impl KeyModifiers {
 }
 
 /// Keyboard event with key code and modifiers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyEvent {
     pub code: KeyCode,
     pub modifiers: KeyModifiers,
@@ -144,7 +144,7 @@ pub enum MouseEventKind {
 }
 
 /// Mouse event with position and button.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MouseEvent {
     pub kind: MouseEventKind,
     pub button: MouseButton,
@@ -160,7 +160,7 @@ pub struct ResizeEvent {
 }
 
 /// Unified input event type.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// Keyboard input
     Key(KeyEvent),

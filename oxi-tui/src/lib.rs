@@ -9,6 +9,7 @@ pub mod components;
 pub mod event;
 pub mod fuzzy;
 pub mod keybindings;
+pub mod keys;
 pub mod kill_ring;
 pub mod overlay;
 pub mod renderer;
