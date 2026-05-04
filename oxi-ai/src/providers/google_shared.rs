@@ -98,6 +98,10 @@ pub fn requires_tool_call_id(model_id: &str) -> bool {
 }
 
 /// Normalize a tool call ID for models that require alphanumeric-only IDs.
+<<<<<<< HEAD
+=======
+#[allow(dead_code)]
+>>>>>>> d024c16
 pub fn normalize_tool_call_id(model_id: &str, id: &str) -> String {
     if !requires_tool_call_id(model_id) {
         return id.to_string();
@@ -151,7 +155,11 @@ pub fn convert_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderErr
                 }));
             }
             crate::Message::ToolResult(t) => {
+<<<<<<< HEAD
                 // Extract text and image content
+=======
+                // Extract text content
+>>>>>>> d024c16
                 let text_parts: Vec<&str> = t
                     .content
                     .iter()
@@ -161,7 +169,11 @@ pub fn convert_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderErr
 
                 let has_text = !text_result.is_empty();
 
+<<<<<<< HEAD
                 // Build function response
+=======
+                // Build function response value
+>>>>>>> d024c16
                 let response_value = if has_text {
                     text_result.clone()
                 } else {
@@ -336,8 +348,11 @@ pub fn blocks_to_google_parts(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>,
             }
             ContentBlock::Thinking(th) => {
                 // Google/Vertex supports thinking blocks via `thought: true` marker.
+<<<<<<< HEAD
                 // For multi-turn context, send as a thinking part so the API
                 // can handle it correctly.
+=======
+>>>>>>> d024c16
                 parts.push(serde_json::json!({
                     "thought": true,
                     "text": th.thinking,
@@ -619,17 +634,26 @@ mod tests {
 
     #[test]
     fn test_normalize_tool_call_id() {
+<<<<<<< HEAD
         // Non-qualifying model: pass through
+=======
+>>>>>>> d024c16
         assert_eq!(
             normalize_tool_call_id("gemini-2.5-pro", "call_abc/123"),
             "call_abc/123"
         );
+<<<<<<< HEAD
         // Qualifying model: sanitize
+=======
+>>>>>>> d024c16
         assert_eq!(
             normalize_tool_call_id("claude-3-opus", "call_abc/123"),
             "call_abc_123"
         );
+<<<<<<< HEAD
         // Qualifying model: truncate to 64 chars
+=======
+>>>>>>> d024c16
         let long_id = "a".repeat(100);
         let result = normalize_tool_call_id("claude-3-opus", &long_id);
         assert_eq!(result.len(), 64);
@@ -655,7 +679,10 @@ mod tests {
         ));
 
         let contents = convert_messages(&ctx).unwrap();
+<<<<<<< HEAD
         // Empty assistant message → skipped
+=======
+>>>>>>> d024c16
         assert_eq!(contents.len(), 1);
     }
 
@@ -683,11 +710,14 @@ mod tests {
         let declarations = result[0]["functionDeclarations"].as_array().unwrap();
         assert_eq!(declarations.len(), 1);
         assert_eq!(declarations[0]["name"], "get_weather");
+<<<<<<< HEAD
         assert_eq!(
             declarations[0]["description"],
             "Get weather for a location"
         );
         // Default mode: parametersJsonSchema
+=======
+>>>>>>> d024c16
         assert!(declarations[0].get("parametersJsonSchema").is_some());
     }
 
@@ -705,7 +735,10 @@ mod tests {
 
         let result = convert_tools(&tools, true).unwrap();
         let decl = &result[0]["functionDeclarations"][0];
+<<<<<<< HEAD
         // Should use `parameters` and strip `$schema`
+=======
+>>>>>>> d024c16
         assert!(decl.get("parameters").is_some());
         assert!(decl.get("parametersJsonSchema").is_none());
         let params = &decl["parameters"];
@@ -773,7 +806,11 @@ mod tests {
             Some(0.7),
             Some(1024),
         );
+<<<<<<< HEAD
         assert_eq!(body["contents"], contents);
+=======
+        assert_eq!(&body["contents"], &serde_json::json!(contents));
+>>>>>>> d024c16
         assert_eq!(body["generationConfig"]["temperature"], 0.7);
         assert_eq!(body["generationConfig"]["maxOutputTokens"], 1024);
         assert_eq!(

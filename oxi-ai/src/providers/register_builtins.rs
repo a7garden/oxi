@@ -249,9 +249,15 @@ pub fn get_builtin_providers() -> &'static [BuiltinProvider] {
 
 /// Look up a built-in provider by name or alias.
 pub fn get_builtin_provider(name: &str) -> Option<&'static BuiltinProvider> {
+<<<<<<< HEAD
     BUILTIN_PROVIDERS.iter().find(|p| {
         p.name == name || p.aliases.contains(&name)
     })
+=======
+    BUILTIN_PROVIDERS
+        .iter()
+        .find(|p| p.name == name || p.aliases.contains(&name))
+>>>>>>> d024c16
 }
 
 /// Get the environment variable name for a provider.
@@ -379,6 +385,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn test_all_providers_have_api() {
         for p in get_builtin_providers() {
             // Just check that the api field is populated (not a "default" value)
@@ -387,12 +394,17 @@ mod tests {
     }
 
     #[test]
+=======
+>>>>>>> d024c16
     fn test_get_all_provider_names() {
         let names = get_all_provider_names();
         assert!(names.contains(&"openai"));
         assert!(names.contains(&"anthropic"));
         assert!(names.contains(&"bedrock"));
+<<<<<<< HEAD
         // Should have at least 15 providers
+=======
+>>>>>>> d024c16
         assert!(names.len() >= 15);
     }
 

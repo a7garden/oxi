@@ -9,6 +9,9 @@ pub struct TextContent {
     #[serde(rename = "type")]
     pub content_type: TextContentType,
     pub text: String,
+    /// Optional signature carrying provider-specific metadata (e.g. OpenAI message ID, phase).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_signature: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -22,6 +25,17 @@ impl TextContent {
         Self {
             content_type: TextContentType::Text,
             text: text.into(),
+            text_signature: None,
+        }
+    }
+
+    /// Create a text content block with a signature.
+    #[allow(dead_code)]
+    pub fn with_signature(text: impl Into<String>, signature: impl Into<String>) -> Self {
+        Self {
+            content_type: TextContentType::Text,
+            text: text.into(),
+            text_signature: Some(signature.into()),
         }
     }
 }

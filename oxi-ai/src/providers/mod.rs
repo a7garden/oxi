@@ -9,11 +9,14 @@ mod codex;
 mod deepseek;
 mod event;
 mod google;
+mod google_shared;
 mod mistral;
 mod openai;
 mod openai_completions;
 mod openai_responses;
+pub mod openai_responses_shared;
 mod options;
+pub mod register_builtins;
 mod trait_def;
 mod vertex;
 
