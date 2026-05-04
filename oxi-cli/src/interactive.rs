@@ -83,7 +83,7 @@
 //! - MCP tool integration in UI
 //! - Telemetry / version check notifications
 
-use crate::{InteractiveSession, ChatMessage};
+use crate::InteractiveSession;
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use oxi_agent::{Agent, AgentEvent};
@@ -99,17 +99,14 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
+#[allow(unused_imports)]
+use crate::ChatMessage;
 
 use crate::clipboard_image;
 use crate::image_convert::convert_to_png;
 use crate::image_resize::{resize_image, ResizeOptions, ResizedImage};
 use crate::file_processor::FileProcessorOptions;
 use crate::rpc_mode::{PasteHandler, PasteState};
-
-// Module imports for slash command handlers
-use crate::auth_storage;
-use crate::changelog;
-use crate::oauth_server;
 
 // ── Image Paste Handler ───────────────────────────────────────────────────
 
@@ -931,22 +928,9 @@ impl SlashCommand {
             "/undo" => SlashCommand::Undo,
             "/redo" => SlashCommand::Redo,
             "/branch" | "/fork" | "/tree" => SlashCommand::Branch,
-            "/session" | "/resume" => SlashCommand::Session,
+            "/session" => SlashCommand::Session,
             "/export" => SlashCommand::Export {
                 path: arg.map(|s| s.to_string()),
-            },
-            "/settings" => SlashCommand::Settings,
-            "/help" | "/?" => SlashCommand::Help,
-            "/quit" | "/exit" | "/q" => SlashCommand::Quit,
-            "/name" => SlashCommand::Name {
-                name: arg.unwrap_or("").to_string(),
-            },
-            "/copy" => SlashCommand::Copy,
-            "/new" => SlashCommand::New,
-            "/reload" => SlashCommand::Reload,
-            "/clone" => SlashCommand::Clone,
-            "/resume" => SlashCommand::Resume {
-                session_id: arg.map(|s| s.to_string()),
             },
             "/import" => SlashCommand::Import {
                 path: arg.unwrap_or_default().to_string(),
