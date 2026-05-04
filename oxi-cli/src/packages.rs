@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-use std::io::Write;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -585,8 +585,8 @@ pub fn git_clone(repo_url: &str, target_dir: &Path, ref_: Option<&str>) -> Resul
     fs::create_dir_all(target_dir)
         .with_context(|| format!("Failed to create {}", target_dir.display()))?;
 
-    let mut args = vec!["clone", repo_url];
-    args.push(&target_dir.to_string_lossy());
+    let target_str = target_dir.to_string_lossy().to_string();
+    let args = vec!["clone", repo_url, &target_str];
 
     git_command_silent(&args, None)?;
 
@@ -1098,23 +1098,41 @@ impl PackageManager {
         scope: SourceScope,
     ) -> Result<PackageManifest> {
         let parsed = ParsedSource::parse(source);
-        self.with_progress(ProgressAction::Install, source, &format!("Installing {}...", source), || {
-            match &parsed {
-                ParsedSource::Npm { .. } => {
-                    // For sync context, we use the npm pack approach
-                    let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(self.install_npm_async(source, scope))
-                }
-                ParsedSource::Git { repo, ref_, .. } => {
-                    self.install_git_sync(source, repo, ref_.as_deref(), scope)
-                }
-                ParsedSource::Local { path } => self.install_local(path),
-                ParsedSource::Url { url } => {
-                    let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(self.install_url(url, scope))
-                }
+        self.emit_progress(ProgressEvent {
+            event_type: ProgressEventType::Start,
+            action: ProgressAction::Install,
+            source: source.to_string(),
+            message: Some(format!("Installing {}...", source)),
+        });
+        let result = match &parsed {
+            ParsedSource::Npm { .. } => {
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(self.install_npm_async(source, scope))
             }
-        })
+            ParsedSource::Git { repo, ref_, .. } => {
+                self.install_git_sync(source, repo, ref_.as_deref(), scope)
+            }
+            ParsedSource::Local { path } => self.install_local(path),
+            ParsedSource::Url { url } => {
+                let rt = tokio::runtime::Runtime::new()?;
+                rt.block_on(self.install_url(url, scope))
+            }
+        };
+        match &result {
+            Ok(_) => self.emit_progress(ProgressEvent {
+                event_type: ProgressEventType::Complete,
+                action: ProgressAction::Install,
+                source: source.to_string(),
+                message: None,
+            }),
+            Err(e) => self.emit_progress(ProgressEvent {
+                event_type: ProgressEventType::Error,
+                action: ProgressAction::Install,
+                source: source.to_string(),
+                message: Some(e.to_string()),
+            }),
+        }
+        result
     }
 
     /// Async install from npm using registry
@@ -1130,7 +1148,7 @@ impl PackageManager {
         };
 
         // Resolve version
-        let version = if pinned {
+        let _version = if pinned {
             // Extract version from spec
             let (_, ver) = parse_npm_spec(&spec);
             if ver {
@@ -1493,49 +1511,69 @@ impl PackageManager {
     /// Uninstall a package from a specific source
     pub fn uninstall_from_source(&mut self, source: &str, scope: SourceScope) -> Result<()> {
         let parsed = ParsedSource::parse(source);
-        self.with_progress(ProgressAction::Remove, source, &format!("Removing {}...", source), || {
-            match &parsed {
-                ParsedSource::Npm { name, .. } => {
-                    let dest = self.npm_install_path(name, scope);
-                    if dest.exists() {
-                        fs::remove_dir_all(&dest)?;
-                    }
-                    self.installed.remove(name);
-                    self.lockfile.remove(name);
-                    let _ = self.save_lockfile();
-                    Ok(())
+        self.emit_progress(ProgressEvent {
+            event_type: ProgressEventType::Start,
+            action: ProgressAction::Remove,
+            source: source.to_string(),
+            message: Some(format!("Removing {}...", source)),
+        });
+        let result = self.do_uninstall_from_source(&parsed, scope);
+        match &result {
+            Ok(_) => self.emit_progress(ProgressEvent {
+                event_type: ProgressEventType::Complete,
+                action: ProgressAction::Remove,
+                source: source.to_string(),
+                message: None,
+            }),
+            Err(e) => self.emit_progress(ProgressEvent {
+                event_type: ProgressEventType::Error,
+                action: ProgressAction::Remove,
+                source: source.to_string(),
+                message: Some(e.to_string()),
+            }),
+        }
+        result
+    }
+
+    fn do_uninstall_from_source(&mut self, parsed: &ParsedSource, scope: SourceScope) -> Result<()> {
+        match parsed {
+            ParsedSource::Npm { name, .. } => {
+                let dest = self.npm_install_path(name, scope);
+                if dest.exists() {
+                    fs::remove_dir_all(&dest)?;
                 }
-                ParsedSource::Git { host, path, .. } => {
-                    let dest = self.git_install_path(host, path, scope);
-                    if dest.exists() {
-                        fs::remove_dir_all(&dest)?;
-                        prune_empty_parents(&dest, &self.packages_dir);
-                    }
-                    // Remove from installed by finding matching entry
-                    self.installed.retain(|_, m| {
-                        let parsed_m = ParsedSource::parse(m.name.as_str());
-                        parsed_m.identity() != parsed.identity()
-                    });
-                    // Remove from lockfile
-                    self.lockfile.packages.retain(|_, entry| {
-                        let parsed_e = ParsedSource::parse(&entry.source);
-                        parsed_e.identity() != parsed.identity()
-                    });
-                    let _ = self.save_lockfile();
-                    Ok(())
-                }
-                ParsedSource::Local { .. } => Ok(()),
-                ParsedSource::Url { .. } => {
-                    // Find the entry in lockfile
-                    let identity = parsed.identity();
-                    self.lockfile.packages.retain(|_, e| {
-                        ParsedSource::parse(&e.source).identity() != identity
-                    });
-                    let _ = self.save_lockfile();
-                    Ok(())
-                }
+                self.installed.remove(name);
+                self.lockfile.remove(name);
+                let _ = self.save_lockfile();
+                Ok(())
             }
-        })
+            ParsedSource::Git { host, path, .. } => {
+                let dest = self.git_install_path(host, path, scope);
+                if dest.exists() {
+                    fs::remove_dir_all(&dest)?;
+                    prune_empty_parents(&dest, &self.packages_dir);
+                }
+                self.installed.retain(|_, m| {
+                    let parsed_m = ParsedSource::parse(m.name.as_str());
+                    parsed_m.identity() != parsed.identity()
+                });
+                self.lockfile.packages.retain(|_, entry| {
+                    let parsed_e = ParsedSource::parse(&entry.source);
+                    parsed_e.identity() != parsed.identity()
+                });
+                let _ = self.save_lockfile();
+                Ok(())
+            }
+            ParsedSource::Local { .. } => Ok(()),
+            ParsedSource::Url { .. } => {
+                let identity = parsed.identity();
+                self.lockfile.packages.retain(|_, e| {
+                    ParsedSource::parse(&e.source).identity() != identity
+                });
+                let _ = self.save_lockfile();
+                Ok(())
+            }
+        }
     }
 
     // ── Update ────────────────────────────────────────────────────────
@@ -1551,12 +1589,28 @@ impl PackageManager {
             let parsed = ParsedSource::parse(&entry.source);
             return match &parsed {
                 ParsedSource::Npm { spec, .. } => {
-                    self.with_progress(
-                        ProgressAction::Update,
-                        &entry.source,
-                        &format!("Updating {}...", name),
-                        || self.install_npm_pack(spec, entry.scope),
-                    )
+                    self.emit_progress(ProgressEvent {
+                        event_type: ProgressEventType::Start,
+                        action: ProgressAction::Update,
+                        source: entry.source.clone(),
+                        message: Some(format!("Updating {}...", name)),
+                    });
+                    let result = self.install_npm_pack(spec, entry.scope);
+                    match &result {
+                        Ok(_) => self.emit_progress(ProgressEvent {
+                            event_type: ProgressEventType::Complete,
+                            action: ProgressAction::Update,
+                            source: entry.source.clone(),
+                            message: None,
+                        }),
+                        Err(e) => self.emit_progress(ProgressEvent {
+                            event_type: ProgressEventType::Error,
+                            action: ProgressAction::Update,
+                            source: entry.source.clone(),
+                            message: Some(e.to_string()),
+                        }),
+                    }
+                    result
                 }
                 ParsedSource::Git { repo, ref_, .. } => {
                     let target_dir = match &parsed {
@@ -1616,7 +1670,7 @@ impl PackageManager {
     pub async fn check_for_updates(&self) -> Vec<PackageUpdateInfo> {
         let mut updates = Vec::new();
 
-        for (name, lock_entry) in &self.lockfile.packages {
+        for (_name, lock_entry) in &self.lockfile.packages {
             let parsed = ParsedSource::parse(&lock_entry.source);
 
             match &parsed {
@@ -1678,7 +1732,7 @@ impl PackageManager {
     /// List configured packages with metadata
     pub fn list_configured(&self) -> Vec<ConfiguredPackage> {
         let mut result = Vec::new();
-        for (name, manifest) in &self.installed {
+        for (name, _manifest) in &self.installed {
             let installed_path = self.get_install_dir(name);
             let lock_entry = self.lockfile.get(name);
             result.push(ConfiguredPackage {
@@ -1840,7 +1894,7 @@ impl PackageManager {
         let mut prompts = Vec::new();
         let mut themes = Vec::new();
 
-        for (name, manifest) in &self.installed {
+        for (name, _manifest) in &self.installed {
             let install_dir = self.pkg_install_dir(name);
             if !install_dir.exists() {
                 continue;
@@ -1853,80 +1907,31 @@ impl PackageManager {
                 base_dir: Some(install_dir.clone()),
             };
 
-            let has_explicit = !manifest.extensions.is_empty()
-                || !manifest.skills.is_empty()
-                || !manifest.prompts.is_empty()
-                || !manifest.themes.is_empty();
-
-            if has_explicit {
-                for ext in &manifest.extensions {
-                    let path = install_dir.join(ext);
-                    if path.exists() {
-                        extensions.push(ResolvedResource {
-                            path,
+            // Use discover_resources logic
+            if let Ok(resources) = self.discover_resources(name) {
+                for r in resources {
+                    match r.kind {
+                        ResourceKind::Extension => extensions.push(ResolvedResource {
+                            path: r.path,
                             enabled: true,
                             metadata: metadata.clone(),
-                        });
-                    }
-                }
-                for skill in &manifest.skills {
-                    let path = install_dir.join(skill);
-                    if path.exists() {
-                        skills.push(ResolvedResource {
-                            path,
+                        }),
+                        ResourceKind::Skill => skills.push(ResolvedResource {
+                            path: r.path,
                             enabled: true,
                             metadata: metadata.clone(),
-                        });
-                    }
-                }
-                for prompt in &manifest.prompts {
-                    let path = install_dir.join(prompt);
-                    if path.exists() {
-                        prompts.push(ResolvedResource {
-                            path,
+                        }),
+                        ResourceKind::Prompt => prompts.push(ResolvedResource {
+                            path: r.path,
                             enabled: true,
                             metadata: metadata.clone(),
-                        });
-                    }
-                }
-                for theme in &manifest.themes {
-                    let path = install_dir.join(theme);
-                    if path.exists() {
-                        themes.push(ResolvedResource {
-                            path,
+                        }),
+                        ResourceKind::Theme => themes.push(ResolvedResource {
+                            path: r.path,
                             enabled: true,
                             metadata: metadata.clone(),
-                        });
+                        }),
                     }
-                }
-            } else {
-                for resource in discover_extensions(&install_dir) {
-                    extensions.push(ResolvedResource {
-                        path: resource.path,
-                        enabled: true,
-                        metadata: metadata.clone(),
-                    });
-                }
-                for resource in discover_skills(&install_dir) {
-                    skills.push(ResolvedResource {
-                        path: resource.path,
-                        enabled: true,
-                        metadata: metadata.clone(),
-                    });
-                }
-                for resource in discover_prompts(&install_dir) {
-                    prompts.push(ResolvedResource {
-                        path: resource.path,
-                        enabled: true,
-                        metadata: metadata.clone(),
-                    });
-                }
-                for resource in discover_themes(&install_dir) {
-                    themes.push(ResolvedResource {
-                        path: resource.path,
-                        enabled: true,
-                        metadata: metadata.clone(),
-                    });
                 }
             }
         }

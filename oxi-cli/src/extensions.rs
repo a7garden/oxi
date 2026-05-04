@@ -2544,7 +2544,7 @@ impl ExtensionRunner {
                     Err(e) => {
                         result.cancelled = true;
                         result.cancelled_by = Some(name.clone());
-                        result.errors.push((name.clone(), e));
+                        result.errors.push((name.clone(), e.to_string()));
                         // Stop processing on first cancellation
                         return result;
                     }
@@ -2572,7 +2572,7 @@ impl ExtensionRunner {
                     Err(e) => {
                         result.cancelled = true;
                         result.cancelled_by = Some(name.clone());
-                        result.errors.push((name.clone(), e));
+                        result.errors.push((name.clone(), e.to_string()));
                         return result;
                     }
                 }
@@ -2599,7 +2599,7 @@ impl ExtensionRunner {
                     Err(e) => {
                         result.cancelled = true;
                         result.cancelled_by = Some(name.clone());
-                        result.errors.push((name.clone(), e));
+                        result.errors.push((name.clone(), e.to_string()));
                         return result;
                     }
                 }
@@ -2626,7 +2626,7 @@ impl ExtensionRunner {
                     Err(e) => {
                         result.cancelled = true;
                         result.cancelled_by = Some(name.clone());
-                        result.errors.push((name.clone(), e));
+                        result.errors.push((name.clone(), e.to_string()));
                         return result;
                     }
                 }
@@ -3767,5 +3767,431 @@ mod tests {
         assert!(calls.contains(&"on_message_received(response)".to_string()));
         assert!(calls.contains(&"on_session_end(s1)".to_string()));
         assert!(calls.contains(&"on_unload".to_string()));
+    }
+
+    // ── ExtensionRunner tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_runner_new() {
+        let runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        assert!(runner.is_empty());
+        assert_eq!(runner.len(), 0);
+        assert!(runner.names().collect::<Vec<_>>().is_empty());
+    }
+
+    #[test]
+    fn test_runner_default() {
+        let runner = ExtensionRunner::default();
+        assert!(runner.is_empty());
+    }
+
+    #[test]
+    fn test_runner_register_in_memory() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("test-ext"));
+        runner.registry_mut().register(ext.clone());
+
+        // Manually set state since we bypassed load_extension
+        runner.states.insert("test-ext".to_string(), ExtensionState::Active);
+        runner.order.push("test-ext".to_string());
+
+        assert_eq!(runner.len(), 1);
+        assert!(!runner.is_empty());
+        assert_eq!(runner.state("test-ext"), ExtensionState::Active);
+    }
+
+    #[test]
+    fn test_runner_state_tracking() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        assert_eq!(runner.state("ext1"), ExtensionState::Active);
+        assert_eq!(runner.state("nonexistent"), ExtensionState::Unloaded);
+
+        let ctx = ExtensionContextBuilder::new(PathBuf::from("/tmp")).build();
+        runner.disable("ext1").unwrap();
+        assert_eq!(runner.state("ext1"), ExtensionState::Disabled);
+
+        runner.enable("ext1", &ctx).unwrap();
+        assert_eq!(runner.state("ext1"), ExtensionState::Active);
+    }
+
+    #[test]
+    fn test_runner_enable_disable() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        // Initially enabled
+        assert!(runner.is_enabled("ext1"));
+
+        // Disable
+        runner.disable("ext1").unwrap();
+        assert!(!runner.is_enabled("ext1"));
+        assert_eq!(runner.state("ext1"), ExtensionState::Disabled);
+
+        // Disable again is no-op
+        runner.disable("ext1").unwrap();
+
+        // Enable
+        let ctx = ExtensionContextBuilder::new(PathBuf::from("/tmp")).build();
+        runner.enable("ext1", &ctx).unwrap();
+        assert!(runner.is_enabled("ext1"));
+        assert_eq!(runner.state("ext1"), ExtensionState::Active);
+    }
+
+    #[test]
+    fn test_runner_enable_disable_not_found() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        assert!(runner.disable("nonexistent").is_err());
+        let ctx = ExtensionContextBuilder::new(PathBuf::from("/tmp")).build();
+        assert!(runner.enable("nonexistent", &ctx).is_err());
+    }
+
+    #[test]
+    fn test_runner_unload() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        assert!(runner.unload_extension("ext1"));
+        assert_eq!(runner.state("ext1"), ExtensionState::Unloaded);
+        assert!(runner.is_empty());
+        assert!(!runner.unload_extension("ext1")); // already unloaded
+    }
+
+    #[test]
+    fn test_runner_has_handlers() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        assert!(!runner.has_handlers("any_event"));
+        assert!(!runner.has_enabled_extensions());
+
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        assert!(runner.has_handlers("any_event"));
+        assert!(runner.has_enabled_extensions());
+    }
+
+    #[test]
+    fn test_runner_extension_order() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+
+        // Register 3 extensions
+        for name in &["ext1", "ext2", "ext3"] {
+            let ext = Arc::new(RecordingExtension::new(name.to_string()));
+            runner.registry_mut().register(ext.clone());
+            runner.states.insert(name.to_string(), ExtensionState::Active);
+            runner.order.push(name.to_string());
+        }
+
+        assert_eq!(runner.extension_order(), &["ext1", "ext2", "ext3"]);
+        assert_eq!(runner.len(), 3);
+    }
+
+    #[test]
+    fn test_runner_error_listener() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let received = Arc::new(std::sync::Mutex::new(Vec::<ExtensionErrorRecord>::new()));
+        let received_clone = received.clone();
+
+        let _handle = runner.on_error(move |record| {
+            received_clone.lock().unwrap().push(record.clone());
+        });
+
+        // Emit an error
+        runner.emit_error_record(ExtensionErrorRecord::new("test-ext", "test_event", "test error"));
+
+        let records = received.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].extension_name, "test-ext");
+        assert_eq!(records[0].event, "test_event");
+    }
+
+    #[test]
+    fn test_runner_emit_tool_call() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        let result = runner.emit_tool_call("bash", &serde_json::json!({"cmd": "ls"}));
+        assert!(!result.blocked);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_runner_emit_tool_result() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        let tool_result = AgentToolResult::success("done");
+        let result = runner.emit_tool_result_event("bash", &tool_result);
+        assert!(result.output.is_none());
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_runner_emit_input_continue() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        let mut event = InputEvent {
+            text: "hello".to_string(),
+            source: InputSource::Interactive,
+        };
+        let result = runner.emit_input_event(&mut event);
+        assert!(matches!(result, InputEventResult::Continue));
+    }
+
+    #[test]
+    fn test_runner_emit_session_before_switch() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        let event = SessionBeforeSwitchEvent {
+            reason: SessionSwitchReason::New,
+            target_session_file: None,
+        };
+        let result = runner.emit_session_before_switch_event(&event);
+        assert!(!result.cancelled);
+        assert!(result.cancelled_by.is_none());
+    }
+
+    #[test]
+    fn test_runner_emit_session_shutdown() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(RecordingExtension::new("ext1"));
+        runner.registry_mut().register(ext.clone());
+        runner.states.insert("ext1".to_string(), ExtensionState::Active);
+        runner.order.push("ext1".to_string());
+
+        let event = SessionShutdownEvent {
+            reason: SessionShutdownReason::Quit,
+            target_session_file: None,
+        };
+        let handled = runner.emit_session_shutdown_event(&event);
+        assert!(handled);
+    }
+
+    #[test]
+    fn test_runner_emit_session_shutdown_no_extensions() {
+        let runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let event = SessionShutdownEvent {
+            reason: SessionShutdownReason::Quit,
+            target_session_file: None,
+        };
+        let handled = runner.emit_session_shutdown_event(&event);
+        assert!(!handled);
+    }
+
+    #[test]
+    fn test_runner_load_extension_missing_file() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ctx = ExtensionContextBuilder::new(PathBuf::from("/tmp")).build();
+        let result = runner.load_extension(Path::new("/nonexistent.so"), &ctx);
+        assert!(result.is_err());
+        assert!(!runner.load_errors().is_empty());
+    }
+
+    #[test]
+    fn test_runner_load_extension_wrong_format() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ctx = ExtensionContextBuilder::new(PathBuf::from("/tmp")).build();
+
+        // Create a temp file with wrong extension
+        let dir = tempfile::tempdir().unwrap();
+        let bad_file = dir.path().join("bad.txt");
+        std::fs::write(&bad_file, "not a library").unwrap();
+
+        let result = runner.load_extension(&bad_file, &ctx);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_runner_all_tools_in_order() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+
+        // NoopExtension has no tools
+        for name in &["ext1", "ext2"] {
+            let ext = Arc::new(NoopExtension);
+            // Give unique names by wrapping
+            runner.registry_mut().register(ext.clone());
+            runner.states.insert(name.to_string(), ExtensionState::Active);
+            runner.order.push(name.to_string());
+        }
+
+        let tools = runner.all_tools();
+        assert!(tools.is_empty()); // NoopExtension provides no tools
+    }
+
+    #[test]
+    fn test_runner_delegation() {
+        let mut runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let ext = Arc::new(NoopExtension);
+        runner.registry_mut().register(ext);
+        runner.states.insert("noop".to_string(), ExtensionState::Active);
+        runner.order.push("noop".to_string());
+
+        assert!(runner.get("noop").is_some());
+        assert!(runner.get("missing").is_none());
+        assert_eq!(runner.names().collect::<Vec<_>>(), vec!["noop"]);
+    }
+
+    #[test]
+    fn test_runner_debug() {
+        let runner = ExtensionRunner::new(PathBuf::from("/tmp"));
+        let debug = format!("{:?}", runner);
+        assert!(debug.contains("ExtensionRunner"));
+        assert!(debug.contains("/tmp"));
+    }
+
+    // ── Extension Discovery tests ─────────────────────────────────────
+
+    #[test]
+    fn test_discover_extensions_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = discover_extensions_in_dir(dir.path());
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_discover_extensions_nonexistent_dir() {
+        let paths = discover_extensions_in_dir(Path::new("/nonexistent"));
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_discover_extensions_finds_shared_lib() {
+        let dir = tempfile::tempdir().unwrap();
+        // Create a fake .so file
+        let ext = if cfg!(target_os = "macos") {
+            "dylib"
+        } else if cfg!(target_os = "windows") {
+            "dll"
+        } else {
+            "so"
+        };
+        let lib_file = dir.path().join(format!("my_ext.{}", ext));
+        std::fs::write(&lib_file, b"fake lib").unwrap();
+
+        let paths = discover_extensions_in_dir(dir.path());
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], lib_file);
+    }
+
+    #[test]
+    fn test_discover_extensions_ignores_non_libs() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("readme.txt"), b"text").unwrap();
+        std::fs::write(dir.path().join("script.sh"), b"bash").unwrap();
+
+        let paths = discover_extensions_in_dir(dir.path());
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_discover_extensions_subdirectory_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let subdir = dir.path().join("my_ext");
+        std::fs::create_dir(&subdir).unwrap();
+
+        let ext = if cfg!(target_os = "macos") {
+            "dylib"
+        } else if cfg!(target_os = "windows") {
+            "dll"
+        } else {
+            "so"
+        };
+        let index_lib = subdir.join(format!("index.{}", ext));
+        std::fs::write(&index_lib, b"fake lib").unwrap();
+
+        let paths = discover_extensions_in_dir(dir.path());
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], index_lib);
+    }
+
+    #[test]
+    fn test_discover_extensions_from_cwd() {
+        let cwd = tempfile::tempdir().unwrap();
+        let ext_dir = cwd.path().join(".oxi").join("extensions");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+
+        let ext = if cfg!(target_os = "macos") {
+            "dylib"
+        } else if cfg!(target_os = "windows") {
+            "dll"
+        } else {
+            "so"
+        };
+        std::fs::write(ext_dir.join(format!("test.{}", ext)), b"fake").unwrap();
+
+        let paths = discover_extensions(cwd.path(), &[]);
+        assert_eq!(paths.len(), 1);
+    }
+
+    // ── ExtensionState tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_extension_state_display() {
+        assert_eq!(ExtensionState::Pending.to_string(), "pending");
+        assert_eq!(ExtensionState::Active.to_string(), "active");
+        assert_eq!(ExtensionState::Disabled.to_string(), "disabled");
+        assert_eq!(ExtensionState::Failed.to_string(), "failed");
+        assert_eq!(ExtensionState::Unloaded.to_string(), "unloaded");
+    }
+
+    #[test]
+    fn test_extension_state_serialization() {
+        let state = ExtensionState::Active;
+        let json = serde_json::to_string(&state).unwrap();
+        assert_eq!(json, "\"active\"");
+        let parsed: ExtensionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, ExtensionState::Active);
+    }
+
+    // ── Emit Result type tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_tool_call_emit_result_default() {
+        let result = ToolCallEmitResult::default();
+        assert!(!result.blocked);
+        assert!(result.block_reason.is_none());
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_tool_result_emit_result_default() {
+        let result = ToolResultEmitResult::default();
+        assert!(result.output.is_none());
+        assert!(result.success.is_none());
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_session_before_emit_result_default() {
+        let result = SessionBeforeEmitResult::default();
+        assert!(!result.cancelled);
+        assert!(result.cancelled_by.is_none());
+        assert!(result.errors.is_empty());
     }
 }
