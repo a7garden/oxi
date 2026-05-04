@@ -84,6 +84,8 @@
 //! - Telemetry / version check notifications
 
 use crate::InteractiveSession;
+use crate::agent_session::AgentSession;
+use crate::session::SessionManager;
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use oxi_agent::{Agent, AgentEvent};
@@ -1802,14 +1804,29 @@ impl SlashCommand {
 /// Run the full interactive mode loop.
 pub async fn run_interactive(app: crate::App) -> Result<()> {
     let theme = Theme::dark();
-    let agent: Arc<Agent> = app.agent();
+
+    // ── Build AgentSession ──────────────────────────────────────────
+    let settings = app.settings().clone();
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string());
+
+    let sm = SessionManager::create(&cwd, None);
+
+    let agent_session = AgentSession::new(
+        app.agent(),
+        settings,
+        sm,
+        cwd,
+    );
 
     // Channels
     let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
     let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
 
     // Agent worker thread (non-Send futures need a LocalSet)
-    let agent_for_thread: Arc<Agent> = Arc::clone(&agent);
+    let agent_for_thread = agent_session.agent_ref();
+    let ui_tx_for_thread = ui_tx.clone();
     let agent_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
