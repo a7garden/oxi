@@ -603,7 +603,7 @@ pub fn transform_messages_for_model(messages: &[Message], model: &Model) -> Vec<
     let mut existing_tool_result_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
-    let mut insert_synthetic_results =
+    let insert_synthetic_results =
         |pending: &mut Vec<ToolCall>,
          existing: &mut std::collections::HashSet<String>,
          out: &mut Vec<Message>| {

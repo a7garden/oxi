@@ -50,8 +50,8 @@ pub use compaction::{
 
 // Cross-provider message transformation
 pub use transform::{
-    anthropic_to_google, anthropic_to_openai, google_to_openai, openai_to_anthropic,
-    transform_messages, TransformOptions,
+    anthropic_to_google, anthropic_to_openai, google_to_openai, normalize_tool_call_id,
+    openai_to_anthropic, transform_messages, transform_messages_for_model, TransformOptions,
 };
 
 // Model registry (runtime mutable registry)
