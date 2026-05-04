@@ -3,6 +3,52 @@
 ## Status
 Completed
 
+## Latest: Keybindings System Port (2026-05-04)
+
+Ported pi-mono's configurable keybindings system to Rust with full TOML support,
+hierarchical config loading, conflict detection, and comprehensive key parsing.
+
+### Files Changed
+
+- **`oxi-cli/src/keybindings.rs`** — Major rewrite (~780 lines)
+  - Added `KeySequence` struct with full parsing for ctrl/alt/shift modifiers
+  - Added `KeyName` enum with F1-F12, Insert, and all special keys
+  - Added `KeySequence::to_notation()` for round-trip display
+  - Added `KeybindingsFile` / `TomlKeyBinding` for TOML config deserialization
+  - Added `KeybindingsManager` with hierarchical config:
+    - Built-in defaults → User overrides (`~/.oxi/keybindings.toml`) → Project overrides (`.oxi/keybindings.toml`)
+  - Added `KeybindingConflict` detection (same key bound to multiple actions)
+  - Added `default_keybindings()` with complete pi-mono parity (50+ bindings)
+  - Added JSON fallback loading for legacy `keybindings.json` files
+  - Added `export_to_toml()` for saving user overrides
+  - Added `default_keybindings_path()` and `project_keybindings_path()` helpers
+  - Preserved all legacy API (`parse_key_sequence`, `format_key_sequence`, `UserKeybindings`)
+  - 50 unit tests covering parsing, conflicts, TOML/JSON loading, round-trips, overrides
+
+- **`oxi-tui/src/keybindings.rs`** — Enhanced (~320 lines)
+  - Extended `KeyName` with `Insert` variant
+  - Extended F-key parsing from f1-f9 to f1-f12
+  - Added `KeySequence::to_notation()` for string display
+  - Added case-insensitive key matching (e.g. `ctrl+C`)
+  - Added `insert`/`ins` alias support
+  - Added 11 unit tests (f-keys, insert, round-trip, registry)
+
+- **`oxi-tui/src/lib.rs`** — Added `pub mod keybindings;` to include the previously orphaned module
+
+### Test Results
+- `cargo test -p oxi-cli keybindings` → 50/50 passed
+- `cargo test -p oxi-tui keybindings` → 11/11 passed
+- `cargo check -p oxi-cli` → 0 errors, 0 warnings from keybindings code
+- `cargo check -p oxi-tui` → 0 errors, 0 warnings
+
+### Key TOML Config Format
+```toml
+[keybindings]
+"app.interrupt" = "escape"
+"app.clear" = "ctrl+c"
+"tui.editor.cursorUp" = ["up", "k"]
+```
+
 ## Tasks
 - [x] Port interactive mode components from pi-mono to oxi-cli
 - [x] Port export-html functionality from pi-mono to Rust
