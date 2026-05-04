@@ -49,7 +49,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 parking_lot = "0.12"
-crossterm = "0.27"
+crossterm = "0.28"
+ratatui = { version = "0.29", features = ["crossterm"] }
 base64 = "0.22"
 async-trait = "0.1"
 lazy_static = "1.4"
