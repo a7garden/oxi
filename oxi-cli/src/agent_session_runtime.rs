@@ -32,7 +32,7 @@
 //! ```
 
 use crate::agent_session::{
-    AgentSession, AgentSessionHandle, CycleDirection, ModelCycleResult, ScopedModel,
+    AgentSession, AgentSessionHandle, ScopedModel,
 };
 use crate::auth_storage::AuthStorage;
 use crate::model_registry::ModelRegistry;
@@ -85,7 +85,6 @@ impl std::fmt::Display for DiagnosticSeverity {
 ///
 /// This is infrastructure only. The `AgentSession` itself is created
 /// separately so session options can be resolved against these services first.
-#[derive(Clone)]
 pub struct AgentSessionServices {
     /// Current working directory (may change on session switch).
     pub cwd: PathBuf,
@@ -93,7 +92,7 @@ pub struct AgentSessionServices {
     pub agent_dir: PathBuf,
     /// Auth storage for API keys / OAuth tokens.
     pub auth_storage: Arc<AuthStorage>,
-    /// Settings manager (layered configuration).
+    /// Settings (layered configuration).
     pub settings: Arc<Settings>,
     /// Model registry (built-in + custom models).
     pub model_registry: Arc<ModelRegistry>,
@@ -147,9 +146,7 @@ pub fn create_agent_session_services(
     options: CreateAgentSessionServicesOptions,
 ) -> Result<AgentSessionServices> {
     let cwd = options.cwd;
-    let agent_dir = options
-        .agent_dir
-        .unwrap_or_else(get_default_agent_dir);
+    let agent_dir = options.agent_dir.unwrap_or_else(get_default_agent_dir);
 
     // Auth storage
     let auth_storage = options.auth_storage.unwrap_or_else(|| {
@@ -164,15 +161,13 @@ pub fn create_agent_session_services(
 
     // Model registry
     let model_registry = options.model_registry.unwrap_or_else(|| {
-        Arc::new(ModelRegistry::create(
-            (*auth_storage).clone(),
-            Some(agent_dir.join("models.json")),
-        ))
+        let auth = (*auth_storage).clone();
+        Arc::new(ModelRegistry::create(auth, Some(agent_dir.join("models.json"))))
     });
 
     // Resource loader
     let resource_loader = options.resource_loader.unwrap_or_else(|| {
-        Arc::new(ResourceLoader::new(&cwd, &agent_dir))
+        Arc::new(ResourceLoader::with_paths(agent_dir.clone(), cwd.clone()))
     });
 
     Ok(AgentSessionServices {
@@ -223,15 +218,15 @@ pub fn create_agent_session_from_services(
     let cwd = services.cwd.to_string_lossy().to_string();
 
     // Resolve model
-    let model_id = options.model_id.unwrap_or_else(|| {
-        settings.effective_model(None)
-    });
+    let model_id = options
+        .model_id
+        .unwrap_or_else(|| settings.effective_model(None));
 
     // Resolve thinking level
     let thinking_level = options.thinking_level.unwrap_or(settings.thinking_level);
 
     // Get provider and model
-    let (provider_name, model_name) = parse_model_id(&model_id);
+    let (provider_name, _model_name) = parse_model_id(&model_id);
 
     let provider = oxi_ai::get_provider(&provider_name)
         .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?;
@@ -239,9 +234,7 @@ pub fn create_agent_session_from_services(
     // Build agent config
     let system_prompt = build_system_prompt(thinking_level);
     let compaction_strategy = if settings.auto_compaction {
-        oxi_ai::CompactionStrategy::Threshold(
-            settings.compaction_threshold.unwrap_or(0.8) as f64
-        )
+        oxi_ai::CompactionStrategy::Threshold(0.8)
     } else {
         oxi_ai::CompactionStrategy::Disabled
     };
@@ -263,12 +256,7 @@ pub fn create_agent_session_from_services(
     let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config));
 
     // Create the session
-    let session = AgentSession::new(
-        agent,
-        settings.clone(),
-        options.session_manager,
-        cwd,
-    );
+    let session = AgentSession::new(agent, settings.clone(), options.session_manager, cwd);
 
     // Set scoped models if provided
     if !options.scoped_models.is_empty() {
@@ -294,9 +282,8 @@ pub struct CreateAgentSessionRuntimeResult {
 }
 
 /// Factory closure type that creates a runtime for a given cwd + session manager.
-pub type CreateRuntimeFactory = Box<
-    dyn Fn(CreateRuntimeOptions) -> Result<CreateAgentSessionRuntimeResult> + Send + Sync,
->;
+pub type CreateRuntimeFactory =
+    dyn Fn(CreateRuntimeOptions) -> Result<CreateAgentSessionRuntimeResult> + Send + Sync;
 
 /// Options passed to the runtime factory.
 pub struct CreateRuntimeOptions {
@@ -418,14 +405,8 @@ impl AgentSessionRuntime {
         session_path: &str,
         cwd_override: Option<&str>,
     ) -> Result<()> {
-        let previous_session_file = self.session.session_file();
-
         // Open the target session
-        let session_manager = SessionManager::open(
-            session_path,
-            None,
-            cwd_override,
-        );
+        let session_manager = SessionManager::open(session_path, None, cwd_override);
 
         // Validate CWD
         let cwd = session_manager.get_cwd();
@@ -447,9 +428,7 @@ impl AgentSessionRuntime {
 
     /// Create a new empty session.
     pub fn new_session(&mut self) -> Result<()> {
-        let previous_session_file = self.session.session_file();
-
-        let session_dir = self.session.session_dir();
+        let session_dir = get_default_session_dir();
         let session_manager = SessionManager::create(
             &self.services.cwd.to_string_lossy(),
             Some(&session_dir),
@@ -472,46 +451,19 @@ impl AgentSessionRuntime {
         &mut self,
         entry_id: &str,
         position: ForkPosition,
-    ) -> Result<Option<String>> {
-        let previous_session_file = self.session.session_file();
+    ) -> Result<()> {
+        let session_dir = get_default_session_dir();
 
         // Create a branched session via SessionManager
         let session_manager = {
-            let current_file = self.session.session_file();
-            let session_dir = self.session.session_dir();
-
-            match position {
-                ForkPosition::At => {
-                    // Branch at the specified entry
-                    let source = SessionManager::open(
-                        current_file.as_deref().unwrap_or(""),
-                        Some(&session_dir),
-                    );
-                    let forked_path = source.create_branched_session(entry_id);
-                    match forked_path {
-                        Some(path) => SessionManager::open(&path, Some(&session_dir), None),
-                        None => SessionManager::create(
-                            &self.services.cwd.to_string_lossy(),
-                            Some(&session_dir),
-                        ),
-                    }
-                }
-                ForkPosition::Before => {
-                    // Create a new session branched before the entry
-                    let source = SessionManager::open(
-                        current_file.as_deref().unwrap_or(""),
-                        Some(&session_dir),
-                    );
-                    // Use parent of the entry as branch point
-                    let forked_path = source.create_branched_session(entry_id);
-                    match forked_path {
-                        Some(path) => SessionManager::open(&path, Some(&session_dir), None),
-                        None => SessionManager::create(
-                            &self.services.cwd.to_string_lossy(),
-                            Some(&session_dir),
-                        ),
-                    }
-                }
+            let source = SessionManager::in_memory(&self.services.cwd.to_string_lossy());
+            let forked_path = source.create_branched_session(entry_id);
+            match forked_path {
+                Some(path) => SessionManager::open(&path, Some(&session_dir), None),
+                None => SessionManager::create(
+                    &self.services.cwd.to_string_lossy(),
+                    Some(&session_dir),
+                ),
             }
         };
 
@@ -523,9 +475,8 @@ impl AgentSessionRuntime {
             session_manager,
         })?;
 
-        let selected_text = None; // Would need to extract from entry
         self.apply(result);
-        Ok(selected_text)
+        Ok(())
     }
 
     /// Import a session JSONL file and switch runtime state.
@@ -547,13 +498,16 @@ impl AgentSessionRuntime {
         };
 
         if !resolved.exists() {
-            return Err(SessionImportFileNotFoundError {
-                file_path: resolved,
-            }.into());
+            return Err(
+                SessionImportFileNotFoundError {
+                    file_path: resolved,
+                }
+                .into(),
+            );
         }
 
         // Copy to session dir if needed
-        let session_dir = self.session.session_dir();
+        let session_dir = get_default_session_dir();
         let dest_dir = Path::new(&session_dir);
         if !dest_dir.exists() {
             std::fs::create_dir_all(dest_dir)?;
@@ -661,8 +615,7 @@ pub fn create_agent_session_runtime(
     // Validate CWD
     let adapter = SessionManagerCwdAdapter(&options.session_manager);
     let cwd = options.session_manager.get_cwd();
-    assert_session_cwd_exists(&adapter, &cwd)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    assert_session_cwd_exists(&adapter, &cwd).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let result = create_runtime(options)?;
 
@@ -713,30 +666,9 @@ fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Extension-point helpers (session_file, session_dir on AgentSessionHandle)
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Extension methods for `AgentSessionHandle` needed by the runtime.
-/// These delegate to the underlying `AgentSession`.
-trait AgentSessionExt {
-    fn session_file(&self) -> Option<String>;
-    fn session_dir(&self) -> String;
-}
-
-impl AgentSessionExt for AgentSessionHandle {
-    fn session_file(&self) -> Option<String> {
-        // The AgentSession wraps SessionManager; we need to expose this.
-        // For now, return None — this will be wired when AgentSession
-        // exposes the session manager more fully.
-        None
-    }
-
-    fn session_dir(&self) -> String {
-        // Default session dir
-        let agent_dir = get_default_agent_dir();
-        agent_dir.join("sessions").to_string_lossy().to_string()
-    }
+/// Get the default sessions directory.
+fn get_default_session_dir() -> String {
+    format!("{}/sessions", get_default_agent_dir().to_string_lossy())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -749,7 +681,7 @@ impl AgentSessionExt for AgentSessionHandle {
 /// This is the main entry point for callers that don't need custom
 /// service injection.
 pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
-    Arc::new(Box::new(|options: CreateRuntimeOptions| {
+    Arc::new(|options: CreateRuntimeOptions| {
         // Create services for the target cwd
         let services = create_agent_session_services(
             CreateAgentSessionServicesOptions {
@@ -764,7 +696,7 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
 
         let result = create_agent_session_from_services(
             CreateAgentSessionFromServicesOptions {
-                services: Arc::new(services.clone()),
+                services: Arc::new(services),
                 session_manager: options.session_manager,
                 model_id: None,
                 thinking_level: None,
@@ -774,11 +706,11 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
 
         Ok(CreateAgentSessionRuntimeResult {
             session: result.session,
-            services: Arc::new(services),
+            services: result.services.clone(),
             diagnostics: Vec::new(),
             model_fallback_message: result.model_fallback_message,
         })
-    }))
+    })
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
