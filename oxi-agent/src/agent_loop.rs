@@ -24,8 +24,10 @@ const BACKOFF_BASE_SECS: u64 = 2;
 
 /// Default max auto-retry attempts (for errors detected in assistant
 /// messages, not provider-level errors).
+#[allow(dead_code)]
 const AUTO_RETRY_MAX_ATTEMPTS: usize = 3;
 /// Default base delay in ms for exponential backoff during auto-retry.
+#[allow(dead_code)]
 const AUTO_RETRY_BASE_DELAY_MS: u64 = 2000;
 
 #[derive(Clone)]
@@ -579,7 +581,7 @@ impl AgentLoop {
 
     async fn execute_tool_calls_sequential(
         &self,
-        messages: &mut Vec<Message>,
+        _messages: &mut Vec<Message>,
         _assistant_message: &AssistantMessage,
         tool_calls: Vec<ToolCall>,
         emit: &EmitFn,
@@ -649,7 +651,7 @@ impl AgentLoop {
 
     async fn execute_tool_calls_parallel(
         &self,
-        messages: &mut Vec<Message>,
+        _messages: &mut Vec<Message>,
         _assistant_message: &AssistantMessage,
         tool_calls: Vec<ToolCall>,
         emit: &EmitFn,
@@ -685,14 +687,16 @@ impl AgentLoop {
                 
                 finalized_calls.push(FinalizedToolCallEntry::Immediate(finalized));
             } else {
-                let before_hook = self.before_tool_call.clone();
+                let tool = prepared.tool.clone();
+                let args = prepared.args.clone();
                 let after_hook = self.after_tool_call.clone();
                 let emit_clone = emit.clone();
                 
                 finalized_calls.push(FinalizedToolCallEntry::Future(Box::pin(async move {
                     let executed = Self::execute_prepared_tool_call_static(
                         tool_call.clone(),
-                        before_hook.clone(),
+                        tool,
+                        args,
                         after_hook.clone(),
                         emit_clone.clone(),
                     ).await;
@@ -730,27 +734,49 @@ impl AgentLoop {
 
     async fn execute_prepared_tool_call_static(
         tool_call: ToolCall,
-        _before_hook: Option<BeforeToolCallHook>,
-        _after_hook: Option<AfterToolCallHook>,
+        tool: Option<Arc<dyn AgentTool>>,
+        args: Value,
+        after_hook: Option<AfterToolCallHook>,
         emit: Arc<dyn Fn(AgentEvent) + Send + Sync>,
     ) -> ExecutedToolCallOutcome {
         let tool_call_id = tool_call.id.clone();
         let tool_name = tool_call.name.clone();
+        
+        let mut result = AgentToolResult::success("");
+        let mut is_error = false;
+        
+        if let Some(ref tool) = tool {
+            match tool.execute(&tool_call_id, args, None).await {
+                Ok(r) => result = r,
+                Err(e) => {
+                    result = AgentToolResult::error(e);
+                    is_error = true;
+                }
+            }
+        }
+        
+        // Apply after hook if present
+        if let Some(ref hook) = after_hook {
+            if let Some(modified) = hook(&tool_call.name, &result).await.ok().flatten() {
+                result = modified;
+                is_error = !result.success;
+            }
+        }
         
         emit(AgentEvent::ToolExecutionEnd {
             tool_call_id: tool_call_id.clone(),
             tool_name: tool_name.clone(),
             result: oxi_ai::ToolResult {
                 tool_call_id,
-                content: String::new(),
-                status: "success".to_string(),
+                content: result.output.clone(),
+                status: if is_error { "error".to_string() } else { "success".to_string() },
             },
-            is_error: false,
+            is_error,
         });
         
         ExecutedToolCallOutcome { 
-            result: AgentToolResult::success(""), 
-            is_error: false,
+            result, 
+            is_error,
         }
     }
 
@@ -759,7 +785,7 @@ impl AgentLoop {
             Some(t) => t,
             None => {
                 return PreparedToolCallOutcome {
-                    kind: PreparedToolCallKind::Immediate,
+                    _kind: PreparedToolCallKind::Immediate,
                     immediate_result: Some(AgentToolResult::error(format!(
                         "Tool '{}' not found",
                         tool_call.name
@@ -777,7 +803,7 @@ impl AgentLoop {
         if let Some(ref hook) = self.before_tool_call {
             if let Some(blocked) = hook(&tool_call.name, &validated_args).await.ok().flatten() {
                 return PreparedToolCallOutcome {
-                    kind: PreparedToolCallKind::Immediate,
+                    _kind: PreparedToolCallKind::Immediate,
                     immediate_result: Some(blocked),
                     is_error: true,
                     tool: None,
@@ -788,7 +814,7 @@ impl AgentLoop {
         }
         
         PreparedToolCallOutcome {
-            kind: PreparedToolCallKind::Prepared,
+            _kind: PreparedToolCallKind::Prepared,
             immediate_result: None,
             is_error: false,
             tool: Some(Arc::clone(&tool)),
