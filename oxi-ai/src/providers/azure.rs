@@ -13,6 +13,8 @@ use crate::{
     ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
+use super::shared_client;
+
 /// Azure OpenAI provider
 ///
 /// Uses Azure-specific endpoint format:
@@ -24,7 +26,7 @@ use crate::{
 /// - AZURE_OPENAI_DEPLOYMENT_NAME: Deployment name (e.g., "gpt-4o")
 #[derive(Clone)]
 pub struct AzureProvider {
-    client: Client,
+    client: &'static Client,
     api_key: Option<String>,
     resource_name: Option<String>,
     deployment_name: Option<String>,
@@ -34,7 +36,7 @@ impl AzureProvider {
     /// Create a new Azure provider, reading configuration from environment variables
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: std::env::var("AZURE_OPENAI_API_KEY").ok(),
             resource_name: std::env::var("AZURE_OPENAI_RESOURCE_NAME").ok(),
             deployment_name: std::env::var("AZURE_OPENAI_DEPLOYMENT_NAME").ok(),
@@ -49,7 +51,7 @@ impl AzureProvider {
         deployment_name: impl Into<String>,
     ) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some(api_key.into()),
             resource_name: Some(resource_name.into()),
             deployment_name: Some(deployment_name.into()),
@@ -538,7 +540,7 @@ mod tests {
     #[test]
     fn test_build_url_missing_resource() {
         let provider = AzureProvider {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some("test-key".to_string()),
             resource_name: None,
             deployment_name: Some("gpt-4o".to_string()),
@@ -559,7 +561,7 @@ mod tests {
     #[test]
     fn test_build_url_missing_deployment() {
         let provider = AzureProvider {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some("test-key".to_string()),
             resource_name: Some("my-resource".to_string()),
             deployment_name: None,
@@ -580,7 +582,7 @@ mod tests {
     #[test]
     fn test_build_url_from_env_vars() {
         let provider = AzureProvider {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some("test-key".to_string()),
             resource_name: Some("my-resource".to_string()),
             deployment_name: Some("gpt-4o".to_string()),
@@ -717,7 +719,7 @@ data: [DONE]"#;
     #[test]
     fn test_azure_endpoint_format() {
         let provider = AzureProvider {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some("key".to_string()),
             resource_name: Some("my-resource".to_string()),
             deployment_name: Some("gpt-4-turbo".to_string()),
