@@ -27,7 +27,7 @@ pub mod file_processor;
 // Utility modules
 pub mod auth_storage;
 pub mod auto_compaction;
-// pub mod branch_summarization;
+pub mod branch_summarization;
 pub mod bash_executor;
 pub mod changelog;
 pub mod child_process;
