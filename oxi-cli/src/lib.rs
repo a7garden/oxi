@@ -107,6 +107,9 @@ pub mod compaction_utils;
 pub mod source_info;
 pub mod system_prompt;
 pub mod telemetry;
+pub mod auth_guidance;
+pub mod exif_orientation;
+pub mod pi_user_agent;
 pub mod timings;
 
 use anyhow::{Error, Result};
