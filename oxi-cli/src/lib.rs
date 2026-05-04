@@ -28,9 +28,15 @@ pub mod file_processor;
 pub mod auth_storage;
 pub mod auto_compaction;
 pub mod bash_executor;
+pub mod changelog;
+pub mod child_process;
 pub mod cli;
 pub mod diagnostics;
 pub mod error_recovery;
+pub mod fs_watch;
+pub mod mime_detect;
+pub mod paths;
+pub mod sleep;
 
 // Re-exports for extension hooks
 pub use crate::error_recovery::{RetryConfig, RetryableError};
