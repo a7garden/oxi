@@ -184,14 +184,22 @@ impl InteractiveSession {
     pub fn add_user_message(&mut self, content: String) {
         self.messages.push(ChatMessage::user(content.clone()));
         // Also add to entries for session persistence
-        let entry = session::SessionEntry::new(session::AgentMessage::User { content });
+        let entry = session::SessionEntry::new(session::AgentMessage::User {
+            content: session::ContentValue::String(content),
+        });
         self.entries.push(entry);
     }
 
     pub fn add_assistant_message(&mut self, content: String) {
         self.messages.push(ChatMessage::assistant(content.clone()));
         // Also add to entries for session persistence
-        let entry = session::SessionEntry::new(session::AgentMessage::Assistant { content });
+        let entry = session::SessionEntry::new(session::AgentMessage::Assistant {
+            content: vec![session::AssistantContentBlock::Text { text: content }],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
+        });
         self.entries.push(entry);
         self.current_response.clear();
     }
@@ -218,7 +226,7 @@ impl InteractiveSession {
     }
 
     /// Get entry by ID
-    pub fn get_entry_by_id(&self, id: Uuid) -> Option<&session::SessionEntry> {
+    pub fn get_entry_by_id(&self, id: &str) -> Option<&session::SessionEntry> {
         self.entries.iter().find(|e| e.id == id)
     }
 

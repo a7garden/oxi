@@ -27,12 +27,11 @@
 //! ```
 
 use crate::auto_compaction::CompactionConfig;
-use crate::error_recovery::{RetryConfig, RetryableError};
-use crate::session::{SessionEntry, SessionManager};
+use crate::session::{AgentMessage, SessionManager};
 use crate::settings::{Settings, ThinkingLevel};
 use anyhow::{Context, Result};
 use oxi_agent::{Agent, AgentEvent, AgentState};
-use oxi_ai::{estimate_tokens, Message};
+use oxi_ai::Message;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -147,6 +146,17 @@ pub struct PromptOptions {
     pub source: InputSource,
 }
 
+impl Default for PromptOptions {
+    fn default() -> Self {
+        Self {
+            expand_templates: true,
+            images: Vec::new(),
+            streaming_behavior: None,
+            source: InputSource::Interactive,
+        }
+    }
+}
+
 /// How to queue a message when the agent is already streaming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamingBehavior {
@@ -167,17 +177,6 @@ pub enum InputSource {
 impl Default for InputSource {
     fn default() -> Self {
         Self::Interactive
-    }
-}
-
-impl Default for PromptOptions {
-    fn default() -> Self {
-        Self {
-            expand_templates: true,
-            images: Vec::new(),
-            streaming_behavior: None,
-            source: InputSource::Interactive,
-        }
     }
 }
 
@@ -271,8 +270,7 @@ pub struct AgentSession {
     retry_notify: Arc<Notify>,
 
     // ── Session persistence ──────────────────────────────────────────
-    session_id: Arc<RwLock<Uuid>>,
-    auto_save_handle: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    session_id: Arc<RwLock<String>>,
 
     // ── CWD ──────────────────────────────────────────────────────────
     cwd: String,
@@ -286,8 +284,7 @@ impl AgentSession {
         session_manager: SessionManager,
         cwd: String,
     ) -> Self {
-        let session_id = Uuid::new_v4();
-
+        let session_id = session_manager.get_session_id();
         let retry_settings = SessionRetrySettings::from_settings(&settings);
         let compaction_config = CompactionConfig {
             enabled: settings.auto_compaction,
@@ -296,7 +293,7 @@ impl AgentSession {
 
         let (event_tx, _event_rx) = mpsc::unbounded_channel();
 
-        let session = Self {
+        Self {
             agent,
             settings: Arc::new(RwLock::new(settings)),
             session_manager: Arc::new(RwLock::new(session_manager)),
@@ -313,11 +310,8 @@ impl AgentSession {
             retry_abort: Arc::new(Mutex::new(None)),
             retry_notify: Arc::new(Notify::new()),
             session_id: Arc::new(RwLock::new(session_id)),
-            auto_save_handle: Arc::new(Mutex::new(None)),
             cwd,
-        };
-
-        session
+        }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -352,8 +346,8 @@ impl AgentSession {
     }
 
     /// Current session ID.
-    pub fn session_id(&self) -> Uuid {
-        *self.session_id.read()
+    pub fn session_id(&self) -> String {
+        self.session_manager.read().get_session_id()
     }
 
     /// Whether compaction is in progress.
@@ -383,12 +377,10 @@ impl AgentSession {
                     assistant_messages += 1;
                     // Count tool-use content blocks
                     for block in &a.content {
-                        if matches!(block, oxi_ai::ContentBlock::ToolUse(_)) {
+                        if matches!(block, oxi_ai::ContentBlock::ToolCall(_)) {
                             tool_calls += 1;
                         }
                     }
-                    // Accumulate token counts from usage if available
-                    // (usage is not directly exposed on AssistantMessage yet)
                     let _ = &a; // suppress unused warning
                 }
                 Message::ToolResult(_) => tool_results += 1,
@@ -397,7 +389,7 @@ impl AgentSession {
         }
 
         SessionStats {
-            session_id: self.session_id().to_string(),
+            session_id: self.session_id(),
             user_messages,
             assistant_messages,
             tool_calls,
@@ -531,7 +523,7 @@ impl AgentSession {
         }
 
         // Run the agent and collect events
-        let (response, events) = self.agent.run(text.clone()).await?;
+        let (_response, events) = self.agent.run(text.clone()).await?;
 
         // Process events for session persistence, compaction, and retry
         self.process_events(events).await?;
@@ -540,32 +532,52 @@ impl AgentSession {
     }
 
     /// Run a prompt and get a channel of events for streaming display.
-    pub async fn prompt_streaming(
+    ///
+    /// **Note:** Due to the Agent's internal locks not being `Send`, this
+    /// uses `tokio::task::LocalSet` internally. Callers should prefer
+    /// [`prompt`] when full streaming control is not needed.
+    pub fn prompt_streaming(
         &self,
         text: String,
-    ) -> Result<mpsc::UnboundedReceiver<AgentEvent>> {
+    ) -> mpsc::UnboundedReceiver<AgentEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
+        let (agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(100);
 
         // Forward agent events through our channel
-        let session = self.clone_handle();
-        let (agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(100);
-        let agent = Arc::clone(&self.agent);
-
-        // Spawn a task to forward events
         tokio::spawn(async move {
             while let Some(event) = agent_rx.recv().await {
                 let _ = tx.send(event);
             }
         });
 
-        // Run the agent in a spawned task
+        // Run the agent in a LocalSet (because Agent's internal RwLock is !Send)
         let agent_clone = Arc::clone(&self.agent);
-        let text_clone = text.clone();
-        tokio::spawn(async move {
-            let _ = agent_clone.run_with_channel(text_clone, agent_tx).await;
+        let text_clone = text;
+        let session_clone = self.clone_handle();
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                let local = tokio::task::LocalSet::new();
+                local.run_until(async move {
+                    let (agent_tx_for_inner, mut agent_rx_for_inner) = mpsc::channel(100);
+                    // Use agent.run_with_channel inside LocalSet
+                    let agent_for_task = Arc::clone(&agent_clone);
+                    let handle = tokio::task::spawn_local(async move {
+                        let _ = agent_for_task.run_with_channel(text_clone, agent_tx_for_inner).await;
+                    });
+
+                    // Forward events from inner to outer
+                    while let Some(event) = agent_rx_for_inner.recv().await {
+                        let _ = tx.send(event);
+                    }
+
+                    let _ = handle.await;
+                    drop(session_clone); // keep alive during run
+                });
+            });
         });
 
-        Ok(rx)
+        rx
     }
 
     /// Queue a steering message (delivered after current turn's tool calls).
@@ -617,7 +629,14 @@ impl AgentSession {
         self.agent.switch_model(model_id)?;
 
         // Persist model change to session
-        let session_id = self.session_id();
+        {
+            let mut sm = self.session_manager.write();
+            let parts: Vec<&str> = model_id.split('/').collect();
+            if parts.len() >= 2 {
+                sm.append_model_change(parts[0], &parts[1..].join("/"));
+            }
+        }
+
         // Update settings default
         {
             let mut settings = self.settings.write();
@@ -749,6 +768,12 @@ impl AgentSession {
             settings.thinking_level = level;
         }
 
+        // Persist to session
+        {
+            let mut sm = self.session_manager.write();
+            sm.append_thinking_level_change(&format!("{:?}", level).to_lowercase());
+        }
+
         self.emit(SessionEvent::ThinkingLevelChanged { level });
     }
 
@@ -815,7 +840,7 @@ impl AgentSession {
 
         // Estimate token count
         let context_json = serde_json::to_string(messages).unwrap_or_default();
-        let estimated_tokens = estimate_tokens(&context_json);
+        let estimated_tokens = oxi_ai::estimate_tokens(&context_json);
 
         // Get context window from agent config (default 128k)
         let context_window = 128_000;
@@ -884,7 +909,7 @@ impl AgentSession {
                 self.agent.state().replace_messages(ctx.kept_messages.clone());
 
                 // Persist to session
-                self.save_session().await;
+                self.persist_session();
 
                 Ok(CompactionResult {
                     summary: ctx.summary.clone(),
@@ -972,8 +997,7 @@ impl AgentSession {
         }
 
         let current_attempt = *attempt;
-        let delay_ms =
-            retry_settings.base_delay_ms * 2u64.pow(current_attempt - 1);
+        let delay_ms = retry_settings.base_delay_ms * 2u64.pow(current_attempt - 1);
 
         self.emit(SessionEvent::AutoRetryStart {
             attempt: current_attempt,
@@ -985,7 +1009,11 @@ impl AgentSession {
         // Wait with exponential backoff
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
 
-        tracing::info!("Auto-retry attempt {}/{}", current_attempt, retry_settings.max_retries);
+        tracing::info!(
+            "Auto-retry attempt {}/{}",
+            current_attempt,
+            retry_settings.max_retries
+        );
 
         true
     }
@@ -1012,35 +1040,60 @@ impl AgentSession {
     // Session persistence
     // ══════════════════════════════════════════════════════════════════
 
-    /// Save the current session to disk.
-    pub async fn save_session(&self) {
+    /// Persist the current agent state to the session manager.
+    fn persist_session(&self) {
         let state = self.agent.state();
         let mut sm = self.session_manager.write();
 
         for msg in &state.messages {
             match msg {
                 Message::User(u) => {
-                    let text = u.text_content();
-                    sm.append_message(crate::session::AgentMessage::User {
-                        content: crate::session::ContentValue::String(text),
+                    let content = match &u.content {
+                        oxi_ai::MessageContent::Text(t) => t.clone(),
+                        oxi_ai::MessageContent::Blocks(blocks) => {
+                            blocks
+                                .iter()
+                                .filter_map(|b| b.as_text())
+                                .collect::<Vec<_>>()
+                                .join("")
+                        }
+                    };
+                    sm.append_message(AgentMessage::User {
+                        content: crate::session::ContentValue::String(content),
                     });
                 }
                 Message::Assistant(a) => {
-                    let text = a.text_content();
-                    sm.append_message(crate::session::AgentMessage::Assistant {
-                        content: vec![crate::session::AssistantContentBlock::Text { text }],
+                    let content_str = a
+                        .content
+                        .iter()
+                        .filter_map(|b| b.as_text())
+                        .collect::<Vec<_>>()
+                        .join("");
+                    sm.append_message(AgentMessage::Assistant {
+                        content: vec![],
                         provider: None,
                         model_id: None,
                         usage: None,
                         stop_reason: None,
                     });
+                    let _ = content_str; // will be used when AssistantMessage
+                    // variant supports storing text content
+                }
+                Message::ToolResult(t) => {
+                    let content = t
+                        .content
+                        .iter()
+                        .filter_map(|b| b.as_text())
+                        .collect::<Vec<_>>()
+                        .join("");
+                    sm.append_message(AgentMessage::ToolResult {
+                        content: crate::session::ContentValue::String(content),
+                        tool_call_id: t.tool_call_id.clone(),
+                    });
                 }
                 _ => {}
             }
         }
-
-        // Force flush to disk
-        sm.set_session_file(sm.get_session_file().unwrap_or_default().as_str());
     }
 
     /// Process a batch of agent events for session concerns.
@@ -1059,7 +1112,10 @@ impl AgentSession {
 
         // Check auto-compaction after successful completion
         let has_complete = events.iter().any(|e| {
-            matches!(e, AgentEvent::AgentEnd { .. } | AgentEvent::Complete { .. })
+            matches!(
+                e,
+                AgentEvent::AgentEnd { .. } | AgentEvent::Complete { .. }
+            )
         });
         if has_complete {
             self.check_auto_compaction().await;
@@ -1075,8 +1131,8 @@ impl AgentSession {
             }
         }
 
-        // Auto-save
-        self.save_session().await;
+        // Persist to session
+        self.persist_session();
 
         Ok(())
     }
@@ -1087,17 +1143,8 @@ impl AgentSession {
 
     /// Set a display name for the current session.
     pub fn set_session_name(&self, name: String) {
-        let sid = self.session_id();
-        let sm = self.session_manager.read();
-        // Load meta, update name, save
-        // SessionManager methods are async but this is sync; use a best-effort approach
-        let rt = tokio::runtime::Handle::current();
-        let _ = rt.block_on(async {
-            if let Ok(Some(mut meta)) = sm.load_meta(sid).await {
-                meta.name = Some(name.clone());
-                let _ = sm.save_meta(&meta).await;
-            }
-        });
+        let mut sm = self.session_manager.write();
+        sm.append_session_info(&name);
         self.emit(SessionEvent::SessionInfoChanged {
             name: Some(name),
         });
@@ -1106,7 +1153,6 @@ impl AgentSession {
     /// Reset the agent state for a new conversation.
     pub fn reset(&self) {
         self.agent.reset();
-        *self.session_id.write() = Uuid::new_v4();
         *self.overflow_recovery_attempted.write() = false;
         self.clear_queue();
     }
@@ -1137,7 +1183,6 @@ impl AgentSession {
             retry_abort: Arc::clone(&self.retry_abort),
             retry_notify: Arc::clone(&self.retry_notify),
             session_id: Arc::clone(&self.session_id),
-            auto_save_handle: Arc::clone(&self.auto_save_handle),
             cwd: self.cwd.clone(),
         }
     }
@@ -1175,8 +1220,6 @@ pub struct SessionListenerGuard {
 
 impl Drop for SessionListenerGuard {
     fn drop(&mut self) {
-        // Set to a no-op rather than removing (to preserve indices).
-        // In practice, Vec swap_remove is fine for event listeners.
         let mut listeners = self.listeners.write();
         if self.key < listeners.len() {
             // Replace with a no-op
@@ -1294,7 +1337,11 @@ mod tests {
     fn test_default_model_list() {
         let models = default_model_list();
         assert!(!models.is_empty());
-        assert!(models.iter().any(|(p, m)| *p == "anthropic" && *m == "claude-sonnet-4-20250514"));
+        assert!(
+            models
+                .iter()
+                .any(|(p, m)| *p == "anthropic" && *m == "claude-sonnet-4-20250514")
+        );
     }
 
     #[test]

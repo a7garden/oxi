@@ -1007,10 +1007,10 @@ impl SessionManager {
     pub fn append_compaction(
         &mut self,
         summary: &str,
-        first_kept_entry_id: &str,
+        _first_kept_entry_id: &str,
         tokens_before: i64,
-        details: Option<serde_json::Value>,
-        from_hook: Option<bool>,
+        _details: Option<serde_json::Value>,
+        _from_hook: Option<bool>,
     ) -> String {
         let leaf = self.leaf_id.read().clone();
         let id = Uuid::new_v4().to_string();
@@ -1038,7 +1038,7 @@ impl SessionManager {
             timestamp: Utc::now().timestamp_millis(),
             message: AgentMessage::Custom {
                 custom_type: custom_type.to_string(),
-                content: data.map(|d| ContentValue::String(d.to_string())).unwrap_or(ContentValue::String(String::new())),
+                content: data.as_ref().map(|d| ContentValue::String(d.to_string())).unwrap_or(ContentValue::String(String::new())),
                 display: false,
                 details: data.clone(),
                 timestamp: Utc::now().timestamp_millis(),
@@ -1187,7 +1187,8 @@ impl SessionManager {
     /// Walk from entry to root, returning all entries in path order
     pub fn get_branch(&self, from_id: Option<&str>) -> Vec<SessionEntry> {
         let mut path = Vec::new();
-        let start_id = from_id.or_else(|| self.leaf_id.read().clone().as_deref());
+        let leaf_fallback = self.leaf_id.read().clone();
+        let start_id = from_id.or_else(|| leaf_fallback.as_deref());
         let Some(start_id) = start_id else {
             return path;
         };
@@ -1265,21 +1266,17 @@ impl SessionManager {
 
         // Build tree
         for entry in &entries {
-            let node = node_map.get(&entry.id).unwrap();
-            match entry.parent_id.as_deref() {
-                Some(pid) if pid != entry.id => {
-                    if let Some(_) = node_map.get(pid) {
-                        // Need to get mutable reference carefully
-                        let parent_children = &mut node_map.get_mut(pid).unwrap().children;
-                        parent_children.push(node.clone());
-                    } else {
-                        // Orphan - treat as root
-                        roots.push(node.clone());
-                    }
-                }
-                _ => {
-                    roots.push(node.clone());
-                }
+            let is_root = match entry.parent_id.as_deref() {
+                Some(pid) if pid != entry.id => !node_map.contains_key(pid),
+                _ => true,
+            };
+            if is_root {
+                let node = node_map.get(&entry.id).unwrap();
+                roots.push(node.clone());
+            } else {
+                let pid = entry.parent_id.as_ref().unwrap();
+                let node = node_map.get(&entry.id).unwrap().clone();
+                node_map.get_mut(pid).unwrap().children.push(node);
             }
         }
 
