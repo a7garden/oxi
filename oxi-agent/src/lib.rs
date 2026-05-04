@@ -3,6 +3,7 @@
 //! This crate provides an agent runtime that integrates with oxi-ai providers.
 
 pub mod agent;
+pub mod agent_loop;
 pub mod compaction;
 pub mod config;
 pub mod error;
@@ -13,6 +14,7 @@ pub mod tools;
 pub mod types;
 
 pub use agent::Agent;
+pub use agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
 pub use config::AgentConfig;
 pub use error::AgentError;
 pub use events::AgentEvent;
@@ -27,6 +29,7 @@ pub use tools::{
 
 pub mod prelude {
     pub use crate::agent::Agent;
+    pub use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
     pub use crate::compaction::{CompactedContext, CompactionEvent};
     pub use crate::config::AgentConfig;
     pub use crate::events::AgentEvent;
