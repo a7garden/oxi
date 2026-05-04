@@ -1819,14 +1819,14 @@ impl fmt::Display for ExtensionState {
 /// Result from emitting a tool call event to extensions.
 ///
 /// Extensions can inspect tool calls and optionally block them.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ToolCallEmitResult {
     /// Whether any extension requested to block the tool call.
     pub blocked: bool,
     /// Optional reason for blocking.
     pub block_reason: Option<String>,
     /// Errors collected from extension handlers.
-    pub errors: Vec<(String, anyhow::Error)>,
+    pub errors: Vec<(String, String)>,
 }
 
 impl Default for ToolCallEmitResult {
@@ -1842,14 +1842,14 @@ impl Default for ToolCallEmitResult {
 /// Result from emitting a tool result event to extensions.
 ///
 /// Extensions can modify tool result content before it is returned.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ToolResultEmitResult {
     /// Modified output content (if any extension changed it).
     pub output: Option<String>,
     /// Modified success flag.
     pub success: Option<bool>,
     /// Errors collected from extension handlers.
-    pub errors: Vec<(String, anyhow::Error)>,
+    pub errors: Vec<(String, String)>,
 }
 
 impl Default for ToolResultEmitResult {
@@ -1865,40 +1865,40 @@ impl Default for ToolResultEmitResult {
 /// Result from emitting a context event to extensions.
 ///
 /// Extensions can inspect and modify messages in the agent context.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ContextEmitResult {
     /// Whether any extension modified the messages.
     pub modified: bool,
     /// The (possibly modified) messages.
     pub messages: Vec<Message>,
     /// Errors collected from extension handlers.
-    pub errors: Vec<(String, anyhow::Error)>,
+    pub errors: Vec<(String, String)>,
 }
 
 /// Result from emitting a before_provider_request event to extensions.
 ///
 /// Extensions can transform the payload before it is sent.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProviderRequestEmitResult {
     /// Whether the payload was modified.
     pub modified: bool,
     /// The (possibly modified) payload.
     pub payload: Value,
     /// Errors collected from extension handlers.
-    pub errors: Vec<(String, anyhow::Error)>,
+    pub errors: Vec<(String, String)>,
 }
 
 /// Result from emitting a session_before event.
 ///
 /// Extensions can cancel session operations.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SessionBeforeEmitResult {
     /// Whether any extension cancelled the operation.
     pub cancelled: bool,
     /// Name of the extension that cancelled (if any).
     pub cancelled_by: Option<String>,
     /// Errors collected from extension handlers.
-    pub errors: Vec<(String, anyhow::Error)>,
+    pub errors: Vec<(String, String)>,
 }
 
 impl Default for SessionBeforeEmitResult {
@@ -2024,49 +2024,91 @@ impl ExtensionRunner {
     ) -> Result<(), ExtensionError> {
         let path_display = path.display().to_string();
 
-        match load_extension(path) {
-            Ok(ext) => {
-                let name = ext.name().to_string();
-                self.registry.register_with_library(
-                    ext.clone(),
-                    path.to_path_buf(),
-                    // We'll need the library, but register_with_library handles that
-                    // For now, we do a simple register since load_extension already consumed the library
-                );
-                // Actually, load_extension returns just the Arc<dyn Extension>, not the library.
-                // We need to load the library ourselves to keep it alive.
-                // Let's use the simpler register() path.
-                //
-                // But we lose hot-reload capability this way. For proper hot-reload,
-                // use register_with_library() from the registry directly.
-                self.registry.register(ext);
-                self.set_state(&name, ExtensionState::Active);
-
-                // Call on_load via registry
-                self.registry.emit_load(ctx);
-
-                tracing::info!(name = %name, path = %path_display, "extension loaded");
-                Ok(())
-            }
-            Err(e) => {
-                let reason = e.to_string();
-                self.load_errors
-                    .push((path.to_path_buf(), reason.clone()));
-
-                let err = ExtensionError::LoadFailed {
-                    name: path_display.clone(),
-                    reason: reason.clone(),
-                };
-
-                self.emit_error_record(ExtensionErrorRecord::new(
-                    &path_display,
-                    "load",
-                    &reason,
-                ));
-
-                Err(err)
-            }
+        // Validate file exists and has correct extension
+        if !path.exists() {
+            return Err(ExtensionError::LoadFailed {
+                name: path_display,
+                reason: "File not found".to_string(),
+            });
         }
+
+        let ext_os = path.extension().and_then(OsStr::to_str).unwrap_or("");
+        let valid = matches!(ext_os, "so" | "dylib" | "dll");
+        if !valid {
+            return Err(ExtensionError::LoadFailed {
+                name: path_display,
+                reason: format!("Unsupported extension file format: .{}", ext_os),
+            });
+        }
+
+        // Load the shared library ourselves so we can keep it alive
+        let library = unsafe {
+            match Library::new(path) {
+                Ok(lib) => lib,
+                Err(e) => {
+                    let reason = format!("Failed to load library: {}", e);
+                    self.load_errors.push((path.to_path_buf(), reason.clone()));
+                    self.emit_error_record(ExtensionErrorRecord::new(
+                        &path_display,
+                        "load",
+                        &reason,
+                    ));
+                    return Err(ExtensionError::LoadFailed {
+                        name: path_display,
+                        reason,
+                    });
+                }
+            }
+        };
+
+        // Get the entry symbol
+        let create: Symbol<CreateFn> = unsafe {
+            match library.get(ENTRY_SYMBOL) {
+                Ok(sym) => sym,
+                Err(e) => {
+                    let reason = format!("Symbol not found: {}", e);
+                    self.load_errors.push((path.to_path_buf(), reason.clone()));
+                    self.emit_error_record(ExtensionErrorRecord::new(
+                        &path_display,
+                        "load",
+                        &reason,
+                    ));
+                    return Err(ExtensionError::LoadFailed {
+                        name: path_display,
+                        reason,
+                    });
+                }
+            }
+        };
+
+        let raw_ptr = unsafe { create() };
+        if raw_ptr.is_null() {
+            let reason = "oxi_extension_create returned null".to_string();
+            self.load_errors.push((path.to_path_buf(), reason.clone()));
+            return Err(ExtensionError::LoadFailed {
+                name: path_display,
+                reason,
+            });
+        }
+
+        let boxed: Box<dyn Extension> = unsafe { Box::from_raw(raw_ptr) };
+        let ext: Arc<dyn Extension> = Arc::from(boxed);
+        let name = ext.name().to_string();
+
+        // Register with library handle for hot-reload
+        self.registry
+            .register_with_library(ext, path.to_path_buf(), library);
+        self.set_state(&name, ExtensionState::Active);
+
+        // Call on_load via registry
+        self.registry.call_hook_safe(&name, "on_load", || {
+            if let Some(e) = self.registry.get(&name) {
+                e.on_load(ctx);
+            }
+        });
+
+        tracing::info!(name = %name, path = %path_display, "extension loaded");
+        Ok(())
     }
 
     /// Load multiple extensions from paths, collecting all errors.
@@ -2091,7 +2133,8 @@ impl ExtensionRunner {
     ///
     /// Calls `on_unload` on the extension, removes it from the registry,
     /// and sets the state to Unloaded.
-    pub fn unload_extension(&mut self, name: &str) -> bool {\n        let had = self.registry.unregister(name);
+    pub fn unload_extension(&mut self, name: &str) -> bool {
+        let had = self.registry.unregister(name);
         if had {
             self.set_state(name, ExtensionState::Unloaded);
             tracing::info!(name = %name, "extension unloaded");
@@ -2108,17 +2151,7 @@ impl ExtensionRunner {
         name: &str,
         ctx: &ExtensionContext,
     ) -> Result<(), ExtensionError> {
-        // Get source path before unregister removes it
-        let source_path = self
-            .registry
-            .get(name)
-            .and_then(|_| {
-                // We need to find the source path — check load_errors or order
-                // The registry doesn't expose source_path directly, so we use hot_reload
-                None
-            });
-
-        // Use registry's hot_reload if possible
+        // Use registry's hot_reload which handles unload + reload
         self.registry.hot_reload(name, ctx)?;
         self.set_state(name, ExtensionState::Active);
         tracing::info!(name = %name, "extension reloaded");
@@ -2187,7 +2220,7 @@ impl ExtensionRunner {
     ///
     /// This is used to short-circuit event emission when no extensions
     /// are listening, avoiding unnecessary context creation.
-    pub fn has_handlers(&self, event_type: &str) -> bool {
+    pub fn has_handlers(&self, _event_type: &str) -> bool {
         // For the trait-based system, every extension has the hook methods,
         // but we check if there are any enabled extensions that have
         // non-default implementations. Since we can't inspect that at runtime
@@ -2284,7 +2317,7 @@ impl ExtensionRunner {
                             error = %err_str,
                             "on_before_tool_call failed"
                         );
-                        result.errors.push((name.clone(), e));
+                        result.errors.push((name.clone(), err_str.clone()));
                         self.emit_error_record(ExtensionErrorRecord::new(
                             name,
                             "on_before_tool_call",
@@ -2313,8 +2346,6 @@ impl ExtensionRunner {
         tool_result: &AgentToolResult,
     ) -> ToolResultEmitResult {
         let mut result = ToolResultEmitResult::default();
-        let mut current_output = tool_result.output.clone();
-        let mut current_success = tool_result.success;
 
         for name in &self.order {
             if self.state(name) != ExtensionState::Active {
@@ -2332,7 +2363,7 @@ impl ExtensionRunner {
                             error = %err_str,
                             "on_after_tool_call failed"
                         );
-                        result.errors.push((name.clone(), e));
+                        result.errors.push((name.clone(), err_str));
                     }
                 }
 
@@ -2341,14 +2372,6 @@ impl ExtensionRunner {
                     ext.on_tool_result(tool_name, tool_result);
                 });
             }
-        }
-
-        // Check if anything was modified
-        if current_output != tool_result.output {
-            result.output = Some(current_output);
-        }
-        if current_success != tool_result.success {
-            result.success = Some(current_success);
         }
 
         result
@@ -2415,7 +2438,6 @@ impl ExtensionRunner {
         messages: Vec<Message>,
     ) -> ContextEmitResult {
         let mut current_messages = messages;
-        let original_len = current_messages.len();
         let mut errors = Vec::new();
         let mut modified = false;
 
@@ -2424,14 +2446,14 @@ impl ExtensionRunner {
                 continue;
             }
             if let Some(ext) = self.registry.get(name) {
+                let prev_len = current_messages.len();
                 let mut event = ContextEvent {
                     messages: current_messages.clone(),
                 };
                 match ext.context(&mut event) {
                     Ok(()) => {
-                        if event.messages.len() != original_len
-                            || event.messages != current_messages
-                        {
+                        // Detect modification via length change
+                        if event.messages.len() != prev_len {
                             current_messages = event.messages;
                             modified = true;
                         }
@@ -2443,7 +2465,7 @@ impl ExtensionRunner {
                             error = %err_str,
                             "context hook failed"
                         );
-                        errors.push((name.clone(), e));
+                        errors.push((name.clone(), err_str));
                     }
                 }
             }
@@ -2464,7 +2486,7 @@ impl ExtensionRunner {
         &self,
         payload: Value,
     ) -> ProviderRequestEmitResult {
-        let mut current_payload = payload.clone();
+        let mut current_payload = payload;
         let mut modified = false;
         let mut errors = Vec::new();
 
@@ -2490,7 +2512,7 @@ impl ExtensionRunner {
                             error = %err_str,
                             "before_provider_request failed"
                         );
-                        errors.push((name.clone(), e));
+                        errors.push((name.clone(), err_str));
                     }
                 }
             }
