@@ -938,7 +938,7 @@ impl SessionHandoff {
 /// Reads JSONL commands from stdin, processes them, and writes
 /// JSONL responses/events to stdout.
 pub async fn run_rpc_mode(app: App) -> Result<()> {
-    let server = Arc::new(RpcServer::new(0)); // 0 = stdio mode
+    let mut server = Arc::new(RpcServer::new(0)); // 0 = stdio mode
     let output = RpcOutput::new();
 
     // Spawn event forwarding task
@@ -1931,17 +1931,13 @@ impl RpcClient {
 
     /// Send a fire-and-forget command (no response expected).
     fn send_command(&mut self, mut command: Value) -> Result<()> {
-        let child = self
-            .child
-            .as_mut()
-            .context("Client not started")?;
-
         let id = self.next_request_id();
         if let Some(obj) = command.as_object_mut() {
             obj.insert("id".to_string(), Value::String(id));
         }
 
         let line = serialize_json_line(&command);
+        let child = self.child.as_mut().context("Client not started")?;
         if let Some(ref mut stdin) = child.stdin {
             stdin
                 .write_all(line.as_bytes())
@@ -1954,11 +1950,6 @@ impl RpcClient {
 
     /// Send a command and wait for the response.
     fn send_and_wait(&mut self, mut command: Value) -> Result<RpcResponse> {
-        let child = self
-            .child
-            .as_mut()
-            .context("Client not started")?;
-
         let id = self.next_request_id();
         if let Some(obj) = command.as_object_mut() {
             obj.insert("id".to_string(), Value::String(id.clone()));
@@ -1967,20 +1958,24 @@ impl RpcClient {
         let line = serialize_json_line(&command);
 
         // Write command
-        if let Some(ref mut stdin) = child.stdin {
-            stdin
-                .write_all(line.as_bytes())
-                .context("Failed to write to stdin")?;
-            stdin.flush().context("Failed to flush stdin")?;
+        {
+            let child = self.child.as_mut().context("Client not started")?;
+            if let Some(ref mut stdin) = child.stdin {
+                stdin
+                    .write_all(line.as_bytes())
+                    .context("Failed to write to stdin")?;
+                stdin.flush().context("Failed to flush stdin")?;
+            }
         }
 
         // Read responses until we find ours
+        let child = self.child.as_mut().context("Client not started")?;
         if let Some(ref mut stdout) = child.stdout {
+            let mut buf_reader = std::io::BufReader::new(std::io::BufReader::new(stdout));
             let mut buf = String::new();
             loop {
                 buf.clear();
-                let mut stdout_buf = std::io::BufReader::new(stdout);
-                match stdout_buf.read_line(&mut buf) {
+                match buf_reader.read_line(&mut buf) {
                     Ok(0) => anyhow::bail!("EOF while waiting for response"),
                     Ok(_) => {
                         let trimmed = buf.trim();
@@ -1989,18 +1984,16 @@ impl RpcClient {
                         }
                         match parse_json_line(trimmed) {
                             Ok(value) => {
-                                // Check if it's our response
                                 if let Some(obj) = value.as_object() {
+                                    // Check if it's our response
                                     if obj.get("type").and_then(|v| v.as_str()) == Some("response")
-                                        && obj.get("id").and_then(|v| v.as_str()) == Some(&id)
+                                        && obj.get("id").and_then(|v| v.as_str()) == Some(id.as_str())
                                     {
-                                        // We can't deserialize RpcResponse (it's Serialize-only)
-                                        // Just check the success field
                                         let success = obj
                                             .get("success")
                                             .and_then(|v| v.as_bool())
                                             .unwrap_or(false);
-                                        let command = obj
+                                        let cmd_name = obj
                                             .get("command")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
@@ -2010,64 +2003,62 @@ impl RpcClient {
                                             .get("error")
                                             .and_then(|v| v.as_str())
                                             .map(|s| s.to_string());
-                                        let response = RpcResponse::Response {
+                                        return Ok(RpcResponse::Response {
                                             id: Some(id.clone()),
-                                            command,
+                                            command: cmd_name,
                                             success,
                                             data,
                                             error,
-                                        };
-                                        return Ok(response);
+                                        });
                                     }
-                                }
 
-                                // Otherwise it's an event — try to parse and notify listeners
-                                // We do a lightweight check since RpcEvent is Serialize-only
-                                let event_type = obj
-                                    .get("type")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                let event = match event_type {
-                                    "agent_start" => Some(RpcEvent::AgentStart),
-                                    "agent_end" => Some(RpcEvent::AgentEnd),
-                                    "thinking" => Some(RpcEvent::Thinking),
-                                    "error" => {
-                                        let msg = obj
-                                            .get("message")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        Some(RpcEvent::Error { message: msg })
-                                    }
-                                    "text_chunk" => {
-                                        let text = obj
-                                            .get("text")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        Some(RpcEvent::TextChunk { text })
-                                    }
-                                    "tool_start" => {
-                                        let tool = obj
-                                            .get("tool")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        Some(RpcEvent::ToolStart { tool })
-                                    }
-                                    "tool_end" => {
-                                        let tool = obj
-                                            .get("tool")
-                                            .and_then(|v| v.as_str())
-                                            .unwrap_or("")
-                                            .to_string();
-                                        Some(RpcEvent::ToolEnd { tool })
-                                    }
-                                    _ => None,
-                                };
-                                if let Some(event) = event {
-                                    for listener in &self.event_listeners {
-                                        listener(event.clone());
+                                    // Otherwise it's an event — parse and notify listeners
+                                    let event_type = obj
+                                        .get("type")
+                                        .and_then(|v: &Value| v.as_str())
+                                        .unwrap_or("");
+                                    let event = match event_type {
+                                        "agent_start" => Some(RpcEvent::AgentStart),
+                                        "agent_end" => Some(RpcEvent::AgentEnd),
+                                        "thinking" => Some(RpcEvent::Thinking),
+                                        "error" => {
+                                            let msg = obj
+                                                .get("message")
+                                                .and_then(|v: &Value| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            Some(RpcEvent::Error { message: msg })
+                                        }
+                                        "text_chunk" => {
+                                            let text = obj
+                                                .get("text")
+                                                .and_then(|v: &Value| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            Some(RpcEvent::TextChunk { text })
+                                        }
+                                        "tool_start" => {
+                                            let tool = obj
+                                                .get("tool")
+                                                .and_then(|v: &Value| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            Some(RpcEvent::ToolStart { tool })
+                                        }
+                                        "tool_end" => {
+                                            let tool = obj
+                                                .get("tool")
+                                                .and_then(|v: &Value| v.as_str())
+                                                .unwrap_or("")
+                                                .to_string();
+                                            Some(RpcEvent::ToolEnd { tool })
+                                        }
+                                        _ => None,
+                                    };
+                                    if let Some(event) = event {
+                                        for listener in &self.event_listeners {
+                                            listener(event.clone());
+                                        }
                                     }
                                 }
                             }
@@ -2080,6 +2071,97 @@ impl RpcClient {
         } else {
             anyhow::bail!("No stdout available");
         }
+    }
+
+    /// Handle an incoming JSON value during send_and_wait.
+    /// Returns Ok(response) if it matches our request ID, otherwise processes as event.
+    fn handle_incoming_value(
+        &mut self,
+        expected_id: &str,
+        value: Value,
+    ) -> Result<RpcResponse> {
+        if let Some(obj) = value.as_object() {
+            // Check if it's our response
+            if obj.get("type").and_then(|v| v.as_str()) == Some("response")
+                && obj.get("id").and_then(|v| v.as_str()) == Some(expected_id)
+            {
+                let success = obj
+                    .get("success")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let command = obj
+                    .get("command")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let data = obj.get("data").cloned();
+                let error = obj
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                return Ok(RpcResponse::Response {
+                    id: Some(expected_id.to_string()),
+                    command,
+                    success,
+                    data,
+                    error,
+                });
+            }
+
+            // Otherwise it's an event — try to parse and notify listeners
+            let event_type = obj
+                .get("type")
+                .and_then(|v: &Value| v.as_str())
+                .unwrap_or("");
+            let event = match event_type {
+                "agent_start" => Some(RpcEvent::AgentStart),
+                "agent_end" => Some(RpcEvent::AgentEnd),
+                "thinking" => Some(RpcEvent::Thinking),
+                "error" => {
+                    let msg = obj
+                        .get("message")
+                        .and_then(|v: &Value| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some(RpcEvent::Error { message: msg })
+                }
+                "text_chunk" => {
+                    let text = obj
+                        .get("text")
+                        .and_then(|v: &Value| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some(RpcEvent::TextChunk { text })
+                }
+                "tool_start" => {
+                    let tool = obj
+                        .get("tool")
+                        .and_then(|v: &Value| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some(RpcEvent::ToolStart { tool })
+                }
+                "tool_end" => {
+                    let tool = obj
+                        .get("tool")
+                        .and_then(|v: &Value| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    Some(RpcEvent::ToolEnd { tool })
+                }
+                _ => None,
+            };
+            if let Some(event) = event {
+                for listener in &self.event_listeners {
+                    listener(event.clone());
+                }
+            }
+        }
+
+        // Not our response — loop continues (caller will read next line)
+        // This is a hack: we return an error to signal "continue reading"
+        // Better approach: use a loop inside send_and_wait
+        anyhow::bail!("Internal: not our response, caller should retry")
     }
 }
 
