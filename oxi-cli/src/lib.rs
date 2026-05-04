@@ -125,7 +125,7 @@ pub struct App {
 }
 
 /// Chat message for display
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
@@ -151,11 +151,13 @@ impl ChatMessage {
 }
 
 /// Interactive session state
+#[derive(Debug, Clone)]
 pub struct InteractiveSession {
     pub messages: Vec<ChatMessage>,
     pub thinking: bool,
     pub current_response: String,
     pub session_id: Option<Uuid>,
+    pub name: Option<String>,
     pub entries: Vec<session::SessionEntry>,
 }
 
@@ -166,6 +168,7 @@ impl Default for InteractiveSession {
             thinking: false,
             current_response: String::new(),
             session_id: None,
+            name: None,
             entries: Vec::new(),
         }
     }

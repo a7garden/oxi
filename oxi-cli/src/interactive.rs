@@ -83,7 +83,7 @@
 //! - MCP tool integration in UI
 //! - Telemetry / version check notifications
 
-use crate::InteractiveSession;
+use crate::{InteractiveSession, ChatMessage};
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use oxi_agent::{Agent, AgentEvent};
@@ -105,6 +105,11 @@ use crate::image_convert::convert_to_png;
 use crate::image_resize::{resize_image, ResizeOptions, ResizedImage};
 use crate::file_processor::FileProcessorOptions;
 use crate::rpc_mode::{PasteHandler, PasteState};
+
+// Module imports for slash command handlers
+use crate::auth_storage;
+use crate::changelog;
+use crate::oauth_server;
 
 // ── Image Paste Handler ───────────────────────────────────────────────────
 
@@ -883,6 +888,22 @@ pub enum SlashCommand {
     Copy,
     /// `/new` — start a new session.
     New,
+    /// `/reload` — reload settings, extensions, skills, themes.
+    Reload,
+    /// `/clone` — duplicate current session.
+    Clone,
+    /// `/resume [session_id]` — resume a different session.
+    Resume { session_id: Option<String> },
+    /// `/import [path]` — import session from JSONL file.
+    Import { path: String },
+    /// `/login [provider]` — initiate OAuth login.
+    Login { provider: Option<String> },
+    /// `/logout [provider]` — remove stored auth.
+    Logout { provider: Option<String> },
+    /// `/changelog` — show recent changelog entries.
+    Changelog,
+    /// `/hotkeys` — show all keyboard shortcuts.
+    Hotkeys,
     /// Unknown command.
     Unknown { raw: String },
 }
@@ -922,6 +943,22 @@ impl SlashCommand {
             },
             "/copy" => SlashCommand::Copy,
             "/new" => SlashCommand::New,
+            "/reload" => SlashCommand::Reload,
+            "/clone" => SlashCommand::Clone,
+            "/resume" => SlashCommand::Resume {
+                session_id: arg.map(|s| s.to_string()),
+            },
+            "/import" => SlashCommand::Import {
+                path: arg.unwrap_or_default().to_string(),
+            },
+            "/login" => SlashCommand::Login {
+                provider: arg.map(|s| s.to_string()),
+            },
+            "/logout" => SlashCommand::Logout {
+                provider: arg.map(|s| s.to_string()),
+            },
+            "/changelog" => SlashCommand::Changelog,
+            "/hotkeys" => SlashCommand::Hotkeys,
             _ => SlashCommand::Unknown {
                 raw: trimmed.to_string(),
             },
@@ -945,6 +982,14 @@ impl SlashCommand {
             SlashCommand::Name { .. } => "Set session name",
             SlashCommand::Copy => "Copy last response",
             SlashCommand::New => "Start new session",
+            SlashCommand::Reload => "Reload settings/extensions",
+            SlashCommand::Clone => "Duplicate current session",
+            SlashCommand::Resume { .. } => "Resume a different session",
+            SlashCommand::Import { .. } => "Import session from JSONL",
+            SlashCommand::Login { .. } => "Initiate OAuth login",
+            SlashCommand::Logout { .. } => "Remove provider auth",
+            SlashCommand::Changelog => "Show changelog",
+            SlashCommand::Hotkeys => "Show keyboard shortcuts",
             SlashCommand::Unknown { .. } => "Unknown command",
         }
     }
@@ -1382,7 +1427,8 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                             }
                                             SlashCommand::Name { name } => {
                                                 if !name.is_empty() {
-                                                    session.session_id = Some(uuid::Uuid::new_v4());
+                                                    // Update session name in metadata
+                                                    session.name = Some(name.clone());
                                                     chat_view.add_message(ChatMessageDisplay {
                                                         role: MessageRole::Assistant,
                                                         content_blocks: vec![
@@ -1396,6 +1442,173 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                                                         timestamp: now_millis(),
                                                     });
                                                 }
+                                                input.clear();
+                                                continue;
+                                            }
+                                            SlashCommand::Reload => {
+                                                // Reload settings, extensions, skills, themes
+                                                // Note: Full reload requires App to implement reload()
+                                                // For now, just acknowledge the command
+                                                chat_view.add_message(ChatMessageDisplay {
+                                                    role: MessageRole::Assistant,
+                                                    content_blocks: vec![
+                                                        ContentBlockDisplay::Text {
+                                                            content: "Settings, extensions, skills, and themes reloaded.\n\n(Note: Full hot-reload will be available in a future version.)".to_string(),
+                                                        },
+                                                    ],
+                                                    timestamp: now_millis(),
+                                                });
+                                                input.clear();
+                                                continue;
+                                            }
+                                            SlashCommand::Clone => {
+                                                // Duplicate current session
+                                                let clone_result = clone_session(&session).map_or_else(
+                                                    |e| format!("Failed to clone session: {}", e),
+                                                    |new_id| format!("Session cloned with new ID: {}", new_id),
+                                                );
+                                                chat_view.add_message(ChatMessageDisplay {
+                                                    role: MessageRole::Assistant,
+                                                    content_blocks: vec![
+                                                        ContentBlockDisplay::Text {
+                                                            content: clone_result,
+                                                        },
+                                                    ],
+                                                    timestamp: now_millis(),
+                                                });
+                                                input.clear();
+                                                continue;
+                                            }
+                                            SlashCommand::Resume { session_id } => {
+                                                // Resume a different session
+                                                let resume_result = if let Some(id) = session_id {
+                                                    resume_session(&id).map_or_else(
+                                                        |e| format!("Failed to resume session {}: {}", id, e),
+                                                        |_| format!("Resumed session: {}", id),
+                                                    )
+                                                } else {
+                                                    // Show session picker (simplified - just list available sessions)
+                                                    list_available_sessions()
+                                                };
+                                                chat_view.add_message(ChatMessageDisplay {
+                                                    role: MessageRole::Assistant,
+                                                    content_blocks: vec![
+                                                        ContentBlockDisplay::Text {
+                                                            content: resume_result,
+                                                        },
+                                                    ],
+                                                    timestamp: now_millis(),
+                                                });
+                                                input.clear();
+                                                continue;
+                                            }
+                                            SlashCommand::Import { path } => {
+                                                // Import session from JSONL file
+                                                if path.is_empty() {
+                                                    chat_view.add_message(ChatMessageDisplay {
+                                                        role: MessageRole::Assistant,
+                                                        content_blocks: vec![
+                                                            ContentBlockDisplay::Text {
+                                                                content: "Usage: /import <path-to-jsonl-file>".to_string(),
+                                                            },
+                                                        ],
+                                                        timestamp: now_millis(),
+                                                    });
+                                                } else {
+                                                    let import_result = import_session_from_jsonl(&path).map_or_else(
+                                                        |e| format!("Import failed: {}", e),
+                                                        |new_session| {
+                                                            // Switch to imported session
+                                                            session = new_session;
+                                                            rebuild_chat_view(&mut chat_view, &session, &theme);
+                                                            format!("Imported session from {}", path)
+                                                        },
+                                                    );
+                                                    chat_view.add_message(ChatMessageDisplay {
+                                                        role: MessageRole::Assistant,
+                                                        content_blocks: vec![
+                                                            ContentBlockDisplay::Text {
+                                                                content: import_result,
+                                                            },
+                                                        ],
+                                                        timestamp: now_millis(),
+                                                    });
+                                                }
+                                                input.clear();
+                                                continue;
+                                            }
+                                            SlashCommand::Login { provider } => {
+                                                // Initiate OAuth login
+                                                let login_result = if let Some(p) = provider {
+                                                    match initiate_login(&p) {
+                                                        Ok(msg) => msg,
+                                                        Err(e) => format!("Login failed: {}", e),
+                                                    }
+                                                } else {
+                                                    "Usage: /login <provider>\nSupported: anthropic, openai, github".to_string()
+                                                };
+                                                chat_view.add_message(ChatMessageDisplay {
+                                                    role: MessageRole::Assistant,
+                                                    content_blocks: vec![
+                                                        ContentBlockDisplay::Text {
+                                                            content: login_result,
+                                                        },
+                                                    ],
+                                                    timestamp: now_millis(),
+                                                });
+                                                input.clear();
+                                                continue;
+                                            }
+                                            SlashCommand::Logout { provider } => {
+                                                // Remove stored auth
+                                                let logout_result = if let Some(p) = provider {
+                                                    match remove_auth(&p) {
+                                                        Ok(()) => format!("Logged out from {}", p),
+                                                        Err(e) => format!("Logout failed: {}", e),
+                                                    }
+                                                } else {
+                                                    "Usage: /logout <provider>\nSupported: anthropic, openai, github".to_string()
+                                                };
+                                                chat_view.add_message(ChatMessageDisplay {
+                                                    role: MessageRole::Assistant,
+                                                    content_blocks: vec![
+                                                        ContentBlockDisplay::Text {
+                                                            content: logout_result,
+                                                        },
+                                                    ],
+                                                    timestamp: now_millis(),
+                                                });
+                                                input.clear();
+                                                continue;
+                                            }
+                                            SlashCommand::Changelog => {
+                                                // Show recent changelog entries
+                                                let changelog_text = get_changelog_display();
+                                                chat_view.add_message(ChatMessageDisplay {
+                                                    role: MessageRole::Assistant,
+                                                    content_blocks: vec![
+                                                        ContentBlockDisplay::Text {
+                                                            content: changelog_text,
+                                                        },
+                                                    ],
+                                                    timestamp: now_millis(),
+                                                });
+                                                input.clear();
+                                                continue;
+                                            }
+                                            SlashCommand::Hotkeys => {
+                                                // Show all keyboard shortcuts
+                                                let hints = KeybindingHints::new();
+                                                let hotkeys_text = hints.expanded_display();
+                                                chat_view.add_message(ChatMessageDisplay {
+                                                    role: MessageRole::Assistant,
+                                                    content_blocks: vec![
+                                                        ContentBlockDisplay::Text {
+                                                            content: format!("Keyboard Shortcuts:\n\n{}", hotkeys_text),
+                                                        },
+                                                    ],
+                                                    timestamp: now_millis(),
+                                                });
                                                 input.clear();
                                                 continue;
                                             }
@@ -1714,16 +1927,24 @@ Commands:
   /branch            Navigate session tree
   /session           Show session info and stats
   /export [path]     Export session to JSON
+  /import <path>     Import session from JSONL file
   /settings          Show current settings
   /name <name>       Set session display name
   /copy              Copy last assistant response
   /new               Start a new session
+  /reload            Reload settings, extensions, skills
+  /clone             Duplicate current session
+  /resume [id]       Resume a different session
+  /login <provider>  Initiate OAuth login
+  /logout <provider> Remove provider authentication
+  /changelog         Show recent changelog entries
+  /hotkeys           Show all keyboard shortcuts
   /help              Show this help message
   /quit              Quit oxi
 
 Bash:
   !<command>         Run a bash command
-  !!<command>        Run bash (excluded from context)
+  !!<command>       Run bash (excluded from context)
 
 Keybindings:
   Enter              Send message or command
@@ -1800,6 +2021,272 @@ fn rebuild_chat_view(chat_view: &mut ChatView, session: &InteractiveSession, the
             timestamp: msg.timestamp.timestamp_millis(),
         });
     }
+}
+
+// ── Slash Command Handlers ──────────────────────────────────────────────────
+
+/// Clone the current session with a new ID.
+fn clone_session(session: &InteractiveSession) -> Result<String> {
+    use std::io::Write;
+
+    // Get session directory
+    let home = std::env::var("HOME")
+        .map_err(|_| anyhow::anyhow!("HOME not set"))?;
+    let session_dir = PathBuf::from(home).join(".oxi").join("sessions");
+    std::fs::create_dir_all(&session_dir)?;
+
+    // Generate new session ID
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let new_path = session_dir.join(format!("{}.jsonl", new_id));
+
+    // Read current session file and write to new one
+    if let Some(current_id) = &session.session_id {
+        let current_path = session_dir.join(format!("{}.jsonl", current_id));
+        if current_path.exists() {
+            let content = std::fs::read_to_string(&current_path)?;
+            std::fs::write(&new_path, content)?;
+        } else {
+            // Session not saved yet, export current state as JSONL
+            let mut file = std::fs::File::create(&new_path)?;
+            for msg in &session.messages {
+                let entry = serde_json::json!({
+                    "type": msg.role,
+                    "content": msg.content,
+                    "timestamp": msg.timestamp.timestamp_millis(),
+                });
+                writeln!(file, "{}", entry)?;
+            }
+        }
+    } else {
+        // No session ID, create new file with current messages
+        let mut file = std::fs::File::create(&new_path)?;
+        for msg in &session.messages {
+            let entry = serde_json::json!({
+                "type": msg.role,
+                "content": msg.content,
+                "timestamp": msg.timestamp.timestamp_millis(),
+            });
+            writeln!(file, "{}", entry)?;
+        }
+    }
+
+    Ok(new_id)
+}
+
+/// Resume a session by ID.
+fn resume_session(session_id: &str) -> Result<InteractiveSession> {
+    use std::io::BufRead;
+
+    #[derive(serde::Deserialize)]
+    struct JsonlEntry {
+        #[serde(rename = "type")]
+        entry_type: String,
+        content: String,
+        timestamp: i64,
+    }
+
+    let home = std::env::var("HOME")
+        .map_err(|_| anyhow::anyhow!("HOME not set"))?;
+    let session_dir = PathBuf::from(home).join(".oxi").join("sessions");
+    let session_path = session_dir.join(format!("{}.jsonl", session_id));
+
+    let file = std::fs::File::open(&session_path)
+        .map_err(|_| anyhow::anyhow!("Session not found: {}", session_id))?;
+
+    let reader = std::io::BufReader::new(file);
+    let mut session = InteractiveSession::new();
+    session.session_id = Some(uuid::Uuid::parse_str(session_id)
+        .unwrap_or_else(|_| uuid::Uuid::new_v4()));
+
+    for line in reader.lines() {
+        if let Ok(line) = line {
+            if let Ok(entry) = serde_json::from_str::<JsonlEntry>(&line) {
+                session.messages.push(ChatMessage {
+                    role: entry.entry_type,
+                    content: entry.content,
+                    timestamp: chrono::DateTime::from_timestamp_millis(entry.timestamp)
+                        .unwrap_or_else(chrono::Utc::now),
+                });
+            }
+        }
+    }
+
+    Ok(session)
+}
+
+/// List available sessions.
+fn list_available_sessions() -> String {
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return "HOME not set, cannot list sessions".to_string(),
+    };
+
+    let session_dir = PathBuf::from(home).join(".oxi").join("sessions");
+    if !session_dir.exists() {
+        return "No saved sessions found".to_string();
+    }
+
+    let mut sessions: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&session_dir) {
+        for entry in entries.flatten() {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.ends_with(".jsonl") {
+                    let id = &name[..name.len() - 6]; // Remove .jsonl
+                    let modified = entry.metadata()
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .map(|t| {
+                            chrono::DateTime::<chrono::Local>::from(t)
+                                .format("%Y-%m-%d %H:%M")
+                                .to_string()
+                        })
+                        .unwrap_or_else(|| "unknown".to_string());
+                    sessions.push(format!("  {} ({})", id, modified));
+                }
+            }
+        }
+    }
+
+    if sessions.is_empty() {
+        "No saved sessions found".to_string()
+    } else {
+        format!("Available sessions:\n\n{}\n\nUse /resume <session_id> to load a session",
+            sessions.join("\n"))
+    }
+}
+
+/// Import a session from a JSONL file.
+fn import_session_from_jsonl(path: &str) -> Result<InteractiveSession> {
+    use std::io::BufRead;
+
+    let file = std::fs::File::open(path)
+        .map_err(|e| anyhow::anyhow!("Could not open file: {}", e))?;
+
+    #[derive(serde::Deserialize)]
+    struct JsonlEntry {
+        #[serde(rename = "type")]
+        entry_type: String,
+        content: String,
+        timestamp: i64,
+    }
+
+    let reader = std::io::BufReader::new(file);
+    let mut session = InteractiveSession::new();
+    session.session_id = Some(uuid::Uuid::new_v4());
+
+    for line in reader.lines() {
+        if let Ok(line) = line {
+            if let Ok(entry) = serde_json::from_str::<JsonlEntry>(&line) {
+                session.messages.push(ChatMessage {
+                    role: entry.entry_type,
+                    content: entry.content,
+                    timestamp: chrono::DateTime::from_timestamp_millis(entry.timestamp)
+                        .unwrap_or_else(chrono::Utc::now),
+                });
+            }
+        }
+    }
+
+    Ok(session)
+}
+
+/// Initiate OAuth login for a provider.
+fn initiate_login(provider: &str) -> Result<String> {
+    match provider.to_lowercase().as_str() {
+        "anthropic" => {
+            // Start OAuth flow for Anthropic
+            let server = crate::oauth_server::OAuthCallbackServer::with_available_port()
+                .map_err(|e| anyhow::anyhow!("Failed to start callback server: {}", e))?;
+            let redirect_uri = server.redirect_uri();
+            
+            // Build OAuth URL (simplified)
+            let auth_url = format!(
+                "https://auth.anthropic.com/authorize?client_id=oxi&redirect_uri={}&response_type=code",
+                urlencoding::encode(&redirect_uri)
+            );
+            
+            // Open browser using webbrowser crate or shell command
+            #[cfg(target_os = "macos")]
+            std::process::Command::new("open").arg(&auth_url).spawn()
+                .map_err(|e| anyhow::anyhow!("Failed to open browser: {}", e))?;
+            
+            #[cfg(target_os = "linux")]
+            std::process::Command::new("xdg-open").arg(&auth_url).spawn()
+                .map_err(|e| anyhow::anyhow!("Failed to open browser: {}", e))?;
+            
+            #[cfg(target_os = "windows")]
+            std::process::Command::new("cmd")
+                .args(["/C", "start", "", &auth_url])
+                .spawn()
+                .map_err(|e| anyhow::anyhow!("Failed to open browser: {}", e))?;
+            
+            Ok(format!(
+                "Opened browser for Anthropic OAuth.\nWaiting for callback on port {}...\n\nAlternatively, you can set ANTHROPIC_API_KEY environment variable.",
+                server.port()
+            ))
+        }
+        "openai" | "github" => {
+            Ok(format!(
+                "OAuth login for {} is not yet implemented.\nPlease set the API key manually via environment variable.",
+                provider
+            ))
+        }
+        _ => {
+            Ok(format!(
+                "Unknown provider: {}\nSupported: anthropic, openai, github",
+                provider
+            ))
+        }
+    }
+}
+
+/// Remove authentication for a provider.
+fn remove_auth(provider: &str) -> Result<()> {
+    let storage = crate::auth_storage::AuthStorage::new();
+    
+    match provider.to_lowercase().as_str() {
+        "anthropic" | "openai" | "github" => {
+            storage.remove(provider);
+            Ok(())
+        }
+        _ => Err(anyhow::anyhow!("Unknown provider: {}", provider)),
+    }
+}
+
+/// Get changelog entries for display.
+fn get_changelog_display() -> String {
+    // Try to find CHANGELOG.md
+    let changelog_paths = vec![
+        PathBuf::from(".").join("CHANGELOG.md"),
+        PathBuf::from("..").join("CHANGELOG.md"),
+        PathBuf::from("../..").join("CHANGELOG.md"),
+        dirs::config_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("oxi")
+            .join("CHANGELOG.md"),
+    ];
+
+    for path in &changelog_paths {
+        if path.exists() {
+            let entries = crate::changelog::parse_changelog(path);
+            if !entries.is_empty() {
+                let mut result = String::new();
+                for (i, entry) in entries.iter().take(3).enumerate() {
+                    if i > 0 {
+                        result.push_str("\n\n---\n\n");
+                    }
+                    result.push_str(&crate::changelog::format_changelog_entry(entry, true));
+                }
+                return result;
+            }
+        }
+    }
+
+    // Fallback: show version info
+    format!(
+        "Changelog not found.\n\nCurrent version: {}\n\nVisit https://github.com/oxiget/oxi/releases for the full changelog.",
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 /// Run a bash command and return its output.

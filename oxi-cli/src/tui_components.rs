@@ -7,10 +7,343 @@
 //! - Login dialog (API key entry with provider selection)
 //! - Diff viewer (show edit diffs with color highlighting)
 //! - Bash execution display (streaming output, timer, cancel)
+//! - Assistant message rendering (thinking blocks, tool calls, markdown)
+//! - Tool execution rendering (args, results, images, status)
+//! - Summary message rendering (compaction, branch)
 
 use serde::{Deserialize, Serialize};
 
 use rand::RngCore;
+
+/// Content block types for assistant messages
+#[derive(Debug, Clone)]
+pub enum AssistantContentBlock {
+    /// Text content with optional markdown
+    Text {
+        text: String,
+    },
+    /// Thinking/reasoning block (collapsible)
+    Thinking {
+        thinking: String,
+    },
+    /// Tool call invocation
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: String,
+    },
+}
+
+/// Assistant message data structure
+#[derive(Debug, Clone)]
+pub struct AssistantMessage {
+    pub content: Vec<AssistantContentBlock>,
+    pub stop_reason: Option<StopReason>,
+    pub error_message: Option<String>,
+}
+
+/// Why the assistant message stopped
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopReason {
+    EndTurn,
+    MaxTokens,
+    StopSequence,
+    Aborted,
+    Error,
+}
+
+impl StopReason {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StopReason::EndTurn => "end_turn",
+            StopReason::MaxTokens => "max_tokens",
+            StopReason::StopSequence => "stop_sequence",
+            StopReason::Aborted => "aborted",
+            StopReason::Error => "error",
+        }
+    }
+}
+
+impl AssistantMessage {
+    pub fn new() -> Self {
+        Self {
+            content: Vec::new(),
+            stop_reason: None,
+            error_message: None,
+        }
+    }
+
+    /// Add a text block
+    pub fn add_text(&mut self, text: impl Into<String>) {
+        self.content.push(AssistantContentBlock::Text {
+            text: text.into(),
+        });
+    }
+
+    /// Add a thinking block
+    pub fn add_thinking(&mut self, thinking: impl Into<String>) {
+        self.content.push(AssistantContentBlock::Thinking {
+            thinking: thinking.into(),
+        });
+    }
+
+    /// Add a tool call block
+    pub fn add_tool_call(&mut self, id: impl Into<String>, name: impl Into<String>, arguments: impl Into<String>) {
+        self.content.push(AssistantContentBlock::ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: arguments.into(),
+        });
+    }
+
+    /// Check if message has any visible content
+    pub fn has_visible_content(&self) -> bool {
+        self.content.iter().any(|c| match c {
+            AssistantContentBlock::Text { text } => !text.trim().is_empty(),
+            AssistantContentBlock::Thinking { thinking } => !thinking.trim().is_empty(),
+            AssistantContentBlock::ToolCall { .. } => false,
+        })
+    }
+
+    /// Check if message has tool calls
+    pub fn has_tool_calls(&self) -> bool {
+        self.content
+            .iter()
+            .any(|c| matches!(c, AssistantContentBlock::ToolCall { .. }))
+    }
+}
+
+impl Default for AssistantMessage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Options for rendering assistant messages
+#[derive(Debug, Clone)]
+pub struct AssistantMessageRenderOptions {
+    /// Hide thinking blocks and show a label instead
+    pub hide_thinking: bool,
+    /// Label to show when thinking is hidden
+    pub hidden_thinking_label: String,
+    /// Use OSC 133 prompt escape codes for terminal integration
+    pub use_osc133: bool,
+}
+
+impl Default for AssistantMessageRenderOptions {
+    fn default() -> Self {
+        Self {
+            hide_thinking: false,
+            hidden_thinking_label: "Thinking...".to_string(),
+            use_osc133: false,
+        }
+    }
+}
+
+/// Assistant message renderer
+pub struct AssistantMessageRenderer {
+    options: AssistantMessageRenderOptions,
+}
+
+impl AssistantMessageRenderer {
+    pub fn new(options: AssistantMessageRenderOptions) -> Self {
+        Self { options }
+    }
+
+    /// Set hide thinking option
+    pub fn with_hide_thinking(mut self, hide: bool) -> Self {
+        self.options.hide_thinking = hide;
+        self
+    }
+
+    /// Set hidden thinking label
+    pub fn with_hidden_thinking_label(mut self, label: impl Into<String>) -> Self {
+        self.options.hidden_thinking_label = label.into();
+        self
+    }
+
+    /// Enable OSC 133 escape codes for terminal integration
+    pub fn with_osc133(mut self, enable: bool) -> Self {
+        self.options.use_osc133 = enable;
+        self
+    }
+
+    /// Render an assistant message to a string
+    pub fn render(&self, message: &AssistantMessage) -> String {
+        let mut output = String::new();
+
+        // OSC 133 zone start
+        if self.options.use_osc133 {
+            output.push_str("\x1b]133;A\x07");
+        }
+
+        let mut has_visible_content = false;
+        let visible_count = message
+            .content
+            .iter()
+            .filter(|c| match c {
+                AssistantContentBlock::Text { text } => !text.trim().is_empty(),
+                AssistantContentBlock::Thinking { thinking } => !thinking.trim().is_empty(),
+                AssistantContentBlock::ToolCall { .. } => false,
+            })
+            .count();
+
+        let mut visible_idx = 0;
+
+        for block in &message.content {
+            match block {
+                AssistantContentBlock::Text { text } if !text.trim().is_empty() => {
+                    if has_visible_content {
+                        output.push('\n');
+                    }
+                    visible_idx += 1;
+                    has_visible_content = true;
+                    output.push_str(&render_markdown(text.trim()));
+                    if visible_idx < visible_count {
+                        output.push('\n');
+                    }
+                }
+                AssistantContentBlock::Thinking { thinking } if !thinking.trim().is_empty() => {
+                    if has_visible_content {
+                        output.push('\n');
+                    }
+                    visible_idx += 1;
+                    has_visible_content = true;
+
+                    if self.options.hide_thinking {
+                        // Show static thinking label (italic, dimmed)
+                        output.push_str(&format!(
+                            "\x1b[2m\x1b[3m{}\x1b[0m",
+                            self.options.hidden_thinking_label
+                        ));
+                    } else {
+                        // Show thinking content (italic, dimmed)
+                        let rendered = render_markdown(thinking.trim());
+                        output.push_str(&format!("\x1b[2m\x1b[3m{}\x1b[0m", rendered));
+                    }
+
+                    if visible_idx < visible_count {
+                        output.push('\n');
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // Handle stop reasons (only if no tool calls)
+        if !message.has_tool_calls() {
+            if let Some(ref reason) = message.stop_reason {
+                if has_visible_content {
+                    output.push('\n');
+                }
+                match reason {
+                    StopReason::Aborted => {
+                        let msg = message
+                            .error_message
+                            .as_ref()
+                            .filter(|m| *m != "Request was aborted")
+                            .cloned()
+                            .unwrap_or_else(|| "Operation aborted".to_string());
+                        output.push_str(&format!("\x1b[31m{}\x1b[0m", msg));
+                    }
+                    StopReason::Error => {
+                        let msg = message
+                            .error_message
+                            .as_ref()
+                            .cloned()
+                            .unwrap_or_else(|| "Unknown error".to_string());
+                        output.push_str(&format!("\x1b[31mError: {}\x1b[0m", msg));
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // OSC 133 zone end
+        if self.options.use_osc133 {
+            output.push_str("\x1b]133;B\x07\x1b]133;C\x07");
+        }
+
+        output
+    }
+}
+
+impl Default for AssistantMessageRenderer {
+    fn default() -> Self {
+        Self::new(AssistantMessageRenderOptions::default())
+    }
+}
+
+/// Simple markdown rendering (bold, italic, code)
+fn render_markdown(text: &str) -> String {
+    let mut output = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '`' {
+            // Inline code
+            let mut code = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '`' {
+                    chars.next();
+                    // Check for code block
+                    if chars.peek() == Some(&'`') {
+                        chars.next();
+                        // Triple backtick - code block
+                        let mut block = String::new();
+                        while let Some(ch) = chars.next() {
+                            if ch == '`' {
+                                if chars.clone().take(2).collect::<String>() == "``" {
+                                    chars.nth(2);
+                                    break;
+                                }
+                                block.push(ch);
+                            } else {
+                                block.push(ch);
+                            }
+                        }
+                        output.push_str(&format!("\x1b[36m{}\x1b[0m", block.trim()));
+                        break;
+                    }
+                    break;
+                } else {
+                    code.push(chars.next().unwrap());
+                }
+            }
+            if !code.is_empty() {
+                output.push_str(&format!("\x1b[33m{}\x1b[0m", code));
+            }
+        } else if c == '*' && chars.peek() == Some(&'*') {
+            // Bold
+            chars.next();
+            let mut bold = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '*' && chars.clone().nth(1) == Some('*') {
+                    chars.next();
+                    chars.next();
+                    break;
+                }
+                bold.push(chars.next().unwrap());
+            }
+            output.push_str(&format!("\x1b[1m{}\x1b[0m", bold));
+        } else if c == '_' {
+            // Italic
+            let mut italic = String::new();
+            while let Some(&next) = chars.peek() {
+                if next == '_' {
+                    chars.next();
+                    break;
+                }
+                italic.push(chars.next().unwrap());
+            }
+            output.push_str(&format!("\x1b[3m{}\x1b[0m", italic));
+        } else {
+            output.push(c);
+        }
+    }
+
+    output
+}
 
 /// Session info for display in session selector
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -937,7 +1270,306 @@ fn highlight_words_diff(content: &str, is_added: bool) -> String {
     result.trim_end().to_string()
 }
 
-/// Bash execution display state
+/// Tool result content block
+#[derive(Debug, Clone)]
+pub enum ToolContentBlock {
+    /// Text output
+    Text { text: String },
+    /// Image data (base64 encoded)
+    Image { data: String, mime_type: String },
+}
+
+/// Tool execution result
+#[derive(Debug, Clone)]
+pub struct ToolResult {
+    pub content: Vec<ToolContentBlock>,
+    pub is_error: bool,
+    pub details: Option<serde_json::Value>,
+}
+
+impl ToolResult {
+    pub fn new_text(text: impl Into<String>) -> Self {
+        Self {
+            content: vec![ToolContentBlock::Text { text: text.into() }],
+            is_error: false,
+            details: None,
+        }
+    }
+
+    pub fn error(text: impl Into<String>) -> Self {
+        Self {
+            content: vec![ToolContentBlock::Text { text: text.into() }],
+            is_error: true,
+            details: None,
+        }
+    }
+
+    /// Get text output (first text block or concatenated)
+    pub fn get_text(&self) -> Option<String> {
+        let texts: Vec<_> = self
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                ToolContentBlock::Text { text } => Some(text.clone()),
+                ToolContentBlock::Image { .. } => None,
+            })
+            .collect();
+
+        if texts.is_empty() {
+            None
+        } else {
+            Some(texts.join("\n"))
+        }
+    }
+
+    /// Check if result contains images
+    pub fn has_images(&self) -> bool {
+        self.content
+            .iter()
+            .any(|b| matches!(b, ToolContentBlock::Image { .. }))
+    }
+
+    /// Count images in result
+    pub fn image_count(&self) -> usize {
+        self.content
+            .iter()
+            .filter(|b| matches!(b, ToolContentBlock::Image { .. }))
+            .count()
+    }
+}
+
+/// Tool execution state
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolExecutionState {
+    /// Tool call has been made, awaiting execution
+    Pending,
+    /// Tool is currently executing
+    Running,
+    /// Tool completed successfully
+    Success,
+    /// Tool completed with error
+    Error,
+}
+
+/// Tool execution display state
+#[derive(Debug, Clone)]
+pub struct ToolExecution {
+    pub tool_name: String,
+    pub tool_call_id: String,
+    pub arguments: serde_json::Value,
+    pub state: ToolExecutionState,
+    pub result: Option<ToolResult>,
+    pub expanded: bool,
+    pub show_images: bool,
+}
+
+impl ToolExecution {
+    pub fn new(tool_name: impl Into<String>, tool_call_id: impl Into<String>, args: serde_json::Value) -> Self {
+        Self {
+            tool_name: tool_name.into(),
+            tool_call_id: tool_call_id.into(),
+            arguments: args,
+            state: ToolExecutionState::Pending,
+            result: None,
+            expanded: false,
+            show_images: true,
+        }
+    }
+
+    /// Mark execution as started
+    pub fn start(&mut self) {
+        self.state = ToolExecutionState::Running;
+    }
+
+    /// Complete with result
+    pub fn complete(&mut self, result: ToolResult) {
+        self.state = if result.is_error {
+            ToolExecutionState::Error
+        } else {
+            ToolExecutionState::Success
+        };
+        self.result = Some(result);
+    }
+
+    /// Set expanded/collapsed state
+    pub fn set_expanded(&mut self, expanded: bool) {
+        self.expanded = expanded;
+    }
+
+    /// Toggle expanded state
+    pub fn toggle_expanded(&mut self) {
+        self.expanded = !self.expanded;
+    }
+
+    /// Format arguments for display
+    pub fn format_arguments(&self) -> String {
+        if self.arguments.is_null() {
+            String::new()
+        } else if let Ok(obj) = serde_json::from_value::<serde_json::Value>(self.arguments.clone()) {
+            serde_json::to_string_pretty(&obj).unwrap_or_else(|_| self.arguments.to_string())
+        } else {
+            self.arguments.to_string()
+        }
+    }
+
+    /// Render the tool execution
+    pub fn render(&self) -> String {
+        let mut output = String::new();
+
+        // Determine colors based on state
+        let (bg_color, fg_color, status_icon) = match self.state {
+            ToolExecutionState::Pending => ("\x1b[48;5;240m", "\x1b[38;5;250m", "○"),
+            ToolExecutionState::Running => ("\x1b[48;5;239m", "\x1b[38;5;250m", "◐"),
+            ToolExecutionState::Success => ("\x1b[48;5;28m", "\x1b[38;5;255m", "●"),
+            ToolExecutionState::Error => ("\x1b[48;5;196m", "\x1b[38;5;255m", "✗"),
+        };
+        let reset = "\x1b[0m";
+
+        // Tool header
+        output.push_str(&format!(
+            "{} {} {}\x1b[1m{}\x1b[0m{}",
+            bg_color, status_icon, fg_color, self.tool_name, reset
+        ));
+        output.push('\n');
+
+        // Arguments (if expanded or small)
+        let args_str = self.format_arguments();
+        if self.expanded || args_str.len() < 200 {
+            if !args_str.is_empty() {
+                // Pretty print arguments
+                output.push_str(&format!("{}Arguments:{} {}\n", fg_color, reset, args_str));
+            }
+        } else {
+            // Show truncated args
+            let truncated = if args_str.len() > 100 {
+                format!("{}...\x1b[0m ({} chars)", &args_str[..100], args_str.len())
+            } else {
+                args_str
+            };
+            output.push_str(&format!("{}Arguments:{} {}\n", fg_color, reset, truncated));
+        }
+
+        // Result
+        if let Some(ref result) = self.result {
+            let result_fg = if result.is_error { "\x1b[31m" } else { fg_color };
+
+            if self.expanded {
+                // Show full result
+                if let Some(text) = result.get_text() {
+                    output.push_str(&format!("{}Output:{}\n{}", result_fg, reset, text));
+                    if !text.ends_with('\n') {
+                        output.push('\n');
+                    }
+                }
+
+                // Show images count
+                if result.has_images() && self.show_images {
+                    output.push_str(&format!(
+                        "{} ({} image{})",
+                        fg_color,
+                        result.image_count(),
+                        if result.image_count() == 1 { "" } else { "s" }
+                    ));
+                }
+            } else {
+                // Show truncated result
+                if let Some(text) = result.get_text() {
+                    let truncated = truncate_text(&text, 500);
+                    output.push_str(&format!("{}Output:{} {}", result_fg, reset, truncated));
+                    if text.len() > 500 {
+                        output.push_str(" (use → to expand)");
+                    }
+                    output.push('\n');
+                } else if result.has_images() {
+                    output.push_str(&format!(
+                        "{}Output:{} {} image{}\n",
+                        result_fg,
+                        reset,
+                        result.image_count(),
+                        if result.image_count() == 1 { "" } else { "s" }
+                    ));
+                }
+            }
+        } else if self.state == ToolExecutionState::Running {
+            output.push_str(&format!("{}Running...{}", fg_color, reset));
+            output.push('\n');
+        }
+
+        output
+    }
+}
+
+/// Truncate text to max length with ellipsis
+fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+
+    // Find a good break point
+    let truncated = &text[..max_len];
+    if let Some(last_newline) = truncated.rfind('\n') {
+        format!("{}...", &truncated[..last_newline])
+    } else if let Some(last_space) = truncated.rfind(' ') {
+        format!("{}...", &truncated[..last_space])
+    } else {
+        format!("{}...", truncated)
+    }
+}
+
+/// Tool execution renderer with advanced options
+pub struct ToolExecutionRenderer {
+    pub show_images: bool,
+    pub max_image_width: usize,
+}
+
+impl ToolExecutionRenderer {
+    pub fn new() -> Self {
+        Self {
+            show_images: true,
+            max_image_width: 80,
+        }
+    }
+
+    pub fn with_show_images(mut self, show: bool) -> Self {
+        self.show_images = show;
+        self
+    }
+
+    pub fn with_max_image_width(mut self, width: usize) -> Self {
+        self.max_image_width = width;
+        self
+    }
+
+    /// Render multiple tool executions
+    pub fn render_all(&self, executions: &[ToolExecution]) -> String {
+        executions
+            .iter()
+            .map(|e| e.render())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+impl Default for ToolExecutionRenderer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Format bytes for human-readable display
+fn format_bytes(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{}B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1}KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1}GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+/// Enhanced Bash execution state with output truncation and streaming support
 #[derive(Debug, Clone)]
 pub struct BashExecution {
     pub command: String,
@@ -946,6 +1578,23 @@ pub struct BashExecution {
     pub start_time: std::time::Instant,
     pub is_running: bool,
     pub is_cancelled: bool,
+    /// Whether the output is expanded (shows full output) or collapsed (preview only)
+    pub expanded: bool,
+    /// Truncation result for context limits
+    pub truncation_info: Option<TruncationInfo>,
+    /// Path to full output file if truncated
+    pub full_output_path: Option<String>,
+}
+
+/// Information about output truncation
+#[derive(Debug, Clone)]
+pub struct TruncationInfo {
+    /// Total lines before truncation
+    pub total_lines: usize,
+    /// Lines shown after truncation
+    pub shown_lines: usize,
+    /// Bytes before truncation
+    pub total_bytes: usize,
 }
 
 impl BashExecution {
@@ -957,18 +1606,42 @@ impl BashExecution {
             start_time: std::time::Instant::now(),
             is_running: true,
             is_cancelled: false,
+            expanded: false,
+            truncation_info: None,
+            full_output_path: None,
         }
     }
 
-    /// Append output
-    pub fn append_output(&mut self, text: &str) {
-        self.output.push_str(text);
+    /// Append output (stripping ANSI codes for display)
+    pub fn append_output(&mut self, chunk: &str) {
+        // Strip ANSI codes and normalize line endings
+        let clean = strip_ansi(chunk).replace("\r\n", "\n").replace("\r", "\n");
+        
+        // Append to output
+        if !self.output.is_empty() && !clean.is_empty() {
+            self.output.push_str(&clean);
+        } else {
+            self.output.push_str(&clean);
+        }
     }
 
     /// Mark as complete
     pub fn complete(&mut self, exit_code: i32) {
         self.exit_code = Some(exit_code);
         self.is_running = false;
+    }
+
+    /// Complete with truncation info
+    pub fn complete_with_truncation(
+        &mut self,
+        exit_code: i32,
+        truncation_info: TruncationInfo,
+        full_output_path: Option<String>,
+    ) {
+        self.exit_code = Some(exit_code);
+        self.is_running = false;
+        self.truncation_info = Some(truncation_info);
+        self.full_output_path = full_output_path;
     }
 
     /// Cancel execution
@@ -984,44 +1657,236 @@ impl BashExecution {
         self.start_time.elapsed()
     }
 
+    /// Set expanded/collapsed state
+    pub fn set_expanded(&mut self, expanded: bool) {
+        self.expanded = expanded;
+    }
+
+    /// Toggle expanded state
+    pub fn toggle_expanded(&mut self) {
+        self.expanded = !self.expanded;
+    }
+
+    /// Get output lines
+    pub fn output_lines(&self) -> Vec<&str> {
+        self.output.lines().collect()
+    }
+
+    /// Get raw output string
+    pub fn get_output(&self) -> &str {
+        &self.output
+    }
+
     /// Render the bash execution display
     pub fn render(&self) -> String {
         let mut output = String::new();
-        let status = if self.is_cancelled {
-            "⛔ CANCELLED"
-        } else if self.is_running {
-            &format!("⏳ Running ({:.1}s)", self.elapsed().as_secs_f64())
+        
+        // Preview line limit (when not expanded)
+        const PREVIEW_LINES: usize = 20;
+
+        // Command header with styling
+        output.push_str(&format!("\x1b[1m$ {}\x1b[0m\n", self.command));
+
+        // Process output lines for display
+        let lines: Vec<&str> = self.output.lines().collect();
+        let total_lines = lines.len();
+        let hidden_lines = if total_lines > PREVIEW_LINES && !self.expanded {
+            total_lines - PREVIEW_LINES
         } else {
-            match self.exit_code {
-                Some(0) => "✓ Done",
-                Some(c) => &format!("✗ Exit code: {}", c) as &str,
-                None => "Running",
-            }
+            0
         };
 
-        output.push_str(&format!("$ {}\n", self.command));
+        // Show output
         if !self.output.is_empty() {
-            output.push_str(&self.output);
-            if !self.output.ends_with('\n') {
+            let lines_to_show = if self.expanded {
+                &lines[..]
+            } else {
+                // Show last PREVIEW_LINES
+                if lines.len() > PREVIEW_LINES {
+                    &lines[lines.len() - PREVIEW_LINES..]
+                } else {
+                    &lines[..]
+                }
+            };
+            
+            // Muted color for output
+            for line in lines_to_show {
+                output.push_str(&format!("\x1b[2m{}\x1b[0m\n", line));
+            }
+        }
+
+        // Status line
+        if self.is_running {
+            // Running state with elapsed time
+            output.push_str(&format!(
+                "\x1b[90mRunning... ({:.1}s)\x1b[0m\n",
+                self.elapsed().as_secs_f64()
+            ));
+        } else {
+            let mut status_parts = Vec::new();
+
+            // Hidden lines indicator
+            if hidden_lines > 0 {
+                if self.expanded {
+                    status_parts.push("\x1b[2m(to collapse)\x1b[0m".to_string());
+                } else {
+                    status_parts.push(format!(
+                        "\x1b[2m... {} more lines\x1b[0m",
+                        hidden_lines
+                    ));
+                }
+            }
+
+            // Status
+            if self.is_cancelled {
+                status_parts.push("\x1b[33m(cancelled)\x1b[0m".to_string());
+            } else if let Some(code) = self.exit_code {
+                if code != 0 {
+                    status_parts.push(format!("\x1b[31m(exit {})\x1b[0m", code));
+                }
+            }
+
+            // Truncation warning
+            if self.truncation_info.is_some() {
+                if let Some(ref path) = self.full_output_path {
+                    status_parts.push(format!(
+                        "\x1b[33mOutput truncated. Full output: {}\x1b[0m",
+                        path
+                    ));
+                }
+            }
+
+            if !status_parts.is_empty() {
+                output.push_str(&status_parts.join(" "));
                 output.push('\n');
             }
         }
-        output.push_str(&format!("{}\n", status));
 
         output
     }
 }
 
-/// Format bytes for human-readable display
-fn format_bytes(bytes: usize) -> String {
-    if bytes < 1024 {
-        format!("{}B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1}KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.1}GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+/// Strip ANSI escape codes from a string
+fn strip_ansi(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // CSI sequence
+            if chars.next() == Some('[') {
+                // Read until we hit a letter
+                while let Some(&ch) = chars.peek() {
+                    if ch.is_ascii_alphabetic() {
+                        chars.next();
+                        break;
+                    }
+                    chars.next();
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    
+    result
+}
+
+/// Summary message types for compaction and branch summaries
+#[derive(Debug, Clone)]
+pub enum SummaryMessageType {
+    /// Compaction summary after context window management
+    Compaction { tokens_before: usize },
+    /// Branch summary when creating/merging branches
+    Branch,
+}
+
+/// Summary message data
+#[derive(Debug, Clone)]
+pub struct SummaryMessage {
+    pub message_type: SummaryMessageType,
+    pub summary: String,
+    pub expanded: bool,
+}
+
+impl SummaryMessage {
+    pub fn compaction(tokens_before: usize, summary: impl Into<String>) -> Self {
+        Self {
+            message_type: SummaryMessageType::Compaction { tokens_before },
+            summary: summary.into(),
+            expanded: false,
+        }
+    }
+
+    pub fn branch(summary: impl Into<String>) -> Self {
+        Self {
+            message_type: SummaryMessageType::Branch,
+            summary: summary.into(),
+            expanded: false,
+        }
+    }
+
+    /// Set expanded/collapsed state
+    pub fn set_expanded(&mut self, expanded: bool) {
+        self.expanded = expanded;
+    }
+
+    /// Toggle expanded state
+    pub fn toggle_expanded(&mut self) {
+        self.expanded = !self.expanded;
+    }
+
+    /// Render the summary message
+    pub fn render(&self) -> String {
+        let mut output = String::new();
+
+        // Label with bold styling
+        let label = match &self.message_type {
+            SummaryMessageType::Compaction { tokens_before } => {
+                format!(
+                    "\x1b[1m[compaction]\x1b[0m Compacted from {} tokens",
+                    tokens_before
+                )
+            }
+            SummaryMessageType::Branch => {
+                "\x1b[1m[branch]\x1b[0m Branch Summary".to_string()
+            }
+        };
+
+        output.push_str(&format!("\x1b[48;5;24m {} \x1b[0m\n", label));
+
+        if self.expanded {
+            // Show full summary with markdown-style formatting
+            output.push_str("\n");
+            output.push_str(&render_markdown(&self.summary));
+            output.push('\n');
+        } else {
+            // Show collapsed hint
+            output.push_str(&format!(
+                "\x1b[2m(to expand)\x1b[0m\n",
+            ));
+        }
+
+        output
+    }
+}
+
+/// Summary message renderer with options
+pub struct SummaryMessageRenderer;
+
+impl SummaryMessageRenderer {
+    /// Render a compaction summary
+    pub fn render_compaction(tokens_before: usize, summary: &str, expanded: bool) -> String {
+        let mut msg = SummaryMessage::compaction(tokens_before, summary);
+        msg.set_expanded(expanded);
+        msg.render()
+    }
+
+    /// Render a branch summary
+    pub fn render_branch(summary: &str, expanded: bool) -> String {
+        let mut msg = SummaryMessage::branch(summary);
+        msg.set_expanded(expanded);
+        msg.render()
     }
 }
 
@@ -1486,5 +2351,284 @@ mod tests {
         assert_eq!(format_bytes(1024), "1.0KB");
         assert_eq!(format_bytes(1024 * 1024), "1.0MB");
         assert_eq!(format_bytes(1024 * 1024 * 1024), "1.0GB");
+    }
+
+    // ── Assistant Message Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_assistant_message_builder() {
+        let mut msg = AssistantMessage::new();
+        msg.add_text("Hello, world!");
+        msg.add_thinking("Let me think about this...");
+        msg.add_tool_call("call_123", "bash", r#"{"command": "ls"}"#);
+
+        assert!(msg.has_visible_content());
+        assert!(msg.has_tool_calls());
+        assert_eq!(msg.content.len(), 3);
+    }
+
+    #[test]
+    fn test_assistant_message_renderer_hide_thinking() {
+        let mut msg = AssistantMessage::new();
+        msg.add_thinking("This is my thought process");
+        msg.add_text("Final answer");
+
+        let renderer = AssistantMessageRenderer::new(
+            AssistantMessageRenderOptions {
+                hide_thinking: true,
+                hidden_thinking_label: "Thinking...".to_string(),
+                use_osc133: false,
+            },
+        );
+
+        let rendered = renderer.render(&msg);
+        assert!(rendered.contains("Thinking..."));
+        assert!(rendered.contains("Final answer"));
+        assert!(!rendered.contains("This is my thought process"));
+    }
+
+    #[test]
+    fn test_assistant_message_renderer_show_thinking() {
+        let mut msg = AssistantMessage::new();
+        msg.add_thinking("This is my thought process");
+
+        let renderer = AssistantMessageRenderer::new(AssistantMessageRenderOptions::default());
+        let rendered = renderer.render(&msg);
+        assert!(rendered.contains("This is my thought process"));
+    }
+
+    #[test]
+    fn test_assistant_message_renderer_error() {
+        let mut msg = AssistantMessage::new();
+        msg.add_text("Some content");
+        msg.stop_reason = Some(StopReason::Error);
+        msg.error_message = Some("Something went wrong".to_string());
+
+        let renderer = AssistantMessageRenderer::new(AssistantMessageRenderOptions::default());
+        let rendered = renderer.render(&msg);
+        assert!(rendered.contains("Error: Something went wrong"));
+    }
+
+    #[test]
+    fn test_assistant_message_renderer_aborted() {
+        let mut msg = AssistantMessage::new();
+        msg.stop_reason = Some(StopReason::Aborted);
+
+        let renderer = AssistantMessageRenderer::new(AssistantMessageRenderOptions::default());
+        let rendered = renderer.render(&msg);
+        assert!(rendered.contains("Operation aborted"));
+    }
+
+    #[test]
+    fn test_stop_reason_as_str() {
+        assert_eq!(StopReason::EndTurn.as_str(), "end_turn");
+        assert_eq!(StopReason::MaxTokens.as_str(), "max_tokens");
+        assert_eq!(StopReason::StopSequence.as_str(), "stop_sequence");
+        assert_eq!(StopReason::Aborted.as_str(), "aborted");
+        assert_eq!(StopReason::Error.as_str(), "error");
+    }
+
+    #[test]
+    fn test_render_markdown() {
+        // Test inline code
+        let result = render_markdown("Use `ls` to list files");
+        assert!(result.contains("\x1b[33m")); // Yellow for code
+
+        // Test bold
+        let result = render_markdown("This is **bold** text");
+        assert!(result.contains("\x1b[1m")); // Bold
+
+        // Test italic
+        let result = render_markdown("This is _italic_ text");
+        assert!(result.contains("\x1b[3m")); // Italic
+    }
+
+    // ── Tool Execution Tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_tool_result_text() {
+        let result = ToolResult::new_text("file created successfully");
+        assert!(!result.is_error);
+        assert_eq!(result.get_text(), Some("file created successfully".to_string()));
+    }
+
+    #[test]
+    fn test_tool_result_error() {
+        let result = ToolResult::error("file not found");
+        assert!(result.is_error);
+        assert_eq!(result.get_text(), Some("file not found".to_string()));
+    }
+
+    #[test]
+    fn test_tool_result_images() {
+        let mut result = ToolResult::new_text("analysis complete");
+        result.content.push(ToolContentBlock::Image {
+            data: "base64data".to_string(),
+            mime_type: "image/png".to_string(),
+        });
+
+        assert!(result.has_images());
+        assert_eq!(result.image_count(), 1);
+        assert!(result.get_text().is_some());
+    }
+
+    #[test]
+    fn test_tool_execution_pending() {
+        let exec = ToolExecution::new(
+            "read_file",
+            "call_abc",
+            serde_json::json!({"path": "test.txt"}),
+        );
+
+        assert_eq!(exec.state, ToolExecutionState::Pending);
+        assert!(exec.result.is_none());
+    }
+
+    #[test]
+    fn test_tool_execution_complete() {
+        let mut exec = ToolExecution::new("bash", "call_123", serde_json::json!({"command": "ls"}));
+        exec.start();
+        assert_eq!(exec.state, ToolExecutionState::Running);
+
+        exec.complete(ToolResult::new_text("file1.txt\nfile2.txt"));
+        assert_eq!(exec.state, ToolExecutionState::Success);
+        assert!(exec.result.is_some());
+    }
+
+    #[test]
+    fn test_tool_execution_error() {
+        let mut exec = ToolExecution::new("bash", "call_123", serde_json::json!({"command": "ls"}));
+        exec.complete(ToolResult::error("Permission denied"));
+        assert_eq!(exec.state, ToolExecutionState::Error);
+    }
+
+    #[test]
+    fn test_tool_execution_format_arguments() {
+        let exec = ToolExecution::new(
+            "search",
+            "call_1",
+            serde_json::json!({"query": "test", "limit": 10}),
+        );
+        let args = exec.format_arguments();
+        assert!(args.contains("test"));
+        assert!(args.contains("10"));
+    }
+
+    #[test]
+    fn test_tool_execution_render() {
+        let mut exec = ToolExecution::new("read_file", "call_1", serde_json::json!({"path": "test.txt"}));
+        exec.complete(ToolResult::new_text("file contents"));
+
+        let rendered = exec.render();
+        assert!(rendered.contains("read_file"));
+        assert!(rendered.contains("file contents"));
+    }
+
+    #[test]
+    fn test_truncate_text() {
+        let long_text = "This is a very long text that should be truncated. ".repeat(20);
+        let truncated = truncate_text(&long_text, 100);
+        assert!(truncated.len() < long_text.len());
+        assert!(truncated.ends_with("..."));
+    }
+
+    // ── Bash Execution Tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_bash_execution_expanded() {
+        let mut exec = BashExecution::new("echo test".to_string());
+        exec.append_output("line1\nline2\nline3\n");
+        exec.set_expanded(true);
+
+        assert!(exec.expanded);
+        let rendered = exec.render();
+        assert!(rendered.contains("line1"));
+    }
+
+    #[test]
+    fn test_bash_execution_preview() {
+        let mut exec = BashExecution::new("ls -la".to_string());
+        // Add many lines
+        for i in 0..50 {
+            exec.append_output(&format!("line{}\n", i));
+        }
+
+        let rendered = exec.render();
+        // Should show hidden lines message
+        assert!(rendered.contains("more lines"));
+    }
+
+    #[test]
+    fn test_bash_execution_strip_ansi() {
+        let input = "\x1b[31mRed text\x1b[0m and normal";
+        let stripped = strip_ansi(input);
+        assert_eq!(stripped, "Red text and normal");
+    }
+
+    #[test]
+    fn test_bash_execution_truncation() {
+        let mut exec = BashExecution::new("cat large_file.txt".to_string());
+        exec.append_output("content");
+        exec.complete_with_truncation(
+            0,
+            TruncationInfo {
+                total_lines: 1000,
+                shown_lines: 500,
+                total_bytes: 50000,
+            },
+            Some("/tmp/full_output.txt".to_string()),
+        );
+
+        let rendered = exec.render();
+        assert!(rendered.contains("truncated"));
+        assert!(rendered.contains("/tmp/full_output.txt"));
+    }
+
+    #[test]
+    fn test_bash_execution_get_output() {
+        let mut exec = BashExecution::new("echo hello".to_string());
+        exec.append_output("hello world");
+        assert_eq!(exec.get_output(), "hello world");
+    }
+
+    #[test]
+    fn test_bash_execution_output_lines() {
+        let mut exec = BashExecution::new("echo hello".to_string());
+        exec.append_output("line1\nline2\nline3");
+        let lines = exec.output_lines();
+        assert_eq!(lines, vec!["line1", "line2", "line3"]);
+    }
+
+    // ── Summary Message Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_summary_message_compaction() {
+        let mut msg = SummaryMessage::compaction(50000, "Compacted 50000 tokens to 10000");
+        assert!(matches!(msg.message_type, SummaryMessageType::Compaction { tokens_before: 50000 }));
+        
+        msg.set_expanded(true);
+        let rendered = msg.render();
+        assert!(rendered.contains("compaction"));
+        assert!(rendered.contains("Compacted from 50000 tokens"));
+    }
+
+    #[test]
+    fn test_summary_message_branch() {
+        let mut msg = SummaryMessage::branch("Created a new branch with these changes...");
+        assert!(matches!(msg.message_type, SummaryMessageType::Branch));
+        
+        msg.set_expanded(true);
+        let rendered = msg.render();
+        assert!(rendered.contains("[branch]"));
+    }
+
+    #[test]
+    fn test_summary_message_renderer() {
+        let rendered = SummaryMessageRenderer::render_compaction(
+            50000,
+            "Summary of compacted content",
+            true,
+        );
+        assert!(rendered.contains("50000"));
     }
 }
