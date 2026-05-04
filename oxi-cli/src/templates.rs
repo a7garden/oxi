@@ -14,7 +14,7 @@
 //! - `{{#if variable}}...{{/if}}` — conditional blocks
 //! - `{{#if variable}}...{{else}}...{{/if}}` — conditional with else
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
@@ -339,16 +339,14 @@ impl<'a> RenderContext<'a> {
                                     // Render the else-branch if present
                                     match block_content.find(else_marker) {
                                         Some(else_pos) => {
-                                            result.push_str(&block_content[else_pos + else_marker.len()..]);
+                                            result
+                                                .push_str(&block_content[else_pos + else_marker.len()..]);
                                         }
                                         None => { /* no else branch, render nothing */ }
                                     }
                                 }
 
-                                i = chars.len(); // We've jumped ahead in template string space
-                                // Recalculate i from string positions
-                                // The `result` is built incrementally; we need to sync i with
-                                // the string position `after_end`
+                                // Sync i to after the {{/if}} closing tag
                                 i = template[..after_end].chars().count();
                                 continue;
                             }
@@ -411,12 +409,10 @@ impl<'a> RenderContext<'a> {
             "cwd" => env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default(),
-            "git_branch" => {
-                env::current_dir()
-                    .ok()
-                    .and_then(|d| crate::git_utils::get_current_branch(&d))
-                    .unwrap_or_default()
-            }
+            "git_branch" => env::current_dir()
+                .ok()
+                .and_then(|d| crate::git_utils::get_current_branch(&d))
+                .unwrap_or_default(),
             "hostname" => env::var("HOSTNAME")
                 .or_else(|_| env::var("HOST"))
                 .unwrap_or_default(),
@@ -641,10 +637,7 @@ fn load_templates_from_dir_into(dir: &Path, templates: &mut Vec<PromptTemplate>)
 fn load_template_from_file(file_path: &Path) -> Option<PromptTemplate> {
     let raw_content = std::fs::read_to_string(file_path).ok()?;
 
-    let name = file_path
-        .file_stem()?
-        .to_str()?
-        .to_string();
+    let name = file_path.file_stem()?.to_str()?.to_string();
 
     let (description, argument_hint, body) = parse_template_metadata(&raw_content);
 
@@ -856,7 +849,9 @@ mod tests {
         vars.insert("lang", "Rust");
 
         let context = RenderContext::new(&vars);
-        let result = context.render("Hello {{name}}, write {{lang}}!").unwrap();
+        let result = context
+            .render("Hello {{name}}, write {{lang}}!")
+            .unwrap();
         assert_eq!(result, "Hello world, write Rust!");
     }
 

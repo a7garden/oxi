@@ -9,11 +9,15 @@
 
 use serde_json::Value as JsonValue;
 
+<<<<<<< HEAD
 use crate::{
     transform::normalize_tool_call_id, Api, AssistantMessage, ContentBlock, Context,
     ImageContent, Message, MessageContent, Model, TextContent, Tool, ToolCall, ToolResultMessage,
     Usage,
 };
+=======
+use crate::{Api, ContentBlock, Context, Message, MessageContent, Model, Tool};
+>>>>>>> d024c16
 
 // ---------------------------------------------------------------------------
 // Text signatures
@@ -75,7 +79,11 @@ fn simple_hash(data: &[u8]) -> [u8; 32] {
     }
     // Mix rounds
     for round in 0u8..4 {
+<<<<<<< HEAD
         for i in 0..32 {
+=======
+        for i in 0..32usize {
+>>>>>>> d024c16
             let prev = result[(i + 31) % 32];
             result[i] = result[i]
                 .wrapping_add(prev)
@@ -103,6 +111,7 @@ fn normalize_id_part(part: &str) -> String {
     truncated.trim_end_matches('_').to_string()
 }
 
+<<<<<<< HEAD
 /// Build a foreign responses item ID from an original item ID.
 fn build_foreign_responses_item_id(item_id: &str) -> String {
     let normalized = format!("fc_{}", short_hash(item_id));
@@ -113,6 +122,8 @@ fn build_foreign_responses_item_id(item_id: &str) -> String {
     }
 }
 
+=======
+>>>>>>> d024c16
 // ---------------------------------------------------------------------------
 // Convert messages to Responses API input format
 // ---------------------------------------------------------------------------
@@ -135,14 +146,23 @@ pub struct ConvertResponsesMessagesOptions {
 pub fn convert_responses_messages(
     model: &Model,
     context: &Context,
+<<<<<<< HEAD
     allowed_tool_call_providers: &[&str],
+=======
+    _allowed_tool_call_providers: &[&str],
+>>>>>>> d024c16
     options: Option<ConvertResponsesMessagesOptions>,
 ) -> Vec<JsonValue> {
     let opts = options.unwrap_or_default();
     let mut messages: Vec<JsonValue> = Vec::new();
 
     // Transform messages for the target model
+<<<<<<< HEAD
     let transformed = crate::transform::transform_messages_for_model(&context.messages, model);
+=======
+    // TODO: implement cross-provider message transformation
+    let transformed: Vec<crate::Message> = context.messages.clone();
+>>>>>>> d024c16
 
     // System prompt
     if opts.include_system_prompt {
@@ -205,7 +225,10 @@ pub fn convert_responses_messages(
                     match block {
                         ContentBlock::Thinking(th) => {
                             if let Some(ref sig) = th.thinking_signature {
+<<<<<<< HEAD
                                 // Try to parse the signature as a reasoning item
+=======
+>>>>>>> d024c16
                                 if let Ok(reasoning_item) =
                                     serde_json::from_str::<JsonValue>(sig)
                                 {
@@ -244,7 +267,10 @@ pub fn convert_responses_messages(
                             let call_id = parts[0];
                             let item_id_raw = parts.get(1).copied();
 
+<<<<<<< HEAD
                             // For different-model messages, omit id to avoid pairing validation
+=======
+>>>>>>> d024c16
                             let item_id: Option<String> = if is_different_model {
                                 item_id_raw.and_then(|id| {
                                     if id.starts_with("fc_") {
@@ -289,7 +315,13 @@ pub fn convert_responses_messages(
                 let parts: Vec<&str> = t.tool_call_id.splitn(2, '|').collect();
                 let call_id = normalize_id_part(parts[0]);
 
+<<<<<<< HEAD
                 let output_val: JsonValue = if has_images && model.input.contains(&crate::InputModality::Image) {
+=======
+                let output_val: JsonValue = if has_images
+                    && model.input.contains(&crate::InputModality::Image)
+                {
+>>>>>>> d024c16
                     let mut content_parts: Vec<JsonValue> = Vec::new();
                     if has_text {
                         content_parts.push(serde_json::json!({
@@ -308,11 +340,17 @@ pub fn convert_responses_messages(
                     }
                     serde_json::json!(content_parts)
                 } else {
+<<<<<<< HEAD
                     serde_json::json!(sanitize_surrogates(if has_text {
                         &text_result
                     } else {
                         "(see attached image)"
                     }))
+=======
+                    serde_json::json!(sanitize_surrogates(
+                        if has_text { &text_result } else { "(see attached image)" }
+                    ))
+>>>>>>> d024c16
                 };
 
                 messages.push(serde_json::json!({
@@ -344,9 +382,13 @@ pub fn convert_responses_tools(
     tools: &[Tool],
     options: Option<ConvertResponsesToolsOptions>,
 ) -> Vec<JsonValue> {
+<<<<<<< HEAD
     let strict = options
         .and_then(|o| o.strict)
         .unwrap_or(false);
+=======
+    let strict = options.and_then(|o| o.strict).unwrap_or(false);
+>>>>>>> d024c16
 
     tools
         .iter()
@@ -385,7 +427,11 @@ pub fn map_responses_stop_reason(status: Option<&str>) -> crate::StopReason {
 pub fn sanitize_surrogates(s: &str) -> String {
     s.chars()
         .map(|c| {
+<<<<<<< HEAD
             if c == '\u{FFFD}' || c.is_control() && c != '\n' && c != '\r' && c != '\t' {
+=======
+            if c == '\u{FFFD}' || (c.is_control() && c != '\n' && c != '\r' && c != '\t') {
+>>>>>>> d024c16
                 ' '
             } else {
                 c
@@ -462,6 +508,10 @@ pub fn parse_streaming_json(input: &str) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+<<<<<<< HEAD
+=======
+    use crate::{Message, TextContent};
+>>>>>>> d024c16
 
     #[test]
     fn test_encode_text_signature_v1() {
@@ -480,7 +530,14 @@ mod tests {
     fn test_parse_text_signature_v1() {
         let sig = encode_text_signature_v1("msg_abc", Some("final_answer"));
         let result = parse_text_signature(Some(&sig));
+<<<<<<< HEAD
         assert_eq!(result, Some(("msg_abc".to_string(), Some("final_answer".to_string()))));
+=======
+        assert_eq!(
+            result,
+            Some(("msg_abc".to_string(), Some("final_answer".to_string())))
+        );
+>>>>>>> d024c16
     }
 
     #[test]
@@ -498,10 +555,14 @@ mod tests {
     fn test_normalize_id_part() {
         assert_eq!(normalize_id_part("abc123"), "abc123");
         assert_eq!(normalize_id_part("a|b|c"), "a_b_c");
+<<<<<<< HEAD
         assert_eq!(
             normalize_id_part(&"x".repeat(100)).len(),
             64
         );
+=======
+        assert_eq!(normalize_id_part(&"x".repeat(100)).len(), 64);
+>>>>>>> d024c16
     }
 
     #[test]
@@ -521,10 +582,29 @@ mod tests {
 
     #[test]
     fn test_map_responses_stop_reason() {
+<<<<<<< HEAD
         assert_eq!(map_responses_stop_reason(Some("completed")), crate::StopReason::Stop);
         assert_eq!(map_responses_stop_reason(Some("incomplete")), crate::StopReason::Length);
         assert_eq!(map_responses_stop_reason(Some("failed")), crate::StopReason::Error);
         assert_eq!(map_responses_stop_reason(Some("cancelled")), crate::StopReason::Error);
+=======
+        assert_eq!(
+            map_responses_stop_reason(Some("completed")),
+            crate::StopReason::Stop
+        );
+        assert_eq!(
+            map_responses_stop_reason(Some("incomplete")),
+            crate::StopReason::Length
+        );
+        assert_eq!(
+            map_responses_stop_reason(Some("failed")),
+            crate::StopReason::Error
+        );
+        assert_eq!(
+            map_responses_stop_reason(Some("cancelled")),
+            crate::StopReason::Error
+        );
+>>>>>>> d024c16
         assert_eq!(map_responses_stop_reason(None), crate::StopReason::Stop);
     }
 
@@ -548,7 +628,10 @@ mod tests {
     #[test]
     fn test_parse_streaming_json_partial() {
         let result = parse_streaming_json(r#"{"key": "val"#);
+<<<<<<< HEAD
         // Should complete and parse
+=======
+>>>>>>> d024c16
         assert_eq!(result["key"], "val");
     }
 
@@ -580,7 +663,11 @@ mod tests {
 
     #[test]
     fn test_convert_responses_messages_basic() {
+<<<<<<< HEAD
         let model = Model::new(
+=======
+        let model = crate::Model::new(
+>>>>>>> d024c16
             "gpt-4o",
             "GPT-4o",
             Api::OpenAiResponses,
@@ -605,7 +692,11 @@ mod tests {
 
     #[test]
     fn test_convert_responses_messages_with_system_prompt() {
+<<<<<<< HEAD
         let model = Model::new(
+=======
+        let model = crate::Model::new(
+>>>>>>> d024c16
             "gpt-4o",
             "GPT-4o",
             Api::OpenAiResponses,
@@ -624,14 +715,21 @@ mod tests {
             }),
         );
 
+<<<<<<< HEAD
         // Should include system prompt as first message
+=======
+>>>>>>> d024c16
         assert!(result.len() >= 1);
         assert_eq!(result[0]["role"], "system");
     }
 
     #[test]
     fn test_convert_responses_messages_reasoning_model() {
+<<<<<<< HEAD
         let mut model = Model::new(
+=======
+        let mut model = crate::Model::new(
+>>>>>>> d024c16
             "o3",
             "o3",
             Api::OpenAiResponses,
@@ -652,7 +750,10 @@ mod tests {
             }),
         );
 
+<<<<<<< HEAD
         // Reasoning models use "developer" role
+=======
+>>>>>>> d024c16
         assert_eq!(result[0]["role"], "developer");
     }
 }

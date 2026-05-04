@@ -1,12 +1,19 @@
-//! Authentication storage for API keys and OAuth tokens
+//! Authentication storage for API keys, OAuth tokens, and session tokens.
 //!
 //! Provides secure storage and retrieval of authentication credentials,
 //! with OS keyring integration and fallback to encrypted file storage.
+//! Supports multi-provider auth, credential validation, session tokens,
+//! and environment variable discovery.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::Arc;
+use parking_lot::RwLock;
+
+// ============================================================================
+// Credential Types
+// ============================================================================
 
 /// Authentication credential
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,18 +33,31 @@ pub enum AuthCredential {
         #[serde(default)]
         provider_data: Option<serde_json::Value>,
     },
+    /// Session token credential (e.g. from browser-based login)
+    Session {
+        token: String,
+        /// When the session expires (unix timestamp, 0 = never)
+        #[serde(default)]
+        expires_at: u64,
+        /// Session metadata (user info, etc.)
+        #[serde(default)]
+        metadata: Option<serde_json::Value>,
+    },
 }
 
 impl AuthCredential {
-    /// Check if the OAuth token is expired
+    /// Check if the credential is expired
     pub fn is_expired(&self) -> bool {
         match self {
             AuthCredential::OAuth { expires_at, .. } => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
+                let now = now_secs();
                 *expires_at <= now
+            }
+            AuthCredential::Session { expires_at, .. } => {
+                if *expires_at == 0 {
+                    return false; // never expires
+                }
+                *expires_at <= now_secs()
             }
             AuthCredential::ApiKey { .. } => false,
         }
@@ -51,41 +71,114 @@ impl AuthCredential {
                 refresh_token,
                 ..
             } => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
+                let now = now_secs();
                 refresh_token.is_some() && *expires_at <= now + 60
             }
+            AuthCredential::Session { .. } => false,
             AuthCredential::ApiKey { .. } => false,
         }
     }
 
-    /// Get the access token if valid
+    /// Get the access token if valid (not expired)
     pub fn access_token(&self) -> Option<&str> {
         match self {
             AuthCredential::OAuth { access_token, .. } if !self.is_expired() => Some(access_token),
+            AuthCredential::Session { token, .. } if !self.is_expired() => Some(token),
             _ => None,
         }
     }
+
+    /// Get the credential type name
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            AuthCredential::ApiKey { .. } => "api_key",
+            AuthCredential::OAuth { .. } => "oauth",
+            AuthCredential::Session { .. } => "session",
+        }
+    }
+
+    /// Validate the credential structure
+    pub fn validate(&self) -> Result<(), CredentialValidationError> {
+        match self {
+            AuthCredential::ApiKey { key } => {
+                if key.is_empty() {
+                    return Err(CredentialValidationError::EmptyField("key".to_string()));
+                }
+                // Check for common placeholder values
+                if key == "your-api-key-here" || key == "xxx" {
+                    return Err(CredentialValidationError::PlaceholderValue(key.clone()));
+                }
+                Ok(())
+            }
+            AuthCredential::OAuth {
+                access_token,
+                expires_at,
+                ..
+            } => {
+                if access_token.is_empty() {
+                    return Err(CredentialValidationError::EmptyField("access_token".to_string()));
+                }
+                if *expires_at == 0 {
+                    return Err(CredentialValidationError::InvalidExpiry);
+                }
+                Ok(())
+            }
+            AuthCredential::Session { token, .. } => {
+                if token.is_empty() {
+                    return Err(CredentialValidationError::EmptyField("token".to_string()));
+                }
+                Ok(())
+            }
+        }
+    }
 }
+
+/// Credential validation error
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum CredentialValidationError {
+    #[error("Field '{0}' must not be empty")]
+    EmptyField(String),
+    #[error("Placeholder value detected: '{0}'")]
+    PlaceholderValue(String),
+    #[error("Invalid expiry timestamp")]
+    InvalidExpiry,
+}
+
+// ============================================================================
+// Auth Status
+// ============================================================================
 
 /// Authentication status
 #[derive(Debug, Clone)]
 pub struct AuthStatus {
     /// Whether auth is configured
     pub configured: bool,
-    /// Source of the auth (stored, runtime, environment, etc.)
+    /// Source of the auth (stored, runtime, environment, fallback)
     pub source: Option<String>,
     /// Label for display
     pub label: Option<String>,
 }
 
+impl std::fmt::Display for AuthStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (&self.source, &self.label) {
+            (Some(source), Some(label)) => write!(f, "{} ({})", source, label),
+            (Some(source), None) => write!(f, "{}", source),
+            (None, Some(label)) => write!(f, "{}", label),
+            (None, None) => write!(f, "not configured"),
+        }
+    }
+}
+
+// ============================================================================
+// Auth Errors
+// ============================================================================
+
 /// Result of an auth operation
-type AuthResult<T> = Result<T, AuthError>;
+pub type AuthResult<T> = Result<T, AuthError>;
 
 /// Authentication errors
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum AuthError {
     #[error("Failed to read auth storage: {0}")]
     ReadError(String),
@@ -97,17 +190,77 @@ pub enum AuthError {
     InvalidFormat(String),
     #[error("Keyring error: {0}")]
     KeyringError(String),
+    #[error("Credential validation failed: {0}")]
+    ValidationFailed(String),
 }
+
+// ============================================================================
+// Environment Variable Key Discovery
+// ============================================================================
+
+/// Known provider environment variable mappings
+static PROVIDER_ENV_KEYS: &[(&str, &[&str])] = &[
+    ("anthropic", &["ANTHROPIC_API_KEY"]),
+    ("openai", &["OPENAI_API_KEY"]),
+    ("google", &["GOOGLE_API_KEY", "GEMINI_API_KEY"]),
+    ("groq", &["GROQ_API_KEY"]),
+    ("mistral", &["MISTRAL_API_KEY"]),
+    ("deepseek", &["DEEPSEEK_API_KEY"]),
+    ("xai", &["XAI_API_KEY"]),
+    ("cohere", &["COHERE_API_KEY", "CO_API_KEY"]),
+    ("perplexity", &["PERPLEXITY_API_KEY"]),
+];
+
+/// Find environment variable keys for a provider
+pub fn find_env_keys(provider: &str) -> Vec<String> {
+    let normalized = provider.to_lowercase().replace('-', "_");
+
+    // Check known mappings first
+    for (name, keys) in PROVIDER_ENV_KEYS {
+        if *name == normalized {
+            let found: Vec<String> = keys
+                .iter()
+                .filter(|k| std::env::var(k).is_ok())
+                .map(|k| k.to_string())
+                .collect();
+            if !found.is_empty() {
+                return found;
+            }
+        }
+    }
+
+    // Try generic pattern: {PROVIDER}_API_KEY
+    let generic_key = format!("{}_API_KEY", normalized.to_uppercase());
+    if std::env::var(&generic_key).is_ok() {
+        return vec![generic_key];
+    }
+
+    Vec::new()
+}
+
+/// Get API key from environment variable for a provider
+pub fn get_env_api_key(provider: &str) -> Option<String> {
+    let keys = find_env_keys(provider);
+    keys.first().and_then(|k| std::env::var(k).ok())
+}
+
+// ============================================================================
+// Storage Backend Trait
+// ============================================================================
 
 /// Storage backend trait
 pub trait AuthStorageBackend: Send + Sync {
-    /// Read a value
+    /// Read stored data
     fn read(&self) -> AuthResult<Option<String>>;
-    /// Write a value
+    /// Write data
     fn write(&self, data: &str) -> AuthResult<()>;
-    /// Delete a value
+    /// Delete stored data
     fn delete(&self) -> AuthResult<()>;
 }
+
+// ============================================================================
+// File Backend
+// ============================================================================
 
 /// File-based auth storage backend
 pub struct FileAuthStorage {
@@ -128,6 +281,11 @@ impl FileAuthStorage {
     pub fn default_path() -> Option<PathBuf> {
         dirs::config_dir().map(|p| p.join("oxi").join("auth.json"))
     }
+
+    /// Get the storage path
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
 }
 
 impl AuthStorageBackend for FileAuthStorage {
@@ -138,7 +296,7 @@ impl AuthStorageBackend for FileAuthStorage {
 
         match std::fs::read_to_string(&self.path) {
             Ok(content) => {
-                *self.cache.write().unwrap() = Some(content.clone());
+                *self.cache.write() = Some(content.clone());
                 Ok(Some(content))
             }
             Err(e) => Err(AuthError::ReadError(e.to_string())),
@@ -146,10 +304,20 @@ impl AuthStorageBackend for FileAuthStorage {
     }
 
     fn write(&self, data: &str) -> AuthResult<()> {
-        // Ensure parent directory exists
+        // Ensure parent directory exists with restricted permissions
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| AuthError::WriteError(e.to_string()))?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(0o700);
+                let _ = std::fs::set_permissions(parent, perms);
+            }
         }
+
+        // Write the file
+        std::fs::write(&self.path, data).map_err(|e| AuthError::WriteError(e.to_string()))?;
 
         // Set file permissions to owner-only on Unix
         #[cfg(unix)]
@@ -160,8 +328,7 @@ impl AuthStorageBackend for FileAuthStorage {
                 .map_err(|e| AuthError::WriteError(e.to_string()))?;
         }
 
-        std::fs::write(&self.path, data).map_err(|e| AuthError::WriteError(e.to_string()))?;
-        *self.cache.write().unwrap() = Some(data.to_string());
+        *self.cache.write() = Some(data.to_string());
         Ok(())
     }
 
@@ -169,12 +336,16 @@ impl AuthStorageBackend for FileAuthStorage {
         if self.path.exists() {
             std::fs::remove_file(&self.path).map_err(|e| AuthError::WriteError(e.to_string()))?;
         }
-        *self.cache.write().unwrap() = None;
+        *self.cache.write() = None;
         Ok(())
     }
 }
 
-/// Environment variable backend
+// ============================================================================
+// Environment Variable Backend
+// ============================================================================
+
+/// Environment variable backend (read-only)
 pub struct EnvAuthStorage {
     provider_prefix: String,
 }
@@ -205,12 +376,17 @@ impl AuthStorageBackend for EnvAuthStorage {
     }
 }
 
+// ============================================================================
+// Memory Backend
+// ============================================================================
+
 /// Memory-based auth storage (for testing)
 pub struct MemoryAuthStorage {
     data: RwLock<HashMap<String, AuthCredential>>,
 }
 
 impl MemoryAuthStorage {
+    /// Create a new memory auth storage
     pub fn new() -> Self {
         Self {
             data: RwLock::new(HashMap::new()),
@@ -226,41 +402,86 @@ impl Default for MemoryAuthStorage {
 
 impl AuthStorageBackend for MemoryAuthStorage {
     fn read(&self) -> AuthResult<Option<String>> {
-        // Not applicable for memory storage
+        // Memory backend doesn't use JSON serialization
         Ok(None)
     }
 
     fn write(&self, _data: &str) -> AuthResult<()> {
-        // Not applicable for memory storage
         Ok(())
     }
 
     fn delete(&self) -> AuthResult<()> {
-        self.data.write().unwrap().clear();
+        self.data.write().clear();
         Ok(())
     }
 }
 
-/// Main auth storage struct
+// ============================================================================
+// Fallback Resolver
+// ============================================================================
+
+/// Trait for fallback API key resolution (e.g., from models.json config)
+pub trait FallbackResolver: Send + Sync {
+    /// Try to resolve an API key for the given provider
+    fn resolve(&self, provider: &str) -> Option<String>;
+}
+
+/// A simple closure-based fallback resolver
+pub struct FnFallbackResolver {
+    f: Box<dyn Fn(&str) -> Option<String> + Send + Sync>,
+}
+
+impl FnFallbackResolver {
+    /// Create from a closure
+    pub fn new(f: Box<dyn Fn(&str) -> Option<String> + Send + Sync>) -> Self {
+        Self { f }
+    }
+}
+
+impl FallbackResolver for FnFallbackResolver {
+    fn resolve(&self, provider: &str) -> Option<String> {
+        (self.f)(provider)
+    }
+}
+
+// ============================================================================
+// Auth Storage (Main)
+// ============================================================================
+
+/// Main auth storage struct.
+///
+/// Provides multi-layered credential lookup with the following priority:
+/// 1. Runtime override (CLI --api-key)
+/// 2. Stored API key from auth.json
+/// 3. OAuth token from auth.json (with auto-refresh awareness)
+/// 4. Session token from auth.json
+/// 5. Environment variable
+/// 6. Fallback resolver (e.g., custom provider config from models.json)
 pub struct AuthStorage {
-    /// File-based storage
-    file_storage: Option<FileAuthStorage>,
-    /// In-memory cache
+    /// File-based storage backend
+    file_storage: Option<Arc<dyn AuthStorageBackend>>,
+    /// In-memory credential cache
     credentials: RwLock<HashMap<String, AuthCredential>>,
     /// Runtime overrides (CLI --api-key)
     runtime_overrides: RwLock<HashMap<String, String>>,
+    /// Fallback resolver for custom providers
+    fallback_resolver: RwLock<Option<Arc<dyn FallbackResolver>>>,
+    /// Collected errors
+    errors: RwLock<Vec<AuthError>>,
+    /// Whether initial load had an error
+    load_error: RwLock<Option<AuthError>>,
 }
 
 impl AuthStorage {
     /// Create a new auth storage with default file backend
     pub fn new() -> Self {
-        let file_storage = Self::default_path().map(FileAuthStorage::new);
+        let file_storage = FileAuthStorage::default_path()
+            .map(|p| Arc::new(FileAuthStorage::new(p)) as Arc<dyn AuthStorageBackend>);
 
         let credentials = if let Some(ref storage) = file_storage {
-            if let Ok(Some(content)) = storage.read() {
-                serde_json::from_str(&content).unwrap_or_default()
-            } else {
-                HashMap::new()
+            match storage.read() {
+                Ok(Some(content)) => serde_json::from_str(&content).unwrap_or_default(),
+                _ => HashMap::new(),
             }
         } else {
             HashMap::new()
@@ -270,81 +491,103 @@ impl AuthStorage {
             file_storage,
             credentials: RwLock::new(credentials),
             runtime_overrides: RwLock::new(HashMap::new()),
+            fallback_resolver: RwLock::new(None),
+            errors: RwLock::new(Vec::new()),
+            load_error: RwLock::new(None),
         }
     }
 
     /// Create with explicit storage backend
-    pub fn with_backend<B: AuthStorageBackend + 'static>(backend: B) -> Self {
-        let credentials = if let Ok(Some(content)) = backend.read() {
-            serde_json::from_str(&content).unwrap_or_default()
-        } else {
-            HashMap::new()
+    pub fn with_backend(backend: impl AuthStorageBackend + 'static) -> Self {
+        let credentials = match backend.read() {
+            Ok(Some(content)) => serde_json::from_str(&content).unwrap_or_default(),
+            _ => HashMap::new(),
         };
 
         Self {
-            file_storage: None,
+            file_storage: Some(Arc::new(backend)),
             credentials: RwLock::new(credentials),
             runtime_overrides: RwLock::new(HashMap::new()),
+            fallback_resolver: RwLock::new(None),
+            errors: RwLock::new(Vec::new()),
+            load_error: RwLock::new(None),
         }
     }
 
-    /// Create a memory-only storage
+    /// Create a memory-only storage (for testing)
     pub fn in_memory() -> Self {
         Self {
             file_storage: None,
             credentials: RwLock::new(HashMap::new()),
             runtime_overrides: RwLock::new(HashMap::new()),
+            fallback_resolver: RwLock::new(None),
+            errors: RwLock::new(Vec::new()),
+            load_error: RwLock::new(None),
         }
     }
 
     /// Get the default auth file path
-    fn default_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("oxi").join("auth.json"))
+    pub fn default_path() -> Option<PathBuf> {
+        FileAuthStorage::default_path()
     }
+
+    // -----------------------------------------------------------------------
+    // Runtime overrides
+    // -----------------------------------------------------------------------
 
     /// Set a runtime API key override (from CLI --api-key)
     pub fn set_runtime_key(&self, provider: &str, api_key: String) {
         self.runtime_overrides
             .write()
-            .unwrap()
             .insert(provider.to_string(), api_key);
     }
 
     /// Remove a runtime override
     pub fn remove_runtime_key(&self, provider: &str) {
-        self.runtime_overrides.write().unwrap().remove(provider);
+        self.runtime_overrides.write().remove(provider);
     }
+
+    // -----------------------------------------------------------------------
+    // Fallback resolver
+    // -----------------------------------------------------------------------
+
+    /// Set a fallback resolver for API keys not found in auth.json or env vars.
+    /// Used for custom provider keys from models.json.
+    pub fn set_fallback_resolver(&self, resolver: Arc<dyn FallbackResolver>) {
+        *self.fallback_resolver.write() = Some(resolver);
+    }
+
+    /// Clear the fallback resolver
+    pub fn clear_fallback_resolver(&self) {
+        *self.fallback_resolver.write() = None;
+    }
+
+    // -----------------------------------------------------------------------
+    // Credential query
+    // -----------------------------------------------------------------------
 
     /// Check if a provider has any auth configured
     pub fn has_auth(&self, provider: &str) -> bool {
-        // Check runtime override
-        if self
-            .runtime_overrides
-            .read()
-            .unwrap()
-            .contains_key(provider)
-        {
+        if self.runtime_overrides.read().contains_key(provider) {
             return true;
         }
-
-        // Check stored credentials
-        if self.credentials.read().unwrap().contains_key(provider) {
+        if self.credentials.read().contains_key(provider) {
             return true;
         }
-
-        // Check environment
-        let env_key = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
-        std::env::var(&env_key).is_ok()
+        if get_env_api_key(provider).is_some() {
+            return true;
+        }
+        if let Some(ref resolver) = *self.fallback_resolver.read() {
+            if resolver.resolve(provider).is_some() {
+                return true;
+            }
+        }
+        false
     }
 
-    /// Get auth status for a provider
+    /// Get auth status for a provider (without exposing credentials)
     pub fn get_status(&self, provider: &str) -> AuthStatus {
-        if self
-            .runtime_overrides
-            .read()
-            .unwrap()
-            .contains_key(provider)
-        {
+        if self.runtime_overrides.read().contains_key(provider) {
             return AuthStatus {
                 configured: false,
                 source: Some("runtime".to_string()),
@@ -352,21 +595,31 @@ impl AuthStorage {
             };
         }
 
-        if self.credentials.read().unwrap().contains_key(provider) {
+        if let Some(cred) = self.credentials.read().get(provider) {
             return AuthStatus {
                 configured: true,
                 source: Some("stored".to_string()),
-                label: None,
+                label: Some(cred.type_name().to_string()),
             };
         }
 
-        let env_key = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
-        if std::env::var(&env_key).is_ok() {
+        let env_keys = find_env_keys(provider);
+        if let Some(first_key) = env_keys.first() {
             return AuthStatus {
                 configured: false,
                 source: Some("environment".to_string()),
-                label: Some(env_key),
+                label: Some(first_key.clone()),
             };
+        }
+
+        if let Some(ref resolver) = *self.fallback_resolver.read() {
+            if resolver.resolve(provider).is_some() {
+                return AuthStatus {
+                    configured: false,
+                    source: Some("fallback".to_string()),
+                    label: Some("custom provider config".to_string()),
+                };
+            }
         }
 
         AuthStatus {
@@ -376,54 +629,71 @@ impl AuthStorage {
         }
     }
 
-    /// Get API key for a provider
+    /// Get API key for a provider.
     ///
     /// Priority:
     /// 1. Runtime override (CLI --api-key)
-    /// 2. Stored API key
-    /// 3. OAuth token (auto-refreshed)
-    /// 4. Environment variable
+    /// 2. Stored API key from auth.json
+    /// 3. OAuth token from auth.json (auto-refreshed)
+    /// 4. Session token from auth.json
+    /// 5. Environment variable
+    /// 6. Fallback resolver
     pub fn get_api_key(&self, provider: &str) -> Option<String> {
+        self.get_api_key_with_options(provider, true)
+    }
+
+    /// Get API key with option to include/exclude fallback resolver
+    pub fn get_api_key_with_options(&self, provider: &str, include_fallback: bool) -> Option<String> {
         // 1. Runtime override
-        if let Some(key) = self.runtime_overrides.read().unwrap().get(provider) {
+        if let Some(key) = self.runtime_overrides.read().get(provider) {
             return Some(key.clone());
         }
 
-        // 2. Stored credential
-        if let Some(cred) = self.credentials.read().unwrap().get(provider) {
+        // 2-4. Stored credential
+        if let Some(cred) = self.credentials.read().get(provider) {
             return match cred {
                 AuthCredential::ApiKey { key } => Some(key.clone()),
-                AuthCredential::OAuth {
-                    access_token,
-                    expires_at,
-                    ..
-                } => {
-                    // Check if token needs refresh
-                    if *expires_at
-                        > std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs()
-                    {
+                AuthCredential::OAuth { access_token, expires_at, .. } => {
+                    if *expires_at > now_secs() {
                         Some(access_token.clone())
                     } else {
-                        // Token expired
+                        // Token expired - caller should handle refresh
+                        None
+                    }
+                }
+                AuthCredential::Session { token, expires_at, .. } => {
+                    if *expires_at == 0 || *expires_at > now_secs() {
+                        Some(token.clone())
+                    } else {
                         None
                     }
                 }
             };
         }
 
-        // 3. Environment variable
-        let env_key = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
-        std::env::var(&env_key).ok()
+        // 5. Environment variable
+        if let Some(key) = get_env_api_key(provider) {
+            return Some(key);
+        }
+
+        // 6. Fallback resolver
+        if include_fallback {
+            if let Some(ref resolver) = *self.fallback_resolver.read() {
+                return resolver.resolve(provider);
+            }
+        }
+
+        None
     }
+
+    // -----------------------------------------------------------------------
+    // Credential mutation
+    // -----------------------------------------------------------------------
 
     /// Set API key for a provider
     pub fn set_api_key(&self, provider: &str, key: String) {
         self.credentials
             .write()
-            .unwrap()
             .insert(provider.to_string(), AuthCredential::ApiKey { key });
         self.persist();
     }
@@ -446,7 +716,7 @@ impl AuthStorage {
         );
     }
 
-    /// Set OAuth credential with full details for a provider
+    /// Set OAuth credential with full details
     pub fn set_oauth_full(
         &self,
         provider: &str,
@@ -456,7 +726,7 @@ impl AuthStorage {
         scopes: Option<String>,
         provider_data: Option<serde_json::Value>,
     ) {
-        self.credentials.write().unwrap().insert(
+        self.credentials.write().insert(
             provider.to_string(),
             AuthCredential::OAuth {
                 access_token,
@@ -469,56 +739,142 @@ impl AuthStorage {
         self.persist();
     }
 
+    /// Set session token for a provider
+    pub fn set_session(
+        &self,
+        provider: &str,
+        token: String,
+        expires_at: u64,
+        metadata: Option<serde_json::Value>,
+    ) {
+        self.credentials.write().insert(
+            provider.to_string(),
+            AuthCredential::Session {
+                token,
+                expires_at,
+                metadata,
+            },
+        );
+        self.persist();
+    }
+
+    /// Update an existing OAuth credential (for token refresh)
+    pub fn update_oauth_tokens(
+        &self,
+        provider: &str,
+        new_access_token: String,
+        new_refresh_token: Option<String>,
+        new_expires_at: u64,
+    ) -> AuthResult<()> {
+        let mut creds = self.credentials.write();
+        let cred = creds.get_mut(provider).ok_or_else(|| {
+            AuthError::NotFound(provider.to_string())
+        })?;
+
+        match cred {
+            AuthCredential::OAuth {
+                access_token,
+                refresh_token,
+                expires_at,
+                ..
+            } => {
+                *access_token = new_access_token;
+                *refresh_token = new_refresh_token;
+                *expires_at = new_expires_at;
+            }
+            _ => {
+                return Err(AuthError::InvalidFormat(
+                    format!("Provider '{}' does not have OAuth credentials", provider),
+                ));
+            }
+        }
+
+        drop(creds);
+        self.persist();
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Credential retrieval
+    // -----------------------------------------------------------------------
+
+    /// Get credential for a provider
+    pub fn get(&self, provider: &str) -> Option<AuthCredential> {
+        self.credentials.read().get(provider).cloned()
+    }
+
     /// Get OAuth credential for a provider (for token refresh)
     pub fn get_oauth_credential(&self, provider: &str) -> Option<AuthCredential> {
-        self.credentials.read().unwrap().get(provider).cloned()
+        self.credentials.read().get(provider).cloned()
     }
 
     /// Check if a provider has OAuth credentials that can be refreshed
     pub fn has_oauth_with_refresh(&self, provider: &str) -> bool {
-        if let Some(cred) = self.credentials.read().unwrap().get(provider) {
-            match cred {
-                AuthCredential::OAuth { refresh_token, .. } => refresh_token.is_some(),
-                _ => false,
-            }
+        if let Some(cred) = self.credentials.read().get(provider) {
+            matches!(cred, AuthCredential::OAuth { refresh_token: Some(_), .. })
         } else {
             false
         }
     }
 
+    // -----------------------------------------------------------------------
+    // CRUD operations
+    // -----------------------------------------------------------------------
+
+    /// Set a credential for a provider
+    pub fn set(&self, provider: &str, credential: AuthCredential) {
+        self.credentials.write().insert(provider.to_string(), credential);
+        self.persist();
+    }
+
     /// Remove credential for a provider
     pub fn remove(&self, provider: &str) {
-        self.credentials.write().unwrap().remove(provider);
+        self.credentials.write().remove(provider);
         self.persist();
     }
 
     /// List all providers with credentials
     pub fn list_providers(&self) -> Vec<String> {
-        self.credentials.read().unwrap().keys().cloned().collect()
+        self.credentials.read().keys().cloned().collect()
     }
 
-    /// Check if credential exists for provider
+    /// Check if credential exists for provider in storage
     pub fn has(&self, provider: &str) -> bool {
-        self.credentials.read().unwrap().contains_key(provider)
+        self.credentials.read().contains_key(provider)
     }
 
-    /// Get all credentials (for debugging)
+    /// Get all credentials
     pub fn get_all(&self) -> HashMap<String, AuthCredential> {
-        self.credentials.read().unwrap().clone()
+        self.credentials.read().clone()
     }
 
     /// Clear all stored credentials
     pub fn clear(&self) {
-        self.credentials.write().unwrap().clear();
+        self.credentials.write().clear();
         self.persist();
     }
+
+    // -----------------------------------------------------------------------
+    // Persistence
+    // -----------------------------------------------------------------------
 
     /// Reload from disk
     pub fn reload(&self) {
         if let Some(ref storage) = self.file_storage {
-            if let Ok(Some(content)) = storage.read() {
-                if let Ok(creds) = serde_json::from_str(&content) {
-                    *self.credentials.write().unwrap() = creds;
+            match storage.read() {
+                Ok(Some(content)) => {
+                    if let Ok(creds) = serde_json::from_str(&content) {
+                        *self.credentials.write() = creds;
+                    }
+                    *self.load_error.write() = None;
+                }
+                Ok(None) => {
+                    self.credentials.write().clear();
+                    *self.load_error.write() = None;
+                }
+                Err(e) => {
+                    *self.load_error.write() = Some(e);
+                    self.record_error(AuthError::ReadError("Failed to reload auth storage".to_string()));
                 }
             }
         }
@@ -527,11 +883,92 @@ impl AuthStorage {
     /// Persist to disk
     fn persist(&self) {
         if let Some(ref storage) = self.file_storage {
-            let creds = self.credentials.read().unwrap();
+            let creds = self.credentials.read();
             if let Ok(json) = serde_json::to_string_pretty(&*creds) {
-                let _ = storage.write(&json);
+                if let Err(e) = storage.write(&json) {
+                    self.record_error(e);
+                }
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Error tracking
+    // -----------------------------------------------------------------------
+
+    /// Record an error
+    fn record_error(&self, error: AuthError) {
+        self.errors.write().push(error);
+    }
+
+    /// Drain collected errors
+    pub fn drain_errors(&self) -> Vec<AuthError> {
+        let mut errors = self.errors.write();
+        std::mem::take(&mut *errors)
+    }
+
+    /// Get the last load error
+    pub fn load_error(&self) -> Option<AuthError> {
+        self.load_error.read().clone()
+    }
+
+    // -----------------------------------------------------------------------
+    // Validation
+    // -----------------------------------------------------------------------
+
+    /// Validate all stored credentials
+    pub fn validate_all(&self) -> Vec<(String, CredentialValidationError)> {
+        let creds = self.credentials.read();
+        let mut results = Vec::new();
+        for (provider, cred) in creds.iter() {
+            if let Err(e) = cred.validate() {
+                results.push((provider.clone(), e));
+            }
+        }
+        results
+    }
+
+    /// Validate credential for a specific provider
+    pub fn validate(&self, provider: &str) -> Result<(), CredentialValidationError> {
+        let creds = self.credentials.read();
+        let cred = creds.get(provider).ok_or_else(|| {
+            CredentialValidationError::EmptyField(format!("no credential for provider '{}'", provider))
+        })?;
+        cred.validate()
+    }
+
+    // -----------------------------------------------------------------------
+    // Multi-provider support
+    // -----------------------------------------------------------------------
+
+    /// Get all configured provider IDs (sorted)
+    pub fn configured_providers(&self) -> Vec<String> {
+        let mut providers: Vec<String> = self.credentials.read().keys().cloned().collect();
+        providers.sort();
+        providers
+    }
+
+    /// Check if multiple providers are configured
+    pub fn has_multiple_providers(&self) -> bool {
+        self.credentials.read().len() > 1
+    }
+
+    /// Get the primary provider (first configured, preferring stored over env)
+    pub fn primary_provider(&self) -> Option<String> {
+        let creds = self.credentials.read();
+        creds.keys().next().cloned()
+    }
+
+    /// Migrate credentials from one provider to another
+    pub fn migrate_provider(&self, from: &str, to: &str) -> AuthResult<()> {
+        let mut creds = self.credentials.write();
+        let cred = creds.remove(from).ok_or_else(|| {
+            AuthError::NotFound(from.to_string())
+        })?;
+        creds.insert(to.to_string(), cred);
+        drop(creds);
+        self.persist();
+        Ok(())
     }
 }
 
@@ -541,7 +978,22 @@ impl Default for AuthStorage {
     }
 }
 
-/// Wrapper for using keyring crate with fallback
+// ============================================================================
+// Helper: current unix timestamp
+// ============================================================================
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+// ============================================================================
+// Keyring Support
+// ============================================================================
+
+/// Wrapper for using OS keyring with fallback
 #[allow(unexpected_cfgs)]
 pub mod keyring_support {
     use super::*;
@@ -557,7 +1009,7 @@ pub mod keyring_support {
 
     /// Try to set a secret in the OS keyring
     #[cfg(feature = "keyring")]
-    pub fn set_keyring_secret(service: &str, account: &str, secret: &str) -> Result<(), AuthError> {
+    pub fn set_keyring_secret(service: &str, account: &str, secret: &str) -> AuthResult<()> {
         use keyring::Entry;
         Entry::new(service, account)
             .map_err(|e| AuthError::KeyringError(e.to_string()))?
@@ -567,7 +1019,7 @@ pub mod keyring_support {
 
     /// Try to delete a secret from the OS keyring
     #[cfg(feature = "keyring")]
-    pub fn delete_keyring_secret(service: &str, account: &str) -> Result<(), AuthError> {
+    pub fn delete_keyring_secret(service: &str, account: &str) -> AuthResult<()> {
         use keyring::Entry;
         Entry::new(service, account)
             .map_err(|e| AuthError::KeyringError(e.to_string()))?
@@ -586,19 +1038,23 @@ pub mod keyring_support {
         _service: &str,
         _account: &str,
         _secret: &str,
-    ) -> Result<(), AuthError> {
+    ) -> AuthResult<()> {
         Err(AuthError::KeyringError(
             "Keyring support not compiled".to_string(),
         ))
     }
 
     #[cfg(not(feature = "keyring"))]
-    pub fn delete_keyring_secret(_service: &str, _account: &str) -> Result<(), AuthError> {
+    pub fn delete_keyring_secret(_service: &str, _account: &str) -> AuthResult<()> {
         Err(AuthError::KeyringError(
             "Keyring support not compiled".to_string(),
         ))
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -652,6 +1108,25 @@ mod tests {
         let status = storage.get_status("anthropic");
         assert!(status.configured);
         assert_eq!(status.source, Some("stored".to_string()));
+        assert_eq!(status.label, Some("api_key".to_string()));
+    }
+
+    #[test]
+    fn test_auth_status_display() {
+        let status = AuthStatus {
+            configured: true,
+            source: Some("stored".to_string()),
+            label: Some("api_key".to_string()),
+        };
+        let display = format!("{}", status);
+        assert_eq!(display, "stored (api_key)");
+
+        let no_config = AuthStatus {
+            configured: false,
+            source: None,
+            label: None,
+        };
+        assert_eq!(format!("{}", no_config), "not configured");
     }
 
     #[test]
@@ -737,11 +1212,7 @@ mod tests {
         assert!(!api_key_cred.is_expired());
 
         // OAuth token that expires in the future
-        let future_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + 3600;
+        let future_time = now_secs() + 3600;
         let oauth_cred = AuthCredential::OAuth {
             access_token: "token".to_string(),
             refresh_token: Some("refresh".to_string()),
@@ -762,16 +1233,11 @@ mod tests {
         assert!(oauth_cred_expired.is_expired());
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_auth_credential_needs_refresh() {
-        let future_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + 120; // 2 minutes from now
+        let future_time = now_secs() + 120; // 2 minutes from now
 
-        // Has refresh token, will expire soon
+        // Has refresh token, will expire soon - not yet within 60s
         let oauth_cred = AuthCredential::OAuth {
             access_token: "token".to_string(),
             refresh_token: Some("refresh".to_string()),
@@ -779,7 +1245,18 @@ mod tests {
             scopes: None,
             provider_data: None,
         };
-        assert!(oauth_cred.needs_refresh());
+        assert!(!oauth_cred.needs_refresh());
+
+        // Within 60 seconds
+        let soon = now_secs() + 30;
+        let oauth_soon = AuthCredential::OAuth {
+            access_token: "token".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            expires_at: soon,
+            scopes: None,
+            provider_data: None,
+        };
+        assert!(oauth_soon.needs_refresh());
 
         // No refresh token - doesn't need refresh
         let no_refresh = AuthCredential::OAuth {
@@ -800,11 +1277,7 @@ mod tests {
 
     #[test]
     fn test_auth_credential_access_token() {
-        let future_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + 3600;
+        let future_time = now_secs() + 3600;
 
         let oauth_cred = AuthCredential::OAuth {
             access_token: "valid_token".to_string(),
@@ -825,11 +1298,11 @@ mod tests {
         };
         assert!(expired_cred.access_token().is_none());
 
-        // API key always returns token
+        // API key returns None via access_token
         let api_key_cred = AuthCredential::ApiKey {
             key: "api_key_token".to_string(),
         };
-        assert!(api_key_cred.access_token().is_none()); // API keys don't use access_token method
+        assert!(api_key_cred.access_token().is_none());
     }
 
     #[test]
@@ -894,5 +1367,252 @@ mod tests {
         } else {
             panic!("Expected OAuth credential");
         }
+    }
+
+    #[test]
+    fn test_session_token() {
+        let storage = AuthStorage::in_memory();
+        storage.set_session(
+            "browser",
+            "session-token-123".to_string(),
+            0, // never expires
+            Some(serde_json::json!({"user": "test"})),
+        );
+
+        assert!(storage.has("browser"));
+        assert_eq!(
+            storage.get_api_key("browser"),
+            Some("session-token-123".to_string())
+        );
+
+        let cred = storage.get("browser").unwrap();
+        assert!(matches!(cred, AuthCredential::Session { .. }));
+        assert!(cred.access_token().is_some());
+    }
+
+    #[test]
+    fn test_session_token_expired() {
+        let storage = AuthStorage::in_memory();
+        storage.set_session("browser", "session-token".to_string(), 1, None);
+
+        // Token expired (timestamp 1 is in the past)
+        assert!(storage.get_api_key("browser").is_none());
+    }
+
+    #[test]
+    fn test_credential_validation() {
+        // Valid API key
+        let valid = AuthCredential::ApiKey { key: "sk-valid".to_string() };
+        assert!(valid.validate().is_ok());
+
+        // Empty API key
+        let empty = AuthCredential::ApiKey { key: "".to_string() };
+        assert!(empty.validate().is_err());
+
+        // Placeholder
+        let placeholder = AuthCredential::ApiKey { key: "your-api-key-here".to_string() };
+        assert!(placeholder.validate().is_err());
+
+        // Valid OAuth
+        let valid_oauth = AuthCredential::OAuth {
+            access_token: "token".to_string(),
+            refresh_token: None,
+            expires_at: now_secs() + 3600,
+            scopes: None,
+            provider_data: None,
+        };
+        assert!(valid_oauth.validate().is_ok());
+
+        // Invalid OAuth (empty token)
+        let invalid_oauth = AuthCredential::OAuth {
+            access_token: "".to_string(),
+            refresh_token: None,
+            expires_at: 1000,
+            scopes: None,
+            provider_data: None,
+        };
+        assert!(invalid_oauth.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_all() {
+        let storage = AuthStorage::in_memory();
+        storage.set_api_key("valid", "sk-good".to_string());
+        storage.set_api_key("empty", "".to_string());
+
+        let errors = storage.validate_all();
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].0, "empty");
+    }
+
+    #[test]
+    fn test_update_oauth_tokens() {
+        let storage = AuthStorage::in_memory();
+        storage.set_oauth(
+            "provider",
+            "old-access".to_string(),
+            Some("old-refresh".to_string()),
+            now_secs() + 3600,
+        );
+
+        storage
+            .update_oauth_tokens(
+                "provider",
+                "new-access".to_string(),
+                Some("new-refresh".to_string()),
+                now_secs() + 7200,
+            )
+            .unwrap();
+
+        let key = storage.get_api_key("provider");
+        assert_eq!(key, Some("new-access".to_string()));
+    }
+
+    #[test]
+    fn test_update_oauth_tokens_wrong_type() {
+        let storage = AuthStorage::in_memory();
+        storage.set_api_key("provider", "key".to_string());
+
+        let result = storage.update_oauth_tokens(
+            "provider",
+            "new-access".to_string(),
+            None,
+            now_secs() + 3600,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_migrate_provider() {
+        let storage = AuthStorage::in_memory();
+        storage.set_api_key("old-provider", "key123".to_string());
+        storage.migrate_provider("old-provider", "new-provider").unwrap();
+
+        assert!(!storage.has("old-provider"));
+        assert!(storage.has("new-provider"));
+        assert_eq!(storage.get_api_key("new-provider"), Some("key123".to_string()));
+    }
+
+    #[test]
+    fn test_migrate_provider_not_found() {
+        let storage = AuthStorage::in_memory();
+        let result = storage.migrate_provider("nonexistent", "target");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_draining() {
+        let storage = AuthStorage::in_memory();
+        let errors = storage.drain_errors();
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_fallback_resolver() {
+        let storage = AuthStorage::in_memory();
+        storage.set_fallback_resolver(Arc::new(FnFallbackResolver::new(
+            Box::new(|provider| {
+                if provider == "custom" {
+                    Some("custom-key-from-config".to_string())
+                } else {
+                    None
+                }
+            }),
+        )));
+
+        assert_eq!(
+            storage.get_api_key("custom"),
+            Some("custom-key-from-config".to_string())
+        );
+        assert!(storage.get_api_key("unknown").is_none());
+
+        // Without fallback
+        storage.clear_fallback_resolver();
+        assert!(storage.get_api_key("custom").is_none());
+    }
+
+    #[test]
+    fn test_get_api_key_with_options() {
+        let storage = AuthStorage::in_memory();
+        storage.set_fallback_resolver(Arc::new(FnFallbackResolver::new(
+            Box::new(|_| Some("fallback-key".to_string())),
+        )));
+
+        // With fallback
+        assert_eq!(
+            storage.get_api_key_with_options("test", true),
+            Some("fallback-key".to_string())
+        );
+
+        // Without fallback
+        assert!(storage.get_api_key_with_options("test", false).is_none());
+    }
+
+    #[test]
+    fn test_configured_providers() {
+        let storage = AuthStorage::in_memory();
+        storage.set_api_key("openai", "key".to_string());
+        storage.set_api_key("anthropic", "key".to_string());
+
+        let providers = storage.configured_providers();
+        assert!(providers.len() >= 2);
+        // Should be sorted
+        let mut sorted = providers.clone();
+        sorted.sort();
+        assert_eq!(providers, sorted);
+    }
+
+    #[test]
+    fn test_has_multiple_providers() {
+        let storage = AuthStorage::in_memory();
+        assert!(!storage.has_multiple_providers());
+
+        storage.set_api_key("openai", "key1".to_string());
+        assert!(!storage.has_multiple_providers());
+
+        storage.set_api_key("anthropic", "key2".to_string());
+        assert!(storage.has_multiple_providers());
+    }
+
+    #[test]
+    fn test_set_and_get_credential() {
+        let storage = AuthStorage::in_memory();
+        let cred = AuthCredential::Session {
+            token: "abc".to_string(),
+            expires_at: 0,
+            metadata: None,
+        };
+        storage.set("custom", cred);
+        let retrieved = storage.get("custom");
+        assert!(retrieved.is_some());
+        assert!(matches!(retrieved.unwrap(), AuthCredential::Session { .. }));
+    }
+
+    #[test]
+    fn test_credential_type_name() {
+        assert_eq!(
+            AuthCredential::ApiKey { key: "k".to_string() }.type_name(),
+            "api_key"
+        );
+        assert_eq!(
+            AuthCredential::OAuth {
+                access_token: "t".to_string(),
+                refresh_token: None,
+                expires_at: 0,
+                scopes: None,
+                provider_data: None,
+            }
+            .type_name(),
+            "oauth"
+        );
+        assert_eq!(
+            AuthCredential::Session {
+                token: "t".to_string(),
+                expires_at: 0,
+                metadata: None,
+            }
+            .type_name(),
+            "session"
+        );
     }
 }

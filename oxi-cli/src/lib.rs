@@ -102,6 +102,7 @@ pub mod provider_display_names;
 pub mod session_cwd;
 pub mod slash_commands;
 pub mod agent_session;
+pub mod agent_session_runtime;
 pub mod compaction_utils;
 pub mod source_info;
 pub mod system_prompt;

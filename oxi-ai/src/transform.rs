@@ -26,9 +26,9 @@
 use serde_json::Value as JsonValue;
 
 use crate::{
-    Api, AssistantMessage, ContentBlock, ImageContent, ImageContentType, Message, MessageContent,
-    StopReason, TextContent, TextContentType, ThinkingContent, ToolCall, ToolCallType,
-    ToolResultMessage, Usage,
+    Api, AssistantMessage, ContentBlock, ImageContent, ImageContentType, InputModality, Message,
+    MessageContent, Model, StopReason, TextContent, TextContentType, ThinkingContent, ToolCall,
+    ToolCallType, ToolResultMessage, Usage,
 };
 
 // ---------------------------------------------------------------------------
@@ -305,6 +305,7 @@ fn intermediate_to_blocks(
             vec![ContentBlock::Text(TextContent {
                 content_type: TextContentType::Text,
                 text: text.clone(),
+                text_signature: None,
             })]
         }
 
@@ -329,6 +330,7 @@ fn intermediate_to_blocks(
                     vec![ContentBlock::Text(TextContent {
                         content_type: TextContentType::Text,
                         text: wrapped,
+                        text_signature: None,
                     })]
                 }
             }
@@ -386,6 +388,7 @@ fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
                     result.push(ContentBlock::Text(TextContent {
                         content_type: TextContentType::Text,
                         text: std::mem::take(&mut pending),
+                        text_signature: None,
                     }));
                 }
                 result.push(other);
@@ -397,8 +400,283 @@ fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
         result.push(ContentBlock::Text(TextContent {
             content_type: TextContentType::Text,
             text: pending,
+            text_signature: None,
         }));
     }
+
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Message normalization (ported from transform-messages.ts)
+// ---------------------------------------------------------------------------
+
+const NON_VISION_USER_IMAGE_PLACEHOLDER: &str =
+    "(image omitted: model does not support images)";
+const NON_VISION_TOOL_IMAGE_PLACEHOLDER: &str =
+    "(tool image omitted: model does not support images)";
+
+/// Replace image content blocks with a text placeholder.
+/// Collapses consecutive placeholders into one.
+fn replace_images_with_placeholder(
+    blocks: &[ContentBlock],
+    placeholder: &str,
+) -> Vec<ContentBlock> {
+    let mut result = Vec::with_capacity(blocks.len());
+    let mut prev_was_placeholder = false;
+
+    for block in blocks {
+        if matches!(block, ContentBlock::Image(_)) {
+            if !prev_was_placeholder {
+                result.push(ContentBlock::Text(TextContent::new(placeholder)));
+            }
+            prev_was_placeholder = true;
+            continue;
+        }
+
+        result.push(block.clone());
+        prev_was_placeholder = matches!(block, ContentBlock::Text(t) if t.text == placeholder);
+    }
+
+    result
+}
+
+/// Downgrade images to text placeholders when the target model does not support vision.
+fn downgrade_unsupported_images(messages: &[Message], model: &Model) -> Vec<Message> {
+    if model.input.contains(&InputModality::Image) {
+        return messages.to_vec();
+    }
+
+    messages
+        .iter()
+        .map(|msg| match msg {
+            Message::User(u) => match &u.content {
+                MessageContent::Blocks(blocks) => {
+                    let replaced =
+                        replace_images_with_placeholder(blocks, NON_VISION_USER_IMAGE_PLACEHOLDER);
+                    Message::User(crate::UserMessage {
+                        role: u.role,
+                        content: MessageContent::Blocks(replaced),
+                        timestamp: u.timestamp,
+                    })
+                }
+                _ => msg.clone(),
+            },
+            Message::ToolResult(t) => {
+                let replaced =
+                    replace_images_with_placeholder(&t.content, NON_VISION_TOOL_IMAGE_PLACEHOLDER);
+                Message::ToolResult(ToolResultMessage {
+                    role: t.role,
+                    tool_call_id: t.tool_call_id.clone(),
+                    tool_name: t.tool_name.clone(),
+                    content: replaced,
+                    details: t.details.clone(),
+                    is_error: t.is_error,
+                    timestamp: t.timestamp,
+                })
+            }
+            _ => msg.clone(),
+        })
+        .collect()
+}
+
+/// Normalize a tool call ID for cross-provider compatibility.
+///
+/// OpenAI Responses API generates IDs that are 450+ chars with special characters like `|`.
+/// Anthropic APIs require IDs matching `^[a-zA-Z0-9_-]+$` (max 64 chars).
+pub fn normalize_tool_call_id(id: &str) -> String {
+    let sanitized: String = id
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect();
+    if sanitized.len() > 64 {
+        sanitized[..64].trim_end_matches('_').to_string()
+    } else {
+        sanitized.trim_end_matches('_').to_string()
+    }
+}
+
+/// Transform messages for a target model, handling:
+/// - Image downgrade for non-vision models
+/// - Thinking block conversion (cross-model → text, same-model → keep)
+/// - Tool call ID normalization
+/// - Tool call thought_signature stripping for cross-model
+/// - Skipping error/aborted assistant messages
+/// - Inserting synthetic tool results for orphaned tool calls
+///
+/// This is the main entry-point matching the behaviour of `transformMessages` in
+/// `transform-messages.ts`.
+pub fn transform_messages_for_model(messages: &[Message], model: &Model) -> Vec<Message> {
+    let image_aware = downgrade_unsupported_images(messages, model);
+
+    // Build a map of original tool call IDs → normalized IDs
+    let mut tool_call_id_map: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    // First pass: transform content blocks
+    let transformed: Vec<Message> = image_aware
+        .iter()
+        .map(|msg| match msg {
+            Message::User(_) => msg.clone(),
+
+            Message::ToolResult(t) => {
+                if let Some(normalized) = tool_call_id_map.get(&t.tool_call_id) {
+                    if normalized != &t.tool_call_id {
+                        return Message::ToolResult(ToolResultMessage {
+                            tool_call_id: normalized.clone(),
+                            ..t.clone()
+                        });
+                    }
+                }
+                msg.clone()
+            }
+
+            Message::Assistant(a) => {
+                let is_same_model = a.provider == model.provider
+                    && a.api == model.api
+                    && a.model == model.id;
+
+                let new_content: Vec<ContentBlock> = a
+                    .content
+                    .iter()
+                    .flat_map(|block| match block {
+                        ContentBlock::Thinking(th) => {
+                            // Redacted thinking: only valid for same model
+                            if th.redacted == Some(true) && !is_same_model {
+                                return vec![];
+                            }
+                            // Same model: keep thinking with signatures
+                            if is_same_model && th.thinking_signature.is_some() {
+                                return vec![block.clone()];
+                            }
+                            // Skip empty thinking
+                            if th.thinking.trim().is_empty() {
+                                return vec![];
+                            }
+                            // Same model: keep
+                            if is_same_model {
+                                return vec![block.clone()];
+                            }
+                            // Cross-model: convert to text
+                            vec![ContentBlock::Text(TextContent::new(&th.thinking))]
+                        }
+
+                        ContentBlock::Text(_) => vec![block.clone()],
+
+                        ContentBlock::ToolCall(tc) => {
+                            let mut new_tc = tc.clone();
+
+                            // Strip thought_signature for cross-model
+                            if !is_same_model && tc.thought_signature.is_some() {
+                                new_tc.thought_signature = None;
+                            }
+
+                            // Normalize tool call ID for cross-model
+                            if !is_same_model {
+                                let normalized = normalize_tool_call_id(&tc.id);
+                                if normalized != tc.id {
+                                    tool_call_id_map
+                                        .insert(tc.id.clone(), normalized.clone());
+                                    new_tc.id = normalized;
+                                }
+                            }
+
+                            vec![ContentBlock::ToolCall(new_tc)]
+                        }
+
+                        _ => vec![block.clone()],
+                    })
+                    .collect();
+
+                Message::Assistant(AssistantMessage {
+                    content: new_content,
+                    ..a.clone()
+                })
+            }
+        })
+        .collect();
+
+    // Second pass: insert synthetic tool results for orphaned tool calls and
+    // skip error/aborted assistant messages.
+    let mut result: Vec<Message> = Vec::with_capacity(transformed.len());
+    let mut pending_tool_calls: Vec<ToolCall> = Vec::new();
+    let mut existing_tool_result_ids: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    let insert_synthetic_results =
+        |pending: &mut Vec<ToolCall>,
+         existing: &mut std::collections::HashSet<String>,
+         out: &mut Vec<Message>| {
+            for tc in pending.drain(..) {
+                if !existing.contains(&tc.id) {
+                    out.push(Message::ToolResult(ToolResultMessage {
+                        role: crate::ToolResultRole::ToolResult,
+                        tool_call_id: tc.id.clone(),
+                        tool_name: tc.name.clone(),
+                        content: vec![ContentBlock::Text(TextContent::new(
+                            "No result provided",
+                        ))],
+                        details: None,
+                        is_error: true,
+                        timestamp: chrono::Utc::now().timestamp_millis(),
+                    }));
+                }
+            }
+            existing.clear();
+        };
+
+    for msg in &transformed {
+        match msg {
+            Message::Assistant(a) => {
+                // Insert synthetic results for any pending orphaned tool calls
+                insert_synthetic_results(
+                    &mut pending_tool_calls,
+                    &mut existing_tool_result_ids,
+                    &mut result,
+                );
+
+                // Skip errored/aborted assistant messages
+                if a.stop_reason == StopReason::Error || a.stop_reason == StopReason::Aborted {
+                    continue;
+                }
+
+                // Track tool calls from this assistant message
+                let tool_calls: Vec<&ToolCall> = a
+                    .content
+                    .iter()
+                    .filter_map(|b| b.as_tool_call())
+                    .collect();
+                if !tool_calls.is_empty() {
+                    pending_tool_calls = tool_calls.into_iter().cloned().collect();
+                    existing_tool_result_ids.clear();
+                }
+
+                result.push(msg.clone());
+            }
+
+            Message::ToolResult(t) => {
+                existing_tool_result_ids.insert(t.tool_call_id.clone());
+                result.push(msg.clone());
+            }
+
+            Message::User(_) => {
+                // User message interrupts tool flow — insert synthetic results for orphans
+                insert_synthetic_results(
+                    &mut pending_tool_calls,
+                    &mut existing_tool_result_ids,
+                    &mut result,
+                );
+                result.push(msg.clone());
+            }
+        }
+    }
+
+    // Handle trailing unresolved tool calls
+    insert_synthetic_results(
+        &mut pending_tool_calls,
+        &mut existing_tool_result_ids,
+        &mut result,
+    );
 
     result
 }
