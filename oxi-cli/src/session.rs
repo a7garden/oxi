@@ -2236,4 +2236,575 @@ mod tests {
         manager.remove_label(&id1).unwrap();
         assert_eq!(manager.get_label(&id1), None);
     }
+
+    // ========================================================================
+    // Tests ported from pi-mono session-manager gaps
+    // ========================================================================
+
+    /// Helper: create a user message
+    fn user_msg(text: &str) -> AgentMessage {
+        AgentMessage::User { content: ContentValue::String(text.to_string()) }
+    }
+
+    /// Helper: create an assistant message
+    fn assistant_msg(text: &str) -> AgentMessage {
+        AgentMessage::Assistant {
+            content: vec![AssistantContentBlock::Text { text: text.to_string() }],
+            provider: Some("anthropic".to_string()),
+            model_id: Some("claude-test".to_string()),
+            usage: None,
+            stop_reason: None,
+        }
+    }
+
+    /// Helper: create a bare assistant message (no content/metadata)
+    fn bare_assistant_msg() -> AgentMessage {
+        AgentMessage::Assistant {
+            content: vec![],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // append operations integration into tree
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_append_thinking_level_change_integrates() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let msg_id = manager.append_message(user_msg("hello"));
+        let thinking_id = manager.append_thinking_level_change("high");
+        let msg2_id = manager.append_message(assistant_msg("response"));
+
+        let entries = manager.get_entries();
+        assert_eq!(entries.len(), 3);
+
+        // Thinking entry should be between the two messages
+        let thinking_entry = entries.iter().find(|e| e.id == thinking_id).unwrap();
+        assert_eq!(thinking_entry.parent_id, Some(msg_id));
+
+        let msg2 = entries.iter().find(|e| e.id == msg2_id).unwrap();
+        assert_eq!(msg2.parent_id, Some(thinking_id));
+    }
+
+    #[test]
+    fn test_append_model_change_integrates() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let msg_id = manager.append_message(user_msg("hello"));
+        let model_id = manager.append_model_change("openai", "gpt-4");
+        let msg2_id = manager.append_message(assistant_msg("response"));
+
+        let entries = manager.get_entries();
+        let model_entry = entries.iter().find(|e| e.id == model_id).unwrap();
+        assert_eq!(model_entry.parent_id, Some(msg_id));
+
+        let msg2 = entries.iter().find(|e| e.id == msg2_id).unwrap();
+        assert_eq!(msg2.parent_id, Some(model_id));
+    }
+
+    #[test]
+    fn test_append_compaction_integrates_into_tree() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let id1 = manager.append_message(user_msg("1"));
+        let id2 = manager.append_message(assistant_msg("2"));
+        let compaction_id = manager.append_compaction("summary", &id1, 1000, None, None);
+        let id3 = manager.append_message(user_msg("3"));
+
+        let entries = manager.get_entries();
+        let compaction = entries.iter().find(|e| e.id == compaction_id).unwrap();
+        assert_eq!(compaction.parent_id, Some(id2));
+
+        let msg3 = entries.iter().find(|e| e.id == id3).unwrap();
+        assert_eq!(msg3.parent_id, Some(compaction_id));
+
+        // Verify compaction content
+        if let AgentMessage::CompactionSummary { summary, tokens_before, .. } = &compaction.message {
+            assert_eq!(summary, "summary");
+            assert_eq!(*tokens_before, 1000);
+        } else {
+            panic!("Expected CompactionSummary");
+        }
+    }
+
+    #[test]
+    fn test_leaf_pointer_advances() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        assert!(manager.get_leaf_id().is_none());
+
+        let id1 = manager.append_message(user_msg("1"));
+        assert_eq!(manager.get_leaf_id(), Some(id1.clone()));
+
+        let id2 = manager.append_message(assistant_msg("2"));
+        assert_eq!(manager.get_leaf_id(), Some(id2.clone()));
+
+        let id3 = manager.append_thinking_level_change("high");
+        assert_eq!(manager.get_leaf_id(), Some(id3));
+    }
+
+    #[test]
+    fn test_get_entry() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        assert!(manager.get_entry("nonexistent").is_none());
+
+        let id1 = manager.append_message(user_msg("first"));
+        let id2 = manager.append_message(assistant_msg("second"));
+
+        let entry1 = manager.get_entry(&id1);
+        assert!(entry1.is_some());
+        assert!(entry1.unwrap().message.is_user());
+
+        let entry2 = manager.get_entry(&id2);
+        assert!(entry2.is_some());
+        assert!(entry2.unwrap().message.is_assistant());
+    }
+
+    #[test]
+    fn test_get_leaf_entry() {
+        let manager = SessionManager::in_memory("/tmp");
+        assert!(manager.get_leaf_entry().is_none());
+
+        let mut manager = SessionManager::in_memory("/tmp");
+        manager.append_message(user_msg("1"));
+        let id2 = manager.append_message(assistant_msg("2"));
+
+        let leaf = manager.get_leaf_entry();
+        assert!(leaf.is_some());
+        assert_eq!(leaf.unwrap().id, id2);
+    }
+
+    // ------------------------------------------------------------------------
+    // getBranch / getPath
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_branch_full_path_root_to_leaf() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let id1 = manager.append_message(user_msg("1"));
+        let id2 = manager.append_message(assistant_msg("2"));
+        let id3 = manager.append_thinking_level_change("high");
+        let id4 = manager.append_message(user_msg("3"));
+
+        let branch = manager.get_branch(None);
+        assert_eq!(branch.len(), 4);
+        assert_eq!(branch[0].id, id1);
+        assert_eq!(branch[1].id, id2);
+        assert_eq!(branch[2].id, id3);
+        assert_eq!(branch[3].id, id4);
+    }
+
+    #[test]
+    fn test_get_branch_from_specific_entry() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let id1 = manager.append_message(user_msg("1"));
+        let id2 = manager.append_message(assistant_msg("2"));
+        manager.append_message(user_msg("3"));
+        manager.append_message(assistant_msg("4"));
+
+        let branch = manager.get_branch(Some(&id2));
+        assert_eq!(branch.len(), 2);
+        assert_eq!(branch[0].id, id1);
+        assert_eq!(branch[1].id, id2);
+    }
+
+    // ------------------------------------------------------------------------
+    // Multiple branches at same point (3 siblings)
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_multiple_branches_at_same_point() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        manager.append_message(user_msg("root"));
+        let id2 = manager.append_message(bare_assistant_msg());
+
+        // Branch A
+        manager.branch(&id2).unwrap();
+        let id_a = manager.append_message(user_msg("branch-A"));
+
+        // Branch B
+        manager.branch(&id2).unwrap();
+        let id_b = manager.append_message(user_msg("branch-B"));
+
+        // Branch C
+        manager.branch(&id2).unwrap();
+        let id_c = manager.append_message(user_msg("branch-C"));
+
+        let tree = manager.get_tree(Uuid::nil());
+        let node2 = &tree[0].children[0];
+        assert_eq!(node2.entry.id, id2);
+        assert_eq!(node2.children.len(), 3);
+
+        let mut branch_ids: Vec<String> = node2.children.iter().map(|c| c.entry.id.clone()).collect();
+        branch_ids.sort();
+        let mut expected = vec![id_a, id_b, id_c];
+        expected.sort();
+        assert_eq!(branch_ids, expected);
+    }
+
+    // ------------------------------------------------------------------------
+    // Deep branching
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_deep_branching() {
+        let mut manager = SessionManager::in_memory("/tmp");
+
+        // Main path: 1 -> 2 -> 3 -> 4
+        manager.append_message(user_msg("1"));
+        let id2 = manager.append_message(bare_assistant_msg());
+        let id3 = manager.append_message(user_msg("3"));
+        manager.append_message(bare_assistant_msg());
+
+        // Branch from 2: 2 -> 5 -> 6
+        manager.branch(&id2).unwrap();
+        let id5 = manager.append_message(user_msg("5"));
+        manager.append_message(bare_assistant_msg());
+
+        // Branch from 5: 5 -> 7
+        manager.branch(&id5).unwrap();
+        manager.append_message(user_msg("7"));
+
+        let tree = manager.get_tree(Uuid::nil());
+
+        // node2 has 2 children: id3 and id5
+        let node2 = &tree[0].children[0];
+        assert_eq!(node2.children.len(), 2);
+
+        let node5 = node2.children.iter().find(|c| c.entry.id == id5).unwrap();
+        assert_eq!(node5.children.len(), 2); // id6 and id7
+
+        let node3 = node2.children.iter().find(|c| c.entry.id == id3).unwrap();
+        assert_eq!(node3.children.len(), 1); // id4
+    }
+
+    // ------------------------------------------------------------------------
+    // branch_with_summary
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_branch_with_summary_inserts_and_advances() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let id1 = manager.append_message(user_msg("1"));
+        manager.append_message(bare_assistant_msg());
+        manager.append_message(user_msg("3"));
+
+        let summary_id = manager.branch_with_summary(
+            Some(&id1),
+            "Summary of abandoned work",
+            None,
+            None,
+        );
+        assert!(!summary_id.is_empty());
+        assert_eq!(manager.get_leaf_id(), Some(summary_id.clone()));
+
+        // Verify branch_summary entry
+        let entries = manager.get_entries();
+        let summary_entry = entries.iter().find(|e| e.id == summary_id).unwrap();
+        assert_eq!(summary_entry.parent_id, Some(id1));
+
+        if let AgentMessage::BranchSummary { summary, .. } = &summary_entry.message {
+            assert_eq!(summary, "Summary of abandoned work");
+        } else {
+            panic!("Expected BranchSummary");
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // build_session_context with branches
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_build_session_context_returns_branch_messages() {
+        let mut manager = SessionManager::in_memory("/tmp");
+
+        // Main: 1 -> 2 -> 3
+        manager.append_message(user_msg("msg1"));
+        let id2 = manager.append_message(bare_assistant_msg());
+        manager.append_message(user_msg("msg3"));
+
+        // Branch from 2: 2 -> 4
+        manager.branch(&id2).unwrap();
+        manager.append_message(assistant_msg("msg4-branch"));
+
+        let ctx = manager.build_session_context();
+        // Should have msg1, msg2, msg4-branch (NOT msg3)
+        assert_eq!(ctx.messages.len(), 3);
+        assert!(ctx.messages[0].is_user());
+        assert!(ctx.messages[1].is_assistant());
+        assert!(ctx.messages[2].is_assistant());
+    }
+
+    #[test]
+    fn test_build_session_context_follows_branch_path() {
+        // Tree: 1 -> 2 -> 3 (branch A)
+        //             \-> 4 (branch B)
+        let mut manager = SessionManager::in_memory("/tmp");
+        manager.append_message(user_msg("start"));
+        let id2 = manager.append_message(bare_assistant_msg());
+        manager.append_message(user_msg("branch A"));
+
+        // Switch to branch B
+        manager.branch(&id2).unwrap();
+        manager.append_message(user_msg("branch B"));
+
+        let ctx = manager.build_session_context();
+        assert_eq!(ctx.messages.len(), 3);
+        // Last message should be "branch B"
+        let last = ctx.messages.last().unwrap();
+        assert_eq!(last.content(), "branch B");
+    }
+
+    #[test]
+    fn test_build_session_context_includes_branch_summary() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        manager.append_message(user_msg("start"));
+        let id2 = manager.append_message(bare_assistant_msg());
+        manager.append_message(user_msg("abandoned path"));
+
+        // Branch with summary
+        manager.branch_with_summary(Some(&id2), "Summary of abandoned work", None, None);
+        manager.append_message(user_msg("new direction"));
+
+        let ctx = manager.build_session_context();
+        // Should include: start, response, branch_summary, new direction
+        assert!(ctx.messages.len() >= 3);
+
+        // Branch summary should be in messages
+        let has_summary = ctx.messages.iter().any(|m| {
+            if let AgentMessage::BranchSummary { summary, .. } = m {
+                summary == "Summary of abandoned work"
+            } else {
+                false
+            }
+        });
+        assert!(has_summary, "Branch summary should be in context messages");
+    }
+
+    #[test]
+    fn test_build_session_context_with_compaction() {
+        let mut manager = SessionManager::in_memory("/tmp");
+
+        // Build conversation
+        let id1 = manager.append_message(user_msg("first"));
+        manager.append_message(assistant_msg("response1"));
+        manager.append_message(user_msg("second"));
+        manager.append_message(assistant_msg("response2"));
+
+        // Add compaction
+        manager.append_compaction("Summary of first two turns", &id1, 1000, None, None);
+
+        // Continue after compaction
+        manager.append_message(user_msg("third"));
+        manager.append_message(assistant_msg("response3"));
+
+        let ctx = manager.build_session_context();
+        // Should include compaction summary as a message in the context
+        assert!(ctx.messages.len() >= 2);
+
+        let has_compaction = ctx.messages.iter().any(|m| {
+            if let AgentMessage::CompactionSummary { summary, .. } = m {
+                summary == "Summary of first two turns"
+            } else {
+                false
+            }
+        });
+        assert!(has_compaction, "Compaction summary should be in context messages");
+    }
+
+    #[test]
+    fn test_build_session_context_tracks_thinking_level() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        manager.append_message(user_msg("hello"));
+        manager.append_thinking_level_change("high");
+        manager.append_message(assistant_msg("thinking hard"));
+
+        let ctx = manager.build_session_context();
+        assert_eq!(ctx.thinking_level, "high");
+    }
+
+    // ------------------------------------------------------------------------
+    // Labels in tree nodes
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_labels_in_tree_nodes() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let id1 = manager.append_message(user_msg("hello"));
+        let id2 = manager.append_message(assistant_msg("hi"));
+
+        manager.add_label(&id1, "start").unwrap();
+        manager.add_label(&id2, "response").unwrap();
+
+        let tree = manager.get_tree(Uuid::nil());
+        let node1 = &tree[0];
+        assert_eq!(node1.label, Some("start".to_string()));
+
+        let node2 = &node1.children[0];
+        assert_eq!(node2.label, Some("response".to_string()));
+    }
+
+    #[test]
+    fn test_last_label_wins() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let id1 = manager.append_message(user_msg("hello"));
+
+        manager.add_label(&id1, "first").unwrap();
+        manager.add_label(&id1, "second").unwrap();
+        manager.add_label(&id1, "third").unwrap();
+
+        assert_eq!(manager.get_label(&id1), Some("third".to_string()));
+    }
+
+    // ------------------------------------------------------------------------
+    // branch throws for non-existent
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_branch_throws_for_nonexistent() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        manager.append_message(user_msg("hello"));
+
+        let result = manager.branch("nonexistent");
+        assert!(result.is_err());
+    }
+
+    // ------------------------------------------------------------------------
+    // Labels not included in buildSessionContext
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_labels_not_in_session_context() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let msg_id = manager.append_message(user_msg("hello"));
+        manager.add_label(&msg_id, "checkpoint").unwrap();
+
+        let ctx = manager.build_session_context();
+        // Should only have the user message, not label entries
+        assert_eq!(ctx.messages.len(), 1);
+        assert!(ctx.messages[0].is_user());
+    }
+
+    // ------------------------------------------------------------------------
+    // appendCustomEntry integration
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_custom_entry_integrates_into_tree() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let msg_id = manager.append_message(user_msg("hello"));
+        let custom_id = manager.append_custom_entry("my_data", Some(serde_json::json!({"foo": "bar"})));
+        let msg2_id = manager.append_message(assistant_msg("response"));
+
+        let entries = manager.get_entries();
+        let custom = entries.iter().find(|e| e.id == custom_id).unwrap();
+        assert_eq!(custom.parent_id, Some(msg_id));
+
+        if let AgentMessage::Custom { custom_type, .. } = &custom.message {
+            assert_eq!(custom_type, "my_data");
+        } else {
+            panic!("Expected Custom message");
+        }
+
+        let msg2 = entries.iter().find(|e| e.id == msg2_id).unwrap();
+        assert_eq!(msg2.parent_id, Some(custom_id));
+
+        // buildSessionContext should work (custom entries skipped in messages)
+        let ctx = manager.build_session_context();
+        // Only the 2 real messages; custom entry is not user/assistant/branch_summary
+        assert_eq!(ctx.messages.len(), 2);
+    }
+
+    // ------------------------------------------------------------------------
+    // Empty session edge cases
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_branch_empty_session() {
+        let manager = SessionManager::in_memory("/tmp");
+        let branch = manager.get_branch(None);
+        assert!(branch.is_empty());
+    }
+
+    #[test]
+    fn test_get_tree_empty_session() {
+        let manager = SessionManager::in_memory("/tmp");
+        let tree = manager.get_tree(Uuid::nil());
+        assert!(tree.is_empty());
+    }
+
+    // ------------------------------------------------------------------------
+    // Complex tree with branches and compaction
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_complex_tree_with_branches_and_compaction() {
+        let mut manager = SessionManager::in_memory("/tmp");
+
+        // Main path: 1 -> 2 -> 3 -> 4 -> compaction(5) -> 6 -> 7
+        manager.append_message(user_msg("start"));
+        manager.append_message(assistant_msg("r1"));
+        let id3 = manager.append_message(user_msg("q2"));
+        manager.append_message(assistant_msg("r2"));
+        manager.append_compaction("Compacted history", &id3, 1000, None, None);
+        manager.append_message(user_msg("q3"));
+        manager.append_message(assistant_msg("r3"));
+
+        // Abandoned branch from 3
+        manager.branch(&id3).unwrap();
+        manager.append_message(user_msg("wrong path"));
+        manager.append_message(assistant_msg("wrong response"));
+
+        // Branch summary resuming from 3
+        manager.branch_with_summary(Some(&id3), "Tried wrong approach", None, None);
+        manager.append_message(user_msg("better approach"));
+
+        let tree = manager.get_tree(Uuid::nil());
+        // Root node
+        assert_eq!(tree.len(), 1);
+
+        // Walk tree to verify structure
+        let root = &tree[0];
+        assert!(root.message.is_user());
+    }
+
+    // ------------------------------------------------------------------------
+    // get_latest_compaction_entry returns the most recent
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_multiple_compactions_returns_latest() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let id1 = manager.append_message(user_msg("a"));
+        manager.append_message(bare_assistant_msg());
+        manager.append_compaction("First summary", &id1, 1000, None, None);
+        manager.append_message(user_msg("c"));
+        manager.append_message(bare_assistant_msg());
+        manager.append_compaction("Second summary", &id1, 2000, None, None);
+
+        let latest = manager.get_latest_compaction_entry();
+        assert!(latest.is_some());
+        if let AgentMessage::CompactionSummary { summary, .. } = &latest.unwrap().message {
+            assert_eq!(summary, "Second summary");
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // get_compaction_entries returns all
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_get_all_compaction_entries() {
+        let mut manager = SessionManager::in_memory("/tmp");
+        let id1 = manager.append_message(user_msg("a"));
+        manager.append_message(bare_assistant_msg());
+        manager.append_compaction("First", &id1, 1000, None, None);
+        manager.append_message(user_msg("b"));
+        manager.append_message(bare_assistant_msg());
+        manager.append_compaction("Second", &id1, 2000, None, None);
+
+        let compactions = manager.get_compaction_entries();
+        assert_eq!(compactions.len(), 2);
+    }
 }
