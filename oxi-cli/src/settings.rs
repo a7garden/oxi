@@ -747,6 +747,10 @@ fn parse_boolish(s: &str) -> Result<bool> {
 mod tests {
     use super::*;
     use std::io::Write as IoWrite;
+    use std::sync::Mutex;
+
+    /// Global lock to serialize all tests that manipulate process-wide env vars.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// RAII guard that removes listed env vars on creation and restores them on drop.
     /// This prevents parallel test races where one test sets an env var that leaks into another.
@@ -1000,15 +1004,15 @@ theme = "dracula"
 
     #[test]
     fn test_effective_session_dir_default() {
-        env::remove_var("OXI_SESSION_DIR");
+        let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         let settings = Settings::default();
         let dir = settings.effective_session_dir().unwrap();
-        assert!(dir.ends_with("sessions"));
+        assert!(dir.ends_with("sessions"), "dir was: {:?}", dir);
     }
 
     #[test]
     fn test_effective_session_dir_from_field() {
-        env::remove_var("OXI_SESSION_DIR");
+        let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         let mut settings = Settings::default();
         settings.session_dir = Some(PathBuf::from("/tmp/oxi-sessions"));
         assert_eq!(
@@ -1019,13 +1023,13 @@ theme = "dracula"
 
     #[test]
     fn test_effective_session_dir_from_env() {
+        let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         env::set_var("OXI_SESSION_DIR", "/tmp/env-sessions");
         let settings = Settings::default();
         assert_eq!(
             settings.effective_session_dir().unwrap(),
             PathBuf::from("/tmp/env-sessions")
         );
-        env::remove_var("OXI_SESSION_DIR");
     }
 
     // ── Migration ────────────────────────────────────────────────────

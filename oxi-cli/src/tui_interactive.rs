@@ -32,6 +32,7 @@ use oxi_tui::component::Component;
 use oxi_tui::{
     ChatMessageDisplay, ChatView, ContentBlockDisplay, Input, MessageRole, Surface, Theme,
 };
+use std::io::Write;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -242,7 +243,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
 
     // ── Render tracking ──────────────────────────────────────────────
-    let mut prev_surface: Option<Surface> = None;
+    let mut term_renderer = TerminalRenderer::new();
     let mut needs_render = true; // First render
     let mut was_streaming = false;
 
@@ -299,9 +300,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 }
             }
 
-            // Render surface to terminal with differential updates
-            render_surface_to_terminal(&surface, &mut prev_surface, width, height);
-            io::stdout().flush()?;
+            // Render surface to terminal with line-based differential updates
+            let lines = surface_to_ansi_lines(&surface, width, height);
+            term_renderer.render(&lines, width, height, &mut io::stdout())?;
             needs_render = false;
         }
 
@@ -802,184 +803,254 @@ fn handle_slash_command(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Surface rendering
+// Line-based differential renderer (pi-mono architecture)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Render a surface to the terminal using differential rendering.
-/// Only outputs cells that differ from the previous frame.
-fn render_surface_to_terminal(
-    surface: &Surface,
-    prev_surface: &mut Option<Surface>,
-    width: u16,
-    height: u16,
-) {
-    // Begin synchronized update to prevent flickering
-    print!("\x1b[?2026h");
+/// Line-based differential renderer.
+///
+/// Compares previous frame's lines against new lines at the string level
+/// and only writes changed lines to the terminal in a single buffered write.
+pub struct TerminalRenderer {
+    previous_lines: Vec<String>,
+    prev_width: u16,
+    prev_height: u16,
+}
 
+impl TerminalRenderer {
+    pub fn new() -> Self {
+        Self {
+            previous_lines: Vec::new(),
+            prev_width: 0,
+            prev_height: 0,
+        }
+    }
+
+    /// Render lines to terminal using differential (line-level) updates.
+    /// Returns true if any output was written.
+    pub fn render(
+        &mut self,
+        new_lines: &[String],
+        width: u16,
+        height: u16,
+        stdout: &mut impl Write,
+    ) -> std::io::Result<bool> {
+        let width_changed = self.prev_width != 0 && self.prev_width != width;
+        let height_changed = self.prev_height != 0 && self.prev_height != height;
+
+        // First render or dimensions changed → full render
+        if self.previous_lines.is_empty() || width_changed || height_changed {
+            self.full_render(new_lines, stdout)?;
+            self.previous_lines = new_lines.to_vec();
+            self.prev_width = width;
+            self.prev_height = height;
+            return Ok(true);
+        }
+
+        // Find first and last changed lines
+        let mut first_changed: Option<usize> = None;
+        let mut last_changed: usize = 0;
+        let max_lines = new_lines.len().max(self.previous_lines.len());
+
+        for i in 0..max_lines {
+            let old_line = self.previous_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+            let new_line = new_lines.get(i).map(|s| s.as_str()).unwrap_or("");
+
+            if old_line != new_line {
+                if first_changed.is_none() {
+                    first_changed = Some(i);
+                }
+                last_changed = i;
+            }
+        }
+
+        let Some(first) = first_changed else {
+            // No changes at all
+            self.previous_lines = new_lines.to_vec();
+            return Ok(false);
+        };
+
+        // Build a single output buffer with only the changed lines
+        let mut buffer = String::with_capacity(4096);
+        buffer.push_str("\x1b[?2026h"); // Begin synchronized output
+
+        // Move cursor to first changed line
+        buffer.push_str(&format!("\x1b[{};1H", first + 1));
+
+        // Write changed lines
+        for i in first..=last_changed {
+            if i > first {
+                buffer.push_str("\r\n");
+            }
+            buffer.push_str("\x1b[2K"); // Clear line
+            if i < new_lines.len() {
+                buffer.push_str(&new_lines[i]);
+            }
+        }
+
+        // Clear extra lines if content shrunk
+        if new_lines.len() < self.previous_lines.len() {
+            for _ in new_lines.len()..self.previous_lines.len() {
+                buffer.push_str("\r\n\x1b[2K");
+            }
+            // Move cursor back to end of content
+            let extra = self.previous_lines.len() - new_lines.len();
+            buffer.push_str(&format!("\x1b[{}A", extra));
+        }
+
+        buffer.push_str("\x1b[0m"); // Reset SGR
+        buffer.push_str("\x1b[?2026l"); // End synchronized output
+
+        write!(stdout, "{}", buffer)?;
+        stdout.flush()?;
+
+        self.previous_lines = new_lines.to_vec();
+        self.prev_width = width;
+        self.prev_height = height;
+        Ok(true)
+    }
+
+    fn full_render(&self, lines: &[String], stdout: &mut impl Write) -> std::io::Result<()> {
+        let mut buffer = String::with_capacity(8192);
+        buffer.push_str("\x1b[?2026h"); // Begin synchronized output
+        buffer.push_str("\x1b[H"); // Move to home
+
+        for (i, line) in lines.iter().enumerate() {
+            if i > 0 {
+                buffer.push_str("\r\n");
+            }
+            buffer.push_str(line);
+        }
+
+        buffer.push_str("\x1b[0m"); // Reset SGR
+        buffer.push_str("\x1b[?2026l"); // End synchronized output
+
+        write!(stdout, "{}", buffer)?;
+        stdout.flush()?;
+        Ok(())
+    }
+
+    /// Force a full redraw on next frame.
+    pub fn force_redraw(&mut self) {
+        self.previous_lines.clear();
+        self.prev_width = 0;
+        self.prev_height = 0;
+    }
+}
+
+/// Convert a Surface to a Vec<String> where each string is a line of ANSI-encoded content.
+fn surface_to_ansi_lines(surface: &Surface, width: u16, height: u16) -> Vec<String> {
+    let mut lines = Vec::with_capacity(height as usize);
     let mut last_fg = oxi_tui::Color::Default;
     let mut last_bg = oxi_tui::Color::Default;
     let mut last_bold = false;
     let mut last_italic = false;
     let mut last_underline = false;
     let mut last_strike = false;
+    let default_cell = oxi_tui::Cell::default();
 
-    if let Some(ref prev) = prev_surface {
-        // Differential rendering - only output changed cells
-        let default_cell = oxi_tui::Cell::default();
-        for row in 0..height {
-            let mut row_changed = false;
-            let mut col_iter = 0u16;
+    for row in 0..height {
+        let mut line = String::with_capacity(width as usize * 4);
 
-            while col_iter < width {
-                let cur_cell = match surface.get(row, col_iter) {
-                    Some(c) => c,
-                    None => &default_cell,
-                };
-                let prev_cell = match prev.get(row, col_iter) {
-                    Some(c) => c,
-                    None => &default_cell,
-                };
+        for col in 0..width {
+            let cell = surface.get(row, col).unwrap_or(&default_cell);
 
-                if cur_cell != prev_cell {
-                    if !row_changed {
-                        // First change in this row - move cursor to row start
-                        print!("\x1b[{};1H", row + 1);
-                        row_changed = true;
-                    }
+            // Only emit SGR changes
+            let fg_changed = cell.fg != last_fg;
+            let bg_changed = cell.bg != last_bg;
+            let attrs_changed = cell.attrs.bold != last_bold
+                || cell.attrs.italic != last_italic
+                || cell.attrs.underline != last_underline
+                || cell.attrs.strikethrough != last_strike;
 
-                    // Move cursor to exact column
-                    print!("\x1b[{};{}H", row + 1, col_iter + 1);
-
-                    // Apply style changes
-                    apply_cell_style(
-                        cur_cell,
-                        &mut last_fg,
-                        &mut last_bg,
-                        &mut last_bold,
-                        &mut last_italic,
-                        &mut last_underline,
-                        &mut last_strike,
-                    );
-
-                    print!("{}", cur_cell.char);
+            if fg_changed || bg_changed || attrs_changed {
+                let mut codes = Vec::new();
+                if cell.attrs.bold != last_bold {
+                    codes.push(if cell.attrs.bold { 1 } else { 22 });
                 }
-                col_iter += 1;
+                if cell.attrs.italic != last_italic {
+                    codes.push(if cell.attrs.italic { 3 } else { 23 });
+                }
+                if cell.attrs.underline != last_underline {
+                    codes.push(if cell.attrs.underline { 4 } else { 24 });
+                }
+                if cell.attrs.strikethrough != last_strike {
+                    codes.push(if cell.attrs.strikethrough { 9 } else { 29 });
+                }
+                if fg_changed {
+                    match cell.fg {
+                        oxi_tui::Color::Default => codes.push(39),
+                        oxi_tui::Color::Black => codes.push(30),
+                        oxi_tui::Color::Red => codes.push(31),
+                        oxi_tui::Color::Green => codes.push(32),
+                        oxi_tui::Color::Yellow => codes.push(33),
+                        oxi_tui::Color::Blue => codes.push(34),
+                        oxi_tui::Color::Magenta => codes.push(35),
+                        oxi_tui::Color::Cyan => codes.push(36),
+                        oxi_tui::Color::White => codes.push(37),
+                        oxi_tui::Color::Indexed(n) => codes.extend_from_slice(&[38, 5, n]),
+                        oxi_tui::Color::Rgb(r, g, b) => {
+                            codes.extend_from_slice(&[38, 2, r, g, b])
+                        }
+                    }
+                }
+                if bg_changed {
+                    match cell.bg {
+                        oxi_tui::Color::Default => codes.push(49),
+                        oxi_tui::Color::Black => codes.push(40),
+                        oxi_tui::Color::Red => codes.push(41),
+                        oxi_tui::Color::Green => codes.push(42),
+                        oxi_tui::Color::Yellow => codes.push(43),
+                        oxi_tui::Color::Blue => codes.push(44),
+                        oxi_tui::Color::Magenta => codes.push(45),
+                        oxi_tui::Color::Cyan => codes.push(46),
+                        oxi_tui::Color::White => codes.push(47),
+                        oxi_tui::Color::Indexed(n) => codes.extend_from_slice(&[48, 5, n]),
+                        oxi_tui::Color::Rgb(r, g, b) => {
+                            codes.extend_from_slice(&[48, 2, r, g, b])
+                        }
+                    }
+                }
+                if !codes.is_empty() {
+                    line.push_str(&format!(
+                        "\x1b[{}m",
+                        codes
+                            .iter()
+                            .map(|c| c.to_string())
+                            .collect::<Vec<_>>()
+                            .join(";")
+                    ));
+                }
+                last_fg = cell.fg;
+                last_bg = cell.bg;
+                last_bold = cell.attrs.bold;
+                last_italic = cell.attrs.italic;
+                last_underline = cell.attrs.underline;
+                last_strike = cell.attrs.strikethrough;
             }
+
+            line.push(cell.char);
         }
-    } else {
-        // First render - write everything with optimized row-by-row approach
-        print!("\x1b[H"); // Move to top-left
-        let default_cell = oxi_tui::Cell::default();
-        for row in 0..height {
-            if row > 0 {
-                print!("\r\n");
-            }
-            for col in 0..width {
-                let cell = match surface.get(row, col) {
-                    Some(c) => c,
-                    None => &default_cell,
-                };
-                apply_cell_style(
-                    cell,
-                    &mut last_fg,
-                    &mut last_bg,
-                    &mut last_bold,
-                    &mut last_italic,
-                    &mut last_underline,
-                    &mut last_strike,
-                );
-                print!("{}", cell.char);
-            }
+
+        // Reset at end of line to prevent style leaking
+        if last_fg != oxi_tui::Color::Default
+            || last_bg != oxi_tui::Color::Default
+            || last_bold
+            || last_italic
+            || last_underline
+            || last_strike
+        {
+            line.push_str("\x1b[0m");
+            last_fg = oxi_tui::Color::Default;
+            last_bg = oxi_tui::Color::Default;
+            last_bold = false;
+            last_italic = false;
+            last_underline = false;
+            last_strike = false;
         }
+
+        lines.push(line);
     }
-
-    print!("\x1b[0m"); // Reset SGR
-    print!("\x1b[?2026l"); // End synchronized update
-
-    // Store current surface as previous
-    *prev_surface = Some(surface.clone());
-}
-
-/// Apply cell style changes without full reset
-fn apply_cell_style(
-    cell: &oxi_tui::Cell,
-    last_fg: &mut oxi_tui::Color,
-    last_bg: &mut oxi_tui::Color,
-    last_bold: &mut bool,
-    last_italic: &mut bool,
-    last_underline: &mut bool,
-    last_strike: &mut bool,
-) {
-    let fg_changed = cell.fg != *last_fg;
-    let bg_changed = cell.bg != *last_bg;
-    let attrs_changed = cell.attrs.bold != *last_bold
-        || cell.attrs.italic != *last_italic
-        || cell.attrs.underline != *last_underline
-        || cell.attrs.strikethrough != *last_strike;
-
-    if fg_changed || bg_changed || attrs_changed {
-        let mut codes = Vec::new();
-
-        // Only change individual attributes, don't reset everything
-        if cell.attrs.bold != *last_bold {
-            codes.push(if cell.attrs.bold { 1 } else { 22 });
-        }
-        if cell.attrs.italic != *last_italic {
-            codes.push(if cell.attrs.italic { 3 } else { 23 });
-        }
-        if cell.attrs.underline != *last_underline {
-            codes.push(if cell.attrs.underline { 4 } else { 24 });
-        }
-        if cell.attrs.strikethrough != *last_strike {
-            codes.push(if cell.attrs.strikethrough { 9 } else { 29 });
-        }
-
-        if fg_changed {
-            match cell.fg {
-                oxi_tui::Color::Default => codes.push(39),
-                oxi_tui::Color::Black => codes.push(30),
-                oxi_tui::Color::Red => codes.push(31),
-                oxi_tui::Color::Green => codes.push(32),
-                oxi_tui::Color::Yellow => codes.push(33),
-                oxi_tui::Color::Blue => codes.push(34),
-                oxi_tui::Color::Magenta => codes.push(35),
-                oxi_tui::Color::Cyan => codes.push(36),
-                oxi_tui::Color::White => codes.push(37),
-                oxi_tui::Color::Indexed(n) => codes.extend_from_slice(&[38, 5, n]),
-                oxi_tui::Color::Rgb(r, g, b) => codes.extend_from_slice(&[38, 2, r, g, b]),
-            }
-        }
-
-        if bg_changed {
-            match cell.bg {
-                oxi_tui::Color::Default => codes.push(49),
-                oxi_tui::Color::Black => codes.push(40),
-                oxi_tui::Color::Red => codes.push(41),
-                oxi_tui::Color::Green => codes.push(42),
-                oxi_tui::Color::Yellow => codes.push(43),
-                oxi_tui::Color::Blue => codes.push(44),
-                oxi_tui::Color::Magenta => codes.push(45),
-                oxi_tui::Color::Cyan => codes.push(46),
-                oxi_tui::Color::White => codes.push(47),
-                oxi_tui::Color::Indexed(n) => codes.extend_from_slice(&[48, 5, n]),
-                oxi_tui::Color::Rgb(r, g, b) => codes.extend_from_slice(&[48, 2, r, g, b]),
-            }
-        }
-
-        if !codes.is_empty() {
-            print!(
-                "\x1b[{}m",
-                codes.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(";")
-            );
-        }
-
-        *last_fg = cell.fg;
-        *last_bg = cell.bg;
-        *last_bold = cell.attrs.bold;
-        *last_italic = cell.attrs.italic;
-        *last_underline = cell.attrs.underline;
-        *last_strike = cell.attrs.strikethrough;
-    }
+    lines
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
