@@ -534,7 +534,7 @@ fn extract_path_arg(args: &serde_json::Value) -> Option<String> {
 pub async fn generate_branch_summary(
     entries: &[SessionEntry],
     model: &Model,
-    provider: Arc<dyn Provider>,
+    _provider: Arc<dyn Provider>,
     options: GenerateBranchSummaryOptions,
 ) -> BranchSummaryResult {
     let reserve_tokens = options.reserve_tokens;
