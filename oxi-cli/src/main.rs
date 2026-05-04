@@ -677,7 +677,7 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
         Uuid::parse_str(session_id)?
     };
 
-    let tree = manager.get_tree(id).await?;
+    let tree = manager.get_tree(id);
     let branch_info = manager.get_branch_info(id).await?;
 
     if let Some(info) = branch_info {
@@ -692,15 +692,16 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
     println!();
 
     // Show tree structure
-    for (_session_id, entry) in &tree {
-        let role_marker = match &entry.message {
+    for node in &tree {
+        let role_marker = match &node.entry.message {
             AgentMessage::User { .. } => "👤",
             AgentMessage::Assistant { .. } => "🤖",
             AgentMessage::System { .. } => "⚙️",
+            _ => "•",
         };
 
-        let content_preview = truncate(&entry.message.content(), 60);
-        let prefix = if entry.parent_id.is_some() {
+        let content_preview = truncate(&node.entry.content(), 60);
+        let prefix = if node.entry.parent_id.is_some() {
             "├─"
         } else {
             "└─"
@@ -708,7 +709,7 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
 
         println!(
             "  {}{} [{:.8}] {}",
-            prefix, role_marker, entry.id, content_preview
+            prefix, role_marker, node.entry.id, content_preview
         );
     }
 
@@ -934,19 +935,20 @@ async fn handle_command(
             if let Some(ref id) = current_session_id {
                 let session_uuid = Uuid::parse_str(id)
                     .map_err(|_| anyhow::anyhow!("Invalid session ID: {}", id))?;
-                let tree = manager.get_tree(session_uuid).await?;
+                let tree = manager.get_tree(session_uuid);
                 if tree.is_empty() {
                     println!("No entries in session.");
                 } else {
                     println!("Session tree:");
-                    for (_, entry) in &tree {
-                        let role = match &entry.message {
+                    for node in &tree {
+                        let role = match &node.entry.message {
                             AgentMessage::User { .. } => "👤",
                             AgentMessage::Assistant { .. } => "🤖",
                             AgentMessage::System { .. } => "⚙️",
-                        };
-                        let preview = truncate(&entry.message.content(), 50);
-                        println!("  {} [{:.8}]: {}", role, entry.id, preview);
+                                    _ => "•",
+        };
+                        let preview = truncate(&node.entry.content(), 50);
+                        println!("  {} [{:.8}]: {}", role, node.entry.id, preview);
                     }
                 }
             } else {
