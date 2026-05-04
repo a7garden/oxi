@@ -17,43 +17,25 @@ All 8 selector components have been ported and added to `oxi-cli/src/tui_compone
 7. **TreeSelector** - Session tree navigation with ASCII tree connectors (├─/└─), filter modes (default/no-tools/user-only/labeled-only/all), active path highlighting, search filtering, and node type icons (user/tool/assistant).
 8. **ScopedModelsSelector** - Scoped models cycling display with enable/disable toggle, provider toggle, reorder (up/down), enable all/clear all, fuzzy search, unsaved change tracking, and detail display.
 
-### Additional changes (selector components):
-- Added `ThinkingLevel` enum with `Default` derive, `as_str()`, `description()`, `all()`, and `from_str()` methods.
-- Added `fuzzy_score()` and `fuzzy_filter_indices()` utility functions for fuzzy matching across all selectors.
-- Enhanced existing `truncate_str()` function to handle ANSI escape codes (was previously breaking on styled text).
-- Added helper types: `ModelScope`, `SessionScope`, `SessionSortMode`, `SessionNameFilter`, `TreeFilterMode`, `ResourceType`, etc.
+### Port miscellaneous interactive components from pi-mono to Rust
+All 5 interactive components have been ported and added to `oxi-cli/src/tui_components.rs`.
 
-### Port interactive message components from pi-mono to Rust
-All 10 message components have been ported and added to `oxi-cli/src/tui_components.rs`.
+1. **ArminComponent** - XBM art rendering with half-block characters (█▀▄). Renders a 31×36 pixel XBM image as 18 rows of Unicode block characters with accent color styling and "ARMIN SAYS HI" message. Includes caching support.
+2. **DaxnutsComponent** - 32×32 RGB image rendering with true-color (24-bit) half-block characters. Parses hex-encoded pixel data and renders using `▄` with per-pixel foreground/background colors. Includes centered text with "Powered by daxnuts" tribute.
+3. **DynamicBorder** - Dynamic width-adjustable horizontal border using `─` box-drawing characters with configurable color styles (Accent, Muted, Success, Error, Custom).
+4. **EarendilAnnouncement** - Framed announcement/notification display with title, body lines, optional link, and styled borders. Auto-detects URLs for link styling.
+5. **ToolExecutionDisplay** - Enhanced tool execution rendering with timing (elapsed time tracking), progress indicators, collapsible arguments/output, partial/streaming args support, expand/collapse toggle, and rich status display with ANSI colors.
 
-1. **UserMessageRenderer** - Renders user messages with optional image indicators and OSC 133 prompt markers. Supports background styling and text wrapping.
-2. **UserMessageSelector** - Select/edit previous user messages with scrolling, wrapping navigation, and visual selection cursor. Includes header with "Fork from Message" label.
-3. **SkillInvocationMessage** - Renders skill invocation blocks with collapsed/expanded state. Collapsed shows single line with skill name; expanded shows full content with markdown rendering.
-4. **DiffRenderer** - Renders unified diffs with color (red/green) and optional intra-line word-level change highlighting. Supports context lines, hunk headers, and tab normalization.
-5. **KeybindingHints** - Renders keyboard shortcut lists with dim keys and muted descriptions. Supports both line-per-hint and inline layout.
-6. **FooterComponentData** - Enhanced footer with model name, provider, thinking level, session name, git branch, pwd, token stats (↑↓RW), cost with subscription indicator, context window with color coding (green/yellow/red), and extension statuses.
-7. **VisualTruncate** - Truncates text to terminal width with line wrapping. Returns visual lines from the end and a skipped count for "...N lines hidden" display.
-8. **ShowImagesSelector** - Toggle image display with Yes/No options, navigation, and selection rendering.
-9. **CountdownTimer** - Countdown display for timeouts with tick-based progression, expiry detection, and optional progress bar rendering.
-10. **ansi module** - Internal ANSI color helper module with 20+ color functions (red, green, blue, yellow, cyan, magenta, bold, italic, dim, inverse, diff colors, user message colors, skill colors, thinking colors, etc.).
-
-### Supporting additions:
-- `ParsedSkillBlock` struct for skill block data.
-- `UserMessageItem` struct for message selector entries.
-- `KeyHint` struct for keybinding hint display.
-- `ShowImagesOption` struct for image toggle options.
-- `VisualTruncateResult` struct for truncation results.
-- `FooterComponentData` struct with all status fields from pi-mono footer.
-- `visible_len()` function that correctly measures string width ignoring ANSI escape codes and OSC sequences.
-- `is_wide_char()` and `truncate_str()` functions for CJK/emoji-aware truncation.
-- `split_words()`, `common_prefix_len()`, `common_suffix_len()` for word-level diff computation.
-- `render_intra_line_diff()` for inverse-highlighted intra-line changes.
-- Comprehensive test suite (~30 tests) covering all new components.
+### Additional changes:
+- Added `center_ansi()` utility for centering strings containing ANSI escape codes.
+- Added `BorderStyle` enum for configurable border styling.
+- Added 22 new tests covering all 5 new components.
+- Fixed `strip_ansi` usage in tests to use `.chars().count()` instead of `.len()` for proper Unicode character counting.
 
 ## Files Changed
-- `oxi-cli/src/tui_components.rs` — Added ~2000 lines of message component implementations with data models, ANSI styling, and rendering logic.
+- `oxi-cli/src/tui_components.rs` — Added ~700 lines of interactive component implementations plus ~250 lines of tests.
 
 ## Notes
-- All components follow the same pattern: struct with state fields and `render()` / `render(width)` returning `String` or `Vec<String>`.
-- No errors introduced in `tui_components.rs` — `cargo check -p oxi-cli` shows only pre-existing errors in `interactive.rs` (missing `imode`, `libc`, `KeyCode::Escape`, `KeyModifiers::CTRL`, etc.).
-- Full TUI integration (event handling, component lifecycle) is a separate step — these components focus on data model and rendering logic as specified.
+- All 5 components follow the same pattern: struct with state fields and `render()` returning `Vec<String>`.
+- `cargo check -p oxi-cli` passes cleanly.
+- All 22 new tests pass (7 pre-existing test failures are unrelated to this change).
