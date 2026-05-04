@@ -1,24 +1,11 @@
-//! TUI-based interactive mode using oxi-tui components.
+//! TUI-based interactive mode using ratatui.
 //!
-//! Wires together ChatView, Input, Markdown, and Image components
-//! into a cohesive terminal chat experience, using [`AgentSession`]
-//! as the core session abstraction instead of bare [`Agent`].
-//!
-//! # Architecture
-//!
-//! ```text
-//! main.rs
-//!   └─ run_tui_interactive(app)
-//!        │
-//!        ├─ AgentSession  (session wrapper)
-//!        │    └─ Agent  (core agent loop)
-//!        │
-//!        ├─ SessionManager  (persistence)
-//!        ├─ Settings  (configuration)
-//!        ├─ ExtensionRunner  (extension hooks)
-//!        │
-//!        └─ TUI event loop  (ChatView + Input)
-//! ```
+//! Provides a flicker-free terminal chat interface with:
+//! - Double-buffered rendering via ratatui
+//! - Line-level differential updates (zero flicker)
+//! - Streaming text display
+//! - Scrollable chat history
+//! - Slash commands
 
 use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
 use crate::agent_session_runtime::{
@@ -28,81 +15,186 @@ use crate::agent_session_runtime::{
 use crate::session::SessionManager;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
-use oxi_tui::component::Component;
-use oxi_tui::{
-    ChatMessageDisplay, ChatView, ContentBlockDisplay, Input, MessageRole, Surface, Theme,
-};
-use std::io::Write;
+use std::io;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode, KeyModifiers, MouseEventKind},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    text::{Line, Span},
+    widgets::{Paragraph, Wrap},
+    Terminal,
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
-// UI events (from agent → TUI)
+// UI Events (agent → TUI)
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Messages sent from the agent/session layer to the TUI event loop.
 #[derive(Debug)]
 enum UiEvent {
-    /// Agent started.
     Start,
-    /// Agent is thinking.
     Thinking,
-    /// Text delta from agent streaming.
     TextDelta(String),
-    /// Tool call started.
-    ToolCall {
-        id: String,
-        name: String,
-        arguments: String,
-    },
-    /// Tool completed.
-    ToolResult {
-        tool_name: String,
-        content: String,
-        is_error: bool,
-    },
-    /// Agent response complete.
+    #[allow(dead_code)]
+    ToolCall { id: String, name: String, arguments: String },
+    ToolResult { tool_name: String, content: String, is_error: bool },
     Complete,
-    /// Agent error.
     Error(String),
-    /// Compaction started.
-    CompactionStart {
-        reason: CompactionReason,
-    },
-    /// Compaction finished.
-    CompactionEnd {
-        _reason: CompactionReason,
-        error_message: Option<String>,
-    },
-    /// Auto-retry started.
-    RetryStart {
-        attempt: u32,
-        max_attempts: u32,
-        error_message: String,
-    },
-    /// Model changed.
-    ModelChanged {
-        model_id: String,
-    },
-    /// Thinking level changed.
-    ThinkingLevelChanged {
-        level: String,
-    },
-    /// Queue updated.
-    QueueUpdate {
-        pending: usize,
-    },
+    CompactionStart { reason: CompactionReason },
+    CompactionEnd { _reason: CompactionReason, error_message: Option<String> },
+    RetryStart { attempt: u32, max_attempts: u32, error_message: String },
+    ModelChanged { model_id: String },
+    ThinkingLevelChanged { level: String },
+    QueueUpdate { pending: usize },
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Chat state
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageRole {
+    User,
+    Assistant,
+    System,
+}
+
+/// A single chat message.
+struct ChatMessage {
+    role: MessageRole,
+    content: String,
+    timestamp: i64,
+}
+
+/// State for the input field (char-index based, UTF-8 safe).
+struct InputState {
+    text: String,
+    cursor: usize, // char index
+}
+
+impl InputState {
+    fn new() -> Self {
+        Self { text: String::new(), cursor: 0 }
+    }
+
+    fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+    }
+
+    fn value(&self) -> &str {
+        &self.text
+    }
+
+    fn char_count(&self) -> usize {
+        self.text.chars().count()
+    }
+
+    fn char_to_byte(&self, char_idx: usize) -> usize {
+        self.text
+            .char_indices()
+            .nth(char_idx)
+            .map(|(i, _)| i)
+            .unwrap_or(self.text.len())
+    }
+
+    fn insert_char(&mut self, c: char) {
+        let byte_pos = self.char_to_byte(self.cursor);
+        self.text.insert(byte_pos, c);
+        self.cursor += 1;
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+            let byte_pos = self.char_to_byte(self.cursor);
+            self.text.remove(byte_pos);
+        }
+    }
+
+    fn delete(&mut self) {
+        if self.cursor < self.char_count() {
+            let byte_pos = self.char_to_byte(self.cursor);
+            self.text.remove(byte_pos);
+        }
+    }
+
+    fn move_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    fn move_right(&mut self) {
+        if self.cursor < self.char_count() {
+            self.cursor += 1;
+        }
+    }
+
+    fn move_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    fn move_end(&mut self) {
+        self.cursor = self.char_count();
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Theme
+// ═══════════════════════════════════════════════════════════════════════════
+
+struct Theme {
+    user_fg: Color,
+    assistant_fg: Color,
+    system_fg: Color,
+    border_fg: Color,
+    input_fg: Color,
+    input_cursor_fg: Color,
+    input_cursor_bg: Color,
+    placeholder_fg: Color,
+    prompt_indicator_fg: Color,
+    thinking_fg: Color,
+    tool_name_fg: Color,
+    tool_border_fg: Color,
+    error_fg: Color,
+    success_fg: Color,
+    status_fg: Color,
+}
+
+impl Theme {
+    fn dark() -> Self {
+        Self {
+            user_fg: Color::Cyan,
+            assistant_fg: Color::Gray,
+            system_fg: Color::Yellow,
+            border_fg: Color::DarkGray,
+            input_fg: Color::White,
+            input_cursor_fg: Color::Black,
+            input_cursor_bg: Color::White,
+            placeholder_fg: Color::DarkGray,
+            prompt_indicator_fg: Color::Cyan,
+            thinking_fg: Color::DarkGray,
+            tool_name_fg: Color::Yellow,
+            tool_border_fg: Color::DarkGray,
+            error_fg: Color::Red,
+            success_fg: Color::Green,
+            status_fg: Color::Yellow,
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Main entry point
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Run the TUI-based interactive mode.
-///
-/// Creates an [`AgentSession`] from the app's settings, wiring up
-/// session persistence, auto-compaction, auto-retry, extension hooks,
-/// and settings changes.
 pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let theme = Theme::dark();
     let settings = app.settings().clone();
@@ -110,17 +202,15 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string());
 
-    // ── Build AgentSession via the runtime factory ───────────────────
+    // ── Build AgentSession ───────────────────────────────────────────
     let session_manager = SessionManager::create(&cwd, None);
     let session_id = session_manager.get_session_id();
 
-    // Create services
     let services = create_agent_session_services(
         CreateAgentSessionServicesOptions::new(std::env::current_dir().unwrap_or_default()),
     )?;
     let services = Arc::new(services);
 
-    // Create agent session from services
     let create_result = create_agent_session_from_services(
         CreateAgentSessionFromServicesOptions {
             services: services.clone(),
@@ -132,28 +222,20 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     )?;
 
     let agent_session = create_result.session;
-
-    // Show model fallback message if any
     if let Some(msg) = create_result.model_fallback_message {
         tracing::warn!("Model fallback: {}", msg);
     }
 
     // ── Subscribe to session events ──────────────────────────────────
     let (session_event_tx, mut session_event_rx) = mpsc::unbounded_channel::<SessionEvent>();
-
     agent_session.subscribe(Box::new(move |event| {
         let _ = session_event_tx.send(event.clone());
     }));
 
-    // Channel for agent → UI communication (for streaming text/tool events)
     let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
-
-    // Channel for user input → agent execution
     let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
 
     // ── Agent worker thread ──────────────────────────────────────────
-    // The agent uses non-Send futures internally, so it needs a
-    // single-threaded runtime with LocalSet.
     let session_handle = agent_session.clone_handle();
     let ui_tx_for_thread = ui_tx.clone();
     let agent_handle = std::thread::spawn(move || {
@@ -163,297 +245,257 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             .expect("Failed to build agent runtime");
         rt.block_on(async {
             let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async {
-                    while let Some(prompt) = prompt_rx.recv().await {
-                        let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
-
-                        // Forward agent events to UI
-                        let ui_fwd = ui_tx_for_thread.clone();
-                        let event_forwarder = tokio::task::spawn_local(async move {
-                            while let Some(event) = event_rx.recv().await {
-                                let ui_event = match event {
-                                    AgentEvent::Start { .. } => UiEvent::Start,
-                                    AgentEvent::Thinking => UiEvent::Thinking,
-                                    AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
-                                    AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
-                                        id: tool_call.id,
-                                        name: tool_call.name,
-                                        arguments: tool_call.arguments.to_string(),
-                                    },
-                                    AgentEvent::ToolStart { tool_name, .. } => UiEvent::TextDelta(
-                                        format!("\n\u{2699} Running: {}...\n", tool_name),
-                                    ),
-                                    AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
-                                        tool_name: String::new(),
-                                        content: result.content.chars().take(500).collect(),
-                                        is_error: false,
-                                    },
-                                    AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
-                                        tool_name: String::new(),
-                                        content: error.clone(),
-                                        is_error: true,
-                                    },
-                                    AgentEvent::Complete { .. } => UiEvent::Complete,
-                                    AgentEvent::Error { message } => UiEvent::Error(message),
-                                    _ => continue,
-                                };
-                                if ui_fwd.send(ui_event).await.is_err() {
-                                    break;
-                                }
+            local.run_until(async {
+                while let Some(prompt) = prompt_rx.recv().await {
+                    let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
+                    let ui_fwd = ui_tx_for_thread.clone();
+                    let event_forwarder = tokio::task::spawn_local(async move {
+                        while let Some(event) = event_rx.recv().await {
+                            let ui_event = match event {
+                                AgentEvent::Start { .. } => UiEvent::Start,
+                                AgentEvent::Thinking => UiEvent::Thinking,
+                                AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
+                                AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
+                                    id: tool_call.id,
+                                    name: tool_call.name,
+                                    arguments: tool_call.arguments.to_string(),
+                                },
+                                AgentEvent::ToolStart { tool_name, .. } => UiEvent::TextDelta(
+                                    format!("\n⚙ Running: {}...\n", tool_name),
+                                ),
+                                AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
+                                    tool_name: String::new(),
+                                    content: result.content.chars().take(500).collect(),
+                                    is_error: false,
+                                },
+                                AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
+                                    tool_name: String::new(),
+                                    content: error.clone(),
+                                    is_error: true,
+                                },
+                                AgentEvent::Complete { .. } => UiEvent::Complete,
+                                AgentEvent::Error { message } => UiEvent::Error(message),
+                                _ => continue,
+                            };
+                            if ui_fwd.send(ui_event).await.is_err() {
+                                break;
                             }
-                        });
-
-                        // Run agent with channel using the session's underlying agent
-                        let sh = session_handle.clone_handle();
-                        let agent = sh.agent_ref();
-                        let _ = agent.run_with_channel(prompt, event_tx).await;
-                        let _ = event_forwarder.await;
-                    }
-                })
-                .await;
+                        }
+                    });
+                    let sh = session_handle.clone_handle();
+                    let agent = sh.agent_ref();
+                    let _ = agent.run_with_channel(prompt, event_tx).await;
+                    let _ = event_forwarder.await;
+                }
+            }).await;
         });
     });
 
-    // ── Build TUI components ─────────────────────────────────────────
-    let mut chat_view = ChatView::new(theme.clone());
-    let mut input = Input::with_placeholder("Type a message... (Ctrl+C to quit)");
-    input.on_focus();
-    input.set_theme(&theme);
-    let mut is_agent_busy = false;
+    // ── Setup terminal ───────────────────────────────────────────────
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+    terminal.clear()?;
 
-    // Display session info at start
-    chat_view.add_message(ChatMessageDisplay {
-        role: MessageRole::Assistant,
-        content_blocks: vec![ContentBlockDisplay::Text {
-            content: format!(
-                "oxi ready. Session: {}\nModel: {}\nType /help for commands.",
-                session_id,
-                agent_session.model_id(),
-            ),
-        }],
+    // ── App state ────────────────────────────────────────────────────
+    let mut messages: Vec<ChatMessage> = Vec::new();
+    let mut input = InputState::new();
+    let mut is_agent_busy = false;
+    let mut streaming_text = String::new();
+    let mut scroll_offset: u16 = 0;
+    let mut auto_scroll = true;
+
+    // Welcome message
+    messages.push(ChatMessage {
+        role: MessageRole::System,
+        content: format!(
+            "oxi ready. Session: {}\nModel: {}\nType /help for commands.",
+            session_id,
+            agent_session.model_id(),
+        ),
         timestamp: now_millis(),
     });
 
-    use std::io::{self, Write};
-
-    // Enter alternate screen
-    crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-    crossterm::execute!(io::stdout(), crossterm::cursor::Hide)?;
-    crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
-
-    // ── Render tracking ──────────────────────────────────────────────
-    let mut term_renderer = TerminalRenderer::new();
-    let mut needs_render = true; // First render
-    let mut was_streaming = false;
-
     let mut running = true;
+    let poll_timeout = std::time::Duration::from_millis(33);
 
     while running {
-        // Get terminal size
-        let (width, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        // ── Render ───────────────────────────────────────────────────
+        terminal.draw(|f| {
+            let size = f.area();
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Min(3),     // Chat area
+                    Constraint::Length(1),   // Separator
+                    Constraint::Length(2),   // Input area
+                ])
+                .split(size);
 
-        // ── Create surface and render layout ──────────────────────
-        let mut surface = Surface::new(width, height);
+            render_chat(f, chunks[0], &messages, &streaming_text, scroll_offset, &theme);
+            render_separator(f, chunks[1], &theme);
+            render_input(f, chunks[2], &input, is_agent_busy, &theme);
+        })?;
 
-        // Only render when something changed
-        if needs_render {
-            let input_height: u16 = 3;
-            let chat_height = height.saturating_sub(input_height);
-
-            // Render chat view in upper area
-            let chat_area = oxi_tui::Rect::new(0, 0, width, chat_height);
-            chat_view.render(&mut surface, chat_area);
-
-            // Render separator
-            if chat_height < height {
-                let sep_y = chat_height;
-                for col in 0..width {
-                    let cell = oxi_tui::Cell::new('\u{2500}').with_fg(theme.colors.border);
-                    surface.set(sep_y, col, cell);
-                }
-
-                // Render prompt indicator
-                surface.set(
-                    chat_height + 1,
-                    0,
-                    oxi_tui::Cell::new('\u{276F}').with_fg(theme.colors.primary),
-                );
-
-                // Render input area
-                let input_area =
-                    oxi_tui::Rect::new(2, chat_height + 1, width.saturating_sub(4), 1);
-                input.render(&mut surface, input_area);
-
-                // Status indicator in bottom-right
-                let status_text = if is_agent_busy { "\u{25CF} thinking..." } else { "" };
-                let status_fg = if is_agent_busy { theme.colors.warning } else { theme.colors.muted };
-                for (i, ch) in status_text.chars().enumerate() {
-                    let col = width as usize - status_text.len() + i;
-                    if col < width as usize {
-                        surface.set(
-                            chat_height + 2,
-                            col as u16,
-                            oxi_tui::Cell::new(ch).with_fg(status_fg),
-                        );
-                    }
-                }
-            }
-
-            // Render surface to terminal with line-based differential updates
-            let lines = surface_to_ansi_lines(&surface, width, height);
-            term_renderer.render(&lines, width, height, &mut io::stdout())?;
-            needs_render = false;
-        }
-
-        // Poll for events with timeout (~30fps)
-        let timeout = std::time::Duration::from_millis(33);
-
-        if crossterm::event::poll(timeout)? {
-            let event = crossterm::event::read()?;
-            match event {
-                crossterm::event::Event::Key(key) => {
+        // ── Poll for terminal events ─────────────────────────────────
+        if event::poll(poll_timeout)? {
+            match event::read()? {
+                CEvent::Key(key) => {
                     match key.code {
-                        crossterm::event::KeyCode::Enter => {
+                        KeyCode::Enter => {
                             if !is_agent_busy {
                                 let value = input.value().to_string();
                                 if !value.is_empty() {
-                                    // Handle slash commands
                                     if value.starts_with('/') {
                                         let handled = handle_slash_command(
                                             &value,
                                             &agent_session,
-                                            &mut chat_view,
-                                            &theme,
+                                            &mut messages,
                                             &mut running,
                                         );
                                         input.clear();
-                                        needs_render = true;
                                         if handled {
                                             continue;
                                         }
-                                        // If not handled, fall through to send as prompt
                                     }
 
-                                    // Add user message to chat view
-                                    chat_view.add_message(ChatMessageDisplay {
+                                    messages.push(ChatMessage {
                                         role: MessageRole::User,
-                                        content_blocks: vec![ContentBlockDisplay::Text {
-                                            content: value.clone(),
-                                        }],
+                                        content: value.clone(),
                                         timestamp: now_millis(),
                                     });
 
-                                    // Start agent streaming
-                                    chat_view.start_streaming();
+                                    streaming_text.clear();
                                     is_agent_busy = true;
-                                    needs_render = true;
+                                    auto_scroll = true;
 
-                                    // Send prompt to agent worker
                                     let _ = prompt_tx.send(value).await;
-
-                                    // Clear input
                                     input.clear();
                                 }
                             }
                         }
-                        crossterm::event::KeyCode::Char('c')
-                            if key
-                                .modifiers
-                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                        {
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if is_agent_busy {
-                                // Abort current operation
                                 let sh = agent_session.clone_handle();
-                                tokio::spawn(async move {
-                                    sh.abort().await;
-                                });
+                                tokio::spawn(async move { sh.abort().await; });
                                 is_agent_busy = false;
-                                chat_view.finish_streaming_error("Interrupted");
-                                needs_render = true;
+                                if !streaming_text.is_empty() {
+                                    messages.push(ChatMessage {
+                                        role: MessageRole::Assistant,
+                                        content: streaming_text.clone(),
+                                        timestamp: now_millis(),
+                                    });
+                                    streaming_text.clear();
+                                }
+                                messages.push(ChatMessage {
+                                    role: MessageRole::System,
+                                    content: "Interrupted".to_string(),
+                                    timestamp: now_millis(),
+                                });
                             } else {
                                 running = false;
                             }
                         }
-                        crossterm::event::KeyCode::PageUp => {
-                            chat_view.scroll_up(10);
-                            needs_render = true;
+                        KeyCode::PageUp => {
+                            scroll_offset = scroll_offset.saturating_add(10);
+                            auto_scroll = false;
                         }
-                        crossterm::event::KeyCode::PageDown => {
-                            chat_view.scroll_down(10);
-                            needs_render = true;
+                        KeyCode::PageDown => {
+                            scroll_offset = scroll_offset.saturating_sub(10);
                         }
-                        _ => {
-                            // Forward keyboard events to input component
-                            if let Some(tui_event) = convert_key_event(key) {
-                                input.handle_event(&tui_event);
-                                needs_render = true;
+                        KeyCode::Char(c) => {
+                            if !is_agent_busy {
+                                input.insert_char(c);
                             }
                         }
+                        KeyCode::Backspace => {
+                            input.backspace();
+                        }
+                        KeyCode::Delete => {
+                            input.delete();
+                        }
+                        KeyCode::Left => {
+                            input.move_left();
+                        }
+                        KeyCode::Right => {
+                            input.move_right();
+                        }
+                        KeyCode::Home => {
+                            input.move_home();
+                        }
+                        KeyCode::End => {
+                            input.move_end();
+                        }
+                        _ => {}
                     }
                 }
-                crossterm::event::Event::Mouse(mouse) => match mouse.kind {
-                    crossterm::event::MouseEventKind::ScrollUp => {
-                        if mouse.row < height - 3 {
-                            chat_view.scroll_up(3);
-                            needs_render = true;
-                        }
+                CEvent::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        scroll_offset = scroll_offset.saturating_add(3);
+                        auto_scroll = false;
                     }
-                    crossterm::event::MouseEventKind::ScrollDown => {
-                        if mouse.row < height - 3 {
-                            chat_view.scroll_down(3);
-                            needs_render = true;
-                        }
+                    MouseEventKind::ScrollDown => {
+                        scroll_offset = scroll_offset.saturating_sub(3);
                     }
                     _ => {}
                 },
-                crossterm::event::Event::Resize(_, _) => {
-                    // Handled on next render cycle via crossterm::terminal::size()
-                    needs_render = true;
+                CEvent::Resize(_, _) => {
+                    // ratatui handles resize automatically in draw()
                 }
                 _ => {}
             }
         }
 
-        // ── Drain agent events from the channel ──────────────────────
+        // ── Drain agent events ───────────────────────────────────────
         while let Ok(ui_event) = ui_rx.try_recv() {
             match ui_event {
                 UiEvent::Start => {}
-                UiEvent::Thinking => {
-                    chat_view.stream_thinking_start();
-                    needs_render = true;
-                }
+                UiEvent::Thinking => {}
                 UiEvent::TextDelta(text) => {
-                    chat_view.stream_text_delta(&text);
-                    needs_render = true;
+                    streaming_text.push_str(&text);
                 }
-                UiEvent::ToolCall {
-                    id,
-                    name,
-                    arguments,
-                } => {
-                    chat_view.stream_thinking_end();
-                    chat_view.stream_tool_call(id, name, arguments);
-                    needs_render = true;
+                UiEvent::ToolCall { name, .. } => {
+                    streaming_text.push_str(&format!("\n⚙ {}\n", name));
                 }
-                UiEvent::ToolResult {
-                    tool_name,
-                    content,
-                    is_error,
-                } => {
-                    chat_view.stream_tool_result(tool_name, content, is_error);
-                    needs_render = true;
+                UiEvent::ToolResult { tool_name, content, is_error } => {
+                    let label = if tool_name.is_empty() { "tool" } else { &tool_name };
+                    if is_error {
+                        streaming_text.push_str(&format!("  ✗ {}: {}\n", label, content.chars().take(200).collect::<String>()));
+                    } else {
+                        let preview: String = content.lines().take(3).collect::<Vec<_>>().join("\n  ");
+                        if !preview.is_empty() {
+                            streaming_text.push_str(&format!("  ✓ {}\n", preview));
+                        }
+                    }
                 }
                 UiEvent::Complete => {
-                    chat_view.stream_thinking_end();
-                    chat_view.finish_streaming();
+                    if !streaming_text.is_empty() {
+                        messages.push(ChatMessage {
+                            role: MessageRole::Assistant,
+                            content: streaming_text.clone(),
+                            timestamp: now_millis(),
+                        });
+                        streaming_text.clear();
+                    }
                     is_agent_busy = false;
-                    needs_render = true;
                 }
                 UiEvent::Error(msg) => {
-                    chat_view.finish_streaming_error(&msg);
+                    if !streaming_text.is_empty() {
+                        messages.push(ChatMessage {
+                            role: MessageRole::Assistant,
+                            content: streaming_text.clone(),
+                            timestamp: now_millis(),
+                        });
+                        streaming_text.clear();
+                    }
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("Error: {}", msg),
+                        timestamp: now_millis(),
+                    });
                     is_agent_busy = false;
-                    needs_render = true;
                 }
                 UiEvent::CompactionStart { reason } => {
                     let reason_str = match reason {
@@ -461,67 +503,44 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         CompactionReason::Threshold => "auto-threshold",
                         CompactionReason::Overflow => "overflow-recovery",
                     };
-                    chat_view.add_message(ChatMessageDisplay {
-                        role: MessageRole::Assistant,
-                        content_blocks: vec![ContentBlockDisplay::Text {
-                            content: format!("\u{1f4e6} Compacting context ({})...", reason_str),
-                        }],
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("📦 Compacting context ({})...", reason_str),
                         timestamp: now_millis(),
                     });
-                    needs_render = true;
                 }
-                UiEvent::CompactionEnd {
-                    _reason: _,
-                    error_message,
-                } => {
+                UiEvent::CompactionEnd { _reason, error_message } => {
                     let msg = if let Some(err) = error_message {
-                        format!("\u{26a0}\u{fe0f} Compaction failed: {}", err)
+                        format!("⚠️ Compaction failed: {}", err)
                     } else {
-                        "\u{2705} Compaction complete.".to_string()
+                        "✅ Compaction complete.".to_string()
                     };
-                    chat_view.add_message(ChatMessageDisplay {
-                        role: MessageRole::Assistant,
-                        content_blocks: vec![ContentBlockDisplay::Text { content: msg }],
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: msg,
                         timestamp: now_millis(),
                     });
-                    needs_render = true;
                 }
-                UiEvent::RetryStart {
-                    attempt,
-                    max_attempts,
-                    error_message,
-                } => {
-                    chat_view.add_message(ChatMessageDisplay {
-                        role: MessageRole::Assistant,
-                        content_blocks: vec![ContentBlockDisplay::Text {
-                            content: format!(
-                                "\u{1f504} Retrying ({}/{}): {}",
-                                attempt, max_attempts, error_message
-                            ),
-                        }],
+                UiEvent::RetryStart { attempt, max_attempts, error_message } => {
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("🔄 Retrying ({}/{}): {}", attempt, max_attempts, error_message),
                         timestamp: now_millis(),
                     });
-                    needs_render = true;
                 }
                 UiEvent::ModelChanged { model_id } => {
-                    chat_view.add_message(ChatMessageDisplay {
-                        role: MessageRole::Assistant,
-                        content_blocks: vec![ContentBlockDisplay::Text {
-                            content: format!("\u{1f916} Model: {}", model_id),
-                        }],
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("🤖 Model: {}", model_id),
                         timestamp: now_millis(),
                     });
-                    needs_render = true;
                 }
                 UiEvent::ThinkingLevelChanged { level } => {
-                    chat_view.add_message(ChatMessageDisplay {
-                        role: MessageRole::Assistant,
-                        content_blocks: vec![ContentBlockDisplay::Text {
-                            content: format!("\u{1f4ad} Thinking level: {}", level),
-                        }],
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("💭 Thinking level: {}", level),
                         timestamp: now_millis(),
                     });
-                    needs_render = true;
                 }
                 UiEvent::QueueUpdate { pending } => {
                     if pending > 0 {
@@ -536,114 +555,262 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             match session_event {
                 SessionEvent::CompactionStart { reason } => {
                     let _ = ui_tx.send(UiEvent::CompactionStart { reason }).await;
-                    needs_render = true;
                 }
-                SessionEvent::CompactionEnd {
-                    reason,
-                    result: _,
-                    aborted: _,
-                    will_retry: _,
-                    error_message,
-                } => {
-                    let _ = ui_tx
-                        .send(UiEvent::CompactionEnd {
-                            _reason: reason,
-                            error_message,
-                        })
-                        .await;
-                    needs_render = true;
+                SessionEvent::CompactionEnd { reason, error_message, .. } => {
+                    let _ = ui_tx.send(UiEvent::CompactionEnd { _reason: reason, error_message }).await;
                 }
                 SessionEvent::ThinkingLevelChanged { level } => {
-                    let _ = ui_tx
-                        .send(UiEvent::ThinkingLevelChanged {
-                            level: format!("{:?}", level),
-                        })
-                        .await;
-                    needs_render = true;
+                    let _ = ui_tx.send(UiEvent::ThinkingLevelChanged { level: format!("{:?}", level) }).await;
                 }
                 SessionEvent::QueueUpdate { steering, follow_up } => {
                     let pending = steering.len() + follow_up.len();
                     let _ = ui_tx.send(UiEvent::QueueUpdate { pending }).await;
-                    needs_render = true;
                 }
-                SessionEvent::SessionInfoChanged { name: _ } => {
-                    // Could update title bar in future
-                }
+                SessionEvent::SessionInfoChanged { name: _ } => {}
                 SessionEvent::Agent(event) => {
-                    // Agent events are handled by the agent worker thread's
-                    // event forwarder; we only get them here if we subscribed
-                    // to the session channel directly (which we do via subscribe).
-                    // Forward relevant ones to UI.
                     match &event {
-                        AgentEvent::Fallback {
-                            from_model: _,
-                            to_model,
-                        } => {
-                            let _ = ui_tx
-                                .send(UiEvent::ModelChanged {
-                                    model_id: to_model.clone(),
-                                })
-                                .await;
-                            needs_render = true;
+                        AgentEvent::Fallback { to_model, .. } => {
+                            let _ = ui_tx.send(UiEvent::ModelChanged { model_id: to_model.clone() }).await;
                         }
-                        AgentEvent::Retry {
-                            attempt,
-                            max_retries,
-                            retry_after_secs: _,
-                            reason,
-                        } => {
-                            let _ = ui_tx
-                                .send(UiEvent::RetryStart {
-                                    attempt: *attempt as u32,
-                                    max_attempts: *max_retries as u32,
-                                    error_message: reason.clone(),
-                                })
-                                .await;
-                            needs_render = true;
+                        AgentEvent::Retry { attempt, max_retries, reason, .. } => {
+                            let _ = ui_tx.send(UiEvent::RetryStart {
+                                attempt: *attempt as u32,
+                                max_attempts: *max_retries as u32,
+                                error_message: reason.clone(),
+                            }).await;
                         }
-                        AgentEvent::Compaction { event: _ } => {
-                            // Compaction events are handled by SessionEvent above
-                        }
+                        AgentEvent::Compaction { .. } => {}
                         _ => {}
                     }
                 }
             }
         }
 
-        // Auto-scroll only when streaming or new content arrives
-        let is_streaming_now = chat_view.is_streaming();
-        if is_streaming_now != was_streaming {
-            needs_render = true;
-            was_streaming = is_streaming_now;
-        }
-        if is_streaming_now {
-            chat_view.scroll_to_bottom();
-            needs_render = true;
+        // ── Auto-scroll logic ────────────────────────────────────────
+        if auto_scroll {
+            scroll_offset = 0;
         }
     }
 
     // ── Cleanup ──────────────────────────────────────────────────────
     drop(prompt_tx);
     let _ = agent_handle.join();
-    crossterm::execute!(io::stdout(), crossterm::cursor::Show)?;
-    crossterm::execute!(io::stdout(), crossterm::event::DisableMouseCapture)?;
-    crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
-    io::stdout().flush()?;
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
 
     Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Rendering
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Render the chat area with messages and optional streaming text.
+fn render_chat(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    messages: &[ChatMessage],
+    streaming_text: &str,
+    scroll_offset: u16,
+    theme: &Theme,
+) {
+    if area.width < 4 || area.height < 1 {
+        return;
+    }
+
+    // Build all lines from messages
+    let mut all_lines: Vec<Line> = Vec::new();
+
+    for msg in messages {
+        let (label, label_fg) = match msg.role {
+            MessageRole::User => (" You", theme.user_fg),
+            MessageRole::Assistant => (" Assistant", theme.assistant_fg),
+            MessageRole::System => (" ◈", theme.system_fg),
+        };
+
+        all_lines.push(Line::from(vec![
+            Span::styled(label.to_string(), Style::default().fg(label_fg).add_modifier(Modifier::BOLD)),
+        ]));
+
+        for line in msg.content.lines() {
+            let content_fg = match msg.role {
+                MessageRole::System => theme.system_fg,
+                _ => theme.assistant_fg,
+            };
+            all_lines.push(Line::from(vec![
+                Span::styled("  ".to_string(), Style::default()),
+                Span::styled(line.to_string(), Style::default().fg(content_fg)),
+            ]));
+        }
+
+        // Blank line separator
+        all_lines.push(Line::from(""));
+    }
+
+    // Streaming text
+    if !streaming_text.is_empty() {
+        all_lines.push(Line::from(vec![
+            Span::styled(" Assistant".to_string(), Style::default().fg(theme.assistant_fg).add_modifier(Modifier::BOLD)),
+        ]));
+        for line in streaming_text.lines() {
+            all_lines.push(Line::from(vec![
+                Span::styled("  ".to_string(), Style::default()),
+                Span::styled(line.to_string(), Style::default().fg(theme.assistant_fg)),
+            ]));
+        }
+        // Animated thinking indicator while streaming
+        all_lines.push(Line::from(vec![
+            Span::styled("  ●", Style::default().fg(theme.thinking_fg)),
+        ]));
+    }
+
+    // Calculate scroll: scroll_offset is how many lines to scroll UP from the bottom
+    let total_lines = all_lines.len();
+    let visible_height = area.height as usize;
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    let scroll_from_top = max_scroll.saturating_sub(scroll_offset as usize);
+
+    // Build the text widget
+    let chat_text = ratatui::text::Text::from(all_lines);
+
+    let chat_widget = Paragraph::new(chat_text)
+        .wrap(Wrap { trim: false })
+        .scroll((scroll_from_top as u16, 0));
+
+    f.render_widget(chat_widget, area);
+}
+
+/// Render the separator line between chat and input.
+fn render_separator(f: &mut ratatui::Frame, area: Rect, theme: &Theme) {
+    let separator = Paragraph::new(Line::from(
+        Span::styled(
+            "─".repeat(area.width as usize),
+            Style::default().fg(theme.border_fg),
+        ),
+    ));
+    f.render_widget(separator, area);
+}
+
+/// Render the input area with cursor.
+fn render_input(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    input: &InputState,
+    is_agent_busy: bool,
+    theme: &Theme,
+) {
+    // Split area into prompt indicator + input field + status
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(2),    // "❯ "
+            Constraint::Min(10),      // Input text
+            Constraint::Length(16),   // Status
+        ])
+        .split(area);
+
+    // Prompt indicator
+    let prompt = Paragraph::new(Line::from(vec![
+        Span::styled("❯ ", Style::default().fg(theme.prompt_indicator_fg)),
+    ]));
+    f.render_widget(prompt, Rect { x: chunks[0].x, y: chunks[0].y, width: 2, height: 1 });
+
+    // Input text with cursor
+    let display_text = if input.value().is_empty() {
+        "Type a message... (Ctrl+C to quit)".to_string()
+    } else {
+        input.value().to_string()
+    };
+
+    let text_fg = if input.value().is_empty() {
+        theme.placeholder_fg
+    } else {
+        theme.input_fg
+    };
+
+    // Calculate visible portion and cursor position
+    let input_width = chunks[1].width as usize;
+    let cursor_char = input.cursor;
+
+    // Horizontal scrolling
+    let scroll_left = if cursor_char >= input_width {
+        cursor_char - input_width + 1
+    } else {
+        0
+    };
+
+    let visible_chars: String = display_text.chars().skip(scroll_left).take(input_width).collect();
+    let cursor_screen_col = cursor_char.saturating_sub(scroll_left);
+
+    // Build styled spans: text before cursor, cursor cell, text after cursor
+    let mut spans: Vec<Span> = Vec::new();
+    let chars: Vec<char> = visible_chars.chars().collect();
+
+    for (i, ch) in chars.iter().enumerate() {
+        if i == cursor_screen_col {
+            spans.push(Span::styled(
+                ch.to_string(),
+                Style::default().fg(theme.input_cursor_fg).bg(theme.input_cursor_bg).add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(
+                ch.to_string(),
+                Style::default().fg(text_fg),
+            ));
+        }
+    }
+
+    // If cursor is at the end of visible text, show cursor on empty space
+    if cursor_screen_col >= chars.len() && cursor_screen_col < input_width {
+        // Already at end - cursor shown as a space with highlight
+        spans.push(Span::styled(
+            " ".to_string(),
+            Style::default().fg(theme.input_cursor_fg).bg(theme.input_cursor_bg),
+        ));
+    }
+
+    // Pad remaining space
+    let used = chars.len().max(cursor_screen_col + 1);
+    if used < input_width {
+        spans.push(Span::styled(
+            " ".repeat(input_width - used),
+            Style::default(),
+        ));
+    }
+
+    let input_line = Line::from(spans);
+    let input_widget = Paragraph::new(input_line);
+    f.render_widget(input_widget, chunks[1]);
+
+    // Status indicator (bottom row)
+    if area.height >= 2 {
+        let status_text = if is_agent_busy {
+            "● thinking..."
+        } else {
+            ""
+        };
+        let status_fg = if is_agent_busy { theme.status_fg } else { theme.border_fg };
+        let status = Paragraph::new(Line::from(vec![
+            Span::styled(status_text.to_string(), Style::default().fg(status_fg)),
+        ]));
+        let status_row = Rect { x: 0, y: area.y + 1, width: area.width, height: 1 };
+        f.render_widget(status, status_row);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Slash command handling
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Handle a slash command. Returns `true` if the command was handled
-/// (and should NOT be sent to the agent).
 fn handle_slash_command(
     input: &str,
     session: &AgentSession,
-    chat_view: &mut ChatView,
-    theme: &Theme,
+    messages: &mut Vec<ChatMessage>,
     running: &mut bool,
 ) -> bool {
     let trimmed = input.trim();
@@ -656,12 +823,9 @@ fn handle_slash_command(
 
     match cmd_lower.as_str() {
         "/help" | "/?" => {
-            let help_text = format_help();
-            chat_view.add_message(ChatMessageDisplay {
-                role: MessageRole::Assistant,
-                content_blocks: vec![ContentBlockDisplay::Text {
-                    content: help_text,
-                }],
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: format_help(),
                 timestamp: now_millis(),
             });
             true
@@ -671,7 +835,7 @@ fn handle_slash_command(
             true
         }
         "/clear" => {
-            *chat_view = ChatView::new(theme.clone());
+            messages.clear();
             session.reset();
             true
         }
@@ -679,33 +843,27 @@ fn handle_slash_command(
             if let Some(model_id) = arg {
                 match session.set_model(model_id) {
                     Ok(()) => {
-                        chat_view.add_message(ChatMessageDisplay {
-                            role: MessageRole::Assistant,
-                            content_blocks: vec![ContentBlockDisplay::Text {
-                                content: format!("Switched to model: {}", model_id),
-                            }],
+                        messages.push(ChatMessage {
+                            role: MessageRole::System,
+                            content: format!("Switched to model: {}", model_id),
                             timestamp: now_millis(),
                         });
                     }
                     Err(e) => {
-                        chat_view.add_message(ChatMessageDisplay {
-                            role: MessageRole::Assistant,
-                            content_blocks: vec![ContentBlockDisplay::Text {
-                                content: format!("Error switching model: {}", e),
-                            }],
+                        messages.push(ChatMessage {
+                            role: MessageRole::System,
+                            content: format!("Error switching model: {}", e),
                             timestamp: now_millis(),
                         });
                     }
                 }
             } else {
-                chat_view.add_message(ChatMessageDisplay {
-                    role: MessageRole::Assistant,
-                    content_blocks: vec![ContentBlockDisplay::Text {
-                        content: format!(
-                            "Current model: {}\nUse /model <provider/model> to switch.",
-                            session.model_id(),
-                        ),
-                    }],
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!(
+                        "Current model: {}\nUse /model <provider/model> to switch.",
+                        session.model_id(),
+                    ),
                     timestamp: now_millis(),
                 });
             }
@@ -713,17 +871,11 @@ fn handle_slash_command(
         }
         "/compact" => {
             let instructions = arg.map(|s| s.to_string());
-            // Compact runs asynchronously, but we fire and forget here
-            // The session events will show progress
             let sh = session.clone_handle();
             tokio::spawn(async move {
                 match sh.compact(instructions).await {
-                    Ok(result) => {
-                        tracing::info!("Compaction complete: {} tokens before", result.tokens_before);
-                    }
-                    Err(e) => {
-                        tracing::warn!("Compaction failed: {}", e);
-                    }
+                    Ok(result) => tracing::info!("Compaction complete: {} tokens before", result.tokens_before),
+                    Err(e) => tracing::warn!("Compaction failed: {}", e),
                 }
             });
             true
@@ -731,14 +883,7 @@ fn handle_slash_command(
         "/session" => {
             let stats = session.session_stats();
             let info = format!(
-                "Session Info:\n\
-                 ID: {}\n\
-                 Messages: {} total ({} user, {} assistant)\n\
-                 Tool calls: {}, Results: {}\n\
-                 Model: {}\n\
-                 Thinking: {:?}\n\
-                 Auto-compaction: {}\n\
-                 Auto-retry: {}",
+                "Session Info:\n  ID: {}\n  Messages: {} total ({} user, {} assistant)\n  Tool calls: {}, Results: {}\n  Model: {}\n  Thinking: {:?}\n  Auto-compaction: {}\n  Auto-retry: {}",
                 stats.session_id,
                 stats.total_messages,
                 stats.user_messages,
@@ -750,29 +895,24 @@ fn handle_slash_command(
                 session.auto_compaction_enabled(),
                 session.auto_retry_enabled(),
             );
-            chat_view.add_message(ChatMessageDisplay {
-                role: MessageRole::Assistant,
-                content_blocks: vec![ContentBlockDisplay::Text { content: info }],
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: info,
                 timestamp: now_millis(),
             });
             true
         }
         "/settings" => {
-            let settings_info = format!(
-                "Model: {}\n\
-                 Thinking Level: {:?}\n\
-                 Auto-compaction: {}\n\
-                 Auto-retry: {}",
+            let info = format!(
+                "Model: {}\nThinking Level: {:?}\nAuto-compaction: {}\nAuto-retry: {}",
                 session.model_id(),
                 session.thinking_level(),
                 session.auto_compaction_enabled(),
                 session.auto_retry_enabled(),
             );
-            chat_view.add_message(ChatMessageDisplay {
-                role: MessageRole::Assistant,
-                content_blocks: vec![ContentBlockDisplay::Text {
-                    content: settings_info,
-                }],
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: info,
                 timestamp: now_millis(),
             });
             true
@@ -780,329 +920,28 @@ fn handle_slash_command(
         "/name" => {
             if let Some(name) = arg {
                 session.set_session_name(name.to_string());
-                chat_view.add_message(ChatMessageDisplay {
-                    role: MessageRole::Assistant,
-                    content_blocks: vec![ContentBlockDisplay::Text {
-                        content: format!("Session named: {}", name),
-                    }],
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!("Session named: {}", name),
                     timestamp: now_millis(),
                 });
             } else {
-                chat_view.add_message(ChatMessageDisplay {
-                    role: MessageRole::Assistant,
-                    content_blocks: vec![ContentBlockDisplay::Text {
-                        content: "Usage: /name <name>".to_string(),
-                    }],
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "Usage: /name <name>".to_string(),
                     timestamp: now_millis(),
                 });
             }
             true
         }
-        _ => false, // Not a recognized command, send to agent
+        _ => false,
     }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Line-based differential renderer (pi-mono architecture)
+// Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Line-based differential renderer.
-///
-/// Compares previous frame's lines against new lines at the string level
-/// and only writes changed lines to the terminal in a single buffered write.
-pub struct TerminalRenderer {
-    previous_lines: Vec<String>,
-    prev_width: u16,
-    prev_height: u16,
-}
-
-impl TerminalRenderer {
-    pub fn new() -> Self {
-        Self {
-            previous_lines: Vec::new(),
-            prev_width: 0,
-            prev_height: 0,
-        }
-    }
-
-    /// Render lines to terminal using differential (line-level) updates.
-    /// Returns true if any output was written.
-    pub fn render(
-        &mut self,
-        new_lines: &[String],
-        width: u16,
-        height: u16,
-        stdout: &mut impl Write,
-    ) -> std::io::Result<bool> {
-        let width_changed = self.prev_width != 0 && self.prev_width != width;
-        let height_changed = self.prev_height != 0 && self.prev_height != height;
-
-        // First render or dimensions changed → full render
-        if self.previous_lines.is_empty() || width_changed || height_changed {
-            self.full_render(new_lines, stdout)?;
-            self.previous_lines = new_lines.to_vec();
-            self.prev_width = width;
-            self.prev_height = height;
-            return Ok(true);
-        }
-
-        // Find first and last changed lines
-        let mut first_changed: Option<usize> = None;
-        let mut last_changed: usize = 0;
-        let max_lines = new_lines.len().max(self.previous_lines.len());
-
-        for i in 0..max_lines {
-            let old_line = self.previous_lines.get(i).map(|s| s.as_str()).unwrap_or("");
-            let new_line = new_lines.get(i).map(|s| s.as_str()).unwrap_or("");
-
-            if old_line != new_line {
-                if first_changed.is_none() {
-                    first_changed = Some(i);
-                }
-                last_changed = i;
-            }
-        }
-
-        let Some(first) = first_changed else {
-            // No changes at all
-            self.previous_lines = new_lines.to_vec();
-            return Ok(false);
-        };
-
-        // Build a single output buffer with only the changed lines
-        let mut buffer = String::with_capacity(4096);
-        buffer.push_str("\x1b[?2026h"); // Begin synchronized output
-
-        // Move cursor to first changed line
-        buffer.push_str(&format!("\x1b[{};1H", first + 1));
-
-        // Write changed lines
-        for i in first..=last_changed {
-            if i > first {
-                buffer.push_str("\r\n");
-            }
-            buffer.push_str("\x1b[2K"); // Clear line
-            if i < new_lines.len() {
-                buffer.push_str(&new_lines[i]);
-            }
-        }
-
-        // Clear extra lines if content shrunk
-        if new_lines.len() < self.previous_lines.len() {
-            for _ in new_lines.len()..self.previous_lines.len() {
-                buffer.push_str("\r\n\x1b[2K");
-            }
-            // Move cursor back to end of content
-            let extra = self.previous_lines.len() - new_lines.len();
-            buffer.push_str(&format!("\x1b[{}A", extra));
-        }
-
-        buffer.push_str("\x1b[0m"); // Reset SGR
-        buffer.push_str("\x1b[?2026l"); // End synchronized output
-
-        write!(stdout, "{}", buffer)?;
-        stdout.flush()?;
-
-        self.previous_lines = new_lines.to_vec();
-        self.prev_width = width;
-        self.prev_height = height;
-        Ok(true)
-    }
-
-    fn full_render(&self, lines: &[String], stdout: &mut impl Write) -> std::io::Result<()> {
-        let mut buffer = String::with_capacity(8192);
-        buffer.push_str("\x1b[?2026h"); // Begin synchronized output
-        buffer.push_str("\x1b[H"); // Move to home
-
-        for (i, line) in lines.iter().enumerate() {
-            if i > 0 {
-                buffer.push_str("\r\n");
-            }
-            buffer.push_str(line);
-        }
-
-        buffer.push_str("\x1b[0m"); // Reset SGR
-        buffer.push_str("\x1b[?2026l"); // End synchronized output
-
-        write!(stdout, "{}", buffer)?;
-        stdout.flush()?;
-        Ok(())
-    }
-
-    /// Force a full redraw on next frame.
-    pub fn force_redraw(&mut self) {
-        self.previous_lines.clear();
-        self.prev_width = 0;
-        self.prev_height = 0;
-    }
-}
-
-/// Convert a Surface to a Vec<String> where each string is a line of ANSI-encoded content.
-fn surface_to_ansi_lines(surface: &Surface, width: u16, height: u16) -> Vec<String> {
-    let mut lines = Vec::with_capacity(height as usize);
-    let mut last_fg = oxi_tui::Color::Default;
-    let mut last_bg = oxi_tui::Color::Default;
-    let mut last_bold = false;
-    let mut last_italic = false;
-    let mut last_underline = false;
-    let mut last_strike = false;
-    let default_cell = oxi_tui::Cell::default();
-
-    for row in 0..height {
-        let mut line = String::with_capacity(width as usize * 4);
-
-        for col in 0..width {
-            let cell = surface.get(row, col).unwrap_or(&default_cell);
-
-            // Only emit SGR changes
-            let fg_changed = cell.fg != last_fg;
-            let bg_changed = cell.bg != last_bg;
-            let attrs_changed = cell.attrs.bold != last_bold
-                || cell.attrs.italic != last_italic
-                || cell.attrs.underline != last_underline
-                || cell.attrs.strikethrough != last_strike;
-
-            if fg_changed || bg_changed || attrs_changed {
-                let mut codes = Vec::new();
-                if cell.attrs.bold != last_bold {
-                    codes.push(if cell.attrs.bold { 1 } else { 22 });
-                }
-                if cell.attrs.italic != last_italic {
-                    codes.push(if cell.attrs.italic { 3 } else { 23 });
-                }
-                if cell.attrs.underline != last_underline {
-                    codes.push(if cell.attrs.underline { 4 } else { 24 });
-                }
-                if cell.attrs.strikethrough != last_strike {
-                    codes.push(if cell.attrs.strikethrough { 9 } else { 29 });
-                }
-                if fg_changed {
-                    match cell.fg {
-                        oxi_tui::Color::Default => codes.push(39),
-                        oxi_tui::Color::Black => codes.push(30),
-                        oxi_tui::Color::Red => codes.push(31),
-                        oxi_tui::Color::Green => codes.push(32),
-                        oxi_tui::Color::Yellow => codes.push(33),
-                        oxi_tui::Color::Blue => codes.push(34),
-                        oxi_tui::Color::Magenta => codes.push(35),
-                        oxi_tui::Color::Cyan => codes.push(36),
-                        oxi_tui::Color::White => codes.push(37),
-                        oxi_tui::Color::Indexed(n) => codes.extend_from_slice(&[38, 5, n]),
-                        oxi_tui::Color::Rgb(r, g, b) => {
-                            codes.extend_from_slice(&[38, 2, r, g, b])
-                        }
-                    }
-                }
-                if bg_changed {
-                    match cell.bg {
-                        oxi_tui::Color::Default => codes.push(49),
-                        oxi_tui::Color::Black => codes.push(40),
-                        oxi_tui::Color::Red => codes.push(41),
-                        oxi_tui::Color::Green => codes.push(42),
-                        oxi_tui::Color::Yellow => codes.push(43),
-                        oxi_tui::Color::Blue => codes.push(44),
-                        oxi_tui::Color::Magenta => codes.push(45),
-                        oxi_tui::Color::Cyan => codes.push(46),
-                        oxi_tui::Color::White => codes.push(47),
-                        oxi_tui::Color::Indexed(n) => codes.extend_from_slice(&[48, 5, n]),
-                        oxi_tui::Color::Rgb(r, g, b) => {
-                            codes.extend_from_slice(&[48, 2, r, g, b])
-                        }
-                    }
-                }
-                if !codes.is_empty() {
-                    line.push_str(&format!(
-                        "\x1b[{}m",
-                        codes
-                            .iter()
-                            .map(|c| c.to_string())
-                            .collect::<Vec<_>>()
-                            .join(";")
-                    ));
-                }
-                last_fg = cell.fg;
-                last_bg = cell.bg;
-                last_bold = cell.attrs.bold;
-                last_italic = cell.attrs.italic;
-                last_underline = cell.attrs.underline;
-                last_strike = cell.attrs.strikethrough;
-            }
-
-            line.push(cell.char);
-        }
-
-        // Reset at end of line to prevent style leaking
-        if last_fg != oxi_tui::Color::Default
-            || last_bg != oxi_tui::Color::Default
-            || last_bold
-            || last_italic
-            || last_underline
-            || last_strike
-        {
-            line.push_str("\x1b[0m");
-            last_fg = oxi_tui::Color::Default;
-            last_bg = oxi_tui::Color::Default;
-            last_bold = false;
-            last_italic = false;
-            last_underline = false;
-            last_strike = false;
-        }
-
-        lines.push(line);
-    }
-    lines
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Event conversion helpers
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Convert a crossterm key event to an oxi-tui Event.
-/// Returns None for special keys handled separately (Enter, Ctrl+C).
-fn convert_key_event(key: crossterm::event::KeyEvent) -> Option<oxi_tui::Event> {
-    use oxi_tui::event::KeyCode as KC;
-
-    let code = match key.code {
-        crossterm::event::KeyCode::Enter => return None,
-        crossterm::event::KeyCode::Char('c')
-            if key
-                .modifiers
-                .contains(crossterm::event::KeyModifiers::CONTROL) =>
-        {
-            return None
-        }
-        crossterm::event::KeyCode::Esc => KC::Escape,
-        crossterm::event::KeyCode::Tab => KC::Tab,
-        crossterm::event::KeyCode::Backspace => KC::Backspace,
-        crossterm::event::KeyCode::Delete => KC::Delete,
-        crossterm::event::KeyCode::Up => KC::Up,
-        crossterm::event::KeyCode::Down => KC::Down,
-        crossterm::event::KeyCode::Left => KC::Left,
-        crossterm::event::KeyCode::Right => KC::Right,
-        crossterm::event::KeyCode::Home => KC::Home,
-        crossterm::event::KeyCode::End => KC::End,
-        crossterm::event::KeyCode::Char(c) => KC::Char(c),
-        crossterm::event::KeyCode::F(n) => KC::F(n),
-        _ => return None,
-    };
-
-    let modifiers = oxi_tui::KeyModifiers {
-        shift: key
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::SHIFT),
-        ctrl: key
-            .modifiers
-            .contains(crossterm::event::KeyModifiers::CONTROL),
-        alt: key.modifiers.contains(crossterm::event::KeyModifiers::ALT),
-        meta: key.modifiers.contains(crossterm::event::KeyModifiers::META),
-    };
-
-    Some(oxi_tui::Event::Key(oxi_tui::KeyEvent::with_modifiers(
-        code, modifiers,
-    )))
-}
-
-/// Format the help text.
 fn format_help() -> String {
     r#"oxi — AI Coding Assistant
 
@@ -1121,11 +960,9 @@ Keybindings:
   Ctrl+C             Interrupt agent or quit
   PageUp/PageDown    Scroll chat history
   Mouse scroll       Scroll chat history
-"#
-    .to_string()
+"#.to_string()
 }
 
-/// Get current timestamp in milliseconds.
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
