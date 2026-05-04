@@ -27,6 +27,7 @@ pub mod file_processor;
 // Utility modules
 pub mod auth_storage;
 pub mod auto_compaction;
+// pub mod branch_summarization;
 pub mod bash_executor;
 pub mod changelog;
 pub mod child_process;
@@ -99,6 +100,7 @@ pub mod defaults;
 pub mod provider_display_names;
 pub mod session_cwd;
 pub mod slash_commands;
+pub mod compaction_utils;
 pub mod source_info;
 pub mod system_prompt;
 pub mod telemetry;
