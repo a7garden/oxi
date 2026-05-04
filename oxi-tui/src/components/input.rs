@@ -131,7 +131,8 @@ impl Input {
     /// Set the value.
     pub fn set_value(&mut self, value: &str) {
         self.value = value.to_string();
-        self.cursor_pos = self.value.len().min(self.cursor_pos);
+        let char_count = self.value.chars().count();
+        self.cursor_pos = char_count.min(self.cursor_pos);
         self.dirty = true;
     }
 
@@ -166,6 +167,24 @@ impl Input {
         self
     }
 
+    /// Convert char index to byte index for safe String slicing.
+    fn char_to_byte(&self, char_idx: usize) -> usize {
+        self.value
+            .char_indices()
+            .nth(char_idx)
+            .map(|(i, _)| i)
+            .unwrap_or(self.value.len())
+    }
+
+    /// Get byte length of char at the given char index.
+    fn char_len_at(&self, char_idx: usize) -> usize {
+        self.value
+            .char_indices()
+            .nth(char_idx)
+            .map(|(_, c)| c.len_utf8())
+            .unwrap_or(0)
+    }
+
     /// Clear the current completions.
     fn clear_completions(&mut self) {
         self.completions.clear();
@@ -186,7 +205,7 @@ impl Input {
             None => return,
         };
 
-        let prefix = self.value[trigger_pos..self.cursor_pos].to_string();
+        let prefix = self.value[self.char_to_byte(trigger_pos)..self.char_to_byte(self.cursor_pos)].to_string();
 
         match trigger_char {
             '@' if self.options.enable_mention_completion => {
@@ -264,20 +283,21 @@ impl Input {
         // Find the start position of the prefix being completed
         let (trigger_pos, _) = self.find_trigger().unwrap_or((0, '/'));
 
-        // Replace the prefix with the completion
-        let _prefix_len = self.cursor_pos - trigger_pos;
-        let suffix = self.value[self.cursor_pos..].to_string();
+        // Replace the prefix with the completion (char-index aware)
+        let prefix_start = self.char_to_byte(trigger_pos);
+        let cursor_byte = self.char_to_byte(self.cursor_pos);
+        let suffix = self.value[cursor_byte..].to_string();
 
         self.value = format!(
             "{}{}{}",
-            &self.value[..trigger_pos],
+            &self.value[..prefix_start],
             completion.text.clone(),
             suffix
         );
 
         // Position cursor after the completed text
-        let new_cursor = trigger_pos + completion.text.len();
-        self.cursor_pos = new_cursor.min(self.value.len());
+        let new_cursor = trigger_pos + completion.text.chars().count();
+        self.cursor_pos = new_cursor.min(self.value.chars().count());
 
         self.clear_completions();
         self.dirty = true;
@@ -410,8 +430,8 @@ impl Component for Input {
                             return true;
                         }
                     }
-                    // Insert character at cursor
-                    self.value.insert(self.cursor_pos, c);
+                    // Insert character at cursor (byte-index safe)
+                    self.value.insert(self.char_to_byte(self.cursor_pos), c);
                     self.cursor_pos += 1;
                     self.dirty = true;
                     // Try to trigger completion
@@ -421,7 +441,8 @@ impl Component for Input {
                 KeyCode::Backspace => {
                     if self.cursor_pos > 0 {
                         self.cursor_pos -= 1;
-                        self.value.remove(self.cursor_pos);
+                        let byte_pos = self.char_to_byte(self.cursor_pos);
+                        self.value.remove(byte_pos);
                         self.dirty = true;
                         self.try_trigger_completion();
                     }
@@ -429,7 +450,8 @@ impl Component for Input {
                 }
                 KeyCode::Delete => {
                     if self.cursor_pos < self.value.len() {
-                        self.value.remove(self.cursor_pos);
+                        let byte_pos = self.char_to_byte(self.cursor_pos);
+                        self.value.remove(byte_pos);
                         self.dirty = true;
                     }
                     true
@@ -454,7 +476,7 @@ impl Component for Input {
                     true
                 }
                 KeyCode::End => {
-                    self.cursor_pos = self.value.len();
+                    self.cursor_pos = self.value.chars().count();
                     self.dirty = true;
                     true
                 }
@@ -475,14 +497,22 @@ impl Component for Input {
     }
 
     fn render(&mut self, surface: &mut Surface, area: Rect) {
-        // Get display text (placeholder or value)
+        // Determine text and foreground color
+        let fg = if self.value.is_empty() {
+            // Placeholder - dim color
+            Color::Indexed(8) // dark gray
+        } else {
+            // Actual text - use theme foreground or bright white
+            self.options.fg_color.unwrap_or(Color::Indexed(252))
+        };
+
         let display = if self.value.is_empty() {
             &self.placeholder
         } else {
             &self.value
         };
 
-        // Calculate visible portion
+        // Calculate visible portion (char-index aware)
         let max_width = area.width as usize;
         let start_offset = if self.cursor_pos >= max_width {
             self.cursor_pos - max_width + 1
@@ -490,27 +520,50 @@ impl Component for Input {
             0
         };
 
-        let visible = &display[start_offset..display.len().min(start_offset + max_width)];
+        let start_byte = display
+            .char_indices()
+            .nth(start_offset)
+            .map(|(i, _)| i)
+            .unwrap_or(display.len());
+        let end_byte = display
+            .char_indices()
+            .nth(start_offset + max_width)
+            .map(|(i, _)| i)
+            .unwrap_or(display.len());
+        let visible = &display[start_byte..end_byte];
 
         // Render text
         let mut x = area.x;
         for c in visible.chars() {
             let mut cell = Cell::new(c);
-            if let Some(fg) = self.options.fg_color {
-                cell.fg = fg;
+            cell.fg = fg;
+            if let Some(bg) = self.options.bg_color {
+                cell.bg = bg;
             }
             surface.set(area.y, x, cell);
             x += 1;
         }
 
         // Render cursor if focused
-        if self.focused && area.x + ((self.cursor_pos - start_offset) as u16) < area.x + area.width
-        {
-            let cursor_col = area.x + (self.cursor_pos - start_offset) as u16;
-            let mut cursor_cell = surface.get(area.y, cursor_col).cloned().unwrap_or_default();
-            cursor_cell.fg = Color::Indexed(0); // Black on white
-            cursor_cell.bg = Color::Indexed(15);
-            surface.set(area.y, cursor_col, cursor_cell);
+        if self.focused {
+            let cursor_offset = (self.cursor_pos - start_offset) as u16;
+            let cursor_col = area.x + cursor_offset;
+            if cursor_col < area.x + area.width {
+                // Block cursor - swap fg/bg
+                if let Some(cell) = surface.get_mut(area.y, cursor_col) {
+                    cell.fg = Color::Indexed(0); // Black text
+                    cell.bg = Color::Indexed(255); // Bright white background
+                    cell.attrs.bold = true;
+                }
+            } else if self.cursor_pos >= start_offset + max_width {
+                // Cursor is past the visible area - show on the last column
+                let last_col = area.x + area.width - 1;
+                if let Some(cell) = surface.get_mut(area.y, last_col) {
+                    cell.fg = Color::Indexed(0);
+                    cell.bg = Color::Indexed(255);
+                    cell.attrs.bold = true;
+                }
+            }
         }
 
         // Clear remainder of area

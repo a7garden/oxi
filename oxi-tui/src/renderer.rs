@@ -14,6 +14,18 @@ struct SGR {
     bg: Option<crate::cell::Color>,
 }
 
+impl PartialEq for SGR {
+    fn eq(&self, other: &Self) -> bool {
+        self.bold == other.bold
+            && self.italic == other.italic
+            && self.underline == other.underline
+            && self.strikethrough == other.strikethrough
+            && self.reversed == other.reversed
+            && self.fg == other.fg
+            && self.bg == other.bg
+    }
+}
+
 impl SGR {
     fn new() -> Self {
         Self {
@@ -146,8 +158,10 @@ impl Renderer {
         print!("\x1b[{};{}H", row + 1, col + 1);
     }
 
-    /// Apply SGR codes.
+    /// Apply SGR codes, computing a diff against current state.
     fn apply_sgr(&mut self, cell: &Cell) -> Option<String> {
+        use crate::cell::Color;
+
         let new_sgr = SGR {
             bold: cell.attrs.bold,
             italic: cell.attrs.italic,
@@ -158,12 +172,78 @@ impl Renderer {
             bg: Some(cell.bg),
         };
 
-        if new_sgr.to_sgr() == self.current_sgr.to_sgr() {
+        if new_sgr == self.current_sgr {
             return None; // No change needed
         }
 
+        let mut codes = Vec::new();
+
+        // Check each attribute individually
+        if new_sgr.bold != self.current_sgr.bold {
+            codes.push(if new_sgr.bold { 1 } else { 22 });
+        }
+        if new_sgr.italic != self.current_sgr.italic {
+            codes.push(if new_sgr.italic { 3 } else { 23 });
+        }
+        if new_sgr.underline != self.current_sgr.underline {
+            codes.push(if new_sgr.underline { 4 } else { 24 });
+        }
+        if new_sgr.strikethrough != self.current_sgr.strikethrough {
+            codes.push(if new_sgr.strikethrough { 9 } else { 29 });
+        }
+
+        // Foreground color
+        if new_sgr.fg != self.current_sgr.fg {
+            match &new_sgr.fg {
+                Some(Color::Default) | None => codes.push(39),
+                Some(Color::Black) => codes.push(30),
+                Some(Color::Red) => codes.push(31),
+                Some(Color::Green) => codes.push(32),
+                Some(Color::Yellow) => codes.push(33),
+                Some(Color::Blue) => codes.push(34),
+                Some(Color::Magenta) => codes.push(35),
+                Some(Color::Cyan) => codes.push(36),
+                Some(Color::White) => codes.push(37),
+                Some(Color::Indexed(n)) => codes.extend_from_slice(&[38, 5, *n as u8]),
+                Some(Color::Rgb(r, g, b)) => {
+                    codes.extend_from_slice(&[38, 2, *r as u8, *g as u8, *b as u8])
+                }
+            }
+        }
+
+        // Background color
+        if new_sgr.bg != self.current_sgr.bg {
+            match &new_sgr.bg {
+                Some(Color::Default) | None => codes.push(49),
+                Some(Color::Black) => codes.push(40),
+                Some(Color::Red) => codes.push(41),
+                Some(Color::Green) => codes.push(42),
+                Some(Color::Yellow) => codes.push(43),
+                Some(Color::Blue) => codes.push(44),
+                Some(Color::Magenta) => codes.push(45),
+                Some(Color::Cyan) => codes.push(46),
+                Some(Color::White) => codes.push(47),
+                Some(Color::Indexed(n)) => codes.extend_from_slice(&[48, 5, *n as u8]),
+                Some(Color::Rgb(r, g, b)) => {
+                    codes.extend_from_slice(&[48, 2, *r as u8, *g as u8, *b as u8])
+                }
+            }
+        }
+
         self.current_sgr = new_sgr;
-        Some(format!("\x1b[{}m", self.current_sgr.to_sgr()))
+
+        if codes.is_empty() {
+            return None;
+        }
+
+        Some(format!(
+            "\x1b[{}m",
+            codes
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join(";")
+        ))
     }
 
     /// Clear from cursor to end of line.
@@ -272,9 +352,6 @@ impl Renderer {
             if !any_dirty {
                 continue;
             }
-
-            // Reset SGR for fresh line
-            self.current_sgr = SGR::reset();
 
             // Render the row
             for col in 0..surface.width() {
