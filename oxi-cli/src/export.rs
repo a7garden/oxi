@@ -423,6 +423,7 @@ pub fn ansi_lines_to_html(lines: &[&str]) -> String {
 
 /// Information about a detected tool operation in message text.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum ToolOp {
     Bash {
         command: String,
@@ -991,10 +992,12 @@ fn render_tree_node(html: &mut String, node: &TreeNode, depth: usize) -> Result<
 // headers (#), unordered lists (- ), links, and paragraphs.
 // This is intentionally lightweight to avoid pulling in a heavy crate.
 
+#[allow(dead_code)]
 fn render_markdown(input: &str) -> String {
     render_markdown_with_options(input, &HtmlExportOptions::default())
 }
 
+#[allow(dead_code)]
 fn render_markdown_with_options(input: &str, options: &HtmlExportOptions) -> String {
     let mut out = String::with_capacity(input.len() * 2);
     let mut in_code_block = false;
