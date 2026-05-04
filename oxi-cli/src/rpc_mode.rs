@@ -943,24 +943,11 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
 
     // Spawn event forwarding task
     let output_clone = output.clone();
-    let mut server_mut = Arc::clone(&server);
-    // We need mutable access to take the event receiver - do it before wrapping
-    // Since RpcServer::new creates it, we can take it here:
-    let mut event_rx = None;
-    // SAFETY: We just created the server and haven't shared it yet
-    // We use get_mut to avoid requiring interior mutability for this one-time op
-    if let Some(s) = Arc::get_mut(&mut server_mut) {
-        event_rx = s.take_event_receiver();
-    }
-    // Fall back: create a new channel if we couldn't get_mut
-    let event_rx = match event_rx {
-        Some(rx) => rx,
-        None => {
-            // Server was already cloned - use a dummy receiver
-            let (_, rx) = mpsc::unbounded_channel();
-            rx
-        }
-    };
+    // Take the event receiver - server was just created so Arc hasn't been shared
+    let rx = Arc::get_mut(&mut server)
+        .expect("server Arc must be unique at construction")
+        .take_event_receiver();
+    let mut event_rx = rx.expect("event receiver must be available at construction");
     let event_handle = tokio::spawn(async move {
         while let Some(event) = event_rx.recv().await {
             let json = serde_json::to_value(&event).unwrap_or_default();
@@ -971,7 +958,7 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut line_reader = JsonlLineReader::new();
-    let mut raw_buf = [0u8; 4096];
+    let _raw_buf = [0u8; 4096];
 
     loop {
         // Check for shutdown

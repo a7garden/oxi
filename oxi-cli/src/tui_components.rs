@@ -7419,6 +7419,8 @@ pub struct SessionTreeNode {
     pub is_tool: bool,
     /// Whether this node has a custom label.
     pub has_label: bool,
+    /// Custom label text (if has_label is true).
+    pub custom_label: Option<String>,
     /// Timestamp string.
     pub timestamp: Option<String>,
     /// Child nodes.
@@ -7445,30 +7447,80 @@ impl TreeFilterMode {
             TreeFilterMode::All => "all",
         }
     }
+
+    /// Get all filter modes in order.
+    pub fn all_modes() -> &'static [TreeFilterMode] {
+        &[
+            TreeFilterMode::Default,
+            TreeFilterMode::NoTools,
+            TreeFilterMode::UserOnly,
+            TreeFilterMode::LabeledOnly,
+            TreeFilterMode::All,
+        ]
+    }
+
+    /// Cycle to the next filter mode.
+    pub fn next(&self) -> TreeFilterMode {
+        let modes = Self::all_modes();
+        let idx = modes.iter().position(|m| m == self).unwrap_or(0);
+        modes[(idx + 1) % modes.len()]
+    }
+
+    /// Cycle to the previous filter mode.
+    pub fn prev(&self) -> TreeFilterMode {
+        let modes = Self::all_modes();
+        let idx = modes.iter().position(|m| m == self).unwrap_or(0);
+        modes[(idx + modes.len() - 1) % modes.len()]
+    }
+}
+
+/// Gutter info for ASCII tree rendering.
+/// Tracks where vertical connector lines should appear.
+#[derive(Debug, Clone)]
+pub struct GutterInfo {
+    /// Position (indent level) where the connector was shown.
+    pub position: usize,
+    /// Whether to show │ (true) or spaces (false).
+    pub show: bool,
 }
 
 /// Flattened tree node for display.
 #[derive(Debug, Clone)]
 pub struct FlatTreeNode {
-    /// Reference to the tree node.
+    /// Reference to the tree node ID.
     pub node_id: String,
     /// Display label.
     pub label: String,
-    /// Indent level.
+    /// Custom label text.
+    pub custom_label: Option<String>,
+    /// Indent level (each level = 3 chars).
     pub indent: usize,
     /// Whether this node is the last sibling.
     pub is_last: bool,
     /// Whether to show a connector line.
     pub show_connector: bool,
+    /// Gutter info for ancestor branch points.
+    pub gutters: Vec<GutterInfo>,
     /// Whether this is a user message.
     pub is_user: bool,
     /// Whether this is a tool call.
     pub is_tool: bool,
     /// Whether this node is on the active path.
     pub is_active: bool,
+    /// Whether this node has a custom label.
+    pub has_label: bool,
 }
 
-/// Session tree navigation with branch display.
+/// Session tree navigation with branch display, fold/unfold, and filter support.
+///
+/// Ported from `tree-selector.ts` with:
+/// - ASCII tree display with proper gutter/connector rendering
+/// - Branch/leaf indicators (├─ └─ │)
+/// - Entry type icons (user=●, tool=⚙, assistant=○)
+/// - Active path markers (•)
+/// - Filter by type (default/no-tools/user-only/labeled-only/all)
+/// - Fold/unfold support
+/// - Inline search
 #[derive(Debug, Clone)]
 pub struct TreeSelector {
     /// Root tree nodes.
@@ -7489,18 +7541,22 @@ pub struct TreeSelector {
     pub query: String,
     /// Maximum visible items.
     pub max_visible: usize,
+    /// Set of folded node IDs.
+    pub folded_nodes: std::collections::HashSet<String>,
+    /// Scroll offset for rendering.
+    pub scroll_offset: usize,
 }
 
 impl TreeSelector {
     /// Create a new tree selector from root nodes.
     pub fn new(roots: Vec<SessionTreeNode>, current_leaf_id: Option<String>) -> Self {
         let active_path_ids = Self::build_active_path(&roots, current_leaf_id.as_deref());
-        let flat_nodes = Self::flatten_tree(&roots);
-        let filtered_nodes = flat_nodes.clone();
+        let flat_nodes = Self::flatten_tree(&roots, &active_path_ids);
         let selected_index = current_leaf_id
             .as_ref()
-            .and_then(|id| filtered_nodes.iter().position(|n| n.node_id == *id))
-            .unwrap_or_else(|| filtered_nodes.iter().position(|n| !n.is_tool).unwrap_or(0));
+            .and_then(|id| flat_nodes.iter().position(|n| n.node_id == *id))
+            .unwrap_or_else(|| flat_nodes.iter().position(|n| !n.is_tool).unwrap_or(0));
+        let filtered_nodes = flat_nodes.clone();
 
         Self {
             roots,
@@ -7512,7 +7568,21 @@ impl TreeSelector {
             filter_mode: TreeFilterMode::Default,
             query: String::new(),
             max_visible: 20,
+            folded_nodes: std::collections::HashSet::new(),
+            scroll_offset: 0,
         }
+    }
+
+    /// Create a tree selector with an initial filter mode.
+    pub fn new_with_filter_mode(
+        roots: Vec<SessionTreeNode>,
+        current_leaf_id: Option<String>,
+        initial_filter_mode: TreeFilterMode,
+    ) -> Self {
+        let mut sel = Self::new(roots, current_leaf_id);
+        sel.filter_mode = initial_filter_mode;
+        sel.apply_filter();
+        sel
     }
 
     fn build_active_path(
@@ -7521,7 +7591,6 @@ impl TreeSelector {
     ) -> std::collections::HashSet<String> {
         let mut path = std::collections::HashSet::new();
         if let Some(leaf) = leaf_id {
-            // Walk tree to find path
             fn walk(
                 node: &SessionTreeNode,
                 target: &str,
@@ -7549,50 +7618,116 @@ impl TreeSelector {
         path
     }
 
-    fn flatten_tree(roots: &[SessionTreeNode]) -> Vec<FlatTreeNode> {
+    fn flatten_tree(
+        roots: &[SessionTreeNode],
+        active_path_ids: &std::collections::HashSet<String>,
+    ) -> Vec<FlatTreeNode> {
         let mut result = Vec::new();
         let multiple_roots = roots.len() > 1;
+
+        // Determine which subtrees contain the active leaf
+        let contains_active = |node: &SessionTreeNode| -> bool {
+            if let Some(ref leaf) = active_path_ids.iter().next() {
+                fn check(n: &SessionTreeNode, target_id: &str) -> bool {
+                    if n.id == target_id {
+                        return true;
+                    }
+                    n.children.iter().any(|c| check(c, target_id))
+                }
+                // Check if any ID in active_path_ids is in this subtree
+                for id in active_path_ids.iter() {
+                    if node.id == *id || node.children.iter().any(|c| check(c, id)) {
+                        return true;
+                    }
+                }
+            }
+            false
+        };
 
         fn flatten_recursive(
             node: &SessionTreeNode,
             indent: usize,
             is_last: bool,
             show_connector: bool,
-            active_ids: &std::collections::HashSet<String>,
+            gutters: Vec<GutterInfo>,
             result: &mut Vec<FlatTreeNode>,
+            active_path_ids: &std::collections::HashSet<String>,
+            multiple_children: bool,
+            just_branched: bool,
         ) {
             result.push(FlatTreeNode {
                 node_id: node.id.clone(),
                 label: node.label.clone(),
+                custom_label: node.custom_label.clone(),
                 indent,
                 is_last,
                 show_connector,
+                gutters: gutters.clone(),
                 is_user: node.is_user,
                 is_tool: node.is_tool,
-                is_active: active_ids.contains(&node.id),
+                is_active: active_path_ids.contains(&node.id),
+                has_label: node.has_label,
             });
 
+            let multiple = node.children.len() > 1;
             for (i, child) in node.children.iter().enumerate() {
                 let child_is_last = i == node.children.len() - 1;
-                let child_indent = if node.children.len() > 1 {
+
+                // Calculate child indent
+                let child_indent = if multiple {
+                    indent + 1
+                } else if just_branched && indent > 0 {
                     indent + 1
                 } else {
                     indent
                 };
-                flatten_recursive(child, child_indent, child_is_last, true, active_ids, result);
+
+                // Build child gutters
+                let connector_shown = show_connector && !result.is_empty();
+                let connector_pos = if indent > 0 { indent - 1 } else { 0 };
+                let mut child_gutters = gutters.clone();
+                if connector_shown {
+                    child_gutters.push(GutterInfo {
+                        position: connector_pos,
+                        show: !is_last,
+                    });
+                }
+
+                flatten_recursive(
+                    child,
+                    child_indent,
+                    child_is_last,
+                    multiple,
+                    child_gutters,
+                    result,
+                    active_path_ids,
+                    multiple,
+                    multiple,
+                );
             }
         }
 
-        for (i, root) in roots.iter().enumerate() {
-            let is_last = i == roots.len() - 1;
+        // Sort roots so the one containing the active leaf comes first
+        let mut ordered_roots: Vec<&SessionTreeNode> = roots.iter().collect();
+        ordered_roots.sort_by(|a, b| {
+            let a_active = contains_active(a);
+            let b_active = contains_active(b);
+            b_active.cmp(&a_active)
+        });
+
+        for (i, root) in ordered_roots.iter().enumerate() {
+            let is_last = i == ordered_roots.len() - 1;
             let indent = if multiple_roots { 1 } else { 0 };
             flatten_recursive(
                 root,
                 indent,
                 is_last,
                 multiple_roots,
-                &std::collections::HashSet::new(), // placeholder, rebuilt later
+                Vec::new(),
                 &mut result,
+                active_path_ids,
+                false,
+                multiple_roots,
             );
         }
 
@@ -7602,16 +7737,106 @@ impl TreeSelector {
     /// Set the filter mode.
     pub fn set_filter_mode(&mut self, mode: TreeFilterMode) {
         self.filter_mode = mode;
+        self.folded_nodes.clear();
         self.apply_filter();
     }
 
-    /// Set search filter.
+    /// Cycle filter mode forward.
+    pub fn cycle_filter_forward(&mut self) {
+        self.filter_mode = self.filter_mode.next();
+        self.folded_nodes.clear();
+        self.apply_filter();
+    }
+
+    /// Cycle filter mode backward.
+    pub fn cycle_filter_backward(&mut self) {
+        self.filter_mode = self.filter_mode.prev();
+        self.folded_nodes.clear();
+        self.apply_filter();
+    }
+
+    /// Toggle between a specific filter and default.
+    pub fn toggle_filter(&mut self, mode: TreeFilterMode) {
+        if self.filter_mode == mode {
+            self.filter_mode = TreeFilterMode::Default;
+        } else {
+            self.filter_mode = mode;
+        }
+        self.folded_nodes.clear();
+        self.apply_filter();
+    }
+
+    /// Set search query.
     pub fn set_query(&mut self, query: String) {
         self.query = query;
+        self.folded_nodes.clear();
         self.apply_filter();
+    }
+
+    /// Append a character to the search query.
+    pub fn append_search(&mut self, ch: char) {
+        self.query.push(ch);
+        self.folded_nodes.clear();
+        self.apply_filter();
+    }
+
+    /// Delete last character from search query.
+    pub fn backspace_search(&mut self) {
+        self.query.pop();
+        self.folded_nodes.clear();
+        self.apply_filter();
+    }
+
+    /// Clear search query.
+    pub fn clear_search(&mut self) {
+        self.query.clear();
+        self.folded_nodes.clear();
+        self.apply_filter();
+    }
+
+    /// Toggle fold on the currently selected node.
+    pub fn toggle_fold(&mut self) {
+        if let Some(node_id) = self.selected_id().map(|s| s.to_string()) {
+            if self.folded_nodes.contains(&node_id) {
+                self.folded_nodes.remove(&node_id);
+            } else {
+                self.folded_nodes.insert(node_id);
+            }
+            self.apply_filter();
+        }
+    }
+
+    /// Fold the currently selected node.
+    pub fn fold(&mut self) {
+        if let Some(node_id) = self.selected_id().map(|s| s.to_string()) {
+            self.folded_nodes.insert(node_id);
+            self.apply_filter();
+        }
+    }
+
+    /// Unfold the currently selected node.
+    pub fn unfold(&mut self) {
+        if let Some(node_id) = self.selected_id().map(|s| s.to_string()) {
+            self.folded_nodes.remove(&node_id);
+            self.apply_filter();
+        }
     }
 
     fn apply_filter(&mut self) {
+        // Preserve last selected ID
+        let last_selected_id = self
+            .filtered_nodes
+            .get(self.selected_index)
+            .map(|n| n.node_id.clone());
+
+        let search_tokens: Vec<String> = self
+            .query
+            .to_lowercase()
+            .split_whitespace()
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+
         self.filtered_nodes = self
             .flat_nodes
             .iter()
@@ -7621,31 +7846,80 @@ impl TreeSelector {
                     TreeFilterMode::Default => true,
                     TreeFilterMode::NoTools => !node.is_tool,
                     TreeFilterMode::UserOnly => node.is_user,
-                    TreeFilterMode::LabeledOnly => !node.is_tool,
+                    TreeFilterMode::LabeledOnly => node.has_label,
                     TreeFilterMode::All => true,
                 }
             })
             .filter(|node| {
                 // Query filter
-                if self.query.is_empty() {
+                if search_tokens.is_empty() {
                     return true;
                 }
-                let lower_query = self.query.to_lowercase();
-                node.label.to_lowercase().contains(&lower_query)
-                    || node.node_id.to_lowercase().contains(&lower_query)
+                let lower_label = node.label.to_lowercase();
+                let lower_id = node.node_id.to_lowercase();
+                search_tokens
+                    .iter()
+                    .all(|token| lower_label.contains(token) || lower_id.contains(token))
             })
             .cloned()
             .collect();
 
-        self.selected_index = self
-            .selected_index
-            .min(self.filtered_nodes.len().saturating_sub(1));
+        // Filter out descendants of folded nodes
+        if !self.folded_nodes.is_empty() {
+            let mut skip_set = std::collections::HashSet::new();
+            for flat_node in &self.flat_nodes {
+                // Walk up to check if any ancestor is folded
+                let mut current_id = flat_node.node_id.as_str();
+                // We need parent info - use flat_nodes parent tracking
+                // For simplicity, check if the node's ID or any ancestor in folded set
+                if self.folded_nodes.contains(current_id) {
+                    // Mark this node's children for skipping (handled below)
+                }
+            }
+            // Build parent map from flat_nodes
+            let mut parent_map = std::collections::HashMap::new();
+            for node in &self.flat_nodes {
+                // Use indent to determine parent-child relationships
+                // Children have higher indent than their parent
+            }
+            // Simple approach: remove filtered nodes whose ancestors are folded
+            let mut new_filtered = Vec::new();
+            let mut folded_depth = std::collections::HashMap::new();
+            for node in &self.filtered_nodes {
+                let indent = node.indent;
+                // Remove any folded depth >= current indent
+                folded_depth.retain(|&k, _| k < indent);
+                if folded_depth.is_empty() || folded_depth.keys().all(|&k| k >= indent) {
+                    if self.folded_nodes.contains(&node.node_id) {
+                        folded_depth.insert(indent, true);
+                    }
+                    new_filtered.push(node.clone());
+                }
+            }
+            self.filtered_nodes = new_filtered;
+        }
+
+        // Try to restore selection
+        self.selected_index = if let Some(ref id) = last_selected_id {
+            self.filtered_nodes
+                .iter()
+                .position(|n| n.node_id == *id)
+                .unwrap_or_else(|| {
+                    self.filtered_nodes
+                        .len()
+                        .saturating_sub(1)
+                })
+        } else {
+            self.selected_index
+                .min(self.filtered_nodes.len().saturating_sub(1))
+        };
     }
 
     /// Move selection up.
     pub fn move_up(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
+            self.adjust_scroll();
         }
     }
 
@@ -7654,6 +7928,28 @@ impl TreeSelector {
         let max = self.filtered_nodes.len().saturating_sub(1);
         if self.selected_index < max {
             self.selected_index += 1;
+            self.adjust_scroll();
+        }
+    }
+
+    /// Move selection up by a page.
+    pub fn page_up(&mut self) {
+        self.selected_index = self.selected_index.saturating_sub(self.max_visible);
+        self.adjust_scroll();
+    }
+
+    /// Move selection down by a page.
+    pub fn page_down(&mut self) {
+        let max = self.filtered_nodes.len().saturating_sub(1);
+        self.selected_index = (self.selected_index + self.max_visible).min(max);
+        self.adjust_scroll();
+    }
+
+    fn adjust_scroll(&mut self) {
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        } else if self.selected_index >= self.scroll_offset + self.max_visible {
+            self.scroll_offset = self.selected_index - self.max_visible + 1;
         }
     }
 
@@ -7664,37 +7960,78 @@ impl TreeSelector {
             .map(|n| n.node_id.as_str())
     }
 
+    /// Get the status label for the current filter mode.
+    fn get_status_labels(&self) -> String {
+        let mut labels = String::new();
+        match self.filter_mode {
+            TreeFilterMode::NoTools => labels.push_str(" [no-tools]"),
+            TreeFilterMode::UserOnly => labels.push_str(" [user]"),
+            TreeFilterMode::LabeledOnly => labels.push_str(" [labeled]"),
+            TreeFilterMode::All => labels.push_str(" [all]"),
+            TreeFilterMode::Default => {}
+        }
+        labels
+    }
+
     /// Render the tree selector.
     pub fn render(&self, width: usize) -> Vec<String> {
         let mut lines = Vec::new();
 
-        lines.push(format!(
-            "\x1b[1mSession Tree\x1b[0m \x1b[2m(filter: {})\x1b[0m",
-            self.filter_mode.label()
-        ));
+        // Header
         lines.push(String::new());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines.push("\x1b[1m  Session Tree\x1b[0m".to_string());
+
+        // Search line
+        if self.query.is_empty() {
+            lines.push("\x1b[2m  Type to search:\x1b[0m".to_string());
+        } else {
+            lines.push(format!(
+                "  \x1b[2mType to search:\x1b[0m \x1b[36m{}\x1b[0m",
+                self.query
+            ));
+        }
+
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
 
         if self.filtered_nodes.is_empty() {
-            lines.push("\x1b[2m  No nodes to display\x1b[0m".to_string());
+            lines.push("\x1b[2m  No entries found\x1b[0m".to_string());
+            lines.push(format!(
+                "\x1b[2m  (0/0){}\x1b[0m",
+                self.get_status_labels()
+            ));
+            lines
+                .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
             return lines;
         }
 
         // Calculate visible range
         let total = self.filtered_nodes.len();
-        let half = self.max_visible / 2;
-        let start = if self.selected_index >= half {
-            (self.selected_index - half).min(total.saturating_sub(self.max_visible))
-        } else {
-            0
-        };
+        let start = self.scroll_offset;
         let end = (start + self.max_visible).min(total);
 
         for i in start..end {
             let node = &self.filtered_nodes[i];
             let is_selected = i == self.selected_index;
+            let is_folded = self.folded_nodes.contains(&node.node_id);
 
-            // Build tree connector
-            let indent_str = "  ".repeat(node.indent);
+            // Cursor
+            let cursor = if is_selected {
+                "\x1b[36m› \x1b[0m"
+            } else {
+                "  "
+            };
+
+            // Build prefix with gutters
+            let multiple_roots = self.roots.len() > 1;
+            let display_indent = if multiple_roots {
+                node.indent.saturating_sub(1)
+            } else {
+                node.indent
+            };
+
             let connector = if node.show_connector {
                 if node.is_last {
                     "└─ "
@@ -7705,7 +8042,57 @@ impl TreeSelector {
                 ""
             };
 
-            // Node icon
+            // Build indent with gutter lines
+            let mut prefix_chars = String::new();
+            let total_chars = display_indent * 3;
+
+            for pos in 0..total_chars {
+                let level = pos / 3;
+                let pos_in_level = pos % 3;
+
+                // Check if there's a gutter at this level
+                if let Some(gutter) = node.gutters.iter().find(|g| g.position == level) {
+                    if pos_in_level == 0 {
+                        prefix_chars.push(if gutter.show { '│' } else { ' ' });
+                    } else {
+                        prefix_chars.push(' ');
+                    }
+                } else {
+                    prefix_chars.push(' ');
+                }
+            }
+
+            // Fold marker for nodes without connectors (roots)
+            let fold_marker = if is_folded && !node.show_connector {
+                "\x1b[36m⊞ \x1b[0m"
+            } else {
+                ""
+            };
+
+            // Fold indicator in connector
+            let connector_display = if node.show_connector && is_folded {
+                // Replace last char of connector with fold marker
+                let base = if node.is_last { "└" } else { "├" };
+                format!("{}⊞ ", base)
+            } else {
+                connector.to_string()
+            };
+
+            // Active path marker
+            let path_marker = if node.is_active {
+                "\x1b[36m• \x1b[0m"
+            } else {
+                ""
+            };
+
+            // Custom label
+            let label = node
+                .custom_label
+                .as_ref()
+                .map(|l| format!("\x1b[33m[{}] \x1b[0m", l))
+                .unwrap_or_default();
+
+            // Node icon based on type
             let icon = if node.is_user {
                 "\x1b[36m●\x1b[0m"
             } else if node.is_tool {
@@ -7714,8 +8101,8 @@ impl TreeSelector {
                 "\x1b[2m○\x1b[0m"
             };
 
-            // Active path highlight
-            let label = if is_selected {
+            // Display label
+            let display_label = if is_selected {
                 format!("\x1b[1m\x1b[36m{}\x1b[0m", node.label)
             } else if node.is_active {
                 format!("\x1b[36m{}\x1b[0m", node.label)
@@ -7723,22 +8110,47 @@ impl TreeSelector {
                 node.label.clone()
             };
 
-            let line = format!("{}{}{}{}", indent_str, connector, icon, label);
-            lines.push(truncate_str(&line, width));
+            let line = format!(
+                "{}\x1b[2m{}\x1b[0m{}{}{}{}{}{}",
+                cursor,
+                prefix_chars,
+                connector_display,
+                fold_marker,
+                path_marker,
+                label,
+                icon,
+                display_label
+            );
+
+            if is_selected {
+                // Apply selected background
+                lines.push(truncate_str(
+                    &format!("\x1b[48;5;24m {}\x1b[0m", &line[..line.len().min(width)]),
+                    width,
+                ));
+            } else {
+                lines.push(truncate_str(&line, width));
+            }
         }
 
-        // Scroll indicator
-        if start > 0 || end < total {
-            lines.push(format!(
-                "\x1b[2m  ({}/{})\x1b[0m",
-                self.selected_index + 1,
-                total
-            ));
-        }
+        // Status line
+        lines.push(format!(
+            "\x1b[2m  ({}/{}){}\x1b[0m",
+            self.selected_index + 1,
+            total,
+            self.get_status_labels()
+        ));
 
         // Hints
         lines.push(String::new());
-        lines.push("\x1b[2m  Enter to jump · Esc to close · F to filter\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines.push(
+            "\x1b[2m  ↑/↓: move · ←/→: page · Enter: jump · Esc: close · F: filter · Tab: cycle\x1b[0m"
+                .to_string(),
+        );
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
 
         lines
     }
