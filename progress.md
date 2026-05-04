@@ -3,6 +3,36 @@
 ## Status
 Completed
 
+## AgentSession Integration into Interactive Mode
+- [x] Replace bare `Agent` usage with `AgentSession` in `tui_interactive.rs`
+- [x] Replace bare `Agent` usage with `AgentSession` in `interactive.rs`
+- [x] Wire up AgentSession events (compact, retry, model change, thinking level)
+- [x] Connect to session_manager (save/load sessions via SessionManager)
+- [x] Connect to settings_manager (settings changes reflect in agent)
+- [x] Connect to extension_runner (extension hooks)
+- [x] Update command handlers to use AgentSession methods
+- [x] Add `agent_ref()` method to AgentSession for direct agent access
+- [x] `cargo check -p oxi-cli` passes
+- [x] All existing commands still work
+- [x] Both InteractiveMode implementations use AgentSession
+
+## Files Changed
+- `oxi-cli/src/tui_interactive.rs` — Full rewrite to use AgentSession:
+  - Creates AgentSession via runtime factory
+  - Subscribes to SessionEvent channel for compact/retry/model/thinking events
+  - Handles /model, /compact, /session, /settings, /name, /help, /quit, /clear commands via AgentSession
+  - Fires async compaction via `session.compact()`
+  - Shows compaction/retry/model change notifications in chat
+  - Ctrl+C during streaming calls `agent_session.abort()`
+- `oxi-cli/src/interactive.rs` — Integrated AgentSession:
+  - `run_interactive()` now creates AgentSession wrapping App's agent
+  - Uses `agent_session.agent_ref()` for worker thread
+  - Command handlers use `agent_session.set_model()`, `agent_session.model_id()`, `agent_session.thinking_level()`, etc.
+  - `/settings` shows session-aware info
+  - `/new` uses `agent_session.reset()`
+  - Added imports for AgentSession and SessionManager
+- `oxi-cli/src/agent_session.rs` — Added `agent_ref()` method
+
 ## Keys Port (pi-mono → oxi-tui)
 - [x] Port `pi-mono/packages/tui/src/keys.ts` to `oxi-tui/src/keys.rs`
 - [x] KeyCode enum + KeyModifiers (using existing event.rs types)
