@@ -869,6 +869,7 @@ theme = "dracula"
     #[test]
     fn test_load_from_dir_no_config() {
         // Clean env vars that load_from() reads via apply_env()
+        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&[
             "OXI_MODEL",
             "OXI_PROVIDER",
@@ -1004,6 +1005,7 @@ theme = "dracula"
 
     #[test]
     fn test_effective_session_dir_default() {
+        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         let settings = Settings::default();
         let dir = settings.effective_session_dir().unwrap();
@@ -1012,6 +1014,7 @@ theme = "dracula"
 
     #[test]
     fn test_effective_session_dir_from_field() {
+        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         let mut settings = Settings::default();
         settings.session_dir = Some(PathBuf::from("/tmp/oxi-sessions"));
@@ -1023,6 +1026,7 @@ theme = "dracula"
 
     #[test]
     fn test_effective_session_dir_from_env() {
+        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         env::set_var("OXI_SESSION_DIR", "/tmp/env-sessions");
         let settings = Settings::default();
