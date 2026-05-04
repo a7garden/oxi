@@ -19,13 +19,9 @@ use rand::RngCore;
 #[derive(Debug, Clone)]
 pub enum AssistantContentBlock {
     /// Text content with optional markdown
-    Text {
-        text: String,
-    },
+    Text { text: String },
     /// Thinking/reasoning block (collapsible)
-    Thinking {
-        thinking: String,
-    },
+    Thinking { thinking: String },
     /// Tool call invocation
     ToolCall {
         id: String,
@@ -75,9 +71,8 @@ impl AssistantMessage {
 
     /// Add a text block
     pub fn add_text(&mut self, text: impl Into<String>) {
-        self.content.push(AssistantContentBlock::Text {
-            text: text.into(),
-        });
+        self.content
+            .push(AssistantContentBlock::Text { text: text.into() });
     }
 
     /// Add a thinking block
@@ -88,7 +83,12 @@ impl AssistantMessage {
     }
 
     /// Add a tool call block
-    pub fn add_tool_call(&mut self, id: impl Into<String>, name: impl Into<String>, arguments: impl Into<String>) {
+    pub fn add_tool_call(
+        &mut self,
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: impl Into<String>,
+    ) {
         self.content.push(AssistantContentBlock::ToolCall {
             id: id.into(),
             name: name.into(),
@@ -847,7 +847,9 @@ impl LoginDialog {
 
     /// Open the authorization URL in the default browser
     pub fn open_auth_url(&self, url: &str) -> Result<(), String> {
-        crate::oauth_server::open_browser(url).map(|_child| ()).map_err(|e| format!("Failed to open browser: {}", e))
+        crate::oauth_server::open_browser(url)
+            .map(|_child| ())
+            .map_err(|e| format!("Failed to open browser: {}", e))
     }
 
     /// Start the OAuth callback server
@@ -1364,7 +1366,11 @@ pub struct ToolExecution {
 }
 
 impl ToolExecution {
-    pub fn new(tool_name: impl Into<String>, tool_call_id: impl Into<String>, args: serde_json::Value) -> Self {
+    pub fn new(
+        tool_name: impl Into<String>,
+        tool_call_id: impl Into<String>,
+        args: serde_json::Value,
+    ) -> Self {
         Self {
             tool_name: tool_name.into(),
             tool_call_id: tool_call_id.into(),
@@ -1405,7 +1411,8 @@ impl ToolExecution {
     pub fn format_arguments(&self) -> String {
         if self.arguments.is_null() {
             String::new()
-        } else if let Ok(obj) = serde_json::from_value::<serde_json::Value>(self.arguments.clone()) {
+        } else if let Ok(obj) = serde_json::from_value::<serde_json::Value>(self.arguments.clone())
+        {
             serde_json::to_string_pretty(&obj).unwrap_or_else(|_| self.arguments.to_string())
         } else {
             self.arguments.to_string()
@@ -1451,7 +1458,11 @@ impl ToolExecution {
 
         // Result
         if let Some(ref result) = self.result {
-            let result_fg = if result.is_error { "\x1b[31m" } else { fg_color };
+            let result_fg = if result.is_error {
+                "\x1b[31m"
+            } else {
+                fg_color
+            };
 
             if self.expanded {
                 // Show full result
@@ -1616,7 +1627,7 @@ impl BashExecution {
     pub fn append_output(&mut self, chunk: &str) {
         // Strip ANSI codes and normalize line endings
         let clean = strip_ansi(chunk).replace("\r\n", "\n").replace("\r", "\n");
-        
+
         // Append to output
         if !self.output.is_empty() && !clean.is_empty() {
             self.output.push_str(&clean);
@@ -1680,7 +1691,7 @@ impl BashExecution {
     /// Render the bash execution display
     pub fn render(&self) -> String {
         let mut output = String::new();
-        
+
         // Preview line limit (when not expanded)
         const PREVIEW_LINES: usize = 20;
 
@@ -1708,7 +1719,7 @@ impl BashExecution {
                     &lines[..]
                 }
             };
-            
+
             // Muted color for output
             for line in lines_to_show {
                 output.push_str(&format!("\x1b[2m{}\x1b[0m\n", line));
@@ -1730,10 +1741,7 @@ impl BashExecution {
                 if self.expanded {
                     status_parts.push("\x1b[2m(to collapse)\x1b[0m".to_string());
                 } else {
-                    status_parts.push(format!(
-                        "\x1b[2m... {} more lines\x1b[0m",
-                        hidden_lines
-                    ));
+                    status_parts.push(format!("\x1b[2m... {} more lines\x1b[0m", hidden_lines));
                 }
             }
 
@@ -1770,7 +1778,7 @@ impl BashExecution {
 fn strip_ansi(input: &str) -> String {
     let mut result = String::with_capacity(input.len());
     let mut chars = input.chars().peekable();
-    
+
     while let Some(c) = chars.next() {
         if c == '\x1b' {
             // CSI sequence
@@ -1788,7 +1796,7 @@ fn strip_ansi(input: &str) -> String {
             result.push(c);
         }
     }
-    
+
     result
 }
 
@@ -1848,9 +1856,7 @@ impl SummaryMessage {
                     tokens_before
                 )
             }
-            SummaryMessageType::Branch => {
-                "\x1b[1m[branch]\x1b[0m Branch Summary".to_string()
-            }
+            SummaryMessageType::Branch => "\x1b[1m[branch]\x1b[0m Branch Summary".to_string(),
         };
 
         output.push_str(&format!("\x1b[48;5;24m {} \x1b[0m\n", label));
@@ -1862,9 +1868,7 @@ impl SummaryMessage {
             output.push('\n');
         } else {
             // Show collapsed hint
-            output.push_str(&format!(
-                "\x1b[2m(to expand)\x1b[0m\n",
-            ));
+            output.push_str(&format!("\x1b[2m(to expand)\x1b[0m\n",));
         }
 
         output
@@ -2096,11 +2100,7 @@ pub struct ExtensionSelector {
 
 impl ExtensionSelector {
     /// Create a new extension selector with a title and list of options.
-    pub fn new(
-        title: impl Into<String>,
-        options: Vec<String>,
-        timeout_secs: Option<u64>,
-    ) -> Self {
+    pub fn new(title: impl Into<String>, options: Vec<String>, timeout_secs: Option<u64>) -> Self {
         Self {
             title: title.into(),
             selected_index: 0,
@@ -2292,10 +2292,7 @@ pub struct CustomMessageComponent {
 
 impl CustomMessageComponent {
     /// Create a new custom message component.
-    pub fn new(
-        custom_type: impl Into<String>,
-        content: impl Into<String>,
-    ) -> Self {
+    pub fn new(custom_type: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             custom_type: custom_type.into(),
             content: content.into(),
@@ -2380,13 +2377,9 @@ pub enum LoginDialogPhase {
         cursor_pos: usize,
     },
     /// Showing informational text.
-    Info {
-        lines: Vec<String>,
-    },
+    Info { lines: Vec<String> },
     /// Showing a waiting/polling message.
-    Waiting {
-        message: String,
-    },
+    Waiting { message: String },
     /// Login completed (success or failure).
     Completed {
         success: bool,
@@ -2412,10 +2405,7 @@ pub struct ProviderLoginDialog {
 
 impl ProviderLoginDialog {
     /// Create a new provider login dialog.
-    pub fn new(
-        provider_id: impl Into<String>,
-        provider_name: impl Into<String>,
-    ) -> Self {
+    pub fn new(provider_id: impl Into<String>, provider_name: impl Into<String>) -> Self {
         Self {
             provider_id: provider_id.into(),
             provider_name: provider_name.into(),
@@ -2448,11 +2438,7 @@ impl ProviderLoginDialog {
     }
 
     /// Transition to the prompt phase.
-    pub fn show_prompt(
-        &mut self,
-        message: impl Into<String>,
-        placeholder: Option<String>,
-    ) {
+    pub fn show_prompt(&mut self, message: impl Into<String>, placeholder: Option<String>) {
         self.phase = LoginDialogPhase::Prompt {
             message: message.into(),
             placeholder,
@@ -2477,7 +2463,9 @@ impl ProviderLoginDialog {
     pub fn show_progress(&mut self, message: &str) {
         // Progress messages are displayed during waiting/polling
         match &mut self.phase {
-            LoginDialogPhase::Waiting { message: ref mut msg } => {
+            LoginDialogPhase::Waiting {
+                message: ref mut msg,
+            } => {
                 msg.push_str(&format!("\n{}", message));
             }
             _ => {
@@ -2497,14 +2485,10 @@ impl ProviderLoginDialog {
     pub fn input_char(&mut self, c: char) {
         match &mut self.phase {
             LoginDialogPhase::ManualInput {
-                value,
-                cursor_pos,
-                ..
+                value, cursor_pos, ..
             }
             | LoginDialogPhase::Prompt {
-                value,
-                cursor_pos,
-                ..
+                value, cursor_pos, ..
             } => {
                 value.insert(*cursor_pos, c);
                 *cursor_pos += c.len_utf8();
@@ -2517,14 +2501,10 @@ impl ProviderLoginDialog {
     pub fn backspace(&mut self) {
         match &mut self.phase {
             LoginDialogPhase::ManualInput {
-                value,
-                cursor_pos,
-                ..
+                value, cursor_pos, ..
             }
             | LoginDialogPhase::Prompt {
-                value,
-                cursor_pos,
-                ..
+                value, cursor_pos, ..
             } => {
                 if *cursor_pos > 0 {
                     let prev = value[..*cursor_pos]
@@ -2571,9 +2551,7 @@ impl ProviderLoginDialog {
             LoginDialogPhase::ShowAuth { url, instructions } => {
                 lines.push(String::new());
                 lines.push(format!("\x1b[36m{}\x1b[0m", url));
-                lines.push(format!(
-                    "\x1b[2mCmd+click to open\x1b[0m"
-                ));
+                lines.push(format!("\x1b[2mCmd+click to open\x1b[0m"));
                 if let Some(instr) = instructions {
                     lines.push(String::new());
                     lines.push(format!("\x1b[33m{}\x1b[0m", instr));
@@ -2601,9 +2579,7 @@ impl ProviderLoginDialog {
                     lines.push(format!("\x1b[2me.g., {}\x1b[0m", ph));
                 }
                 lines.push(format!("> {}", value));
-                lines.push(format!(
-                    "\x1b[2m(Esc to cancel, Enter to submit)\x1b[0m"
-                ));
+                lines.push(format!("\x1b[2m(Esc to cancel, Enter to submit)\x1b[0m"));
             }
             LoginDialogPhase::Info { lines: info_lines } => {
                 lines.push(String::new());
@@ -2618,19 +2594,12 @@ impl ProviderLoginDialog {
                 lines.push(format!("\x1b[2m{}\x1b[0m", message));
                 lines.push(format!("\x1b[2m(Esc to cancel)\x1b[0m"));
             }
-            LoginDialogPhase::Completed {
-                success,
-                message,
-            } => {
+            LoginDialogPhase::Completed { success, message } => {
                 lines.push(String::new());
                 if *success {
-                    lines.push(format!(
-                        "\x1b[32m✓ Login successful\x1b[0m"
-                    ));
+                    lines.push(format!("\x1b[32m✓ Login successful\x1b[0m"));
                 } else {
-                    lines.push(format!(
-                        "\x1b[31m✗ Login failed\x1b[0m"
-                    ));
+                    lines.push(format!("\x1b[31m✗ Login failed\x1b[0m"));
                 }
                 if let Some(msg) = message {
                     lines.push(msg.clone());
@@ -2669,13 +2638,9 @@ pub enum ProviderConfigStatus {
     /// Not configured at all.
     Unconfigured,
     /// Configured with the matching auth type.
-    Configured {
-        label: String,
-    },
+    Configured { label: String },
     /// Configured with a different auth type.
-    PartiallyConfigured {
-        label: String,
-    },
+    PartiallyConfigured { label: String },
 }
 
 /// OAuth selector component.
@@ -2713,10 +2678,7 @@ pub enum OAuthSelectorMode {
 
 impl OAuthSelector {
     /// Create a new OAuth selector.
-    pub fn new(
-        mode: OAuthSelectorMode,
-        providers: Vec<AuthProviderInfo>,
-    ) -> Self {
+    pub fn new(mode: OAuthSelectorMode, providers: Vec<AuthProviderInfo>) -> Self {
         let filtered_indices: Vec<usize> = (0..providers.len()).collect();
         Self {
             mode,
@@ -2820,10 +2782,7 @@ impl OAuthSelector {
                     let is_selected = vi == self.selected_index;
 
                     // Status indicator
-                    let status_str = match self
-                        .config_status
-                        .get(&provider.id)
-                    {
+                    let status_str = match self.config_status.get(&provider.id) {
                         Some(ProviderConfigStatus::Configured { label }) => {
                             format!("\x1b[32m ✓ {}\x1b[0m", label)
                         }
@@ -2840,15 +2799,9 @@ impl OAuthSelector {
                     };
 
                     if is_selected {
-                        lines.push(format!(
-                            "\x1b[36m→ {}\x1b[0m{}",
-                            provider.name, status_str
-                        ));
+                        lines.push(format!("\x1b[36m→ {}\x1b[0m{}", provider.name, status_str));
                     } else {
-                        lines.push(format!(
-                            "  \x1b[37m{}\x1b[0m{}",
-                            provider.name, status_str
-                        ));
+                        lines.push(format!("  \x1b[37m{}\x1b[0m{}", provider.name, status_str));
                     }
                 }
             }
@@ -2958,16 +2911,15 @@ const ARMIN_BYTES_PER_ROW: usize = (ARMIN_WIDTH + 7) / 8; // ceil(31/8) = 4
 const ARMIN_DISPLAY_HEIGHT: usize = (ARMIN_HEIGHT + 1) / 2; // half-block rendering
 
 const ARMIN_BITS: [u8; 144] = [
-    0xff, 0xff, 0xff, 0x7f, 0xff, 0xf0, 0xff, 0x7f, 0xff, 0xed, 0xff, 0x7f, 0xff, 0xdb, 0xff,
-    0x7f, 0xff, 0xb7, 0xff, 0x7f, 0xff, 0x77, 0xfe, 0x7f, 0x3f, 0xf8, 0xfe, 0x7f, 0xdf, 0xff,
-    0xfe, 0x7f, 0xdf, 0x3f, 0xfc, 0x7f, 0x9f, 0xc3, 0xfb, 0x7f, 0x6f, 0xfc, 0xf4, 0x7f, 0xf7,
-    0x0f, 0xf7, 0x7f, 0xf7, 0xff, 0xf7, 0x7f, 0xf7, 0xff, 0xe3, 0x7f, 0xf7, 0x07, 0xe8, 0x7f,
-    0xef, 0xf8, 0x67, 0x70, 0x0f, 0xff, 0xbb, 0x6f, 0xf1, 0x00, 0xd0, 0x5b, 0xfd, 0x3f, 0xec,
-    0x53, 0xc1, 0xff, 0xef, 0x57, 0x9f, 0xfd, 0xee, 0x5f, 0x9f, 0xfc, 0xae, 0x5f, 0x1f, 0x78,
-    0xac, 0x5f, 0x3f, 0x00, 0x50, 0x6c, 0x7f, 0x00, 0xdc, 0x77, 0xff, 0xc0, 0x3f, 0x78, 0xff,
-    0x01, 0xf8, 0x7f, 0xff, 0x03, 0x9c, 0x78, 0xff, 0x07, 0x8c, 0x7c, 0xff, 0x0f, 0xce, 0x78,
-    0xff, 0xff, 0xcf, 0x7f, 0xff, 0xff, 0xcf, 0x78, 0xff, 0xff, 0xdf, 0x78, 0xff, 0xff, 0xdf,
-    0x7d, 0xff, 0xff, 0x3f, 0x7e, 0xff, 0xff, 0xff, 0x7f,
+    0xff, 0xff, 0xff, 0x7f, 0xff, 0xf0, 0xff, 0x7f, 0xff, 0xed, 0xff, 0x7f, 0xff, 0xdb, 0xff, 0x7f,
+    0xff, 0xb7, 0xff, 0x7f, 0xff, 0x77, 0xfe, 0x7f, 0x3f, 0xf8, 0xfe, 0x7f, 0xdf, 0xff, 0xfe, 0x7f,
+    0xdf, 0x3f, 0xfc, 0x7f, 0x9f, 0xc3, 0xfb, 0x7f, 0x6f, 0xfc, 0xf4, 0x7f, 0xf7, 0x0f, 0xf7, 0x7f,
+    0xf7, 0xff, 0xf7, 0x7f, 0xf7, 0xff, 0xe3, 0x7f, 0xf7, 0x07, 0xe8, 0x7f, 0xef, 0xf8, 0x67, 0x70,
+    0x0f, 0xff, 0xbb, 0x6f, 0xf1, 0x00, 0xd0, 0x5b, 0xfd, 0x3f, 0xec, 0x53, 0xc1, 0xff, 0xef, 0x57,
+    0x9f, 0xfd, 0xee, 0x5f, 0x9f, 0xfc, 0xae, 0x5f, 0x1f, 0x78, 0xac, 0x5f, 0x3f, 0x00, 0x50, 0x6c,
+    0x7f, 0x00, 0xdc, 0x77, 0xff, 0xc0, 0x3f, 0x78, 0xff, 0x01, 0xf8, 0x7f, 0xff, 0x03, 0x9c, 0x78,
+    0xff, 0x07, 0x8c, 0x7c, 0xff, 0x0f, 0xce, 0x78, 0xff, 0xff, 0xcf, 0x7f, 0xff, 0xff, 0xcf, 0x78,
+    0xff, 0xff, 0xdf, 0x78, 0xff, 0xff, 0xdf, 0x7d, 0xff, 0xff, 0x3f, 0x7e, 0xff, 0xff, 0xff, 0x7f,
 ];
 
 /// Get pixel at (x, y): true = foreground, false = background
@@ -3092,11 +3044,11 @@ impl DaxnutsComponent {
     /// Render the component at the given terminal width
     pub fn render(&self, width: usize) -> Vec<String> {
         let reset = "\x1b[0m";
-        let accent = "\x1b[38;5;75m";  // light blue
+        let accent = "\x1b[38;5;75m"; // light blue
         let success = "\x1b[32m";
         let muted = "\x1b[90m";
         let dim = "\x1b[2m";
-        let link = "\x1b[36m";     // cyan for links
+        let link = "\x1b[36m"; // cyan for links
 
         let mut lines: Vec<String> = Vec::new();
         lines.push(String::new());
@@ -3114,16 +3066,10 @@ impl DaxnutsComponent {
             &format!("{}\"Powered by daxnuts\"{}", success, reset),
             width,
         ));
-        lines.push(center_ansi(
-            &format!("{}— @thdxr{}", muted, reset),
-            width,
-        ));
+        lines.push(center_ansi(&format!("{}— @thdxr{}", muted, reset), width));
 
         lines.push(String::new());
-        lines.push(center_ansi(
-            &format!("{}Try OpenCode{}", dim, reset),
-            width,
-        ));
+        lines.push(center_ansi(&format!("{}Try OpenCode{}", dim, reset), width));
         lines.push(center_ansi(
             &format!("{}https://mistral.ai/news/mistral-vibe-2-0{}", link, reset),
             width,
@@ -3173,7 +3119,11 @@ fn build_dax_image() -> Vec<String> {
         let mut line = String::new();
         for x in 0..DAX_IMG_WIDTH {
             let (tr, tg, tb) = pixels[row][x];
-            let (br, bg_val, bb) = pixels.get(row + 1).and_then(|r| r.get(x)).copied().unwrap_or((tr, tg, tb));
+            let (br, bg_val, bb) = pixels
+                .get(row + 1)
+                .and_then(|r| r.get(x))
+                .copied()
+                .unwrap_or((tr, tg, tb));
             // fg = bottom pixel, bg = top pixel
             line.push_str(&format!(
                 "\x1b[38;2;{};{};{}m\x1b[48;2;{};{};{}m▄",
@@ -3329,13 +3279,7 @@ impl EarendilAnnouncement {
         lines.extend(border.render(width));
 
         // Title (bold, accent)
-        lines.push(format!(
-            " {}{}{}{}",
-            accent,
-            bold,
-            self.title,
-            reset
-        ));
+        lines.push(format!(" {}{}{}{}", accent, bold, self.title, reset));
 
         // Spacer
         lines.push(String::new());
@@ -3492,30 +3436,10 @@ impl ToolExecutionDisplay {
 
         // Determine colors based on state
         let (bg_color, fg_color, status_icon, status_label) = match self.state {
-            ToolExecutionState::Pending => (
-                "\x1b[48;5;240m",
-                "\x1b[38;5;250m",
-                "○",
-                "pending",
-            ),
-            ToolExecutionState::Running => (
-                "\x1b[48;5;239m",
-                "\x1b[38;5;250m",
-                "◐",
-                "running",
-            ),
-            ToolExecutionState::Success => (
-                "\x1b[48;5;28m",
-                "\x1b[38;5;255m",
-                "●",
-                "done",
-            ),
-            ToolExecutionState::Error => (
-                "\x1b[48;5;196m",
-                "\x1b[38;5;255m",
-                "✗",
-                "error",
-            ),
+            ToolExecutionState::Pending => ("\x1b[48;5;240m", "\x1b[38;5;250m", "○", "pending"),
+            ToolExecutionState::Running => ("\x1b[48;5;239m", "\x1b[38;5;250m", "◐", "running"),
+            ToolExecutionState::Success => ("\x1b[48;5;28m", "\x1b[38;5;255m", "●", "done"),
+            ToolExecutionState::Error => ("\x1b[48;5;196m", "\x1b[38;5;255m", "✗", "error"),
         };
 
         // ── Header line: status icon + tool name + elapsed time ──
@@ -3554,20 +3478,14 @@ impl ToolExecutionDisplay {
         if !args_str.is_empty() {
             if self.expanded || args_str.len() < 200 {
                 for arg_line in args_str.lines() {
-                    lines.push(format!(
-                        "  \x1b[38;5;246m{}{}",
-                        arg_line, reset
-                    ));
+                    lines.push(format!("  \x1b[38;5;246m{}{}", arg_line, reset));
                 }
             } else {
                 // Show first few lines, then truncation
                 let arg_lines: Vec<&str> = args_str.lines().collect();
                 let show = 3.min(arg_lines.len());
                 for line in &arg_lines[..show] {
-                    lines.push(format!(
-                        "  \x1b[38;5;246m{}{}",
-                        line, reset
-                    ));
+                    lines.push(format!("  \x1b[38;5;246m{}{}", line, reset));
                 }
                 if arg_lines.len() > show {
                     lines.push(format!(
@@ -3581,10 +3499,7 @@ impl ToolExecutionDisplay {
 
         // ── Partial indicator ──
         if self.is_partial && self.state == ToolExecutionState::Pending {
-            lines.push(format!(
-                "  \x1b[90m(receiving arguments...){}",
-                reset
-            ));
+            lines.push(format!("  \x1b[90m(receiving arguments...){}", reset));
         }
 
         // ── Result section ──
@@ -3598,22 +3513,12 @@ impl ToolExecutionDisplay {
             if let Some(text) = result.get_text() {
                 if self.expanded {
                     for text_line in text.lines() {
-                        lines.push(format!(
-                            "  {}{}{}",
-                            result_fg,
-                            text_line,
-                            reset
-                        ));
+                        lines.push(format!("  {}{}{}", result_fg, text_line, reset));
                     }
                 } else {
                     let truncated = truncate_text(&text, 500);
                     for text_line in truncated.lines() {
-                        lines.push(format!(
-                            "  {}{}{}",
-                            result_fg,
-                            text_line,
-                            reset
-                        ));
+                        lines.push(format!("  {}{}{}", result_fg, text_line, reset));
                     }
                     if text.len() > 500 {
                         lines.push(format!(
@@ -3635,10 +3540,7 @@ impl ToolExecutionDisplay {
                 ));
             }
         } else if self.state == ToolExecutionState::Running {
-            lines.push(format!(
-                "  \x1b[90m⏳ executing...{}",
-                reset
-            ));
+            lines.push(format!("  \x1b[90m⏳ executing...{}", reset));
         }
 
         lines
@@ -4304,10 +4206,7 @@ fn render_intra_line_diff(old_content: &str, new_content: &str) -> (String, Stri
 
     // Simple word-level diff: find common prefix and suffix
     let prefix_len = common_prefix_len(&old_words, &new_words);
-    let suffix_len = common_suffix_len(
-        &old_words[prefix_len..],
-        &new_words[prefix_len..],
-    );
+    let suffix_len = common_suffix_len(&old_words[prefix_len..], &new_words[prefix_len..]);
 
     let old_mid_end = old_words.len().saturating_sub(suffix_len);
     let new_mid_end = new_words.len().saturating_sub(suffix_len);
@@ -4528,10 +4427,7 @@ impl FooterComponentData {
             pwd_parts.push(format!("• {}", session));
         }
         let pwd_line = pwd_parts.join(" ");
-        lines.push(ansi::dim(&truncate_str(
-            &pwd_line,
-            width.saturating_sub(3),
-        )));
+        lines.push(ansi::dim(&truncate_str(&pwd_line, width.saturating_sub(3))));
 
         // Line 2: stats left | model right
         let mut stats_parts = Vec::new();
@@ -4542,10 +4438,16 @@ impl FooterComponentData {
             stats_parts.push(format!("↓{}", Self::format_token_count(self.output_tokens)));
         }
         if self.cache_read_tokens > 0 {
-            stats_parts.push(format!("R{}", Self::format_token_count(self.cache_read_tokens)));
+            stats_parts.push(format!(
+                "R{}",
+                Self::format_token_count(self.cache_read_tokens)
+            ));
         }
         if self.cache_write_tokens > 0 {
-            stats_parts.push(format!("W{}", Self::format_token_count(self.cache_write_tokens)));
+            stats_parts.push(format!(
+                "W{}",
+                Self::format_token_count(self.cache_write_tokens)
+            ));
         }
 
         // Cost
@@ -4553,7 +4455,11 @@ impl FooterComponentData {
             let cost_str = format!(
                 "${:.3}{}",
                 self.total_cost,
-                if self.using_subscription { " (sub)" } else { "" }
+                if self.using_subscription {
+                    " (sub)"
+                } else {
+                    ""
+                }
             );
             stats_parts.push(cost_str);
         }
@@ -4647,7 +4553,13 @@ impl FooterComponentData {
                 .map(|(_, text)| {
                     // Sanitize: replace newlines/tabs with space, collapse spaces
                     text.chars()
-                        .map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c })
+                        .map(|c| {
+                            if c == '\n' || c == '\r' || c == '\t' {
+                                ' '
+                            } else {
+                                c
+                            }
+                        })
                         .collect::<String>()
                         .split_whitespace()
                         .collect::<Vec<_>>()
@@ -4655,10 +4567,7 @@ impl FooterComponentData {
                 })
                 .collect::<Vec<_>>()
                 .join(" ");
-            lines.push(truncate_str(
-                &status_line,
-                width.saturating_sub(3),
-            ));
+            lines.push(truncate_str(&status_line, width.saturating_sub(3)));
         }
 
         lines
@@ -4939,24 +4848,12 @@ impl CountdownTimer {
         let empty = width - filled;
 
         let bar = if self.remaining_seconds <= 5 {
-            format!(
-                "{}{}",
-                "█".repeat(filled),
-                "░".repeat(empty)
-            )
+            format!("{}{}", "█".repeat(filled), "░".repeat(empty))
         } else {
-            format!(
-                "{}{}",
-                "█".repeat(filled),
-                "░".repeat(empty)
-            )
+            format!("{}{}", "█".repeat(filled), "░".repeat(empty))
         };
 
-        format!(
-            "{} {}",
-            ansi::dim(&bar),
-            self.render()
-        )
+        format!("{} {}", ansi::dim(&bar), self.render())
     }
 }
 
@@ -5086,7 +4983,10 @@ pub fn fuzzy_score(query: &str, text: &str) -> Option<usize> {
         if let Some(&qc) = query_chars.peek() {
             if tc == qc {
                 // Bonus for matching at word boundaries
-                if i == 0 || text.as_bytes().get(i - 1) == Some(&b' ') || text.as_bytes().get(i - 1) == Some(&b'/') {
+                if i == 0
+                    || text.as_bytes().get(i - 1) == Some(&b' ')
+                    || text.as_bytes().get(i - 1) == Some(&b'/')
+                {
                     score += 10;
                 } else if i == last_match_pos + 1 {
                     // Bonus for consecutive matches
@@ -5116,9 +5016,7 @@ pub fn fuzzy_filter_indices(items: &[impl AsRef<str>], query: &str) -> Vec<usize
     let mut scored: Vec<(usize, usize)> = items
         .iter()
         .enumerate()
-        .filter_map(|(i, item)| {
-            fuzzy_score(query, item.as_ref()).map(|score| (i, score))
-        })
+        .filter_map(|(i, item)| fuzzy_score(query, item.as_ref()).map(|score| (i, score)))
         .collect();
     scored.sort_by(|a, b| b.1.cmp(&a.1));
     scored.into_iter().map(|(i, _)| i).collect()
@@ -5175,9 +5073,18 @@ pub struct ConfigResourceSubgroup {
 /// Flat entry for display in the config selector.
 #[derive(Debug, Clone)]
 pub enum ConfigFlatEntry {
-    Group { group: ConfigResourceGroup },
-    Subgroup { subgroup: ConfigResourceSubgroup, group_label: String },
-    Item { item: ConfigResourceItem, group_label: String, subgroup_label: String },
+    Group {
+        group: ConfigResourceGroup,
+    },
+    Subgroup {
+        subgroup: ConfigResourceSubgroup,
+        group_label: String,
+    },
+    Item {
+        item: ConfigResourceItem,
+        group_label: String,
+        subgroup_label: String,
+    },
 }
 
 /// Config file selection with fuzzy search.
@@ -5218,7 +5125,9 @@ impl ConfigSelector {
     fn build_flat_list(groups: &[ConfigResourceGroup]) -> Vec<ConfigFlatEntry> {
         let mut entries = Vec::new();
         for group in groups {
-            entries.push(ConfigFlatEntry::Group { group: group.clone() });
+            entries.push(ConfigFlatEntry::Group {
+                group: group.clone(),
+            });
             for subgroup in &group.subgroups {
                 entries.push(ConfigFlatEntry::Subgroup {
                     subgroup: subgroup.clone(),
@@ -5260,7 +5169,11 @@ impl ConfigSelector {
             if let ConfigFlatEntry::Item { item, .. } = entry {
                 if item.display_name.to_lowercase().contains(&lower_query)
                     || item.path.to_lowercase().contains(&lower_query)
-                    || item.resource_type.label().to_lowercase().contains(&lower_query)
+                    || item
+                        .resource_type
+                        .label()
+                        .to_lowercase()
+                        .contains(&lower_query)
                 {
                     matching_items.insert(idx);
                 }
@@ -5323,7 +5236,10 @@ impl ConfigSelector {
     fn find_next_item(&self, from: usize, direction: i32) -> usize {
         let mut idx = from as i32 + direction;
         while idx >= 0 && (idx as usize) < self.filtered_entries.len() {
-            if matches!(self.filtered_entries[idx as usize], ConfigFlatEntry::Item { .. }) {
+            if matches!(
+                self.filtered_entries[idx as usize],
+                ConfigFlatEntry::Item { .. }
+            ) {
                 return idx as usize;
             }
             idx += direction;
@@ -5333,7 +5249,9 @@ impl ConfigSelector {
 
     /// Toggle the enabled state of the currently selected item.
     pub fn toggle_selected(&mut self) -> Option<&ConfigResourceItem> {
-        if let Some(ConfigFlatEntry::Item { item, .. }) = self.filtered_entries.get(self.selected_index) {
+        if let Some(ConfigFlatEntry::Item { item, .. }) =
+            self.filtered_entries.get(self.selected_index)
+        {
             let new_enabled = !item.enabled;
             let path = item.path.clone();
             let resource_type = item.resource_type;
@@ -5608,12 +5526,8 @@ impl ModelSelectorEnhanced {
 
         // Scope header
         let scope_text = match self.scope {
-            ModelScope::All => {
-                "\x1b[36mall\x1b[0m | \x1b[2mscoped\x1b[0m".to_string()
-            }
-            ModelScope::Scoped => {
-                "\x1b[2mall\x1b[0m | \x1b[36mscoped\x1b[0m".to_string()
-            }
+            ModelScope::All => "\x1b[36mall\x1b[0m | \x1b[2mscoped\x1b[0m".to_string(),
+            ModelScope::Scoped => "\x1b[2mall\x1b[0m | \x1b[36mscoped\x1b[0m".to_string(),
         };
         lines.push(format!(
             "\x1b[2mScope:\x1b[0m {} \x1b[2m(Tab to toggle)\x1b[0m",
@@ -5672,7 +5586,10 @@ impl ModelSelectorEnhanced {
                 String::new()
             };
 
-            let line = format!("{}{} {}{}", prefix, model_text, provider_badge, current_badge);
+            let line = format!(
+                "{}{} {}{}",
+                prefix, model_text, provider_badge, current_badge
+            );
             lines.push(truncate_str(&line, width));
         }
 
@@ -5747,32 +5664,45 @@ pub struct EnhancedSessionInfo {
 fn format_relative_time(date_str: &str) -> String {
     // Try parsing common date formats
     let now = chrono::Utc::now();
-    let parsed: Option<chrono::DateTime<chrono::Utc>> = chrono::DateTime::parse_from_rfc3339(date_str)
-        .map(|dt| dt.to_utc())
-        .ok()
-        .or_else(|| {
-            chrono::NaiveDateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S")
-                .map(|dt| dt.and_utc())
-                .ok()
-        })
-        .or_else(|| {
-            chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc())
-                .ok()
-        });
+    let parsed: Option<chrono::DateTime<chrono::Utc>> =
+        chrono::DateTime::parse_from_rfc3339(date_str)
+            .map(|dt| dt.to_utc())
+            .ok()
+            .or_else(|| {
+                chrono::NaiveDateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S")
+                    .map(|dt| dt.and_utc())
+                    .ok()
+            })
+            .or_else(|| {
+                chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                    .map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc())
+                    .ok()
+            });
 
     match parsed {
         Some(dt) => {
             let diff = now.signed_duration_since(dt);
             let mins = diff.num_minutes();
-            if mins < 1 { return "now".to_string(); }
-            if mins < 60 { return format!("{}m", mins); }
+            if mins < 1 {
+                return "now".to_string();
+            }
+            if mins < 60 {
+                return format!("{}m", mins);
+            }
             let hours = diff.num_hours();
-            if hours < 24 { return format!("{}h", hours); }
+            if hours < 24 {
+                return format!("{}h", hours);
+            }
             let days = diff.num_days();
-            if days < 7 { return format!("{}d", days); }
-            if days < 30 { return format!("{}w", days / 7); }
-            if days < 365 { return format!("{}mo", days / 30); }
+            if days < 7 {
+                return format!("{}d", days);
+            }
+            if days < 30 {
+                return format!("{}w", days / 7);
+            }
+            if days < 365 {
+                return format!("{}mo", days / 30);
+            }
             format!("{}y", days / 365)
         }
         None => date_str.to_string(),
@@ -5882,11 +5812,7 @@ impl SessionSelectorEnhanced {
         // Scope filter
         if self.scope == SessionScope::CurrentFolder {
             if let Some(ref cwd) = self.cwd {
-                filtered.retain(|s| {
-                    s.working_dir
-                        .as_ref()
-                        .map_or(true, |d| d == cwd)
-                });
+                filtered.retain(|s| s.working_dir.as_ref().map_or(true, |d| d == cwd));
             }
         }
 
@@ -5917,7 +5843,11 @@ impl SessionSelectorEnhanced {
         // Sort
         match self.sort_mode {
             SessionSortMode::Recent => {
-                filtered.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(b.created_at.cmp(&a.created_at)));
+                filtered.sort_by(|a, b| {
+                    b.updated_at
+                        .cmp(&a.updated_at)
+                        .then(b.created_at.cmp(&a.created_at))
+                });
             }
             SessionSortMode::Fuzzy => {
                 // Keep order; fuzzy matching already done by filter
@@ -5933,7 +5863,9 @@ impl SessionSelectorEnhanced {
         }
 
         self.filtered_sessions = filtered;
-        self.selected_index = self.selected_index.min(self.filtered_sessions.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.filtered_sessions.len().saturating_sub(1));
     }
 
     /// Move selection up.
@@ -5981,10 +5913,7 @@ impl SessionSelectorEnhanced {
             SessionScope::CurrentFolder => "\x1b[36m◉ Current Folder\x1b[0m | ○ All",
             SessionScope::All => "○ Current Folder | \x1b[36m◉ All\x1b[0m",
         };
-        let sort_text = format!(
-            "Sort: \x1b[36m{}\x1b[0m",
-            self.sort_mode.label()
-        );
+        let sort_text = format!("Sort: \x1b[36m{}\x1b[0m", self.sort_mode.label());
         let name_text = format!(
             "Name: \x1b[36m{}\x1b[0m",
             match self.name_filter {
@@ -6017,7 +5946,11 @@ impl SessionSelectorEnhanced {
             let real_idx = self.scroll_offset + i;
             let is_selected = real_idx == self.selected_index;
 
-            let marker = if is_selected { "\x1b[36m▶\x1b[0m" } else { " " };
+            let marker = if is_selected {
+                "\x1b[36m▶\x1b[0m"
+            } else {
+                " "
+            };
 
             // Branch indicator
             let branch = if session.parent_id.is_some() {
@@ -6041,7 +5974,8 @@ impl SessionSelectorEnhanced {
                 .unwrap_or_default();
 
             // Relative time
-            let time = format_relative_time(&session.updated_at.as_ref().unwrap_or(&session.created_at));
+            let time =
+                format_relative_time(&session.updated_at.as_ref().unwrap_or(&session.created_at));
 
             let mut line = format!(
                 "{} {}{:<30} {} msg:{} model:{}",
@@ -6167,7 +6101,11 @@ impl SettingsSelector {
             "auto-resize-images",
             "Auto-resize images",
             "Resize large images to 2000x2000 max",
-            if config.auto_resize_images { "true" } else { "false" },
+            if config.auto_resize_images {
+                "true"
+            } else {
+                "false"
+            },
             vec!["true".to_string(), "false".to_string()],
         ));
 
@@ -6183,7 +6121,11 @@ impl SettingsSelector {
             "skill-commands",
             "Skill commands",
             "Register skills as /skill:name commands",
-            if config.enable_skill_commands { "true" } else { "false" },
+            if config.enable_skill_commands {
+                "true"
+            } else {
+                "false"
+            },
             vec!["true".to_string(), "false".to_string()],
         ));
 
@@ -6208,7 +6150,12 @@ impl SettingsSelector {
             "Transport",
             "Preferred transport for providers with multiple transports",
             config.transport.clone(),
-            vec!["sse".to_string(), "websocket".to_string(), "websocket-cached".to_string(), "auto".to_string()],
+            vec![
+                "sse".to_string(),
+                "websocket".to_string(),
+                "websocket-cached".to_string(),
+                "auto".to_string(),
+            ],
         ));
 
         items.push(SettingItem::new(
@@ -6227,7 +6174,11 @@ impl SettingsSelector {
             "hide-thinking",
             "Hide thinking",
             "Hide thinking blocks in assistant responses",
-            if config.hide_thinking_block { "true" } else { "false" },
+            if config.hide_thinking_block {
+                "true"
+            } else {
+                "false"
+            },
             vec!["true".to_string(), "false".to_string()],
         ));
 
@@ -6252,14 +6203,24 @@ impl SettingsSelector {
             "Tree filter mode",
             "Default filter when opening /tree",
             config.tree_filter_mode.clone(),
-            vec!["default".to_string(), "no-tools".to_string(), "user-only".to_string(), "labeled-only".to_string(), "all".to_string()],
+            vec![
+                "default".to_string(),
+                "no-tools".to_string(),
+                "user-only".to_string(),
+                "labeled-only".to_string(),
+                "all".to_string(),
+            ],
         ));
 
         items.push(SettingItem::new(
             "quiet-startup",
             "Quiet startup",
             "Disable verbose printing at startup",
-            if config.quiet_startup { "true" } else { "false" },
+            if config.quiet_startup {
+                "true"
+            } else {
+                "false"
+            },
             vec!["true".to_string(), "false".to_string()],
         ));
 
@@ -6283,7 +6244,9 @@ impl SettingsSelector {
                 .collect();
             self.filtered_indices = fuzzy_filter_indices(&search_texts, &self.query);
         }
-        self.selected_index = self.selected_index.min(self.filtered_indices.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.filtered_indices.len().saturating_sub(1));
     }
 
     /// Move selection up.
@@ -6337,7 +6300,8 @@ impl SettingsSelector {
     pub fn render(&self, width: usize) -> Vec<String> {
         let mut lines = Vec::new();
 
-        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
         lines.push("\x1b[1mSettings\x1b[0m \x1b[2m(Enter to change · Esc to close · Type to search)\x1b[0m".to_string());
 
         if !self.query.is_empty() {
@@ -6390,10 +6354,7 @@ impl SettingsSelector {
                 }
             };
 
-            let line = format!(
-                "{} {:<25} {}",
-                prefix, label, value_display
-            );
+            let line = format!("{} {:<25} {}", prefix, label, value_display);
             lines.push(truncate_str(&line, width));
 
             // Description for selected item
@@ -6412,7 +6373,8 @@ impl SettingsSelector {
             ));
         }
 
-        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
         lines
     }
 }
@@ -6469,10 +6431,7 @@ impl ThemeSelector {
     /// Create a new theme selector.
     pub fn new(themes: Vec<String>, current_theme: String) -> Self {
         let filtered_indices = (0..themes.len()).collect();
-        let selected_index = themes
-            .iter()
-            .position(|t| t == &current_theme)
-            .unwrap_or(0);
+        let selected_index = themes.iter().position(|t| t == &current_theme).unwrap_or(0);
         Self {
             themes,
             selected_index,
@@ -6495,7 +6454,9 @@ impl ThemeSelector {
         } else {
             self.filtered_indices = fuzzy_filter_indices(&self.themes, &self.query);
         }
-        self.selected_index = self.selected_index.min(self.filtered_indices.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.filtered_indices.len().saturating_sub(1));
     }
 
     /// Move selection up.
@@ -6524,7 +6485,8 @@ impl ThemeSelector {
     pub fn render(&self, width: usize) -> Vec<String> {
         let mut lines = Vec::new();
 
-        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
         lines.push("\x1b[1mSelect Theme\x1b[0m".to_string());
         lines.push(String::new());
 
@@ -6569,7 +6531,8 @@ impl ThemeSelector {
 
         lines.push(String::new());
         lines.push("\x1b[2m  Enter to select · Esc to cancel\x1b[0m".to_string());
-        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
 
         lines
     }
@@ -6631,7 +6594,8 @@ impl ThinkingSelector {
     pub fn render(&self, width: usize) -> Vec<String> {
         let mut lines = Vec::new();
 
-        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
         lines.push("\x1b[1mThinking Level\x1b[0m".to_string());
         lines.push("\x1b[2mSelect reasoning depth for thinking-capable models\x1b[0m".to_string());
         lines.push(String::new());
@@ -6659,16 +6623,14 @@ impl ThinkingSelector {
                 String::new()
             };
 
-            let line = format!(
-                "{}{:<12} {}{}",
-                prefix, name, desc, current_badge
-            );
+            let line = format!("{}{:<12} {}{}", prefix, name, desc, current_badge);
             lines.push(truncate_str(&line, width));
         }
 
         lines.push(String::new());
         lines.push("\x1b[2m  Enter to select · Esc to cancel\x1b[0m".to_string());
-        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
 
         lines
     }
@@ -6772,12 +6734,7 @@ impl TreeSelector {
         let selected_index = current_leaf_id
             .as_ref()
             .and_then(|id| filtered_nodes.iter().position(|n| n.node_id == *id))
-            .unwrap_or_else(|| {
-                filtered_nodes
-                    .iter()
-                    .position(|n| !n.is_tool)
-                    .unwrap_or(0)
-            });
+            .unwrap_or_else(|| filtered_nodes.iter().position(|n| !n.is_tool).unwrap_or(0));
 
         Self {
             roots,
@@ -6856,14 +6813,7 @@ impl TreeSelector {
                 } else {
                     indent
                 };
-                flatten_recursive(
-                    child,
-                    child_indent,
-                    child_is_last,
-                    true,
-                    active_ids,
-                    result,
-                );
+                flatten_recursive(child, child_indent, child_is_last, true, active_ids, result);
             }
         }
 
@@ -6921,7 +6871,9 @@ impl TreeSelector {
             .cloned()
             .collect();
 
-        self.selected_index = self.selected_index.min(self.filtered_nodes.len().saturating_sub(1));
+        self.selected_index = self
+            .selected_index
+            .min(self.filtered_nodes.len().saturating_sub(1));
     }
 
     /// Move selection up.
@@ -7005,10 +6957,7 @@ impl TreeSelector {
                 node.label.clone()
             };
 
-            let line = format!(
-                "{}{}{}{}",
-                indent_str, connector, icon, label
-            );
+            let line = format!("{}{}{}{}", indent_str, connector, icon, label);
             lines.push(truncate_str(&line, width));
         }
 
@@ -7069,10 +7018,7 @@ pub struct ScopedModelsSelector {
 
 impl ScopedModelsSelector {
     /// Create a new scoped models selector.
-    pub fn new(
-        models: Vec<ScopedModelItem>,
-        enabled_ids: Option<Vec<String>>,
-    ) -> Self {
+    pub fn new(models: Vec<ScopedModelItem>, enabled_ids: Option<Vec<String>>) -> Self {
         let all_ids: Vec<String> = models.iter().map(|m| m.full_id.clone()).collect();
         let filtered_items = Self::build_items(&models, &enabled_ids, &all_ids);
 
@@ -7104,16 +7050,19 @@ impl ScopedModelsSelector {
         sorted_ids
             .into_iter()
             .filter_map(|id| {
-                models.iter().find(|m| m.full_id == id).map(|m| ScopedModelItem {
-                    full_id: m.full_id.clone(),
-                    id: m.id.clone(),
-                    provider: m.provider.clone(),
-                    name: m.name.clone(),
-                    enabled: match enabled_ids {
-                        None => true,
-                        Some(ids) => ids.contains(&m.full_id),
-                    },
-                })
+                models
+                    .iter()
+                    .find(|m| m.full_id == id)
+                    .map(|m| ScopedModelItem {
+                        full_id: m.full_id.clone(),
+                        id: m.id.clone(),
+                        provider: m.provider.clone(),
+                        name: m.name.clone(),
+                        enabled: match enabled_ids {
+                            None => true,
+                            Some(ids) => ids.contains(&m.full_id),
+                        },
+                    })
             })
             .collect()
     }
@@ -7322,11 +7271,10 @@ impl ScopedModelsSelector {
         let mut lines = Vec::new();
 
         // Header
-        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
         lines.push("\x1b[1m\x1b[36mModel Configuration\x1b[0m".to_string());
-        lines.push(
-            "\x1b[2mSession-only. Ctrl+S to save to settings.\x1b[0m".to_string(),
-        );
+        lines.push("\x1b[2mSession-only. Ctrl+S to save to settings.\x1b[0m".to_string());
         lines.push(String::new());
 
         // Search input
@@ -7415,7 +7363,8 @@ impl ScopedModelsSelector {
             count_text, dirty_marker
         ));
 
-        lines.push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
+        lines
+            .push("\x1b[36m───────────────────────────────────────────────────\x1b[0m".to_string());
 
         lines
     }
@@ -7871,13 +7820,11 @@ mod tests {
         msg.add_thinking("This is my thought process");
         msg.add_text("Final answer");
 
-        let renderer = AssistantMessageRenderer::new(
-            AssistantMessageRenderOptions {
-                hide_thinking: true,
-                hidden_thinking_label: "Thinking...".to_string(),
-                use_osc133: false,
-            },
-        );
+        let renderer = AssistantMessageRenderer::new(AssistantMessageRenderOptions {
+            hide_thinking: true,
+            hidden_thinking_label: "Thinking...".to_string(),
+            use_osc133: false,
+        });
 
         let rendered = renderer.render(&msg);
         assert!(rendered.contains("Thinking..."));
@@ -7947,7 +7894,10 @@ mod tests {
     fn test_tool_result_text() {
         let result = ToolResult::new_text("file created successfully");
         assert!(!result.is_error);
-        assert_eq!(result.get_text(), Some("file created successfully".to_string()));
+        assert_eq!(
+            result.get_text(),
+            Some("file created successfully".to_string())
+        );
     }
 
     #[test]
@@ -8014,7 +7964,11 @@ mod tests {
 
     #[test]
     fn test_tool_execution_render() {
-        let mut exec = ToolExecution::new("read_file", "call_1", serde_json::json!({"path": "test.txt"}));
+        let mut exec = ToolExecution::new(
+            "read_file",
+            "call_1",
+            serde_json::json!({"path": "test.txt"}),
+        );
         exec.complete(ToolResult::new_text("file contents"));
 
         let rendered = exec.render();
@@ -8102,8 +8056,13 @@ mod tests {
     #[test]
     fn test_summary_message_compaction() {
         let mut msg = SummaryMessage::compaction(50000, "Compacted 50000 tokens to 10000");
-        assert!(matches!(msg.message_type, SummaryMessageType::Compaction { tokens_before: 50000 }));
-        
+        assert!(matches!(
+            msg.message_type,
+            SummaryMessageType::Compaction {
+                tokens_before: 50000
+            }
+        ));
+
         msg.set_expanded(true);
         let rendered = msg.render();
         assert!(rendered.contains("compaction"));
@@ -8114,7 +8073,7 @@ mod tests {
     fn test_summary_message_branch() {
         let mut msg = SummaryMessage::branch("Created a new branch with these changes...");
         assert!(matches!(msg.message_type, SummaryMessageType::Branch));
-        
+
         msg.set_expanded(true);
         let rendered = msg.render();
         assert!(rendered.contains("[branch]"));
@@ -8122,11 +8081,8 @@ mod tests {
 
     #[test]
     fn test_summary_message_renderer() {
-        let rendered = SummaryMessageRenderer::render_compaction(
-            50000,
-            "Summary of compacted content",
-            true,
-        );
+        let rendered =
+            SummaryMessageRenderer::render_compaction(50000, "Summary of compacted content", true);
         assert!(rendered.contains("50000"));
     }
 
@@ -8280,11 +8236,8 @@ mod tests {
 
     #[test]
     fn test_tool_execution_display_lifecycle() {
-        let mut display = ToolExecutionDisplay::new(
-            "bash",
-            "call_123",
-            serde_json::json!({"command": "ls"}),
-        );
+        let mut display =
+            ToolExecutionDisplay::new("bash", "call_123", serde_json::json!({"command": "ls"}));
         display.start();
         assert_eq!(display.state, ToolExecutionState::Running);
         assert!(display.started_at.is_some());
@@ -8325,11 +8278,8 @@ mod tests {
 
     #[test]
     fn test_tool_execution_display_expanded() {
-        let mut display = ToolExecutionDisplay::new(
-            "search",
-            "call_2",
-            serde_json::json!({"query": "test"}),
-        );
+        let mut display =
+            ToolExecutionDisplay::new("search", "call_2", serde_json::json!({"query": "test"}));
         display.start();
 
         let long_output: String = "result line\n".repeat(100);
@@ -8348,11 +8298,7 @@ mod tests {
 
     #[test]
     fn test_tool_execution_display_elapsed() {
-        let mut display = ToolExecutionDisplay::new(
-            "test",
-            "call",
-            serde_json::json!(null),
-        );
+        let mut display = ToolExecutionDisplay::new("test", "call", serde_json::json!(null));
         // Not started - no elapsed
         assert!(display.elapsed_str().is_empty());
 
@@ -8364,11 +8310,7 @@ mod tests {
 
     #[test]
     fn test_tool_execution_display_args_streaming() {
-        let mut display = ToolExecutionDisplay::new(
-            "bash",
-            "call_stream",
-            serde_json::json!(null),
-        );
+        let mut display = ToolExecutionDisplay::new("bash", "call_stream", serde_json::json!(null));
         assert!(display.is_partial);
 
         display.update_args(serde_json::json!({"command": "ls"}));
@@ -8381,11 +8323,7 @@ mod tests {
 
     #[test]
     fn test_tool_execution_display_toggle() {
-        let mut display = ToolExecutionDisplay::new(
-            "test",
-            "call",
-            serde_json::json!(null),
-        );
+        let mut display = ToolExecutionDisplay::new("test", "call", serde_json::json!(null));
         assert!(!display.expanded);
         display.toggle_expanded();
         assert!(display.expanded);
@@ -8424,8 +8362,7 @@ mod tests {
 
     #[test]
     fn test_user_message_renderer_with_images() {
-        let renderer = UserMessageRenderer::new("Check this out")
-            .with_images(true);
+        let renderer = UserMessageRenderer::new("Check this out").with_images(true);
         let lines = renderer.render(80);
         let joined = lines.join("\n");
         assert!(joined.contains("has images"));
@@ -8508,13 +8445,11 @@ mod tests {
 
     #[test]
     fn test_user_message_selector_render() {
-        let messages = vec![
-            UserMessageItem {
-                id: "1".to_string(),
-                text: "Hello".to_string(),
-                timestamp: None,
-            },
-        ];
+        let messages = vec![UserMessageItem {
+            id: "1".to_string(),
+            text: "Hello".to_string(),
+            timestamp: None,
+        }];
         let selector = UserMessageSelector::new(messages);
         let lines = selector.render(80);
         let joined = lines.join("\n");
@@ -8893,11 +8828,7 @@ mod tests {
 
     #[test]
     fn test_extension_selector_render() {
-        let sel = ExtensionSelector::new(
-            "Choose",
-            vec!["X".to_string(), "Y".to_string()],
-            None,
-        );
+        let sel = ExtensionSelector::new("Choose", vec!["X".to_string(), "Y".to_string()], None);
         let lines = sel.render();
         assert!(lines.iter().any(|l| l.contains("Choose")));
         assert!(lines.iter().any(|l| l.contains("X")));
@@ -8975,15 +8906,17 @@ mod tests {
 
     #[test]
     fn test_provider_login_dialog_with_title() {
-        let dialog = ProviderLoginDialog::new("openai", "OpenAI")
-            .with_title("Custom Login");
+        let dialog = ProviderLoginDialog::new("openai", "OpenAI").with_title("Custom Login");
         assert_eq!(dialog.title, Some("Custom Login".to_string()));
     }
 
     #[test]
     fn test_provider_login_dialog_show_auth() {
         let mut dialog = ProviderLoginDialog::new("github", "GitHub");
-        dialog.show_auth("https://github.com/login", Some("Follow instructions".to_string()));
+        dialog.show_auth(
+            "https://github.com/login",
+            Some("Follow instructions".to_string()),
+        );
         match &dialog.phase {
             LoginDialogPhase::ShowAuth { url, instructions } => {
                 assert_eq!(url, "https://github.com/login");
@@ -9016,7 +8949,9 @@ mod tests {
     fn test_provider_login_dialog_waiting() {
         let mut dialog = ProviderLoginDialog::new("github", "GitHub");
         dialog.show_waiting("Polling for device code...");
-        assert!(matches!(&dialog.phase, LoginDialogPhase::Waiting { message } if message == "Polling for device code..."));
+        assert!(
+            matches!(&dialog.phase, LoginDialogPhase::Waiting { message } if message == "Polling for device code...")
+        );
     }
 
     #[test]
@@ -9048,8 +8983,8 @@ mod tests {
 
     #[test]
     fn test_provider_login_dialog_render() {
-        let dialog = ProviderLoginDialog::new("anthropic", "Anthropic")
-            .with_title("Login to Anthropic");
+        let dialog =
+            ProviderLoginDialog::new("anthropic", "Anthropic").with_title("Login to Anthropic");
         let lines = dialog.render();
         assert!(lines.iter().any(|l| l.contains("Login to Anthropic")));
     }
@@ -9059,9 +8994,21 @@ mod tests {
         let mut sel = OAuthSelector::new(
             OAuthSelectorMode::Login,
             vec![
-                AuthProviderInfo { id: "anthropic".into(), name: "Anthropic".into(), auth_type: AuthType::OAuth },
-                AuthProviderInfo { id: "openai".into(), name: "OpenAI".into(), auth_type: AuthType::ApiKey },
-                AuthProviderInfo { id: "github".into(), name: "GitHub".into(), auth_type: AuthType::OAuth },
+                AuthProviderInfo {
+                    id: "anthropic".into(),
+                    name: "Anthropic".into(),
+                    auth_type: AuthType::OAuth,
+                },
+                AuthProviderInfo {
+                    id: "openai".into(),
+                    name: "OpenAI".into(),
+                    auth_type: AuthType::ApiKey,
+                },
+                AuthProviderInfo {
+                    id: "github".into(),
+                    name: "GitHub".into(),
+                    auth_type: AuthType::OAuth,
+                },
             ],
         );
         assert_eq!(sel.selected().unwrap().id, "anthropic");
@@ -9078,8 +9025,16 @@ mod tests {
         let mut sel = OAuthSelector::new(
             OAuthSelectorMode::Login,
             vec![
-                AuthProviderInfo { id: "anthropic".into(), name: "Anthropic".into(), auth_type: AuthType::OAuth },
-                AuthProviderInfo { id: "openai".into(), name: "OpenAI".into(), auth_type: AuthType::ApiKey },
+                AuthProviderInfo {
+                    id: "anthropic".into(),
+                    name: "Anthropic".into(),
+                    auth_type: AuthType::OAuth,
+                },
+                AuthProviderInfo {
+                    id: "openai".into(),
+                    name: "OpenAI".into(),
+                    auth_type: AuthType::ApiKey,
+                },
             ],
         );
         sel.set_filter("open".to_string());
@@ -9091,13 +9046,18 @@ mod tests {
     fn test_oauth_selector_config_status() {
         let mut sel = OAuthSelector::new(
             OAuthSelectorMode::Login,
-            vec![
-                AuthProviderInfo { id: "anthropic".into(), name: "Anthropic".into(), auth_type: AuthType::OAuth },
-            ],
+            vec![AuthProviderInfo {
+                id: "anthropic".into(),
+                name: "Anthropic".into(),
+                auth_type: AuthType::OAuth,
+            }],
         );
-        sel.set_config_status("anthropic", ProviderConfigStatus::Configured {
-            label: "OAuth".to_string(),
-        });
+        sel.set_config_status(
+            "anthropic",
+            ProviderConfigStatus::Configured {
+                label: "OAuth".to_string(),
+            },
+        );
         let status = sel.config_status.get("anthropic").unwrap();
         assert!(matches!(status, ProviderConfigStatus::Configured { label } if label == "OAuth"));
     }
@@ -9106,9 +9066,11 @@ mod tests {
     fn test_oauth_selector_render() {
         let sel = OAuthSelector::new(
             OAuthSelectorMode::Login,
-            vec![
-                AuthProviderInfo { id: "anthropic".into(), name: "Anthropic".into(), auth_type: AuthType::OAuth },
-            ],
+            vec![AuthProviderInfo {
+                id: "anthropic".into(),
+                name: "Anthropic".into(),
+                auth_type: AuthType::OAuth,
+            }],
         );
         let lines = sel.render();
         assert!(lines.iter().any(|l| l.contains("Select provider")));
