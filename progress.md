@@ -1,26 +1,27 @@
 # Progress
 
 ## Status
-In Progress
+In Progress — Deep Verification Complete
 
 ## Tasks
-- [x] Deep review of oxios-kernel core integration (6 verification points)
-  - [x] V1: EngineProvider usage in Orchestrator/Supervisor
-  - [x] V2: AgentLoop::run() Fn vs FnMut callback pattern
-  - [x] V3: OuroborosEngine OxiEngineProvider usage
-  - [x] V4: oxi-tui workspace dependency check
-  - [x] V5: engine module export verification
-  - [x] V6: oxios-ouroboros oxi-ai direct usage vs engine.rs
+
+### Deep Verification Items (7 items)
+- [x] 1. `get_provider()` new instance per call — 🟡 Confirmed. Main path OK (`Arc<dyn Provider>`), `stream()` free function wastes connection pools.
+- [x] 2. `should_terminate_batch()` logic — 🔴 **Critical bug**. Wrong termination logic: checks `success` instead of explicit `terminate` flag. Missing `terminate` field on `AgentToolResult`. Breaks multi-turn tool use.
+- [x] 3. `_persist()` user message loss — 🟢 Same deferred-write pattern as pi-mono. Deliberate design.
+- [x] 4. `get_tree()` O(n²) — 🟢 Actually O(n log n). Unused `_id` parameter.
+- [x] 5. `prompt_streaming()` functionality — 🟢 Sound architecture. `spawn_blocking` + `LocalSet` pattern correct.
+- [x] 6. Public exports — ⚪ No issue. All types correctly exported.
+- [x] 7. Test coverage vs pi-mono — 🟡 ~24 oxi tests vs 90+ pi-mono test files. Missing persistence, migration, integration tests.
+
+### Critical Findings
+1. **[P0] `should_terminate_batch()` in `oxi-agent/src/agent_loop.rs:552-554`**: Terminates agent loop on ALL successful tool calls instead of requiring explicit opt-in `terminate: true`. `AgentToolResult` lacks the `terminate` field entirely.
+2. **[P1] HTTP client reuse in `oxi-ai/src/providers/mod.rs:52-69`**: Each `get_provider()` call creates a new `reqwest::Client`, discarding connection pools.
 
 ## Files Changed
-- /tmp/oxios-deep-review.md (review output)
+- `/tmp/oxi-deep-review.md` — Full review findings
 
 ## Notes
-- All 6 verification points PASS — no blockers found
-- Build: cargo check passes
-- Tests: 206/206 pass (184 unit + 22 integration)
-- Architecture is clean: proper dependency direction, no circular deps
-- EngineProvider is a startup factory; resolved Provider/Model flow downstream
-- AgentRuntime correctly uses spawn_blocking + Arc<Mutex<>> for Fn callback + !Send future
-- oxi-tui correctly absent from oxios workspace (it's a CLI-only dependency)
-- oxios-ouroboros correctly depends on oxi-ai directly (engine.rs lives in kernel, above ouroboros)
+- Project compiles cleanly (`cargo check --workspace` passes)
+- The `should_terminate_batch()` bug is the most critical — it effectively breaks multi-turn tool use
+- Test coverage is functional for basic flows but far below pi-mono's comprehensive suite

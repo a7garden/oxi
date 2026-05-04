@@ -12,6 +12,7 @@ use std::pin::Pin;
 use super::google_shared::{
     build_request_body, convert_messages, convert_tools, create_error_message, parse_google_events,
 };
+use super::shared_client;
 use super::{Provider, ProviderError, ProviderEvent, StreamOptions};
 use crate::{Api, Context, Model, StopReason};
 
@@ -22,13 +23,13 @@ use crate::{Api, Context, Model, StopReason};
 /// - gcloud CLI access token (from `gcloud auth print-access-token`)
 #[derive(Clone)]
 pub struct VertexProvider {
-    client: Client,
+    client: &'static Client,
 }
 
 impl VertexProvider {
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
         }
     }
 
@@ -93,7 +94,7 @@ impl VertexProvider {
         let claims_b64 = base64_url_encode(&claims);
         let signature = sign_rs256(&header, &claims_b64, &creds.private_key)?;
         let jwt = signature;
-        let client = Client::new();
+        let client = shared_client();
         let response = client
             .post("https://oauth2.googleapis.com/token")
             .form(&[
