@@ -1629,7 +1629,7 @@ document.addEventListener('DOMContentLoaded', () => {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::AgentMessage;
+    use crate::session::{AgentMessage, AssistantContentBlock};
 
     fn make_entry(msg: AgentMessage) -> SessionEntry {
         SessionEntry {
@@ -1650,7 +1650,11 @@ mod tests {
                 content: "Hello".into(),
             }),
             make_entry(AgentMessage::Assistant {
-                content: "Hi there!".into(),
+                content: vec![AssistantContentBlock::Text { text: "Hi there!".into() }],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
             }),
         ];
         let meta = ExportMeta::default();
@@ -1674,7 +1678,11 @@ mod tests {
     #[test]
     fn export_renders_thinking_block_collapsible() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: "<think\nLet me reason step by step.\n</think\n\nThe answer is 42.".into(),
+            content: vec![AssistantContentBlock::Text { text: "<think\nLet me reason step by step.\n</think\n\nThe answer is 42.".into() }],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
         })];
         let meta = ExportMeta::default();
         let html = export_html(&entries, &meta, None, None).unwrap();
@@ -1708,9 +1716,13 @@ mod tests {
     #[test]
     fn export_renders_code_block_with_language_class() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content:
+            content: vec![AssistantContentBlock::Text { text:
                 "Here is some code:\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\nDone."
-                    .into(),
+                    .into() }],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
         })];
         let meta = ExportMeta::default();
         let html = export_html(&entries, &meta, None, None).unwrap();
@@ -1723,7 +1735,11 @@ mod tests {
     #[test]
     fn export_renders_tool_calls_and_results() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: "🔧 Running bash\n```\nls -la\n```\n📤 result:\nfile1.txt\nfile2.txt".into(),
+            content: vec![AssistantContentBlock::Text { text: "🔧 Running bash\n```\nls -la\n```\n📤 result:\nfile1.txt\nfile2.txt".into() }],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
         })];
         let meta = ExportMeta::default();
         let html = export_html(&entries, &meta, None, None).unwrap();
@@ -1793,7 +1809,11 @@ mod tests {
     #[test]
     fn export_options_skip_thinking() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: "<think\nSecret thoughts\n</think\n\nVisible answer.".into(),
+            content: vec![AssistantContentBlock::Text { text: "<think\nSecret thoughts\n</think\n\nVisible answer.".into() }],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
         })];
         let options = HtmlExportOptions {
             include_thinking: false,
@@ -1810,7 +1830,11 @@ mod tests {
     #[test]
     fn export_options_skip_tool_calls() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: "🔧 Running bash\n📤 Done".into(),
+            content: vec![AssistantContentBlock::Text { text: "🔧 Running bash\n📤 Done".into() }],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
         })];
         let options = HtmlExportOptions {
             include_tool_calls: false,
