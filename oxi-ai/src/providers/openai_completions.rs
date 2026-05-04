@@ -14,6 +14,7 @@ use crate::{
     Api, AssistantMessage, Context, Model, Provider, ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
+use super::shared_client;
 use super::ProviderError;
 
 /// Configuration for OpenAI Completions provider
@@ -81,7 +82,7 @@ impl Default for OpenAICompletionsConfig {
 /// OpenAI Completions provider using /v1/completions endpoint
 #[derive(Clone)]
 pub struct OpenAICompletionsProvider {
-    client: Client,
+    client: &'static Client,
     config: OpenAICompletionsConfig,
 }
 
@@ -89,7 +90,7 @@ impl OpenAICompletionsProvider {
     /// Create a new provider with default configuration
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             config: OpenAICompletionsConfig::default(),
         }
     }
@@ -100,7 +101,7 @@ impl OpenAICompletionsProvider {
         let mut config = OpenAICompletionsConfig::default();
         config.api_key = Some(api_key.into());
         Self {
-            client: Client::new(),
+            client: shared_client(),
             config,
         }
     }
@@ -109,7 +110,7 @@ impl OpenAICompletionsProvider {
     #[allow(dead_code)]
     pub fn with_config(config: OpenAICompletionsConfig) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             config,
         }
     }

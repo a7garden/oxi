@@ -8,6 +8,7 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
+use super::shared_client;
 use crate::{
     error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
     ProviderEvent, StopReason, StreamOptions, Usage,
@@ -16,14 +17,14 @@ use crate::{
 /// OpenAI-compatible provider
 #[derive(Clone)]
 pub struct OpenAiProvider {
-    client: Client,
+    client: &'static Client,
     api_key: Option<String>,
 }
 
 impl OpenAiProvider {
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: std::env::var("OPENAI_API_KEY").ok(),
         }
     }
@@ -31,7 +32,7 @@ impl OpenAiProvider {
     #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some(api_key.into()),
         }
     }

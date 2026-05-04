@@ -9,20 +9,21 @@ use std::pin::Pin;
 use super::google_shared::{
     build_request_body, convert_messages, convert_tools, create_error_message, parse_google_events,
 };
+use super::shared_client;
 use super::{Provider, ProviderError, ProviderEvent, StreamOptions};
 use crate::{Api, Context, Model, StopReason};
 
 /// Google Generative AI provider
 #[derive(Clone)]
 pub struct GoogleProvider {
-    client: Client,
+    client: &'static Client,
     api_key: Option<String>,
 }
 
 impl GoogleProvider {
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: std::env::var("GOOGLE_API_KEY").ok(),
         }
     }
@@ -30,7 +31,7 @@ impl GoogleProvider {
     #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some(api_key.into()),
         }
     }

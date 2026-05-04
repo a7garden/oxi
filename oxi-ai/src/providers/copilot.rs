@@ -16,6 +16,7 @@ use crate::{
     StreamOptions, Usage,
 };
 
+use super::shared_client;
 use super::ProviderError;
 
 /// GitHub Copilot provider
@@ -26,7 +27,7 @@ use super::ProviderError;
 /// - Explicit API key via StreamOptions
 #[derive(Clone)]
 pub struct CopilotProvider {
-    client: Client,
+    client: &'static Client,
     api_key: Option<String>,
 }
 
@@ -39,7 +40,7 @@ impl CopilotProvider {
             .or_else(|| std::env::var("GITHUB_TOKEN").ok());
 
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key,
         }
     }
@@ -48,7 +49,7 @@ impl CopilotProvider {
     #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some(api_key.into()),
         }
     }

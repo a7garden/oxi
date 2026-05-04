@@ -18,6 +18,8 @@ use crate::{
     ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
+use super::shared_client;
+
 // Import Digest trait and Sha256 type for SHA256 hashing
 use sha2::{Digest, Sha256};
 
@@ -27,7 +29,7 @@ type HmacSha256 = Hmac<Sha256>;
 /// Amazon Bedrock provider
 #[derive(Clone)]
 pub struct BedrockProvider {
-    client: Client,
+    client: &'static Client,
     default_region: String,
 }
 
@@ -35,7 +37,7 @@ impl BedrockProvider {
     /// Create a new Bedrock provider with default region (us-east-1)
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             default_region: std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
         }
     }
@@ -44,7 +46,7 @@ impl BedrockProvider {
     #[allow(dead_code)]
     pub fn with_region(region: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             default_region: region.into(),
         }
     }

@@ -17,10 +17,12 @@ use crate::{
     StopReason, StreamOptions, Usage,
 };
 
+use super::shared_client;
+
 /// Mistral AI provider
 #[derive(Clone)]
 pub struct MistralProvider {
-    client: Client,
+    client: &'static Client,
     api_key: Option<String>,
 }
 
@@ -34,7 +36,7 @@ impl MistralProvider {
     /// Create a new Mistral provider using MISTRAL_API_KEY env var
     pub fn new() -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: std::env::var("MISTRAL_API_KEY").ok(),
         }
     }
@@ -43,7 +45,7 @@ impl MistralProvider {
     #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: shared_client(),
             api_key: Some(api_key.into()),
         }
     }
