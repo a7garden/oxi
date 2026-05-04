@@ -817,6 +817,10 @@ impl Default for KeybindingHints {
 /// Auto-save interval in seconds
 const AUTO_SAVE_INTERVAL_SECS: u64 = 30;
 
+// ── Placeholder marker for new integration types ──────────────────────────
+// (Will be replaced with actual types in subsequent edit)
+
+
 #[derive(Debug)]
 enum UiEvent {
     Start,
