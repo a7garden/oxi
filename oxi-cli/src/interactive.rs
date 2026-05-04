@@ -817,8 +817,812 @@ impl Default for KeybindingHints {
 /// Auto-save interval in seconds
 const AUTO_SAVE_INTERVAL_SECS: u64 = 30;
 
-// ── Placeholder marker for new integration types ──────────────────────────
-// (Will be replaced with actual types in subsequent edit)
+// ── Ctrl+P Model Selector Overlay ──────────────────────────────────────────
+
+/// Model entry for the selector overlay.
+#[derive(Debug, Clone)]
+pub struct ModelSelectorEntry {
+    /// Full model ID (e.g. "anthropic/claude-sonnet-4-20250514").
+    pub full_id: String,
+    /// Short display name.
+    pub display_name: String,
+    /// Provider name.
+    pub provider: String,
+    /// Whether this model is currently selected.
+    pub selected: bool,
+}
+
+/// Interactive model selector overlay state.
+///
+/// Shown when the user presses `Ctrl+P`. Supports fuzzy search filtering
+/// and cycling through scoped or all available models.
+pub struct ModelSelectorOverlay {
+    /// All available models (either scoped or from registry).
+    models: Vec<ModelSelectorEntry>,
+    /// Current filter text.
+    filter: String,
+    /// Cursor position in the filtered list.
+    cursor: usize,
+    /// Whether the overlay is visible.
+    visible: bool,
+}
+
+impl ModelSelectorOverlay {
+    /// Create a new model selector with the given model list.
+    pub fn new(models: Vec<ModelSelectorEntry>) -> Self {
+        Self {
+            models,
+            filter: String::new(),
+            cursor: 0,
+            visible: false,
+        }
+    }
+
+    /// Create from model resolver `Model` entries.
+    pub fn from_models(models: &[crate::model_resolver::Model], current_model_id: &str) -> Self {
+        let entries: Vec<ModelSelectorEntry> = models
+            .iter()
+            .map(|m| {
+                let full_id = m.full_id();
+                ModelSelectorEntry {
+                    full_id: full_id.clone(),
+                    display_name: m.name.clone().unwrap_or_else(|| m.id.clone()),
+                    provider: m.provider.clone(),
+                    selected: full_id == current_model_id,
+                }
+            })
+            .collect();
+        Self::new(entries)
+    }
+
+    /// Show the overlay.
+    pub fn show(&mut self) {
+        self.visible = true;
+        self.filter.clear();
+        self.cursor = 0;
+        self.reposition_cursor_to_selected();
+    }
+
+    /// Hide the overlay.
+    pub fn hide(&mut self) {
+        self.visible = false;
+        self.filter.clear();
+    }
+
+    /// Whether the overlay is currently visible.
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Get the current filter text.
+    pub fn filter(&self) -> &str {
+        &self.filter
+    }
+
+    /// Get the cursor position.
+    pub fn cursor_position(&self) -> usize {
+        self.cursor
+    }
+
+    /// Get filtered models matching the current filter.
+    pub fn filtered_models(&self) -> Vec<&ModelSelectorEntry> {
+        if self.filter.is_empty() {
+            return self.models.iter().collect();
+        }
+        let query = self.filter.to_lowercase();
+        self.models
+            .iter()
+            .filter(|m| {
+                let name_lower = m.display_name.to_lowercase();
+                let id_lower = m.full_id.to_lowercase();
+                let provider_lower = m.provider.to_lowercase();
+                fuzzy_match(&query, &name_lower)
+                    || fuzzy_match(&query, &id_lower)
+                    || fuzzy_match(&query, &provider_lower)
+            })
+            .collect()
+    }
+
+    /// Get the currently selected model entry (under cursor), if any.
+    pub fn selected_model(&self) -> Option<&ModelSelectorEntry> {
+        let filtered = self.filtered_models();
+        filtered.into_iter().nth(self.cursor)
+    }
+
+    /// Move the cursor up.
+    pub fn cursor_up(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    /// Move the cursor down.
+    pub fn cursor_down(&mut self) {
+        let count = self.filtered_models().len();
+        if self.cursor + 1 < count {
+            self.cursor += 1;
+        }
+    }
+
+    /// Type a character into the filter.
+    pub fn type_char(&mut self, c: char) {
+        self.filter.push(c);
+        self.cursor = 0;
+    }
+
+    /// Delete last character from the filter.
+    pub fn backspace(&mut self) {
+        self.filter.pop();
+        self.cursor = 0;
+    }
+
+    /// Confirm selection and return the chosen model full ID.
+    pub fn confirm(&mut self) -> Option<String> {
+        let choice = self.selected_model().map(|m| m.full_id.clone());
+        self.hide();
+        choice
+    }
+
+    /// Cancel selection.
+    pub fn cancel(&mut self) {
+        self.hide();
+    }
+
+    /// Reposition cursor to the currently active model.
+    fn reposition_cursor_to_selected(&mut self) {
+        let filtered = self.filtered_models();
+        for (i, m) in filtered.iter().enumerate() {
+            if m.selected {
+                self.cursor = i;
+                return;
+            }
+        }
+        self.cursor = 0;
+    }
+}
+
+/// Simple fuzzy match: true if all characters of `query` appear in `text` in order.
+fn fuzzy_match(query: &str, text: &str) -> bool {
+    let mut qi = query.chars();
+    let mut current = qi.next();
+    for ch in text.chars() {
+        if let Some(qc) = current {
+            if ch == qc {
+                current = qi.next();
+            }
+        }
+    }
+    current.is_none()
+}
+
+impl Default for ModelSelectorOverlay {
+    fn default() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+// ── Double-Escape Quit Tracker ──────────────────────────────────────────────
+
+/// Action to take on double-escape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoubleEscapeAction {
+    /// Quit the application.
+    Quit,
+    /// Clear the input.
+    Clear,
+}
+
+/// Tracks double-escape presses within a time window.
+///
+/// When the user presses Escape twice within 500ms, triggers the configured
+/// action (quit by default, or clear input).
+pub struct DoubleEscapeTracker {
+    /// Timestamp of the last Escape press.
+    last_escape: Option<Instant>,
+    /// Maximum interval between two Escape presses (ms).
+    interval_ms: u64,
+    /// What action to take on double-escape.
+    action: DoubleEscapeAction,
+}
+
+impl DoubleEscapeTracker {
+    /// Create a new tracker with the default 500ms interval.
+    pub fn new() -> Self {
+        Self {
+            last_escape: None,
+            interval_ms: 500,
+            action: DoubleEscapeAction::Quit,
+        }
+    }
+
+    /// Create with a custom interval.
+    pub fn with_interval(interval_ms: u64) -> Self {
+        Self {
+            last_escape: None,
+            interval_ms,
+            action: DoubleEscapeAction::Quit,
+        }
+    }
+
+    /// Set the action to take on double-escape.
+    pub fn set_action(&mut self, action: DoubleEscapeAction) {
+        self.action = action;
+    }
+
+    /// Get the configured action.
+    pub fn action(&self) -> DoubleEscapeAction {
+        self.action
+    }
+
+    /// Record an Escape press. Returns `true` if this is a double-escape
+    /// (i.e., two Escape presses within the configured interval).
+    pub fn press_escape(&mut self) -> bool {
+        let now = Instant::now();
+        if let Some(last) = self.last_escape {
+            if now.duration_since(last).as_millis() as u64 <= self.interval_ms {
+                self.last_escape = None;
+                return true; // Double-escape detected
+            }
+        }
+        self.last_escape = Some(now);
+        false
+    }
+
+    /// Reset the tracker (e.g., when another key is pressed).
+    pub fn reset(&mut self) {
+        self.last_escape = None;
+    }
+}
+
+impl Default for DoubleEscapeTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Auto-Compaction Progress Tracker ───────────────────────────────────────
+
+/// Tracks auto-compaction progress and allows cancellation via Escape.
+pub struct CompactionProgressTracker {
+    /// Whether compaction is in progress.
+    active: bool,
+    /// Number of messages compacted so far.
+    messages_compacted: usize,
+    /// Total messages to compact.
+    total_messages: usize,
+    /// Whether the user has requested cancellation.
+    cancelled: bool,
+    /// Compaction start time.
+    started_at: Option<Instant>,
+}
+
+impl CompactionProgressTracker {
+    /// Create a new tracker.
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            messages_compacted: 0,
+            total_messages: 0,
+            cancelled: false,
+            started_at: None,
+        }
+    }
+
+    /// Start tracking a compaction operation.
+    pub fn start(&mut self, total_messages: usize) {
+        self.active = true;
+        self.messages_compacted = 0;
+        self.total_messages = total_messages;
+        self.cancelled = false;
+        self.started_at = Some(Instant::now());
+    }
+
+    /// Update progress.
+    pub fn update(&mut self, messages_compacted: usize) {
+        self.messages_compacted = messages_compacted;
+    }
+
+    /// Mark compaction as finished.
+    pub fn finish(&mut self) {
+        self.active = false;
+        self.started_at = None;
+    }
+
+    /// Request cancellation (user pressed Escape).
+    pub fn cancel(&mut self) {
+        if self.active {
+            self.cancelled = true;
+        }
+    }
+
+    /// Whether cancellation was requested.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Whether compaction is in progress.
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Format a progress string for display.
+    pub fn progress_text(&self) -> String {
+        if !self.active {
+            return String::new();
+        }
+        let elapsed = self
+            .started_at
+            .map(|t| t.elapsed().as_secs())
+            .unwrap_or(0);
+        let spinner = match elapsed % 4 {
+            0 => "|",
+            1 => "/",
+            2 => "-",
+            3 => "\\",
+            _ => "|",
+        };
+        let cancel_hint = if self.cancelled {
+            " (cancelling...)"
+        } else {
+            " (Esc to cancel)"
+        };
+        if self.total_messages > 0 {
+            format!(
+                "{} Compacting... {}/{} messages{}",
+                spinner, self.messages_compacted, self.total_messages, cancel_hint
+            )
+        } else {
+            format!("{} Compacting context...{}", spinner, cancel_hint)
+        }
+    }
+}
+
+impl Default for CompactionProgressTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Extension Shortcut Registry ────────────────────────────────────────────
+
+/// A keyboard shortcut registered by an extension.
+#[derive(Debug, Clone)]
+pub struct ExtensionShortcut {
+    /// Unique identifier for this shortcut (extension-provided).
+    pub id: String,
+    /// The extension that registered this shortcut.
+    pub extension_name: String,
+    /// Key sequence (e.g., "ctrl+shift+f").
+    pub key_sequence: String,
+    /// Human-readable label.
+    pub label: String,
+    /// Whether the shortcut is currently enabled.
+    pub enabled: bool,
+}
+
+/// Registry for extension-registered keyboard shortcuts.
+///
+/// Extensions can register keyboard shortcuts that are checked
+/// *before* default handling in the interactive event loop.
+pub struct ExtensionShortcutRegistry {
+    shortcuts: Vec<ExtensionShortcut>,
+}
+
+impl ExtensionShortcutRegistry {
+    /// Create a new empty registry.
+    pub fn new() -> Self {
+        Self {
+            shortcuts: Vec::new(),
+        }
+    }
+
+    /// Register a new extension shortcut.
+    ///
+    /// If a shortcut with the same `id` already exists, it is replaced.
+    pub fn register(
+        &mut self,
+        id: impl Into<String>,
+        extension_name: impl Into<String>,
+        key_sequence: impl Into<String>,
+        label: impl Into<String>,
+    ) {
+        let id = id.into();
+        let shortcut = ExtensionShortcut {
+            id: id.clone(),
+            extension_name: extension_name.into(),
+            key_sequence: key_sequence.into(),
+            label: label.into(),
+            enabled: true,
+        };
+        // Replace if exists
+        if let Some(pos) = self.shortcuts.iter().position(|s| s.id == id) {
+            self.shortcuts[pos] = shortcut;
+        } else {
+            self.shortcuts.push(shortcut);
+        }
+    }
+
+    /// Unregister a shortcut by ID.
+    pub fn unregister(&mut self, id: &str) {
+        self.shortcuts.retain(|s| s.id != id);
+    }
+
+    /// Enable or disable a shortcut by ID.
+    pub fn set_enabled(&mut self, id: &str, enabled: bool) {
+        if let Some(s) = self.shortcuts.iter_mut().find(|s| s.id == id) {
+            s.enabled = enabled;
+        }
+    }
+
+    /// Get all registered shortcuts.
+    pub fn shortcuts(&self) -> &[ExtensionShortcut] {
+        &self.shortcuts
+    }
+
+    /// Check if any extension shortcut matches the given key event.
+    ///
+    /// Compares against the crossterm key event using a normalized
+    /// key sequence string.
+    pub fn find_matching(
+        &self,
+        key: &crossterm::event::KeyEvent,
+    ) -> Option<&ExtensionShortcut> {
+        let seq_str = key_event_to_sequence_string(key);
+        self.shortcuts
+            .iter()
+            .find(|s| s.enabled && s.key_sequence == seq_str)
+    }
+}
+
+impl Default for ExtensionShortcutRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Convert a crossterm `KeyEvent` to a normalized key sequence string like "ctrl+p".
+fn key_event_to_sequence_string(key: &crossterm::event::KeyEvent) -> String {
+    use crossterm::event::KeyCode;
+
+    let mut parts = Vec::new();
+    let mods = key.modifiers;
+    if mods.contains(crossterm::event::KeyModifiers::CONTROL) {
+        parts.push("ctrl");
+    }
+    if mods.contains(crossterm::event::KeyModifiers::ALT) {
+        parts.push("alt");
+    }
+    if mods.contains(crossterm::event::KeyModifiers::SHIFT) {
+        parts.push("shift");
+    }
+
+    let key_name = match key.code {
+        KeyCode::Char(c) => {
+            // For char keys with ctrl/alt, use lowercase
+            if mods.intersects(crossterm::event::KeyModifiers::CONTROL | crossterm::event::KeyModifiers::ALT) {
+                c.to_ascii_lowercase().to_string()
+            } else {
+                c.to_string()
+            }
+        }
+        KeyCode::Enter => "enter".to_string(),
+        KeyCode::Esc => "escape".to_string(),
+        KeyCode::Tab => "tab".to_string(),
+        KeyCode::Backspace => "backspace".to_string(),
+        KeyCode::Delete => "delete".to_string(),
+        KeyCode::Up => "up".to_string(),
+        KeyCode::Down => "down".to_string(),
+        KeyCode::Left => "left".to_string(),
+        KeyCode::Right => "right".to_string(),
+        KeyCode::Home => "home".to_string(),
+        KeyCode::End => "end".to_string(),
+        KeyCode::PageUp => "pageup".to_string(),
+        KeyCode::PageDown => "pagedown".to_string(),
+        KeyCode::F(n) => format!("f{}", n),
+        KeyCode::Insert => "insert".to_string(),
+        KeyCode::Null => "null".to_string(),
+        _ => "".to_string(),
+    };
+
+    parts.push(&key_name);
+    parts.join("+")
+}
+
+// ── Terminal Suspend Handler (Ctrl+Z / SIGTSTP) ────────────────────────────
+
+/// Manages terminal suspend/resume state for SIGTSTP handling.
+///
+/// On Ctrl+Z, the terminal state is restored, the process is suspended
+/// via `SIGTSTP`, and on `SIGCONT` the terminal is reinitialized.
+pub struct TerminalSuspendHandler {
+    /// Whether we are currently suspended.
+    suspended: bool,
+}
+
+impl TerminalSuspendHandler {
+    /// Create a new suspend handler.
+    pub fn new() -> Self {
+        Self { suspended: false }
+    }
+
+    /// Check if currently suspended.
+    pub fn is_suspended(&self) -> bool {
+        self.suspended
+    }
+
+    /// Prepare for suspend: restore terminal to its original state.
+    pub fn prepare_suspend(&mut self) -> Result<()> {
+        use std::io::{self, Write};
+        crossterm::execute!(io::stdout(), crossterm::cursor::Show)?;
+        crossterm::execute!(io::stdout(), crossterm::event::DisableMouseCapture)?;
+        crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+        io::stdout().flush()?;
+        crossterm::terminal::disable_raw_mode()?;
+        self.suspended = true;
+        Ok(())
+    }
+
+    /// Reinitialize terminal after resume (SIGCONT).
+    pub fn resume_after_suspend(&mut self) -> Result<()> {
+        use std::io::{self, Write};
+        crossterm::terminal::enable_raw_mode()?;
+        crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+        crossterm::execute!(io::stdout(), crossterm::cursor::Hide)?;
+        crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
+        io::stdout().flush()?;
+        self.suspended = false;
+        Ok(())
+    }
+
+    /// Send SIGTSTP to self (suspend the process).
+    #[cfg(unix)]
+    pub fn send_sigtstp(&self) -> Result<()> {
+        unsafe {
+            libc::raise(libc::SIGTSTP);
+        }
+        Ok(())
+    }
+
+    /// Send SIGTSTP (no-op on non-Unix).
+    #[cfg(not(unix))]
+    pub fn send_sigtstp(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl Default for TerminalSuspendHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Clipboard Image Paste Handler (Ctrl+V) ─────────────────────────────────
+
+/// Handles Ctrl+V image paste from the system clipboard.
+pub struct ClipboardImagePasteHandler {
+    inner: ImagePasteHandler,
+}
+
+impl ClipboardImagePasteHandler {
+    /// Create a new clipboard image paste handler.
+    pub fn new() -> Self {
+        Self {
+            inner: ImagePasteHandler::new(),
+        }
+    }
+
+    /// Attempt to paste an image from the system clipboard.
+    pub fn paste_from_clipboard(&mut self) -> Option<ImageAttachment> {
+        match self.inner.read_from_clipboard() {
+            Ok(attachment) => Some(attachment),
+            Err(e) => {
+                tracing::debug!("Clipboard paste failed: {}", e);
+                None
+            }
+        }
+    }
+
+    /// Process raw image data.
+    pub fn process_raw(&mut self, data: Vec<u8>) -> Option<ImageAttachment> {
+        self.inner.handle_paste_data(data)
+    }
+
+    /// Reset the handler state.
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
+}
+
+impl Default for ClipboardImagePasteHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Interactive Mode Integration State ──────────────────────────────────────
+
+/// Bundles all integration-level interactive mode state together.
+///
+/// This struct holds the state for model cycling, double-escape quit,
+/// auto-compaction progress, extension shortcuts, terminal suspend handling,
+/// and clipboard image paste.
+pub struct InteractiveModeState {
+    /// Ctrl+P model selector overlay.
+    pub model_selector: ModelSelectorOverlay,
+    /// Double-escape quit/clear tracker.
+    pub double_escape: DoubleEscapeTracker,
+    /// Auto-compaction progress tracker.
+    pub compaction_progress: CompactionProgressTracker,
+    /// Extension-registered keyboard shortcuts.
+    pub extension_shortcuts: ExtensionShortcutRegistry,
+    /// Terminal suspend handler (Ctrl+Z / SIGTSTP).
+    pub suspend_handler: TerminalSuspendHandler,
+    /// Clipboard image paste handler (Ctrl+V).
+    pub clipboard_paste: ClipboardImagePasteHandler,
+    /// Pending image attachment from clipboard paste.
+    pub pending_image: Option<ImageAttachment>,
+}
+
+impl InteractiveModeState {
+    /// Create a new integration state with default settings.
+    pub fn new() -> Self {
+        Self {
+            model_selector: ModelSelectorOverlay::default(),
+            double_escape: DoubleEscapeTracker::new(),
+            compaction_progress: CompactionProgressTracker::new(),
+            extension_shortcuts: ExtensionShortcutRegistry::new(),
+            suspend_handler: TerminalSuspendHandler::new(),
+            clipboard_paste: ClipboardImagePasteHandler::new(),
+            pending_image: None,
+        }
+    }
+
+    /// Create with a specific model list for the selector.
+    pub fn with_models(models: Vec<ModelSelectorEntry>) -> Self {
+        Self {
+            model_selector: ModelSelectorOverlay::new(models),
+            ..Self::new()
+        }
+    }
+
+    // ── Ctrl+P Model Cycling ────────────────────────────────────────────
+
+    /// Handle Ctrl+P: toggle the model selector overlay.
+    pub fn handle_ctrl_p(&mut self) -> Option<String> {
+        if self.model_selector.is_visible() {
+            self.model_selector.cursor_down();
+        } else {
+            self.model_selector.show();
+        }
+        None
+    }
+
+    /// Handle Shift+Ctrl+P: cycle to previous model.
+    pub fn handle_shift_ctrl_p(&mut self) -> Option<String> {
+        if self.model_selector.is_visible() {
+            self.model_selector.cursor_up();
+        }
+        None
+    }
+
+    /// Handle Enter in model selector: confirm selection.
+    pub fn handle_model_confirm(&mut self) -> Option<String> {
+        if self.model_selector.is_visible() {
+            self.model_selector.confirm()
+        } else {
+            None
+        }
+    }
+
+    /// Handle Escape in model selector: cancel.
+    /// Returns `true` if the model selector was open (and is now closed).
+    pub fn handle_model_cancel(&mut self) -> bool {
+        if self.model_selector.is_visible() {
+            self.model_selector.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    // ── Double-Escape ───────────────────────────────────────────────────
+
+    /// Handle an Escape key press. Returns `true` if double-escape detected.
+    pub fn handle_escape(&mut self) -> bool {
+        self.double_escape.press_escape()
+    }
+
+    /// Reset the double-escape tracker.
+    pub fn reset_escape(&mut self) {
+        self.double_escape.reset();
+    }
+
+    // ── Auto-Compaction ─────────────────────────────────────────────────
+
+    /// Handle Escape during compaction. Returns `true` if active and cancelled.
+    pub fn handle_compaction_escape(&mut self) -> bool {
+        if self.compaction_progress.is_active() {
+            self.compaction_progress.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Start tracking a compaction operation.
+    pub fn start_compaction(&mut self, total_messages: usize) {
+        self.compaction_progress.start(total_messages);
+    }
+
+    /// Update compaction progress.
+    pub fn update_compaction(&mut self, messages_compacted: usize) {
+        self.compaction_progress.update(messages_compacted);
+    }
+
+    /// Finish compaction tracking.
+    pub fn finish_compaction(&mut self) {
+        self.compaction_progress.finish();
+    }
+
+    // ── Ctrl+Z Suspend ──────────────────────────────────────────────────
+
+    /// Handle Ctrl+Z: suspend the process.
+    pub fn handle_suspend(&mut self) -> Result<()> {
+        self.suspend_handler.prepare_suspend()?;
+        self.suspend_handler.send_sigtstp()?;
+        self.suspend_handler.resume_after_suspend()?;
+        Ok(())
+    }
+
+    // ── Ctrl+V Clipboard Paste ──────────────────────────────────────────
+
+    /// Handle Ctrl+V: paste image from clipboard.
+    pub fn handle_clipboard_paste(&mut self) -> Option<ImageAttachment> {
+        let attachment = self.clipboard_paste.paste_from_clipboard();
+        if attachment.is_some() {
+            self.pending_image = attachment.clone();
+        }
+        attachment
+    }
+
+    /// Take the pending image attachment (consumes it).
+    pub fn take_pending_image(&mut self) -> Option<ImageAttachment> {
+        self.pending_image.take()
+    }
+
+    // ── Extension Shortcuts ─────────────────────────────────────────────
+
+    /// Check if an extension shortcut matches the given key event.
+    pub fn check_extension_shortcut(
+        &self,
+        key: &crossterm::event::KeyEvent,
+    ) -> Option<&ExtensionShortcut> {
+        self.extension_shortcuts.find_matching(key)
+    }
+
+    /// Register an extension shortcut.
+    pub fn register_extension_shortcut(
+        &mut self,
+        id: impl Into<String>,
+        extension_name: impl Into<String>,
+        key_sequence: impl Into<String>,
+        label: impl Into<String>,
+    ) {
+        self.extension_shortcuts
+            .register(id, extension_name, key_sequence, label);
+    }
+
+    /// Unregister an extension shortcut.
+    pub fn unregister_extension_shortcut(&mut self, id: &str) {
+        self.extension_shortcuts.unregister(id);
+    }
+}
+
+impl Default for InteractiveModeState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 
 #[derive(Debug)]
@@ -932,13 +1736,23 @@ impl SlashCommand {
             "/undo" => SlashCommand::Undo,
             "/redo" => SlashCommand::Redo,
             "/branch" | "/fork" | "/tree" => SlashCommand::Branch,
-            "/session" => SlashCommand::Session,
+            "/session" | "/resume" => SlashCommand::Session,
             "/export" => SlashCommand::Export {
                 path: arg.map(|s| s.to_string()),
             },
             "/import" => SlashCommand::Import {
                 path: arg.unwrap_or_default().to_string(),
             },
+            "/settings" => SlashCommand::Settings,
+            "/help" | "/?" => SlashCommand::Help,
+            "/quit" | "/exit" | "/q" => SlashCommand::Quit,
+            "/name" => SlashCommand::Name {
+                name: arg.unwrap_or_default().to_string(),
+            },
+            "/copy" => SlashCommand::Copy,
+            "/new" => SlashCommand::New,
+            "/reload" => SlashCommand::Reload,
+            "/clone" => SlashCommand::Clone,
             "/login" => SlashCommand::Login {
                 provider: arg.map(|s| s.to_string()),
             },
@@ -1060,6 +1874,9 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
     // Track undo/redo stacks
     let mut undo_stack: Vec<crate::ChatMessage> = Vec::new();
 
+    // Integration state: model cycling, double-escape, compaction, etc.
+    let mut imode = InteractiveModeState::new();
+
     // Terminal setup
     use std::io::{self, Write};
     crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
@@ -1126,6 +1943,34 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
             }
         }
 
+        // ── Render model selector overlay ──────────────────────────────────
+        if imode.model_selector.is_visible() {
+            render_model_selector_overlay(
+                &mut surface,
+                &imode.model_selector,
+                width,
+                height,
+                &theme,
+            );
+        }
+
+        // ── Render compaction progress ──────────────────────────────────────
+        if imode.compaction_progress.is_active() {
+            let progress_text = imode.compaction_progress.progress_text();
+            if !progress_text.is_empty() {
+                for (i, ch) in progress_text.chars().enumerate() {
+                    let col = i;
+                    if col < width as usize {
+                        surface.set(
+                            chat_height,
+                            col as u16,
+                            oxi_tui::Cell::new(ch).with_fg(theme.colors.warning),
+                        );
+                    }
+                }
+            }
+        }
+
         render_surface_to_terminal(&surface, width, height);
         io::stdout().flush()?;
 
@@ -1138,6 +1983,32 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                 crossterm::event::Event::Key(key) => {
                     match key.code {
                         crossterm::event::KeyCode::Enter => {
+                            // If model selector is visible, confirm selection
+                            if imode.model_selector.is_visible() {
+                                if let Some(model_id) = imode.handle_model_confirm() {
+                                    match app.switch_model(&model_id) {
+                                        Ok(()) => {
+                                            chat_view.add_message(ChatMessageDisplay {
+                                                role: MessageRole::Assistant,
+                                                content_blocks: vec![ContentBlockDisplay::Text {
+                                                    content: format!("Switched to model: {}", model_id),
+                                                }],
+                                                timestamp: now_millis(),
+                                            });
+                                        }
+                                        Err(e) => {
+                                            chat_view.add_message(ChatMessageDisplay {
+                                                role: MessageRole::Assistant,
+                                                content_blocks: vec![ContentBlockDisplay::Text {
+                                                    content: format!("Error switching model: {}", e),
+                                                }],
+                                                timestamp: now_millis(),
+                                            });
+                                        }
+                                    }
+                                }
+                                continue;
+                            }
                             if state == InteractiveState::Input {
                                 let value = input.value().to_string();
                                 if !value.is_empty() {
@@ -1668,6 +2539,83 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                             // Double Ctrl+C to exit, single Ctrl+C interrupts
                             running = false;
                         }
+                        // ── Ctrl+P: Model selector / cycling ─────────────────
+                        crossterm::event::KeyCode::Char('p')
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL)
+                                && !key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
+                        {
+                            if imode.model_selector.is_visible() {
+                                imode.model_selector.cursor_down();
+                            } else {
+                                imode.model_selector.show();
+                            }
+                        }
+                        // ── Shift+Ctrl+P: Cycle backward ────────────────────
+                        crossterm::event::KeyCode::Char('P')
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL)
+                                && key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
+                        {
+                            if imode.model_selector.is_visible() {
+                                imode.model_selector.cursor_up();
+                            }
+                        }
+                        // ── Ctrl+Z / SIGTSTP: Suspend ────────────────────────
+                        crossterm::event::KeyCode::Char('z')
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                        {
+                            if let Err(e) = imode.handle_suspend() {
+                                tracing::warn!("Suspend failed: {}", e);
+                            }
+                        }
+                        // ── Ctrl+V: Clipboard image paste ───────────────────
+                        crossterm::event::KeyCode::Char('v')
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                        {
+                            if let Some(attachment) = imode.handle_clipboard_paste() {
+                                chat_view.add_message(ChatMessageDisplay {
+                                    role: MessageRole::Assistant,
+                                    content_blocks: vec![ContentBlockDisplay::Text {
+                                        content: format!(
+                                            "[Image pasted: {} ({}x{})]",
+                                            attachment.mime_type,
+                                            attachment.width.map(|w| w.to_string()).unwrap_or_else(|| "?".to_string()),
+                                            attachment.height.map(|h| h.to_string()).unwrap_or_else(|| "?".to_string())
+                                        ),
+                                    }],
+                                    timestamp: now_millis(),
+                                });
+                            }
+                        }
+                        // ── Escape: model selector cancel, compaction cancel, double-escape quit ─
+                        crossterm::event::KeyCode::Esc => {
+                            // Priority 1: Cancel model selector overlay
+                            if imode.handle_model_cancel() {
+                                // Model selector was open, closed it
+                            }
+                            // Priority 2: Cancel compaction
+                            else if imode.handle_compaction_escape() {
+                                // Compaction cancellation requested
+                            }
+                            // Priority 3: Double-escape quit/clear
+                            else if imode.handle_escape() {
+                                match imode.double_escape.action() {
+                                    DoubleEscapeAction::Quit => {
+                                        running = false;
+                                    }
+                                    DoubleEscapeAction::Clear => {
+                                        input.clear();
+                                    }
+                                }
+                            }
+                        }
                         crossterm::event::KeyCode::PageUp => {
                             chat_view.scroll_up(10);
                         }
@@ -1675,7 +2623,30 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
                             chat_view.scroll_down(10);
                         }
                         _ => {
-                            if let Some(tui_event) = convert_key_event(key) {
+                            // ── Model selector overlay input ──────────────────
+                            if imode.model_selector.is_visible() {
+                                match key.code {
+                                    crossterm::event::KeyCode::Up => {
+                                        imode.model_selector.cursor_up();
+                                    }
+                                    crossterm::event::KeyCode::Down => {
+                                        imode.model_selector.cursor_down();
+                                    }
+                                    crossterm::event::KeyCode::Backspace => {
+                                        imode.model_selector.backspace();
+                                    }
+                                    crossterm::event::KeyCode::Char(c) => {
+                                        imode.model_selector.type_char(c);
+                                    }
+                                    _ => {}
+                                }
+                            // ── Check extension shortcuts first ────────────
+                            } else if let Some(_shortcut) = imode.check_extension_shortcut(&key) {
+                                tracing::debug!(
+                                    "Extension shortcut matched: {}",
+                                    _shortcut.label
+                                );
+                            } else if let Some(tui_event) = convert_key_event(key) {
                                 input.handle_event(&tui_event);
                             }
                         }
@@ -1774,6 +2745,167 @@ pub async fn run_interactive(app: crate::App) -> Result<()> {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Render the model selector overlay onto the surface.
+///
+/// Shows a centered box with fuzzy-search filter at the top, a scrollable
+/// list of models, and the current selection highlighted.
+fn render_model_selector_overlay(
+    surface: &mut Surface,
+    selector: &ModelSelectorOverlay,
+    width: u16,
+    height: u16,
+    theme: &Theme,
+) {
+    let overlay_w = (width as usize).min(60).max(30);
+    let overlay_h = (height as usize).min(16).max(8);
+    let x_start = (width as usize - overlay_w) / 2;
+    let y_start = (height as usize - overlay_h) / 2;
+
+    // Draw border and background
+    for row in 0..overlay_h {
+        for col in 0..overlay_w {
+            let x = x_start + col;
+            let y = y_start + row;
+            if x < width as usize && y < height as usize {
+                let ch = if row == 0 && col == 0 {
+                    '\u{250C}'
+                } else if row == 0 && col == overlay_w - 1 {
+                    '\u{2510}'
+                } else if row == overlay_h - 1 && col == 0 {
+                    '\u{2514}'
+                } else if row == overlay_h - 1 && col == overlay_w - 1 {
+                    '\u{2518}'
+                } else if row == 0 || row == overlay_h - 1 {
+                    '\u{2500}'
+                } else if col == 0 || col == overlay_w - 1 {
+                    '\u{2502}'
+                } else {
+                    ' '
+                };
+                surface.set(
+                    y as u16,
+                    x as u16,
+                    oxi_tui::Cell::new(ch)
+                        .with_fg(theme.colors.primary)
+                        .with_bg(theme.colors.background),
+                );
+            }
+        }
+    }
+
+    // Title line
+    let title = " Model Selector (Ctrl+P) ";
+    let title_x = x_start + (overlay_w - title.len()) / 2;
+    for (i, ch) in title.chars().enumerate() {
+        let x = title_x + i;
+        if x < x_start + overlay_w - 1 && x < width as usize {
+            surface.set(
+                y_start as u16,
+                x as u16,
+                oxi_tui::Cell::new(ch)
+                    .with_fg(theme.colors.primary)
+                    .with_bg(theme.colors.background),
+            );
+        }
+    }
+
+    // Filter line (row 1)
+    let filter_label = "> ";
+    for (i, ch) in filter_label.chars().enumerate() {
+        let x = x_start + 1 + i;
+        if x < x_start + overlay_w - 1 {
+            surface.set(
+                (y_start + 1) as u16,
+                x as u16,
+                oxi_tui::Cell::new(ch)
+                    .with_fg(theme.colors.muted)
+                    .with_bg(theme.colors.background),
+            );
+        }
+    }
+    let filter_text = selector.filter();
+    for (i, ch) in filter_text.chars().enumerate() {
+        let x = x_start + 1 + filter_label.len() + i;
+        if x < x_start + overlay_w - 1 {
+            surface.set(
+                (y_start + 1) as u16,
+                x as u16,
+                oxi_tui::Cell::new(ch)
+                    .with_fg(theme.colors.foreground)
+                    .with_bg(theme.colors.background),
+            );
+        }
+    }
+
+    // Separator after filter
+    for col in 1..overlay_w - 1 {
+        let x = x_start + col;
+        surface.set(
+            (y_start + 2) as u16,
+            x as u16,
+            oxi_tui::Cell::new('\u{2500}')
+                .with_fg(theme.colors.border)
+                .with_bg(theme.colors.background),
+        );
+    }
+
+    // Model list (starting at row 3)
+    let filtered = selector.filtered_models();
+    let list_start_y = y_start + 3;
+    let list_height = overlay_h.saturating_sub(5);
+
+    for (i, model) in filtered.iter().enumerate() {
+        if i >= list_height {
+            break;
+        }
+        let y = list_start_y + i;
+        if y >= y_start + overlay_h - 1 {
+            break;
+        }
+
+        let is_cursor = i == selector.cursor_position();
+        let fg = if is_cursor {
+            theme.colors.primary
+        } else if model.selected {
+            theme.colors.success
+        } else {
+            theme.colors.foreground
+        };
+        let bg = if is_cursor {
+            theme.colors.selection_bg
+        } else {
+            theme.colors.background
+        };
+
+        // Indicator
+        let indicator = if model.selected { '\u{25CF}' } else { ' ' };
+        surface.set(
+            y as u16,
+            (x_start + 1) as u16,
+            oxi_tui::Cell::new(indicator).with_fg(fg).with_bg(bg),
+        );
+
+        // Model name
+        let max_name_len = overlay_w.saturating_sub(6);
+        let name_text = if model.display_name.len() > max_name_len {
+            let trunc_len = max_name_len.saturating_sub(3);
+            format!("{}...", &model.display_name[..trunc_len])
+        } else {
+            model.display_name.clone()
+        };
+        for (j, ch) in name_text.chars().enumerate() {
+            let x = x_start + 3 + j;
+            if x < x_start + overlay_w - 1 {
+                surface.set(
+                    y as u16,
+                    x as u16,
+                    oxi_tui::Cell::new(ch).with_fg(fg).with_bg(bg),
+                );
+            }
+        }
+    }
+}
 
 /// Render a surface to the terminal using efficient SGR sequences.
 fn render_surface_to_terminal(surface: &Surface, width: u16, height: u16) {
@@ -2862,5 +3994,438 @@ mod tests {
         let lcs = longest_common_subsequence(&a, &b);
         assert!(lcs.contains(&(0, 0))); // "a"
         assert!(lcs.contains(&(2, 1))); // "c"
+    }
+}
+
+// ── Tests for integration features ──────────────────────────────────────────
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    // ── ModelSelectorOverlay tests ────────────────────────────────────
+
+    #[test]
+    fn test_model_selector_new() {
+        let selector = ModelSelectorOverlay::new(Vec::new());
+        assert!(!selector.is_visible());
+        assert!(selector.filter().is_empty());
+    }
+
+    #[test]
+    fn test_model_selector_show_hide() {
+        let mut selector = ModelSelectorOverlay::new(Vec::new());
+        assert!(!selector.is_visible());
+        selector.show();
+        assert!(selector.is_visible());
+        selector.hide();
+        assert!(!selector.is_visible());
+    }
+
+    #[test]
+    fn test_model_selector_filter() {
+        let models = vec![
+            ModelSelectorEntry {
+                full_id: "anthropic/claude-sonnet".to_string(),
+                display_name: "Claude Sonnet".to_string(),
+                provider: "anthropic".to_string(),
+                selected: false,
+            },
+            ModelSelectorEntry {
+                full_id: "openai/gpt-4o".to_string(),
+                display_name: "GPT-4o".to_string(),
+                provider: "openai".to_string(),
+                selected: true,
+            },
+        ];
+        let mut selector = ModelSelectorOverlay::new(models);
+        selector.show();
+
+        // Type filter
+        selector.type_char('c');
+        assert_eq!(selector.filter(), "c");
+        let filtered = selector.filtered_models();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].display_name, "Claude Sonnet");
+
+        // Backspace
+        selector.backspace();
+        assert!(selector.filter().is_empty());
+        assert_eq!(selector.filtered_models().len(), 2);
+    }
+
+    #[test]
+    fn test_model_selector_cursor_navigation() {
+        let models = vec![
+            ModelSelectorEntry {
+                full_id: "a".to_string(),
+                display_name: "Model A".to_string(),
+                provider: "p1".to_string(),
+                selected: false,
+            },
+            ModelSelectorEntry {
+                full_id: "b".to_string(),
+                display_name: "Model B".to_string(),
+                provider: "p2".to_string(),
+                selected: false,
+            },
+            ModelSelectorEntry {
+                full_id: "c".to_string(),
+                display_name: "Model C".to_string(),
+                provider: "p3".to_string(),
+                selected: false,
+            },
+        ];
+        let mut selector = ModelSelectorOverlay::new(models);
+        selector.show();
+
+        assert_eq!(selector.cursor_position(), 0);
+        selector.cursor_down();
+        assert_eq!(selector.cursor_position(), 1);
+        selector.cursor_down();
+        assert_eq!(selector.cursor_position(), 2);
+        selector.cursor_down(); // Should not go beyond end
+        assert_eq!(selector.cursor_position(), 2);
+        selector.cursor_up();
+        assert_eq!(selector.cursor_position(), 1);
+        selector.cursor_up();
+        assert_eq!(selector.cursor_position(), 0);
+        selector.cursor_up(); // Should not go below 0
+        assert_eq!(selector.cursor_position(), 0);
+    }
+
+    #[test]
+    fn test_model_selector_confirm() {
+        let models = vec![
+            ModelSelectorEntry {
+                full_id: "anthropic/claude".to_string(),
+                display_name: "Claude".to_string(),
+                provider: "anthropic".to_string(),
+                selected: false,
+            },
+        ];
+        let mut selector = ModelSelectorOverlay::new(models);
+        selector.show();
+        let choice = selector.confirm();
+        assert_eq!(choice, Some("anthropic/claude".to_string()));
+        assert!(!selector.is_visible());
+    }
+
+    #[test]
+    fn test_model_selector_cancel() {
+        let mut selector = ModelSelectorOverlay::new(Vec::new());
+        selector.show();
+        selector.cancel();
+        assert!(!selector.is_visible());
+    }
+
+    #[test]
+    fn test_model_selector_reposition_to_selected() {
+        let models = vec![
+            ModelSelectorEntry {
+                full_id: "a".to_string(),
+                display_name: "A".to_string(),
+                provider: "p".to_string(),
+                selected: false,
+            },
+            ModelSelectorEntry {
+                full_id: "b".to_string(),
+                display_name: "B".to_string(),
+                provider: "p".to_string(),
+                selected: true,
+            },
+            ModelSelectorEntry {
+                full_id: "c".to_string(),
+                display_name: "C".to_string(),
+                provider: "p".to_string(),
+                selected: false,
+            },
+        ];
+        let mut selector = ModelSelectorOverlay::new(models);
+        selector.show(); // Should reposition to selected (index 1)
+        assert_eq!(selector.cursor_position(), 1);
+    }
+
+    // ── Fuzzy match tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_fuzzy_match_basic() {
+        assert!(fuzzy_match("cs", "claude sonnet"));
+        assert!(fuzzy_match("gpt", "gpt-4o"));
+        assert!(!fuzzy_match("xyz", "hello"));
+    }
+
+    #[test]
+    fn test_fuzzy_match_empty() {
+        assert!(fuzzy_match("", ""));
+        assert!(fuzzy_match("", "anything"));
+    }
+
+    #[test]
+    fn test_fuzzy_match_exact() {
+        assert!(fuzzy_match("hello", "hello"));
+    }
+
+    // ── DoubleEscapeTracker tests ─────────────────────────────────────
+
+    #[test]
+    fn test_double_escape_single_press() {
+        let mut tracker = DoubleEscapeTracker::new();
+        assert!(!tracker.press_escape()); // First press -> not double
+    }
+
+    #[test]
+    fn test_double_escape_double_press() {
+        let mut tracker = DoubleEscapeTracker::new();
+        assert!(!tracker.press_escape()); // First press
+        assert!(tracker.press_escape());  // Second press -> double!
+    }
+
+    #[test]
+    fn test_double_escape_timeout() {
+        let mut tracker = DoubleEscapeTracker::with_interval(50); // 50ms
+        assert!(!tracker.press_escape());
+        thread::sleep(Duration::from_millis(100)); // Wait longer than interval
+        assert!(!tracker.press_escape()); // Should not detect double-escape
+    }
+
+    #[test]
+    fn test_double_escape_reset() {
+        let mut tracker = DoubleEscapeTracker::new();
+        assert!(!tracker.press_escape());
+        tracker.reset();
+        assert!(!tracker.press_escape()); // Should be like first press again
+    }
+
+    #[test]
+    fn test_double_escape_action() {
+        let mut tracker = DoubleEscapeTracker::new();
+        assert_eq!(tracker.action(), DoubleEscapeAction::Quit);
+        tracker.set_action(DoubleEscapeAction::Clear);
+        assert_eq!(tracker.action(), DoubleEscapeAction::Clear);
+    }
+
+    // ── CompactionProgressTracker tests ───────────────────────────────
+
+    #[test]
+    fn test_compaction_progress_new() {
+        let tracker = CompactionProgressTracker::new();
+        assert!(!tracker.is_active());
+        assert!(!tracker.is_cancelled());
+    }
+
+    #[test]
+    fn test_compaction_progress_start_finish() {
+        let mut tracker = CompactionProgressTracker::new();
+        tracker.start(10);
+        assert!(tracker.is_active());
+        assert!(!tracker.is_cancelled());
+        tracker.finish();
+        assert!(!tracker.is_active());
+    }
+
+    #[test]
+    fn test_compaction_progress_cancel() {
+        let mut tracker = CompactionProgressTracker::new();
+        tracker.start(10);
+        tracker.cancel();
+        assert!(tracker.is_cancelled());
+        tracker.finish();
+        assert!(!tracker.is_active());
+    }
+
+    #[test]
+    fn test_compaction_progress_update() {
+        let mut tracker = CompactionProgressTracker::new();
+        tracker.start(20);
+        tracker.update(5);
+        let text = tracker.progress_text();
+        assert!(text.contains("5/20"));
+        assert!(text.contains("Esc to cancel"));
+    }
+
+    #[test]
+    fn test_compaction_progress_cancel_hint() {
+        let mut tracker = CompactionProgressTracker::new();
+        tracker.start(10);
+        tracker.cancel();
+        let text = tracker.progress_text();
+        assert!(text.contains("cancelling"));
+    }
+
+    #[test]
+    fn test_compaction_progress_empty_when_inactive() {
+        let tracker = CompactionProgressTracker::new();
+        assert!(tracker.progress_text().is_empty());
+    }
+
+    // ── ExtensionShortcutRegistry tests ───────────────────────────────
+
+    #[test]
+    fn test_extension_shortcut_register() {
+        let mut registry = ExtensionShortcutRegistry::new();
+        registry.register("test.shortcut", "test-ext", "ctrl+shift+f", "Find in files");
+        assert_eq!(registry.shortcuts().len(), 1);
+        assert_eq!(registry.shortcuts()[0].id, "test.shortcut");
+        assert_eq!(registry.shortcuts()[0].key_sequence, "ctrl+shift+f");
+    }
+
+    #[test]
+    fn test_extension_shortcut_unregister() {
+        let mut registry = ExtensionShortcutRegistry::new();
+        registry.register("test.shortcut", "test-ext", "ctrl+f", "Find");
+        registry.unregister("test.shortcut");
+        assert!(registry.shortcuts().is_empty());
+    }
+
+    #[test]
+    fn test_extension_shortcut_replace() {
+        let mut registry = ExtensionShortcutRegistry::new();
+        registry.register("test.shortcut", "ext1", "ctrl+f", "Find v1");
+        registry.register("test.shortcut", "ext2", "ctrl+g", "Find v2");
+        assert_eq!(registry.shortcuts().len(), 1);
+        assert_eq!(registry.shortcuts()[0].label, "Find v2");
+    }
+
+    #[test]
+    fn test_extension_shortcut_enable_disable() {
+        let mut registry = ExtensionShortcutRegistry::new();
+        registry.register("test.id", "ext", "ctrl+f", "Find");
+        registry.set_enabled("test.id", false);
+        assert!(!registry.shortcuts()[0].enabled);
+        registry.set_enabled("test.id", true);
+        assert!(registry.shortcuts()[0].enabled);
+    }
+
+    #[test]
+    fn test_extension_shortcut_find_matching() {
+        let mut registry = ExtensionShortcutRegistry::new();
+        registry.register("test.find", "ext", "ctrl+f", "Find");
+
+        // Create a mock key event
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('f'),
+            crossterm::event::KeyModifiers::CONTROL,
+        );
+        let result = registry.find_matching(&key);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().id, "test.find");
+    }
+
+    // ── InteractiveModeState tests ────────────────────────────────────
+
+    #[test]
+    fn test_interactive_mode_state_new() {
+        let state = InteractiveModeState::new();
+        assert!(!state.model_selector.is_visible());
+        assert!(!state.compaction_progress.is_active());
+        assert!(state.pending_image.is_none());
+    }
+
+    #[test]
+    fn test_interactive_mode_state_model_confirm_not_visible() {
+        let mut state = InteractiveModeState::new();
+        assert!(state.handle_model_confirm().is_none());
+    }
+
+    #[test]
+    fn test_interactive_mode_state_model_cancel_not_visible() {
+        let mut state = InteractiveModeState::new();
+        assert!(!state.handle_model_cancel());
+    }
+
+    #[test]
+    fn test_interactive_mode_state_compaction_escape_not_active() {
+        let mut state = InteractiveModeState::new();
+        assert!(!state.handle_compaction_escape());
+    }
+
+    #[test]
+    fn test_interactive_mode_state_compaction_lifecycle() {
+        let mut state = InteractiveModeState::new();
+        state.start_compaction(10);
+        assert!(state.compaction_progress.is_active());
+        state.update_compaction(5);
+        assert!(state.handle_compaction_escape());
+        assert!(state.compaction_progress.is_cancelled());
+        state.finish_compaction();
+        assert!(!state.compaction_progress.is_active());
+    }
+
+    #[test]
+    fn test_interactive_mode_state_double_escape() {
+        let mut state = InteractiveModeState::new();
+        assert!(!state.handle_escape()); // First press
+        assert!(state.handle_escape());  // Second press -> double!
+    }
+
+    #[test]
+    fn test_interactive_mode_state_register_extension_shortcut() {
+        let mut state = InteractiveModeState::new();
+        state.register_extension_shortcut("my.shortcut", "ext", "ctrl+shift+x", "Custom");
+        assert_eq!(state.extension_shortcuts.shortcuts().len(), 1);
+        state.unregister_extension_shortcut("my.shortcut");
+        assert!(state.extension_shortcuts.shortcuts().is_empty());
+    }
+
+    #[test]
+    fn test_interactive_mode_state_ctrl_p() {
+        let models = vec![
+            ModelSelectorEntry {
+                full_id: "a".to_string(),
+                display_name: "A".to_string(),
+                provider: "p".to_string(),
+                selected: true,
+            },
+            ModelSelectorEntry {
+                full_id: "b".to_string(),
+                display_name: "B".to_string(),
+                provider: "p".to_string(),
+                selected: false,
+            },
+        ];
+        let mut state = InteractiveModeState::with_models(models);
+        assert!(!state.model_selector.is_visible());
+        state.handle_ctrl_p(); // Show
+        assert!(state.model_selector.is_visible());
+        state.handle_ctrl_p(); // Cycle down
+        assert_eq!(state.model_selector.cursor_position(), 1);
+    }
+
+    // ── TerminalSuspendHandler tests ──────────────────────────────────
+
+    #[test]
+    fn test_terminal_suspend_handler_new() {
+        let handler = TerminalSuspendHandler::new();
+        assert!(!handler.is_suspended());
+    }
+
+    // ── ClipboardImagePasteHandler tests ──────────────────────────────
+
+    #[test]
+    fn test_clipboard_image_paste_handler_new() {
+        let handler = ClipboardImagePasteHandler::new();
+        // Just ensure it creates successfully
+        drop(handler);
+    }
+
+    // ── SlashCommand alias tests ──────────────────────────────────────
+
+    #[test]
+    fn test_slash_command_aliases() {
+        assert_eq!(SlashCommand::parse("/help"), SlashCommand::Help);
+        assert_eq!(SlashCommand::parse("/?"), SlashCommand::Help);
+        assert_eq!(SlashCommand::parse("/quit"), SlashCommand::Quit);
+        assert_eq!(SlashCommand::parse("/exit"), SlashCommand::Quit);
+        assert_eq!(SlashCommand::parse("/q"), SlashCommand::Quit);
+        assert_eq!(SlashCommand::parse("/settings"), SlashCommand::Settings);
+        assert_eq!(SlashCommand::parse("/new"), SlashCommand::New);
+        assert_eq!(SlashCommand::parse("/reload"), SlashCommand::Reload);
+        assert_eq!(SlashCommand::parse("/clone"), SlashCommand::Clone);
+        assert_eq!(SlashCommand::parse("/copy"), SlashCommand::Copy);
+        assert_eq!(SlashCommand::parse("/name test"), SlashCommand::Name { name: "test".to_string() });
+        assert_eq!(SlashCommand::parse("/resume"), SlashCommand::Session);
     }
 }

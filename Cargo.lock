@@ -2292,6 +2292,7 @@ dependencies = [
  "futures",
  "image",
  "lazy_static",
+ "libc",
  "libloading",
  "notify",
  "once_cell",

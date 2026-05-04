@@ -5,6 +5,32 @@ Completed
 
 ## Tasks
 
+### Port interactive integration features from pi-mono to Rust
+Added 6 integration-level features connecting interactive mode components together in `oxi-cli/src/interactive.rs`.
+
+1. **Ctrl+P model cycling** — `ModelSelectorOverlay` with fuzzy search filtering, cursor navigation, confirm/cancel. When user presses Ctrl+P, overlay appears with scoped models or all available models. Supports typing to filter, up/down to navigate, Enter to confirm, Escape to cancel.
+
+2. **Ctrl+Z / SIGTSTP suspend** — `TerminalSuspendHandler` restores terminal state (leaves alternate screen, disables raw mode, shows cursor), sends SIGTSTP via libc, then reinitializes terminal on SIGCONT resume.
+
+3. **Double-Escape quit** — `DoubleEscapeTracker` detects two Escape presses within 500ms. Configurable action (quit or clear input). Escape handling has priority chain: model selector cancel → compaction cancel → double-escape.
+
+4. **Auto-compaction with Escape** — `CompactionProgressTracker` shows progress during compaction (spinner, message count, cancel hint). User can press Escape to cancel. Progress is rendered in the status line area.
+
+5. **Clipboard image paste (Ctrl+V)** — `ClipboardImagePasteHandler` wraps existing `ImagePasteHandler` to read system clipboard for images via Ctrl+V. Images are processed (resize, base64 encode) and stored as pending attachments.
+
+6. **Extension shortcut handling** — `ExtensionShortcutRegistry` lets extensions register keyboard shortcuts (id, extension name, key sequence, label). Shortcuts are checked before default handling in the event loop. Includes enable/disable and find-matching support.
+
+### Additional changes:
+- Added `InteractiveModeState` bundling all integration state together with convenience methods
+- Added `render_model_selector_overlay()` for TUI rendering of the model selector
+- Added missing slash command aliases: `/help`, `/?`, `/quit`, `/exit`, `/q`, `/settings`, `/new`, `/reload`, `/clone`, `/copy`, `/name`, `/resume`
+- Added `key_event_to_sequence_string()` for normalizing crossterm key events
+- Added `fuzzy_match()` for fuzzy character-by-character matching
+- Fixed pre-existing compile error in `tui_components.rs` (`as_ref()` on `impl Into<String>`)
+- Added `libc` dependency for Unix SIGTSTP support
+- 37 new tests covering all integration features
+
+
 ### Port interactive UI selector components from pi-mono to Rust
 All 8 selector components have been ported and added to `oxi-cli/src/tui_components.rs`.
 

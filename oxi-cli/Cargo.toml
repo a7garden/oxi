@@ -80,5 +80,9 @@ flate2 = "1"
 tar = "0.4"
 zip = "2"
 
+# Unix primitives for SIGTSTP
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
