@@ -932,23 +932,48 @@ fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOpt
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            html.push_str(&render_markdown_with_options(content, options));
+            let content_str = match content {
+                crate::session::ContentValue::String(s) => s.as_str(),
+                crate::session::ContentValue::Blocks(blocks) => {
+                    let mut text = String::new();
+                    for block in blocks {
+                        if let crate::session::ContentBlock::Text { text: t } = block {
+                            text.push_str(t);
+                            text.push('\n');
+                        }
+                    }
+                    text.trim()
+                }
+            };
+            html.push_str(&render_markdown_with_options(content_str, options));
             html.push_str("</div>\n</div>\n");
         }
-        AgentMessage::Assistant { content } => {
+        AgentMessage::Assistant { content, .. } => {
             html.push_str("<div class=\"msg msg-assistant\">\n");
             html.push_str("<div class=\"msg-header\"><span class=\"msg-role\">Assistant</span>");
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
 
+            // Extract text content for markdown rendering
+            let mut text_content = String::new();
+            for block in content {
+                if let crate::session::AssistantContentBlock::Text { text } = block {
+                    text_content.push_str(text);
+                    text_content.push('\n');
+                }
+            }
+
+            let text_str = text_content.trim();
+
+
             // Try tool rendering first for assistant messages
-            if let Some(tool_html) = render_tool_blocks(content, options.include_tool_calls) {
+            if let Some(tool_html) = render_tool_blocks(text_str, options.include_tool_calls) {
                 html.push_str(&tool_html);
                 // Also render the non-tool content via markdown
-                html.push_str(&render_markdown_with_options(content, options));
+                html.push_str(&render_markdown_with_options(text_str, options));
             } else {
-                html.push_str(&render_markdown_with_options(content, options));
+                html.push_str(&render_markdown_with_options(text_str, options));
             }
 
             html.push_str("</div>\n</div>\n");
@@ -959,8 +984,34 @@ fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOpt
             write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
-            html.push_str(&render_markdown_with_options(content, options));
+            let content_str = match content {
+                crate::session::ContentValue::String(s) => s.as_str(),
+                crate::session::ContentValue::Blocks(blocks) => {
+                    let mut text = String::new();
+                    for block in blocks {
+                        if let crate::session::ContentBlock::Text { text: t } = block {
+                            text.push_str(t);
+                            text.push('\n');
+                        }
+                    }
+                    text.trim()
+                }
+            };
+            html.push_str(&render_markdown_with_options(content_str, options));
             html.push_str("</div>\n</div>\n");
+        }
+        // Handle other message types (render them as system for simplicity)
+        _ => {
+            let content = entry.content();
+            if !content.is_empty() {
+                html.push_str("<div class=\"msg msg-system\">\n");
+                html.push_str("<div class=\"msg-header\"><span class=\"msg-role\">System</span>");
+                write!(html, "<span class=\"msg-time\">{}</span>", html_escape(&ts))?;
+                html.push_str("</div>\n");
+                html.push_str("<div class=\"msg-body\">");
+                html.push_str(&render_markdown_with_options(&content, options));
+                html.push_str("</div>\n</div>\n");
+            }
         }
     }
     Ok(())

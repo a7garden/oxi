@@ -146,7 +146,7 @@ pub struct CollectEntriesResult {
     /// Entries to summarize, in chronological order
     pub entries: Vec<SessionEntry>,
     /// Common ancestor between old and new position, if any
-    pub common_ancestor_id: Option<Uuid>,
+    pub common_ancestor_id: Option<String>,
 }
 
 /// Options for generating branch summary
@@ -267,8 +267,8 @@ const TOOL_RESULT_MAX_CHARS: usize = 2000;
 /// Entries to summarize and the common ancestor
 pub fn collect_entries_for_branch_summary(
     entries: &[SessionEntry],
-    old_leaf_id: Option<Uuid>,
-    target_id: Uuid,
+    old_leaf_id: Option<String>,
+    target_id: String,
 ) -> CollectEntriesResult {
     // If no old position, nothing to summarize
     let old_leaf_id = match old_leaf_id {
@@ -281,23 +281,23 @@ pub fn collect_entries_for_branch_summary(
 
     // Build path from old leaf to root
     let old_path = build_path_to_root(entries, old_leaf_id);
-    let old_path_set: HashSet<Uuid> = old_path.iter().map(|e| e.id).collect();
+    let old_path_set: HashSet<String> = old_path.iter().map(|e| e.id.clone()).collect();
 
     // Build path from target to root
     let target_path = build_path_to_root(entries, target_id);
 
     // target_path is root-first, so iterate backwards to find deepest common ancestor
-    let mut common_ancestor_id: Option<Uuid> = None;
+    let mut common_ancestor_id: Option<String> = None;
     for entry in target_path.iter().rev() {
-        if old_path_set.contains(&entry.id) {
-            common_ancestor_id = Some(entry.id);
+        if old_path_set.contains(&entry.id.clone()) {
+            common_ancestor_id = Some(entry.id.clone());
             break;
         }
     }
 
     // Collect entries from old leaf back to common ancestor
     let mut entries_to_summarize: Vec<SessionEntry> = Vec::new();
-    let mut current_id: Option<Uuid> = Some(old_leaf_id);
+    let mut current_id: Option<String> = Some(old_leaf_id);
 
     while let Some(id) = current_id {
         if common_ancestor_id == Some(id) {
@@ -322,9 +322,9 @@ pub fn collect_entries_for_branch_summary(
 }
 
 /// Build path from an entry to the root (entry, parent, grandparent, etc.)
-fn build_path_to_root(entries: &[SessionEntry], start_id: Uuid) -> Vec<SessionEntry> {
+fn build_path_to_root(entries: &[SessionEntry], start_id: &str) -> Vec<SessionEntry> {
     let mut path = Vec::new();
-    let mut current_id: Option<Uuid> = Some(start_id);
+    let mut current_id: Option<String> = Some(start_id);
 
     while let Some(id) = current_id {
         if let Some(entry) = entries.iter().find(|e| e.id == id) {
@@ -346,24 +346,59 @@ fn build_path_to_root(entries: &[SessionEntry], start_id: Uuid) -> Vec<SessionEn
 /// Similar to getMessageFromEntry in compaction.rs but also handles compaction entries.
 fn get_message_from_entry(entry: &SessionEntry) -> Option<oxi_ai::Message> {
     match &entry.message {
-        SessionAgentMessage::User { content } => {
-            Some(oxi_ai::Message::User(UserMessage::new(content.clone())))
+        crate::session::AgentMessage::User { content } => {
+            let text = match content {
+                crate::session::ContentValue::String(s) => s.clone(),
+                crate::session::ContentValue::Blocks(blocks) => {
+                    let mut t = String::new();
+                    for block in blocks {
+                        if let crate::session::ContentBlock::Text { text } = block {
+                            t.push_str(text);
+                            t.push('\n');
+                        }
+                    }
+                    t.trim().to_string()
+                }
+            };
+            Some(oxi_ai::Message::User(UserMessage::new(text)))
         }
-        SessionAgentMessage::Assistant { content } => {
+        crate::session::AgentMessage::Assistant { content, .. } => {
+            let mut text = String::new();
+            for block in content {
+                if let crate::session::AssistantContentBlock::Text { text: t } = block {
+                    text.push_str(t);
+                    text.push('\n');
+                }
+            }
             Some(oxi_ai::Message::Assistant({
                 let mut msg = AssistantMessage::new(
                     oxi_ai::Api::AnthropicMessages,
                     "session",
                     "unknown",
                 );
-                msg.content = vec![ContentBlock::Text(TextContent::new(content.clone()))];
+                msg.content = vec![ContentBlock::Text(TextContent::new(text.trim().to_string()))];
                 msg
             }))
         }
-        SessionAgentMessage::System { content } => {
+        crate::session::AgentMessage::System { content } => {
+            let text = match content {
+                crate::session::ContentValue::String(s) => s.clone(),
+                crate::session::ContentValue::Blocks(blocks) => {
+                    let mut t = String::new();
+                    for block in blocks {
+                        if let crate::session::ContentBlock::Text { text } = block {
+                            t.push_str(text);
+                            t.push('\n');
+                        }
+                    }
+                    t.trim().to_string()
+                }
+            };
             // System messages should be converted to user messages for summarization
-            Some(oxi_ai::Message::User(UserMessage::new(content.clone())))
+            Some(oxi_ai::Message::User(UserMessage::new(text)))
         }
+        // Other message types don't contribute to context
+        _ => None,
     }
 }
 
@@ -726,14 +761,22 @@ fn format_file_operations(summary: &str, read_files: &[String], modified_files: 
 mod tests {
     use super::*;
 
-    fn create_test_entry(role: &str, content: &str, parent: Option<Uuid>) -> SessionEntry {
+    fn create_test_entry(role: &str, content: &str, parent: Option<String>) -> SessionEntry {
         let message = match role {
-            "user" => SessionAgentMessage::User { content: content.to_string() },
-            _ => SessionAgentMessage::Assistant { content: content.to_string() },
+            "user" => crate::session::AgentMessage::User { 
+                content: crate::session::ContentValue::String(content.to_string()) 
+            },
+            _ => crate::session::AgentMessage::Assistant { 
+                content: vec![crate::session::AssistantContentBlock::Text { 
+                    text: content.to_string() 
+                }],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
+            },
         };
-        let mut entry = SessionEntry::new(message);
-        entry.parent_id = parent;
-        entry
+        SessionEntry::new(message)
     }
 
     #[test]
@@ -745,7 +788,7 @@ mod tests {
         let result = collect_entries_for_branch_summary(
             &entries,
             None,
-            entries[0].id,
+            entries[0].id.clone(),
         );
         
         assert!(result.entries.is_empty());
@@ -758,19 +801,19 @@ mod tests {
         
         // Create a chain: root -> a -> b -> c
         let root = create_test_entry("user", "Root", None);
-        let root_id = root.id;
+        let root_id = root.id.clone();
         entries.push(root);
         
         let a = create_test_entry("user", "A", Some(root_id));
-        let a_id = a.id;
+        let a_id = a.id.clone();
         entries.push(a);
         
-        let b = create_test_entry("user", "B", Some(a_id));
-        let b_id = b.id;
+        let b = create_test_entry("user", "B", Some(a_id.clone()));
+        let b_id = b.id.clone();
         entries.push(b);
         
-        let c = create_test_entry("user", "C", Some(b_id));
-        let c_id = c.id;
+        let c = create_test_entry("user", "C", Some(b_id.clone()));
+        let c_id = c.id.clone();
         entries.push(c);
         
         // Navigate from c to a (common ancestor should be a)
@@ -783,8 +826,8 @@ mod tests {
         // Should collect b and c
         assert_eq!(result.entries.len(), 2);
         assert_eq!(result.common_ancestor_id, Some(a_id));
-        assert_eq!(result.entries[0].message.content(), "B");
-        assert_eq!(result.entries[1].message.content(), "C");
+        assert_eq!(result.entries[0].content(), "B");
+        assert_eq!(result.entries[1].content(), "C");
     }
 
     #[test]
