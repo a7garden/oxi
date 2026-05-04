@@ -565,7 +565,7 @@ impl AgentSession {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 let local = tokio::task::LocalSet::new();
-                local.run_until(async move {
+                let _ = local.run_until(async move {
                     let (inner_tx, mut inner_rx) = mpsc::channel(100);
                     // Use agent.run_with_channel inside LocalSet
                     let agent_for_task = Arc::clone(&agent_clone);

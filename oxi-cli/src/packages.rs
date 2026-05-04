@@ -50,7 +50,9 @@ use std::time::Duration;
 // ── Constants ─────────────────────────────────────────────────────────
 
 const NETWORK_TIMEOUT_SECS: u64 = 10;
+#[allow(dead_code)]
 const UPDATE_CHECK_CONCURRENCY: usize = 4;
+#[allow(dead_code)]
 const GIT_UPDATE_CONCURRENCY: usize = 4;
 const LOCKFILE_NAME: &str = "oxi-lock.json";
 const MANIFEST_NAME: &str = "oxi-package.toml";
@@ -80,6 +82,7 @@ impl std::fmt::Display for ResourceKind {
 }
 
 /// All resource kinds for iteration
+#[allow(dead_code)]
 const RESOURCE_KINDS: [ResourceKind; 4] = [
     ResourceKind::Extension,
     ResourceKind::Skill,
@@ -878,6 +881,7 @@ impl PackageManager {
         }
     }
 
+    #[allow(dead_code)]
     fn with_progress<F>(
         &self,
         action: ProgressAction,
@@ -1716,6 +1720,7 @@ impl PackageManager {
     }
 
     /// Check if offline mode is enabled
+    #[allow(dead_code)]
     fn is_offline() -> bool {
         std::env::var("OXI_OFFLINE")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))

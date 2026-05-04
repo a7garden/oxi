@@ -3,7 +3,7 @@
 //! When navigating to a different point in the session tree, this generates
 //! a summary of the branch being left so context isn't lost.
 
-use crate::session::{SessionEntry, AgentMessage as SessionAgentMessage};
+use crate::session::SessionEntry;
 use oxi_ai::{
     AssistantMessage, Model, Provider, UserMessage, ContentBlock, TextContent,
     complete, Context as AiContext,
@@ -11,7 +11,6 @@ use oxi_ai::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;
-use uuid::Uuid;
 
 // ============================================================================
 // Types

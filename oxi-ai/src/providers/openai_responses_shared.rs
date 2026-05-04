@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Shared code between OpenAI Responses API and Codex providers.
 //!
 //! Ported from `openai-responses-shared.ts`. Contains:
@@ -9,7 +10,7 @@
 
 use serde_json::Value as JsonValue;
 
-use crate::{Api, ContentBlock, Context, Message, MessageContent, Model, Tool};
+use crate::{ContentBlock, Context, Message, MessageContent, Model, Tool};
 
 // ---------------------------------------------------------------------------
 // Text signatures
