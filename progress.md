@@ -126,3 +126,33 @@ Completed
 
 ### Files Changed
 - `oxi-cli/src/tui_components.rs` — Added SessionSelectorSearch, enhanced SettingsSelector, ThinkingSelector, and TreeSelector
+
+## RPC Mode Port (pi-mono → oxi-cli)
+
+### What was ported
+- [x] JSONL streaming protocol (`serialize_json_line`, `parse_json_line`, `JsonlLineReader`)
+- [x] JSON-RPC 2.0 compatibility layer (request/response types, method mapping, error codes)
+- [x] RPC Client for programmatic access (`RpcClient` with typed API for all operations)
+- [x] RPC Client config (`RpcClientConfig` with binary path, cwd, env, provider, model)
+- [x] Event streaming/subscription (`RpcEvent` enum with AgentStart, TextChunk, Thinking, ToolStart, ToolEnd, AgentEnd, Error)
+- [x] Session handoff protocol (`SessionHandoff` for inter-process session transfer)
+- [x] Extension UI request/response handling (pending requests with async resolution)
+- [x] Thread-safe output writer (`RpcOutput` with atomic JSONL writes)
+- [x] Missing fields from pi-mono types: `streaming_behavior` on Prompt, `model` in SessionState, `session_file` in state
+- [x] Command provenance tracking (`SourceInfo` on `CommandInfo`)
+- [x] Model info in session state (`ModelInfo` struct)
+- [x] Event forwarding in server loop (events emitted to subscribers)
+- [x] Full JSON-RPC 2.0 method mapping (all 28 methods)
+- [x] Comprehensive test suite (50+ tests covering all new features)
+
+### Verification
+- [x] `cargo check -p oxi-cli` passes (zero errors in rpc_mode.rs)
+- [x] Pre-existing errors in tui_interactive.rs and tui_components.rs fixed
+- [x] All new types serialize/deserialize correctly
+- [x] JSONL framing is LF-only (no CR splitting)
+- [x] JSON-RPC 2.0 detection works via `jsonrpc` field presence
+
+### Files Changed
+- `oxi-cli/src/rpc_mode.rs` — Major enhancement: JSONL framing, JSON-RPC 2.0, RPC Client, event streaming, session handoff
+- `oxi-cli/src/tui_components.rs` — Fixed pre-existing `current_id` variable name bug
+- `oxi-cli/src/tui_interactive.rs` — Fixed pre-existing `ui_tx` borrow-after-move bug

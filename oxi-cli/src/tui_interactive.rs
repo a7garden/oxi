@@ -20,15 +20,12 @@
 //!        └─ TUI event loop  (ChatView + Input)
 //! ```
 
-use crate::agent_session::{
-    AgentSession, CompactionReason, PromptOptions, SessionEvent, StreamingBehavior,
-};
+use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
 use crate::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
 };
 use crate::session::SessionManager;
-use crate::settings::Settings;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
 use oxi_tui::component::Component;
@@ -73,7 +70,7 @@ enum UiEvent {
     },
     /// Compaction finished.
     CompactionEnd {
-        reason: CompactionReason,
+        _reason: CompactionReason,
         error_message: Option<String>,
     },
     /// Auto-retry started.
@@ -171,7 +168,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
 
                         // Forward agent events to UI
-                        let ui_fwd = ui_tx.clone();
+                        let ui_fwd = ui_tx_for_thread.clone();
                         let event_forwarder = tokio::task::spawn_local(async move {
                             while let Some(event) = event_rx.recv().await {
                                 let ui_event = match event {
@@ -453,7 +450,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     });
                 }
                 UiEvent::CompactionEnd {
-                    reason: _,
+                    _reason: _,
                     error_message,
                 } => {
                     let msg = if let Some(err) = error_message {
@@ -524,7 +521,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 } => {
                     let _ = ui_tx
                         .send(UiEvent::CompactionEnd {
-                            reason,
+                            _reason: reason,
                             error_message,
                         })
                         .await;
@@ -571,7 +568,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     // Forward relevant ones to UI.
                     match &event {
                         AgentEvent::Fallback {
-                            from_model,
+                            from_model: _,
                             to_model,
                         } => {
                             let _ = ui_tx
