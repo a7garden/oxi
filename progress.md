@@ -132,3 +132,31 @@ Added 18 integration tests to `oxi-agent/src/tests.rs` covering 6 areas:
 **Test Results:** 189 passed (lib), 4 passed (bin), 60 passed (integration) — 253 total, 0 failures
 
 **Output:** `/tmp/fix5-agent-tests.md`
+
+### Fix 8: oxi-cli AgentSession Tests + Module Documentation (2026-05-05)
+
+**Status: ✅ Complete**
+
+Added 48 comprehensive unit tests to `oxi-cli/src/agent_session.rs` covering 10 areas:
+
+1. **AgentSession creation** (4 tests): Basic field initialization, model ID, default thinking level, empty queues
+2. **Model cycling** (6 tests): Forward/backward cycle without scoped models, scoped model cycling, single-model edge case, set/get scoped models, scoped model field validation, ModelCycleResult fields
+3. **Thinking level changes** (4 tests): set_thinking_level across all variants, no-op when same level, cycle_thinking_level full cycle through None→Minimal→Standard→Thorough, wrapping behavior
+4. **Steering/follow-up queue operations** (6 tests): steer() adds to queue, follow_up() adds to queue, multiple steer messages, multiple follow-up messages, mixed steer+follow-up, pending_message_count
+5. **Queue management** (2 tests): clear_queue with data, clear_queue on empty
+6. **Compaction trigger logic** (4 tests): Default enabled state, set_auto_compaction_enabled toggle, is_compacting initially false, CompactionReason variant equality, CompactionConfig defaults
+7. **Session entry appending** (5 tests): Session stats on empty session, SessionStats struct default, persist_session with no messages (no-op), persisted_count accessor, idempotent persist
+8. **Event subscription** (3 tests): Subscribe receives ThinkingLevelChanged events, channel-based subscription with guard, listener guard RAII drop behavior
+9. **Session reset** (1 test): Reset clears queues and overflow flag
+10. **Handle cloning + extensions + misc** (9 tests): Clone handle shares state, no extension runner by default, extension tools/commands empty, auto_retry_enabled, PromptOptions defaults, StreamingBehavior/InputSource variants, default model list
+
+**Key findings:**
+- `Agent::state()` returns a cloned `AgentState`, so direct mutation via `agent.state().add_user_message()` doesn't modify internal state (design limitation, not bug)
+- `subscribe_channel()` returns a receiver but the listener guard is immediately dropped, replacing the callback with a no-op — a pre-existing design issue
+- `Settings::default()` has `auto_compaction = true`
+
+**Module documentation:** All four target files (`bash_executor.rs`, `agent_session.rs`, `tools_manager.rs`, `event_bus.rs`) already have adequate `//!` module-level doc comments — no additions needed.
+
+**Test Results:** 48 passed, 0 failed
+
+**Output:** `/tmp/fix8-session-tests.md`
