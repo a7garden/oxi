@@ -9,6 +9,7 @@ use crate::component::Component;
 use crate::components::{Completion, FileCompleter};
 use crate::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use crate::surface::Surface;
+use crate::undo_stack::UndoStack;
 use crate::Rect;
 use crate::Size;
 use crate::Theme;
@@ -140,6 +141,8 @@ pub struct Editor {
     completion_active: bool,
     trigger_start: usize,
     mention_matcher: FuzzyMatcher,
+    // Undo/redo state
+    undo_stack: UndoStack<String>,
 }
 
 impl Editor {
@@ -159,6 +162,7 @@ impl Editor {
             completion_active: false,
             trigger_start: 0,
             mention_matcher: FuzzyMatcher::new(),
+            undo_stack: UndoStack::new(),
         }
     }
 
@@ -178,6 +182,7 @@ impl Editor {
             completion_active: false,
             trigger_start: 0,
             mention_matcher: FuzzyMatcher::new(),
+            undo_stack: UndoStack::new(),
         }
     }
 
@@ -213,6 +218,7 @@ impl Editor {
         self.current_line = 0;
         self.scroll_offset = 0;
         self.clear_completions();
+        self.undo_stack.clear();
         self.dirty = true;
     }
 
@@ -477,6 +483,53 @@ impl Editor {
         self.completion_index
     }
 
+    /// Snapshot current content for undo.
+    fn snapshot(&mut self) {
+        self.undo_stack.push(self.content());
+    }
+
+    /// Undo the last edit.
+    fn undo(&mut self) -> bool {
+        if let Some(state) = self.undo_stack.undo() {
+            let content = state.clone();
+            self.restore_state(&content);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Redo the last undone edit.
+    fn redo(&mut self) -> bool {
+        if let Some(state) = self.undo_stack.redo() {
+            let content = state.clone();
+            self.restore_state(&content);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Restore editor to a snapshot state.
+    fn restore_state(&mut self, content: &str) {
+        // Save current cursor line for best-effort restore
+        let prev_line = self.current_line;
+        self.set_content(content);
+        // Try to restore cursor line
+        self.current_line = prev_line.min(self.lines.len().saturating_sub(1));
+        self.dirty = true;
+    }
+
+    /// Check if undo is available.
+    pub fn can_undo(&self) -> bool {
+        self.undo_stack.can_undo()
+    }
+
+    /// Check if redo is available.
+    pub fn can_redo(&self) -> bool {
+        self.undo_stack.can_redo()
+    }
+
     /// Insert character at cursor position.
     fn insert_char(&mut self, c: char) {
         let cursor = Self::line_cursor(self.current());
@@ -566,6 +619,72 @@ impl Editor {
         } else {
             false
         }
+    }
+
+    /// Move cursor left by one word.
+    fn move_word_left(&mut self) -> bool {
+        let line = self.current_mut();
+        if line.cursor == 0 {
+            return false;
+        }
+
+        // Walk backwards: skip non-word chars, then skip word chars
+        let s = &line.content[..line.cursor];
+        let chars: Vec<(usize, char)> = s.char_indices().collect();
+
+        let mut i = chars.len();
+        // Skip trailing non-word chars
+        while i > 0 && !is_word_char(chars[i - 1].1) {
+            i -= 1;
+        }
+        // Skip word chars
+        while i > 0 && is_word_char(chars[i - 1].1) {
+            i -= 1;
+        }
+
+        let new_cursor = if i > 0 { chars[i - 1].0 + chars[i - 1].1.len_utf8() } else { 0 };
+        // If we're at the same position, try to move before the non-word chars
+        if new_cursor == line.cursor && i > 0 {
+            // fallback: just move left one char
+            let prev_byte = chars.last().map(|(idx, c)| *idx).unwrap_or(0);
+            line.cursor = prev_byte;
+        } else {
+            line.cursor = new_cursor;
+        }
+        self.dirty = true;
+        true
+    }
+
+    /// Move cursor right by one word.
+    fn move_word_right(&mut self) -> bool {
+        let line = self.current_mut();
+        if line.cursor >= line.content.len() {
+            return false;
+        }
+
+        let s = &line.content[line.cursor..];
+        let mut offset = 0usize;
+        let chars: Vec<(usize, char)> = s.char_indices().collect();
+        let mut i = 0;
+
+        // Skip word chars
+        while i < chars.len() && is_word_char(chars[i].1) {
+            i += 1;
+        }
+        // Skip non-word chars
+        while i < chars.len() && !is_word_char(chars[i].1) {
+            i += 1;
+        }
+
+        if i < chars.len() {
+            offset = chars[i].0;
+        } else {
+            offset = s.len();
+        }
+
+        line.cursor = line.cursor + offset;
+        self.dirty = true;
+        true
     }
 }
 
