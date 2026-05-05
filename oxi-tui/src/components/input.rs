@@ -177,6 +177,7 @@ impl Input {
     }
 
     /// Get byte length of char at the given char index.
+    #[allow(dead_code)]
     fn char_len_at(&self, char_idx: usize) -> usize {
         self.value
             .char_indices()

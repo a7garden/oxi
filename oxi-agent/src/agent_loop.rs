@@ -1209,10 +1209,12 @@ mod tests {
     #[tokio::test]
     async fn test_agent_loop_basic_run() {
         let loop_instance = create_test_loop();
-        let mut events = Vec::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
         
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
+        let result = loop_instance.run("Hello".to_string(), move |e| events_clone.lock().unwrap().push(e)).await;
         
+        let events = events.lock().unwrap();
         assert!(result.is_ok());
         assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentStart { .. })));
         assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
@@ -1256,11 +1258,13 @@ mod tests {
         loop_instance.steer(Message::User(UserMessage::new("Steering message 1")));
         loop_instance.steer(Message::User(UserMessage::new("Steering message 2")));
         
-        let mut events = Vec::new();
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        let result = loop_instance.run("Hello".to_string(), move |e| events_clone.lock().unwrap().push(e)).await;
         
         assert!(result.is_ok());
         
+        let events = events.lock().unwrap();
         let steering_count = events.iter().filter(|e| matches!(e, AgentEvent::SteeringMessage { .. })).count();
         assert_eq!(steering_count, 2);
     }
@@ -1279,12 +1283,14 @@ mod tests {
     #[tokio::test]
     async fn test_agent_loop_message_events() {
         let loop_instance = create_test_loop();
-        let mut events = Vec::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
         
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
+        let result = loop_instance.run("Hello".to_string(), move |e| events_clone.lock().unwrap().push(e)).await;
         
         assert!(result.is_ok());
         
+        let events = events.lock().unwrap();
         let message_starts = events.iter().filter(|e| matches!(e, AgentEvent::MessageStart { .. })).count();
         let message_ends = events.iter().filter(|e| matches!(e, AgentEvent::MessageEnd { .. })).count();
         

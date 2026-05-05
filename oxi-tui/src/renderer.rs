@@ -39,6 +39,7 @@ impl SGR {
         }
     }
 
+    #[allow(dead_code)]
     fn reset() -> Self {
         Self {
             bold: false,
