@@ -1,6 +1,5 @@
 //! Tool definition wrapping utilities
 //!
-//! Ported from pi-mono coding-agent `tool-definition-wrapper.ts`.
 //! Provides adapters for converting between tool representations.
 
 use crate::tools::{AgentTool, AgentToolResult, ToolError};

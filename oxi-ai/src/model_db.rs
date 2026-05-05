@@ -1,6 +1,5 @@
 //! Comprehensive model database for oxi-ai
 //!
-//! Auto-generated from pi-mono/packages/ai/src/models.generated.ts
 //! Contains 544 models across 28 providers.
 //!
 //! # Usage

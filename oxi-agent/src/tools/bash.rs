@@ -1,6 +1,6 @@
 //! Bash tool - execute shell commands
 //!
-//! Feature parity with pi-mono bash tool:
+//! Features:
 //! - Timeout support with process group kill
 //! - Working directory (cwd) parameter
 //! - Environment variables support

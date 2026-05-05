@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum AgentEvent {
-    // ── Lifecycle events (from pi-mono agent-loop) ──────────────────
+    // ── Lifecycle events ──────────────────────────────────────────────
     AgentStart {
         prompts: Vec<oxi_ai::Message>,
     },
@@ -23,7 +23,7 @@ pub enum AgentEvent {
         tool_results: Vec<oxi_ai::ToolResultMessage>,
     },
 
-    // ── Message events (from pi-mono agent-loop) ────────────────────
+    // ── Message events ────────────────────────────────────────────────
     MessageStart {
         message: oxi_ai::Message,
     },
@@ -35,7 +35,7 @@ pub enum AgentEvent {
         message: oxi_ai::Message,
     },
 
-    // ── Tool execution events (from pi-mono agent-loop) ────────────
+    // ── Tool execution events ────────────────────────────────────────
     ToolExecutionStart {
         tool_call_id: String,
         tool_name: String,

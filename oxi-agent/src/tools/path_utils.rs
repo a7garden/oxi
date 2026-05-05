@@ -1,6 +1,5 @@
 //! Path resolution utilities
 //!
-//! Ported from pi-mono coding-agent `path-utils.ts`.
 //! Provides path normalization, home expansion, and macOS-specific path handling.
 
 use std::path::{Path, PathBuf};

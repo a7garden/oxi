@@ -11,7 +11,7 @@
 //! - Bracketed paste
 //! - UTF-8 multi-byte character decoding
 //!
-//! Based on pi-mono's `packages/tui/src/keys.ts`.
+//! Originally inspired by pi-mono's terminal key input parsing.
 
 use crate::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,

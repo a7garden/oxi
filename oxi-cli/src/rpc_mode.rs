@@ -352,7 +352,7 @@ pub enum RpcExtensionUiResponse {
     },
 }
 
-/// Session state for get_state response (aligned with pi-mono RpcSessionState)
+/// Session state for get_state response
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionState {
     /// Current model info

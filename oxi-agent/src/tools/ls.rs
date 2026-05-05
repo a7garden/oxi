@@ -143,7 +143,7 @@ impl LsTool {
                 })
                 .collect();
 
-            // Add entry count summary - matching pi-mono format
+            // Add entry count summary
             lines.push(format!(
                 "\n{} director{}, {} file{}",
                 dir_count,

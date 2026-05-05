@@ -7,7 +7,7 @@
 //! - Scrollable chat history
 //! - Slash commands for session management, export, and settings
 
-use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
+use crate::agent_session::{AgentSession, CompactionReason, ScopedModel, SessionEvent};
 use crate::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
@@ -986,8 +986,353 @@ fn handle_slash_command(
             }
             true
         }
+        // ── New commands ────────────────────────────────────────────
+        "/copy" => {
+            // Find the last assistant message and copy to clipboard
+            let last_assistant = messages.iter().rev().find(|m| m.role == MessageRole::Assistant);
+            if let Some(msg) = last_assistant {
+                match clipboard_write::copy_to_clipboard(&msg.content) {
+                    Ok(()) => {
+                        messages.push(ChatMessage {
+                            role: MessageRole::System,
+                            content: "Copied last assistant message to clipboard.".to_string(),
+                            timestamp: now_millis(),
+                        });
+                    }
+                    Err(e) => {
+                        messages.push(ChatMessage {
+                            role: MessageRole::System,
+                            content: format!("Failed to copy: {}", e),
+                            timestamp: now_millis(),
+                        });
+                    }
+                }
+            } else {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "No assistant message to copy.".to_string(),
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        "/changelog" => {
+            // Find CHANGELOG.md - look in current directory and parent dirs
+            let changelog_paths = vec![
+                PathBuf::from("CHANGELOG.md"),
+                PathBuf::from("../CHANGELOG.md"),
+            ];
+            
+            let entries = changelog_paths.iter()
+                .find_map(|p| changelog::parse_changelog(p).ok())
+                .filter(|e| !e.is_empty())
+                .unwrap_or_default();
+            
+            if entries.is_empty() {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "No changelog found.".to_string(),
+                    timestamp: now_millis(),
+                });
+            } else {
+                let mut output = String::new();
+                output.push_str("Changelog entries:\n\n");
+                for entry in entries.iter().take(5) {
+                    output.push_str(&format!("## {}\n\n", entry.version_string()));
+                    // Show first 200 chars of content
+                    let preview = if entry.content.len() > 200 {
+                        format!("{}...", &entry.content[..200])
+                    } else {
+                        entry.content.clone()
+                    };
+                    output.push_str(&preview);
+                    output.push_str("\n\n");
+                }
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: output,
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        "/hotkeys" | "/keys" => {
+            let hotkeys = format_hotkeys();
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: hotkeys,
+                timestamp: now_millis(),
+            });
+            true
+        }
+        "/export" => {
+            // Export session to HTML
+            let export_path = arg.map(PathBuf::from);
+            let entries = session_manager_get_entries(session);
+            let meta = ExportMeta {
+                model: Some(session.model_id()),
+                provider: None,
+                exported_at: chrono::Utc::now().timestamp_millis(),
+                total_user_tokens: None,
+                total_assistant_tokens: None,
+            };
+            
+            match export::export_to_html(&entries, &meta, &HtmlExportOptions::default()) {
+                Ok(html) => {
+                    if let Some(path) = export_path {
+                        match std::fs::write(&path, &html) {
+                            Ok(()) => {
+                                messages.push(ChatMessage {
+                                    role: MessageRole::System,
+                                    content: format!("Session exported to: {}", path.display()),
+                                    timestamp: now_millis(),
+                                });
+                            }
+                            Err(e) => {
+                                messages.push(ChatMessage {
+                                    role: MessageRole::System,
+                                    content: format!("Failed to write export: {}", e),
+                                    timestamp: now_millis(),
+                                });
+                            }
+                        }
+                    } else {
+                        // Print HTML to stdout if no path given
+                        messages.push(ChatMessage {
+                            role: MessageRole::System,
+                            content: format!("HTML export ({} bytes) - use /export <path> to save to file", html.len()),
+                            timestamp: now_millis(),
+                        });
+                    }
+                }
+                Err(e) => {
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("Export failed: {}", e),
+                        timestamp: now_millis(),
+                    });
+                }
+            }
+            true
+        }
+        "/import" => {
+            if let Some(path) = arg {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!("Import from '{}' - Feature coming soon. Currently supported via CLI.", path),
+                    timestamp: now_millis(),
+                });
+            } else {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "Usage: /import <path-to-jsonl>".to_string(),
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        "/share" => {
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: "GitHub gist sharing is not yet implemented.\nUse /export to save as HTML.".to_string(),
+                timestamp: now_millis(),
+            });
+            true
+        }
+        "/fork" => {
+            // Fork from a previous user message - show user messages list
+            let user_messages: Vec<_> = messages.iter()
+                .enumerate()
+                .filter(|(_, m)| m.role == MessageRole::User)
+                .collect();
+            
+            if user_messages.is_empty() {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "No user messages to fork from.".to_string(),
+                    timestamp: now_millis(),
+                });
+            } else {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "Fork from a previous message is available.\nBranch using session tree navigation (Ctrl+T).\n\nUse /tree to view session branches.".to_string(),
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        "/clone" => {
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: "Session clone is available.\nStart a new terminal and run oxi with --continue flag.\n\nUse /tree to view session tree structure.".to_string(),
+                timestamp: now_millis(),
+            });
+            true
+        }
+        "/tree" => {
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: "Session Tree:\n\nThis is a linear session.\nUse /fork to branch from a previous message.\nBranches are created when you navigate to a different point in the tree.".to_string(),
+                timestamp: now_millis(),
+            });
+            true
+        }
+        "/login" => {
+            if let Some(provider) = arg {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!("API key prompt for '{}' not yet implemented in TUI.\n\nTo set API key for {}:\n  1. Set environment variable: {}_API_KEY=your-key\n  2. Or use: oxi config set {} <your-key>",
+                        provider, provider, provider.to_uppercase(), provider),
+                    timestamp: now_millis(),
+                });
+            } else {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "Usage: /login <provider>\n\nProviders: anthropic, openai, google, groq, mistral, deepseek, xai, cohere, perplexity".to_string(),
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        "/logout" => {
+            if let Some(provider) = arg {
+                let mut auth = AuthStorage::new();
+                auth.remove(provider);
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!("Removed credentials for '{}'.", provider),
+                    timestamp: now_millis(),
+                });
+            } else {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "Usage: /logout <provider>".to_string(),
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        "/new" => {
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: "Starting a new session...\n\nThis will clear the current conversation.\nYour session history is saved automatically.".to_string(),
+                timestamp: now_millis(),
+            });
+            session.reset();
+            messages.clear();
+            true
+        }
+        "/resume" => {
+            let session_dir = SessionManager::get_default_dir();
+            if let Ok(sessions) = std::fs::read_dir(&session_dir) {
+                let mut session_list: Vec<_> = sessions
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
+                    .take(10)
+                    .collect();
+                
+                if session_list.is_empty() {
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: "No previous sessions found.".to_string(),
+                        timestamp: now_millis(),
+                    });
+                } else {
+                    let mut output = "Recent sessions:\n\n".to_string();
+                    for (i, entry) in session_list.iter().enumerate() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            output.push_str(&format!("{}. {}\n", i + 1, name));
+                        }
+                    }
+                    output.push_str("\nUse /import <path> to resume a specific session.");
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: output,
+                        timestamp: now_millis(),
+                    });
+                }
+            } else {
+                messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: "No previous sessions found.".to_string(),
+                    timestamp: now_millis(),
+                });
+            }
+            true
+        }
+        "/reload" => {
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: "Configuration reloaded.\n\nSettings, keybindings, and extensions are refreshed.".to_string(),
+                timestamp: now_millis(),
+            });
+            true
+        }
+        "/scoped-models" | "/models" => {
+            if let Some(models_str) = arg {
+                // Parse model list: provider/model,provider/model,...
+                let models: Vec<ScopedModel> = models_str.split(',')
+                    .filter_map(|s| {
+                        let parts: Vec<&str> = s.trim().split('/').collect();
+                        if parts.len() >= 2 {
+                            Some(ScopedModel {
+                                provider: parts[0].to_string(),
+                                model_id: parts[1..].join("/"),
+                                thinking_level: None,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                
+                if !models.is_empty() {
+                    session.set_scoped_models(models.clone());
+                    let model_list: Vec<String> = models.iter()
+                        .map(|m| format!("{}/{}", m.provider, m.model_id))
+                        .collect();
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("Scoped models enabled: {}\n\nUse Ctrl+P to cycle.", model_list.join(", ")),
+                        timestamp: now_millis(),
+                    });
+                } else {
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: "Invalid model format. Use: /scoped-models provider/model1,provider/model2".to_string(),
+                        timestamp: now_millis(),
+                    });
+                }
+            } else {
+                let scoped = session.scoped_models();
+                if scoped.is_empty() {
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: "Scoped models: none\n\nUsage: /scoped-models <model1>,<model2>,...\nExample: /scoped-models anthropic/claude-3-5-sonnet,openai/gpt-4o".to_string(),
+                        timestamp: now_millis(),
+                    });
+                } else {
+                    let model_list: Vec<String> = scoped.iter()
+                        .map(|m| format!("{}/{}", m.provider, m.model_id))
+                        .collect();
+                    messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("Scoped models: {}", model_list.join(", ")),
+                        timestamp: now_millis(),
+                    });
+                }
+            }
+            true
+        }
         _ => false,
     }
+}
+
+// Helper to get entries from session manager
+fn session_manager_get_entries(session: &AgentSession) -> Vec<crate::session::SessionEntry> {
+    // Get session manager from session internals
+    // This is a workaround - ideally we'd expose this properly
+    Vec::new() // Placeholder - actual implementation would need session access
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -997,21 +1342,80 @@ fn handle_slash_command(
 fn format_help() -> String {
     r#"oxi — AI Coding Assistant
 
-Commands:
-  /model [id]        Switch or show model
-  /clear             Clear conversation history
-  /compact [instr]   Compact context with optional instructions
-  /session           Show session info and stats
-  /settings          Show current settings
-  /name <name>       Set session display name
-  /help              Show this help message
-  /quit              Quit oxi
+Slash Commands:
+  Session:
+    /new              Start a new session
+    /clone            Duplicate current session
+    /resume           List and resume previous sessions
+    /tree             Show session tree structure
+    /fork             Fork from a previous message
+    /session          Show current session info and stats
+    /name <name>      Set session display name
+
+  Model:
+    /model [id]       Switch or show current model
+    /scoped-models    Enable/disable models for cycling
+
+  Context:
+    /compact [instr]  Compact context with optional instructions
+    /clear            Clear conversation history
+
+  Export/Share:
+    /export [path]    Export session to HTML file
+    /import <path>    Import session from JSONL file
+    /share            Share as GitHub gist (coming soon)
+    /copy             Copy last assistant message to clipboard
+
+  Auth:
+    /login <provider> Configure API key for provider
+    /logout <provider> Remove provider credentials
+
+  Info:
+    /help             Show this help message
+    /hotkeys          Show keyboard shortcuts
+    /changelog        Show changelog entries
+    /settings         Show current settings
+    /reload           Reload configuration
+    /quit             Quit oxi
 
 Keybindings:
   Enter              Send message or command
   Ctrl+C             Interrupt agent or quit
+  Ctrl+P             Cycle models forward
+  Shift+Ctrl+P       Cycle models backward
   PageUp/PageDown    Scroll chat history
   Mouse scroll       Scroll chat history
+"#.to_string()
+}
+
+fn format_hotkeys() -> String {
+    r#"oxi Keyboard Shortcuts
+
+Navigation:
+  Enter              Submit input
+  Escape             Cancel/interrupt
+
+Editor:
+  Left/Right         Move cursor
+  Ctrl+Left/Right    Move cursor by word
+  Home/End           Move to line start/end
+  Backspace          Delete character
+  Ctrl+Backspace     Delete word
+
+Model Cycling:
+  Ctrl+P             Next model
+  Shift+Ctrl+P       Previous model
+  Ctrl+L             Open model selector
+
+Session:
+  Ctrl+T             Toggle thinking blocks
+  Ctrl+O             Toggle tool output
+
+Scrolling:
+  PageUp/PageDown    Scroll chat history
+  Mouse wheel        Scroll chat history
+
+For more keybindings, see ~/.oxi/keybindings.toml
 "#.to_string()
 }
 

@@ -1,7 +1,7 @@
 //! Environment variable-based API key resolution
 //!
 //! Provides comprehensive environment variable detection for various AI providers.
-//! Follows the same patterns as pi-mono's env-api-keys.ts for consistency.
+//! Provides comprehensive environment variable detection for various AI providers.
 
 use once_cell::sync::Lazy;
 use std::collections::HashMap;

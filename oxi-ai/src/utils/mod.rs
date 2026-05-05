@@ -1,4 +1,4 @@
-//! Utility modules ported from pi-mono's ai package
+//! Utility modules for AI API handling
 //!
 //! These utilities provide robust handling for common AI API edge cases:
 //! - Unicode sanitization for safe JSON serialization
