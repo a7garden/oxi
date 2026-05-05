@@ -481,8 +481,8 @@ impl RpcServer {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         Self {
             port,
-            shutdown: Arc::new(std::sync::RwLock::new(false)),
-            session_state: Arc::new(std::sync::RwLock::new(SessionState {
+            shutdown: Arc::new(parking_lot::RwLock::new(false)),
+            session_state: Arc::new(parking_lot::RwLock::new(SessionState {
                 model: None,
                 thinking_level: "default".to_string(),
                 is_streaming: false,
@@ -833,7 +833,7 @@ impl RpcOutput {
     /// Create a new output writer wrapping stdout.
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(std::sync::Mutex::new(std::io::stdout())),
+            inner: Arc::new(parking_lot::Mutex::new(std::io::stdout())),
         }
     }
 

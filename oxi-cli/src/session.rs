@@ -1353,12 +1353,12 @@ impl SessionManager {
             entries_map: &HashMap<String, SessionEntry>,
             labels: &HashMap<String, String>,
             label_timestamps: &HashMap<String, String>,
-        ) -> SessionTreeNode {
-            let entry = entries_map.get(id).cloned().expect(&format!("Corrupted session: entry {} not found", id));
-            let child_ids = adj.get(id).unwrap();
+        ) -> anyhow::Result<SessionTreeNode> {
+            let entry = entries_map.get(id).ok_or_else(|| anyhow::anyhow!("Corrupted session: entry {} not found", id))?.clone();
+            let child_ids = adj.get(id).cloned().unwrap_or_default();
             let children: Vec<SessionTreeNode> = child_ids.iter().map(|cid| {
                 build(cid, adj, entries_map, labels, label_timestamps)
-            }).collect();
+            }).collect::<Result<Vec<_>, _>>()?;
             SessionTreeNode {
                 entry,
                 children,
@@ -1370,7 +1370,7 @@ impl SessionManager {
 
         let mut roots: Vec<SessionTreeNode> = root_ids.into_iter().map(|rid| {
             build(&rid, &adj, &entries_map, &labels, &label_timestamps)
-        }).collect();
+        }).collect::<Result<Vec<_>, _>>()?;
 
         sort_tree_by_timestamp(&mut roots);
         roots
