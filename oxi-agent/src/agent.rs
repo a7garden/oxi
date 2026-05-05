@@ -691,7 +691,7 @@ impl Agent {
         // Try streaming with the fallback provider
         match Self::stream_with_retry(
             fallback_provider.as_ref(),
-            fallback_model,
+            &fallback_model,
             context,
             options,
             tx,
