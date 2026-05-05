@@ -7,8 +7,8 @@
 
 use crate::extensions::context::{ExtensionContext, ExtensionContextBuilder};
 use crate::extensions::loading::load_extension;
-use crate::extensions::types::{
-    AgentEvent, AgentTool, AgentToolResult, BashEvent, BeforeProviderRequestEvent,
+use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
+use crate::extensions::types::{ BashEvent, BeforeProviderRequestEvent,
     Command, ContextEmitResult, ContextEvent, ExtensionError, ExtensionErrorListener,
     ExtensionErrorRecord, ExtensionManifest, ExtensionPermission, ExtensionState,
     InputEvent, InputEventResult, InputSource, ModelSelectEvent, ModelSelectSource,

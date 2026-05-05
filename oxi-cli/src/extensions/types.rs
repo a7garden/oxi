@@ -554,3 +554,6 @@ impl Command {
 
 /// Callback invoked when an extension error is recorded.
 pub type ExtensionErrorListener = dyn Fn(&ExtensionErrorRecord) + Send + Sync;
+
+// Re-export Extension trait from oxi_agent for type signatures
+pub use oxi_agent::AgentTool;
