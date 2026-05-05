@@ -583,7 +583,7 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
         Uuid::parse_str(session_id)?
     };
 
-    let tree = manager.get_tree(id);
+    let tree = manager.get_tree(id)?;
     let branch_info = manager.get_branch_info(id).await?;
 
     if let Some(info) = branch_info {
@@ -844,7 +844,13 @@ async fn handle_command(
             if let Some(ref id) = current_session_id {
                 let session_uuid = Uuid::parse_str(id)
                     .map_err(|_| anyhow::anyhow!("Invalid session ID: {}", id))?;
-                let tree = manager.get_tree(session_uuid);
+                let tree = match manager.get_tree(session_uuid) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        println!("Error getting tree: {}", e);
+                        return Ok(CommandResult::Handled);
+                    }
+                };
                 if tree.is_empty() {
                     println!("No entries in session.");
                 } else {
