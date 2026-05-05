@@ -71,8 +71,17 @@ async fn main() -> Result<()> {
     // Create app
     let app = oxi::App::new(settings).await?;
 
-    // Register extension tools with the agent
+    // Register builtin tools with the agent
     let tools = app.agent_tools();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let builtins = oxi_agent::ToolRegistry::with_builtins_cwd(cwd.clone());
+    for name in builtins.names() {
+        if let Some(tool) = builtins.get(&name) {
+            tools.register_arc(tool);
+        }
+    }
+
+    // Register extension tools with the agent
     for tool in ext_registry.all_tools() {
         tools.register_arc(tool);
     }
