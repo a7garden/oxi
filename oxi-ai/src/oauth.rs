@@ -111,6 +111,7 @@ impl TokenBundle {
 /// The on-disk auth file structure: a map from provider name to token bundle.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct AuthStore {
+    /// Map from provider name to token bundle.
     #[serde(flatten)]
     pub tokens: HashMap<String, TokenBundle>,
 }
@@ -264,9 +265,13 @@ pub fn openai_codex_config() -> Result<OAuthConfig> {
 /// PKCE state produced when starting an authorization flow.
 #[derive(Debug, Clone)]
 pub struct PkceState {
+    /// PKCE code verifier.
     pub code_verifier: String,
+    /// PKCE code challenge (S256).
     pub code_challenge: String,
+    /// Full authorization URL to redirect the user to.
     pub authorization_url: String,
+    /// Opaque state parameter for CSRF protection.
     pub state: String,
 }
 

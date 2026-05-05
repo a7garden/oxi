@@ -1,4 +1,4 @@
-/// oxi-agent: Agent runtime for oxi
+//! oxi-agent: Agent runtime for oxi
 
 #![allow(inner_doc_comments)]
 #![warn(missing_docs)]

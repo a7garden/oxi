@@ -8,19 +8,27 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-// Re-export from oxi-agent for tool types
+/// Alias for a dynamically-dispatched agent tool.
 pub type ExtensionTool = dyn oxi_agent::AgentTool;
+/// Alias for a reference-counted agent tool.
 pub type ExtensionToolArc = Arc<ExtensionTool>;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extension Context
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// pub.
+/// Runtime context provided to extension hooks.
+///
+/// Gives extensions access to the session's working directory, settings,
+/// configuration, and various control surfaces (tool registration,
+/// message sending, model switching, etc.).
 pub struct ExtensionContext {
+    /// Current working directory.
     pub cwd: PathBuf,
     settings: Arc<RwLock<Settings>>,
+    /// Extension-specific configuration value.
     pub config: Value,
+    /// Active session ID, if any.
     pub session_id: Option<String>,
     idle: Arc<RwLock<bool>>,
     tool_registrar: Arc<dyn Fn(ExtensionToolArc) + Send + Sync>,
@@ -43,6 +51,7 @@ impl std::fmt::Debug for ExtensionContext {
 }
 
 impl ExtensionContext {
+    /// Create a new extension context.
     pub fn new(
         cwd: PathBuf,
         settings: Arc<RwLock<Settings>>,
@@ -66,29 +75,29 @@ impl ExtensionContext {
         }
     }
 
-/// TODO: document.
+    /// Get a snapshot of the current settings.
     pub fn settings(&self) -> Settings { self.settings.read().clone() }
-/// TODO: document.
+    /// Whether the agent is currently idle (not streaming).
     pub fn is_idle(&self) -> bool { *self.idle.read() }
 
-/// TODO: document.
+    /// Register a tool with the agent.
     pub fn register_tool(&self, tool: ExtensionToolArc) { (self.tool_registrar)(tool); }
-/// TODO: document.
+    /// Send a message as the extension.
     pub fn send_message(&self, text: &str) { (self.message_sender)(text); }
 
-/// TODO: document.
+    /// Record an error from an extension.
     pub fn record_error(&self, extension_name: &str, event: &str, error: &str) {
         let record = ExtensionErrorRecord::new(extension_name, event, error);
         tracing::warn!(extension = extension_name, event = event, error = error, "Extension error recorded");
         self.errors.write().push(record);
     }
 
-/// TODO: document.
+    /// Get all recorded errors.
     pub fn errors(&self) -> Vec<ExtensionErrorRecord> { self.errors.read().clone() }
-/// TODO: document.
+    /// Clear all recorded errors.
     pub fn clear_errors(&self) { self.errors.write().clear(); }
 
-/// TODO: document.
+    /// Look up a value in the extension configuration by dot-separated path.
     pub fn config_get(&self, path: &str) -> Option<Value> {
         let mut current = &self.config;
         for key in path.split('.') {
@@ -97,27 +106,27 @@ impl ExtensionContext {
         Some(current.clone())
     }
 
-/// TODO: document.
+    /// Read a file relative to the working directory.
     pub fn read_file(&self, relative_path: &Path) -> Result<String> {
         let full_path = self.cwd.join(relative_path);
         std::fs::read_to_string(&full_path).with_context(|| format!("Failed to read file: {}", full_path.display()))
     }
 
-/// TODO: document.
+    /// Get all currently registered tools.
     pub fn get_tools(&self) -> Vec<ExtensionToolArc> { (self.tool_getter)() }
-/// TODO: document.
+    /// Replace the full set of registered tools.
     pub fn set_tools(&self, tools: Vec<ExtensionToolArc>) { (self.tool_setter)(tools); }
-/// TODO: document.
+    /// Switch the active model.
     pub fn set_model(&self, model: &str) { (self.model_setter)(model); }
-/// TODO: document.
+    /// Set the thinking level.
     pub fn set_thinking_level(&self, level: &str) { (self.thinking_level_setter)(level); }
-/// TODO: document.
+    /// Append text to the system prompt.
     pub fn append_system_prompt(&self, text: &str) { (self.system_prompt_appender)(text); }
-/// TODO: document.
+    /// Set the session display name.
     pub fn set_session_name(&self, name: &str) { (self.session_name_setter)(name); }
-/// TODO: document.
+    /// Get all session entries.
     pub fn get_session_entries(&self) -> Vec<Value> { (self.session_entries_getter)() }
-/// TODO: document.
+    /// Fork the session at the given entry ID.
     pub fn fork_session(&self, entry_id: &str) -> Result<String> { (self.session_fork)(entry_id) }
 }
 
@@ -125,7 +134,7 @@ impl ExtensionContext {
 // Extension Context Builder
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// pub.
+/// Builder for [`ExtensionContext`].
 pub struct ExtensionContextBuilder {
     cwd: PathBuf,
     settings: Option<Arc<RwLock<Settings>>>,
@@ -146,6 +155,7 @@ pub struct ExtensionContextBuilder {
 }
 
 impl ExtensionContextBuilder {
+    /// Create a new builder for the given working directory.
     pub fn new(cwd: PathBuf) -> Self {
         Self {
             cwd, settings: None, config: Value::Null, session_id: None,
@@ -157,38 +167,38 @@ impl ExtensionContextBuilder {
         }
     }
 
-/// TODO: document.
+    /// Set the shared settings handle.
     pub fn settings(mut self, settings: Arc<RwLock<Settings>>) -> Self { self.settings = Some(settings); self }
-/// TODO: document.
+    /// Set the extension configuration value.
     pub fn config(mut self, config: Value) -> Self { self.config = config; self }
-/// TODO: document.
+    /// Set the session ID.
     pub fn session_id(mut self, id: impl Into<String>) -> Self { self.session_id = Some(id.into()); self }
-/// TODO: document.
+    /// Set the idle flag handle.
     pub fn idle(mut self, idle: Arc<RwLock<bool>>) -> Self { self.idle = idle; self }
-/// TODO: document.
+    /// Set the tool registration callback.
     pub fn tool_registrar(mut self, registrar: Arc<dyn Fn(ExtensionToolArc) + Send + Sync>) -> Self { self.tool_registrar = Some(registrar); self }
-/// TODO: document.
+    /// Set the message sender callback.
     pub fn message_sender(mut self, sender: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.message_sender = Some(sender); self }
-/// TODO: document.
+    /// Set the shared error collection.
     pub fn errors(mut self, errors: Arc<RwLock<Vec<ExtensionErrorRecord>>>) -> Self { self.errors = Some(errors); self }
-/// TODO: document.
+    /// Set the tool getter callback.
     pub fn tool_getter(mut self, getter: Arc<dyn Fn() -> Vec<ExtensionToolArc> + Send + Sync>) -> Self { self.tool_getter = Some(getter); self }
-/// TODO: document.
+    /// Set the tool setter callback.
     pub fn tool_setter(mut self, setter: Arc<dyn Fn(Vec<ExtensionToolArc>) + Send + Sync>) -> Self { self.tool_setter = Some(setter); self }
-/// TODO: document.
+    /// Set the model setter callback.
     pub fn model_setter(mut self, setter: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.model_setter = Some(setter); self }
-/// TODO: document.
+    /// Set the thinking-level setter callback.
     pub fn thinking_level_setter(mut self, setter: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.thinking_level_setter = Some(setter); self }
-/// TODO: document.
+    /// Set the system-prompt appender callback.
     pub fn system_prompt_appender(mut self, appender: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.system_prompt_appender = Some(appender); self }
-/// TODO: document.
+    /// Set the session-name setter callback.
     pub fn session_name_setter(mut self, setter: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.session_name_setter = Some(setter); self }
-/// TODO: document.
+    /// Set the session-entries getter callback.
     pub fn session_entries_getter(mut self, getter: Arc<dyn Fn() -> Vec<Value> + Send + Sync>) -> Self { self.session_entries_getter = Some(getter); self }
-/// TODO: document.
+    /// Set the session-fork callback.
     pub fn session_fork(mut self, fork: Arc<dyn Fn(&str) -> Result<String> + Send + Sync>) -> Self { self.session_fork = Some(fork); self }
 
-/// TODO: document.
+    /// Build the [`ExtensionContext`].
     pub fn build(self) -> ExtensionContext {
         ExtensionContext {
             cwd: self.cwd,
