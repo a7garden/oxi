@@ -551,10 +551,12 @@ mod tests {
 
     #[test]
     fn parse_usage_in_chunk() {
+        // Usage is accumulated from earlier chunks; the Done event captures
+        // usage that was accumulated *before* the finish_reason chunk.
         let sse = concat!(
-            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":8,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n",
             "\n",
-            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":8,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n"
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}]}\n"
         );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
         // TextDelta + Done
@@ -572,8 +574,11 @@ mod tests {
 
     #[test]
     fn parse_usage_without_cache_details() {
+        // Usage from an earlier chunk; Done event on a separate chunk without usage.
         let sse = concat!(
-            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n"
+            "data: {\"id\":\"c\",\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n",
+            "\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}]}\n"
         );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
         match &events[0] {
