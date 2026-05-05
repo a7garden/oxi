@@ -128,6 +128,7 @@ pub mod render_utils;
 pub mod tool_definition_wrapper;
 pub mod truncate;
 pub mod web_search;
+pub mod subagent;
 pub mod write;
 
 // Re-export for convenience

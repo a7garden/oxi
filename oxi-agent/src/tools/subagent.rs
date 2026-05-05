@@ -454,15 +454,18 @@ async fn run_parallel(
     let indexed_tasks: Vec<(usize, ParallelTask)> = tasks.into_iter().enumerate().collect();
     let mut all_results: Vec<Option<SingleResult>> = vec![None; n];
 
-    for chunk in indexed_tasks.chunks(limit) {
+    // Process in chunks of `limit`
+    let mut i = 0;
+    while i < indexed_tasks.len() {
+        let end = (i + limit).min(indexed_tasks.len());
+        let chunk: Vec<_> = indexed_tasks[i..end].to_vec();
         let mut handles = Vec::new();
 
         for (idx, task) in chunk {
-            let idx = *idx;
             let agents = agents.to_vec();
             let cwd = cwd.to_path_buf();
 
-            handles.push(tokio::spawn(async move {
+            handles.push((idx, tokio::spawn(async move {
                 run_single_agent(
                     &cwd,
                     &agents,
@@ -473,14 +476,16 @@ async fn run_parallel(
                     None,
                 )
                 .await
-            }));
+            })));
         }
 
-        for (i, handle) in handles.into_iter().enumerate() {
+        for (idx, handle) in handles {
             if let Ok(result) = handle.await {
-                all_results[chunk[i].0] = Some(result);
+                all_results[idx] = Some(result);
             }
         }
+
+        i = end;
     }
 
     all_results
@@ -506,7 +511,7 @@ async fn run_parallel(
 
 // ── Parameter Types ────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ParallelTask {
     agent: String,
     task: String,
