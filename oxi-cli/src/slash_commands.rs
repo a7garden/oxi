@@ -18,16 +18,22 @@ pub enum SlashCommandSource {
 /// Resolved information about a slash command (may be built-in or from an extension).
 #[derive(Debug, Clone)]
 pub struct SlashCommandInfo {
+/// pub.
     pub name: String,
+/// pub.
     pub description: Option<String>,
+/// pub.
     pub source: SlashCommandSource,
+/// pub.
     pub source_info: SourceInfo,
 }
 
 /// A built-in slash command definition.
 #[derive(Debug, Clone)]
 pub struct BuiltinSlashCommand {
+/// pub.
     pub name: &'static str,
+/// pub.
     pub description: &'static str,
 }
 

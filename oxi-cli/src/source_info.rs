@@ -52,9 +52,13 @@ pub struct SourceInfo {
 /// Metadata returned by the package manager, used to construct [`SourceInfo`].
 #[derive(Debug, Clone)]
 pub struct PathMetadata {
+/// pub.
     pub source: String,
+/// pub.
     pub scope: SourceScope,
+/// pub.
     pub origin: SourceOrigin,
+/// pub.
     pub base_dir: Option<String>,
 }
 

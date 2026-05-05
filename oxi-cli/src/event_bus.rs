@@ -12,19 +12,27 @@ use tokio::sync::RwLock;
 pub enum AgentSessionEvent {
     /// A new message was received or sent
     Message {
+/// role.
         role: String,
+/// content.
         content: String,
+/// timestamp.
         timestamp: u64,
     },
     /// A tool started executing
     ToolStart {
+/// tool_name.
         tool_name: String,
+/// input.
         input: serde_json::Value,
     },
     /// A tool finished executing
     ToolEnd {
+/// tool_name.
         tool_name: String,
+/// output.
         output: Result<serde_json::Value, String>,
+/// duration_ms.
         duration_ms: u64,
     },
     /// An error occurred
@@ -33,21 +41,29 @@ pub enum AgentSessionEvent {
     ModelStart { model_id: String },
     /// Model finished generating a response
     ModelEnd {
+/// model_id.
         model_id: String,
+/// duration_ms.
         duration_ms: u64,
+/// tokens_used.
         tokens_used: Option<u32>,
     },
     /// Token usage update
     TokenUsage {
+/// input_tokens.
         input_tokens: u32,
+/// output_tokens.
         output_tokens: u32,
+/// cached_tokens.
         cached_tokens: Option<u32>,
     },
     /// Session started
     SessionStart { session_id: String },
     /// Session ended
     SessionEnd {
+/// session_id.
         session_id: String,
+/// total_messages.
         total_messages: u32,
     },
     /// Thinking block started
@@ -58,17 +74,23 @@ pub enum AgentSessionEvent {
     StreamChunk { content: String },
     /// Tool call requested
     ToolCall {
+/// tool_name.
         tool_name: String,
+/// arguments.
         arguments: serde_json::Value,
     },
     /// Tool result received
     ToolResult {
+/// tool_name.
         tool_name: String,
+/// result.
         result: serde_json::Value,
     },
     /// Custom event from extensions
     Custom {
+/// name.
         name: String,
+/// data.
         data: serde_json::Value,
     },
 }
@@ -87,7 +109,9 @@ pub type SyncEventHandler = Arc<dyn Fn(AgentSessionEvent) + Send + Sync>;
 
 /// A subscriber handle
 pub struct Subscriber {
+/// pub.
     pub channel: String,
+/// pub.
     pub id: u64,
 }
 
@@ -269,6 +293,7 @@ pub struct EventBusBuilder {
 }
 
 impl EventBusBuilder {
+/// TODO.
     pub fn new() -> Self {
         Self {
             channels: Vec::new(),

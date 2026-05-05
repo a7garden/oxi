@@ -19,6 +19,7 @@ pub use crate::settings::ThinkingLevel;
 #[command(about = "CLI coding harness for oxi")]
 #[command(version)]
 pub struct CliArgs {
+/// pub.
     #[command(subcommand)]
     pub command: Option<Commands>,
 
@@ -95,11 +96,13 @@ pub enum Commands {
     },
     /// Package management
     Pkg {
+/// action.
         #[command(subcommand)]
         action: PkgCommands,
     },
     /// Configuration management
     Config {
+/// action.
         #[command(subcommand)]
         action: ConfigCommands,
     },

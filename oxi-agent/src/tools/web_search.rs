@@ -17,6 +17,7 @@ const DEFAULT_MAX_RESULTS: usize = 10;
 pub struct WebSearchTool;
 
 impl WebSearchTool {
+/// TODO.
     pub fn new() -> Self {
         Self
     }

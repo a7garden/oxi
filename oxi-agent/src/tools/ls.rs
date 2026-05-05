@@ -19,6 +19,7 @@ const DEFAULT_MAX_BYTES: usize = 50 * 1024;
 pub struct LsTool;
 
 impl LsTool {
+/// TODO.
     pub fn new() -> Self {
         Self
     }

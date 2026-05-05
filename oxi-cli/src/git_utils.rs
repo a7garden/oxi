@@ -10,36 +10,52 @@ use std::time::SystemTime;
 /// Git commit information
 #[derive(Debug, Clone)]
 pub struct GitCommit {
+/// pub.
     pub sha: String,
+/// pub.
     pub short_sha: String,
+/// pub.
     pub message: String,
+/// pub.
     pub author: String,
+/// pub.
     pub timestamp: SystemTime,
 }
 
 /// Git log entry
 #[derive(Debug, Clone)]
 pub struct GitLogEntry {
+/// pub.
     pub commit: GitCommit,
+/// pub.
     pub branch: Option<String>,
 }
 
 /// Git diff result
 #[derive(Debug, Clone)]
 pub struct GitDiff {
+/// pub.
     pub staged: String,
+/// pub.
     pub unstaged: String,
+/// pub.
     pub untracked: String,
 }
 
 /// Git status
 #[derive(Debug, Clone)]
 pub struct GitStatus {
+/// pub.
     pub is_repo: bool,
+/// pub.
     pub branch: Option<String>,
+/// pub.
     pub is_dirty: bool,
+/// pub.
     pub staged_files: Vec<String>,
+/// pub.
     pub modified_files: Vec<String>,
+/// pub.
     pub untracked_files: Vec<String>,
 }
 

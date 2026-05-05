@@ -49,15 +49,20 @@ pub struct LoadResult<T> {
 /// Load error
 #[derive(Debug, Clone)]
 pub struct LoadError {
+/// pub.
     pub path: PathBuf,
+/// pub.
     pub error: String,
 }
 
 /// Resource diagnostic
 #[derive(Debug, Clone)]
 pub struct ResourceDiagnostic {
+/// pub.
     pub severity: DiagnosticSeverity,
+/// pub.
     pub message: String,
+/// pub.
     pub path: Option<PathBuf>,
 }
 
@@ -202,11 +207,17 @@ pub fn load_skill_impl(path: &Path) -> Result<Skill, String> {
 /// A loaded skill
 #[derive(Debug, Clone)]
 pub struct Skill {
+/// pub.
     pub id: String,
+/// pub.
     pub path: PathBuf,
+/// pub.
     pub content: String,
+/// pub.
     pub name: Option<String>,
+/// pub.
     pub description: Option<String>,
+/// pub.
     pub source: String,
 }
 
@@ -281,10 +292,15 @@ pub fn load_theme_impl(path: &Path) -> Result<Theme, String> {
 /// A loaded theme
 #[derive(Debug, Clone)]
 pub struct Theme {
+/// pub.
     pub id: String,
+/// pub.
     pub name: String,
+/// pub.
     pub path: PathBuf,
+/// pub.
     pub content: serde_json::Value,
+/// pub.
     pub source: String,
 }
 
@@ -354,11 +370,17 @@ pub fn load_prompt_impl(path: &Path) -> Result<Prompt, String> {
 /// A loaded prompt template
 #[derive(Debug, Clone)]
 pub struct Prompt {
+/// pub.
     pub id: String,
+/// pub.
     pub name: String,
+/// pub.
     pub path: PathBuf,
+/// pub.
     pub content: String,
+/// pub.
     pub description: Option<String>,
+/// pub.
     pub source: String,
 }
 
@@ -400,6 +422,7 @@ pub struct ResourceWatcher {
 }
 
 impl ResourceWatcher {
+/// TODO.
     pub fn new() -> Self {
         Self {
             paths: Vec::new(),
@@ -454,7 +477,9 @@ impl Default for ResourceWatcher {
 /// A resource change event
 #[derive(Debug, Clone)]
 pub struct ResourceChange {
+/// pub.
     pub path: PathBuf,
+/// pub.
     pub kind: ChangeKind,
 }
 
@@ -500,9 +525,14 @@ pub fn load_all_resources_impl(base_dir: &Path) -> LoadAllResourcesResult {
 
 /// Result of loading all resources
 pub struct LoadAllResourcesResult {
+/// pub.
     pub skills: Vec<Skill>,
+/// pub.
     pub themes: Vec<Theme>,
+/// pub.
     pub prompts: Vec<Prompt>,
+/// pub.
     pub errors: Vec<LoadError>,
+/// pub.
     pub diagnostics: Vec<ResourceDiagnostic>,
 }

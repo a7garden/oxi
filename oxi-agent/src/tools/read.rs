@@ -33,6 +33,7 @@ pub struct ReadTool {
 }
 
 impl ReadTool {
+/// TODO.
     pub fn new() -> Self {
         Self {
             progress_callback: Arc::new(Mutex::new(None)),

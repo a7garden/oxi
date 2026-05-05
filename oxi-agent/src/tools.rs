@@ -16,8 +16,11 @@ pub type ToolError = String;
 /// Result of tool execution
 #[derive(Debug)]
 pub struct AgentToolResult {
+/// pub.
     pub success: bool,
+/// pub.
     pub output: String,
+/// pub.
     pub metadata: Option<serde_json::Value>,
     /// Optional content blocks (e.g., image blocks) to include in the tool result message.
     /// When present, these are used as the content of the ToolResultMessage instead of
@@ -30,6 +33,7 @@ pub struct AgentToolResult {
 }
 
 impl AgentToolResult {
+/// TODO.
     pub fn success(output: impl Into<String>) -> Self {
         Self {
             success: true,
@@ -40,6 +44,7 @@ impl AgentToolResult {
         }
     }
 
+/// TODO.
     pub fn error(output: impl Into<String>) -> Self {
         Self {
             success: false,
@@ -144,35 +149,20 @@ pub trait AgentTool: Send + Sync {
 }
 
 // Built-in tools
-/// Module documentation.
 pub mod bash;
-/// Module documentation.
 pub mod edit;
-/// Module documentation.
 pub mod edit_diff;
-/// Module documentation.
 pub mod file_mutation_queue;
-/// Module documentation.
 pub mod find;
-/// Module documentation.
 pub mod grep;
-/// Module documentation.
 pub mod ls;
-/// Module documentation.
 pub mod path_utils;
-/// Module documentation.
 pub mod read;
-/// Module documentation.
 pub mod render_utils;
-/// Module documentation.
 pub mod tool_definition_wrapper;
-/// Module documentation.
 pub mod truncate;
-/// Module documentation.
 pub mod web_search;
-/// Module documentation.
 pub mod subagent;
-/// Module documentation.
 pub mod write;
 
 // Re-export for convenience
@@ -199,6 +189,7 @@ impl Default for ToolRegistry {
 }
 
 impl ToolRegistry {
+/// TODO.
     pub fn new() -> Self {
         Self {
             tools: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),

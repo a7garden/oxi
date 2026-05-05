@@ -23,8 +23,11 @@ pub enum AuthCredential {
     ApiKey { key: String },
     /// OAuth credential with token management
     OAuth {
+/// access_token.
         access_token: String,
+/// refresh_token.
         refresh_token: Option<String>,
+/// expires_at.
         expires_at: u64,
         /// Scopes granted (space-separated)
         #[serde(default)]
@@ -35,6 +38,7 @@ pub enum AuthCredential {
     },
     /// Session token credential (e.g. from browser-based login)
     Session {
+/// token.
         token: String,
         /// When the session expires (unix timestamp, 0 = never)
         #[serde(default)]

@@ -57,7 +57,10 @@ use crate::AgentToolResult;
 
 /// Finalized tool call with result.
 pub struct FinalizedToolCall {
+/// pub.
     pub tool_call: oxi_ai::ToolCall,
+/// pub.
     pub result: AgentToolResult,
+/// pub.
     pub is_error: bool,
 }

@@ -477,6 +477,7 @@ pub struct KeybindingHint {
 }
 
 impl KeybindingHint {
+/// TODO.
     pub fn new(keys: &str, description: &str) -> Self {
         Self {
             keys: keys.to_string(),
@@ -816,6 +817,7 @@ pub struct ExtensionStatusTracker {
 }
 
 impl ExtensionStatusTracker {
+/// TODO.
     pub fn new() -> Self {
         Self {
             statuses: HashMap::new(),

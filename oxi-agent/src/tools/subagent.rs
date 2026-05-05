@@ -57,11 +57,17 @@ impl Default for AgentScope {
 /// A discovered agent definition.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
+/// pub.
     pub name: String,
+/// pub.
     pub description: String,
+/// pub.
     pub model: Option<String>,
+/// pub.
     pub tools: Option<Vec<String>>,
+/// pub.
     pub system_prompt: String,
+/// pub.
     pub source: String, // "user" or "project"
 }
 
@@ -215,27 +221,44 @@ fn parse_frontmatter(content: &str) -> (HashMap<String, String>, String) {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 /// UsageStats.
 pub struct UsageStats {
+/// pub.
     pub input_tokens: u64,
+/// pub.
     pub output_tokens: u64,
+/// pub.
     pub cache_read: u64,
+/// pub.
     pub cache_write: u64,
+/// pub.
     pub cost: f64,
+/// pub.
     pub turns: u32,
 }
 
 #[derive(Debug, Clone)]
 /// SingleResult.
 pub struct SingleResult {
+/// pub.
     pub agent: String,
+/// pub.
     pub agent_source: String,
+/// pub.
     pub task: String,
+/// pub.
     pub exit_code: i32,
+/// pub.
     pub output: String,
+/// pub.
     pub stderr: String,
+/// pub.
     pub usage: UsageStats,
+/// pub.
     pub model: Option<String>,
+/// pub.
     pub stop_reason: Option<String>,
+/// pub.
     pub error_message: Option<String>,
+/// pub.
     pub step: Option<usize>,
 }
 
@@ -254,7 +277,9 @@ pub enum SubagentMode {
 #[derive(Debug, Clone)]
 /// SubagentDetails.
 pub struct SubagentDetails {
+/// pub.
     pub mode: SubagentMode,
+/// pub.
     pub results: Vec<SingleResult>,
 }
 
@@ -610,6 +635,7 @@ pub struct SubagentTool {
 }
 
 impl SubagentTool {
+/// TODO.
     pub fn new(cwd: impl Into<PathBuf>) -> Self {
         Self {
             cwd: cwd.into(),

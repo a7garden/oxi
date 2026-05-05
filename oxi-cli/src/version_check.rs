@@ -22,13 +22,16 @@ pub struct CrateVersion {
 /// Response from crates.io API
 #[derive(Debug, Deserialize)]
 pub struct CratesIoResponse {
+/// pub.
     pub crate_info: CrateInfo,
 }
 
 #[derive(Debug, Deserialize)]
 /// CrateInfo.
 pub struct CrateInfo {
+/// pub.
     pub latest_version: Option<CrateVersion>,
+/// pub.
     #[serde(default)]
     pub versions: Vec<CrateVersion>,
 }

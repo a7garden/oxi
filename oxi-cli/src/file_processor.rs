@@ -23,6 +23,7 @@ const DEFAULT_MAX_IMAGE_DIMENSION: u32 = 2000;
 pub struct FileProcessorOptions {
     /// Maximum image dimensions
     pub max_image_width: u32,
+/// pub.
     pub max_image_height: u32,
     /// Maximum image size after base64 encoding
     pub max_image_bytes: usize,
@@ -45,6 +46,7 @@ impl Default for FileProcessorOptions {
 }
 
 impl FileProcessorOptions {
+/// TODO.
     pub fn new() -> Self {
         Self::default()
     }

@@ -10,7 +10,9 @@ use std::fmt;
 /// A single edit operation
 #[derive(Debug, Clone)]
 pub struct Edit {
+/// pub.
     pub old_text: String,
+/// pub.
     pub new_text: String,
 }
 
@@ -26,6 +28,7 @@ pub struct EditDiffResult {
 /// Error during diff computation
 #[derive(Debug, Clone)]
 pub struct EditDiffError {
+/// pub.
     pub message: String,
 }
 
