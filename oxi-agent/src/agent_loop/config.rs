@@ -24,12 +24,8 @@ pub struct AgentLoopConfig {
     pub transport: Option<String>,
     pub compact_on_start: bool,
     pub max_retry_delay_ms: Option<u64>,
-    /// Enable auto-retry on retryable errors detected in assistant
-    /// messages (overloaded, rate-limit, server errors).
     pub auto_retry_enabled: bool,
-    /// Maximum number of auto-retry attempts.
     pub auto_retry_max_attempts: usize,
-    /// Base delay in ms for exponential backoff during auto-retry.
     pub auto_retry_base_delay_ms: u64,
 }
 

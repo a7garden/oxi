@@ -1,33 +1,28 @@
 //! Queue management for agent loop
 
-use oxi_ai::Message;
+use std::sync::Arc;
+use crate::events::AgentEvent;
+use parking_lot::RwLock;
 
-impl super::AgentLoop {
-    /// Drain all messages from the steering queue.
-    pub fn drain_steering_queue(&self) -> Vec<Message> {
-        let mut queue = self.steering_queue.write();
-        queue.drain(..).collect()
-    }
+pub(crate) fn clear_steering_queue(loop_ref: &super::AgentLoop) {
+    loop_ref.steering_queue.write().clear();
+}
 
-    /// Drain all messages from the follow-up queue.
-    pub fn drain_follow_up_queue(&self) -> Vec<Message> {
-        let mut queue = self.follow_up_queue.write();
-        queue.drain(..).collect()
-    }
+pub(crate) fn clear_follow_up_queue(loop_ref: &super::AgentLoop) {
+    loop_ref.follow_up_queue.write().clear();
+}
 
-    /// Clear the steering queue.
-    pub fn clear_steering_queue(&self) {
-        self.steering_queue.write().clear();
-    }
+pub(crate) fn clear_all_queues(loop_ref: &super::AgentLoop) {
+    clear_steering_queue(loop_ref);
+    clear_follow_up_queue(loop_ref);
+}
 
-    /// Clear the follow-up queue.
-    pub fn clear_follow_up_queue(&self) {
-        self.follow_up_queue.write().clear();
-    }
+pub(crate) fn drain_steering_queue(loop_ref: &super::AgentLoop) -> Vec<oxi_ai::Message> {
+    let mut queue = loop_ref.steering_queue.write();
+    queue.drain(..).collect()
+}
 
-    /// Clear all queues (steering and follow-up).
-    pub fn clear_all_queues(&self) {
-        self.clear_steering_queue();
-        self.clear_follow_up_queue();
-    }
+pub(crate) fn drain_follow_up_queue(loop_ref: &super::AgentLoop) -> Vec<oxi_ai::Message> {
+    let mut queue = loop_ref.follow_up_queue.write();
+    queue.drain(..).collect()
 }
