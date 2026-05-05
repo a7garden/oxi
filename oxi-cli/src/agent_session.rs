@@ -1234,7 +1234,6 @@ impl AgentSession {
     pub fn build_extension_context(&self) -> ExtensionContext {
         ExtensionContextBuilder::new(PathBuf::from(&self.cwd))
             .settings(Arc::clone(&self.settings))
-            .session_id(self.session_id())
             .build()
     }
 
