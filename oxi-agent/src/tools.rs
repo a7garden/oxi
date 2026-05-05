@@ -127,6 +127,7 @@ pub mod read;
 pub mod render_utils;
 pub mod tool_definition_wrapper;
 pub mod truncate;
+pub mod web_search;
 pub mod write;
 
 // Re-export for convenience
@@ -136,6 +137,7 @@ pub use find::FindTool;
 pub use grep::GrepTool;
 pub use ls::LsTool;
 pub use read::ReadTool;
+pub use web_search::WebSearchTool;
 pub use write::WriteTool;
 
 /// Tool registry for managing available tools
@@ -204,6 +206,7 @@ impl ToolRegistry {
         registry.register(GrepTool::new());
         registry.register(FindTool::new());
         registry.register(LsTool::new());
+        registry.register(WebSearchTool::new());
         registry
     }
 }
