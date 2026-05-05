@@ -1161,12 +1161,14 @@ mod tests {
             );
             assistant.content = vec![ContentBlock::Text(TextContent::new(self.response.clone()))];
             
-            let stream = futures::stream::once(async move {
+            let partial = assistant.clone();
+            let stream = futures::stream::iter(vec![
+                ProviderEvent::Start { partial },
                 ProviderEvent::Done { 
                     reason: StopReason::Stop,
                     message: assistant, 
-                }
-            });
+                },
+            ]);
             
             Ok(Box::pin(stream))
         }
@@ -1437,12 +1439,14 @@ mod tests {
                 assistant.content = vec![ContentBlock::Text(TextContent::new("Response"))];
                 assistant.stop_reason = StopReason::Stop;
                 
-                let stream = futures::stream::once(async move {
+                let partial = assistant.clone();
+                let stream = futures::stream::iter(vec![
+                    ProviderEvent::Start { partial },
                     ProviderEvent::Done { 
                         reason: StopReason::Stop,
                         message: assistant, 
-                    }
-                });
+                    },
+                ]);
                 
                 Ok(Box::pin(stream))
             }
