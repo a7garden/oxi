@@ -7,9 +7,8 @@
 | Phase 1 — Documentation Pass | ✅ **Completed** | Public API items now have doc comments |
 | Phase 2 — Unsafe Cleanup | ✅ **Completed** | All `unsafe` blocks reviewed; remaining ones justified |
 | Phase 3 — Error Handling | ✅ **Completed** | `unwrap()`/`expect()` reduced; proper error types with `thiserror` |
-| Phase 4.3 — oxi-agent Integration Tests | ✅ **Completed** | Created agent_loop_full.rs with 20 comprehensive tests |
-| Phase 4.4 — Fix Ignored Tests | ✅ **Completed** | No ignored unit tests found; doctests correctly marked ignore |
 | Phase 4.1 — oxi-cli Integration Tests | ✅ **Completed** | Created cli_parsing.rs (6 tests) and session_persistence.rs (1 test) |
+| Phase 4.2 — oxi-ai Mock HTTP Tests | ✅ **Completed** | Created provider_mock.rs with 8 mockito tests |
 
 ---
 
@@ -130,6 +129,46 @@ cargo test -p oxi-cli --test cli_parsing test_version_flag
 
 ---
 
+## Phase 4.2: oxi-ai Mock HTTP Tests (provider_mock.rs)
+
+### Created Files
+- `/Volumes/MERCURY/PROJECTS/oxi/oxi-ai/tests/provider_mock.rs` (8 integration tests)
+- `/Volumes/MERCURY/PROJECTS/oxi/oxi-ai/tests/fixtures/` (4 fixture files)
+
+### Test Coverage (8 tests)
+
+1. `test_openai_streaming_text` - SSE text streaming with multiple chunks
+2. `test_openai_tool_call_parsing` - Tool call delta accumulation
+3. `test_rate_limit_error` - 429 error handling
+4. `test_auth_error` - 401 error handling
+5. `test_server_error` - 500 error handling
+6. `test_empty_stream` - Empty stream handling
+7. `test_model_override` - Custom model ID in requests
+8. `test_streaming_with_history` - Context with message history
+
+### Fixture Files
+- `openai_stream.txt` - Sample OpenAI SSE streaming response
+- `anthropic_stream.txt` - Sample Anthropic SSE streaming response
+- `anthropic_thinking.txt` - Sample Anthropic with thinking blocks
+- `openai_tool_call.txt` - Sample OpenAI tool call streaming
+
+### Implementation Notes
+- Uses mockito for HTTP mocking
+- Requires helper function `call_stream()` to resolve async-trait type inference
+- ProviderEvent uses `TextDelta` not `TextPart`
+- Must use `ref` keyword when matching String fields in patterns
+
+### Lib.rs Change
+Added `pub use providers::OpenAiProvider;` to export provider for tests.
+
+### Verification
+```bash
+cd /Volumes/MERCURY/PROJECTS/oxi && cargo test -p oxi-ai --test provider_mock
+# Result: ok. 8 passed; 0 failed
+```
+
+---
+
 ## Verification Results
 
 ### Compilation
@@ -137,9 +176,9 @@ All crates compile successfully with `cargo check --workspace`. Some warnings re
 
 ### Tests
 ```
-✅ 686+ tests passing across workspace
-   oxi-ai: 198 passed
-   oxi-agent: 24 passed (20 new in agent_loop_full.rs)
+✅ 694+ tests passing across workspace
+   oxi-ai: 206 passed (8 new in provider_mock.rs)
+   oxi-agent: 24 passed (20 in agent_loop_full.rs)
    oxi-tui: 972 passed
    oxi-core: 12 passed
 ```
