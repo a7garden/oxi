@@ -554,14 +554,18 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
                 {
                     break;
                 }
-                let l = lines.next().unwrap();
+                let Some(l) = lines.next() else {
+                    break;
+                };
                 if l.contains("old:") || l.contains("Old text:") {
                     // Collect old text
                     while let Some(next) = lines.peek() {
                         if next.contains("new:") || next.contains("New text:") {
                             break;
                         }
-                        let ol = lines.next().unwrap();
+                        let Some(ol) = lines.next() else {
+                            break;
+                        };
                         if ol.starts_with("```") {
                             continue;
                         }
@@ -578,7 +582,9 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
                         {
                             break;
                         }
-                        let nl = lines.next().unwrap();
+                        let Some(nl) = lines.next() else {
+                            break;
+                        };
                         if nl.starts_with("```") {
                             continue;
                         }
@@ -611,7 +617,9 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
                 {
                     break;
                 }
-                results.push(lines.next().unwrap().to_string());
+                if let Some(r) = lines.next() {
+                    results.push(r.to_string());
+                }
             }
             html.push_str(&render_search_tool(&query, &results));
             continue;

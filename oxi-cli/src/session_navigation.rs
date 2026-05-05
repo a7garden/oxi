@@ -371,14 +371,15 @@ impl SessionNavigator {
         target_id: Uuid,
     ) -> CollectEntriesResult {
         // If no old position, nothing to summarize
-        if old_leaf_id.is_none() {
-            return CollectEntriesResult {
-                entries: Vec::new(),
-                common_ancestor_id: None,
-            };
-        }
-
-        let old_leaf_id = old_leaf_id.unwrap();
+        let old_leaf_id = match old_leaf_id {
+            Some(id) => id,
+            None => {
+                return CollectEntriesResult {
+                    entries: Vec::new(),
+                    common_ancestor_id: None,
+                };
+            }
+        };
 
         // Build sets of IDs on both paths
         let old_path_ids: HashSet<Uuid> = self
@@ -588,7 +589,11 @@ impl SessionNavigator {
             None
         } else {
             // No summary, navigating to non-root
-            self.branch(new_leaf_id.unwrap());
+            if let Some(id) = new_leaf_id {
+                self.branch(id);
+            } else {
+                self.reset_leaf();
+            }
             None
         };
 
@@ -661,8 +666,14 @@ impl SessionNavigator {
         from_hook: bool,
     ) -> Uuid {
         // Validate branch_from_id exists if provided
-        if branch_from_id.is_some()
-            && !self.entries_by_id.contains_key(&branch_from_id.unwrap())
+        if let Some(bfid) = branch_from_id {
+            if !self.entries_by_id.contains_key(&bfid) {
+                tracing::warn!(
+                    "Entry {:?} not found for branch_with_summary",
+                    branch_from_id
+                );
+            }
+        }
         {
             tracing::warn!(
                 "Entry {:?} not found for branch_with_summary",
@@ -677,7 +688,7 @@ impl SessionNavigator {
             id: summary_id,
             parent_id: branch_from_id,
             timestamp: Utc::now().timestamp_millis(),
-            from_id: branch_from_id.unwrap_or_else(|| Uuid::nil()),
+            from_id: branch_from_id.unwrap_or(Uuid::nil()),
             summary,
             details,
             from_hook: Some(from_hook),

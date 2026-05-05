@@ -588,8 +588,12 @@ pub async fn generate_branch_summary(
     let conversation_text = serialize_conversation(&messages);
 
     // Build prompt
-    let instructions = if options.replace_instructions && options.custom_instructions.is_some() {
-        options.custom_instructions.as_ref().unwrap().clone()
+    let instructions = if options.replace_instructions {
+        if let Some(ref instr) = options.custom_instructions {
+            instr.clone()
+        } else {
+            BRANCH_SUMMARY_PROMPT.to_string()
+        }
     } else if let Some(ref custom) = options.custom_instructions {
         format!("{}\n\nAdditional focus: {}", BRANCH_SUMMARY_PROMPT, custom)
     } else {

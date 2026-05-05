@@ -299,7 +299,7 @@ impl App {
         });
         let skills = SkillManager::load_from_dir(&skills_dir).unwrap_or_else(|e| {
             tracing::debug!("Skills not loaded: {}", e);
-            SkillManager::load_from_dir(std::path::Path::new("/nonexistent")).unwrap()
+            SkillManager { skills: std::collections::HashMap::new() }
         });
 
         // Build agent config from settings
