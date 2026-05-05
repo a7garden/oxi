@@ -419,22 +419,34 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             }
                         }
                         KeyCode::Backspace => {
-                            input.backspace();
+                            if !is_agent_busy {
+                                input.backspace();
+                            }
                         }
                         KeyCode::Delete => {
-                            input.delete();
+                            if !is_agent_busy {
+                                input.delete();
+                            }
                         }
                         KeyCode::Left => {
-                            input.move_left();
+                            if !is_agent_busy {
+                                input.move_left();
+                            }
                         }
                         KeyCode::Right => {
-                            input.move_right();
+                            if !is_agent_busy {
+                                input.move_right();
+                            }
                         }
                         KeyCode::Home => {
-                            input.move_home();
+                            if !is_agent_busy {
+                                input.move_home();
+                            }
                         }
                         KeyCode::End => {
-                            input.move_end();
+                            if !is_agent_busy {
+                                input.move_end();
+                            }
                         }
                         _ => {}
                     }
@@ -680,9 +692,6 @@ fn render_chat(
         ]));
     }
 
-    // Build the text widget
-    let chat_text = ratatui::text::Text::from(all_lines);
-
     // Calculate wrapped line count to determine scroll range.
     // After wrapping, the actual number of displayed lines may be larger
     // than all_lines.len() because long lines get split.
@@ -697,6 +706,9 @@ fn render_chat(
             wrapped_count += (line_width + wrap_width - 1) / wrap_width.max(1);
         }
     }
+
+    // Build the text widget
+    let chat_text = ratatui::text::Text::from(all_lines);
 
     let visible_height = area.height as usize;
     let max_scroll = wrapped_count.saturating_sub(visible_height);
