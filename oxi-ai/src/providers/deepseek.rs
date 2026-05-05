@@ -29,7 +29,6 @@ impl DeepSeekProvider {
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
             client: shared_client(),
@@ -328,7 +327,6 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // SSE chunk structure
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct SSEChunk {
     id: Option<String>,
     #[serde(rename = "model")]
@@ -351,7 +349,6 @@ struct Delta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct ToolCallDelta {
     index: Option<usize>,
     id: Option<String>,
@@ -361,7 +358,6 @@ struct ToolCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct FunctionDelta {
     name: Option<String>,
     arguments: Option<String>,

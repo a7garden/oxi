@@ -28,6 +28,7 @@ pub enum FsWatchError {
 
 /// Watcher handle that can be used to stop watching
 pub struct FsWatcher {
+    /// Keep: watcher must stay alive for the duration of observation; dropping it stops watching.
     #[allow(dead_code)]
     watcher: Option<RecommendedWatcher>,
     stop_tx: Option<Sender<()>>,

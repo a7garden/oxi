@@ -106,7 +106,6 @@ enum IntermediateMessage {
         content: Vec<IntermediateBlock>,
         model: String,
         provider: String,
-        #[allow(dead_code)]
         api: Api, // kept for potential future use
         usage: Usage,
         stop_reason: StopReason,

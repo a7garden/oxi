@@ -99,7 +99,6 @@ pub fn requires_tool_call_id(model_id: &str) -> bool {
 }
 
 /// Normalize a tool call ID for models that require alphanumeric-only IDs.
-#[allow(dead_code)]
 pub fn normalize_tool_call_id(model_id: &str, id: &str) -> String {
     if !requires_tool_call_id(model_id) {
         return id.to_string();
