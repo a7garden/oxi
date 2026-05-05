@@ -163,7 +163,7 @@ enum Block {
     Paragraph {
         text: String,
     },
-    CodeBlock {
+    Code {
         language: String,
         code: String,
     },
@@ -218,7 +218,7 @@ fn parse_blocks(input: &str) -> Vec<Block> {
                 }
                 code_lines.push(cl.to_string());
             }
-            blocks.push(Block::CodeBlock {
+            blocks.push(Block::Code {
                 language: lang,
                 code: code_lines.join("\n"),
             });
@@ -1114,8 +1114,7 @@ fn render_blocks_to_lines(
             Block::Heading { level, text } => {
                 let idx = (level - 1).min(5);
                 let fg = theme.heading_colors[idx];
-                let mut attrs = Attributes::default();
-                attrs.bold = theme.heading_bold[idx];
+                let attrs = Attributes { bold: theme.heading_bold[idx], ..Attributes::default() };
                 // Render heading with underline for level 1–2
                 let wrapped = word_wrap(text, w);
                 for row in &wrapped {
@@ -1153,7 +1152,7 @@ fn render_blocks_to_lines(
                 lines.push(StyledLine::new()); // blank after
             }
 
-            Block::CodeBlock { language, code } => {
+            Block::Code { language, code } => {
                 let lang = language.to_lowercase();
                 let mut header = StyledLine::new();
                 // Render language label
@@ -1688,7 +1687,7 @@ mod tests {
         let blocks = parse_blocks(input);
         assert_eq!(blocks.len(), 1);
         match &blocks[0] {
-            Block::CodeBlock { language, code } => {
+            Block::Code { language, code } => {
                 assert_eq!(language, "rust");
                 assert_eq!(code, "fn main() {}");
             }

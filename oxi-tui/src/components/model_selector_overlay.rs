@@ -357,7 +357,8 @@ impl ModelSelectorOverlay {
         }
     }
 
-    fn render_text(&self, surface: &mut Surface, row: u16, col: u16, text: &str, fg: Color, bg: Color, max_width: u16) {
+    fn render_text(&self, surface: &mut Surface, pos: (u16, u16), text: &str, fg: Color, bg: Color, max_width: u16) {
+        let (row, col) = pos;
         let truncated = truncate_to_width(text, max_width as usize, Some(""), false);
         for (i, c) in truncated.chars().enumerate() {
             let x = col + i as u16;
@@ -478,10 +479,10 @@ impl Component for ModelSelectorOverlay {
         // Search input row
         let input_row = y + 1;
         let prompt = "> ";
-        self.render_text(surface, input_row, x + 1, prompt, self.theme.muted, self.theme.overlay_bg, inner_width);
+        self.render_text(surface, (input_row, x + 1), prompt, self.theme.muted, self.theme.overlay_bg, inner_width);
         let query_start = x + 1 + prompt.len() as u16;
         let query_max = palette_w.saturating_sub(query_start - x) - 1;
-        self.render_text(surface, input_row, query_start, &self.query, self.theme.input_text, self.theme.overlay_bg, query_max);
+        self.render_text(surface, (input_row, query_start), &self.query, self.theme.input_text, self.theme.overlay_bg, query_max);
         // Cursor
         let cursor_col = query_start + self.query.len() as u16;
         if cursor_col < x + palette_w - 1 {
@@ -498,8 +499,7 @@ impl Component for ModelSelectorOverlay {
         if self.filtered_models.is_empty() {
             self.render_text(
                 surface,
-                list_start_y,
-                x + 1,
+                (list_start_y, x + 1),
                 "  No matching models",
                 self.theme.no_match,
                 self.theme.overlay_bg,
@@ -566,7 +566,7 @@ impl Component for ModelSelectorOverlay {
                 let scroll_y = list_start_y + (vis_end - vis_start).min(list_height) as u16;
                 if scroll_y < list_start_y + list_height as u16 {
                     let scroll_text = format!("  ({}/{})", self.selected_index + 1, self.filtered_models.len());
-                    self.render_text(surface, scroll_y, x + 1, &scroll_text, self.theme.scroll_info, self.theme.overlay_bg, inner_width);
+                    self.render_text(surface, (scroll_y, x + 1), &scroll_text, self.theme.scroll_info, self.theme.overlay_bg, inner_width);
                 }
             }
         }
@@ -576,7 +576,7 @@ impl Component for ModelSelectorOverlay {
         if let Some(selected) = self.filtered_models.get(self.selected_index) {
             let detail = selected.display_name();
             let detail_text = format!("  {}", detail);
-            self.render_text(surface, detail_y, x + 1, &detail_text, self.theme.muted, self.theme.overlay_bg, inner_width);
+            self.render_text(surface, (detail_y, x + 1), &detail_text, self.theme.muted, self.theme.overlay_bg, inner_width);
         } else {
             for c in x..x + palette_w {
                 surface.set(detail_y, c, Cell::new(' ').with_bg(self.theme.overlay_bg));
@@ -587,8 +587,7 @@ impl Component for ModelSelectorOverlay {
         let hint_y = detail_y + 1;
         self.render_text(
             surface,
-            hint_y,
-            x + 1,
+            (hint_y, x + 1),
             "  Type to search · Enter to select · Esc to cancel",
             self.theme.hint,
             self.theme.overlay_bg,
