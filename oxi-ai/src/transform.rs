@@ -106,7 +106,6 @@ enum IntermediateMessage {
         content: Vec<IntermediateBlock>,
         model: String,
         provider: String,
-        api: Api, // kept for potential future use
         usage: Usage,
         stop_reason: StopReason,
         error_message: Option<String>,
@@ -168,7 +167,6 @@ fn to_intermediate(msg: &Message, _from_api: &Api) -> IntermediateMessage {
             content: a.content.iter().map(block_to_intermediate).collect(),
             model: a.model.clone(),
             provider: a.provider.clone(),
-            api: a.api,
             usage: a.usage.clone(),
             stop_reason: a.stop_reason,
             error_message: a.error_message.clone(),
@@ -246,7 +244,6 @@ fn from_intermediate(im: &IntermediateMessage, to_api: &Api, opts: &TransformOpt
             content,
             model,
             provider,
-            api: _,
             usage,
             stop_reason,
             error_message,

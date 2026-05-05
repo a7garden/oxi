@@ -346,7 +346,7 @@ pub trait Compactor: Send + Sync {
 /// LLM-based compactor that uses the model itself to summarize
 pub struct LlmCompactor {
     model: Model,
-    provider: Arc<dyn Provider>,
+    _provider: Arc<dyn Provider>,
     config: CompactionConfig,
 }
 
@@ -355,7 +355,7 @@ impl LlmCompactor {
     pub fn new(model: Model, provider: Arc<dyn Provider>) -> Self {
         Self {
             model,
-            provider,
+            _provider: provider,
             config: CompactionConfig::new(),
         }
     }
@@ -368,7 +368,7 @@ impl LlmCompactor {
     ) -> Self {
         Self {
             model,
-            provider,
+            _provider: provider,
             config,
         }
     }

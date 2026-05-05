@@ -95,7 +95,8 @@ impl OpenAICompletionsProvider {
         }
     }
 
-    /// Create with explicit API key
+    /// Create with explicit API key (public API for external consumers)
+    #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         let mut config = OpenAICompletionsConfig::default();
         config.api_key = Some(api_key.into());
@@ -105,7 +106,8 @@ impl OpenAICompletionsProvider {
         }
     }
 
-    /// Create with custom configuration
+    /// Create with custom configuration (public API)
+    #[allow(dead_code)]
     pub fn with_config(config: OpenAICompletionsConfig) -> Self {
         Self {
             client: shared_client(),
@@ -113,7 +115,8 @@ impl OpenAICompletionsProvider {
         }
     }
 
-    /// Get provider name
+    /// Get provider name (public API)
+    #[allow(dead_code)]
     pub fn name(&self) -> &str {
         "openai-completions"
     }
@@ -415,6 +418,7 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // SSE structures for completions API
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct CompletionChunk {
     id: Option<String>,
     object: Option<String>,
@@ -425,6 +429,7 @@ struct CompletionChunk {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct CompletionChoice {
     text: Option<String>,
     index: usize,
