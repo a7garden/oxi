@@ -5,28 +5,21 @@ In Progress
 
 ## Tasks
 
-### P3-1: Analyze and clean up `.wip` file in oxi-tui ✅
-- Analyzed `oxi-tui/src/components/chat_view.rs.wip` vs current `chat_view.rs`
-- Finding: `.wip` was an **older snapshot** missing Error block support, incremental reflow optimization, and 4 tests already in main
-- Decision: **DELETE** — no meaningful content to merge
-- Deleted `.wip` file; all 350 oxi-tui tests pass
+### P2-2: Add IME/Cursor Support to oxi-tui ✅
+- Added `Event::CursorPosition(u16, u16)` variant to event.rs
+- Added `Terminal::query_cursor_position()` and `Terminal::set_ime_cursor()` to terminal trait + CrosstermTerminal impl
+- Added `cursor_position: Option<(u16, u16)>` field to Renderer with `set_cursor_position()` method
+- Updated `Renderer::flush()` to emit cursor positioning + show cursor after content when IME position is set
+- Added `cursor_marker_pending: bool` to TUI
+- Added `TUI::request_cursor_position_query()`, `TUI::set_ime_cursor()`, `TUI::clear_ime_cursor()`
+- Updated `TUI::poll_event()` to handle pending cursor position queries via terminal's cursor_pos()
 
 ## Files Changed
-- `oxi-tui/src/components/chat_view.rs.wip` — deleted (obsolete older snapshot of chat_view.rs)
-
-### P3-2: Analyze and potentially split `keys.rs` (2,448 lines) ✅
-- Analyzed all 2,448 lines of `oxi-tui/src/keys.rs`
-- **NOT auto-generated** — hand-written terminal key input parsing code
-- **Decision: KEEP AS-IS** — file is cohesive, tightly coupled, and has no external consumers
-- Added comprehensive module doc comment documenting section layout and rationale for monolithic structure
-- No API changes, no function signature changes
-- Report written to `/tmp/p3-2-keys-cleanup.md`
-
-## Files Changed
-- `oxi-tui/src/keys.rs` — added structural documentation to module doc comment
-- `oxi-tui/src/components/chat_view.rs.wip` — deleted in P3-1
+- `oxi-tui/src/event.rs` — Added `Event::CursorPosition(u16, u16)` variant
+- `oxi-tui/src/terminal.rs` — Added `query_cursor_position()` and `set_ime_cursor()` to Terminal trait and CrosstermTerminal
+- `oxi-tui/src/renderer.rs` — Added `cursor_position` field, `set_cursor_position()` method, updated flush to position cursor for IME
+- `oxi-tui/src/tui.rs` — Added `cursor_marker_pending`, `request_cursor_position_query()`, `set_ime_cursor()`, `clear_ime_cursor()`, updated poll_event
 
 ## Notes
-- The main `chat_view.rs` is the authoritative, more complete version with Error block rendering, incremental reflow, and better scroll clamping
-- Report written to `/tmp/p3-1-wip-file.md`
-- `keys.rs` has 18 logical sections with clear `// ---` headers; all share private types/constants making a split net-negative without external consumers
+- Crossterm internally parses `ESC[row;colR` as `InternalEvent::CursorPosition` but its public EventFilter discards it. The implementation uses `Terminal::cursor_pos()` as a synchronous fallback when a pending cursor query has no regular event available.
+- All 350 unit tests + 12 doc tests pass.

@@ -65,13 +65,17 @@ fn copy_via_xclip(text: &str) -> Option<Result<()>> {
         .spawn()
         .ok()?;
 
+    use std::io::Write;
     if let Some(mut stdin) = child.stdin.take() {
-        use std::io::Write;
         stdin.write_all(text.as_bytes()).ok()?;
     }
-    drop(child);
-
-    Some(Ok(()))
+    // Wait for xclip to finish reading stdin and setting clipboard
+    let status = child.wait().ok()?;
+    if status.success() {
+        Some(Ok(()))
+    } else {
+        Some(Err(anyhow::anyhow!("xclip failed")))
+    }
 }
 
 /// Copy text to clipboard using pbcopy (macOS)
@@ -85,10 +89,14 @@ fn copy_via_pbcopy(text: &str) -> Option<Result<()>> {
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(text.as_bytes()).ok()?;
     }
-    drop(child);
-
-    // pbcopy always succeeds if it runs
-    Some(Ok(()))
+    // Wait for pbcopy to finish
+    let status = child.wait().ok()?;
+    if status.success() {
+        Some(Ok(()))
+    } else {
+        Some(Err(anyhow::anyhow!("pbcopy failed")))
+    }
+}
 }
 
 /// Copy text to clipboard using clip (Windows)
@@ -137,7 +145,7 @@ pub fn generate_osc52_sequence(text: &str) -> String {
     use base64::Engine as _;
     let base64_text = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
     // OSC52 sequence: ESC ] 52 ; ; base64-data BEL
-    format!("\x1b]52;;{}上古", base64_text)
+    format!("\x1b]52;;{}\x07", base64_text)
 }
 
 /// Copy text to clipboard, trying platform-specific methods in order.
@@ -240,7 +248,7 @@ mod tests {
         let text = "Hello, World!";
         let seq = generate_osc52_sequence(text);
         assert!(seq.starts_with("\x1b]52;;"));
-        assert!(seq.ends_with("上古"));
+        assert!(seq.ends_with("\x07"));
     }
 
     #[test]
