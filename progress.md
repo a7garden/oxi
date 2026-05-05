@@ -2,6 +2,46 @@
 
 ## Completed Tasks
 
+### Fix 1: oxi-ai TextDelta double-push bug in high_level.rs (2026-05-05)
+
+**Status: ✅ Complete**
+
+**Bug:** In the `complete()` function, `ProviderEvent::TextDelta` was pushing text to `text_buffer` twice:
+1. Unconditionally before the index-change check
+2. Unconditionally after the buffer flush/clear
+
+When `current_text_index` changed, the same delta was pushed once, then the buffer was flushed to the old block, cleared, then pushed again for the new block — causing double-counting at every block boundary.
+
+**Fix:** Reordered logic so `text_buffer.push_str(&delta)` executes exactly once, after the block-swap logic:
+
+```rust
+if current_text_index != Some(content_index) {
+    // New block — flush previous buffer
+    if let Some(idx) = current_text_index {
+        if !text_buffer.is_empty() {
+            push_text_block(&mut final_message, idx, &text_buffer);
+        }
+    }
+    current_text_index = Some(content_index);
+    text_buffer.clear();
+}
+text_buffer.push_str(&delta);  // ← single push
+```
+
+**Also fixed:** `ToolCallStart` synthetic ID generation. The event already carried `tool_call_id: Option<String>` from providers — the code now uses it with fallback to `format!("tool_call_{}", content_index)`.
+
+**Propagated changes** (tool_call_id field added to ProviderEvent::ToolCallStart):
+- `providers/event.rs` — added `tool_call_id: Option<String>` field
+- `providers/anthropic.rs` — added `id` to `ContentBlockStart`; passes real ID in ToolCallStart; fixed index fallback to `block.index.or(event.index)`
+- `providers/openai_responses.rs` — passes `output_item.id` for OutputItemAdded cases; `None` for ContentPartAdded
+- `providers/bedrock.rs` — added `id` to `ContentBlockRef`; passes it in ToolCallStart
+- `oxi-agent/src/proxy.rs` — updated destructuring
+- `oxi-agent/src/agent.rs` — updated destructuring
+
+**Test Results:** `cargo test -p oxi-ai` → **424 passed, 0 failed**
+
+**Output:** `/tmp/fix1-highlevel.md`
+
 ### Fix 2: oxi-ai SSE Parsing Unit Tests for OpenAI and Anthropic (2026-05-05)
 
 **Status: ✅ Complete**
