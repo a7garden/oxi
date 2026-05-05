@@ -647,4 +647,120 @@ mod tests {
         assert_eq!(format!("{}", ImageProtocol::Fallback), "fallback");
         assert_eq!(format!("{}", ImageProtocol::Auto), "auto");
     }
+
+    // ===== Additional edge-case tests =====
+
+    #[test]
+    fn test_image_new_empty_data() {
+        let img = Image::new(vec![], "image/png");
+        assert!(img.data().is_empty());
+        assert_eq!(img.mime_type(), "image/png");
+    }
+
+    #[test]
+    fn test_image_default_protocol_is_auto() {
+        let img = Image::new(vec![0u8; 10], "image/png");
+        assert_eq!(img.protocol, ImageProtocol::Auto);
+    }
+
+    #[test]
+    fn test_image_builder_chain() {
+        let img = Image::new(vec![0u8; 100], "image/jpeg")
+            .with_width(30)
+            .with_height(10)
+            .with_protocol(ImageProtocol::Iterm2);
+        assert_eq!(img.width(), Some(30));
+        assert_eq!(img.height(), Some(10));
+        assert_eq!(img.protocol, ImageProtocol::Iterm2);
+    }
+
+    #[test]
+    fn test_fallback_render_tall() {
+        let img = Image::new(vec![0u8; 100], "image/png")
+            .with_protocol(ImageProtocol::Fallback)
+            .with_width(20)
+            .with_height(6);
+        let lines = img.render_fallback(80);
+        // Should have top border + content rows + bottom border
+        assert!(lines.len() >= 4);
+        assert!(lines.first().unwrap().starts_with('┌'));
+        assert!(lines.last().unwrap().starts_with('└'));
+    }
+
+    #[test]
+    fn test_fallback_render_narrow() {
+        let img = Image::new(vec![0u8; 100], "image/png")
+            .with_protocol(ImageProtocol::Fallback)
+            .with_width(2)
+            .with_height(3);
+        let lines = img.render_fallback(80);
+        // Should still produce valid output for narrow widths
+        assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn test_image_base64_cached() {
+        let mut img = Image::new(vec![0u8; 10], "image/png")
+            .with_protocol(ImageProtocol::Kitty)
+            .with_width(10)
+            .with_height(3);
+        // Access base64 twice to verify caching
+        let b64_1 = img.base64_data().to_string();
+        let b64_2 = img.base64_data().to_string();
+        assert_eq!(b64_1, b64_2);
+        assert!(!b64_1.is_empty());
+    }
+
+    #[test]
+    fn test_detect_protocol_returns_fallback_in_test_env() {
+        // In test environments, we typically don't have special terminal vars set
+        let protocol = detect_protocol();
+        // The result depends on the environment; just verify it doesn't panic
+        assert!(matches!(
+            protocol,
+            ImageProtocol::Fallback | ImageProtocol::Kitty | ImageProtocol::Iterm2
+        ));
+    }
+
+    #[test]
+    fn test_kitty_render_jpeg() {
+        let mut img = Image::new(vec![0u8; 100], "image/jpeg")
+            .with_protocol(ImageProtocol::Kitty)
+            .with_width(10)
+            .with_height(3);
+        let lines = img.render_kitty(80, 24);
+        assert!(lines[0].contains("f=24"));
+    }
+
+    #[test]
+    fn test_kitty_render_uses_default_dims() {
+        let mut img = Image::new(sample_png_data(), "image/png")
+            .with_protocol(ImageProtocol::Kitty);
+        // No width/height set, should use cols/rows
+        let lines = img.render_kitty(40, 12);
+        assert!(lines[0].contains("c=40"));
+        assert!(lines[0].contains("r=12"));
+    }
+
+    #[test]
+    fn test_image_from_file_invalid_path() {
+        let result = Image::from_file(Path::new("/definitely/does/not/exist.png"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_image_handle_event_returns_false() {
+        let mut img = Image::new(sample_png_data(), "image/png");
+        let event = Event::Key(crate::KeyEvent::new(crate::KeyCode::Char('a')));
+        assert!(!img.handle_event(&event));
+    }
+
+    #[test]
+    fn test_image_desired_size_none() {
+        let img = Image::new(sample_png_data(), "image/png");
+        // No width/height set, defaults used
+        let size = img.desired_size().unwrap();
+        assert_eq!(size.width, 40); // default
+        assert_eq!(size.height, 10); // default
+    }
 }

@@ -1184,7 +1184,7 @@ mod tests {
         };
 
         // Without setting env vars in test, this should return false
-        let has_auth = has_configured_auth("anthropic", &model);
+        let _has_auth = has_configured_auth("anthropic", &model);
         // This might be true if ANTHROPIC_API_KEY is set in the environment
         // which is fine - the test just checks the function works
     }

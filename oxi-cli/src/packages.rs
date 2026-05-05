@@ -2851,8 +2851,8 @@ mod tests {
         mgr.install(pkg_dir.to_str().unwrap()).unwrap();
 
         // install_local doesn't use with_progress, so no events expected from install()
-        // But the mechanism works
-        assert!(events.lock().unwrap().is_empty() || events.lock().unwrap().len() >= 0);
+        // Just verify the progress event mechanism exists and doesn't panic
+        let _event_count = events.lock().unwrap().len();
     }
 
     #[test]

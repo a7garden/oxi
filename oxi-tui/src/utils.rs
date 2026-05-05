@@ -1401,4 +1401,155 @@ mod tests {
         // 你 = 2 cols, ... = 3 cols → total 5
         assert_eq!(w, 5, "result={:?} stripped={:?} w={}", result, stripped, w);
     }
+
+    // ===== Additional edge-case tests =====
+
+    #[test]
+    fn test_strip_ansi_empty() {
+        assert_eq!(strip_ansi(""), "");
+    }
+
+    #[test]
+    fn test_strip_ansi_nested_codes() {
+        assert_eq!(strip_ansi("\x1b[1m\x1b[31mbold red\x1b[0m"), "bold red");
+    }
+
+    #[test]
+    fn test_visible_width_mixed() {
+        // Mix of ASCII, ANSI, and wide chars
+        assert_eq!(visible_width("\x1b[31m你好\x1b[0m"), 4); // 2+2 wide chars
+    }
+
+    #[test]
+    fn test_visible_width_only_ansi() {
+        assert_eq!(visible_width("\x1b[31m\x1b[0m"), 0);
+    }
+
+    #[test]
+    fn test_wrap_text_zero_width() {
+        let lines = wrap_text("hello", 0);
+        assert_eq!(lines, vec![""]);
+    }
+
+    #[test]
+    fn test_wrap_text_multiple_spaces() {
+        let lines = wrap_text("hello     world", 7);
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn test_truncate_with_padding_and_ansi() {
+        let result = truncate_to_width("\x1b[31mhi\x1b[0m", 5, None, true);
+        let stripped = strip_ansi(&result);
+        assert_eq!(stripped.chars().take(2).collect::<String>(), "hi");
+        assert_eq!(visible_width(&stripped), 5);
+    }
+
+    #[test]
+    fn test_segment_text_empty() {
+        let segs = segment_text("");
+        assert!(segs.is_empty());
+    }
+
+    #[test]
+    fn test_segment_text_single_char() {
+        let segs = segment_text("x");
+        assert_eq!(segs, vec!["x"]);
+    }
+
+    #[test]
+    fn test_word_at_empty() {
+        assert_eq!(word_at("", 0), None);
+    }
+
+    #[test]
+    fn test_word_at_beyond_end() {
+        assert_eq!(word_at("hello", 100), None);
+    }
+
+    #[test]
+    fn test_word_at_start_of_word() {
+        assert_eq!(word_at("hello world", 0), Some((0, 5)));
+    }
+
+    #[test]
+    fn test_word_at_end_of_word() {
+        // Position at end of "hello" (byte 5 is space)
+        assert_eq!(word_at("hello world", 4), Some((0, 5)));
+    }
+
+    #[test]
+    fn test_highlight_matches_at_start() {
+        let result = highlight_matches("hello world", "hello");
+        assert!(result.starts_with("\x1b[7mhello\x1b[27m"));
+    }
+
+    #[test]
+    fn test_highlight_matches_with_custom_tags() {
+        let result = highlight_matches_with("foo bar foo", "foo", "[", "]");
+        assert_eq!(result, "[foo] bar [foo]");
+    }
+
+    #[test]
+    fn test_slice_by_column_full_line() {
+        assert_eq!(slice_by_column("hello", 0, 5), "hello");
+    }
+
+    #[test]
+    fn test_slice_by_column_with_ansi() {
+        let result = slice_by_column("\x1b[31mhello\x1b[0m", 0, 5);
+        assert!(result.contains("\x1b[31m"));
+    }
+
+    #[test]
+    fn test_find_word_boundaries_single_word() {
+        let bounds = find_word_boundaries("hello");
+        assert_eq!(bounds.len(), 2); // Start + End
+        assert_eq!(bounds[0].kind, WordBoundaryKind::Start);
+        assert_eq!(bounds[1].kind, WordBoundaryKind::End);
+    }
+
+    #[test]
+    fn test_find_word_boundaries_all_spaces() {
+        let bounds = find_word_boundaries("   ");
+        assert!(bounds.is_empty());
+    }
+
+    #[test]
+    fn test_apply_background_no_padding_needed() {
+        let result = apply_background_to_line("hello", 5, |s| format!("[{}]", s));
+        assert_eq!(result, "[hello]");
+    }
+
+    #[test]
+    fn test_truncate_exact_width() {
+        assert_eq!(truncate_to_width("12345", 5, None, false), "12345");
+    }
+
+    #[test]
+    fn test_truncate_with_custom_ellipsis_longer_than_text() {
+        // Ellipsis longer than max_width
+        let result = truncate_to_width("ab", 2, Some("..."), false);
+        // Ellipsis is too long, should clip
+        assert!(result.len() <= 5);
+    }
+
+    #[test]
+    fn test_wrap_text_single_long_word_no_spaces() {
+        let lines = wrap_text("abcdefghij", 5);
+        assert_eq!(lines, vec!["abcde", "fghij"]);
+    }
+
+    #[test]
+    fn test_is_whitespace_unicode() {
+        assert!(is_whitespace_char('\u{00A0}')); // non-breaking space
+    }
+
+    #[test]
+    fn test_is_punctuation_complete_set() {
+        // Verify all documented punctuation chars
+        for ch in "(){}[]<>.,;:'\"!?+-=*/\\|&%^$#@~`".chars() {
+            assert!(is_punctuation_char(ch), "expected '{}' to be punctuation", ch);
+        }
+    }
 }

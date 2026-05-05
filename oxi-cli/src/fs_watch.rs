@@ -116,7 +116,6 @@ pub trait FsWatchHandler: Send {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notify::EventKind;
 
     #[test]
     fn test_watcher_creation() {

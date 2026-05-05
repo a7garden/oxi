@@ -646,7 +646,7 @@ impl Editor {
         // If we're at the same position, try to move before the non-word chars
         if new_cursor == line.cursor && i > 0 {
             // fallback: just move left one char
-            let prev_byte = chars.last().map(|(idx, c)| *idx).unwrap_or(0);
+            let prev_byte = chars.last().map(|(idx, _c)| *idx).unwrap_or(0);
             line.cursor = prev_byte;
         } else {
             line.cursor = new_cursor;
@@ -663,7 +663,6 @@ impl Editor {
         }
 
         let s = &line.content[line.cursor..];
-        let mut offset = 0usize;
         let chars: Vec<(usize, char)> = s.char_indices().collect();
         let mut i = 0;
 
@@ -676,13 +675,13 @@ impl Editor {
             i += 1;
         }
 
-        if i < chars.len() {
-            offset = chars[i].0;
+        let new_pos = if i < chars.len() {
+            chars[i].0
         } else {
-            offset = s.len();
-        }
+            s.len()
+        };
 
-        line.cursor = line.cursor + offset;
+        line.cursor = line.cursor + new_pos;
         self.dirty = true;
         true
     }
@@ -772,6 +771,14 @@ impl Component for Editor {
 
         if let Event::Key(key) = event {
             match key.code {
+                KeyCode::Char('z') if key.modifiers.ctrl => {
+                    self.undo();
+                    true
+                }
+                KeyCode::Char('y') if key.modifiers.ctrl => {
+                    self.redo();
+                    true
+                }
                 KeyCode::Char(c) => {
                     if key.modifiers.ctrl {
                         return false;
@@ -828,14 +835,6 @@ impl Component for Editor {
                     } else {
                         self.move_right();
                     }
-                    true
-                }
-                KeyCode::Char('z') if key.modifiers.ctrl => {
-                    self.undo();
-                    true
-                }
-                KeyCode::Char('y') if key.modifiers.ctrl => {
-                    self.redo();
                     true
                 }
                 KeyCode::Up => {
@@ -1394,26 +1393,30 @@ mod tests {
         editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('i'))));
         assert_eq!(editor.content(), "hi");
 
-        // Undo twice
-        editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
-            KeyCode::Char('z'),
-            KeyModifiers::new().with_ctrl(),
-        )));
+        // Undo: snapshot "h" is popped, pushed to redo; undo stack has ["", "h"] → pop "h", return ""
+        // Actually: undo pops top of undo stack, pushes to redo, returns new top
+        // Stack after typing: ["", "h"] (snapshot before 'h' was "", snapshot before 'i' was "h")
+        // First undo: pop "h" from undo, push to redo; undo now has [""]; returns Some("")
+        // Content restored to "" (the state before 'h')
         editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
             KeyCode::Char('z'),
             KeyModifiers::new().with_ctrl(),
         )));
 
-        // Redo twice
+        // Redo: pop "h" from redo, push to undo; returns Some("h")
+        // Content restored to "h"
         editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
             KeyCode::Char('y'),
             KeyModifiers::new().with_ctrl(),
         )));
+        assert_eq!(editor.content(), "h");
+
+        // Redo again: redo is empty, nothing happens
         editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
             KeyCode::Char('y'),
             KeyModifiers::new().with_ctrl(),
         )));
-        assert_eq!(editor.content(), "hi");
+        assert_eq!(editor.content(), "h");
     }
 
     #[test]

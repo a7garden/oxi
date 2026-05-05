@@ -388,9 +388,8 @@ mod tests {
 
     #[test]
     fn test_check_common_issues() {
-        let issues = check_common_issues();
+        let _issues = check_common_issues();
         // Should complete without panic
-        assert!(issues.len() >= 0);
     }
 
     #[test]
