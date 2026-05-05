@@ -60,11 +60,11 @@ impl Provider for GoogleProvider {
             .or(self.api_key.as_ref())
             .ok_or_else(|| ProviderError::MissingApiKey)?;
 
-        // Build the request URL
+        // Build the request URL (without key - uses header instead for security)
         let model_id = &model.id;
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?key={}&alt=sse",
-            model_id, api_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
+            model_id
         );
 
         // Build contents using shared conversion
@@ -82,10 +82,11 @@ impl Provider for GoogleProvider {
             options.max_tokens,
         );
 
-        // Make request
+        // Make request with API key in header (not URL query param)
         let response = self
             .client
             .post(&url)
+            .header("x-goog-api-key", api_key)
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
