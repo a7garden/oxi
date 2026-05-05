@@ -13,6 +13,7 @@ use crate::Rect;
 use crate::Size;
 use crate::Theme;
 use std::path::Path;
+use unicode_width::UnicodeWidthChar;
 
 /// Editor content with cursor tracking.
 #[derive(Debug, Clone)]
@@ -41,7 +42,7 @@ impl Line {
         if pos <= self.content.len() {
             self.content.insert(pos, c);
             if self.cursor >= pos {
-                self.cursor = (self.cursor + 1).min(self.content.len());
+                self.cursor = (self.cursor + c.len_utf8()).min(self.content.len());
             }
         }
     }
@@ -50,7 +51,7 @@ impl Line {
         if pos < self.content.len() {
             let c = self.content.remove(pos);
             if self.cursor > pos {
-                self.cursor = self.cursor.saturating_sub(1);
+                self.cursor = self.cursor.saturating_sub(c.len_utf8());
             }
             Some(c)
         } else {
@@ -426,24 +427,14 @@ impl Editor {
         }
 
         let trigger_start = self.trigger_start;
-        let trigger_len = self.cursor() - trigger_start;
+        let cursor = self.cursor();
 
         // Get the completion text
         let completion_text = self.completions[self.completion_index].text.clone();
 
-        // Modify the line
+        // Replace the trigger range with completion text using byte-range replacement
         let line = self.current_mut();
-
-        // Remove the trigger prefix
-        for _ in 0..trigger_len {
-            line.content.remove(trigger_start);
-        }
-
-        // Insert completion
-        for c in completion_text.chars() {
-            line.content.insert(trigger_start, c);
-        }
-
+        line.content.replace_range(trigger_start..cursor, &completion_text);
         line.cursor = trigger_start + completion_text.len();
 
         self.clear_completions();
@@ -497,7 +488,13 @@ impl Editor {
     fn delete_back(&mut self) -> bool {
         let cursor = Self::line_cursor(self.current());
         if cursor > 0 {
-            self.current_mut().remove(cursor - 1);
+            // Find byte position of previous char boundary
+            let prev_byte = self.current().content[..cursor]
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.current_mut().remove(prev_byte);
             self.dirty = true;
             true
         } else if self.current_line > 0 {
@@ -536,11 +533,17 @@ impl Editor {
         }
     }
 
-    /// Move cursor left.
+    /// Move cursor left by one character.
     fn move_left(&mut self) -> bool {
         let line = self.current_mut();
         if line.cursor > 0 {
-            line.cursor -= 1;
+            // Find byte offset of previous character
+            let prev_byte = line.content[..line.cursor]
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            line.cursor = prev_byte;
             self.dirty = true;
             true
         } else {
@@ -548,11 +551,16 @@ impl Editor {
         }
     }
 
-    /// Move cursor right.
+    /// Move cursor right by one character.
     fn move_right(&mut self) -> bool {
         let line = self.current_mut();
-        if line.cursor < line.len() {
-            line.cursor += 1;
+        if line.cursor < line.content.len() {
+            // Find byte offset of next character
+            line.cursor = line.content[line.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| line.cursor + i)
+                .unwrap_or(line.content.len());
             self.dirty = true;
             true
         } else {
@@ -786,7 +794,7 @@ impl Component for Editor {
             let content = &line.content;
             let cursor_in_line = Self::line_cursor(line);
 
-            for (i, c) in content.chars().enumerate() {
+            for (byte_idx, c) in content.char_indices() {
                 if x >= area.x + area.width {
                     break;
                 }
@@ -797,13 +805,14 @@ impl Component for Editor {
                 }
 
                 // Highlight cursor position
-                if i == cursor_in_line && self.focused {
+                if byte_idx == cursor_in_line && self.focused {
                     cell.fg = crate::Color::Indexed(0);
                     cell.bg = crate::Color::Indexed(15);
                 }
 
+                let char_width = UnicodeWidthChar::width(c).unwrap_or(1) as u16;
                 surface.set(y, x, cell);
-                x += 1;
+                x += char_width;
             }
 
             // Render cursor if at end of line
