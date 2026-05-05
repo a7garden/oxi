@@ -3,10 +3,11 @@
 use crate::{
     AgentToolResult,
     error::AgentError, events::AgentEvent,
+    recovery::{CircuitBreaker, CircuitBreakerConfig},
     state::SharedState, tools::{ToolRegistry, AgentTool},
 };
 use anyhow::{Error, Result};
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use oxi_ai::{
     Context, ContentBlock, Message, Provider, ProviderEvent, StreamOptions,
     StopReason, TextContent, ToolCall, UserMessage, CompactionStrategy,
@@ -96,6 +97,8 @@ pub struct AgentLoop {
     auto_retry_attempt: AtomicUsize,
     /// Set to `true` to cancel an in-progress auto-retry wait.
     auto_retry_cancel: RwLock<bool>,
+    /// Circuit breaker for provider-level retries.
+    circuit_breaker: CircuitBreaker,
 }
 
 impl AgentLoop {
@@ -123,6 +126,7 @@ impl AgentLoop {
             session_id: config.session_id.clone(),
             auto_retry_attempt: AtomicUsize::new(0),
             auto_retry_cancel: RwLock::new(false),
+            circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
         }
     }
 
@@ -712,13 +716,36 @@ impl AgentLoop {
             }
         }
         
-        let mut ordered_finalized_calls = Vec::new();
-        for entry in finalized_calls {
+        // Separate immediate results from futures while preserving order.
+        // Then run all futures concurrently via join_all.
+        let mut slots: Vec<Option<FinalizedToolCall>> = Vec::with_capacity(finalized_calls.len());
+        let mut pending_futures: Vec<(usize, Pin<Box<dyn futures::Future<Output = FinalizedToolCall>>>)> = Vec::new();
+
+        for (i, entry) in finalized_calls.into_iter().enumerate() {
             match entry {
-                FinalizedToolCallEntry::Immediate(f) => ordered_finalized_calls.push(f),
-                FinalizedToolCallEntry::Future(f) => ordered_finalized_calls.push(f.await),
+                FinalizedToolCallEntry::Immediate(f) => slots.push(Some(f)),
+                FinalizedToolCallEntry::Future(f) => {
+                    slots.push(None);
+                    pending_futures.push((i, f));
+                }
             }
         }
+
+        // Run all pending tool futures concurrently.
+        if !pending_futures.is_empty() {
+            let indexed_results: Vec<(usize, FinalizedToolCall)> =
+                futures::future::join_all(pending_futures.into_iter().map(|(i, f)| async move {
+                    (i, f.await)
+                }))
+                .await;
+
+            for (idx, finalized) in indexed_results {
+                slots[idx] = Some(finalized);
+            }
+        }
+
+        let ordered_finalized_calls: Vec<FinalizedToolCall> =
+            slots.into_iter().map(|s| s.expect("all slots should be filled after join_all")).collect();
         
         let mut tool_result_messages = Vec::new();
         for finalized in &ordered_finalized_calls {
@@ -1033,9 +1060,21 @@ impl AgentLoop {
         let mut last_err: Option<String> = None;
 
         for attempt in 0..=MAX_RETRIES {
+            // Check the circuit breaker before each attempt.
+            if let Err(open_err) = self.circuit_breaker.allow_request() {
+                emit(AgentEvent::Error {
+                    message: format!("Circuit breaker open: {}", open_err),
+                });
+                return Err(AgentError::Stream(format!("Circuit breaker open: {}", open_err)).into());
+            }
+
             match self.provider.stream(model, context, options.clone()).await {
-                Ok(stream) => return Ok(Box::pin(stream) as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>),
+                Ok(stream) => {
+                    self.circuit_breaker.record_success();
+                    return Ok(Box::pin(stream) as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+                }
                 Err(e) => {
+                    self.circuit_breaker.record_failure();
                     let msg = e.to_string();
                     let is_rate_limit = matches!(e, oxi_ai::ProviderError::HttpError(429, _));
 

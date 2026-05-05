@@ -53,11 +53,9 @@ pub async fn complete(
                 content_index,
                 ..
             } => {
-                text_buffer.push_str(&delta);
                 if current_text_index != Some(content_index) {
-                    // New text block started
+                    // New text block started — flush previous buffer first
                     if let Some(idx) = current_text_index {
-                        // Save previous text block
                         if !text_buffer.is_empty() {
                             push_text_block(&mut final_message, idx, &text_buffer);
                         }
@@ -120,15 +118,17 @@ pub async fn complete(
             }
             ProviderEvent::ToolCallStart {
                 content_index,
+                tool_call_id,
                 partial,
             } => {
                 if final_message.is_none() {
                     final_message = Some(partial);
                 }
-                // Initialize tool call
+                // Initialize tool call — use provider ID if available, otherwise generate
+                let id = tool_call_id.unwrap_or_else(|| format!("tool_call_{}", content_index));
                 let tc = ToolCall {
                     content_type: crate::ToolCallType::ToolCall,
-                    id: format!("tool_call_{}", content_index),
+                    id,
                     name: String::new(),
                     arguments: serde_json::json!({}),
                     thought_signature: None,

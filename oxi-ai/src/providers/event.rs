@@ -53,6 +53,9 @@ pub enum ProviderEvent {
     /// Tool call block started
     ToolCallStart {
         content_index: usize,
+        /// The tool call ID from the provider, if available at start time.
+        /// Providers that only surface the ID later (in deltas/end) leave this `None`.
+        tool_call_id: Option<String>,
         partial: AssistantMessage,
     },
 

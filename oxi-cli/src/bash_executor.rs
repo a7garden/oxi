@@ -262,6 +262,12 @@ impl BashExecutor {
         let start = std::time::Instant::now();
 
         let mut cmd = Command::new(&self.config.shell);
+        // Preserve important environment variables instead of clearing everything.
+        const PRESERVE_ENV_VARS: &[&str] = &[
+            "HOME", "TERM", "LANG", "LC_ALL", "PATH", "USER", "SHELL", "TMPDIR",
+            "EDITOR", "PAGER",
+        ];
+
         cmd.arg("-c")
             .arg(command)
             .current_dir(self.cwd.read().unwrap().as_path())
@@ -269,12 +275,17 @@ impl BashExecutor {
             .stderr(Stdio::piped())
             .env_clear();
 
+        // Re-inherit preserved vars from the current process environment.
+        for var in PRESERVE_ENV_VARS {
+            if let Ok(val) = std::env::var(var) {
+                cmd.env(var, val);
+            }
+        }
+
+        // Apply user-specified overrides last so they take precedence.
         let env = self.env.read().unwrap();
         for (key, value) in env.iter() {
             cmd.env(key, value);
-        }
-        if let Ok(path) = std::env::var("PATH") {
-            cmd.env("PATH", path);
         }
 
         let mut child = match cmd.spawn() {
@@ -356,9 +367,17 @@ impl BashExecutor {
     /// Truncate output to max size
     fn truncate_output(&self, output: String) -> String {
         if output.len() > self.config.max_output_size {
+            let half = self.config.max_output_size / 2;
+            // Find a safe char boundary near `half`.
+            let boundary = output
+                .char_indices()
+                .take_while(|(idx, _)| *idx <= half)
+                .last()
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
             format!(
                 "{}...\n[Output truncated: {} bytes -> {} bytes]",
-                &output[..self.config.max_output_size / 2],
+                &output[..boundary],
                 output.len(),
                 self.config.max_output_size
             )
@@ -370,7 +389,7 @@ impl BashExecutor {
 
 impl Default for BashExecutor {
     fn default() -> Self {
-        Self::default()
+        Self::new(BashExecutorConfig::default())
     }
 }
 

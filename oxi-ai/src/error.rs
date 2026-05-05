@@ -64,3 +64,54 @@ pub enum Error {
 
 /// Result type alias
 pub type Result<T> = std::result::Result<T, Error>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_error_display() {
+        assert_eq!(ProviderError::MissingApiKey.to_string(), "Missing API key");
+        assert_eq!(
+            ProviderError::UnknownProvider("foo".to_string()).to_string(),
+            "Unknown provider: foo"
+        );
+        assert_eq!(
+            ProviderError::HttpError(429, "rate limited".to_string()).to_string(),
+            "HTTP error 429: rate limited"
+        );
+        assert_eq!(
+            ProviderError::InvalidResponse("bad json".to_string()).to_string(),
+            "Invalid response: bad json"
+        );
+        assert_eq!(
+            ProviderError::StreamError("disconnected".to_string()).to_string(),
+            "Stream error: disconnected"
+        );
+        assert_eq!(
+            ProviderError::NotImplemented("x".to_string()).to_string(),
+            "Provider not implemented: x"
+        );
+    }
+
+    #[test]
+    fn error_chain_from_provider_error() {
+        let inner = ProviderError::MissingApiKey;
+        let outer: Error = inner.into();
+        assert!(matches!(outer, Error::Provider(ProviderError::MissingApiKey)));
+        assert!(outer.to_string().contains("Missing API key"));
+    }
+
+    #[test]
+    fn validation_error_display() {
+        let err = ValidationError::MissingRequiredField("model".to_string());
+        assert_eq!(err.to_string(), "Missing required field: model");
+    }
+
+    #[test]
+    fn error_chain_from_io() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let outer: Error = io_err.into();
+        assert!(matches!(outer, Error::Io(_)));
+    }
+}

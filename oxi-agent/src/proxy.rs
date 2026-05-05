@@ -867,6 +867,7 @@ impl ProxyEventStripper {
 
             ProviderEvent::ToolCallStart {
                 content_index,
+                tool_call_id: _,
                 partial,
             } => {
                 self.content_index = *content_index;

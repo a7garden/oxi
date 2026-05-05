@@ -236,6 +236,7 @@ mod anthropic_parser {
                             Some("tool_use") => {
                                 events.push(ProviderEvent::ToolCallStart {
                                     content_index: block.index.unwrap_or(0),
+                                    tool_call_id: None,
                                     partial: partial_message.clone(),
                                 });
                             }
