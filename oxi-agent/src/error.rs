@@ -1,27 +1,34 @@
 //! Error types for oxi-agent
 
-use std::fmt;
-
 /// Agent-specific errors
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AgentError {
     /// Tool execution error
+    #[error("Tool '{tool_name}' failed: {message}")]
     Tool { tool_name: String, message: String },
     /// Stream / provider communication error
+    #[error("Stream error: {0}")]
     Stream(String),
     /// State management error
+    #[error("State error: {0}")]
     State(String),
     /// Configuration error
+    #[error("Config error: {0}")]
     Config(String),
     /// Model not found or unavailable
+    #[error("Model '{model_id}' error: {message}")]
     Model { model_id: String, message: String },
     /// Maximum iterations reached
+    #[error("Maximum iterations reached ({iterations})")]
     MaxIterations { iterations: usize },
     /// Rate limited – retry after N seconds
+    #[error("Rate limited – retry after {retry_after_secs}s")]
     RateLimited { retry_after_secs: u64 },
     /// A retriable error that failed after exhausting retries
+    #[error("Failed after {attempts} retries: {last_error}")]
     RetriesExhausted { attempts: usize, last_error: String },
     /// Fallback failed – both primary and fallback model errored
+    #[error("Both models failed – {primary_model} ({primary_error}) and {fallback_model} ({fallback_error})")]
     FallbackFailed {
         primary_model: String,
         primary_error: String,
@@ -29,48 +36,6 @@ pub enum AgentError {
         fallback_error: String,
     },
 }
-
-impl fmt::Display for AgentError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Tool { tool_name, message } => {
-                write!(f, "Tool '{}' failed: {}", tool_name, message)
-            }
-            Self::Stream(msg) => write!(f, "Stream error: {}", msg),
-            Self::State(msg) => write!(f, "State error: {}", msg),
-            Self::Config(msg) => write!(f, "Config error: {}", msg),
-            Self::Model { model_id, message } => {
-                write!(f, "Model '{}' error: {}", model_id, message)
-            }
-            Self::MaxIterations { iterations } => {
-                write!(f, "Maximum iterations reached ({})", iterations)
-            }
-            Self::RateLimited { retry_after_secs } => {
-                write!(f, "Rate limited – retry after {}s", retry_after_secs)
-            }
-            Self::RetriesExhausted {
-                attempts,
-                last_error,
-            } => {
-                write!(f, "Failed after {} retries: {}", attempts, last_error)
-            }
-            Self::FallbackFailed {
-                primary_model,
-                primary_error,
-                fallback_model,
-                fallback_error,
-            } => {
-                write!(
-                    f,
-                    "Both models failed – {} ({}) and {} ({})",
-                    primary_model, primary_error, fallback_model, fallback_error
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for AgentError {}
 
 impl AgentError {
     /// Check if this error is retryable.

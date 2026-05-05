@@ -113,11 +113,11 @@ impl Provider for OpenAiResponsesProvider {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_key).parse().unwrap(),
+            format!("Bearer {}", api_key).parse().expect("valid bearer header"),
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("valid header value"),
         );
 
         // Add custom headers

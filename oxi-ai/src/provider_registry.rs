@@ -394,7 +394,6 @@ impl ProviderAuthRegistry {
         if self
             .runtime_overrides
             .read()
-            .unwrap()
             .contains_key(provider)
         {
             return true;
@@ -453,7 +452,6 @@ impl ProviderAuthRegistry {
         let overrides: Vec<String> = self
             .runtime_overrides
             .read()
-            .unwrap()
             .keys()
             .cloned()
             .collect();
@@ -474,7 +472,6 @@ impl ProviderAuthRegistry {
         if self
             .runtime_overrides
             .read()
-            .unwrap()
             .contains_key(provider)
         {
             return AuthStatus {

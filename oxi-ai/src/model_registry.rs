@@ -6,6 +6,11 @@ use crate::{Api, Cost, InputModality, Model};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
+/// Extract the model name after the last '/', or return the whole id if no '/' is present.
+fn extract_model_name(id: &str) -> &str {
+    id.rsplit_once('/').map(|(_, name)| name).unwrap_or(id)
+}
+
 /// Global model registry
 static MODELS: Lazy<HashMap<String, Model>> = Lazy::new(|| {
     let mut map = HashMap::new();
@@ -61,7 +66,7 @@ fn add_openai_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::OpenAiCompletions,
                 provider: "openai".to_string(),
@@ -144,7 +149,7 @@ fn add_anthropic_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::AnthropicMessages,
                 provider: "anthropic".to_string(),
@@ -210,7 +215,7 @@ fn add_google_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::GoogleGenerativeAi,
                 provider: "google".to_string(),
@@ -262,7 +267,7 @@ fn add_deepseek_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::OpenAiCompletions,
                 provider: "deepseek".to_string(),
@@ -336,7 +341,7 @@ fn add_mistral_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::OpenAiCompletions,
                 provider: "mistral".to_string(),
@@ -404,7 +409,7 @@ fn add_groq_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::OpenAiCompletions,
                 provider: "groq".to_string(),
@@ -438,7 +443,7 @@ fn add_cerebras_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::OpenAiCompletions,
                 provider: "cerebras".to_string(),
@@ -472,7 +477,7 @@ fn add_xai_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::OpenAiCompletions,
                 provider: "xai".to_string(),
@@ -559,7 +564,7 @@ fn add_openrouter_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::OpenAiCompletions,
                 provider: "openrouter".to_string(),
@@ -597,7 +602,7 @@ fn add_azure_models(map: &mut HashMap<String, Model>) {
         map.insert(
             id.to_string(),
             Model {
-                id: id.split('/').last().unwrap().to_string(),
+                id: extract_model_name(id).to_string(),
                 name: name.to_string(),
                 api: Api::AzureOpenAiResponses,
                 provider: "azure-openai".to_string(),

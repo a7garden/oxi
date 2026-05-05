@@ -2326,6 +2326,7 @@ dependencies = [
  "dirs",
  "futures",
  "glob",
+ "libc",
  "oxi-ai",
  "parking_lot",
  "regex",

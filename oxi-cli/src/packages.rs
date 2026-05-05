@@ -1272,7 +1272,10 @@ impl PackageManager {
             return self.load_manifest_from_dir(&target_dir, source, scope);
         }
 
-        fs::create_dir_all(target_dir.parent().unwrap())
+        let Some(parent) = target_dir.parent() else {
+            bail!("Invalid install path: no parent directory for {}", target_dir.display());
+        };
+        fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create parent dir for {}", target_dir.display()))?;
 
         git_clone(repo, &target_dir, ref_)?;

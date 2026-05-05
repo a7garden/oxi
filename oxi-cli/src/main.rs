@@ -554,8 +554,8 @@ async fn list_sessions(manager: &SessionManager) -> Result<()> {
     println!("{:-<36} {:-<20} {:-<20}", "", "", "");
 
     for meta in sessions {
-        let branch_str = if meta.parent_id.is_some() {
-            format!("forked from {}", &meta.parent_id.unwrap().to_string()[..8])
+        let branch_str = if let Some(ref pid) = meta.parent_id {
+            format!("forked from {}", &pid.to_string()[..8])
         } else {
             "root".to_string()
         };
@@ -587,11 +587,11 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
     let branch_info = manager.get_branch_info(id).await?;
 
     if let Some(info) = branch_info {
-        println!(
-            "Session: {} (branched from {})",
-            id,
-            info.parent_session_id.unwrap()
-        );
+        if let Some(ref pid) = info.parent_session_id {
+            println!("Session: {} (branched from {})", id, pid);
+        } else {
+            println!("Session: {} (root)", id);
+        }
     } else {
         println!("Session: {} (root)", id);
     }

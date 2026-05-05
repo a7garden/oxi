@@ -740,10 +740,10 @@ impl SessionManager {
         let cwd = cwd_override
             .map(|s| s.to_string())
             .or_else(|| header.as_ref().map(|h| h.cwd.clone()))
-            .unwrap_or_else(|| std::env::current_dir().unwrap().to_string_lossy().to_string());
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).to_string_lossy().to_string());
         let dir = session_dir
             .map(|s| s.to_string())
-            .unwrap_or_else(|| Path::new(path).parent().unwrap().to_string_lossy().to_string());
+            .unwrap_or_else(|| Path::new(path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| ".".to_string()));
 
         let mut manager = Self::new_internal(&cwd, &dir, Some(path), true);
         manager.persist = true;
@@ -1354,7 +1354,7 @@ impl SessionManager {
             labels: &HashMap<String, String>,
             label_timestamps: &HashMap<String, String>,
         ) -> SessionTreeNode {
-            let entry = entries_map.get(id).unwrap().clone();
+            let entry = entries_map.get(id).ok_or_else(|| anyhow::anyhow!("Corrupted session: entry {} not found", id))?.clone();
             let child_ids = adj.get(id).unwrap();
             let children: Vec<SessionTreeNode> = child_ids.iter().map(|cid| {
                 build(cid, adj, entries_map, labels, label_timestamps)
@@ -1619,7 +1619,7 @@ impl SessionManager {
         let base_dir = home.join(".oxi");
         let sessions_dir = base_dir.join("sessions");
         tokio::fs::create_dir_all(&sessions_dir).await?;
-        let cwd = std::env::current_dir().unwrap().to_string_lossy().to_string();
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).to_string_lossy().to_string();
         Ok(Self::in_memory(&cwd))
     }
 
@@ -1645,7 +1645,7 @@ impl SessionManager {
             let entry = entry?;
             let path = entry.path();
             if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                let file_name = path.file_stem().unwrap().to_string_lossy().to_string();
+                let file_name = path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("")).to_string_lossy().to_string();
                 // Try to extract uuid from filename
                 if let Some(uuid_part) = file_name.split('_').last() {
                     if let Ok(uuid) = Uuid::parse_str(uuid_part) {
