@@ -585,7 +585,7 @@ mod tests {
             "\n",
             "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" check this.\"}}\n",
             "\n"
-        ;
+        );
         let events = parse_anthropic_events(sse, MODEL);
         assert_eq!(events.len(), 3);
         assert!(matches!(&events[0], ProviderEvent::ThinkingStart { .. }));
