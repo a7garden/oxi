@@ -1,5 +1,6 @@
 //! Cell - represents a single character cell with styling.
 
+use ratatui::style::{Color as RColor, Modifier, Style};
 use std::fmt;
 
 /// Text attributes for styling.
@@ -31,6 +32,27 @@ impl Attributes {
         self.underline = true;
         self
     }
+
+    /// Convert to ratatui Modifier.
+    pub fn to_modifier(&self) -> Modifier {
+        let mut modifier = Modifier::empty();
+        if self.bold {
+            modifier |= Modifier::BOLD;
+        }
+        if self.italic {
+            modifier |= Modifier::ITALIC;
+        }
+        if self.underline {
+            modifier |= Modifier::UNDERLINED;
+        }
+        if self.strikethrough {
+            modifier |= Modifier::CROSSED_OUT;
+        }
+        if self.reversed {
+            modifier |= Modifier::REVERSED;
+        }
+        modifier
+    }
 }
 
 /// Text color (24-bit true color).
@@ -52,6 +74,34 @@ pub enum Color {
     /// Default terminal color
     #[default]
     Default,
+}
+
+impl Color {
+    /// Convert to ratatui Color.
+    pub fn to_ratatui(&self) -> RColor {
+        match self {
+            Color::Black => RColor::Black,
+            Color::Red => RColor::Red,
+            Color::Green => RColor::Green,
+            Color::Yellow => RColor::Yellow,
+            Color::Blue => RColor::Blue,
+            Color::Magenta => RColor::Magenta,
+            Color::Cyan => RColor::Cyan,
+            Color::White => RColor::White,
+            Color::Indexed(n) => RColor::Indexed(*n),
+            Color::Rgb(r, g, b) => RColor::Rgb(*r, *g, *b),
+            Color::Default => RColor::Reset,
+        }
+    }
+
+    /// Convert to ratatui Style.
+    pub fn to_style(&self, bg: Option<Color>) -> Style {
+        let fg = self.to_ratatui();
+        match bg {
+            Some(bg_color) => Style::new().fg(fg).bg(bg_color.to_ratatui()),
+            None => Style::new().fg(fg),
+        }
+    }
 }
 
 

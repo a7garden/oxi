@@ -55,6 +55,6 @@ pub use terminal_image::{
     ImageCache, ImageDimensions, ImageFormat, ImagePlaceholder,
     ImageProtocol as TerminalImageProtocol, RenderOptions, RenderedImage, TerminalCapabilities,
 };
-pub use theme::{ColorScheme, FontScheme, Spacing, Theme, ThemeFile, ThemeManager};
+pub use theme::{ColorScheme, FontScheme, Spacing, Theme, ThemeFile, ThemeManager, ThemeStyles};
 pub use tui::TUI;
 pub use undo_stack::UndoStack;

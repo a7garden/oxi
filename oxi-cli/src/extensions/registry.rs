@@ -32,7 +32,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 // Re-export types used by other modules
-pub use crate::extensions::types::ExtensionErrorListener;
 use crate::extensions::types::ExtensionErrorRecord as ExtErrorRecord;
 
 // ═══════════════════════════════════════════════════════════════════════════
