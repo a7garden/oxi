@@ -1359,13 +1359,12 @@ impl SessionManager {
             let children: Vec<SessionTreeNode> = child_ids.iter().map(|cid| {
                 build(cid, adj, entries_map, labels, label_timestamps)
             }).collect::<Result<Vec<_>, _>>()?;
-            SessionTreeNode {
+            Ok(SessionTreeNode {
                 entry,
                 children,
                 label: labels.get(id).cloned(),
                 label_timestamp: label_timestamps.get(id).cloned(),
-                // Note: label_timestamp is String
-            }
+            })
         }
 
         let mut roots = root_ids.into_iter().map(|rid| {
@@ -1373,6 +1372,7 @@ impl SessionManager {
         }).collect::<anyhow::Result<Vec<_>>>()?;
 
         sort_tree_by_timestamp(&mut roots);
+        Ok(roots)
     }
 
     // =========================================================================
