@@ -1,162 +1,17 @@
-# oxi Project Progress
+# Progress
 
-## Completed Tasks
+## Status
+In Progress
 
-### Fix 1: oxi-ai TextDelta double-push bug in high_level.rs (2026-05-05)
+## Tasks
+- [x] Fix 13: Google API key security fix (query param → header)
+- [x] Fix 12: Consolidate duplicate AgentConfig structs
 
-**Status: ✅ Complete**
+## Files Changed
+- oxi-ai/src/providers/google.rs
+- oxi-agent/src/types.rs
 
-**Bug:** In the `complete()` function, `ProviderEvent::TextDelta` was pushing text to `text_buffer` twice:
-1. Unconditionally before the index-change check
-2. Unconditionally after the buffer flush/clear
-
-When `current_text_index` changed, the same delta was pushed once, then the buffer was flushed to the old block, cleared, then pushed again for the new block — causing double-counting at every block boundary.
-
-**Fix:** Reordered logic so `text_buffer.push_str(&delta)` executes exactly once, after the block-swap logic:
-
-```rust
-if current_text_index != Some(content_index) {
-    // New block — flush previous buffer
-    if let Some(idx) = current_text_index {
-        if !text_buffer.is_empty() {
-            push_text_block(&mut final_message, idx, &text_buffer);
-        }
-    }
-    current_text_index = Some(content_index);
-    text_buffer.clear();
-}
-text_buffer.push_str(&delta);  // ← single push
-```
-
-**Also fixed:** `ToolCallStart` synthetic ID generation. The event already carried `tool_call_id: Option<String>` from providers — the code now uses it with fallback to `format!("tool_call_{}", content_index)`.
-
-**Propagated changes** (tool_call_id field added to ProviderEvent::ToolCallStart):
-- `providers/event.rs` — added `tool_call_id: Option<String>` field
-- `providers/anthropic.rs` — added `id` to `ContentBlockStart`; passes real ID in ToolCallStart; fixed index fallback to `block.index.or(event.index)`
-- `providers/openai_responses.rs` — passes `output_item.id` for OutputItemAdded cases; `None` for ContentPartAdded
-- `providers/bedrock.rs` — added `id` to `ContentBlockRef`; passes it in ToolCallStart
-- `oxi-agent/src/proxy.rs` — updated destructuring
-- `oxi-agent/src/agent.rs` — updated destructuring
-
-**Test Results:** `cargo test -p oxi-ai` → **424 passed, 0 failed**
-
-**Output:** `/tmp/fix1-highlevel.md`
-
-### Fix 2: oxi-ai SSE Parsing Unit Tests for OpenAI and Anthropic (2026-05-05)
-
-**Status: ✅ Complete**
-
-Added 39 comprehensive unit tests covering SSE parsing critical paths:
-
-**OpenAI (`openai.rs`) — 17 tests:**
-- Single event parsing, multiple events, `[DONE]` terminator early exit
-- Finish reason mapping (stop, length, tool_calls)
-- Tool call delta accumulation (with args, without args field)
-- Usage accumulation (with/without cache details)
-- Empty input, only empty lines, malformed JSON, empty data lines, non-data lines
-- Carriage return line endings
-- Full stream integration (text + tool call + done)
-
-**Anthropic (`anthropic.rs`) — 22 tests:**
-- `message_start`, `content_block_start` (text, thinking, tool_use)
-- `content_block_delta` (text_delta, thinking_delta, input_json_delta)
-- `message_delta` stop reasons (end_turn, max_tokens, stop_sequence)
-- `message_stop` (no event emitted)
-- Thinking block full flow (start + deltas)
-- Usage accumulation with cache metrics (cache_read, cache_write)
-- Empty input, `[DONE]` skipped, malformed JSON, non-data lines, unknown event types
-- Carriage return line endings
-- Full Anthropic stream integration
-
-**Key finding:** Both parsers accumulate usage *after* emitting the Done event, so the Done message captures the previously accumulated usage, not the usage from the same chunk. Tests are written to match this behavior.
-
-**Test Results:** 424 passed, 0 failed
-
-**Output:** `/tmp/fix2-sse-tests.md`
-
-### Fix 4: Agent Loop — Parallel Tool Execution + Circuit Breaker (2026-05-05)
-
-**Status: ✅ Complete (code changes)**
-
-- **Parallel tool execution**: Fixed `execute_tool_calls_parallel` to use `futures::future::join_all` instead of sequential `.await` in a for-loop. Tool futures now run concurrently while preserving result order via indexed slots.
-- **Circuit breaker integration**: Wired `CircuitBreaker` from `recovery.rs` into `AgentLoop`:
-  - Added `circuit_breaker` field to `AgentLoop` struct
-  - Initialized with `CircuitBreakerConfig::default()` (threshold: 5, open: 30s)
-  - `stream_with_retry` checks `allow_request()` before each attempt, records success/failure
-  - When circuit is open, returns error immediately without hitting the provider
-
-**Files modified:**
-- `oxi-agent/src/agent_loop.rs` (imports, struct, constructor, parallel execution, stream_with_retry)
-
-**Blocked:** `cargo test -p oxi-agent` cannot run due to pre-existing `oxi-ai` compilation errors (broken `concat!` macros in test code).
-
-**Output:** `/tmp/fix4-agent-loop.md`
-
-### Fix 3: oxi-ai Serialization Roundtrip Tests + Core Types Tests (2026-05-05)
-
-**Status: ✅ Complete**
-
-Added comprehensive `#[cfg(test)] mod tests` to three core files:
-- `oxi-ai/src/types.rs` — 9 tests (Model roundtrip, Usage calculations, Cost total, Api Display, ThinkingLevel serde, StopReason serde, ToolResult helpers)
-- `oxi-ai/src/messages.rs` — 20 tests (ContentBlock roundtrips for Text/Thinking/Image/ToolCall, inner message type roundtrips, text_content() for all roles, transform_for_provider OpenAI↔Anthropic, adjacent text block merging, MessageContent From conversions)
-- `oxi-ai/src/error.rs` — 4 tests (ProviderError Display for all variants, error chain #[from] for ProviderError→Error and io::Error→Error, ValidationError Display)
-
-Also fixed pre-existing `concat!` macro syntax error in `providers/anthropic.rs`.
-
-**Test Results:** 34 new tests all pass; 422 total pass, 2 pre-existing failures (unrelated provider tests)
-
-**Output:** `/tmp/fix3-types-tests.md`
-
-### Fix 5: oxi-agent Integration Tests (2026-05-05)
-
-**Status: ✅ Complete**
-
-Added 18 integration tests to `oxi-agent/src/tests.rs` covering 6 areas:
-
-1. **Multi-turn tool use loop** (1 test): User asks → LLM calls echo tool → tool result → LLM responds. Verifies 2-turn cycle, tool execution events, and tool result content.
-
-2. **Compaction flow integration** (3 tests): CompactionEvent serialization roundtrips, CompactedContext field validation, state.replace_messages() simulating compaction, CompactionStrategy configuration.
-
-3. **Cross-provider model switching with active tool use** (2 tests): Tool results survive Anthropic→OpenAI transforms, tool call ContentBlocks preserved across provider switches.
-
-4. **Error recovery scenarios** (4 tests): Circuit breaker full lifecycle (closed→open→half-open→closed), PartialResponse accumulator, FallbackChain, AgentError retryable classification and user-friendly messages.
-
-5. **Steering messages injected mid-loop** (2 tests): Single and multiple steering messages emit SteeringMessage events and are processed as MessageStart/End in the loop.
-
-6. **Follow-up queue processing** (6 tests): Follow-up queue API, follow-up processed in tool-use loop, follow-up via continue_loop with steering, queue clearing, independent steering/follow-up queues, state tracking for multi-turn conversations.
-
-**Also fixed:** Pre-existing `concat!` macro syntax errors in `oxi-ai/src/providers/anthropic.rs` and `oxi-ai/src/providers/openai.rs` that prevented compilation.
-
-**Helper types added:** `MultiTurnToolProvider`, `MultiTurnToolResponse`, `EchoTool`, `RetryableProvider`, `AlwaysErrorProvider`.
-
-**Test Results:** 189 passed (lib), 4 passed (bin), 60 passed (integration) — 253 total, 0 failures
-
-**Output:** `/tmp/fix5-agent-tests.md`
-
-### Fix 8: oxi-cli AgentSession Tests + Module Documentation (2026-05-05)
-
-**Status: ✅ Complete**
-
-Added 48 comprehensive unit tests to `oxi-cli/src/agent_session.rs` covering 10 areas:
-
-1. **AgentSession creation** (4 tests): Basic field initialization, model ID, default thinking level, empty queues
-2. **Model cycling** (6 tests): Forward/backward cycle without scoped models, scoped model cycling, single-model edge case, set/get scoped models, scoped model field validation, ModelCycleResult fields
-3. **Thinking level changes** (4 tests): set_thinking_level across all variants, no-op when same level, cycle_thinking_level full cycle through None→Minimal→Standard→Thorough, wrapping behavior
-4. **Steering/follow-up queue operations** (6 tests): steer() adds to queue, follow_up() adds to queue, multiple steer messages, multiple follow-up messages, mixed steer+follow-up, pending_message_count
-5. **Queue management** (2 tests): clear_queue with data, clear_queue on empty
-6. **Compaction trigger logic** (4 tests): Default enabled state, set_auto_compaction_enabled toggle, is_compacting initially false, CompactionReason variant equality, CompactionConfig defaults
-7. **Session entry appending** (5 tests): Session stats on empty session, SessionStats struct default, persist_session with no messages (no-op), persisted_count accessor, idempotent persist
-8. **Event subscription** (3 tests): Subscribe receives ThinkingLevelChanged events, channel-based subscription with guard, listener guard RAII drop behavior
-9. **Session reset** (1 test): Reset clears queues and overflow flag
-10. **Handle cloning + extensions + misc** (9 tests): Clone handle shares state, no extension runner by default, extension tools/commands empty, auto_retry_enabled, PromptOptions defaults, StreamingBehavior/InputSource variants, default model list
-
-**Key findings:**
-- `Agent::state()` returns a cloned `AgentState`, so direct mutation via `agent.state().add_user_message()` doesn't modify internal state (design limitation, not bug)
-- `subscribe_channel()` returns a receiver but the listener guard is immediately dropped, replacing the callback with a no-op — a pre-existing design issue
-- `Settings::default()` has `auto_compaction = true`
-
-**Module documentation:** All four target files (`bash_executor.rs`, `agent_session.rs`, `tools_manager.rs`, `event_bus.rs`) already have adequate `//!` module-level doc comments — no additions needed.
-
-**Test Results:** 48 passed, 0 failed
-
-**Output:** `/tmp/fix8-session-tests.md`
+## Notes
+- Moved API key from URL query parameter to x-goog-api-key header
+- Google Generative AI API uses x-goog-api-key header (different from Vertex AI which uses Authorization: Bearer)
+- Removed duplicate AgentConfig from types.rs; kept the fuller version in config.rs (has compaction support, builder methods). types::AgentConfig had zero external usages — all code already used config::AgentConfig.

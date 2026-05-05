@@ -118,7 +118,7 @@ fn parse_version(version: &str) -> Option<(u32, u32, u32)> {
     let version = version.split('-').next().unwrap_or(version);
 
     let parts: Vec<&str> = version.split('.').collect();
-    if parts.len() >= 3 {
+    if parts.len() == 3 {
         let major = parts[0].parse().ok()?;
         let minor = parts[1].parse().ok()?;
         let patch = parts[2]
@@ -156,12 +156,25 @@ fn compare_versions(left: &str, right: &str) -> i32 {
 
 /// Calculate how many versions behind current is from latest
 fn calculate_versions_behind(current: &str, latest: &str) -> u32 {
-    // Simple heuristic: assume at most 10 versions behind
-    let cmp = compare_versions(latest, current);
-    if cmp <= 0 {
-        0
-    } else {
-        cmp.min(10) as u32
+    let current_parsed = parse_version(current);
+    let latest_parsed = parse_version(latest);
+
+    match (current_parsed, latest_parsed) {
+        (Some((c_major, c_minor, c_patch)), Some((l_major, l_minor, l_patch))) => {
+            if l_major < c_major
+                || (l_major == c_major && l_minor < c_minor)
+                || (l_major == c_major && l_minor == c_minor && l_patch <= c_patch)
+            {
+                0
+            } else {
+                // Weight: major bumps count as 2, minor and patch as 1 each
+                let major_diff = (l_major - c_major) as u32;
+                let minor_diff = (l_minor.saturating_sub(c_minor)) as u32;
+                let patch_diff = (l_patch.saturating_sub(c_patch)) as u32;
+                (major_diff * 2 + minor_diff + patch_diff).min(10)
+            }
+        }
+        _ => 0,
     }
 }
 
@@ -368,7 +381,6 @@ mod tests {
         assert_eq!(parse_version("1.0.0+build123"), Some((1, 0, 0)));
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_parse_version_invalid() {
         assert_eq!(parse_version("invalid"), None);
@@ -469,7 +481,6 @@ mod tests {
         assert_eq!(current.summary(), "You have the latest version.");
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_calculate_versions_behind() {
         assert_eq!(calculate_versions_behind("1.0.0", "1.0.0"), 0);

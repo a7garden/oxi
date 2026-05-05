@@ -3,30 +3,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Agent configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentConfig {
-    pub name: String,
-    pub description: Option<String>,
-    pub model_id: String,
-    pub system_prompt: Option<String>,
-    pub max_iterations: usize,
-    pub timeout_seconds: u64,
-}
-
-impl Default for AgentConfig {
-    fn default() -> Self {
-        Self {
-            name: "oxi-agent".to_string(),
-            description: None,
-            model_id: "claude-sonnet-4-20250514".to_string(),
-            system_prompt: None,
-            max_iterations: 10,
-            timeout_seconds: 300,
-        }
-    }
-}
-
 /// Tool definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
