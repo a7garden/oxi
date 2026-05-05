@@ -1351,13 +1351,6 @@ fn handle_slash_command(
     }
 }
 
-// Helper to get entries from session manager
-fn session_manager_get_entries(_session: &AgentSession) -> Vec<crate::session::SessionEntry> {
-    // Get session manager from session internals
-    // This is a workaround - ideally we'd expose this properly
-    Vec::new() // Placeholder - actual implementation would need session access
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════════════════
