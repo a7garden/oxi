@@ -51,3 +51,50 @@ All undocumented public items across the following crates received doc comments:
 cargo clean && cargo build -p oxi-cli 2>&1 | grep "missing documentation" | wc -l
 # Result: 0
 ```
+
+## Phase 5: Critical missing tests
+
+### Completed
+- **oxi-ai error_handling tests** (25 tests) — `oxi-ai/tests/error_handling.rs`
+  - All ProviderError variants: creation, display, Debug impl
+  - From impls: io → ProviderError, io → Error, ProviderError → Error, json → ValidationError
+  - Error chain context preservation through wrapping layers
+  - Config error helpful messages (MissingApiKey, UnknownProvider, NotImplemented, InvalidApiKey)
+  - Tools::ValidationError coverage (SchemaValidation, InvalidJson, MissingRequiredField)
+
+- **oxi-agent retry_tests** (45 tests) — `oxi-agent/tests/retry_tests.rs`
+  - CircuitBreaker: opens after threshold, threshold=1, default threshold=5
+  - CircuitBreaker: manual reset, half-open transition after cooldown, half-open closes after successes
+  - CircuitBreaker: half-open reopens on failure, success resets consecutive failures
+  - CircuitOpenError display
+  - Exponential backoff: constants, doubling, growth verification
+  - is_retryable_error: 20+ retryable patterns (overloaded, rate limit, 429-504, timeout, connection errors, etc.)
+  - is_retryable_error: non-retryable cases (normal stop, no error message, empty error, wrong stop reason, unknown text)
+  - PartialResponse: accumulation, take_text, thinking, clear
+  - FallbackChain: default, custom, empty
+
+- **oxi-cli session_navigation tests** (30 tests) — inline in `oxi-cli/src/session_navigation.rs`
+  - Added module declaration to lib.rs (was orphaned)
+  - Fixed Summarizer trait dyn-incompatibility (NoOpSummarizer with Pin<Box<...>>)
+  - Fixed `summary_text` borrow-after-move bug in navigate_tree
+  - Navigation: to user message, to assistant message, noop, to nonexistent, to root
+  - Branch operations: branch, reset_leaf, branch_with_summary (with details + from_hook)
+  - Labels: attach, remove, replace, timestamp, nonexistent entry
+  - Tree operations: get_branch, get_children, get_entries, from_entries
+  - Extension hooks: cancel navigation, provide extension summary
+  - Utility functions: is_user_message, is_assistant_message, MessageRole checks
+  - Entry type accessors
+
+### Bugs fixed along the way
+- `oxii-tui` typo in oxi-cli/Cargo.toml → `oxi-tui`
+- Stray `//! None module.` / `//! Module documentation.` inner doc comments in oxi-ai/lib.rs, oxi-agent/lib.rs, agent_loop/mod.rs, tools.rs
+- session_navigation.rs was orphaned (not declared as module in lib.rs)
+- `summary_text` borrow-after-move in `navigate_tree`
+- Summarizer trait not dyn-compatible — existing tests used `None::<&dyn Summarizer>` which never compiled
+
+### Test results
+```
+cargo test -p oxi-ai --test error_handling    → 25 passed
+cargo test -p oxi-agent --test retry_tests    → 45 passed
+cargo test -p oxi-cli --lib session_navigation → 30 passed
+```
