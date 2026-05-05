@@ -268,6 +268,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             model_id: Some(app.model_id()),
             thinking_level: Some(settings.thinking_level),
             scoped_models: Vec::new(),
+            tool_registry: Some(app.agent().tools()),
         },
     )?;
 

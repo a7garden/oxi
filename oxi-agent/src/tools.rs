@@ -6,6 +6,7 @@ use crate::types::ToolDefinition;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -139,6 +140,7 @@ pub use grep::GrepTool;
 pub use ls::LsTool;
 pub use read::ReadTool;
 pub use web_search::WebSearchTool;
+pub use subagent::SubagentTool;
 pub use write::WriteTool;
 
 /// Tool registry for managing available tools
@@ -199,6 +201,11 @@ impl ToolRegistry {
 
     /// Create a registry with all built-in tools
     pub fn with_builtins() -> Self {
+        Self::with_builtins_cwd(PathBuf::from("."))
+    }
+
+    /// Create a registry with all built-in tools, using the given cwd.
+    pub fn with_builtins_cwd(cwd: PathBuf) -> Self {
         let registry = Self::new();
         registry.register(ReadTool::new());
         registry.register(WriteTool::new());
@@ -208,6 +215,22 @@ impl ToolRegistry {
         registry.register(FindTool::new());
         registry.register(LsTool::new());
         registry.register(WebSearchTool::new());
+        registry.register(SubagentTool::new(cwd));
+        registry
+    }
+
+    /// Create registry with selected builtins only.
+    pub fn with_selected_tools(cwd: PathBuf, names: &[&str]) -> Self {
+        let full = Self::with_builtins_cwd(cwd);
+        let registry = Self::new();
+        let set: std::collections::HashSet<&str> = names.iter().copied().collect();
+        for name in full.names() {
+            if set.contains(name.as_str()) {
+                if let Some(tool) = full.get(&name) {
+                    registry.register_arc(tool);
+                }
+            }
+        }
         registry
     }
 }
