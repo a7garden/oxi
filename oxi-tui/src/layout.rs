@@ -57,7 +57,7 @@ pub fn split(area: Rect, direction: Direction, constraints: &[Constraint]) -> Ve
     // Percentage
     for (i, c) in constraints.iter().enumerate() {
         if let Constraint::Percentage(pct) = c {
-            let pct = *pct.min(100) as u32;
+            let pct = (*pct).min(100) as u32;
             let len = (remaining * pct / 100) as u16;
             sizes[i] = len;
             remaining = remaining.saturating_sub(len as u32);
@@ -68,7 +68,7 @@ pub fn split(area: Rect, direction: Direction, constraints: &[Constraint]) -> Ve
     let flex_total: u32 = constraints
         .iter()
         .enumerate()
-        .map(|(i, c)| match c {
+        .map(|(_i, c)| match c {
             Constraint::Flex(w) => *w as u32,
             Constraint::Min(min) => {
                 // Min acts like flex(1) but ensures at least `min` cells
@@ -187,8 +187,8 @@ impl Container {
     }
 
     /// Get a mutable reference to a child by index.
-    pub fn child_mut(&mut self, index: usize) -> Option<&mut dyn Component> {
-        self.children.get_mut(index).map(|c| c.as_mut())
+    pub fn child_mut(&mut self, index: usize) -> Option<&mut (dyn Component + '_)> {
+        self.children.get_mut(index).map(|c| c.as_mut() as &mut dyn Component)
     }
 
     /// Set layout direction.

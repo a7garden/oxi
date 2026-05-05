@@ -1,6 +1,6 @@
 //! Surface - a 2D grid of cells forming the render buffer.
 
-use crate::cell::Cell;
+use crate::cell::{Attributes, Cell, Color};
 
 /// A rectangular area in the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -148,14 +148,78 @@ impl Surface {
         }
     }
 
-    /// Write a string at (row, col), respecting width limits.
+    /// Write a string at (row, col), respecting width limits and wide characters.
     pub fn write_string(&mut self, row: u16, col: u16, s: &str) {
-        for (i, c) in s.chars().enumerate() {
-            let col = col + i as u16;
-            if col >= self.width {
+        let mut current_col = col as usize;
+        for c in s.chars() {
+            let char_width = unicode_width::unicode_width(c).unwrap_or(1);
+            if current_col + char_width > self.width as usize {
                 break;
             }
-            self.set(row, col, Cell::new(c));
+            if current_col < self.width as usize {
+                self.set(row, current_col as u16, Cell::new(c));
+                // For wide chars, mark subsequent cells as continuation placeholders
+                if char_width > 1 {
+                    for offset in 1..char_width {
+                        let next_col = current_col + offset;
+                        if next_col < self.width as usize {
+                            self.cells[row as usize][next_col] = Cell::wide_continuation();
+                            self.mark_dirty(row, next_col as u16);
+                        }
+                    }
+                }
+            }
+            current_col += char_width;
+        }
+    }
+
+    /// Write a styled string at (row, col) with given fg/bg/attrs.
+    pub fn write_string_styled(
+        &mut self,
+        row: u16,
+        col: u16,
+        s: &str,
+        fg: Color,
+        bg: Color,
+        attrs: Attributes,
+    ) {
+        let mut current_col = col as usize;
+        for c in s.chars() {
+            let char_width = unicode_width::unicode_width(c).unwrap_or(1);
+            if current_col + char_width > self.width as usize {
+                break;
+            }
+            if current_col < self.width as usize {
+                let cell = Cell::new(c).with_fg(fg).with_bg(bg).with_attrs(attrs);
+                self.set(row, current_col as u16, cell);
+                if char_width > 1 {
+                    for offset in 1..char_width {
+                        let next_col = current_col + offset;
+                        if next_col < self.width as usize {
+                            self.cells[row as usize][next_col] =
+                                Cell::wide_continuation().with_bg(bg);
+                            self.mark_dirty(row, next_col as u16);
+                        }
+                    }
+                }
+            }
+            current_col += char_width;
+        }
+    }
+
+    /// Write a string and fill the rest of the row (from end of string to end of row) with spaces using the given bg color.
+    pub fn write_line(&mut self, row: u16, col: u16, s: &str, fg: Color, bg: Color) {
+        self.write_string_styled(row, col, s, fg, bg, Attributes::new());
+        // Fill remaining columns with bg-colored spaces
+        // We need to figure out where the string ended in column terms
+        let mut current_col = col as usize;
+        for c in s.chars() {
+            let char_width = unicode_width::unicode_width(c).unwrap_or(1);
+            current_col += char_width;
+        }
+        let space_cell = Cell::new(' ').with_bg(bg);
+        for c in current_col..self.width as usize {
+            self.set(row, c as u16, space_cell.clone());
         }
     }
 
