@@ -58,7 +58,7 @@ pub use transform::{
 mod model_registry;
 pub use model_registry::{get_model, get_models, get_providers, ModelRegistry};
 
-// Static model database (comprehensive, auto-generated from pi-mono)
+// Static model database (comprehensive)
 pub mod model_db;
 pub use model_db::{
     get_all_models, get_cheapest_models, get_model_entry, get_provider_models,

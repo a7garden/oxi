@@ -1,6 +1,5 @@
 //! Tool output rendering utilities
 //!
-//! Ported from pi-mono coding-agent `render-utils.ts`.
 //! Provides helpers for formatting tool results for display.
 
 /// Shorten a file path by replacing the home directory prefix with `~`.

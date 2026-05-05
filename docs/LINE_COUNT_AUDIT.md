@@ -1,16 +1,16 @@
-# DEEP AUDIT: Line Count by Feature — pi-mono vs oxi
+# DEEP AUDIT: Line Count by Feature — oxi vs pi-mono
 
 ## EXECUTIVE SUMMARY
 
-| Metric | pi-mono (TS) | oxi (Rust) | Ratio |
-|--------|-------------|------------|-------|
-| **Core Source** | ~67,100 lines | ~82,894 lines | 1.24x |
-| **Excl. NEW Skills** | ~67,100 | ~58,632 | 0.87x |
-| **AI Providers** | 8,673 (17 files) | 7,291 (14 files) | 0.84x |
-| **Tools** | 3,367 (14 files) | 4,415 (10 files) | 1.31x |
-| **Interactive UI** | 13,467 (38 files) | 14,682 (29 files) | 1.09x |
-| **Extension System** | 3,113 (5 files) | 1,817 (1 file) | 0.58x |
-| **Compaction** | 1,355 (4 files) | 1,143 (2 files) | 0.84x |
+| Metric | oxi (Rust) | pi-mono (TS) | Ratio |
+|--------|------------|-------------|-------|
+| **Core Source** | ~82,894 lines | ~67,100 lines | 1.24x |
+| **Excl. NEW Skills** | ~58,632 | ~67,100 | 0.87x |
+| **AI Providers** | 7,291 (14 files) | 8,673 (17 files) | 0.84x |
+| **Tools** | 4,415 (10 files) | 3,367 (14 files) | 1.31x |
+| **Interactive UI** | 14,682 (29 files) | 13,467 (38 files) | 1.09x |
+| **Extension System** | 1,817 (1 file) | 3,113 (5 files) | 0.58x |
+| **Compaction** | 1,143 (2 files) | 1,355 (4 files) | 0.84x |
 
 ---
 
@@ -160,8 +160,8 @@ These features simply don't exist in pi-mono at all:
 ### AI/Provider Layer
 
 ```
-pi-mono:  8,673 lines (17 providers + stream.ts)
-oxi:      7,291 lines (14 providers)
+oxi:      7,291 lines (14 providers + stream.ts)
+pi-mono:  8,673 lines (17 providers)
 
 Missing providers:
   - openai-completions (881 lines)
@@ -180,8 +180,8 @@ Ratio for common providers: ~0.84x (Rust is slightly more compact)
 ### Tool Implementation
 
 ```
-pi-mono:  3,367 lines (14 tool files)
 oxi:      4,415 lines (10 tool files)
+pi-mono:  3,367 lines (14 tool files)
 
 Ratio: 1.31x (Rust is MORE verbose, not less)
 Reason: Rust requires explicit error handling, type signatures
@@ -190,8 +190,8 @@ Reason: Rust requires explicit error handling, type signatures
 ### Interactive/TUI
 
 ```
-pi-mono: 13,467 lines (38 components + main file)
 oxi:    14,682 lines (29 components + main files)
+pi-mono: 13,467 lines (38 components + main file)
 
 Ratio: 1.09x (roughly equivalent, but for different reasons)
 - pi-mono has more files, simpler implementations
@@ -202,8 +202,8 @@ Ratio: 1.09x (roughly equivalent, but for different reasons)
 ### Extension System
 
 ```
-pi-mono:  3,113 lines (5 files, full API)
 oxi:      1,817 lines (1 file, partial API)
+pi-mono:  3,113 lines (5 files, full API)
 
 Ratio: 0.58x (Rust is simpler, but INCOMPLETE)
 Missing: tool override hooks, message renderer hooks, input transforms
@@ -213,16 +213,16 @@ Missing: tool override hooks, message renderer hooks, input transforms
 
 ## HONEST ASSESSMENT
 
-### ✅ Legitimate Rust Compactness (Features are equivalent, Rust is smaller)
+### ✅ Legitimate Rust Compactness
 
 1. **AI Providers**: 0.84x ratio — Rust's traits make shared functionality reusable
 2. **Compaction**: 0.84x ratio — Similar feature set, slightly smaller
-3. **Session Management**: 0.62x ratio — pi-mono has more features, but Rust is more compact
+3. **Session Management**: 0.62x ratio — oxi has simplified features, but is more compact
 
-### ✅ Missing Features (Not yet implemented)
+### ✅ Missing Features in oxi
 
 1. **OAuth Web Flows**: 2,660 lines of web-based OAuth in pi-mono, none in oxi
-2. **Extension Hooks**: Dynamic tool override, message renderers, input transforms (1,296 lines missing)
+2. **Extension Hooks**: Dynamic tool override, message renderers, input transforms (~1,296 lines missing)
 3. **Branch Summarization**: 355 lines for git-aware compaction
 4. **RPC Mode**: 1,520 lines for remote procedure call mode
 5. **Advisor Agent**: 505 lines for advisor sub-agent
@@ -247,8 +247,8 @@ Missing: tool override hooks, message renderer hooks, input transforms
 
 ```
 Core comparable code (providers + tools + UI):
-  pi-mono: 8,673 + 3,367 + 13,467 = 25,507 lines
   oxi:     7,291 + 4,415 + 14,682 = 26,388 lines
+  pi-mono: 8,673 + 3,367 + 13,467 = 25,507 lines
   Ratio: 1.03x (essentially equal)
 
 Where oxi is MORE verbose (tools, some UI):
@@ -272,7 +272,7 @@ Where oxi is MISSING features:
 
 ## CONCLUSION
 
-**The reduction ratio of 0.87x (oxi vs pi-mono for comparable features) is explained by:**
+**The ratio of 1.03x (oxi vs pi-mono for comparable features) is explained by:**
 
 1. **30%**: Rust is legitimately more compact (traits, type system, less boilerplate)
 2. **40%**: Missing features (OAuth, extension hooks, RPC mode, some providers)

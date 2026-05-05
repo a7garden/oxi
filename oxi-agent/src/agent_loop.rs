@@ -874,8 +874,7 @@ impl AgentLoop {
 
     /// Detect whether an assistant message contains a retryable error.
     ///
-    /// This mirrors the pi-mono `_isRetryableError` logic: checks that
-    /// the stop_reason is `Error`, that an `error_message` is present,
+    /// Checks that the stop_reason is `Error`, that an `error_message` is present,
     /// and that the error text matches known retryable patterns
     /// (overloaded, rate-limit, 5xx, network errors, timeouts, etc.).
     fn is_retryable_error(message: &AssistantMessage) -> bool {

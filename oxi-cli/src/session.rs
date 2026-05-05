@@ -2238,7 +2238,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Tests ported from pi-mono session-manager gaps
+    // Session tree and branching tests
     // ========================================================================
 
     /// Helper: create a user message

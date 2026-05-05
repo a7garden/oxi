@@ -1,7 +1,7 @@
 //! Declarative keyboard shortcut system.
 //!
-//! Provides a centralized, customizable keybinding registry inspired by
-//! pi-mono's KeybindingsManager. Bindings are defined declaratively with
+//! Provides a centralized, customizable keybinding registry.
+//! Bindings are defined declaratively with
 //! default keys and descriptions, and can be overridden via a JSON config
 //! file (`~/.oxi/keybindings.json`).
 
