@@ -97,7 +97,6 @@ fn copy_via_pbcopy(text: &str) -> Option<Result<()>> {
         Some(Err(anyhow::anyhow!("pbcopy failed")))
     }
 }
-}
 
 /// Copy text to clipboard using clip (Windows)
 fn copy_via_clip(text: &str) -> Option<Result<()>> {
