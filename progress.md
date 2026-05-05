@@ -5,6 +5,7 @@ Complete
 
 ## Completed Tasks
 
+- [x] Fix #20: Add doc comments to oxi-agent public items (agent.rs, state.rs, events.rs, recovery.rs)
 - [x] Fix #21: Add `#[non_exhaustive]` to key public enums
 
 ## Files Changed
