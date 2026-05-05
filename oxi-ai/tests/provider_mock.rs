@@ -10,9 +10,9 @@ use std::pin::Pin;
 
 use futures::Stream;
 use oxi_ai::{
-    get_model, Context, Message, Model, OpenAiProvider, Provider, ProviderEvent, StreamOptions,
-    UserMessage,
+    get_model, Context, Message, Model, Provider, ProviderEvent, StreamOptions, UserMessage,
 };
+use oxi_ai::providers::OpenAiProvider;
 
 /// Helper to create a minimal context for testing
 fn test_context() -> Context {
@@ -26,8 +26,18 @@ fn test_model(provider: &str, model_id: &str) -> Model {
         .clone()
 }
 
-/// Helper type alias for the stream type
-type TestStream = Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>;
+/// Helper type alias for the stream type - must match Provider::stream return type
+type BoxedStream = Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>;
+
+/// Helper function to call provider.stream with explicit type annotation
+async fn call_stream(
+    provider: &OpenAiProvider,
+    model: &Model,
+    context: &Context,
+    options: StreamOptions,
+) -> Result<BoxedStream, oxi_ai::error::ProviderError> {
+    <OpenAiProvider as Provider>::stream(provider, model, context, Some(options)).await
+}
 
 /// Test OpenAI streaming with text content
 #[tokio::test]
@@ -65,8 +75,7 @@ data: [DONE]
 
     // Stream events
     let options = StreamOptions::default();
-    let mut stream = provider
-        .stream(&model, &context, Some(options))
+    let mut stream = call_stream(&provider, &model, &context, options)
         .await
         .expect("stream should succeed");
 
@@ -120,8 +129,7 @@ data: [DONE]
     let context = test_context();
 
     let options = StreamOptions::default();
-    let mut stream = provider
-        .stream(&model, &context, Some(options))
+    let mut stream = call_stream(&provider, &model, &context, options)
         .await
         .expect("stream should succeed");
 
@@ -183,7 +191,7 @@ async fn test_rate_limit_error() {
     let context = test_context();
 
     let options = StreamOptions::default();
-    let result = provider.stream(&model, &context, Some(options)).await;
+    let result = call_stream(&provider, &model, &context, options).await;
 
     // Should get an error
     assert!(result.is_err(), "should return error for 429 status");
@@ -219,7 +227,7 @@ async fn test_auth_error() {
     let context = test_context();
 
     let options = StreamOptions::default();
-    let result = provider.stream(&model, &context, Some(options)).await;
+    let result = call_stream(&provider, &model, &context, options).await;
 
     // Should get an error
     assert!(result.is_err(), "should return error for 401 status");
@@ -247,7 +255,7 @@ async fn test_server_error() {
     let context = test_context();
 
     let options = StreamOptions::default();
-    let result = provider.stream(&model, &context, Some(options)).await;
+    let result = call_stream(&provider, &model, &context, options).await;
 
     // Should get an error
     assert!(result.is_err(), "should return error for 500 status");
@@ -275,8 +283,7 @@ async fn test_empty_stream() {
     let context = test_context();
 
     let options = StreamOptions::default();
-    let mut stream = provider
-        .stream(&model, &context, Some(options))
+    let mut stream = call_stream(&provider, &model, &context, options)
         .await
         .expect("stream should succeed");
 
@@ -319,8 +326,7 @@ data: [DONE]
     let context = test_context();
 
     let options = StreamOptions::default();
-    let mut stream = provider
-        .stream(&model, &context, Some(options))
+    let mut stream = call_stream(&provider, &model, &context, options)
         .await
         .expect("stream should succeed");
 
@@ -367,8 +373,7 @@ data: [DONE]
     context.set_system_prompt("You are a geography assistant.");
 
     let options = StreamOptions::default();
-    let mut stream = provider
-        .stream(&model, &context, Some(options))
+    let mut stream = call_stream(&provider, &model, &context, options)
         .await
         .expect("stream should succeed");
 
