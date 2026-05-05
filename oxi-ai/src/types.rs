@@ -7,6 +7,7 @@ use std::hash::Hash;
 
 /// Provider API identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum Api {
     #[serde(rename = "openai-completions")]
     OpenAiCompletions,
@@ -54,6 +55,7 @@ pub enum CacheRetention {
 /// Model thinking/reasoning level
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum ThinkingLevel {
     #[default]
     Off,
@@ -80,6 +82,7 @@ impl ThinkingLevel {
 /// Input modalities
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum InputModality {
     Text,
     Image,
@@ -108,6 +111,7 @@ impl Cost {
 /// Stop reason
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[non_exhaustive]
 pub enum StopReason {
     Stop,
     Length,

@@ -6,8 +6,10 @@ use serde_json::Value as JsonValue;
 /// Text content block
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextContent {
+    /// Discriminator for untagged deserialization.
     #[serde(rename = "type")]
     pub content_type: TextContentType,
+    /// The text payload.
     pub text: String,
     /// Optional signature carrying provider-specific metadata (e.g. OpenAI message ID, phase).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -21,6 +23,7 @@ pub enum TextContentType {
 }
 
 impl TextContent {
+    /// Create a plain text content block.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             content_type: TextContentType::Text,
@@ -40,14 +43,18 @@ impl TextContent {
     }
 }
 
-/// Thinking content block
+/// Thinking content block (extended thinking / chain-of-thought output).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThinkingContent {
+    /// Discriminator for untagged deserialization.
     #[serde(rename = "type")]
     pub content_type: ThinkingContentType,
+    /// The raw thinking text from the model.
     pub thinking: String,
+    /// Optional provider-specific signature for the thinking block.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_signature: Option<String>,
+    /// Whether the thinking content was redacted by the provider.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redacted: Option<bool>,
 }
@@ -59,6 +66,7 @@ pub enum ThinkingContentType {
 }
 
 impl ThinkingContent {
+    /// Create a new thinking content block.
     pub fn new(thinking: impl Into<String>) -> Self {
         Self {
             content_type: ThinkingContentType::Thinking,
@@ -69,12 +77,15 @@ impl ThinkingContent {
     }
 }
 
-/// Image content block
+/// Image content block (base64-encoded).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageContent {
+    /// Discriminator for untagged deserialization.
     #[serde(rename = "type")]
     pub content_type: ImageContentType,
-    pub data: String, // base64 encoded
+    /// Base64-encoded image data.
+    pub data: String,
+    /// MIME type of the image (e.g. `"image/png"`).
     pub mime_type: String,
 }
 
@@ -85,6 +96,7 @@ pub enum ImageContentType {
 }
 
 impl ImageContent {
+    /// Create a new image content block.
     pub fn new(data: impl Into<String>, mime_type: impl Into<String>) -> Self {
         Self {
             content_type: ImageContentType::Image,
@@ -94,14 +106,19 @@ impl ImageContent {
     }
 }
 
-/// Tool call content block
+/// Tool call content block emitted by the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
+    /// Discriminator for untagged deserialization.
     #[serde(rename = "type")]
     pub content_type: ToolCallType,
+    /// Provider-assigned tool call identifier.
     pub id: String,
+    /// Name of the tool being invoked.
     pub name: String,
+    /// JSON arguments for the tool invocation.
     pub arguments: JsonValue,
+    /// Optional provider-specific signature linking to a thinking block.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thought_signature: Option<String>,
 }
@@ -113,6 +130,7 @@ pub enum ToolCallType {
 }
 
 impl ToolCall {
+    /// Create a new tool call.
     pub fn new(id: impl Into<String>, name: impl Into<String>, arguments: JsonValue) -> Self {
         Self {
             content_type: ToolCallType::ToolCall,
@@ -124,18 +142,27 @@ impl ToolCall {
     }
 }
 
-/// Content block union (untagged for flexibility)
+/// Content block union (untagged for flexibility).
+///
+/// Represents a single piece of content inside a message – text, thinking,
+/// an image, a tool call, or an unrecognized block kept as raw JSON.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ContentBlock {
+    /// Plain text content.
     Text(TextContent),
+    /// Extended thinking / chain-of-thought output.
     Thinking(ThinkingContent),
+    /// Base64-encoded image.
     Image(ImageContent),
+    /// Tool invocation requested by the model.
     ToolCall(ToolCall),
+    /// Unrecognised block preserved as raw JSON.
     Unknown(JsonValue),
 }
 
 impl ContentBlock {
+    /// Returns the inner text if this is a `Text` block.
     pub fn as_text(&self) -> Option<&str> {
         match self {
             ContentBlock::Text(t) => Some(&t.text),
@@ -143,6 +170,7 @@ impl ContentBlock {
         }
     }
 
+    /// Returns a reference to the `ToolCall` if this is a `ToolCall` block.
     pub fn as_tool_call(&self) -> Option<&ToolCall> {
         match self {
             ContentBlock::ToolCall(t) => Some(t),
@@ -150,6 +178,7 @@ impl ContentBlock {
         }
     }
 
+    /// Returns a reference to the `ThinkingContent` if this is a `Thinking` block.
     pub fn as_thinking(&self) -> Option<&ThinkingContent> {
         match self {
             ContentBlock::Thinking(t) => Some(t),

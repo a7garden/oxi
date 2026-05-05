@@ -6,6 +6,7 @@ use crate::{AssistantMessage, StopReason, ToolCall};
 ///
 /// Note: We use crate::AssistantMessage directly to avoid type alias conflicts
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ProviderEvent {
     /// Stream started
     Start { partial: AssistantMessage },
