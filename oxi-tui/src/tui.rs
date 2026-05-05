@@ -174,6 +174,18 @@ impl TUI {
         self.event_handler = Some(Box::new(handler));
     }
 
+    /// Set a layout for arranging children.
+    pub fn set_layout(&mut self, direction: Direction, constraints: Vec<Constraint>) {
+        self.layout = Some((direction, constraints));
+        self.request_render();
+    }
+
+    /// Clear the layout (children will be rendered full-area).
+    pub fn clear_layout(&mut self) {
+        self.layout = None;
+        self.request_render();
+    }
+
     /// Start the TUI event loop.
     ///
     /// This enters alternate screen mode and runs until `stop()` is called.
@@ -383,8 +395,17 @@ impl TUI {
 
         // Render children
         let area = surface.area();
-        for child in &mut self.children {
-            child.render(&mut surface, area);
+        if let Some((ref direction, ref constraints)) = self.layout {
+            let areas = split(area, *direction, constraints);
+            for (i, child) in self.children.iter_mut().enumerate() {
+                if let Some(&child_area) = areas.get(i) {
+                    child.render(&mut surface, child_area);
+                }
+            }
+        } else {
+            for child in &mut self.children {
+                child.render(&mut surface, area);
+            }
         }
 
         // Render overlays (on top)

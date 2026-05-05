@@ -153,30 +153,37 @@ pub fn generate_osc52_sequence(text: &str) -> String {
 /// Returns Ok(()) on success.
 pub fn copy_to_clipboard(text: &str) -> Result<()> {
     if is_termux() {
-        copy_via_termux(text)
-            .ok_or_else(|| anyhow::anyhow!("Failed to copy to clipboard in Termux"))??
+        match copy_via_termux(text) {
+            Some(Ok(())) => Ok(()),
+            Some(Err(e)) => Err(e),
+            None => Err(anyhow::anyhow!("termux-clipboard-set not available")),
+        }
     } else if cfg!(target_os = "linux") {
         if is_wayland() {
             copy_via_wl_copy(text)
                 .or_else(|| copy_via_xclip(text))
-                .ok_or_else(|| anyhow::anyhow!("No clipboard tool available for Linux"))??
+                .ok_or_else(|| anyhow::anyhow!("No clipboard tool available for Linux"))?
         } else {
             copy_via_xclip(text)
                 .or_else(|| copy_via_wl_copy(text))
-                .ok_or_else(|| anyhow::anyhow!("No clipboard tool available for Linux"))??
+                .ok_or_else(|| anyhow::anyhow!("No clipboard tool available for Linux"))?
         }
     } else if cfg!(target_os = "macos") {
-        copy_via_pbcopy(text).ok_or_else(|| anyhow::anyhow!("pbcopy failed"))??
+        match copy_via_pbcopy(text) {
+            Some(Ok(())) => Ok(()),
+            Some(Err(e)) => Err(e),
+            None => Err(anyhow::anyhow!("pbcopy not available")),
+        }
     } else if cfg!(target_os = "windows") {
         copy_via_powershell(text)
             .or_else(|| copy_via_clip(text))
-            .ok_or_else(|| anyhow::anyhow!("No clipboard tool available for Windows"))??
+            .ok_or_else(|| anyhow::anyhow!("No clipboard tool available for Windows"))?
     } else if is_wsl() {
         // Try Linux clipboard first, then Windows
         copy_via_wl_copy(text)
             .or_else(|| copy_via_xclip(text))
             .or_else(|| copy_via_powershell(text))
-            .ok_or_else(|| anyhow::anyhow!("No clipboard tool available"))??
+            .ok_or_else(|| anyhow::anyhow!("No clipboard tool available"))?
     } else {
         // Fallback: print OSC52 sequence
         print!("{}", generate_osc52_sequence(text));
