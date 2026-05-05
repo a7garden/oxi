@@ -17,34 +17,55 @@ use crate::Size;
 /// Styling theme for rendered markdown.
 #[derive(Debug, Clone)]
 pub struct MarkdownTheme {
-    // Heading colours (h1–h6, index 0–5).
+    /// Heading colours (h1–h6, index 0–5).
     pub heading_colors: [Color; 6],
+    /// Whether each heading level is bold.
     pub heading_bold: [bool; 6],
 
     // Inline styles
+    /// Foreground colour for inline code.
     pub code_fg: Color,
+    /// Background colour for inline code.
     pub code_bg: Color,
+    /// Foreground colour for links.
     pub link_fg: Color,
+    /// Whether links are underlined.
     pub link_underline: bool,
+    /// Override colour for bold text (None = inherit).
     pub bold_color: Option<Color>,
+    /// Override colour for italic text (None = inherit).
     pub italic_color: Option<Color>,
+    /// Override colour for strikethrough text (None = inherit).
     pub strikethrough_color: Option<Color>,
 
     // Block styles
+    /// Foreground colour for blockquotes.
     pub blockquote_fg: Color,
+    /// Character used to mark blockquote lines.
     pub blockquote_marker: char,
+    /// Marker character for unordered list items.
     pub list_marker_unordered: char,
+    /// Character used for horizontal rules.
     pub hr_char: char,
+    /// Colour of the horizontal rule character.
     pub hr_color: Color,
 
     // Syntax-highlighting colours for code blocks.
+    /// Colour for language keywords.
     pub syntax_keyword: Color,
+    /// Colour for string literals.
     pub syntax_string: Color,
+    /// Colour for comments.
     pub syntax_comment: Color,
+    /// Colour for numeric literals.
     pub syntax_number: Color,
+    /// Colour for type names.
     pub syntax_type: Color,
+    /// Colour for function names.
     pub syntax_function: Color,
+    /// Colour for punctuation.
     pub syntax_punctuation: Color,
+    /// Default colour for identifiers.
     pub syntax_default: Color,
 }
 
@@ -94,9 +115,13 @@ impl Default for MarkdownTheme {
 /// A single rendered cell with its style.
 #[derive(Debug, Clone)]
 struct StyledChar {
+    /// The character.
     ch: char,
+    /// Foreground colour.
     fg: Color,
+    /// Background colour.
     bg: Color,
+    /// Text attributes.
     attrs: Attributes,
 }
 
@@ -114,6 +139,7 @@ impl Default for StyledChar {
 /// A horizontal run of styled characters occupying exactly one display row.
 #[derive(Debug, Clone)]
 struct StyledLine {
+    /// The characters on this line.
     chars: Vec<StyledChar>,
 }
 
@@ -1450,7 +1476,9 @@ fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
 /// Parses markdown text and renders it with colours and styles appropriate
 /// for a terminal.
 pub struct Markdown {
+    /// Raw markdown content.
     content: String,
+    /// Theme controlling colours and markers.
     theme: MarkdownTheme,
     /// Cached rendered lines (recomputed when content or width changes).
     styled_lines: Vec<StyledLine>,
@@ -1458,6 +1486,7 @@ pub struct Markdown {
     cached_width: u16,
     /// Scroll offset (number of rows scrolled up from the top).
     scroll_offset: u16,
+    /// Whether content needs re-rendering.
     dirty: bool,
 }
 

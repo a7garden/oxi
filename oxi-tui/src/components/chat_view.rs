@@ -29,8 +29,11 @@ use crate::Theme;
 /// Role of a chat message participant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageRole {
+    /// Message sent by the user.
     User,
+    /// Message from the AI assistant.
     Assistant,
+    /// Result of a tool execution.
     ToolResult,
 }
 
@@ -64,8 +67,11 @@ pub enum ContentBlockDisplay {
 /// Display representation of a single chat message.
 #[derive(Debug, Clone)]
 pub struct ChatMessageDisplay {
+    /// Role of the message sender.
     pub role: MessageRole,
+    /// Ordered list of content blocks.
     pub content_blocks: Vec<ContentBlockDisplay>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
 }
 
