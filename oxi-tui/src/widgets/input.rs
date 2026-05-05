@@ -80,8 +80,18 @@ impl InputState {
             return false;
         }
         let completion = &self.completions[self.completion_index];
-        // Replace from trigger to cursor with completion text
-        self.text = format!("{}{}", self.text.trim_end_matches(|_: char| true), completion.text);
+        // Find trigger position (first non-space char going backward from cursor)
+        let chars: Vec<char> = self.text.chars().collect();
+        let mut trigger_pos = self.cursor;
+        while trigger_pos > 0 {
+            match chars.get(trigger_pos - 1).copied() {
+                Some(c) if !c.is_whitespace() => trigger_pos -= 1,
+                _ => break,
+            }
+        }
+        // Reconstruct: prefix + completion
+        let prefix: String = chars[..trigger_pos].iter().collect();
+        self.text = format!("{}{}", prefix, completion.text);
         self.cursor = self.text.chars().count();
         self.completion_active = false;
         true
