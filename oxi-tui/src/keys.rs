@@ -1055,7 +1055,7 @@ fn parse_esc_prefix(second: u8) -> Option<Event> {
     }
 
     // Alt+letter/digit: ESC + letter/digit
-    if (b'a'..=b'z').contains(&second) || (b'0'..=b'9').contains(&second) {
+    if second.is_ascii_lowercase() || second.is_ascii_digit() {
         let ch = second as char;
         return Some(Event::Key(KeyEvent::with_modifiers(
             KeyCode::Char(ch),
@@ -1773,7 +1773,7 @@ pub fn parse_key(data: &[u8]) -> Option<String> {
         if (1..=26).contains(&code) {
             return Some(format!("ctrl+alt+{}", char::from(code + 96)));
         }
-        if (b'a'..=b'z').contains(&code) || (b'0'..=b'9').contains(&code) {
+        if code.is_ascii_lowercase() || code.is_ascii_digit() {
             return Some(format!("alt+{}", code as char));
         }
     }

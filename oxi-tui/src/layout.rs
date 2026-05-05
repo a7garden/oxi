@@ -70,9 +70,8 @@ pub fn split(area: Rect, direction: Direction, constraints: &[Constraint]) -> Ve
         
         .map(|c| match c {
             Constraint::Flex(w) => *w as u32,
-            Constraint::Min(min) => {
-                // Min acts like flex(1) but ensures at least `min` cells
-                remaining >= *min as u32;
+            Constraint::Min(_min) => {
+                // Min acts like flex(1) but ensures at least `_min` cells (handled below)
                 1
             }
             _ => 0,
