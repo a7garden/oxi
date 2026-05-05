@@ -18,5 +18,6 @@
 //! via the `Theme::to_styles()` method.
 
 pub mod chat;
+pub mod command_palette;
 pub mod footer;
 pub mod input;
