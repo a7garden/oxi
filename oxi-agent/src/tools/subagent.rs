@@ -269,7 +269,7 @@ pub struct SubagentDetails {
 
 // ── JSON line processing ───────────────────────────────────────────────
 
-fn process_json_line(line: &str, result: &mut SingleResult, text: &mut String, on_progress: &Option<ProgressFn>) {
+fn process_json_line(line: &str, result: &mut SingleResult, text: &mut String, _on_progress: &Option<ProgressFn>) {
     let event: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(_) => return,
@@ -805,7 +805,7 @@ impl AgentTool for SubagentTool {
 
             let success_count = results.iter().filter(|r| r.exit_code == 0).count();
             let summaries: Vec<String> = results.iter().map(|r| {
-                let preview = truncate_output(&r.output, 100);
+                let _preview = truncate_output(&r.output, 100);
                 format!(
                     "[{}]: {}",
                     r.agent,

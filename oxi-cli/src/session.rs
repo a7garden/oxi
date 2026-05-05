@@ -1368,12 +1368,11 @@ impl SessionManager {
             }
         }
 
-        let mut roots: Vec<SessionTreeNode> = root_ids.into_iter().map(|rid| {
+        let mut roots = root_ids.into_iter().map(|rid| {
             build(&rid, &adj, &entries_map, &labels, &label_timestamps)
-        }).collect::<Result<Vec<_>, _>>()?;
+        }).collect::<anyhow::Result<Vec<_>>>()?;
 
         sort_tree_by_timestamp(&mut roots);
-        roots
     }
 
     // =========================================================================
@@ -1724,7 +1723,7 @@ impl SessionManager {
 
     /// Get tree for a specific session (backward compat)
     pub async fn get_tree_async(&self, _id: Uuid) -> Result<Vec<SessionTreeNode>> {
-        Ok(self.get_tree(Uuid::nil()))
+        Ok(self.get_tree(Uuid::nil())?)
     }
 
     /// Save metadata (backward compat)

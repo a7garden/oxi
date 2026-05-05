@@ -840,27 +840,24 @@ impl RpcOutput {
     /// Write a JSONL record atomically.
     pub fn write_line(&self, value: &Value) {
         let line = serialize_json_line(value);
-        if let Ok(mut out) = self.inner.lock() {
-            let _ = out.write_all(line.as_bytes());
-            let _ = out.flush();
-        }
+        let mut out = self.inner.lock();
+        let _ = out.write_all(line.as_bytes());
+        let _ = out.flush();
     }
 
     /// Write a serializable value as a JSONL record.
     pub fn write_obj<T: Serialize>(&self, value: &T) {
         let line = serialize_json_line_obj(value);
-        if let Ok(mut out) = self.inner.lock() {
-            let _ = out.write_all(line.as_bytes());
-            let _ = out.flush();
-        }
+        let mut out = self.inner.lock();
+        let _ = out.write_all(line.as_bytes());
+        let _ = out.flush();
     }
 
     /// Write a raw string (must already be a complete JSONL record with trailing LF).
     pub fn write_raw(&self, raw: &str) {
-        if let Ok(mut out) = self.inner.lock() {
-            let _ = out.write_all(raw.as_bytes());
-            let _ = out.flush();
-        }
+        let mut out = self.inner.lock();
+        let _ = out.write_all(raw.as_bytes());
+        let _ = out.flush();
     }
 }
 
