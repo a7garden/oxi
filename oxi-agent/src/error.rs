@@ -3,9 +3,14 @@
 /// Agent-specific errors
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
-    /// Tool execution error
+    /// Error originating from a tool.
     #[error("Tool '{tool_name}' failed: {message}")]
-    Tool { tool_name: String, message: String },
+    Tool {
+        /// Name of the tool that failed.
+        tool_name: String,
+        /// Human-readable error message.
+        message: String,
+    },
     /// Stream / provider communication error
     #[error("Stream error: {0}")]
     Stream(String),
@@ -15,28 +20,44 @@ pub enum AgentError {
     /// Configuration error
     #[error("Config error: {0}")]
     Config(String),
-    /// Model not found or unavailable
+    /// Model not found or unavailable.
     #[error("Model '{model_id}' error: {message}")]
-    Model { model_id: String, message: String },
-    /// Maximum iterations reached
+    Model {
+        /// Identifier of the model.
+        model_id: String,
+        /// Error detail.
+        message: String,
+    },
+    /// Maximum iterations reached.
     #[error("Maximum iterations reached ({iterations})")]
-    MaxIterations { iterations: usize },
-    /// Rate limited – retry after N seconds
+    MaxIterations {
+        /// Number of iterations that were executed.
+        iterations: usize,
+    },
+    /// Rate limited – retry after N seconds.
     #[error("Rate limited – retry after {retry_after_secs}s")]
-    RateLimited { retry_after_secs: u64 },
-    /// A retriable error that failed after exhausting retries
+    RateLimited {
+        /// Seconds to wait before retrying.
+        retry_after_secs: u64,
+    },
+    /// A retriable error that failed after exhausting retries.
     #[error("Failed after {attempts} retries: {last_error}")]
-    RetriesExhausted { attempts: usize, last_error: String },
+    RetriesExhausted {
+        /// Number of retry attempts made.
+        attempts: usize,
+        /// Error from the final attempt.
+        last_error: String,
+    },
     /// Fallback failed – both primary and fallback model errored
     #[error("Both models failed – {primary_model} ({primary_error}) and {fallback_model} ({fallback_error})")]
     FallbackFailed {
-/// primary_model.
+        /// Name of the primary model.
         primary_model: String,
-/// primary_error.
+        /// Error from the primary model.
         primary_error: String,
-/// fallback_model.
+        /// Name of the fallback model.
         fallback_model: String,
-/// fallback_error.
+        /// Error from the fallback model.
         fallback_error: String,
     },
 }

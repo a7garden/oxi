@@ -35,10 +35,15 @@ pub enum SessionEntryType {
 /// Message entry content
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageEntry {
+    /// Unique identifier for this message.
     pub id: Uuid,
+    /// Parent entry ID in the session tree.
     pub parent_id: Option<Uuid>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
+    /// Role of the message sender.
     pub role: MessageRole,
+    /// Text content of the message.
     pub content: String,
 }
 
@@ -46,11 +51,17 @@ pub struct MessageEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MessageRole {
+    /// User-authored message.
     User,
+    /// Assistant-authored message.
     Assistant,
+    /// System prompt message.
     System,
+    /// Tool call message.
     Tool,
+    /// Tool result message.
     ToolResult,
+    /// Custom role message.
     Custom,
 }
 
@@ -69,8 +80,11 @@ impl MessageRole {
 /// Branch summary entry - captures context when navigating away from a branch
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchSummaryEntry {
+    /// Unique identifier for this summary entry.
     pub id: Uuid,
+    /// Parent entry ID in the session tree.
     pub parent_id: Option<Uuid>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
     /// ID of the entry this summary is attached to
     pub from_id: Uuid,
@@ -87,16 +101,22 @@ pub struct BranchSummaryEntry {
 /// Details stored in BranchSummaryEntry for file tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchSummaryDetails {
+    /// Files that were read during the branch.
     pub read_files: Vec<String>,
+    /// Files that were modified during the branch.
     pub modified_files: Vec<String>,
 }
 
 /// Compaction entry - summary after context window compaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionEntry {
+    /// Unique identifier for this compaction entry.
     pub id: Uuid,
+    /// Parent entry ID in the session tree.
     pub parent_id: Option<Uuid>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
+    /// Compacted summary text.
     pub summary: String,
     /// ID of first entry kept after compaction
     pub first_kept_entry_id: Uuid,
@@ -113,29 +133,43 @@ pub struct CompactionEntry {
 /// Label entry - user-defined bookmark/marker on entries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LabelEntry {
+    /// Unique identifier for this label entry.
     pub id: Uuid,
+    /// Parent entry ID in the session tree.
     pub parent_id: Option<Uuid>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
+    /// Entry ID this label is attached to.
     pub target_id: Uuid,
+    /// Optional label text.
     pub label: Option<String>,
 }
 
 /// Session info entry - metadata like display name
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfoEntry {
+    /// Unique identifier for this session info entry.
     pub id: Uuid,
+    /// Parent entry ID in the session tree.
     pub parent_id: Option<Uuid>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
+    /// Optional display name for the session.
     pub name: Option<String>,
 }
 
 /// Custom entry for extensions to store extension-specific data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomEntry {
+    /// Unique identifier for this custom entry.
     pub id: Uuid,
+    /// Parent entry ID in the session tree.
     pub parent_id: Option<Uuid>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
+    /// Extension-defined type discriminator.
     pub custom_type: String,
+    /// Optional extension-specific data payload.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
@@ -143,11 +177,17 @@ pub struct CustomEntry {
 /// Custom message entry for extensions to inject messages into LLM context
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomMessageEntry {
+    /// Unique identifier for this custom message entry.
     pub id: Uuid,
+    /// Parent entry ID in the session tree.
     pub parent_id: Option<Uuid>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
+    /// Extension-defined type discriminator.
     pub custom_type: String,
+    /// Message content injected into LLM context.
     pub content: String,
+    /// Optional extension-specific details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
     /// Controls TUI rendering
@@ -203,13 +243,21 @@ pub struct NavigationResult {
 /// Preparation data for tree navigation (passed to extension hooks)
 #[derive(Debug, Clone)]
 pub struct TreePreparation {
+    /// The navigation target entry ID.
     pub target_id: Uuid,
+    /// The leaf ID before navigation.
     pub old_leaf_id: Option<Uuid>,
+    /// Common ancestor between old and new positions.
     pub common_ancestor_id: Option<Uuid>,
+    /// Entries collected for summarization.
     pub entries_to_summarize: Vec<SessionEntryType>,
+    /// Whether the user requested a summary.
     pub user_wants_summary: bool,
+    /// Custom instructions for summarization.
     pub custom_instructions: Option<String>,
+    /// Whether custom instructions replace the default prompt.
     pub replace_instructions: bool,
+    /// Label to attach to the summary.
     pub label: Option<String>,
 }
 
@@ -245,8 +293,11 @@ pub struct BranchSummaryResult {
 /// Error during summarization
 #[derive(Debug, Clone)]
 pub enum SummarizationError {
+    /// No model available for summarization.
     NoModel,
+    /// Summarization was aborted by the user.
     Aborted,
+    /// Summarization failed with an error message.
     Failed(String),
 }
 
@@ -268,7 +319,9 @@ pub struct BeforeTreeHookResult {
 /// Summary generated by an extension
 #[derive(Debug, Clone)]
 pub struct ExtensionSummary {
+    /// Summary text generated by the extension.
     pub summary: String,
+    /// Optional extension-specific details.
     pub details: Option<serde_json::Value>,
 }
 
