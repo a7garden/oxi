@@ -104,6 +104,7 @@ pub struct CompactionResult {
 
 /// Scoped model entry for Ctrl+P cycling.
 #[derive(Debug, Clone)]
+/// Scoped model entry for Ctrl+P cycling.
 pub struct ScopedModel {
     pub provider: String,
     pub model_id: String,
