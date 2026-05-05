@@ -201,4 +201,97 @@ mod tests {
     fn test_pattern_longer_than_text() {
         assert!(fuzzy_match("abcdef", "abc").is_none());
     }
+
+    // ===== Additional edge-case tests =====
+
+    #[test]
+    fn test_start_of_text_bonus() {
+        // Matching at start should score higher than matching in middle
+        let at_start = fuzzy_match("ab", "abcd").unwrap().score;
+        let in_middle = fuzzy_match("ab", "xaby").unwrap().score;
+        assert!(
+            at_start > in_middle,
+            "start score {at_start} should exceed middle score {in_middle}"
+        );
+    }
+
+    #[test]
+    fn test_consecutive_match_bonus() {
+        let consecutive = fuzzy_match("abc", "abcd").unwrap().score;
+        let scattered = fuzzy_match("abc", "aXbXc").unwrap().score;
+        assert!(
+            consecutive > scattered,
+            "consecutive {consecutive} should exceed scattered {scattered}"
+        );
+    }
+
+    #[test]
+    fn test_fuzzy_rank_excludes_non_matches() {
+        let candidates = vec![
+            "hello".to_string(),
+            "world".to_string(),
+        ];
+        let ranked = fuzzy_rank("xyz", &candidates);
+        assert!(ranked.is_empty());
+    }
+
+    #[test]
+    fn test_fuzzy_rank_empty_pattern() {
+        let candidates = vec!["hello".to_string(), "world".to_string()];
+        let ranked = fuzzy_rank("", &candidates);
+        // Empty pattern matches everything
+        assert_eq!(ranked.len(), 2);
+    }
+
+    #[test]
+    fn test_fuzzy_rank_empty_candidates() {
+        let candidates: Vec<String> = vec![];
+        let ranked = fuzzy_rank("abc", &candidates);
+        assert!(ranked.is_empty());
+    }
+
+    #[test]
+    fn test_is_word_boundary() {
+        assert!(is_word_boundary('_'));
+        assert!(is_word_boundary('-'));
+        assert!(is_word_boundary('.'));
+        assert!(is_word_boundary(' '));
+        assert!(is_word_boundary('/'));
+        assert!(!is_word_boundary('a'));
+        assert!(!is_word_boundary('1'));
+    }
+
+    #[test]
+    fn test_single_char_pattern() {
+        let result = fuzzy_match("a", "abc").unwrap();
+        assert_eq!(result.positions, vec![0]);
+    }
+
+    #[test]
+    fn test_single_char_text_match() {
+        let result = fuzzy_match("a", "a").unwrap();
+        assert_eq!(result.positions, vec![0]);
+    }
+
+    #[test]
+    fn test_single_char_text_no_match() {
+        assert!(fuzzy_match("b", "a").is_none());
+    }
+
+    #[test]
+    fn test_unicode_match() {
+        let result = fuzzy_match("한", "한글").unwrap();
+        assert_eq!(result.positions.len(), 1);
+    }
+
+    #[test]
+    fn test_length_bonus() {
+        // Shorter texts should score slightly higher for same pattern
+        let short = fuzzy_match("ab", "ab").unwrap().score;
+        let long = fuzzy_match("ab", "ab_extra_padding").unwrap().score;
+        assert!(
+            short > long,
+            "short text score {short} should exceed long text score {long}"
+        );
+    }
 }

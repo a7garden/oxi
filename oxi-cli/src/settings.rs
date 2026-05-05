@@ -1393,8 +1393,6 @@ stream_responses = false
 
     #[test]
     fn test_merge_json_values() {
-        use std::collections::HashMap;
-
         let base = serde_json::json!({
             "version": 1,
             "theme": "default",

@@ -489,7 +489,6 @@ impl AutoCompactor {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use futures::StreamExt;
     use oxi_ai::Api;
 
     fn create_test_provider() -> Arc<dyn Provider> {

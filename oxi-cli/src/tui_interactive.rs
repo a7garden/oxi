@@ -47,6 +47,7 @@ enum UiEvent {
     Start,
     Thinking,
     TextDelta(String),
+    // Keep: ToolCall fields `id` and `arguments` unused now but may be needed for tool UI display.
     #[allow(dead_code)]
     ToolCall { id: String, name: String, arguments: String },
     ToolResult { tool_name: String, content: String, is_error: bool },
@@ -75,6 +76,7 @@ enum MessageRole {
 struct ChatMessage {
     role: MessageRole,
     content: String,
+    /// Keep: timestamp available for future message ordering/display.
     #[allow(dead_code)]
     timestamp: i64,
 }
@@ -168,12 +170,16 @@ struct Theme {
     placeholder_fg: Color,
     prompt_indicator_fg: Color,
     thinking_fg: Color,
+    // Keep: theme colors for future tool call rendering.
     #[allow(dead_code)]
     tool_name_fg: Color,
+    // Keep: theme colors for future tool call border rendering.
     #[allow(dead_code)]
     tool_border_fg: Color,
+    // Keep: theme colors for future error display.
     #[allow(dead_code)]
     error_fg: Color,
+    // Keep: theme colors for future success display.
     #[allow(dead_code)]
     success_fg: Color,
     status_fg: Color,
