@@ -376,13 +376,17 @@ async fn run_single_agent(
     }
 
     // System prompt via temp file (RAII cleanup)
-    let tmp_dir = TempDirGuard::new("oxi-subagent")
-        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    let tmp_dir = match TempDirGuard::new("oxi-subagent") {
+        Ok(g) => g,
+        Err(e) => {
+            result.exit_code = 1;
+            result.stderr = e.clone();
+            result.error_message = Some(e);
+            return result;
+        }
+    };
     if !agent.system_prompt.is_empty() {
-        if std::fs::write(tmp_dir.prompt_path(), &agent.system_prompt)
-            .map_err(|e| format!("Failed to write prompt: {}", e))
-            .is_ok()
-        {
+        if let Ok(()) = std::fs::write(tmp_dir.prompt_path(), &agent.system_prompt) {
             args.push("--append-system-prompt".to_string());
             args.push(tmp_dir.prompt_path().to_str().unwrap_or_default().to_string());
         }
