@@ -5,8 +5,11 @@ use crate::{Cell, Color, Component, Event, KeyCode, KeyEvent, Rect, Size, Surfac
 /// The type of a setting value.
 #[derive(Debug, Clone)]
 pub enum SettingValue {
+    /// Boolean toggle.
     Toggle(bool),
+    /// Text string.
     Text(String),
+    /// Integer number.
     Number(i64),
 }
 
@@ -23,8 +26,11 @@ impl SettingValue {
 /// A single setting entry.
 #[derive(Debug, Clone)]
 pub struct SettingEntry {
+    /// Setting key / label.
     pub key: String,
+    /// Current value.
     pub value: SettingValue,
+    /// Optional group header.
     pub group: Option<String>,
 }
 
@@ -43,6 +49,7 @@ pub struct SettingsList {
 }
 
 impl SettingsList {
+    /// Create a new settings list.
     pub fn new(settings: Vec<SettingEntry>) -> Self {
         Self {
             settings,
@@ -55,11 +62,13 @@ impl SettingsList {
         }
     }
 
+    /// Set the callback invoked when a value changes.
     pub fn on_change(mut self, f: impl Fn(&str, &SettingValue) + Send + 'static) -> Self {
         self.on_change = Some(Box::new(f));
         self
     }
 
+    /// Get the currently selected setting.
     pub fn selected_setting(&self) -> Option<&SettingEntry> {
         self.settings.get(self.selected)
     }

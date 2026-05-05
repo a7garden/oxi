@@ -14,6 +14,7 @@ use tokio::sync::oneshot;
 /// Maximum number of results to return by default
 const DEFAULT_MAX_RESULTS: usize = 10;
 
+/// WebSearchTool.
 pub struct WebSearchTool;
 
 impl WebSearchTool {

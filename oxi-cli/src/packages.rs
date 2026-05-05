@@ -60,9 +60,13 @@ const NPM_MANIFEST_NAME: &str = "package.json";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
+/// extension variant.
     Extension,
+/// skill variant.
     Skill,
+/// prompt variant.
     Prompt,
+/// theme variant.
     Theme,
 }
 
@@ -134,7 +138,9 @@ pub struct PathMetadata {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceOrigin {
+/// package variant.
     Package,
+/// top level variant.
     TopLevel,
 }
 
@@ -142,7 +148,9 @@ pub enum ResourceOrigin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceScope {
+/// user variant.
     User,
+/// project variant.
     Project,
 }
 
@@ -188,9 +196,13 @@ pub struct ProgressEvent {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgressEventType {
+/// start variant.
     Start,
+/// progress variant.
     Progress,
+/// complete variant.
     Complete,
+/// error variant.
     Error,
 }
 
@@ -198,10 +210,15 @@ pub enum ProgressEventType {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgressAction {
+/// install variant.
     Install,
+/// remove variant.
     Remove,
+/// update variant.
     Update,
+/// clone variant.
     Clone,
+/// pull variant.
     Pull,
 }
 
@@ -226,6 +243,7 @@ pub type ProgressCallback = Box<dyn Fn(ProgressEvent) + Send + Sync>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ParsedSource {
+/// Variant.
     Npm {
         /// Full spec (e.g. "express@4.18.0")
         spec: String,
@@ -234,6 +252,7 @@ pub enum ParsedSource {
         /// Whether a version was pinned
         pinned: bool,
     },
+/// Variant.
     Git {
         /// Full repository URL
         repo: String,
@@ -244,10 +263,12 @@ pub enum ParsedSource {
         /// Optional ref (branch / tag / commit)
         ref_: Option<String>,
     },
+/// Variant.
     Local {
         /// Local path
         path: String,
     },
+/// Variant.
     Url {
         /// URL to archive
         url: String,

@@ -10,9 +10,13 @@ use std::path::{Path, PathBuf};
 /// Resource type
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ResourceType {
+/// skill variant.
     Skill,
+/// extension variant.
     Extension,
+/// theme variant.
     Theme,
+/// prompt variant.
     Prompt,
 }
 
@@ -60,8 +64,11 @@ pub struct ResourceDiagnostic {
 /// Diagnostic severity
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
+/// warning variant.
     Warning,
+/// error variant.
     Error,
+/// info variant.
     Info,
 }
 
@@ -400,11 +407,13 @@ impl ResourceWatcher {
         }
     }
 
+/// TODO: document this function.
     pub fn add_path(&mut self, path: PathBuf) {
         self.paths.push(path.clone());
         self.callbacks.entry(path).or_insert_with(Vec::new);
     }
 
+/// TODO: document this function.
     pub fn on_change<F>(&mut self, path: &Path, callback: F)
     where
         F: Fn(ResourceChange) + Send + Sync + 'static,
@@ -416,6 +425,7 @@ impl ResourceWatcher {
             .push(Box::new(callback));
     }
 
+/// TODO: document this function.
     pub fn check_changes(&mut self) {
         for path in &self.paths {
             if let Ok(metadata) = fs::metadata(path) {
@@ -451,8 +461,11 @@ pub struct ResourceChange {
 /// Change kind
 #[derive(Debug, Clone, Copy)]
 pub enum ChangeKind {
+/// created variant.
     Created,
+/// modified variant.
     Modified,
+/// deleted variant.
     Deleted,
 }
 

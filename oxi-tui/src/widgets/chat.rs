@@ -96,6 +96,33 @@ impl ChatViewState {
         }
     }
 
+    /// Append a tool call content block to the streaming message.
+    pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String) {
+        if let Some(ref mut state) = self.streaming {
+            state.message.content_blocks.push(ContentBlock::ToolCall {
+                id, name, arguments,
+            });
+        }
+    }
+
+    /// Append a tool result content block to the streaming message.
+    pub fn stream_tool_result(&mut self, tool_name: String, content: String, is_error: bool) {
+        if let Some(ref mut state) = self.streaming {
+            state.message.content_blocks.push(ContentBlock::ToolResult {
+                tool_name, content, is_error,
+            });
+        }
+    }
+
+    /// Append an error content block to the streaming message.
+    pub fn stream_error(&mut self, title: String, message: String, retryable: bool) {
+        if let Some(ref mut state) = self.streaming {
+            state.message.content_blocks.push(ContentBlock::Error {
+                title, message, retryable,
+            });
+        }
+    }
+
     /// Finish streaming — move to messages.
     pub fn finish_streaming(&mut self) {
         if let Some(state) = self.streaming.take() {
@@ -103,9 +130,10 @@ impl ChatViewState {
         }
     }
 
-    /// Scroll to bottom.
-    pub fn scroll_to_bottom(&mut self) {
-        self.scroll_offset = self.content_height.saturating_sub(1).max(self.scroll_offset);
+    /// Scroll to bottom (set offset to max).
+    pub fn scroll_to_bottom(&mut self, visible_height: u16) {
+        let max_scroll = self.content_height.saturating_sub(visible_height);
+        self.scroll_offset = max_scroll;
     }
 
     /// Scroll up.

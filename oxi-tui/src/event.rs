@@ -10,13 +10,18 @@ pub enum KeyCode {
     /// Tab key
     Tab,
     /// Backspace
+    /// Backspace key
     Backspace,
     /// Delete key
     Delete,
-    /// Arrow keys
+    /// Arrow up
     Up,
+/// Variant.
+    /// Arrow down
     Down,
+    /// Arrow left
     Left,
+    /// Arrow right
     Right,
     /// Home key
     Home,

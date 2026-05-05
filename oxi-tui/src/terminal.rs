@@ -7,11 +7,14 @@ use anyhow::Result;
 /// Terminal dimensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Size {
+    /// Width in columns.
     pub width: u16,
+    /// Height in rows.
     pub height: u16,
 }
 
 impl Size {
+    /// Create a new Size.
     pub fn new(width: u16, height: u16) -> Self {
         Self { width, height }
     }
@@ -20,15 +23,19 @@ impl Size {
 /// Terminal position (0-indexed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
+    /// Row number.
     pub row: u16,
+    /// Column number.
     pub col: u16,
 }
 
 /// Cursor visibility state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CursorVisibility {
+    /// Cursor is visible.
     #[default]
     Visible,
+    /// Cursor is hidden.
     Hidden,
 }
 
@@ -89,6 +96,7 @@ pub struct CrosstermTerminal {
 }
 
 impl CrosstermTerminal {
+    /// Create a new terminal, querying the current size.
     pub fn new() -> Result<Self> {
         let size = Self::get_size()?;
         Ok(Self { size_cache: size })

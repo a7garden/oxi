@@ -36,12 +36,19 @@ pub struct Theme {
 /// Semantic color palette used by components.
 #[derive(Clone, Debug)]
 pub struct ColorScheme {
+    /// Normal text foreground color.
     pub foreground: Color,
+    /// Default background color.
     pub background: Color,
+    /// Primary accent color (UI elements, labels).
     pub primary: Color,
+    /// Secondary color (alternative accents).
     pub secondary: Color,
+    /// Error / danger color.
     pub error: Color,
+    /// Warning / caution color.
     pub warning: Color,
+    /// Success / confirmation color.
     pub success: Color,
     /// Muted / dimmed text (e.g. placeholders).
     pub muted: Color,
@@ -276,6 +283,7 @@ pub struct ThemeFile {
     pub colors: ThemeFileColors,
 }
 
+/// Color overrides from a theme file.
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct ThemeFileColors {
     /// Foreground / text color.

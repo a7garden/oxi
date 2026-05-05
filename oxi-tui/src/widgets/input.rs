@@ -49,6 +49,14 @@ impl InputState {
         }
     }
 
+    /// Delete character after cursor.
+    pub fn delete(&mut self) {
+        if self.cursor < self.text.chars().count() {
+            let byte_pos = self.char_to_byte(self.cursor);
+            self.text.remove(byte_pos);
+        }
+    }
+
     /// Move cursor left.
     pub fn move_left(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
@@ -120,9 +128,9 @@ pub struct Input<'a> {
 }
 
 impl<'a> Input<'a> {
-    pub fn new() -> Self {
+    pub fn new(theme: &'a Theme) -> Self {
         Self {
-            theme: &Theme::dark(),
+            theme,
             placeholder: None,
             prompt_char: '❯',
         }
@@ -144,11 +152,7 @@ impl<'a> Input<'a> {
     }
 }
 
-impl Default for Input<'static> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: No Default impl because Input requires a Theme reference.
 
 impl StatefulWidget for Input<'_> {
     type State = InputState;

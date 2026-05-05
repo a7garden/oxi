@@ -136,6 +136,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// Create a new renderer.
     pub fn new() -> Self {
         Self {
             current_sgr: Sgr::new(),
@@ -452,6 +453,7 @@ impl Default for Renderer {
 
 /// Extension trait for rendering to surfaces with ANSI codes.
 pub trait RenderToSurface {
+    /// Render the surface as ANSI escape sequences.
     fn to_ansi(&self) -> String;
 }
 

@@ -822,15 +822,18 @@ impl ExtensionStatusTracker {
         }
     }
 
+/// TODO: document this function.
     pub fn set(&mut self, extension: &str, status: &str) {
         self.statuses
             .insert(extension.to_string(), status.to_string());
     }
 
+/// TODO: document this function.
     pub fn clear(&mut self, extension: &str) {
         self.statuses.remove(extension);
     }
 
+/// TODO: document this function.
     pub fn get_all(&self) -> &HashMap<String, String> {
         &self.statuses
     }

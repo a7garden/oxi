@@ -23,6 +23,7 @@ use tokio::sync::oneshot;
 /// Default timeout in seconds
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
+/// BashTool.
 pub struct BashTool {
     progress_callback: Arc<std::sync::Mutex<Option<ProgressCallback>>>,
 }

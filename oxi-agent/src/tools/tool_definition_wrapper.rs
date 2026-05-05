@@ -99,10 +99,15 @@ impl AgentTool for DynamicTool {
 
 /// Trait for tool definitions that can be wrapped into `AgentTool`.
 pub trait ToolDefinitionLike: Send + Sync {
+/// TODO: document this function.
     fn tool_name(&self) -> &str;
+/// TODO: document this function.
     fn tool_label(&self) -> &str;
+/// TODO: document this function.
     fn tool_description(&self) -> &str;
+/// TODO: document this function.
     fn tool_parameters(&self) -> Value;
+/// TODO: document this function.
     fn tool_execute(
         &self,
         tool_call_id: &str,

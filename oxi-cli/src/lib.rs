@@ -134,12 +134,16 @@ pub struct App {
 /// Chat message for display
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ChatMessage {
+    /// Role of the message sender (e.g. "user" or "assistant").
     pub role: String,
+    /// Text content of the message.
     pub content: String,
+    /// Timestamp when the message was created.
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 impl ChatMessage {
+    /// Create a new user chat message.
     pub fn user(content: String) -> Self {
         Self {
             role: "user".to_string(),
@@ -148,6 +152,7 @@ impl ChatMessage {
         }
     }
 
+    /// Create a new assistant chat message.
     pub fn assistant(content: String) -> Self {
         Self {
             role: "assistant".to_string(),
@@ -160,11 +165,17 @@ impl ChatMessage {
 /// Interactive session state
 #[derive(Debug, Clone)]
 pub struct InteractiveSession {
+    /// Chat messages exchanged so far.
     pub messages: Vec<ChatMessage>,
+    /// Whether the assistant is currently generating a response.
     pub thinking: bool,
+    /// Partial response text accumulated during streaming.
     pub current_response: String,
+    /// Unique session identifier.
     pub session_id: Option<Uuid>,
+    /// Optional human-readable session name.
     pub name: Option<String>,
+    /// Raw session entries for persistence and tree navigation.
     pub entries: Vec<session::SessionEntry>,
 }
 
@@ -175,6 +186,7 @@ impl Default for InteractiveSession {
             thinking: false,
             current_response: String::new(),
             session_id: None,
+/// TODO: document.
             name: None,
             entries: Vec::new(),
         }
@@ -182,10 +194,13 @@ impl Default for InteractiveSession {
 }
 
 impl InteractiveSession {
+    /// Create a new empty interactive session.
     pub fn new() -> Self {
+/// TODO: document.
         Self::default()
     }
 
+    /// Add a user message to the session.
     pub fn add_user_message(&mut self, content: String) {
         self.messages.push(ChatMessage::user(content.clone()));
         // Also add to entries for session persistence
@@ -195,10 +210,12 @@ impl InteractiveSession {
         self.entries.push(entry);
     }
 
+    /// Add an assistant message to the session.
     pub fn add_assistant_message(&mut self, content: String) {
         self.messages.push(ChatMessage::assistant(content.clone()));
         // Also add to entries for session persistence
         let entry = session::SessionEntry::new(session::AgentMessage::Assistant {
+/// TODO: document.
             content: vec![session::AssistantContentBlock::Text { text: content }],
             provider: None,
             model_id: None,
@@ -209,10 +226,12 @@ impl InteractiveSession {
         self.current_response.clear();
     }
 
+    /// Append text to the current partial streaming response.
     pub fn append_to_response(&mut self, text: &str) {
         self.current_response.push_str(text);
     }
 
+    /// Finalize the current streaming response into a full assistant message.
     pub fn finish_response(&mut self) {
         if !self.current_response.is_empty() {
             let response = std::mem::take(&mut self.current_response);

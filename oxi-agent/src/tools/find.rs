@@ -8,6 +8,7 @@ use std::path::Path;
 use tokio::fs;
 use tokio::sync::oneshot;
 
+/// FindTool.
 pub struct FindTool;
 
 impl FindTool {

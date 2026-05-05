@@ -216,6 +216,7 @@ fn parse_frontmatter(content: &str) -> (HashMap<String, String>, String) {
 // ── Result Types ───────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// UsageStats.
 pub struct UsageStats {
     pub input_tokens: u64,
     pub output_tokens: u64,
@@ -226,6 +227,7 @@ pub struct UsageStats {
 }
 
 #[derive(Debug, Clone)]
+/// SingleResult.
 pub struct SingleResult {
     pub agent: String,
     pub agent_source: String,
@@ -242,13 +244,18 @@ pub struct SingleResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+/// SubagentMode.
 pub enum SubagentMode {
+/// single variant.
     Single,
+/// parallel variant.
     Parallel,
+/// chain variant.
     Chain,
 }
 
 #[derive(Debug, Clone)]
+/// SubagentDetails.
 pub struct SubagentDetails {
     pub mode: SubagentMode,
     pub results: Vec<SingleResult>,
@@ -598,6 +605,7 @@ struct ChainStep {
 
 // ── Tool Implementation ────────────────────────────────────────────────
 
+/// SubagentTool.
 pub struct SubagentTool {
     cwd: PathBuf,
     binary_path: Option<PathBuf>,

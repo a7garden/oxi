@@ -20,21 +20,37 @@ use std::path::{Path, PathBuf};
 /// Parsed key name (modifiers handled separately).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KeyName {
+/// char variant.
     Char(char),
+/// enter variant.
     Enter,
+/// escape variant.
     Escape,
+/// tab variant.
     Tab,
+/// backspace variant.
     Backspace,
+/// delete variant.
     Delete,
+/// up variant.
     Up,
+/// down variant.
     Down,
+/// left variant.
     Left,
+/// right variant.
     Right,
+/// home variant.
     Home,
+/// end variant.
     End,
+/// page up variant.
     PageUp,
+/// page down variant.
     PageDown,
+/// insert variant.
     Insert,
+/// f variant.
     F(u8),
 }
 
@@ -177,80 +193,149 @@ impl fmt::Display for KeySequence {
 pub enum KeyAction {
     // Editor actions
     CursorUp,
+/// cursor down variant.
     CursorDown,
+/// cursor left variant.
     CursorLeft,
+/// cursor right variant.
     CursorRight,
+/// cursor word left variant.
     CursorWordLeft,
+/// cursor word right variant.
     CursorWordRight,
+/// cursor line start variant.
     CursorLineStart,
+/// cursor line end variant.
     CursorLineEnd,
+/// jump forward variant.
     JumpForward,
+/// jump backward variant.
     JumpBackward,
+/// page up variant.
     PageUp,
+/// page down variant.
     PageDown,
+/// delete char backward variant.
     DeleteCharBackward,
+/// delete char forward variant.
     DeleteCharForward,
+/// delete word backward variant.
     DeleteWordBackward,
+/// delete word forward variant.
     DeleteWordForward,
+/// delete to line start variant.
     DeleteToLineStart,
+/// delete to line end variant.
     DeleteToLineEnd,
+/// yank variant.
     Yank,
+/// yank pop variant.
     YankPop,
+/// undo variant.
     Undo,
+/// new line variant.
     NewLine,
 
     // Input actions
     Submit,
+/// tab variant.
     Tab,
+/// copy variant.
     Copy,
+/// select up variant.
     SelectUp,
+/// select down variant.
     SelectDown,
+/// select page up variant.
     SelectPageUp,
+/// select page down variant.
     SelectPageDown,
+/// select confirm variant.
     SelectConfirm,
+/// select cancel variant.
     SelectCancel,
+/// interrupt variant.
     Interrupt,
 
     // App actions
     Clear,
+/// exit variant.
     Exit,
+/// suspend variant.
     Suspend,
+/// cycle thinking level variant.
     CycleThinkingLevel,
+/// cycle model forward variant.
     CycleModelForward,
+/// cycle model backward variant.
     CycleModelBackward,
+/// select model variant.
     SelectModel,
+/// expand tools variant.
     ExpandTools,
+/// toggle thinking variant.
     ToggleThinking,
+/// toggle session named filter variant.
     ToggleSessionNamedFilter,
+/// external editor variant.
     ExternalEditor,
+/// follow up variant.
     FollowUp,
+/// dequeue variant.
     Dequeue,
+/// paste image variant.
     PasteImage,
+/// new session variant.
     NewSession,
+/// tree variant.
     Tree,
+/// fork variant.
     Fork,
+/// resume variant.
     Resume,
+/// tree fold or up variant.
     TreeFoldOrUp,
+/// tree unfold or down variant.
     TreeUnfoldOrDown,
+/// tree edit label variant.
     TreeEditLabel,
+/// tree toggle label timestamp variant.
     TreeToggleLabelTimestamp,
+/// toggle session path variant.
     ToggleSessionPath,
+/// toggle session sort variant.
     ToggleSessionSort,
+/// rename session variant.
     RenameSession,
+/// delete session variant.
     DeleteSession,
+/// delete session noninvasive variant.
     DeleteSessionNoninvasive,
+/// save model selection variant.
     SaveModelSelection,
+/// enable all models variant.
     EnableAllModels,
+/// clear all models variant.
     ClearAllModels,
+/// toggle provider variant.
     ToggleProvider,
+/// reorder up variant.
     ReorderUp,
+/// reorder down variant.
     ReorderDown,
+/// tree filter default variant.
     TreeFilterDefault,
+/// tree filter no tools variant.
     TreeFilterNoTools,
+/// tree filter user only variant.
     TreeFilterUserOnly,
+/// tree filter labeled only variant.
     TreeFilterLabeledOnly,
+/// tree filter all variant.
     TreeFilterAll,
+/// tree filter cycle forward variant.
     TreeFilterCycleForward,
+/// tree filter cycle backward variant.
     TreeFilterCycleBackward,
 
     // Custom action (for extensions)
@@ -494,7 +579,9 @@ pub struct KeybindingsFile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum TomlKeyBinding {
+/// single variant.
     Single(String),
+/// multiple variant.
     Multiple(Vec<String>),
 }
 

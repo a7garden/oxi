@@ -159,8 +159,11 @@ pub enum StreamingBehavior {
 /// Source of user input (for extension hooks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputSource {
+/// interactive variant.
     Interactive,
+/// extension variant.
     Extension,
+/// rpc variant.
     Rpc,
 }
 
@@ -1434,7 +1437,9 @@ impl std::ops::Deref for AgentSessionHandle {
 /// Direction for model cycling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CycleDirection {
+/// forward variant.
     Forward,
+/// backward variant.
     Backward,
 }
 

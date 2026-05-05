@@ -23,6 +23,7 @@ const PREVIEW_TAIL_LINES: usize = 5;
 /// Threshold above which we switch from full-content to head/tail preview display
 const PREVIEW_THRESHOLD_LINES: usize = 20;
 
+/// WriteTool.
 pub struct WriteTool;
 
 impl WriteTool {

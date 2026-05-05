@@ -18,6 +18,7 @@ pub struct TruncatedText {
 }
 
 impl TruncatedText {
+    /// Create a new truncated text component.
     pub fn new(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
@@ -32,36 +33,43 @@ impl TruncatedText {
         }
     }
 
+    /// Set the maximum width before truncation.
     pub fn with_max_width(mut self, width: u16) -> Self {
         self.max_width = Some(width);
         self
     }
 
+    /// Set the maximum height before truncation.
     pub fn with_max_height(mut self, height: u16) -> Self {
         self.max_height = Some(height);
         self
     }
 
+    /// Allow expanding to show full content on focus.
     pub fn with_expand_on_focus(mut self) -> Self {
         self.expand_on_focus = true;
         self
     }
 
+    /// Set foreground color.
     pub fn with_fg(mut self, color: Color) -> Self {
         self.fg_color = Some(color);
         self
     }
 
+    /// Set background color.
     pub fn with_bg(mut self, color: Color) -> Self {
         self.bg_color = Some(color);
         self
     }
 
+    /// Replace the content.
     pub fn set_content(&mut self, content: impl Into<String>) {
         self.content = content.into();
         self.dirty = true;
     }
 
+    /// Get the current content.
     pub fn content(&self) -> &str {
         &self.content
     }

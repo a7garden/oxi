@@ -2739,6 +2739,7 @@ dependencies = [
  "once_cell",
  "oxi-agent",
  "oxi-ai",
+ "oxi-tui",
  "parking_lot",
  "predicates",
  "rand 0.8.6",

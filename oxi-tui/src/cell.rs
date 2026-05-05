@@ -68,13 +68,25 @@ impl Attributes {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[derive(Default)]
 pub enum Color {
+/// Variant.
+    /// Black.
     Black,
+/// Variant.
+    /// Red.
     Red,
+/// Variant.
+    /// Green.
     Green,
+/// Variant.
+    /// Yellow.
     Yellow,
+    /// Blue.
     Blue,
+    /// Magenta.
     Magenta,
+    /// Cyan.
     Cyan,
+    /// White.
     White,
     /// 256-color palette (0-255)
     Indexed(u8),

@@ -13,6 +13,7 @@ pub mod fuzzy;
 pub mod keybindings;
 pub mod keys;
 pub mod layout;
+/// Kill ring (clipboard history).
 pub mod kill_ring;
 pub mod overlay;
 pub mod renderer;
@@ -24,6 +25,7 @@ pub mod theme;
 pub mod tui;
 pub mod undo_stack;
 pub mod utils;
+pub mod widgets;
 
 pub use autocomplete::FuzzyMatcher;
 pub use cell::{Attributes, Cell, CellBuilder, Color};

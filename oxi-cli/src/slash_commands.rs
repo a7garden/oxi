@@ -7,8 +7,11 @@ use crate::source_info::SourceInfo;
 /// Where a slash command originates from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlashCommandSource {
+/// extension variant.
     Extension,
+/// prompt variant.
     Prompt,
+/// skill variant.
     Skill,
 }
 

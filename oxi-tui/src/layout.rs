@@ -5,7 +5,9 @@ use crate::{Component, Event, Rect, Size, Surface};
 /// Layout direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
+/// vertical.
     Vertical,
+/// horizontal.
     Horizontal,
 }
 

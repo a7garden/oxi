@@ -59,8 +59,11 @@ pub struct AgentSessionRuntimeDiagnostic {
 /// Severity level for diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
+/// info variant.
     Info,
+/// warning variant.
     Warning,
+/// error variant.
     Error,
 }
 

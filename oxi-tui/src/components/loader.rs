@@ -16,6 +16,7 @@ pub struct Loader {
 }
 
 impl Loader {
+    /// Create a new loader with no message.
     pub fn new() -> Self {
         Self {
             message: None,
@@ -27,16 +28,19 @@ impl Loader {
         }
     }
 
+    /// Set the loading message.
     pub fn with_message(mut self, message: impl Into<String>) -> Self {
         self.message = Some(message.into());
         self
     }
 
+    /// Set the spinner color.
     pub fn with_color(mut self, color: Color) -> Self {
         self.fg_color = color;
         self
     }
 
+    /// Change the message at runtime.
     pub fn set_message(&mut self, message: impl Into<String>) {
         self.message = Some(message.into());
         self.dirty = true;
@@ -50,22 +54,26 @@ impl Loader {
         }
     }
 
+    /// Check if loading was cancelled.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled
     }
 
+    /// Cancel loading.
     pub fn cancel(&mut self) {
         self.cancelled = true;
         self.message = Some("Cancelled".to_string());
         self.dirty = true;
     }
 
+    /// Reset to initial state.
     pub fn reset(&mut self) {
         self.cancelled = false;
         self.frame = 0;
         self.dirty = true;
     }
 
+    /// Mark as done with a completion message.
     pub fn set_done(&mut self, msg: impl Into<String>) {
         self.cancelled = true;
         self.message = Some(msg.into());

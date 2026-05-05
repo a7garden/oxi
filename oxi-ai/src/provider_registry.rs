@@ -79,10 +79,15 @@ pub struct ApiKeyAuth {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// AuthSource.
 pub enum AuthSource {
+/// stored variant.
     Stored,
+/// runtime variant.
     Runtime,
+/// environment variant.
     Environment,
+/// ambient variant.
     Ambient,
 }
 

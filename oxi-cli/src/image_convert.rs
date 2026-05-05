@@ -150,15 +150,22 @@ pub fn parse_data_uri(uri: &str) -> Option<(String, Vec<u8>)> {
 /// Image format info
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
+/// png variant.
     Png,
+/// jpeg variant.
     Jpeg,
+/// gif variant.
     Gif,
+/// web p variant.
     WebP,
+/// bmp variant.
     Bmp,
+/// unknown variant.
     Unknown,
 }
 
 impl ImageFormat {
+/// TODO: document this function.
     pub fn mime_type(&self) -> &'static str {
         match self {
             ImageFormat::Png => "image/png",

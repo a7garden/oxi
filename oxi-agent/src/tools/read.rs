@@ -28,6 +28,7 @@ const IMAGE_EXTENSIONS: &[(&str, &str)] = &[
     ("webp", "image/webp"),
 ];
 
+/// ReadTool.
 pub struct ReadTool {
     progress_callback: Arc<Mutex<Option<ProgressCallback>>>,
 }

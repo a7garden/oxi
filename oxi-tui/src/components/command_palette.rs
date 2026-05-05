@@ -6,12 +6,16 @@ use crate::{Cell, Color, Component, Event, KeyCode, KeyEvent, Rect, Size, Surfac
 /// A command entry in the palette.
 #[derive(Debug, Clone)]
 pub struct Command {
+    /// Display name of the command.
     pub name: String,
+    /// Keyboard shortcut, if any.
     pub shortcut: Option<String>,
+    /// Category for grouping.
     pub category: Option<String>,
 }
 
 impl Command {
+    /// Create a new command with just a name.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
@@ -20,11 +24,13 @@ impl Command {
         }
     }
 
+    /// Add a keyboard shortcut.
     pub fn with_shortcut(mut self, shortcut: impl Into<String>) -> Self {
         self.shortcut = Some(shortcut.into());
         self
     }
 
+    /// Add a category label.
     pub fn with_category(mut self, category: impl Into<String>) -> Self {
         self.category = Some(category.into());
         self
@@ -48,6 +54,7 @@ pub struct CommandPalette {
 }
 
 impl CommandPalette {
+    /// Create a palette pre-loaded with the given commands.
     pub fn new(commands: Vec<Command>) -> Self {
         let filtered_indices = (0..commands.len()).collect();
         Self {
@@ -63,17 +70,20 @@ impl CommandPalette {
         }
     }
 
+    /// Set the callback invoked when a command is confirmed.
     pub fn on_command(mut self, f: impl Fn(&Command) + Send + 'static) -> Self {
         self.on_command = Some(Box::new(f));
         self
     }
 
+    /// Replace the command list.
     pub fn set_commands(&mut self, commands: Vec<Command>) {
         self.commands = commands;
         self.apply_filter();
         self.dirty = true;
     }
 
+    /// Show the palette.
     pub fn show(&mut self) {
         self.visible = true;
         self.query.clear();
@@ -83,11 +93,13 @@ impl CommandPalette {
         self.dirty = true;
     }
 
+    /// Hide the palette.
     pub fn hide(&mut self) {
         self.visible = false;
         self.dirty = true;
     }
 
+    /// Check if the palette is currently visible.
     pub fn is_visible(&self) -> bool {
         self.visible
     }

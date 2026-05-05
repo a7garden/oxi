@@ -26,7 +26,9 @@ const DOWNLOAD_TIMEOUT_SECS: u64 = 120;
 /// Supported external tools.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ToolName {
+/// fd variant.
     Fd,
+/// rg variant.
     Rg,
 }
 
