@@ -1,4 +1,4 @@
-# Design: oxi - Clean-room Rust Implementation of pi
+# Design: oxi — A Rust Coding Agent
 
 **Date:** 2026-05-02
 **Status:** Draft
@@ -7,7 +7,7 @@
 
 ## Overview
 
-oxi is a clean-room Rust implementation of pi-mono's core architecture for AI coding agents. The goal is to rebuild the essential abstractions in idiomatic Rust while preserving pi's philosophy: provider-agnostic LLM access, event-driven streaming, and hackable minimalism.
+oxi is a terminal-based AI coding assistant built in Rust. It is inspired by modern agent architectures and provides provider-agnostic LLM access, event-driven streaming, and an extensible tool system.
 
 ---
 

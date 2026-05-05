@@ -382,7 +382,7 @@ impl KeyBinding {
     }
 }
 
-/// Complete set of default keybindings matching pi-mono's KEYBINDINGS.
+/// Complete set of default keybindings.
 pub fn default_keybindings() -> HashMap<String, KeyBinding> {
     let mut m = HashMap::new();
 

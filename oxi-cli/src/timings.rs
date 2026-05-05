@@ -2,7 +2,7 @@
 //!
 //! Enable with the `OXI_TIMING=1` environment variable.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/timings.ts`.
+//! Startup profiling and timing instrumentation.
 
 use std::sync::Mutex;
 use std::time::Instant;

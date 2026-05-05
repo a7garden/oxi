@@ -1,6 +1,4 @@
 //! Important default values used across the application.
-//!
-//! Ported from `pi-mono/packages/coding-agent/src/core/defaults.ts`.
 
 /// Default thinking level for the agent.
 pub const DEFAULT_THINKING_LEVEL: &str = "medium";

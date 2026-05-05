@@ -1,6 +1,6 @@
 //! Telemetry opt-in/out handling.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/telemetry.ts`.
+//! Telemetry utilities for oxi.
 
 /// Check whether install telemetry is enabled.
 ///

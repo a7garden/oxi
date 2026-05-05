@@ -1,6 +1,6 @@
 //! System prompt construction and project context loading.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/system-prompt.ts`.
+//! Originally inspired by pi-mono's system prompt construction.
 
 use chrono::Local;
 

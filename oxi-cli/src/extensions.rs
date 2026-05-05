@@ -6,7 +6,7 @@
 //!
 //! # Architecture
 //!
-//! The extension system is modeled after pi-mono's extension API and provides:
+//! The extension system provides:
 //!
 //! - **Extension manifest** — metadata, permissions, configuration schema
 //! - **Extension lifecycle hooks** — `on_load`, `on_unload`, message/tool/session events
@@ -952,7 +952,7 @@ pub trait Extension: Send + Sync {
         Ok(())
     }
 
-    // ── Session lifecycle hooks (pi-mono parity) ─────────────────────
+    // ── Session lifecycle hooks ─────────────────────
 
     /// Called before switching to another session.
     ///
@@ -993,7 +993,7 @@ pub trait Extension: Send + Sync {
     /// Called after navigating in the session tree.
     fn session_tree(&self, _event: &SessionTreeEvent) {}
 
-    // ── Provider hooks (pi-mono parity) ──────────────────────────────
+    // ── Provider hooks ──────────────────────────────
 
     /// Called to inject or inspect context messages before the agent loop.
     fn context(&self, _event: &mut ContextEvent) -> Result<(), anyhow::Error> {
@@ -1010,7 +1010,7 @@ pub trait Extension: Send + Sync {
         Ok(())
     }
 
-    // ── Model hooks (pi-mono parity) ─────────────────────────────────
+    // ── Model hooks ─────────────────────────────────
 
     /// Called when a new model is selected.
     fn model_select(&self, _event: &ModelSelectEvent) {}
@@ -1018,7 +1018,7 @@ pub trait Extension: Send + Sync {
     /// Called when a new thinking level is selected.
     fn thinking_level_select(&self, _event: &ThinkingLevelSelectEvent) {}
 
-    // ── Bash / Input hooks (pi-mono parity) ──────────────────────────
+    // ── Bash / Input hooks ──────────────────────────
 
     /// Called when a bash command is executed by the user.
     fn bash(&self, _event: &BashEvent) {}
@@ -1467,7 +1467,7 @@ impl ExtensionRegistry {
         errors
     }
 
-    // ── Session Lifecycle Hook Broadcasts (pi-mono parity) ────────────
+    // ── Session Lifecycle Hook Broadcasts ────────────
 
     /// Broadcast `session_before_switch` to all enabled extensions.
     pub fn emit_session_before_switch(
@@ -1584,7 +1584,7 @@ impl ExtensionRegistry {
         }
     }
 
-    // ── Provider Hook Broadcasts (pi-mono parity) ─────────────────────
+    // ── Provider Hook Broadcasts ─────────────────────
 
     /// Broadcast `context` to all enabled extensions.
     pub fn emit_context(
@@ -1643,7 +1643,7 @@ impl ExtensionRegistry {
         errors
     }
 
-    // ── Model Hook Broadcasts (pi-mono parity) ────────────────────────
+    // ── Model Hook Broadcasts ────────────────────────
 
     /// Broadcast `model_select` to all enabled extensions.
     pub fn emit_model_select(&self, event: &ModelSelectEvent) {
@@ -1665,7 +1665,7 @@ impl ExtensionRegistry {
         }
     }
 
-    // ── Bash / Input Hook Broadcasts (pi-mono parity) ─────────────────
+    // ── Bash / Input Hook Broadcasts ─────────────────
 
     /// Broadcast `bash` to all enabled extensions.
     pub fn emit_bash(&self, event: &BashEvent) {

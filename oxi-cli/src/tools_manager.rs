@@ -1,6 +1,6 @@
 //! Tools manager — download and manage external tool binaries (fd, rg).
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/utils/tools-manager.ts`.
+//! External tool binary management (download, cache, resolve).
 //!
 //! Checks for tools in the local bin directory first, then falls back to
 //! system PATH. If not found anywhere, downloads the latest release from

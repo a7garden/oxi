@@ -5,17 +5,23 @@
 //! - Line-level differential updates (zero flicker)
 //! - Streaming text display
 //! - Scrollable chat history
-//! - Slash commands
+//! - Slash commands for session management, export, and settings
 
 use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
 use crate::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
 };
-use crate::session::SessionManager;
+use crate::auth_storage::AuthStorage;
+use crate::changelog;
+use crate::export::{self, ExportMeta, HtmlExportOptions};
+use crate::clipboard_write;
+use crate::keybindings;
+use crate::session::{AgentMessage, SessionManager};
 use anyhow::Result;
 use oxi_agent::AgentEvent;
 use std::io;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 

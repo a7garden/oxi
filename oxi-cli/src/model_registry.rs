@@ -1,6 +1,6 @@
 //! Model registry — manages built-in and custom models, provides API key resolution.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/model-registry.ts`.
+//! Originally inspired by pi-mono's model-registry.
 //!
 //! This module provides a `ModelRegistry` that:
 //! - Loads built-in models from `oxi_ai::model_db`
