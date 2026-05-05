@@ -33,6 +33,7 @@ pub enum KeyCode {
     /// Character keys (A-Z, numbers, symbols)
     Char(char),
     /// Number keys (0-9) - distinct from Char('0') etc.
+    #[allow(dead_code)]
     Number(u8),
 }
 
@@ -141,6 +142,12 @@ pub enum MouseEventKind {
     Drag,
     ScrollUp,
     ScrollDown,
+    /// Horizontal scroll left (touchpad).
+    ScrollLeft,
+    /// Horizontal scroll right (touchpad).
+    ScrollRight,
+    /// Mouse moved without any button pressed (hover).
+    Moved,
 }
 
 /// Mouse event with position and button.

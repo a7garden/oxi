@@ -1,25 +1,15 @@
-# Progress: Clean up pi-mono references in oxi source code comments
+# Progress
 
-## Status: ✅ COMPLETE
+## Status
+In Progress
 
-## Summary
-Updated 30 files across 4 crates (oxi-cli, oxi-agent, oxi-ai, oxi-tui) to clean up pi-mono references in doc comments.
+## Tasks
+- [x] P0-1: Fix `add_overlay()` UB in oxi-tui (double-free from two owning pointers to same memory)
 
-## What was done
-- Replaced `Ported from pi-mono/...` with simple module descriptions
-- Replaced `Based on pi-mono/...` with appropriate descriptions  
-- Removed all `(pi-mono parity)` comment suffixes (9 occurrences in extensions.rs)
-- Changed `Feature parity with pi-mono` to `Features:` 
-- Changed `matching pi-mono format` to simple descriptions
-- Kept "Originally inspired by pi-mono" where appropriate (5 files)
-- All changes are doc comments only — no functional code was modified
+## Files Changed
+- `oxi-tui/src/overlay.rs` — Added Component passthrough methods to `OverlayHandle` trait; fixed `OverlayBox::render()` backdrop overfill
+- `oxi-tui/src/tui.rs` — Simplified `OverlayHandleWrapper` to single `Box<dyn OverlayHandle>`; removed all `unsafe` code
 
-## Files changed: 30
-- oxi-cli: 17 files
-- oxi-agent: 6 files  
-- oxi-ai: 4 files
-- oxi-tui: 2 files
-
-## Verification
-- `grep -rn 'pi-mono' --include='*.rs' | grep -v 'Originally inspired by'` → 0 results
-- Detailed findings written to /tmp/oxi-cleanup-comments.md
+## Notes
+- All 313 unit tests + 12 doc tests pass
+- Backdrop rendering intentionally removed from `OverlayBox::render()` — needs proper area management to be correct

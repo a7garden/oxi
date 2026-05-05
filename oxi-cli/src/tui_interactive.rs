@@ -17,7 +17,7 @@ use crate::changelog;
 use crate::export::{self, ExportMeta, HtmlExportOptions};
 use crate::clipboard_write;
 use crate::keybindings;
-use crate::session::{AgentMessage, SessionManager};
+use crate::session::SessionManager;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
 use std::io;
@@ -1023,10 +1023,14 @@ fn handle_slash_command(
                 PathBuf::from("../CHANGELOG.md"),
             ];
             
-            let entries = changelog_paths.iter()
-                .find_map(|p| changelog::parse_changelog(p).ok())
-                .filter(|e| !e.is_empty())
-                .unwrap_or_default();
+            let mut entries: Vec<changelog::ChangelogEntry> = Vec::new();
+            for path in &changelog_paths {
+                let parsed = changelog::parse_changelog(path);
+                if !parsed.is_empty() {
+                    entries = parsed;
+                    break;
+                }
+            }
             
             if entries.is_empty() {
                 messages.push(ChatMessage {
@@ -1223,7 +1227,12 @@ fn handle_slash_command(
             true
         }
         "/resume" => {
-            let session_dir = SessionManager::get_default_dir();
+            // Get session directory from environment
+            let cwd = std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| ".".to_string());
+            let session_dir = session::get_default_session_dir(&cwd);
+            
             if let Ok(sessions) = std::fs::read_dir(&session_dir) {
                 let mut session_list: Vec<_> = sessions
                     .filter_map(|e| e.ok())

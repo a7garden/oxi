@@ -9,6 +9,7 @@ use crate::{
     event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, ResizeEvent,
     },
+    layout::{split, Constraint, Direction},
     overlay::{OverlayBox, OverlayContent, OverlayHandle, OverlayOptions},
     renderer::Renderer,
     surface::Surface,
@@ -48,11 +49,12 @@ pub struct TUI {
     running: bool,
     /// Event handle callback.
     event_handler: Option<Box<dyn FnMut(crate::Event) + Send>>,
+    /// Layout for arranging children.
+    layout: Option<(Direction, Vec<Constraint>)>,
 }
 
 struct OverlayHandleWrapper {
-    handle: Box<dyn OverlayHandle>,
-    content: Box<dyn Component>,
+    overlay: Box<dyn OverlayHandle>,
 }
 
 impl TUI {
@@ -74,6 +76,7 @@ impl TUI {
             last_height: size.height,
             running: false,
             event_handler: None,
+            layout: None,
         }
     }
 
@@ -137,16 +140,11 @@ impl TUI {
         options: OverlayOptions,
     ) -> usize {
         let id = self.overlay_stack.len();
-        let mut boxed: Box<OverlayBox<T>> = Box::new(OverlayBox::new(content, options));
+        let mut boxed = OverlayBox::new(content, options);
         boxed.set_id(id);
 
-        // Get the content box to wrap - we need to keep the overlay box alive
-        // while also using it as a Component
-        let content_ptr = boxed.as_mut() as *mut OverlayBox<T> as *mut dyn Component;
-
         self.overlay_stack.push(OverlayHandleWrapper {
-            handle: boxed,
-            content: unsafe { Box::from_raw(content_ptr) },
+            overlay: Box::new(boxed),
         });
         self.request_render();
         id
@@ -272,25 +270,25 @@ impl TUI {
             }
             crossterm::event::Event::Mouse(mouse) => {
                 let kind = match mouse.kind {
-                    crossterm::event::MouseEventKind::Moved => MouseEventKind::Drag,
-                    crossterm::event::MouseEventKind::Drag(_) => MouseEventKind::Drag,
+                    crossterm::event::MouseEventKind::Down(_btn) => MouseEventKind::Press,
+                    crossterm::event::MouseEventKind::Up(_btn) => MouseEventKind::Release,
+                    crossterm::event::MouseEventKind::Drag(_btn) => MouseEventKind::Drag,
+                    crossterm::event::MouseEventKind::Moved => MouseEventKind::Moved,
                     crossterm::event::MouseEventKind::ScrollDown => MouseEventKind::ScrollDown,
                     crossterm::event::MouseEventKind::ScrollUp => MouseEventKind::ScrollUp,
-                    _ => MouseEventKind::Click,
+                    crossterm::event::MouseEventKind::ScrollLeft => MouseEventKind::ScrollLeft,
+                    crossterm::event::MouseEventKind::ScrollRight => MouseEventKind::ScrollRight,
                 };
 
-                let button = if mouse
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL)
-                {
-                    MouseButton::Right
-                } else if mouse
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::ALT)
-                {
-                    MouseButton::Middle
-                } else {
-                    MouseButton::Left
+                let button = match mouse.kind {
+                    crossterm::event::MouseEventKind::Down(btn)
+                    | crossterm::event::MouseEventKind::Up(btn)
+                    | crossterm::event::MouseEventKind::Drag(btn) => match btn {
+                        crossterm::event::MouseButton::Left => MouseButton::Left,
+                        crossterm::event::MouseButton::Right => MouseButton::Right,
+                        crossterm::event::MouseButton::Middle => MouseButton::Middle,
+                    },
+                    _ => MouseButton::None,
                 };
 
                 crate::Event::Mouse(MouseEvent {
@@ -314,11 +312,11 @@ impl TUI {
     fn handle_event(&mut self, event: crate::Event) {
         // Handle overlay events first (for modals)
         if let Some(top) = self.overlay_stack.last_mut() {
-            if top.handle.is_hidden() {
+            if top.overlay.is_hidden() {
                 return;
             }
             // Try overlay first
-            if top.content.handle_event(&event) {
+            if top.overlay.handle_event(&event) {
                 self.request_render();
                 return;
             }
@@ -391,8 +389,8 @@ impl TUI {
 
         // Render overlays (on top)
         for overlay in &mut self.overlay_stack {
-            if !overlay.handle.is_hidden() {
-                overlay.content.render(&mut surface, area);
+            if !overlay.overlay.is_hidden() {
+                overlay.overlay.render(&mut surface, area);
             }
         }
 

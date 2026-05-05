@@ -31,6 +31,9 @@ impl Default for OverlayOptions {
 }
 
 /// Handle for managing an active overlay.
+///
+/// This trait combines overlay lifecycle management with Component rendering,
+/// so callers only need one boxed pointer instead of two.
 pub trait OverlayHandle: Send {
     /// Hide the overlay (but keep it in the stack).
     fn hide(&mut self);
@@ -46,6 +49,23 @@ pub trait OverlayHandle: Send {
 
     /// Get a mutable reference to the overlay content.
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
+    // -- Component passthrough methods --
+
+    /// Render the overlay onto the surface.
+    fn render(&mut self, surface: &mut Surface, area: Rect);
+
+    /// Handle an input event. Returns `true` if the event was consumed.
+    fn handle_event(&mut self, event: &Event) -> bool;
+
+    /// Check if the overlay needs re-rendering.
+    fn is_dirty(&self) -> bool;
+
+    /// Clear the dirty flag.
+    fn clear_dirty(&mut self);
+
+    /// Request a re-render.
+    fn request_render(&mut self);
 }
 
 /// Trait for objects that can be rendered as overlay content.
@@ -118,6 +138,28 @@ impl<T: OverlayContent + 'static> OverlayHandle for OverlayBox<T> {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
+
+    // -- Component passthrough delegations --
+
+    fn render(&mut self, surface: &mut Surface, area: Rect) {
+        <Self as Component>::render(self, surface, area);
+    }
+
+    fn handle_event(&mut self, event: &Event) -> bool {
+        <Self as Component>::handle_event(self, event)
+    }
+
+    fn is_dirty(&self) -> bool {
+        <Self as Component>::is_dirty(self)
+    }
+
+    fn clear_dirty(&mut self) {
+        <Self as Component>::clear_dirty(self);
+    }
+
+    fn request_render(&mut self) {
+        <Self as Component>::request_render(self);
+    }
 }
 
 // Ensure OverlayBox is also a Component
@@ -158,13 +200,11 @@ impl<T: OverlayContent> Component for OverlayBox<T> {
         if self.hidden {
             return;
         }
-        // Render backdrop if configured
-        if let Some(_opacity) = self.options.backdrop_opacity {
-            // For now, just render a dark backdrop
-            let mut backdrop_cell = crate::Cell::new(' ');
-            backdrop_cell.bg = crate::cell::Color::Indexed(0);
-            surface.fill(backdrop_cell);
-        }
+        // NOTE: Backdrop rendering is intentionally skipped here.
+        // A full-surface fill would destroy content rendered by components
+        // underneath the overlay. Proper backdrop rendering requires area
+        // management (rendering only within the overlay's designated rect).
+        // That will be added when overlay positioning is implemented.
         self.content.render(surface, area);
     }
 
