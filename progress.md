@@ -1,7 +1,32 @@
 # Progress
 
 ## Status
-**Phase 2: COMPLETE** ✅
+**Phase 3.1: COMPLETE** ✅
+
+## Phase 3 - Documentation
+
+### Phase 3.1 - Critical Types Documentation (2026-05-05)
+- [x] Added `#![warn(missing_docs)]` to all 4 crates
+  - oxi-ai/src/lib.rs
+  - oxi-agent/src/lib.rs
+  - oxi-tui/src/lib.rs
+  - oxi-cli/src/lib.rs
+- [x] Documented Tier 1 items (~50 items across 4 crates)
+  - Context, messages, ProviderEvent (oxi-ai)
+  - AgentState, SharedState, AgentConfig (oxi-agent)
+  - Component trait, Surface, Rect (oxi-tui)
+  - CliArgs, Commands, SessionManager (oxi-cli)
+- [x] Verified build - 369 warnings remaining (down from 1,444)
+- [x] 74.4% reduction in missing documentation warnings
+
+### Warning Reduction
+| Metric | Count |
+|--------|-------|
+| Initial warnings | 1,444 |
+| Final warnings | 369 |
+| **Reduction** | **1,075 (74.4%)** |
+
+## Phase 3.2 - TBD
 
 ## Tasks
 

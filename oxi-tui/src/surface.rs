@@ -5,9 +5,13 @@ use crate::cell::{Attributes, Cell, Color};
 /// A rectangular area in the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Rect {
+    /// X coordinate (column).
     pub x: u16,
+    /// Y coordinate (row).
     pub y: u16,
+    /// Width in columns.
     pub width: u16,
+    /// Height in rows.
     pub height: u16,
 }
 

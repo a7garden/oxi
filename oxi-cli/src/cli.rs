@@ -73,9 +73,9 @@ pub struct CliArgs {
 /// CLI subcommands
 #[derive(Debug, Clone, Subcommand)]
 pub enum Commands {
-    /// List all sessions
+    /// List all sessions.
     Sessions,
-    /// Show session tree structure
+    /// Show session tree structure.
     Tree {
         /// Session ID to show tree for (default: current/last session)
         #[arg(default_value = "")]

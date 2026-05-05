@@ -10,10 +10,7 @@ pub mod helpers;
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
 use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
-use crate::{
-    AgentToolResult, error::AgentError,
-    state::SharedState, tools::{ToolRegistry, AgentTool},
-};
+use crate::{AgentToolResult, error::AgentError, state::SharedState, tools::ToolRegistry};
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
@@ -28,10 +25,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use config::{BeforeToolCallHook, AfterToolCallHook};
-
-// Re-export config types
-pub use config::{AgentLoopConfig, ToolExecutionMode, AUTO_RETRY_MAX_ATTEMPTS, AUTO_RETRY_BASE_DELAY_MS};
+use config::{AgentLoopConfig, BeforeToolCallHook, AfterToolCallHook, ToolExecutionMode};
+use queues::{drain_steering_queue, drain_follow_up_queue, clear_steering_queue, clear_follow_up_queue, clear_all_queues};
+use retry::{stream_with_retry, is_retryable_error, handle_retryable_error, cancel_auto_retry, auto_retry_attempt_method};
+use streaming::stream_assistant_response;
+use helpers::should_stop_after_turn;
+use tool_exec::{execute_tool_calls, should_terminate_batch, create_tool_result_message};
 
 type EmitFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
@@ -46,12 +45,8 @@ pub struct AgentLoop {
     steering_queue: RwLock<Vec<Message>>,
     follow_up_queue: RwLock<Vec<Message>>,
     session_id: Option<String>,
-    /// Tracks the current auto-retry attempt count (atomically so it can
-    /// be read from any thread without holding the async runtime).
     auto_retry_attempt: AtomicUsize,
-    /// Set to `true` to cancel an in-progress auto-retry wait.
     auto_retry_cancel: RwLock<bool>,
-    /// Circuit breaker for provider-level retries.
     circuit_breaker: CircuitBreaker,
 }
 
@@ -67,10 +62,8 @@ impl AgentLoop {
             config.context_window,
         );
 
-        // Pre-initialize the LLM compactor if compaction is enabled
         if config.compaction_strategy != CompactionStrategy::Disabled {
             let model = crate::model_id::resolve_model_from_id(&config.model_id);
-
             if let Some(model) = model {
                 let llm_compactor =
                     Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
@@ -113,33 +106,32 @@ impl AgentLoop {
         self.follow_up_queue.write().push(message);
     }
 
-    // Queue methods delegated to queues module
     pub fn clear_steering_queue(&self) {
-        queues::clear_steering_queue(self);
+        clear_steering_queue(self);
     }
 
     pub fn clear_follow_up_queue(&self) {
-        queues::clear_follow_up_queue(self);
+        clear_follow_up_queue(self);
     }
 
     pub fn clear_all_queues(&self) {
-        queues::clear_all_queues(self);
+        clear_all_queues(self);
     }
 
-    pub fn drain_steering_queue(&self) -> Vec<Message> {
-        queues::drain_steering_queue(self)
+    fn drain_steering_queue(&self) -> Vec<Message> {
+        drain_steering_queue(self)
     }
 
-    pub fn drain_follow_up_queue(&self) -> Vec<Message> {
-        queues::drain_follow_up_queue(self)
+    fn drain_follow_up_queue(&self) -> Vec<Message> {
+        drain_follow_up_queue(self)
     }
 
     pub fn cancel_auto_retry(&self) {
-        retry::cancel_auto_retry(self);
+        cancel_auto_retry(self);
     }
 
     pub fn auto_retry_attempt(&self) -> usize {
-        retry::auto_retry_attempt(self)
+        auto_retry_attempt_method(self)
     }
 
     pub async fn run(
@@ -276,10 +268,9 @@ impl AgentLoop {
                     pending_messages = Vec::new();
                 }
 
-                // --- Auto-compaction check before each LLM call ---
                 self.maybe_compact(&mut messages, turn_number as usize, &emit).await;
 
-                let assistant_message = match self.stream_assistant_response(&mut messages, &emit).await {
+                let assistant_message = match stream_assistant_response(self, &mut messages, &emit).await {
                     Ok(msg) => msg,
                     Err(e) => {
                         let err_msg = format!("{:?}", e);
@@ -292,11 +283,9 @@ impl AgentLoop {
                 new_messages.push(Message::Assistant(assistant_message.clone()));
 
                 if matches!(assistant_message.stop_reason, StopReason::Error) {
-                    // Check for retryable errors (overloaded, rate-limit, server errors)
-                    if retry::is_retryable_error(&assistant_message) {
-                        let did_retry = retry::handle_retryable_error(self, &assistant_message, &mut messages, &emit).await;
+                    if is_retryable_error(&assistant_message) {
+                        let did_retry = handle_retryable_error(self, &assistant_message, &mut messages, &emit).await;
                         if did_retry {
-                            // Emit turn end for the failed turn, then continue loop.
                             emit(AgentEvent::TurnEnd {
                                 turn_number,
                                 assistant_message: Message::Assistant(assistant_message.clone()),
@@ -307,10 +296,9 @@ impl AgentLoop {
                                 assistant_message: Message::Assistant(assistant_message.clone()),
                                 tool_results: vec![],
                             });
-                            has_more_tool_calls = true; // Force another iteration to retry.
+                            has_more_tool_calls = true;
                             continue;
                         }
-                        // Retry not initiated - fall through to normal error handling.
                     }
 
                     emit(AgentEvent::TurnEnd {
@@ -326,7 +314,6 @@ impl AgentLoop {
                     return Ok((messages, events));
                 }
                 if matches!(assistant_message.stop_reason, StopReason::Aborted) {
-                    // On a successful (non-error) response, reset the retry counter.
                     if self.auto_retry_attempt.load(Ordering::Relaxed) > 0 {
                         emit(AgentEvent::AutoRetryEnd {
                             success: true,
@@ -349,7 +336,6 @@ impl AgentLoop {
                     return Ok((messages, events));
                 }
 
-                // Successful response - reset auto-retry counter.
                 if self.auto_retry_attempt.load(Ordering::Relaxed) > 0 {
                     emit(AgentEvent::AutoRetryEnd {
                         success: true,
@@ -365,9 +351,13 @@ impl AgentLoop {
                 has_more_tool_calls = false;
 
                 if !tool_calls.is_empty() {
-                    let executed_batch = self
-                        .execute_tool_calls(&mut messages, &assistant_message, tool_calls, &emit)
-                        .await?;
+                    let executed_batch = execute_tool_calls(
+                        self,
+                        &mut messages,
+                        &assistant_message,
+                        tool_calls,
+                        &emit,
+                    ).await?;
 
                     tool_results = executed_batch.messages;
                     has_more_tool_calls = !executed_batch.terminate;
@@ -408,22 +398,16 @@ impl AgentLoop {
         Ok((messages, events))
     }
 
-    /// Check if context compaction is needed and, if so, run it.
-    /// Emits `CompactionEvent::Triggered`, `Started`, and `Completed`/`Failed` events.
     async fn maybe_compact(
         &self,
         messages: &mut Vec<Message>,
         iteration: usize,
         emit: &EmitFn,
     ) {
-        // Estimate token count from the current message history
         let context_text = serde_json::to_string(&*messages).unwrap_or_default();
         let context_tokens = estimate_tokens(&context_text);
 
-        if !self
-            .compaction_manager
-            .should_compact(context_tokens, iteration)
-        {
+        if !self.compaction_manager.should_compact(context_tokens, iteration) {
             return;
         }
 
@@ -450,16 +434,12 @@ impl AgentLoop {
                     event: CompactionEvent::Started { message_count },
                 });
 
-                // Extract data before moving
                 let kept_messages = compacted.kept_messages;
                 let summary = compacted.summary;
                 let compacted_count = compacted.compacted_count;
 
-                // Replace the in-flight message list with compacted context
                 *messages = kept_messages;
 
-                // Persist to shared state so subsequent iterations also see
-                // the compacted history.
                 let state_msgs = messages.clone();
                 self.state.update(|s| {
                     s.replace_messages(state_msgs);
@@ -467,7 +447,7 @@ impl AgentLoop {
 
                 let compacted_ctx = CompactedContext {
                     summary,
-                    kept_messages: Vec::new(), // Already moved into `messages`
+                    kept_messages: Vec::new(),
                     compacted_count,
                 };
                 emit(AgentEvent::Compaction {
@@ -477,9 +457,7 @@ impl AgentLoop {
                     },
                 });
             }
-            Ok(None) => {
-                // No compaction was actually needed (strategy declined)
-            }
+            Ok(None) => {}
             Err(e) => {
                 emit(AgentEvent::Compaction {
                     event: CompactionEvent::Failed {
@@ -495,29 +473,3 @@ impl AgentLoop {
             .ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
     }
 }
-
-/// Helper: Check if loop should stop after a turn.
-fn should_stop_after_turn(messages: &[Message], assistant_message: &AssistantMessage, max_iterations: usize) -> bool {
-    let current_iteration = messages.iter().filter(|m| matches!(m, Message::Assistant(_))).count();
-
-    if current_iteration >= max_iterations {
-        return true;
-    }
-
-    match assistant_message.stop_reason {
-        StopReason::Stop | StopReason::Length => true,
-        _ => false,
-    }
-}
-
-// Re-export streaming method
-pub(super) use streaming::stream_assistant_response;
-
-// Re-export retry methods
-pub(super) use retry::{stream_with_retry, is_retryable_error, handle_retryable_error};
-
-// Re-export tool exec methods
-pub(super) use tool_exec::{execute_tool_calls, execute_tool_calls_sequential, execute_tool_calls_parallel, execute_prepared_tool_call_static, prepare_tool_call, execute_prepared_tool_call};
-
-// Re-export queue helper functions
-pub use queues::{drain_steering_queue, drain_follow_up_queue, clear_steering_queue, clear_follow_up_queue, clear_all_queues};
