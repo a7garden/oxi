@@ -28,12 +28,16 @@ pub const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high"
 /// Known AI providers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Provider {
+/// pub.
     pub id: String,
+/// pub.
     pub name: String,
+/// pub.
     pub website: Option<String>,
 }
 
 impl Provider {
+/// TODO.
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -52,18 +56,29 @@ impl Provider {
 /// A discovered model
 #[derive(Debug, Clone)]
 pub struct Model {
+/// pub.
     pub provider: String,
+/// pub.
     pub id: String,
+/// pub.
     pub name: Option<String>,
+/// pub.
     pub description: Option<String>,
+/// pub.
     pub context_window: Option<u32>,
+/// pub.
     pub supported_features: Vec<String>,
     // Unified from ModelEntry - cost info
+/// pub.
     pub cost_input: Option<f64>,
+/// pub.
     pub cost_output: Option<f64>,
+/// pub.
     pub cost_cache_read: Option<f64>,
+/// pub.
     pub cost_cache_write: Option<f64>,
     // Unified from ModelEntry - input modalities
+/// pub.
     pub input_modalities: Vec<String>,
 }
 
@@ -119,34 +134,48 @@ impl Model {
 /// Result of parsing a model pattern
 #[derive(Debug)]
 pub struct ParsedModelResult {
+/// pub.
     pub provider: Option<String>,
+/// pub.
     pub model_id: String,
+/// pub.
     pub thinking_level: Option<String>,
+/// pub.
     pub warning: Option<String>,
 }
 
 /// Result of resolving a CLI model
 #[derive(Debug)]
 pub struct ResolveCliModelResult {
+/// pub.
     pub model: Option<Model>,
+/// pub.
     pub thinking_level: Option<String>,
+/// pub.
     pub warning: Option<String>,
+/// pub.
     pub error: Option<String>,
 }
 
 /// Result of finding initial model
 #[derive(Debug)]
 pub struct InitialModelResult {
+/// pub.
     pub model: Option<Model>,
+/// pub.
     pub thinking_level: String,
+/// pub.
     pub fallback_message: Option<String>,
 }
 
 /// Result of restore model from session
 #[derive(Debug)]
 pub struct RestoreModelResult {
+/// pub.
     pub model: Option<Model>,
+/// pub.
     pub fallback_message: Option<String>,
+/// pub.
     pub reason: Option<String>,
 }
 

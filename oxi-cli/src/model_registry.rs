@@ -26,14 +26,23 @@ use parking_lot::RwLock;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelOverride {
+/// pub.
     pub name: Option<String>,
+/// pub.
     pub reasoning: Option<bool>,
+/// pub.
     pub thinking_level_map: Option<HashMap<String, Option<String>>>,
+/// pub.
     pub input: Option<Vec<InputModality>>,
+/// pub.
     pub cost: Option<PartialCost>,
+/// pub.
     pub context_window: Option<usize>,
+/// pub.
     pub max_tokens: Option<usize>,
+/// pub.
     pub headers: Option<HashMap<String, String>>,
+/// pub.
     pub compat: Option<CompatSettings>,
 }
 
@@ -41,9 +50,13 @@ pub struct ModelOverride {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialCost {
+/// pub.
     pub input: Option<f64>,
+/// pub.
     pub output: Option<f64>,
+/// pub.
     pub cache_read: Option<f64>,
+/// pub.
     pub cache_write: Option<f64>,
 }
 
@@ -51,17 +64,29 @@ pub struct PartialCost {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelDefinition {
+/// pub.
     pub id: String,
+/// pub.
     pub name: Option<String>,
+/// pub.
     pub api: Option<Api>,
+/// pub.
     pub base_url: Option<String>,
+/// pub.
     pub reasoning: Option<bool>,
+/// pub.
     pub thinking_level_map: Option<HashMap<String, Option<String>>>,
+/// pub.
     pub input: Option<Vec<InputModality>>,
+/// pub.
     pub cost: Option<Cost>,
+/// pub.
     pub context_window: Option<usize>,
+/// pub.
     pub max_tokens: Option<usize>,
+/// pub.
     pub headers: Option<HashMap<String, String>>,
+/// pub.
     pub compat: Option<CompatSettings>,
 }
 
@@ -69,20 +94,30 @@ pub struct ModelDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfig {
+/// pub.
     pub name: Option<String>,
+/// pub.
     pub base_url: Option<String>,
+/// pub.
     pub api_key: Option<String>,
+/// pub.
     pub api: Option<Api>,
+/// pub.
     pub headers: Option<HashMap<String, String>>,
+/// pub.
     pub compat: Option<CompatSettings>,
+/// pub.
     pub auth_header: Option<bool>,
+/// pub.
     pub models: Option<Vec<ModelDefinition>>,
+/// pub.
     pub model_overrides: Option<HashMap<String, ModelOverride>>,
 }
 
 /// Top-level models.json configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelsConfig {
+/// pub.
     pub providers: HashMap<String, ProviderConfig>,
 }
 

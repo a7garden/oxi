@@ -27,6 +27,7 @@ fn truncate_line(line: &str) -> (String, bool) {
 pub struct GrepTool;
 
 impl GrepTool {
+/// TODO.
     pub fn new() -> Self {
         Self
     }

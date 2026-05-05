@@ -26,6 +26,7 @@ const PREVIEW_THRESHOLD_LINES: usize = 20;
 pub struct WriteTool;
 
 impl WriteTool {
+/// TODO.
     pub fn new() -> Self {
         Self
     }

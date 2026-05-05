@@ -177,18 +177,26 @@ pub struct ResolvedResource {
 /// Resolved paths for all resource types
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResolvedPaths {
+/// pub.
     pub extensions: Vec<ResolvedResource>,
+/// pub.
     pub skills: Vec<ResolvedResource>,
+/// pub.
     pub prompts: Vec<ResolvedResource>,
+/// pub.
     pub themes: Vec<ResolvedResource>,
 }
 
 /// Progress events for package operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProgressEvent {
+/// pub.
     pub event_type: ProgressEventType,
+/// pub.
     pub action: ProgressAction,
+/// pub.
     pub source: String,
+/// pub.
     pub message: Option<String>,
 }
 
@@ -457,8 +465,11 @@ fn parse_git_source(source: &str) -> ParsedSource {
 /// Information fetched from the npm registry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NpmPackageInfo {
+/// pub.
     pub name: String,
+/// pub.
     pub versions: BTreeMap<String, serde_json::Value>,
+/// pub.
     #[serde(rename = "dist-tags")]
     pub dist_tags: BTreeMap<String, String>,
 }
@@ -782,9 +793,13 @@ impl Default for Lockfile {
 /// Counts of each resource type in a package
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResourceCounts {
+/// pub.
     pub extensions: usize,
+/// pub.
     pub skills: usize,
+/// pub.
     pub prompts: usize,
+/// pub.
     pub themes: usize,
 }
 
@@ -817,18 +832,26 @@ impl std::fmt::Display for ResourceCounts {
 /// Information about an available package update
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageUpdateInfo {
+/// pub.
     pub source: String,
+/// pub.
     pub display_name: String,
+/// pub.
     pub source_type: String, // "npm" or "git"
+/// pub.
     pub scope: SourceScope,
 }
 
 /// A configured package
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfiguredPackage {
+/// pub.
     pub source: String,
+/// pub.
     pub scope: SourceScope,
+/// pub.
     pub filtered: bool,
+/// pub.
     pub installed_path: Option<PathBuf>,
 }
 

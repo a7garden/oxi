@@ -15,12 +15,16 @@ use tracing::{debug, info, warn};
 /// Agent message for queued items
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AgentMessage {
+/// pub.
     pub role: String,
+/// pub.
     pub content: String,
+/// pub.
     pub timestamp: i64,
 }
 
 impl AgentMessage {
+/// TODO.
     pub fn user(content: String) -> Self {
         Self {
             role: "user".to_string(),
@@ -29,6 +33,7 @@ impl AgentMessage {
         }
     }
 
+/// TODO.
     pub fn assistant(content: String) -> Self {
         Self {
             role: "assistant".to_string(),
@@ -83,6 +88,7 @@ pub struct CompactedContext {
 }
 
 impl CompactedContext {
+/// TODO.
     pub fn new(summary: String, compacted_count: usize, tokens_saved: usize) -> Self {
         Self {
             summary,
@@ -108,17 +114,23 @@ pub enum CompactorState {
 pub enum CompactorEvent {
     /// Compaction started
     Started {
+/// reason.
         reason: CompactionReason,
+/// tokens_before.
         tokens_before: usize,
     },
     /// Compaction progress update
     Progress {
+/// messages_compacted.
         messages_compacted: usize,
+/// total_messages.
         total_messages: usize,
     },
     /// Compaction completed successfully
     Completed {
+/// result.
         result: CompactedContext,
+/// tokens_after.
         tokens_after: usize,
     },
     /// Compaction was aborted
@@ -127,8 +139,11 @@ pub enum CompactorEvent {
     Failed { error: String },
     /// Context is approaching threshold
     Warning {
+/// current_ratio.
         current_ratio: f32,
+/// tokens.
         tokens: usize,
+/// max_tokens.
         max_tokens: usize,
     },
 }
@@ -162,8 +177,11 @@ impl std::fmt::Display for CompactionReason {
 /// Notification for UI display
 #[derive(Debug, Clone)]
 pub struct CompactionNotification {
+/// pub.
     pub message: String,
+/// pub.
     pub level: NotificationLevel,
+/// pub.
     pub can_cancel: bool,
 }
 
@@ -179,6 +197,7 @@ pub enum NotificationLevel {
 }
 
 impl CompactionNotification {
+/// TODO.
     pub fn info(msg: impl Into<String>) -> Self {
         Self {
             message: msg.into(),
@@ -187,6 +206,7 @@ impl CompactionNotification {
         }
     }
 
+/// TODO.
     pub fn warning(msg: impl Into<String>, can_cancel: bool) -> Self {
         Self {
             message: msg.into(),
@@ -195,6 +215,7 @@ impl CompactionNotification {
         }
     }
 
+/// TODO.
     pub fn compacting(tokens: usize, max_tokens: usize, percentage: f32) -> Self {
         Self {
             message: format!(

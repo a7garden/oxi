@@ -46,17 +46,11 @@ pub struct MessageEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MessageRole {
-/// user.
     User,
-/// assistant.
     Assistant,
-/// system.
     System,
-/// tool.
     Tool,
-/// tool  result.
     ToolResult,
-/// custom.
     Custom,
 }
 
@@ -251,11 +245,8 @@ pub struct BranchSummaryResult {
 /// Error during summarization
 #[derive(Debug, Clone)]
 pub enum SummarizationError {
-/// no  model.
     NoModel,
-/// aborted.
     Aborted,
-/// failed.
     Failed(String),
 }
 
@@ -371,15 +362,11 @@ impl SessionNavigator {
     }
 
     /// Collect entries that should be summarized when navigating from one position to another.
-    ///
-    /// Walks from oldLeafId back to the common ancestor with targetId, collecting entries
-    /// along the way.
     pub fn collect_entries_for_branch_summary(
         &self,
         old_leaf_id: Option<Uuid>,
         target_id: Uuid,
     ) -> CollectEntriesResult {
-        // If no old position, nothing to summarize
         let old_leaf_id = match old_leaf_id {
             Some(id) => id,
             None => {
@@ -390,7 +377,6 @@ impl SessionNavigator {
             }
         };
 
-        // Build sets of IDs on both paths
         let old_path_ids: HashSet<Uuid> = self
             .get_branch(Some(old_leaf_id))
             .iter()
@@ -399,8 +385,6 @@ impl SessionNavigator {
 
         let target_path = self.get_branch(Some(target_id));
 
-        // Find common ancestor (deepest node that's on both paths)
-        // target_path is root-first, so iterate backwards
         let mut common_ancestor_id: Option<Uuid> = None;
         for entry in target_path.iter().rev() {
             let id = Self::entry_id(entry);
@@ -410,7 +394,6 @@ impl SessionNavigator {
             }
         }
 
-        // Collect entries from old leaf back to common ancestor
         let mut entries: Vec<&SessionEntryType> = Vec::new();
         let mut current_id: Option<Uuid> = Some(old_leaf_id);
 
@@ -426,7 +409,6 @@ impl SessionNavigator {
             }
         }
 
-        // Reverse to get chronological order
         entries.reverse();
 
         CollectEntriesResult {
@@ -436,14 +418,6 @@ impl SessionNavigator {
     }
 
     /// Navigate to a target entry in the session tree.
-    ///
-    /// This handles:
-    /// - No-op if already at target
-    /// - Collection of entries to summarize
-    /// - Extension hooks (session_before_tree, session_tree)
-    /// - Branch summarization via the provided summarizer
-    /// - Leaf switching based on target type
-    /// - Label attachment
     pub fn navigate_tree<N: Summarizer + ?Sized>(
         &mut self,
         target_id: Uuid,
@@ -453,7 +427,6 @@ impl SessionNavigator {
     ) -> NavigationResult {
         let old_leaf_id = self.leaf_id;
 
-        // No-op if already at target
         if Some(target_id) == old_leaf_id {
             return NavigationResult {
                 editor_text: None,
@@ -463,7 +436,6 @@ impl SessionNavigator {
             };
         }
 
-        // Validate target exists
         let target_entry = match self.entries_by_id.get(&target_id) {
             Some(e) => e,
             None => {
@@ -476,15 +448,12 @@ impl SessionNavigator {
             }
         };
 
-        // Collect entries to summarize (from old leaf to common ancestor)
         let collection = self.collect_entries_for_branch_summary(old_leaf_id, target_id);
 
-        // Prepare mutable options that can be overridden by extensions
         let mut custom_instructions = options.custom_instructions.clone();
         let mut replace_instructions = options.replace_instructions;
         let mut label = options.label.clone();
 
-        // Prepare tree preparation for extension hooks
         let preparation = TreePreparation {
             target_id,
             old_leaf_id,
@@ -496,7 +465,6 @@ impl SessionNavigator {
             label: label.clone(),
         };
 
-        // Run extension hook (session_before_tree)
         let mut extension_summary: Option<ExtensionSummary> = None;
         let mut from_extension = false;
 
@@ -516,7 +484,6 @@ impl SessionNavigator {
                 from_extension = true;
             }
 
-            // Allow extensions to override instructions and label
             if let Some(ci) = result.custom_instructions {
                 custom_instructions = Some(ci);
             }
@@ -528,7 +495,6 @@ impl SessionNavigator {
             }
         }
 
-        // Run default summarizer if needed
         let mut summary_text: Option<String> = None;
         let mut summary_details: Option<BranchSummaryDetails> = None;
 
@@ -553,7 +519,6 @@ impl SessionNavigator {
                             };
                         }
                         if let Some(err) = summary_result.error {
-                            // Log error but continue without summary
                             tracing::warn!("Summarization failed: {}", err);
                         }
                         summary_text = summary_result.summary;
@@ -573,32 +538,24 @@ impl SessionNavigator {
             }
         } else if let Some(ext_sum) = extension_summary {
             summary_text = Some(ext_sum.summary);
-            summary_details = ext_sum.details.and_then(|d| {
-                serde_json::from_value(d).ok()
-            });
+            summary_details = ext_sum.details.and_then(|d| serde_json::from_value(d).ok());
         }
 
-        // Determine the new leaf position based on target type
         let (new_leaf_id, editor_text) = Self::determine_leaf_and_editor(target_entry);
 
-        // Switch leaf (with or without summary)
         let has_summary = summary_text.is_some();
         let summary_entry_id = if let Some(text) = summary_text {
-            // Create summary at target position (can be null for root)
             let summary_id = self.branch_with_summary(new_leaf_id, text, summary_details, from_extension);
 
-            // Attach label to the summary entry
             if let Some(l) = &label {
                 self.append_label_change(summary_id, Some(l.clone()));
             }
 
             Some(summary_id)
         } else if new_leaf_id.is_none() {
-            // No summary, navigating to root - reset leaf
             self.reset_leaf();
             None
         } else {
-            // No summary, navigating to non-root
             if let Some(id) = new_leaf_id {
                 self.branch(id);
             } else {
@@ -607,7 +564,6 @@ impl SessionNavigator {
             None
         };
 
-        // Attach label to target entry when not summarizing
         let has_label = label.is_some();
         if has_label && !has_summary {
             self.append_label_change(target_id, label);
@@ -621,11 +577,6 @@ impl SessionNavigator {
         }
     }
 
-    /// Determine the new leaf position and editor text based on target entry type.
-    ///
-    /// - User message: leaf = parent (null if root), text goes to editor
-    /// - Custom message: leaf = parent (null if root), text goes to editor
-    /// - Other entries: leaf = selected node
     fn determine_leaf_and_editor(entry: &SessionEntryType) -> (Option<Uuid>, Option<String>) {
         match entry {
             SessionEntryType::Message(msg) if msg.role.is_user() => {
@@ -654,7 +605,6 @@ impl SessionNavigator {
     /// Switch to a different entry (start a new branch).
     pub fn branch(&mut self, branch_from_id: Uuid) {
         if !self.entries_by_id.contains_key(&branch_from_id) {
-            tracing::warn!("Entry {} not found for branching", branch_from_id);
             return;
         }
         self.leaf_id = Some(branch_from_id);
@@ -666,7 +616,6 @@ impl SessionNavigator {
     }
 
     /// Start a new branch with a summary of the abandoned path.
-    /// Returns the ID of the new summary entry.
     pub fn branch_with_summary(
         &mut self,
         branch_from_id: Option<Uuid>,
@@ -674,22 +623,6 @@ impl SessionNavigator {
         details: Option<BranchSummaryDetails>,
         from_hook: bool,
     ) -> Uuid {
-        // Validate branch_from_id exists if provided
-        if let Some(bfid) = branch_from_id {
-            if !self.entries_by_id.contains_key(&bfid) {
-                tracing::warn!(
-                    "Entry {:?} not found for branch_with_summary",
-                    branch_from_id
-                );
-            }
-        }
-        {
-            tracing::warn!(
-                "Entry {:?} not found for branch_with_summary",
-                branch_from_id
-            );
-        }
-
         self.leaf_id = branch_from_id;
 
         let summary_id = Uuid::new_v4();
@@ -708,10 +641,8 @@ impl SessionNavigator {
     }
 
     /// Set or clear a label on an entry.
-    /// Returns the ID of the label entry created.
     pub fn append_label_change(&mut self, target_id: Uuid, label: Option<String>) -> Uuid {
         if !self.entries_by_id.contains_key(&target_id) {
-            tracing::warn!("Entry {} not found for label change", target_id);
             return Uuid::nil();
         }
 
@@ -748,8 +679,6 @@ impl SessionNavigator {
     pub fn get_label_timestamp(&self, id: Uuid) -> Option<i64> {
         self.label_timestamps_by_id.get(&id).copied()
     }
-
-    // Helper methods for accessing entry fields generically
 
     fn entry_id(entry: &SessionEntryType) -> Uuid {
         match entry {
@@ -821,6 +750,25 @@ pub fn is_assistant_message(entry: &SessionEntryType) -> bool {
 mod tests {
     use super::*;
 
+    /// No-op summarizer for tests that don't need summarization.
+    struct NoOpSummarizer;
+    impl Summarizer for NoOpSummarizer {
+        async fn summarize(
+            &self,
+            _entries: &[SessionEntryType],
+            _custom_instructions: Option<&str>,
+            _replace_instructions: bool,
+        ) -> Result<BranchSummaryResult, SummarizationError> {
+            Ok(BranchSummaryResult {
+                summary: None,
+                read_files: vec![],
+                modified_files: vec![],
+                aborted: false,
+                error: None,
+            })
+        }
+    }
+
     fn create_message(id: Uuid, parent_id: Option<Uuid>, role: MessageRole, content: &str) -> SessionEntryType {
         SessionEntryType::Message(MessageEntry {
             id,
@@ -831,11 +779,26 @@ mod tests {
         })
     }
 
+    fn entry_id(entry: &SessionEntryType) -> Uuid {
+        match entry {
+            SessionEntryType::Message(e) => e.id,
+            SessionEntryType::BranchSummary(e) => e.id,
+            SessionEntryType::Compaction(e) => e.id,
+            SessionEntryType::Label(e) => e.id,
+            SessionEntryType::SessionInfo(e) => e.id,
+            SessionEntryType::Custom(e) => e.id,
+            SessionEntryType::CustomMessage(e) => e.id,
+        }
+    }
+
+    // ===================================================================
+    // Original tests
+    // ===================================================================
+
     #[test]
     fn test_navigate_to_user_message() {
         let mut nav = SessionNavigator::new();
 
-        // Create a simple tree: root -> user -> assistant
         let root_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
         let assistant_id = Uuid::new_v4();
@@ -846,8 +809,7 @@ mod tests {
 
         nav.branch(assistant_id);
 
-        // Navigate back to user message
-        let result = nav.navigate_tree(user_id, NavigationOptions::default(), None::<&dyn Summarizer>, None);
+        let result = nav.navigate_tree(user_id, NavigationOptions::default(), None as Option<&NoOpSummarizer>, None);
 
         assert!(!result.cancelled);
         assert!(!result.aborted);
@@ -869,8 +831,7 @@ mod tests {
 
         nav.branch(assistant_id);
 
-        // Navigate to assistant message (should stay there)
-        let result = nav.navigate_tree(assistant_id, NavigationOptions::default(), None::<&dyn Summarizer>, None);
+        let result = nav.navigate_tree(assistant_id, NavigationOptions::default(), None as Option<&NoOpSummarizer>, None);
 
         assert!(!result.cancelled);
         assert_eq!(nav.get_leaf_id(), Some(assistant_id));
@@ -884,8 +845,7 @@ mod tests {
         nav.add_entry(create_message(entry_id, None, MessageRole::User, "Test"));
         nav.branch(entry_id);
 
-        // Navigate to same position (no-op)
-        let result = nav.navigate_tree(entry_id, NavigationOptions::default(), None::<&dyn Summarizer>, None);
+        let result = nav.navigate_tree(entry_id, NavigationOptions::default(), None as Option<&NoOpSummarizer>, None);
 
         assert!(!result.cancelled);
         assert_eq!(result.editor_text, None);
@@ -893,32 +853,25 @@ mod tests {
 
     #[test]
     fn test_collect_entries_for_branch_summary() {
-        let nav = SessionNavigator::new();
-
         let root_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
         let assistant_id = Uuid::new_v4();
         let branch_user_id = Uuid::new_v4();
         let branch_assistant_id = Uuid::new_v4();
 
-        // Main branch: root -> user -> assistant
-        let mut entries = vec![
+        let entries = vec![
             create_message(root_id, None, MessageRole::User, "Root"),
             create_message(user_id, Some(root_id), MessageRole::User, "User"),
             create_message(assistant_id, Some(user_id), MessageRole::Assistant, "Assistant"),
+            create_message(branch_user_id, Some(user_id), MessageRole::User, "Branch User"),
+            create_message(branch_assistant_id, Some(branch_user_id), MessageRole::Assistant, "Branch Assistant"),
         ];
-
-        // Branch from user: user -> branch_user -> branch_assistant
-        entries.push(create_message(branch_user_id, Some(user_id), MessageRole::User, "Branch User"));
-        entries.push(create_message(branch_assistant_id, Some(branch_user_id), MessageRole::Assistant, "Branch Assistant"));
 
         let nav = SessionNavigator::from_entries(entries, Some(branch_assistant_id));
 
-        // Collect entries from branch_assistant back to root
         let result = nav.collect_entries_for_branch_summary(Some(branch_assistant_id), root_id);
 
         assert_eq!(result.common_ancestor_id, Some(root_id));
-        // Should collect branch_assistant and branch_user
         assert_eq!(result.entries.len(), 2);
     }
 
@@ -929,13 +882,11 @@ mod tests {
         let entry_id = Uuid::new_v4();
         nav.add_entry(create_message(entry_id, None, MessageRole::User, "Test"));
 
-        // Add label
         let label_id = nav.append_label_change(entry_id, Some("Important".to_string()));
 
         assert_eq!(nav.get_label(entry_id), Some("Important"));
         assert!(nav.get_entry(label_id).is_some());
 
-        // Remove label
         nav.append_label_change(entry_id, None);
 
         assert_eq!(nav.get_label(entry_id), None);
@@ -950,7 +901,6 @@ mod tests {
 
         nav.branch(entry_id);
 
-        // Create a branch with summary
         let summary_id = nav.branch_with_summary(
             Some(entry_id),
             "This is a summary".to_string(),
@@ -961,12 +911,376 @@ mod tests {
         assert!(nav.get_entry(summary_id).is_some());
         assert_eq!(nav.get_leaf_id(), Some(entry_id));
 
-        // Verify it's a branch summary entry
         match nav.get_entry(summary_id) {
             Some(SessionEntryType::BranchSummary(e)) => {
                 assert_eq!(e.summary, "This is a summary");
             }
             _ => panic!("Expected branch summary entry"),
         }
+    }
+
+    // ===================================================================
+    // Additional comprehensive tests
+    // ===================================================================
+
+    #[test]
+    fn test_new_navigator_has_no_leaf() {
+        let nav = SessionNavigator::new();
+        assert!(nav.get_leaf_id().is_none());
+    }
+
+    #[test]
+    fn test_default_navigator_has_no_leaf() {
+        let nav = SessionNavigator::default();
+        assert!(nav.get_leaf_id().is_none());
+    }
+
+    #[test]
+    fn test_get_entry_returns_none_for_unknown() {
+        let nav = SessionNavigator::new();
+        assert!(nav.get_entry(Uuid::new_v4()).is_none());
+    }
+
+    #[test]
+    fn test_get_branch_returns_empty_when_no_entries() {
+        let nav = SessionNavigator::new();
+        assert!(nav.get_branch(None).is_empty());
+    }
+
+    #[test]
+    fn test_get_branch_returns_full_path() {
+        let mut nav = SessionNavigator::new();
+        let root_id = Uuid::new_v4();
+        let mid_id = Uuid::new_v4();
+        let leaf_id = Uuid::new_v4();
+
+        nav.add_entry(create_message(root_id, None, MessageRole::User, "Root"));
+        nav.add_entry(create_message(mid_id, Some(root_id), MessageRole::Assistant, "Mid"));
+        nav.add_entry(create_message(leaf_id, Some(mid_id), MessageRole::User, "Leaf"));
+        nav.branch(leaf_id);
+
+        let branch = nav.get_branch(None);
+        assert_eq!(branch.len(), 3);
+        assert_eq!(entry_id(branch[0]), root_id);
+        assert_eq!(entry_id(branch[1]), mid_id);
+        assert_eq!(entry_id(branch[2]), leaf_id);
+    }
+
+    #[test]
+    fn test_get_children() {
+        let mut nav = SessionNavigator::new();
+        let parent_id = Uuid::new_v4();
+        let child_a = Uuid::new_v4();
+        let child_b = Uuid::new_v4();
+
+        nav.add_entry(create_message(parent_id, None, MessageRole::User, "Parent"));
+        nav.add_entry(create_message(child_a, Some(parent_id), MessageRole::Assistant, "A"));
+        nav.add_entry(create_message(child_b, Some(parent_id), MessageRole::Assistant, "B"));
+
+        let children = nav.get_children(parent_id);
+        assert_eq!(children.len(), 2);
+    }
+
+    #[test]
+    fn test_get_children_of_leaf() {
+        let mut nav = SessionNavigator::new();
+        let id = Uuid::new_v4();
+        nav.add_entry(create_message(id, None, MessageRole::User, "Solo"));
+
+        let children = nav.get_children(id);
+        assert!(children.is_empty());
+    }
+
+    #[test]
+    fn test_branch_switches_leaf() {
+        let mut nav = SessionNavigator::new();
+        let id = Uuid::new_v4();
+        nav.add_entry(create_message(id, None, MessageRole::User, "Test"));
+
+        nav.branch(id);
+        assert_eq!(nav.get_leaf_id(), Some(id));
+
+        nav.reset_leaf();
+        assert_eq!(nav.get_leaf_id(), None);
+    }
+
+    #[test]
+    fn test_reset_leaf() {
+        let mut nav = SessionNavigator::new();
+        let id = Uuid::new_v4();
+        nav.add_entry(create_message(id, None, MessageRole::User, "Test"));
+        nav.branch(id);
+        assert_eq!(nav.get_leaf_id(), Some(id));
+
+        nav.reset_leaf();
+        assert!(nav.get_leaf_id().is_none());
+    }
+
+    #[test]
+    fn test_from_entries_preserves_leaf() {
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        let entries = vec![
+            create_message(id1, None, MessageRole::User, "A"),
+            create_message(id2, Some(id1), MessageRole::Assistant, "B"),
+        ];
+        let nav = SessionNavigator::from_entries(entries, Some(id2));
+        assert_eq!(nav.get_leaf_id(), Some(id2));
+        assert!(nav.get_entry(id1).is_some());
+        assert!(nav.get_entry(id2).is_some());
+    }
+
+    #[test]
+    fn test_navigate_to_nonexistent_returns_cancelled() {
+        let mut nav = SessionNavigator::new();
+        let id = Uuid::new_v4();
+        nav.add_entry(create_message(id, None, MessageRole::User, "Test"));
+        nav.branch(id);
+
+        let result = nav.navigate_tree(
+            Uuid::new_v4(),
+            NavigationOptions::default(),
+            None as Option<&NoOpSummarizer>,
+            None,
+        );
+        assert!(result.cancelled);
+    }
+
+    #[test]
+    fn test_navigate_to_root_resets_leaf() {
+        let mut nav = SessionNavigator::new();
+        let root_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+
+        nav.add_entry(create_message(root_id, None, MessageRole::User, "Root"));
+        nav.add_entry(create_message(child_id, Some(root_id), MessageRole::Assistant, "Child"));
+        nav.branch(child_id);
+
+        let result = nav.navigate_tree(
+            root_id,
+            NavigationOptions::default(),
+            None as Option<&NoOpSummarizer>,
+            None,
+        );
+        assert!(!result.cancelled);
+        assert_eq!(result.editor_text, Some("Root".to_string()));
+        assert_eq!(nav.get_leaf_id(), None);
+    }
+
+    #[test]
+    fn test_collect_entries_no_old_leaf() {
+        let target_id = Uuid::new_v4();
+        let mut nav = SessionNavigator::new();
+        nav.add_entry(create_message(target_id, None, MessageRole::User, "T"));
+
+        let result = nav.collect_entries_for_branch_summary(None, target_id);
+        assert!(result.entries.is_empty());
+        assert_eq!(result.common_ancestor_id, None);
+    }
+
+    #[test]
+    fn test_collect_entries_same_branch_common_ancestor() {
+        let root_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let assistant_id = Uuid::new_v4();
+
+        let entries = vec![
+            create_message(root_id, None, MessageRole::User, "Root"),
+            create_message(user_id, Some(root_id), MessageRole::User, "User"),
+            create_message(assistant_id, Some(user_id), MessageRole::Assistant, "Asst"),
+        ];
+
+        let nav = SessionNavigator::from_entries(entries, Some(assistant_id));
+
+        let result = nav.collect_entries_for_branch_summary(Some(assistant_id), user_id);
+        assert_eq!(result.common_ancestor_id, Some(user_id));
+        assert_eq!(result.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_label_timestamp() {
+        let mut nav = SessionNavigator::new();
+        let id = Uuid::new_v4();
+        nav.add_entry(create_message(id, None, MessageRole::User, "Test"));
+
+        assert!(nav.get_label_timestamp(id).is_none());
+        nav.append_label_change(id, Some("marker".to_string()));
+        assert!(nav.get_label_timestamp(id).is_some());
+    }
+
+    #[test]
+    fn test_label_replace() {
+        let mut nav = SessionNavigator::new();
+        let id = Uuid::new_v4();
+        nav.add_entry(create_message(id, None, MessageRole::User, "Test"));
+
+        nav.append_label_change(id, Some("first".to_string()));
+        assert_eq!(nav.get_label(id), Some("first"));
+
+        nav.append_label_change(id, Some("second".to_string()));
+        assert_eq!(nav.get_label(id), Some("second"));
+    }
+
+    #[test]
+    fn test_label_nonexistent_entry_returns_nil() {
+        let mut nav = SessionNavigator::new();
+        let id = nav.append_label_change(Uuid::new_v4(), Some("ghost".to_string()));
+        assert_eq!(id, Uuid::nil());
+    }
+
+    #[test]
+    fn test_branch_with_summary_details() {
+        let mut nav = SessionNavigator::new();
+        let id = Uuid::new_v4();
+        nav.add_entry(create_message(id, None, MessageRole::User, "Test"));
+        nav.branch(id);
+
+        let details = BranchSummaryDetails {
+            read_files: vec!["a.rs".into()],
+            modified_files: vec!["b.rs".into()],
+        };
+        let summary_id = nav.branch_with_summary(Some(id), "Summary".into(), Some(details), true);
+
+        match nav.get_entry(summary_id) {
+            Some(SessionEntryType::BranchSummary(e)) => {
+                assert_eq!(e.summary, "Summary");
+                assert!(e.from_hook.unwrap_or(false));
+                assert!(e.details.is_some());
+                let d = e.details.as_ref().unwrap();
+                assert_eq!(d.read_files, vec!["a.rs"]);
+                assert_eq!(d.modified_files, vec!["b.rs"]);
+            }
+            _ => panic!("Expected branch summary"),
+        }
+    }
+
+    #[test]
+    fn test_navigate_with_extension_cancel() {
+        let mut nav = SessionNavigator::new();
+        let root_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+        nav.add_entry(create_message(root_id, None, MessageRole::User, "R"));
+        nav.add_entry(create_message(child_id, Some(root_id), MessageRole::Assistant, "C"));
+        nav.branch(child_id);
+
+        let hook = |_: TreePreparation| -> BeforeTreeHookResult {
+            BeforeTreeHookResult {
+                cancel: true,
+                summary: None,
+                custom_instructions: None,
+                replace_instructions: None,
+                label: None,
+            }
+        };
+
+        let result = nav.navigate_tree(
+            root_id,
+            NavigationOptions::default(),
+            None as Option<&NoOpSummarizer>,
+            Some(&hook),
+        );
+        assert!(result.cancelled);
+    }
+
+    #[test]
+    fn test_navigate_with_extension_summary() {
+        let mut nav = SessionNavigator::new();
+        let root_id = Uuid::new_v4();
+        let child_id = Uuid::new_v4();
+        nav.add_entry(create_message(root_id, None, MessageRole::User, "R"));
+        nav.add_entry(create_message(child_id, Some(root_id), MessageRole::Assistant, "C"));
+        nav.branch(child_id);
+
+        let hook = |_: TreePreparation| -> BeforeTreeHookResult {
+            BeforeTreeHookResult {
+                cancel: false,
+                summary: Some(ExtensionSummary {
+                    summary: "Ext summary".into(),
+                    details: None,
+                }),
+                custom_instructions: None,
+                replace_instructions: None,
+                label: None,
+            }
+        };
+
+        let result = nav.navigate_tree(
+            root_id,
+            NavigationOptions {
+                summarize: true,
+                ..Default::default()
+            },
+            None as Option<&NoOpSummarizer>,
+            Some(&hook),
+        );
+        assert!(!result.cancelled);
+        assert!(result.summary_entry_id.is_some());
+
+        let sid = result.summary_entry_id.unwrap();
+        match nav.get_entry(sid) {
+            Some(SessionEntryType::BranchSummary(e)) => {
+                assert_eq!(e.summary, "Ext summary");
+            }
+            _ => panic!("Expected branch summary from extension"),
+        }
+    }
+
+    #[test]
+    fn test_message_role_checks() {
+        assert!(MessageRole::User.is_user());
+        assert!(!MessageRole::User.is_assistant());
+        assert!(MessageRole::Assistant.is_assistant());
+        assert!(!MessageRole::Assistant.is_user());
+        assert!(!MessageRole::System.is_user());
+        assert!(!MessageRole::Tool.is_user());
+    }
+
+    #[test]
+    fn test_utility_functions() {
+        let user_entry = create_message(Uuid::new_v4(), None, MessageRole::User, "hi");
+        let asst_entry = create_message(Uuid::new_v4(), None, MessageRole::Assistant, "yo");
+        let sys_entry = create_message(Uuid::new_v4(), None, MessageRole::System, "sys");
+
+        assert!(is_user_message(&user_entry));
+        assert!(!is_user_message(&asst_entry));
+        assert!(is_assistant_message(&asst_entry));
+        assert!(!is_assistant_message(&user_entry));
+        assert!(!is_user_message(&sys_entry));
+        assert!(!is_assistant_message(&sys_entry));
+    }
+
+    #[test]
+    fn test_session_entry_type_accessors() {
+        let id = Uuid::new_v4();
+        let msg = SessionEntryType::Message(MessageEntry {
+            id,
+            parent_id: None,
+            timestamp: 42,
+            role: MessageRole::User,
+            content: "test".into(),
+        });
+
+        match &msg {
+            SessionEntryType::Message(e) => {
+                assert_eq!(e.id, id);
+                assert_eq!(e.parent_id, None);
+                assert_eq!(e.timestamp, 42);
+                assert_eq!(e.role, MessageRole::User);
+                assert_eq!(e.content, "test");
+            }
+            _ => panic!("Expected Message"),
+        }
+    }
+
+    #[test]
+    fn test_get_all_entries() {
+        let mut nav = SessionNavigator::new();
+        let id1 = Uuid::new_v4();
+        let id2 = Uuid::new_v4();
+        nav.add_entry(create_message(id1, None, MessageRole::User, "A"));
+        nav.add_entry(create_message(id2, Some(id1), MessageRole::Assistant, "B"));
+
+        let all = nav.get_entries();
+        assert_eq!(all.len(), 2);
     }
 }

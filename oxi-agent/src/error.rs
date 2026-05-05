@@ -30,9 +30,13 @@ pub enum AgentError {
     /// Fallback failed – both primary and fallback model errored
     #[error("Both models failed – {primary_model} ({primary_error}) and {fallback_model} ({fallback_error})")]
     FallbackFailed {
+/// primary_model.
         primary_model: String,
+/// primary_error.
         primary_error: String,
+/// fallback_model.
         fallback_model: String,
+/// fallback_error.
         fallback_error: String,
     },
 }

@@ -12,21 +12,37 @@ pub const AUTO_RETRY_BASE_DELAY_MS: u64 = 2000;
 #[derive(Clone)]
 /// AgentLoopConfig.
 pub struct AgentLoopConfig {
+/// pub.
     pub model_id: String,
+/// pub.
     pub system_prompt: Option<String>,
+/// pub.
     pub temperature: f32,
+/// pub.
     pub max_tokens: u32,
+/// pub.
     pub max_iterations: usize,
+/// pub.
     pub tool_execution: ToolExecutionMode,
+/// pub.
     pub compaction_strategy: oxi_ai::CompactionStrategy,
+/// pub.
     pub context_window: usize,
+/// pub.
     pub compaction_instruction: Option<String>,
+/// pub.
     pub session_id: Option<String>,
+/// pub.
     pub transport: Option<String>,
+/// pub.
     pub compact_on_start: bool,
+/// pub.
     pub max_retry_delay_ms: Option<u64>,
+/// pub.
     pub auto_retry_enabled: bool,
+/// pub.
     pub auto_retry_max_attempts: usize,
+/// pub.
     pub auto_retry_base_delay_ms: u64,
 }
 
@@ -52,11 +68,13 @@ use anyhow::{Error, Result};
 use crate::AgentToolResult;
 use serde_json::Value;
 
+/// pub.
 pub type BeforeToolCallHook = Arc<
     dyn Fn(&str, &Value) -> Pin<Box<dyn Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
         + Send + Sync,
 >;
 
+/// pub.
 pub type AfterToolCallHook = Arc<
     dyn Fn(&str, &AgentToolResult) -> Pin<Box<dyn Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
         + Send + Sync,

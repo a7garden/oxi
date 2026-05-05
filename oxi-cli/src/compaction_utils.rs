@@ -235,12 +235,16 @@ pub fn prepare_compaction_messages(messages: &[Message]) -> PreparedCompaction {
 /// Tracks which files have been read, written, or edited during a conversation.
 #[derive(Debug, Clone, Default)]
 pub struct FileOperations {
+/// pub.
     pub read: HashSet<String>,
+/// pub.
     pub written: HashSet<String>,
+/// pub.
     pub edited: HashSet<String>,
 }
 
 impl FileOperations {
+/// TODO.
     pub fn new() -> Self {
         Self::default()
     }

@@ -10,7 +10,9 @@ use std::time::Instant;
 /// A single recorded timing entry.
 #[derive(Debug, Clone)]
 pub struct TimingEntry {
+/// pub.
     pub label: String,
+/// pub.
     pub ms: u64,
 }
 

@@ -49,10 +49,15 @@ impl Default for HtmlExportOptions {
 /// Metadata attached to an export (optional but encouraged).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportMeta {
+/// pub.
     pub model: Option<String>,
+/// pub.
     pub provider: Option<String>,
+/// pub.
     pub exported_at: i64,
+/// pub.
     pub total_user_tokens: Option<u64>,
+/// pub.
     pub total_assistant_tokens: Option<u64>,
 }
 
@@ -71,9 +76,13 @@ impl Default for ExportMeta {
 /// A single rendered node in the session tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TreeNode {
+/// pub.
     pub session_id: Uuid,
+/// pub.
     pub name: Option<String>,
+/// pub.
     pub is_current: bool,
+/// pub.
     pub children: Vec<TreeNode>,
 }
 

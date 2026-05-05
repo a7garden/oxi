@@ -19,10 +19,15 @@ use std::sync::Arc;
 /// Result of branch summarization
 #[derive(Debug, Clone)]
 pub struct BranchSummaryResult {
+/// pub.
     pub summary: Option<String>,
+/// pub.
     pub read_files: Option<Vec<String>>,
+/// pub.
     pub modified_files: Option<Vec<String>>,
+/// pub.
     pub aborted: bool,
+/// pub.
     pub error: Option<String>,
 }
 
@@ -75,15 +80,20 @@ impl BranchSummaryResult {
 /// Details stored for file tracking
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchSummaryDetails {
+/// pub.
     pub read_files: Vec<String>,
+/// pub.
     pub modified_files: Vec<String>,
 }
 
 /// File operations collected from tool calls
 #[derive(Debug, Clone, Default)]
 pub struct FileOperations {
+/// pub.
     pub read: HashSet<String>,
+/// pub.
     pub written: HashSet<String>,
+/// pub.
     pub edited: HashSet<String>,
 }
 

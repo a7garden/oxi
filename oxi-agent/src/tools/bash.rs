@@ -28,6 +28,7 @@ pub struct BashTool {
 }
 
 impl BashTool {
+/// TODO.
     pub fn new() -> Self {
         Self {
             progress_callback: Arc::new(std::sync::Mutex::new(None)),

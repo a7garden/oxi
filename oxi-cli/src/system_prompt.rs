@@ -7,14 +7,18 @@ use chrono::Local;
 /// A skill that can be included in the system prompt.
 #[derive(Debug, Clone)]
 pub struct Skill {
+/// pub.
     pub name: String,
+/// pub.
     pub content: String,
 }
 
 /// A pre-loaded context file.
 #[derive(Debug, Clone)]
 pub struct ContextFile {
+/// pub.
     pub path: String,
+/// pub.
     pub content: String,
 }
 

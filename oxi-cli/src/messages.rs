@@ -6,7 +6,9 @@
 /// A simple message type for utilities
 #[derive(Debug, Clone)]
 pub struct SimpleMessage {
+/// pub.
     pub role: String,
+/// pub.
     pub content: String,
 }
 

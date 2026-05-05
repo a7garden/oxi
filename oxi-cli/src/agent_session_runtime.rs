@@ -52,7 +52,9 @@ use std::sync::Arc;
 /// whether errors should abort startup.
 #[derive(Debug, Clone)]
 pub struct AgentSessionRuntimeDiagnostic {
+/// pub.
     pub severity: DiagnosticSeverity,
+/// pub.
     pub message: String,
 }
 
@@ -209,7 +211,9 @@ pub struct CreateAgentSessionFromServicesOptions {
 
 /// Result of creating an agent session.
 pub struct CreateAgentSessionResult {
+/// pub.
     pub session: AgentSession,
+/// pub.
     pub model_fallback_message: Option<String>,
 }
 
@@ -296,9 +300,13 @@ pub fn create_agent_session_from_services(
 
 /// Result returned by runtime creation.
 pub struct CreateAgentSessionRuntimeResult {
+/// pub.
     pub session: AgentSession,
+/// pub.
     pub services: Arc<AgentSessionServices>,
+/// pub.
     pub diagnostics: Vec<AgentSessionRuntimeDiagnostic>,
+/// pub.
     pub model_fallback_message: Option<String>,
 }
 
@@ -308,8 +316,11 @@ pub type CreateRuntimeFactory =
 
 /// Options passed to the runtime factory.
 pub struct CreateRuntimeOptions {
+/// pub.
     pub cwd: PathBuf,
+/// pub.
     pub agent_dir: PathBuf,
+/// pub.
     pub session_manager: SessionManager,
 }
 
@@ -339,6 +350,7 @@ pub enum SessionSwitchReason {
 /// Error when `/import` references a JSONL file that does not exist.
 #[derive(Debug)]
 pub struct SessionImportFileNotFoundError {
+/// pub.
     pub file_path: PathBuf,
 }
 

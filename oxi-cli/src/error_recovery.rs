@@ -290,7 +290,9 @@ pub enum RetryResult<T> {
     Success(T),
     /// All retries exhausted
     Exhausted {
+/// attempts.
         attempts: u32,
+/// last_error.
         last_error: RetryableError,
     },
     /// User aborted the retry

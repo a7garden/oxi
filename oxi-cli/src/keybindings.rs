@@ -80,9 +80,13 @@ impl fmt::Display for KeyName {
 /// A fully parsed key sequence with modifiers.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeySequence {
+/// pub.
     pub ctrl: bool,
+/// pub.
     pub alt: bool,
+/// pub.
     pub shift: bool,
+/// pub.
     pub key: KeyName,
 }
 
@@ -462,6 +466,7 @@ pub struct KeyBinding {
 }
 
 impl KeyBinding {
+/// TODO.
     pub fn new(action: &str, default_keys: Vec<&str>, description: &str) -> Self {
         Self {
             action: action.to_string(),
