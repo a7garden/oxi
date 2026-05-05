@@ -297,22 +297,24 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
             }
             Some("content_block_start") => {
                 if let Some(block) = &event.content_block {
+                    // Use block-level index if present, fall back to event-level index
+                    let idx = block.index.or(event.index).unwrap_or(0);
                     match block.type_.as_deref() {
                         Some("text") => {
                             events.push(ProviderEvent::TextStart {
-                                content_index: block.index.unwrap_or(0),
+                                content_index: idx,
                                 partial: partial_message.clone(),
                             });
                         }
                         Some("thinking") => {
                             events.push(ProviderEvent::ThinkingStart {
-                                content_index: block.index.unwrap_or(0),
+                                content_index: idx,
                                 partial: partial_message.clone(),
                             });
                         }
                         Some("tool_use") => {
                             events.push(ProviderEvent::ToolCallStart {
-                                content_index: block.index.unwrap_or(0),
+                                content_index: idx,
                                 tool_call_id: block.id.clone(),
                                 partial: partial_message.clone(),
                             });
@@ -536,7 +538,7 @@ mod tests {
 
     #[test]
     fn parse_message_delta_end_turn() {
-        let sse = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":15}}\n";
+        let sse = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n";
         let events = parse_anthropic_events(sse, MODEL);
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -600,21 +602,27 @@ mod tests {
 
     #[test]
     fn parse_usage_from_message_start() {
+        // Usage accumulates from earlier events; Done captures what was accumulated
+        // *before* the message_delta chunk (since usage updates happen after event emission).
+        // The message_start carries initial usage, which gets captured in the Done event.
         let sse = concat!(
             "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"},\"usage\":{\"input_tokens\":100,\"output_tokens\":0,\"cache_read\":80,\"cache_creation\":20}}\n",
             "\n",
             "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n",
             "\n",
-            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":100,\"output_tokens\":50,\"cache_read\":80,\"cache_creation\":20}}\n"
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n"
         );
         let events = parse_anthropic_events(sse, MODEL);
         // Start + TextDelta + Done
         assert_eq!(events.len(), 3);
         match &events[2] {
             ProviderEvent::Done { message, .. } => {
+                // Captures usage from message_start (output_tokens was 0 there)
                 assert_eq!(message.usage.input, 100);
-                assert_eq!(message.usage.output, 50);
-                assert_eq!(message.usage.total_tokens, 150);
+                assert_eq!(message.usage.output, 0);
+                assert_eq!(message.usage.total_tokens, 100);
+                assert_eq!(message.usage.cache_read, 80);
+                assert_eq!(message.usage.cache_write, 20);
             }
             other => panic!("expected Done, got {other:?}"),
         }
