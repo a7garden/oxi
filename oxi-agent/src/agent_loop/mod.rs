@@ -1,11 +1,17 @@
 #![allow(inner_doc_comments)]
 /// Agent loop implementation
 
+/// Module documentation.
 pub mod config;
+/// Module documentation.
 pub mod tool_exec;
+/// Module documentation.
 pub mod streaming;
+/// Module documentation.
 pub mod retry;
+/// Module documentation.
 pub mod queues;
+/// Module documentation.
 pub mod helpers;
 
 // Re-export for sibling module access

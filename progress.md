@@ -56,3 +56,22 @@ cargo check --lib -p oxi-tui 2>&1 | grep "missing documentation" | wc -l
 - **settings.rs**: 125 doc comments, 0 warnings
 - **session.rs**: 288 doc comments, 0 warnings  
 - **lib.rs**: 72 doc comments, 0 warnings
+
+### Batch 2: Fix missing_docs in oxi-cli (agent_session.rs, extensions/, rpc_mode.rs, bash_executor.rs)
+- **Status**: ✅ COMPLETE - 0 warnings remaining for all target files
+- **Starting count**: 527 warnings across target files
+- **Final count**: 0 warnings
+- **Files modified**: 7 files
+
+| File | Warnings Fixed |
+|------|---------------|
+| oxi-cli/src/agent_session.rs | 32 → 0 |
+| oxi-cli/src/extensions/types.rs | ~100 → 0 |
+| oxi-cli/src/extensions/context.rs | ~30 → 0 |
+| oxi-cli/src/extensions/loading.rs | 6 → 0 |
+| oxi-cli/src/extensions/mod.rs | ~35 → 0 |
+| oxi-cli/src/extensions/registry.rs | 3 → 0 |
+| oxi-cli/src/rpc_mode.rs | 137 → 0 |
+| oxi-cli/src/bash_executor.rs | 0 → 0 (no warnings) |
+
+**Additional**: Fixed pre-existing oxi-agent build errors (broken `//! Module documentation.` comments)

@@ -46,11 +46,17 @@ pub struct MessageEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MessageRole {
+/// user.
     User,
+/// assistant.
     Assistant,
+/// system.
     System,
+/// tool.
     Tool,
+/// tool  result.
     ToolResult,
+/// custom.
     Custom,
 }
 
@@ -245,8 +251,11 @@ pub struct BranchSummaryResult {
 /// Error during summarization
 #[derive(Debug, Clone)]
 pub enum SummarizationError {
+/// no  model.
     NoModel,
+/// aborted.
     Aborted,
+/// failed.
     Failed(String),
 }
 

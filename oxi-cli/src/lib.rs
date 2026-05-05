@@ -10,6 +10,7 @@ pub mod oauth_server;
 pub mod packages;
 pub mod print_mode;
 pub mod session;
+pub mod session_navigation;
 pub mod settings;
 pub mod skills;
 pub mod templates;
