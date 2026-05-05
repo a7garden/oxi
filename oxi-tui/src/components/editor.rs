@@ -887,9 +887,14 @@ impl Component for Editor {
 // Private helper
 impl Editor {
     fn ensure_cursor_visible(&mut self) {
-        // Clamp cursor to line length
+        // Clamp cursor to line length and ensure it's on a valid char boundary
         let line = &mut self.lines[self.current_line];
         line.cursor = line.cursor.min(line.content.len());
+
+        // If cursor is not on a char boundary, snap to the nearest one before it
+        while !line.content.is_char_boundary(line.cursor) && line.cursor > 0 {
+            line.cursor -= 1;
+        }
 
         // Could add scroll logic here if needed
     }
@@ -939,5 +944,272 @@ mod tests {
         ];
         editor.set_mention_candidates(mentions);
         // Can't easily test completion without simulating events
+    }
+
+    // ===== Unicode / multi-byte character tests =====
+
+    #[test]
+    fn test_line_insert_korean() {
+        // Korean characters are 3 bytes each in UTF-8
+        let mut line = Line::new();
+        line.insert(0, '한');
+        assert_eq!(line.content, "한");
+        assert_eq!(line.cursor, "한".len()); // 3 bytes
+        assert_eq!(line.cursor, 3);
+
+        line.insert(line.cursor, '글');
+        assert_eq!(line.content, "한글");
+        assert_eq!(line.cursor, "한글".len()); // 6 bytes
+    }
+
+    #[test]
+    fn test_line_insert_emoji() {
+        // Emoji are 4 bytes in UTF-8
+        let mut line = Line::new();
+        line.insert(0, '🎉');
+        assert_eq!(line.content, "🎉");
+        assert_eq!(line.cursor, 4);
+
+        line.insert(line.cursor, '🚀');
+        assert_eq!(line.content, "🎉🚀");
+        assert_eq!(line.cursor, 8);
+    }
+
+    #[test]
+    fn test_line_from_multibyte() {
+        let line = Line::from("한글");
+        assert_eq!(line.content, "한글");
+        assert_eq!(line.cursor, "한글".len()); // 6 bytes
+    }
+
+    #[test]
+    fn test_line_remove_korean() {
+        let mut line = Line::from("한글");
+        // Remove the second char (at byte offset 3)
+        let c = line.remove(3);
+        assert_eq!(c, Some('글'));
+        assert_eq!(line.content, "한");
+        assert_eq!(line.cursor, 3); // cursor was at end (6), moved back by 3
+    }
+
+    #[test]
+    fn test_line_remove_emoji() {
+        let mut line = Line::from("🎉🚀");
+        let c = line.remove(4);
+        assert_eq!(c, Some('🚀'));
+        assert_eq!(line.content, "🎉");
+        assert_eq!(line.cursor, 4); // was at 8, moved back by 4
+    }
+
+    #[test]
+    fn test_editor_insert_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.insert_char('한');
+        editor.insert_char('글');
+        assert_eq!(editor.content(), "한글");
+        assert_eq!(editor.cursor(), "한글".len());
+    }
+
+    #[test]
+    fn test_editor_insert_mixed_ascii_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.insert_char('h');
+        editor.insert_char('i');
+        editor.insert_char('한');
+        editor.insert_char('글');
+        assert_eq!(editor.content(), "hi한글");
+        // cursor should be at end: 2 ("hi") + 6 ("한글") = 8 bytes
+        assert_eq!(editor.cursor(), 8);
+    }
+
+    #[test]
+    fn test_editor_move_left_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("한글");
+        // cursor at end (6 bytes)
+        assert_eq!(editor.cursor(), 6);
+
+        // Move left past '글' (3 bytes)
+        assert!(editor.move_left());
+        assert_eq!(editor.cursor(), 3); // before '글'
+
+        // Move left past '한' (3 bytes)
+        assert!(editor.move_left());
+        assert_eq!(editor.cursor(), 0); // at start
+
+        // Can't move further left
+        assert!(!editor.move_left());
+    }
+
+    #[test]
+    fn test_editor_move_right_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("한글");
+        // Move to start
+        editor.current_mut().cursor = 0;
+        assert_eq!(editor.cursor(), 0);
+
+        // Move right past '한'
+        assert!(editor.move_right());
+        assert_eq!(editor.cursor(), 3);
+
+        // Move right past '글'
+        assert!(editor.move_right());
+        assert_eq!(editor.cursor(), 6);
+
+        // Can't move further right
+        assert!(!editor.move_right());
+    }
+
+    #[test]
+    fn test_editor_move_left_emoji() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("🎉🚀");
+        assert_eq!(editor.cursor(), 8);
+
+        assert!(editor.move_left());
+        assert_eq!(editor.cursor(), 4); // before '🚀'
+
+        assert!(editor.move_left());
+        assert_eq!(editor.cursor(), 0); // before '🎉'
+    }
+
+    #[test]
+    fn test_editor_delete_back_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("한글");
+        assert_eq!(editor.cursor(), 6);
+
+        // Delete '글' (backspace from end)
+        assert!(editor.delete_back());
+        assert_eq!(editor.content(), "한");
+        assert_eq!(editor.cursor(), 3);
+
+        // Delete '한'
+        assert!(editor.delete_back());
+        assert_eq!(editor.content(), "");
+        assert_eq!(editor.cursor(), 0);
+    }
+
+    #[test]
+    fn test_editor_delete_back_mixed() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("a한b");
+        // byte lengths: 'a'=1, '한'=3, 'b'=1 => total 5
+        assert_eq!(editor.cursor(), 5);
+
+        // Delete 'b'
+        assert!(editor.delete_back());
+        assert_eq!(editor.content(), "a한");
+        assert_eq!(editor.cursor(), 4);
+
+        // Delete '한' (3 bytes)
+        assert!(editor.delete_back());
+        assert_eq!(editor.content(), "a");
+        assert_eq!(editor.cursor(), 1);
+
+        // Delete 'a'
+        assert!(editor.delete_back());
+        assert_eq!(editor.content(), "");
+        assert_eq!(editor.cursor(), 0);
+    }
+
+    #[test]
+    fn test_editor_delete_forward_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("한글");
+        // Move cursor to start
+        editor.current_mut().cursor = 0;
+
+        // Delete '한' at cursor
+        assert!(editor.delete_forward());
+        assert_eq!(editor.content(), "글");
+        assert_eq!(editor.cursor(), 0);
+
+        // Delete '글'
+        assert!(editor.delete_forward());
+        assert_eq!(editor.content(), "");
+    }
+
+    #[test]
+    fn test_editor_split_line_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("한글");
+        // Move cursor to between '한' and '글' (byte offset 3)
+        editor.current_mut().cursor = 3;
+
+        // Simulate Enter key
+        let line = editor.current_mut();
+        let cursor = Editor::line_cursor(line);
+        let after = line.content[cursor..].to_string();
+        line.content.truncate(cursor);
+        line.cursor = 0;
+        let new_line = Line::from(&after);
+        editor.current_line += 1;
+        editor.lines.insert(editor.current_line, new_line);
+
+        assert_eq!(editor.lines.len(), 2);
+        assert_eq!(editor.lines[0].content, "한");
+        assert_eq!(editor.lines[1].content, "글");
+    }
+
+    #[test]
+    fn test_editor_home_end_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("한글");
+
+        // Home
+        editor.current_mut().cursor = 0;
+        assert_eq!(editor.cursor(), 0);
+
+        // End
+        let line = editor.current_mut();
+        line.cursor = line.content.len();
+        assert_eq!(editor.cursor(), 6);
+    }
+
+    #[test]
+    fn test_content_until_cursor_korean() {
+        let mut editor = Editor::new();
+        editor.set_content("한글");
+        // Move cursor to between the two chars
+        editor.current_mut().cursor = 3;
+        assert_eq!(editor.content_until_cursor(), "한");
+    }
+
+    #[test]
+    fn test_editor_roundtrip_korean() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        // Insert Korean chars one by one
+        for c in "안녕하세요".chars() {
+            editor.insert_char(c);
+        }
+        assert_eq!(editor.content(), "안녕하세요");
+
+        // Move to start
+        editor.current_mut().cursor = 0;
+        // Move right through all chars
+        let char_count = "안녕하세요".chars().count();
+        for _ in 0..char_count {
+            assert!(editor.move_right());
+        }
+        assert_eq!(editor.cursor(), "안녕하세요".len());
+
+        // Delete all chars from end
+        for _ in 0..char_count {
+            assert!(editor.delete_back());
+        }
+        assert_eq!(editor.content(), "");
     }
 }
