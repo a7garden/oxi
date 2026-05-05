@@ -182,6 +182,9 @@ pub enum Event {
     FocusLost,
     /// Paste event (text being pasted)
     Paste(String),
+    /// Cursor position report from terminal (response to ESC[6n query).
+    /// This is NOT user input; it's a terminal response indicating row/col.
+    CursorPosition(u16, u16),
     /// No-op for tick/frame events
     #[default]
     None,
