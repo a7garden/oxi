@@ -894,7 +894,7 @@ fn render_separator(f: &mut ratatui::Frame, area: Rect, theme: &Theme) {
     f.render_widget(separator, area);
 }
 
-/// Render the input area with cursor.
+/// Render the input area with cursor and slash command popup.
 fn render_input(
     f: &mut ratatui::Frame,
     area: Rect,
@@ -920,7 +920,7 @@ fn render_input(
 
     // Input text with cursor
     let display_text = if input.value().is_empty() {
-        "Type a message... (Ctrl+C to quit)".to_string()
+        "Type a message... (/ for commands)".to_string()
     } else {
         input.value().to_string()
     };
@@ -986,8 +986,12 @@ fn render_input(
     let input_widget = Paragraph::new(input_line);
     f.render_widget(input_widget, chunks[1]);
 
-    // Status indicator (bottom row)
-    if area.height >= 2 {
+    // ── Slash command completion popup (second row of input area) ──
+    if input.slash_completion_active && area.height >= 2 {
+        let popup_row = area.y + 1;
+        render_slash_popup(f, popup_row, area.x, area.width, input, theme);
+    } else if area.height >= 2 {
+        // Status indicator (bottom row) - only when no popup
         let status_text = if is_agent_busy {
             "● thinking..."
         } else {
@@ -1000,6 +1004,161 @@ fn render_input(
         let status_row = Rect { x: 0, y: area.y + 1, width: area.width, height: 1 };
         f.render_widget(status, status_row);
     }
+}
+
+/// Render slash command completion popup inline.
+fn render_slash_popup(
+    f: &mut ratatui::Frame,
+    row: u16,
+    x: u16,
+    width: u16,
+    input: &InputState,
+    _theme: &Theme,
+) {
+    let completions = &input.slash_completions;
+    if completions.is_empty() {
+        return;
+    }
+
+    // Show up to 8 completions in a single line: /cmd1 /cmd2 /cmd3 ...
+    let mut spans: Vec<Span> = Vec::new();
+    let max_show = 8;
+
+    // Calculate visible window around selected
+    let selected = input.slash_completion_index;
+    let total = completions.len().min(max_show);
+    let start = if selected >= total {
+        selected.saturating_sub(total - 1)
+    } else {
+        0
+    };
+
+    spans.push(Span::styled(
+        "  ".to_string(),
+        Style::default().fg(Color::DarkGray),
+    ));
+
+    for (i, comp) in completions.iter().enumerate().skip(start).take(max_show) {
+        if i == selected {
+            spans.push(Span::styled(
+                format!(" {} ", comp.name),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else {
+            spans.push(Span::styled(
+                format!(" {} ", comp.name),
+                Style::default().fg(Color::Yellow),
+            ));
+        }
+    }
+
+    // Show description for selected item
+    if let Some(comp) = completions.get(selected) {
+        let used_width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let desc_max = (width as usize).saturating_sub(used_width + 10);
+        if desc_max > 3 {
+            let desc: String = comp.description.chars().take(desc_max).collect();
+            spans.push(Span::styled(
+                format!(" — {}", desc),
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+
+    let line = Line::from(spans);
+    let popup = Paragraph::new(line);
+    f.render_widget(popup, Rect { x, y: row, width, height: 1 });
+}
+
+/// Render the status bar showing cwd, model, git branch.
+fn render_status_bar(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    cwd: &str,
+    model_id: &str,
+    git_branch: Option<&str>,
+    is_agent_busy: bool,
+    theme: &Theme,
+) {
+    if area.width < 4 {
+        return;
+    }
+
+    let mut left_spans: Vec<Span> = Vec::new();
+    let mut right_spans: Vec<Span> = Vec::new();
+
+    // Left: cwd (abbreviate home dir to ~)
+    let home = std::env::var("HOME").unwrap_or_default();
+    let display_cwd = if !home.is_empty() && cwd.starts_with(&home) {
+        format!("~{}", &cwd[home.len()..])
+    } else {
+        cwd.to_string()
+    };
+
+    // Truncate cwd if too long
+    let max_cwd_len = (area.width as usize / 3).max(10);
+    let display_cwd = if display_cwd.len() > max_cwd_len {
+        let short: String = display_cwd.chars().rev().take(max_cwd_len.saturating_sub(2)).collect();
+        format!("...{}", short.chars().rev().collect::<String>())
+    } else {
+        display_cwd
+    };
+
+    left_spans.push(Span::styled(
+        format!(" {}", display_cwd),
+        Style::default().fg(theme.border_fg),
+    ));
+
+    // Git branch
+    if let Some(branch) = git_branch {
+        if !branch.is_empty() {
+            left_spans.push(Span::styled(
+                format!(" ({})", branch),
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+    }
+
+    // Right: model + busy indicator
+    if !model_id.is_empty() {
+        let model_display = model_id.split('/').last().unwrap_or(model_id);
+        right_spans.push(Span::styled(
+            model_display.to_string(),
+            Style::default().fg(Color::Cyan),
+        ));
+    }
+
+    if is_agent_busy {
+        right_spans.push(Span::styled(
+            " ●".to_string(),
+            Style::default().fg(theme.status_fg),
+        ));
+    }
+
+    // Calculate right-alignment
+    let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
+    let right_width: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
+    let padding = area.width as usize;
+
+    let mut all_spans = left_spans;
+
+    // Add padding between left and right
+    let gap = padding.saturating_sub(left_width).saturating_sub(right_width);
+    if gap > 0 {
+        all_spans.push(Span::styled(
+            " ".repeat(gap),
+            Style::default(),
+        ));
+    }
+
+    all_spans.extend(right_spans);
+
+    let line = Line::from(all_spans);
+    let status = Paragraph::new(line);
+    f.render_widget(status, area);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -50,6 +50,14 @@ Complete
 ### Fix 17: Cross-provider transformation — ✅ Done
 - Replaced no-op clone with actual transform call
 
+### Fix 15: Wire compaction_manager into AgentLoop — ✅ Done
+- Added `maybe_compact()` method to AgentLoop that checks `should_compact()` before each turn
+- Emits CompactionEvent::Triggered, Started, Completed/Failed events
+- Pre-initializes LlmCompactor in AgentLoop::new() (mirrors Agent struct pattern)
+- Persists compacted messages back to SharedState
+- Fixed broken function signatures in agent_loop.rs (continue_loop, run_loop) caused by prior edits
+- Note: 4 remaining compile errors in agent.rs (missing `session_id` field) are from another agent's changes
+
 ### Fix key/model/pkg/tpl: Failing test fixes — ✅ Done
 - Fixed 6 tests (race conditions, parsing bugs, assertions)
 
