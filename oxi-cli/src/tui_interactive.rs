@@ -356,7 +356,11 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let mut scroll_offset: usize = 0;
     let mut auto_scroll: bool = true;
     let mut spinner_frame: usize = 0;
+    let mut last_spinner_tick: std::time::Instant = std::time::Instant::now();
     let mut message_count: usize = 0; // user + assistant
+    let mut input_history: Vec<String> = Vec::new();
+    let mut history_index: usize = 0; // 0 = current, 1.. = history
+    let mut saved_input: String = String::new(); // saved current input when entering history
 
     let model_id = agent_session.model_id();
     let git_branch = crate::git_utils::get_current_branch(
@@ -374,7 +378,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let poll_timeout = std::time::Duration::from_millis(50); // 50ms for smooth spinner
 
     while running {
-        spinner_frame = (spinner_frame + 1) % SPINNER.len();
+        // Advance spinner based on wall-clock time (80ms per frame)
+        let now = std::time::Instant::now();
+        if now.duration_since(last_spinner_tick).as_millis() >= 80 {
+            spinner_frame = (spinner_frame + 1) % SPINNER.len();
+            last_spinner_tick = now;
+        }
 
         // Render
         terminal.draw(|f| {
@@ -392,7 +401,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 .split(size);
 
             render_chat(f, chunks[0], &messages, &streaming_text, scroll_offset,
-                        is_agent_busy, spinner_frame, &cwd);
+                        is_agent_busy, spinner_frame);
             render_separator(f, chunks[1]);
             render_input(f, chunks[2], &input, is_agent_busy, spinner_frame);
             render_status_bar(f, chunks[3], &cwd, &model_id,
@@ -425,6 +434,10 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                         timestamp: now_millis(),
                                     });
                                     message_count += 1;
+                                    // Save to input history
+                                    input_history.insert(0, value.clone());
+                                    if input_history.len() > 100 { input_history.pop(); }
+                                    history_index = 0;
                                     streaming_text.clear();
                                     is_agent_busy = true;
                                     auto_scroll = true;
@@ -482,8 +495,38 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                 input.update_slash_completions();
                             }
                         }
-                        KeyCode::Left => { if !is_agent_busy { input.move_left(); } }
-                        KeyCode::Right => { if !is_agent_busy { input.move_right(); } }
+                        KeyCode::Left => {
+                            if !is_agent_busy {
+                                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                    // Word-left: find previous word boundary
+                                    let text: Vec<char> = input.text.chars().collect();
+                                    let mut pos = input.cursor;
+                                    // Skip trailing spaces
+                                    while pos > 0 && text[pos - 1].is_whitespace() { pos -= 1; }
+                                    // Skip word chars
+                                    while pos > 0 && !text[pos - 1].is_whitespace() { pos -= 1; }
+                                    input.cursor = pos;
+                                } else {
+                                    input.move_left();
+                                }
+                            }
+                        }
+                        KeyCode::Right => {
+                            if !is_agent_busy {
+                                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                    // Word-right: find next word boundary
+                                    let text: Vec<char> = input.text.chars().collect();
+                                    let mut pos = input.cursor;
+                                    // Skip word chars
+                                    while pos < text.len() && !text[pos].is_whitespace() { pos += 1; }
+                                    // Skip spaces
+                                    while pos < text.len() && text[pos].is_whitespace() { pos += 1; }
+                                    input.cursor = pos;
+                                } else {
+                                    input.move_right();
+                                }
+                            }
+                        }
                         KeyCode::Home => { if !is_agent_busy { input.move_home(); } }
                         KeyCode::End => { if !is_agent_busy { input.move_end(); } }
                         KeyCode::Tab => {
@@ -494,6 +537,17 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         KeyCode::Up => {
                             if !is_agent_busy && input.slash_completion_active {
                                 input.prev_slash_completion();
+                            } else if !is_agent_busy && input.text.is_empty() && !input_history.is_empty() {
+                                // Input history: recall previous message
+                                if history_index == 0 {
+                                    saved_input = input.text.clone();
+                                }
+                                if history_index < input_history.len() {
+                                    history_index += 1;
+                                    input.text = input_history[history_index - 1].clone();
+                                    input.cursor = input.text.chars().count();
+                                    input.clear_slash_completions();
+                                }
                             } else {
                                 scroll_offset = scroll_offset.saturating_add(3);
                                 auto_scroll = false;
@@ -502,6 +556,16 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         KeyCode::Down => {
                             if !is_agent_busy && input.slash_completion_active {
                                 input.next_slash_completion();
+                            } else if !is_agent_busy && history_index > 0 {
+                                // Input history: go to newer
+                                history_index -= 1;
+                                if history_index == 0 {
+                                    input.text = saved_input.clone();
+                                } else {
+                                    input.text = input_history[history_index - 1].clone();
+                                }
+                                input.cursor = input.text.chars().count();
+                                input.clear_slash_completions();
                             } else {
                                 scroll_offset = scroll_offset.saturating_sub(3);
                                 if scroll_offset == 0 { auto_scroll = true; }
@@ -704,7 +768,6 @@ fn render_chat(
     scroll_offset: usize,
     is_agent_busy: bool,
     spinner_frame: usize,
-    _cwd: &str,
 ) {
     if area.width < 4 || area.height < 1 { return; }
 
@@ -795,7 +858,8 @@ fn render_chat(
     let chat_text = ratatui::text::Text::from(all_lines);
     let chat_widget = Paragraph::new(chat_text)
         .wrap(Wrap { trim: false })
-        .scroll((scroll_from_top as u16, 0));
+        .scroll((scroll_from_top as u16, 0))
+        .style(Style::default().bg(palette::BG));
 
     f.render_widget(chat_widget, area);
 
@@ -814,15 +878,17 @@ fn render_chat(
                 Rect { x: col, y: row, width: 1, height: 1 },
             );
         }
-        // Percentage text at bottom-right
-        let pct_text = format!("{}%", scroll_pct);
-        let pct_len = pct_text.len() as u16;
-        let pct_row = area.y + area.height - 1;
-        let pct_col = area.x + area.width - pct_len - 2;
-        f.render_widget(
-            Paragraph::new(Line::from(Span::styled(pct_text, Style::default().fg(palette::FG_DIM)))),
-            Rect { x: pct_col, y: pct_row, width: pct_len + 1, height: 1 },
-        );
+        // Percentage text at bottom-right (only when not at top or bottom)
+        if scroll_from_top > 0 && scroll_from_top < max_scroll {
+            let pct_text = format!("{}%", scroll_pct);
+            let pct_len = pct_text.len() as u16;
+            let pct_row = area.y + area.height - 1;
+            let pct_col = area.x + area.width - pct_len - 2;
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(pct_text, Style::default().fg(palette::FG_DIM)))),
+                Rect { x: pct_col, y: pct_row, width: pct_len + 1, height: 1 },
+            );
+        }
     }
 }
 
@@ -1040,7 +1106,6 @@ fn render_status_bar(
         format!("…{}", short.chars().rev().collect::<String>())
     } else { display_cwd };
 
-    left.push(Span::styled(" ╭─ ".to_string(), Style::default().fg(palette::TEAL)));
     left.push(Span::styled(" ".to_string(), Style::default()));
     left.push(Span::styled(display_cwd, Style::default().fg(palette::FG)));
 
@@ -1091,16 +1156,18 @@ fn render_status_bar(
 // ═══════════════════════════════════════════════════════════════════════════
 
 fn format_welcome(session_id: &str, model_id: &str) -> String {
+    // Box is 35 chars wide: ╭ + 33 × ─ + ╮
+    let line = "─".repeat(33);
     format!(
-r#"  ╭─────────────────────────────╮
-  │  ◈  oxi                      │
-  │     AI Coding Assistant      │
-  ╰─────────────────────────────╯
+"  ╭{line}╮
+  │  ◈ oxi — AI Coding Assistant   │
+  ╰{line}╯
 
-  Session  {}
-  Model    {}
-  Type /help for commands · Enter to send"#,
-        session_id, model_id,
+  Session  {session_id}
+  Model    {model_id}
+
+  /help for commands · Enter to send",
+        line = line, session_id = session_id, model_id = model_id,
     )
 }
 
