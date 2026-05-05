@@ -172,6 +172,21 @@ pub enum ConfigCommands {
 // ── Parsing helpers ────────────────────────────────────────────────
 
 /// Parse CLI arguments from the command line
+///
+/// # Examples
+///
+/// ```ignore
+/// use oxi_cli::CliArgs;
+///
+/// fn main() {
+///     let args = CliArgs::parse();
+///     match args.command {
+///         Some(Commands::Sessions) => { /* list sessions */ }
+///         Some(Commands::Tree { session_id }) => { /* show tree */ }
+///         _ => { /* interactive mode */ }
+///     }
+/// }
+/// ```
 pub fn parse_args() -> CliArgs {
     CliArgs::parse()
 }

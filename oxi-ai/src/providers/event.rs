@@ -8,81 +8,109 @@ use crate::{AssistantMessage, StopReason, ToolCall};
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum ProviderEvent {
-    /// Stream started
+    /// Stream started with partial assistant message.
     Start { partial: AssistantMessage },
 
-    /// Text block started
+    /// Text content block started.
     TextStart {
+        /// Index of the content block in the message.
         content_index: usize,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Text delta received
+    /// Incremental text delta received.
     TextDelta {
+        /// Index of the content block in the message.
         content_index: usize,
+        /// The text delta to append.
         delta: String,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Text block ended
+    /// Text content block finished.
     TextEnd {
+        /// Index of the content block in the message.
         content_index: usize,
+        /// The complete text content.
         content: String,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Thinking block started
+    /// Thinking content block started.
     ThinkingStart {
+        /// Index of the content block in the message.
         content_index: usize,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Thinking delta received
+    /// Incremental thinking delta received.
     ThinkingDelta {
+        /// Index of the content block in the message.
         content_index: usize,
+        /// The thinking text delta to append.
         delta: String,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Thinking block ended
+    /// Thinking content block finished.
     ThinkingEnd {
+        /// Index of the content block in the message.
         content_index: usize,
+        /// The complete thinking content.
         content: String,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Tool call block started
+    /// Tool call block started.
     ToolCallStart {
+        /// Index of the content block in the message.
         content_index: usize,
         /// The tool call ID from the provider, if available at start time.
         /// Providers that only surface the ID later (in deltas/end) leave this `None`.
         tool_call_id: Option<String>,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Tool call delta received
+    /// Tool call delta received (partial JSON arguments).
     ToolCallDelta {
+        /// Index of the content block in the message.
         content_index: usize,
+        /// The delta string to append to tool arguments.
         delta: String,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Tool call block ended
+    /// Tool call block finished.
     ToolCallEnd {
+        /// Index of the content block in the message.
         content_index: usize,
+        /// The complete tool call with resolved arguments.
         tool_call: ToolCall,
+        /// Partial assistant message state.
         partial: AssistantMessage,
     },
 
-    /// Stream completed successfully
+    /// Stream completed successfully.
     Done {
+        /// Why the model stopped generating.
         reason: StopReason,
+        /// The final assistant message.
         message: AssistantMessage,
     },
 
-    /// Stream ended with error
+    /// Stream ended with an error.
     Error {
+        /// The stop reason at time of error.
         reason: StopReason,
+        /// Error details in assistant message form.
         error: AssistantMessage,
     },
 }

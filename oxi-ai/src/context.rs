@@ -49,6 +49,15 @@ impl Context {
     }
 
     /// Add a message to the context
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_ai::{Context, Message, UserMessage};
+    /// let mut ctx = Context::new();
+    /// ctx.add_message(Message::User(UserMessage::new("Hello!")));
+    /// assert_eq!(ctx.len(), 1);
+    /// ```
     pub fn add_message(&mut self, message: Message) {
         self.messages.push(message);
     }
@@ -59,6 +68,16 @@ impl Context {
     }
 
     /// Get the last message
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_ai::{Context, Message, UserMessage};
+    /// let mut ctx = Context::new();
+    /// ctx.add_message(Message::User(UserMessage::new("First")));
+    /// ctx.add_message(Message::User(UserMessage::new("Second")));
+    /// assert!(ctx.last_message().is_some());
+    /// ```
     pub fn last_message(&self) -> Option<&Message> {
         self.messages.last()
     }
@@ -84,6 +103,20 @@ impl Context {
     }
 
     /// Set available tools
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_ai::{Context, Tool};
+    /// let mut ctx = Context::new();
+    /// let tool = Tool::new(
+    ///     "search",
+    ///     "Search the web",
+    ///     serde_json::json!({"type": "object", "properties": {}}),
+    /// );
+    /// ctx.set_tools(vec![tool]);
+    /// assert_eq!(ctx.tools.len(), 1);
+    /// ```
     pub fn set_tools(&mut self, tools: Vec<Tool>) {
         self.tools = tools;
     }
@@ -93,12 +126,17 @@ impl Context {
         self.tools.push(tool);
     }
 
-    /// Serialize context to JSON string
+    /// Get the system prompt for this context.
+    pub fn system_prompt(&self) -> Option<&str> {
+        self.system_prompt.as_deref()
+    }
+
+    /// Serialize context to a JSON string.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string(self)
     }
 
-    /// Deserialize context from JSON string
+    /// Deserialize a context from a JSON string.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }

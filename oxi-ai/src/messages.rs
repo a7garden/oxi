@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use crate::Api;
 
 /// Text content block
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -405,6 +406,20 @@ impl Message {
     /// Convenience constructor for a user text message.
     pub fn user(content: impl Into<MessageContent>) -> Self {
         Message::User(UserMessage::new(content))
+    }
+
+    /// Convenience constructor for an assistant message.
+    pub fn assistant(content: Vec<ContentBlock>) -> Self {
+        Message::Assistant(AssistantMessage::new(
+            Api::AnthropicMessages,
+            "assistant",
+            "assistant",
+        ))
+    }
+
+    /// Convenience constructor for a tool result message.
+    pub fn tool_result(tool_call_id: impl Into<String>, tool_name: impl Into<String>, content: Vec<ContentBlock>) -> Self {
+        Message::ToolResult(ToolResultMessage::new(tool_call_id, tool_name, content))
     }
 
     /// Return the timestamp (milliseconds since epoch) of this message.

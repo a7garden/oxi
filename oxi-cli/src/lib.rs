@@ -341,6 +341,17 @@ impl App {
     }
 
     /// Get a reference to the underlying agent.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use oxi_cli::App;
+    ///
+    /// async fn example(app: &App) {
+    ///     let agent = app.agent();
+    ///     // Use the agent directly
+    /// }
+    /// ```
     pub fn agent(&self) -> Arc<Agent> {
         Arc::clone(&self.agent)
     }

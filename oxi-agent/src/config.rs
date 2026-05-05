@@ -56,6 +56,7 @@ impl Default for AgentConfig {
 }
 
 impl AgentConfig {
+    /// Create a new config with the given model ID.
     pub fn new(model_id: impl Into<String>) -> Self {
         Self {
             model_id: model_id.into(),
@@ -63,31 +64,37 @@ impl AgentConfig {
         }
     }
 
+    /// Set the agent name.
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = name.into();
         self
     }
 
+    /// Set the system prompt.
     pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
         self
     }
 
+    /// Set the maximum number of agent loop iterations.
     pub fn with_max_iterations(mut self, max: usize) -> Self {
         self.max_iterations = max;
         self
     }
 
+    /// Set the timeout in seconds for the entire agent run.
     pub fn with_timeout(mut self, seconds: u64) -> Self {
         self.timeout_seconds = seconds;
         self
     }
 
+    /// Set the compaction strategy for long conversations.
     pub fn with_compaction_strategy(mut self, strategy: CompactionStrategy) -> Self {
         self.compaction_strategy = strategy;
         self
     }
 
+    /// Set a custom instruction passed to the compactor.
     pub fn with_compaction_instruction(mut self, instruction: impl Into<String>) -> Self {
         self.compaction_instruction = Some(instruction.into());
         self
