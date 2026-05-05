@@ -22,6 +22,7 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
+    /// Create a new OpenAI provider using environment variables.
     pub fn new() -> Self {
         Self {
             client: shared_client(),

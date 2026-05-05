@@ -1,5 +1,4 @@
 /// Edit diff computation engine
-//!
 /// Computes unified diffs for edit previews. Supports:
 /// - Multiple non-overlapping edits in one call
 /// - Line ending normalization (CRLF → LF)

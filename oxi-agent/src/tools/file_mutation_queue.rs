@@ -1,5 +1,4 @@
 /// File mutation queue - serializes concurrent writes to the same file
-//!
 /// Prevents race conditions when multiple edit operations target the same file.
 /// Operations on *different* files run in parallel; operations on the *same* file are serialized.
 

@@ -1,5 +1,4 @@
 /// Web search tool - search the web using DuckDuckGo HTML API
-//!
 /// Features:
 /// - DuckDuckGo HTML search (no API key required)
 /// - Configurable result count

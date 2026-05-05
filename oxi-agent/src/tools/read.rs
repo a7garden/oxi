@@ -1,5 +1,4 @@
 /// Read file tool
-//!
 /// Reads file contents with support for:
 /// - Text files with line numbers, offset/limit, and truncation
 /// - Image files (jpg/png/gif/webp) returned as base64-encoded content blocks

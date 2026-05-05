@@ -1,9 +1,7 @@
 /// Agent proxy implementation for bandwidth optimization and event stripping.
-//!
 /// The proxy pattern works as follows:
 /// - Server-side: Strips redundant fields from events for bandwidth optimization
 /// - Client-side: Reconnects to proxy and reconstructs original events
-//!
 /// This reduces bandwidth by ~40-60% for streaming responses by removing
 /// redundant partial message data from each delta event.
 

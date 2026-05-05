@@ -1,5 +1,4 @@
 /// Write file tool
-//!
 /// Supports:
 /// - Creating parent directories if they don't exist
 /// - Append mode (append=true)

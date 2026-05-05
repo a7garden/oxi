@@ -1,5 +1,4 @@
 /// Path resolution utilities
-//!
 /// Provides path normalization, home expansion, and macOS-specific path handling.
 
 use std::path::{Path, PathBuf};

@@ -473,12 +473,18 @@ pub async fn ensure_valid_token(
 /// Response from GitHub's device-code endpoint.
 #[derive(Debug, Deserialize)]
 pub struct DeviceCodeResponse {
+    /// Device verification code.
     pub device_code: String,
+    /// User-visible code to enter on the verification page.
     pub user_code: String,
+    /// URL the user should visit to authorize.
     pub verification_uri: String,
+    /// Optional complete verification URL (includes user code).
     #[serde(default)]
     pub verification_uri_complete: Option<String>,
+    /// Polling interval in seconds.
     pub interval: u64,
+    /// Seconds until the device code expires.
     pub expires_in: u64,
 }
 

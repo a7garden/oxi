@@ -1,5 +1,4 @@
 /// Bash tool - execute shell commands
-//!
 /// Features:
 /// - Timeout support with process group kill
 /// - Working directory (cwd) parameter
