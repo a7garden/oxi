@@ -1,5 +1,6 @@
 //! Agent loop implementation
 
+use crate::model_id::resolve_model_from_id;
 use crate::{
     AgentToolResult,
     compaction::{CompactedContext, CompactionEvent},
@@ -13,7 +14,7 @@ use oxi_ai::{
     Context, ContentBlock, Message, Provider, ProviderEvent, StreamOptions,
     StopReason, TextContent, ToolCall, UserMessage, CompactionStrategy,
     CompactionManager as OxCompactionManager, AssistantMessage,
-    estimate_tokens, get_model, LlmCompactor,
+    estimate_tokens, LlmCompactor,
 };
 use parking_lot::RwLock;
 use regex::Regex;
@@ -23,8 +24,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-const MAX_RETRIES: usize = 3;
-const BACKOFF_BASE_SECS: u64 = 2;
+use crate::retry_constants::*;
 
 /// Default max auto-retry attempts (for errors detected in assistant
 /// messages, not provider-level errors).
@@ -116,15 +116,7 @@ impl AgentLoop {
 
         // Pre-initialize the LLM compactor if compaction is enabled
         if config.compaction_strategy != CompactionStrategy::Disabled {
-            let model_id = config.model_id.clone();
-            let model = {
-                let parts: Vec<&str> = model_id.split('/').collect();
-                if parts.len() >= 2 {
-                    get_model(parts[0], &parts[1..].join("/"))
-                } else {
-                    get_model("anthropic", &model_id)
-                }
-            };
+            let model = resolve_model_from_id(&config.model_id);
 
             if let Some(model) = model {
                 let llm_compactor =
@@ -1129,14 +1121,8 @@ impl AgentLoop {
     }
 
     fn resolve_model(&self) -> Result<oxi_ai::Model> {
-        let parts: Vec<&str> = self.config.model_id.split('/').collect();
-        let model = if parts.len() >= 2 {
-            oxi_ai::get_model(parts[0], &parts[1..].join("/"))
-        } else {
-            oxi_ai::get_model("anthropic", &self.config.model_id)
-        };
-
-        model.cloned().ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
+        resolve_model_from_id(&self.config.model_id)
+            .ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
     }
 
     fn should_stop_after_turn(&self, messages: &[Message], assistant_message: &AssistantMessage) -> bool {

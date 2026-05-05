@@ -10,7 +10,7 @@ use crate::types::{Response, StopReason};
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
-    get_model, progress_callback, transform_for_provider, CompactionManager, CompactionStrategy,
+    progress_callback, transform_for_provider, CompactionManager, CompactionStrategy,
     Context, LlmCompactor, Message, Provider, ProviderEvent, StreamOptions, ToolCall,
 };
 use parking_lot::RwLock;
@@ -18,11 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-/// Maximum retries for transient / rate-limit errors.
-const MAX_RETRIES: usize = 3;
-
-/// Base delay in seconds for exponential back-off.
-const BACKOFF_BASE_SECS: u64 = 2;
+use crate::retry_constants::*;
 
 /// Default fallback model used when the primary model fails.
 const DEFAULT_FALLBACK_MODEL: &str = "openai/gpt-4o-mini";
@@ -49,15 +45,7 @@ impl Agent {
 
         // Pre-initialize the LLM compactor if compaction is enabled
         if config.compaction_strategy != CompactionStrategy::Disabled {
-            let model_id = config.model_id.clone();
-            let model = {
-                let parts: Vec<&str> = model_id.split('/').collect();
-                if parts.len() == 2 {
-                    get_model(parts[0], parts[1])
-                } else {
-                    get_model("anthropic", &model_id)
-                }
-            };
+            let model = crate::model_id::resolve_model_from_id(&config.model_id);
 
             if let Some(model) = model {
                 let llm_compactor =
@@ -101,18 +89,7 @@ impl Agent {
     /// # Returns
     /// `Ok(())` on success, or an error if the model/provider is unknown
     pub fn switch_model(&self, model_id: &str) -> Result<()> {
-        let parts: Vec<&str> = model_id.split('/').collect();
-        let (provider_name, model_name) = if parts.len() >= 2 {
-            (parts[0], parts[1..].join("/"))
-        } else {
-            return Err(Error::msg(format!(
-                "Invalid model ID '{}'. Expected format: provider/model",
-                model_id
-            )));
-        };
-
-        // Look up the new model
-        let new_model = get_model(provider_name, &model_name)
+        let new_model = crate::model_id::resolve_model_from_id(model_id)
             .ok_or_else(|| Error::msg(format!("Model '{}' not found", model_id)))?;
 
         // Create the new provider
@@ -123,14 +100,9 @@ impl Agent {
         {
             let inner = self.config();
             let old_model_id = &inner.config.model_id;
-            let old_parts: Vec<&str> = old_model_id.split('/').collect();
-            let old_api = if old_parts.len() >= 2 {
-                get_model(old_parts[0], &old_parts[1..].join("/"))
-                    .map(|m| m.api)
-                    .unwrap_or(oxi_ai::Api::AnthropicMessages)
-            } else {
-                oxi_ai::Api::AnthropicMessages
-            };
+            let old_api = crate::model_id::resolve_model_from_id(old_model_id)
+                .map(|m| m.api)
+                .unwrap_or(oxi_ai::Api::AnthropicMessages);
 
             if old_api != new_model.api {
                 // Transform existing messages for the new provider
@@ -162,14 +134,9 @@ impl Agent {
         // Detect API change and transform messages if needed
         {
             let inner = self.config();
-            let old_parts: Vec<&str> = inner.config.model_id.split('/').collect();
-            let old_api = if old_parts.len() >= 2 {
-                get_model(old_parts[0], &old_parts[1..].join("/"))
-                    .map(|m| m.api)
-                    .unwrap_or(oxi_ai::Api::AnthropicMessages)
-            } else {
-                oxi_ai::Api::AnthropicMessages
-            };
+            let old_api = crate::model_id::resolve_model_from_id(&inner.config.model_id)
+                .map(|m| m.api)
+                .unwrap_or(oxi_ai::Api::AnthropicMessages);
 
             if old_api != model.api {
                 let messages = self.state.get_state().messages.clone();
@@ -252,12 +219,7 @@ impl Agent {
 
         let model = {
             let inner = self.config();
-            let parts: Vec<&str> = inner.config.model_id.split('/').collect();
-            if parts.len() == 2 {
-                get_model(parts[0], parts[1])
-            } else {
-                get_model("anthropic", &inner.config.model_id)
-            }
+            crate::model_id::resolve_model_from_id(&inner.config.model_id)
         }
         .ok_or_else(|| {
             let inner = self.config();
@@ -693,12 +655,7 @@ impl Agent {
     ) -> std::result::Result<futures::stream::BoxStream<'static, ProviderEvent>, AgentError> {
         // Resolve fallback model
         let fallback_id = DEFAULT_FALLBACK_MODEL;
-        let parts: Vec<&str> = fallback_id.split('/').collect();
-        let fallback_model = if parts.len() >= 2 {
-            get_model(parts[0], &parts[1..].join("/"))
-        } else {
-            None
-        };
+        let fallback_model = crate::model_id::resolve_model_from_id(fallback_id);
 
         let fallback_model = match fallback_model {
             Some(m) => m,

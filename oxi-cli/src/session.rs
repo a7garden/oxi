@@ -1311,7 +1311,7 @@ impl SessionManager {
 
     /// Get the session as a tree structure
     /// If id is provided, returns tree for that session (backward compat)
-    pub fn get_tree(&self, _id: Uuid) -> Vec<SessionTreeNode> {
+    pub fn get_tree(&self, _id: Uuid) -> anyhow::Result<Vec<SessionTreeNode>> {
         let entries = self.get_entries();
         let labels: HashMap<String, String> = self.labels_by_id.read().clone();
         let label_timestamps: HashMap<String, String> = self.label_timestamps_by_id.read().clone();
