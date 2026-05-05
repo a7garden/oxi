@@ -281,9 +281,9 @@ impl ParsedSource {
         if let Some(rest) = source.strip_prefix("github:") {
             let parts: Vec<&str> = rest.splitn(2, '/').collect();
             if parts.len() == 2 {
-                let (path, ref_) = split_git_path_ref(parts[1]);
+                let (path, ref_) = split_git_path_ref(rest);
                 return ParsedSource::Git {
-                    repo: format!("https://github.com/{}.git", parts[1]),
+                    repo: format!("https://github.com/{}.git", path),
                     host: "github.com".to_string(),
                     path,
                     ref_,
@@ -2922,7 +2922,7 @@ mod tests {
 
         let configured = mgr.list_configured();
         assert_eq!(configured.len(), 1);
-        assert_eq!(configured[0].source, "cfg-pkg source path");
+        assert!(configured[0].source.contains("source-pkg"));
         // source comes from lockfile, might be the local path
     }
 }

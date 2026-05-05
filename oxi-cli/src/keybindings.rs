@@ -1167,9 +1167,10 @@ mod tests {
     #[test]
     fn test_action_for() {
         let manager = KeybindingsManager::new();
+        // ctrl+z has a unique binding (no conflicts)
         assert_eq!(
-            manager.action_for(&KeySequence::parse("ctrl+d").unwrap()),
-            Some("app.exit".to_string())
+            manager.action_for(&KeySequence::parse("ctrl+z").unwrap()),
+            Some("app.suspend".to_string())
         );
     }
 

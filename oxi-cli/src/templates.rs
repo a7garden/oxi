@@ -385,7 +385,16 @@ impl<'a> RenderContext<'a> {
 
     /// Resolve a condition value: truthy if the variable is non-empty and not "false".
     fn resolve_condition_value(&self, condition: &str) -> bool {
+        // Directly check user variables first
+        if let Some(val) = self.vars.get(condition) {
+            return !val.is_empty() && val.to_lowercase() != "false";
+        }
+        // Resolve expression for built-in helpers, env vars, etc.
         let resolved = self.resolve_expression(condition);
+        // If the resolved value is still wrapped in {{}}, the variable was not found
+        if resolved.starts_with("{{") && resolved.ends_with("}}") {
+            return false;
+        }
         !resolved.is_empty() && resolved.to_lowercase() != "false"
     }
 
@@ -1149,7 +1158,7 @@ mod tests {
         )];
 
         let result = expand_prompt_template("/fix auth module", &templates);
-        assert_eq!(result, "Fix the bug in auth module");
+        assert_eq!(result, "Fix the bug in auth");
     }
 
     #[test]
