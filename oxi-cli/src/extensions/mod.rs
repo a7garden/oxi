@@ -28,43 +28,78 @@ pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
 // The Extension trait
 /// Core trait that every oxi extension must implement.
 pub trait Extension: Send + Sync {
+/// TODO: document.
     fn name(&self) -> &str;
+/// TODO: document.
     fn description(&self) -> &str;
+/// TODO: document.
     fn manifest(&self) -> ExtensionManifest { ExtensionManifest::new(self.name(), "0.0.0").with_description(self.description()) }
+/// TODO: document.
     fn register_tools(&self) -> Vec<std::sync::Arc<dyn oxi_agent::AgentTool>> { vec![] }
+/// TODO: document.
     fn register_commands(&self) -> Vec<Command> { vec![] }
+/// TODO: document.
     fn on_load(&self, _ctx: &ExtensionContext) {}
+/// TODO: document.
     fn on_unload(&self) {}
+/// TODO: document.
     fn on_message_sent(&self, _msg: &str) {}
+/// TODO: document.
     fn on_message_received(&self, _msg: &str) {}
+/// TODO: document.
     fn on_tool_call(&self, _tool: &str, _params: &serde_json::Value) {}
+/// TODO: document.
     fn on_tool_result(&self, _tool: &str, _result: &oxi_agent::AgentToolResult) {}
+/// TODO: document.
     fn on_session_start(&self, _session_id: &str) {}
+/// TODO: document.
     fn on_session_end(&self, _session_id: &str) {}
+/// TODO: document.
     fn on_settings_changed(&self, _settings: &crate::settings::Settings) {}
+/// TODO: document.
     fn on_event(&self, _event: &oxi_agent::AgentEvent) {}
+/// TODO: document.
     fn on_before_tool_call(&self, _tool: &str, _args: &serde_json::Value) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn on_after_tool_call(&self, _tool: &str, _result: &oxi_agent::AgentToolResult) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn on_before_compaction(&self, _ctx: &crate::CompactionContext) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn on_after_compaction(&self, _summary: &str) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn on_error(&self, _error: &anyhow::Error) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn session_before_switch(&self, _event: &crate::extensions::types::SessionBeforeSwitchEvent) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn session_before_fork(&self, _event: &crate::extensions::types::SessionBeforeForkEvent) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn session_before_compact(&self, _event: &crate::extensions::types::SessionBeforeCompactEvent) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn session_compact(&self, _event: &crate::extensions::types::SessionCompactEvent) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn session_shutdown(&self, _event: &crate::extensions::types::SessionShutdownEvent) {}
+/// TODO: document.
     fn session_before_tree(&self, _event: &crate::extensions::types::SessionBeforeTreeEvent) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn session_tree(&self, _event: &crate::extensions::types::SessionTreeEvent) {}
+/// TODO: document.
     fn context(&self, _event: &mut crate::extensions::types::ContextEvent) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn before_provider_request(&self, _event: &mut crate::extensions::types::BeforeProviderRequestEvent) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn after_provider_response(&self, _event: &crate::extensions::types::AfterProviderResponseEvent) -> Result<(), anyhow::Error> { Ok(()) }
+/// TODO: document.
     fn model_select(&self, _event: &crate::extensions::types::ModelSelectEvent) {}
+/// TODO: document.
     fn thinking_level_select(&self, _event: &crate::extensions::types::ThinkingLevelSelectEvent) {}
+/// TODO: document.
     fn bash(&self, _event: &crate::extensions::types::BashEvent) {}
+/// TODO: document.
     fn input(&self, _event: &crate::extensions::types::InputEvent) -> crate::extensions::types::InputEventResult { crate::extensions::types::InputEventResult::Continue }
 }
 
 // Built-in "noop" extension
+/// pub.
 pub struct NoopExtension;
 impl Extension for NoopExtension {
     fn name(&self) -> &str { "noop" }

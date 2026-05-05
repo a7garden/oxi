@@ -1,4 +1,4 @@
-//! Find tool - find files by name or pattern
+/// Find tool - find files by name or pattern
 
 use super::{AgentTool, AgentToolResult, ToolError};
 use async_trait::async_trait;

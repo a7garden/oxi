@@ -2,12 +2,12 @@
 //!
 //! Provides a flicker-free terminal chat interface with:
 //! - Double-buffered rendering via ratatui
-//! - Line-level differential updates (zero flicker)
+//! - New widget-based rendering via oxi-tui widgets
 //! - Streaming text display with spinner animation
 //! - Scrollable chat history with scroll indicator
 //! - Slash commands with autocomplete popup
-//! - Status bar showing cwd, model, git branch, context usage
-//! - Rich message rendering with role badges and visual hierarchy
+//! - Status bar showing cwd, model, git branch
+//! - Rich message rendering via ChatView widget
 
 use crate::agent_session::{AgentSession, CompactionReason, ScopedModel, SessionEvent};
 use crate::agent_session_runtime::{
@@ -22,6 +22,12 @@ use crate::session::SessionManager;
 use crate::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
+use oxi_tui::theme::Theme;
+use oxi_tui::widgets::{
+    chat::{ChatMessage, ChatView, ChatViewState, ContentBlock, MessageRole},
+    footer::{Footer, FooterState},
+    input::{Input, InputState as WidgetInputState},
+};
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,43 +43,36 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
+    widgets::Paragraph,
     Terminal,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Color Palette — Tokyo Night inspired
+// Color Palette — Tokyo Night inspired (kept for separator & popup rendering)
 // ═══════════════════════════════════════════════════════════════════════════
 
 mod palette {
     #![allow(dead_code)]
     use ratatui::style::Color;
 
-    // Background layers
-    pub const BG:          Color = Color::Rgb(26, 27, 38);    // #1a1b26 base
-    pub const BG_SURFACE:  Color = Color::Rgb(30, 32, 48);   // #1e2030 surface
-    pub const BG_OVERLAY:  Color = Color::Rgb(36, 38, 56);   // #242638 overlay
-    pub const BG_HOVER:    Color = Color::Rgb(55, 58, 82);   // #373a52 hover
-
-    // Foreground
-    pub const FG:          Color = Color::Rgb(169, 177, 214); // #a9b1d6 text
-    pub const FG_DIM:      Color = Color::Rgb(88, 91, 112);  // #585b70 dimmed
-    pub const FG_BRIGHT:   Color = Color::Rgb(205, 214, 244);// #cdd6f4 bright
-
-    // Accents
-    pub const BLUE:        Color = Color::Rgb(122, 162, 247); // #7aa2f7 blue
-    pub const CYAN:        Color = Color::Rgb(125, 207, 255); // #7dcfff cyan
-    pub const GREEN:       Color = Color::Rgb(158, 206, 106); // #9ece6a green
-    pub const YELLOW:      Color = Color::Rgb(224, 175, 104); // #e0af68 yellow
-    pub const RED:         Color = Color::Rgb(247, 118, 142); // #f7768e red
-    pub const MAGENTA:     Color = Color::Rgb(187, 154, 247); // #bb9af7 magenta
-    pub const ORANGE:      Color = Color::Rgb(255, 158, 100); // #ff9e64 orange
-    pub const TEAL:        Color = Color::Rgb(84, 168, 160);  // #54a8a0 teal
-
-    // Role colors
-    pub const USER_BG:     Color = Color::Rgb(30, 40, 70);   // subtle blue bg
-    pub const ASSISTANT_BG:Color = Color::Rgb(30, 35, 50);   // subtle dark bg
-    pub const SYSTEM_BG:   Color = Color::Rgb(45, 35, 30);   // subtle warm bg
+    pub const BG:          Color = Color::Rgb(26, 27, 38);
+    pub const BG_SURFACE:  Color = Color::Rgb(30, 32, 48);
+    pub const BG_OVERLAY:  Color = Color::Rgb(36, 38, 56);
+    pub const BG_HOVER:    Color = Color::Rgb(55, 58, 82);
+    pub const FG:          Color = Color::Rgb(169, 177, 214);
+    pub const FG_DIM:      Color = Color::Rgb(88, 91, 112);
+    pub const FG_BRIGHT:   Color = Color::Rgb(205, 214, 244);
+    pub const BLUE:        Color = Color::Rgb(122, 162, 247);
+    pub const CYAN:        Color = Color::Rgb(125, 207, 255);
+    pub const GREEN:       Color = Color::Rgb(158, 206, 106);
+    pub const YELLOW:      Color = Color::Rgb(224, 175, 104);
+    pub const RED:         Color = Color::Rgb(247, 118, 142);
+    pub const MAGENTA:     Color = Color::Rgb(187, 154, 247);
+    pub const ORANGE:      Color = Color::Rgb(255, 158, 100);
+    pub const TEAL:        Color = Color::Rgb(84, 168, 160);
+    pub const USER_BG:     Color = Color::Rgb(30, 40, 70);
+    pub const ASSISTANT_BG:Color = Color::Rgb(30, 35, 50);
+    pub const SYSTEM_BG:   Color = Color::Rgb(45, 35, 30);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -100,57 +99,115 @@ enum UiEvent {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Chat state
+// Slash completion (kept locally, not in widget)
 // ═══════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MessageRole {
-    User,
-    Assistant,
-    System,
-}
-
-/// A single chat message.
-struct ChatMessage {
-    role: MessageRole,
-    content: String,
-    #[allow(dead_code)]
-    timestamp: i64,
-}
-
-/// Spinner frames for thinking animation.
-const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-/// State for the input field (char-index based, UTF-8 safe).
-struct InputState {
-    text: String,
-    cursor: usize,
-    slash_completions: Vec<SlashCompletion>,
-    slash_completion_index: usize,
-    slash_completion_active: bool,
-}
 
 struct SlashCompletion {
     name: String,
     description: String,
 }
 
-impl InputState {
+/// Spinner frames for thinking animation.
+const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// App State — unified state using widget states
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Unified application state holding all widget states.
+struct AppState {
+    /// Chat view state (messages + streaming).
+    chat: ChatViewState,
+    /// Input field state.
+    input: WidgetInputState,
+    /// Footer state for status bar.
+    footer_state: FooterState,
+    /// Whether the agent is currently processing.
+    is_agent_busy: bool,
+    /// Current spinner animation frame.
+    spinner_frame: usize,
+    /// Auto-scroll to bottom on new content.
+    auto_scroll: bool,
+    /// Input history for Up/Down recall.
+    input_history: Vec<String>,
+    /// History navigation index (0 = current, 1.. = history).
+    history_index: usize,
+    /// Saved current input when navigating history.
+    saved_input: String,
+    /// Slash command completions.
+    slash_completions: Vec<SlashCompletion>,
+    /// Currently selected slash completion.
+    slash_completion_index: usize,
+    /// Whether slash completion popup is active.
+    slash_completion_active: bool,
+    /// Count of user+assistant messages for status bar.
+    message_count: usize,
+}
+
+impl AppState {
     fn new() -> Self {
         Self {
-            text: String::new(),
-            cursor: 0,
+            chat: ChatViewState::default(),
+            input: WidgetInputState::default(),
+            footer_state: FooterState::default(),
+            is_agent_busy: false,
+            spinner_frame: 0,
+            auto_scroll: true,
+            input_history: Vec::new(),
+            history_index: 0,
+            saved_input: String::new(),
             slash_completions: Vec::new(),
             slash_completion_index: 0,
             slash_completion_active: false,
+            message_count: 0,
         }
     }
 
-    fn clear(&mut self) {
-        self.text.clear();
-        self.cursor = 0;
+    // ── Input helpers (delegating to widget InputState) ──
+
+    fn input_value(&self) -> &str {
+        &self.input.text
+    }
+
+    fn input_clear(&mut self) {
+        self.input.clear();
         self.clear_slash_completions();
     }
+
+    fn input_insert_char(&mut self, c: char) {
+        self.input.insert_char(c);
+    }
+
+    fn input_backspace(&mut self) {
+        self.input.backspace();
+    }
+
+    fn input_delete(&mut self) {
+        self.input.delete();
+    }
+
+    fn input_move_left(&mut self) {
+        self.input.move_left();
+    }
+
+    fn input_move_right(&mut self) {
+        self.input.move_right();
+    }
+
+    fn input_move_home(&mut self) {
+        self.input.move_home();
+    }
+
+    fn input_move_end(&mut self) {
+        self.input.move_end();
+    }
+
+    fn input_set_text(&mut self, text: String) {
+        self.input.text = text;
+        self.input.cursor = self.input.text.chars().count();
+    }
+
+    // ── Slash completion helpers ──
 
     fn clear_slash_completions(&mut self) {
         self.slash_completions.clear();
@@ -159,7 +216,7 @@ impl InputState {
     }
 
     fn update_slash_completions(&mut self) {
-        let text = self.text.trim();
+        let text = self.input_value().trim();
         if !text.starts_with('/') || text.contains(' ') {
             self.clear_slash_completions();
             return;
@@ -188,8 +245,7 @@ impl InputState {
             return false;
         }
         let completion = &self.slash_completions[self.slash_completion_index];
-        self.text = completion.name.clone();
-        self.cursor = self.text.chars().count();
+        self.input_set_text(completion.name.clone());
         self.clear_slash_completions();
         true
     }
@@ -210,36 +266,77 @@ impl InputState {
         }
     }
 
-    fn value(&self) -> &str { &self.text }
+    // ── Chat message helpers ──
 
-    fn insert_char(&mut self, c: char) {
-        let byte_pos = self.char_to_byte(self.cursor);
-        self.text.insert(byte_pos, c);
-        self.cursor += 1;
+    /// Add a completed user message.
+    fn add_user_message(&mut self, content: String) {
+        self.chat.add_message(ChatMessage {
+            role: MessageRole::User,
+            content_blocks: vec![ContentBlock::Text { content }],
+            timestamp: now_millis(),
+        });
+        self.message_count += 1;
     }
 
-    fn backspace(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-            let byte_pos = self.char_to_byte(self.cursor);
-            self.text.remove(byte_pos);
+    /// Add a system message.
+    fn add_system_message(&mut self, content: String) {
+        self.chat.add_message(ChatMessage {
+            role: MessageRole::System,
+            content_blocks: vec![ContentBlock::Text { content }],
+            timestamp: now_millis(),
+        });
+    }
+
+    /// Start streaming a new assistant message.
+    fn start_streaming(&mut self) {
+        self.chat.start_streaming();
+        self.is_agent_busy = true;
+        self.auto_scroll = true;
+    }
+
+    /// Append text delta to the streaming message.
+    fn stream_text_delta(&mut self, delta: &str) {
+        self.chat.stream_text_delta(delta);
+    }
+
+    /// Finish streaming, moving partial message to completed messages.
+    fn finish_streaming(&mut self) {
+        let was_streaming = self.chat.is_streaming();
+        self.chat.finish_streaming();
+        self.is_agent_busy = false;
+        if was_streaming {
+            self.message_count += 1;
         }
     }
 
-    fn delete(&mut self) {
-        if self.cursor < self.text.chars().count() {
-            let byte_pos = self.char_to_byte(self.cursor);
-            self.text.remove(byte_pos);
+    /// Cancel streaming, saving whatever was accumulated.
+    fn cancel_streaming(&mut self) {
+        if self.chat.is_streaming() {
+            self.chat.finish_streaming();
+            self.message_count += 1;
+        }
+        self.is_agent_busy = false;
+    }
+
+    /// Scroll the chat view, handling auto-scroll.
+    fn scroll_up(&mut self, n: u16) {
+        self.chat.scroll_up(n);
+        self.auto_scroll = false;
+    }
+
+    fn scroll_down(&mut self, n: u16) {
+        self.chat.scroll_down(n);
+    }
+
+    fn ensure_auto_scroll(&mut self, visible_height: u16) {
+        if self.auto_scroll {
+            self.chat.scroll_to_bottom(visible_height);
         }
     }
 
-    fn move_left(&mut self) { if self.cursor > 0 { self.cursor -= 1; } }
-    fn move_right(&mut self) { if self.cursor < self.text.chars().count() { self.cursor += 1; } }
-    fn move_home(&mut self) { self.cursor = 0; }
-    fn move_end(&mut self) { self.cursor = self.text.chars().count(); }
-
-    fn char_to_byte(&self, char_idx: usize) -> usize {
-        self.text.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(self.text.len())
+    /// Get messages for slash command access.
+    fn messages(&self) -> &[ChatMessage] {
+        &self.chat.messages
     }
 }
 
@@ -247,7 +344,6 @@ impl InputState {
 // Main entry point
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// TODO: document this function.
 pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let settings = app.settings().clone();
     let cwd = std::env::current_dir()
@@ -350,44 +446,38 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
+    // Theme for widgets
+    let theme = Theme::dark();
+
     // App state
-    let mut messages: Vec<ChatMessage> = Vec::new();
-    let mut input = InputState::new();
-    let mut is_agent_busy = false;
-    let mut streaming_text = String::new();
-    let mut scroll_offset: usize = 0;
-    let mut auto_scroll: bool = true;
-    let mut spinner_frame: usize = 0;
-    let mut last_spinner_tick: std::time::Instant = std::time::Instant::now();
-    let mut message_count: usize = 0; // user + assistant
-    let mut input_history: Vec<String> = Vec::new();
-    let mut history_index: usize = 0; // 0 = current, 1.. = history
-    let mut saved_input: String = String::new(); // saved current input when entering history
+    let mut state = AppState::new();
 
     let model_id = agent_session.model_id();
     let git_branch = crate::git_utils::get_current_branch(
         &std::env::current_dir().unwrap_or_default(),
     );
 
-    // Welcome
-    messages.push(ChatMessage {
-        role: MessageRole::System,
-        content: format_welcome(&session_id, &model_id),
-        timestamp: now_millis(),
-    });
+    // Set up footer data
+    state.footer_state.data.pwd = Some(cwd.clone());
+    state.footer_state.data.model_name = model_id.clone();
+    state.footer_state.data.git_branch = git_branch.clone();
+
+    // Welcome message
+    state.add_system_message(format_welcome(&session_id, &model_id));
 
     let mut running = true;
-    let poll_timeout = std::time::Duration::from_millis(50); // 50ms for smooth spinner
+    let mut last_spinner_tick = std::time::Instant::now();
+    let poll_timeout = std::time::Duration::from_millis(50);
 
     while running {
         // Advance spinner based on wall-clock time (80ms per frame)
         let now = std::time::Instant::now();
         if now.duration_since(last_spinner_tick).as_millis() >= 80 {
-            spinner_frame = (spinner_frame + 1) % SPINNER.len();
+            state.spinner_frame = (state.spinner_frame + 1) % SPINNER.len();
             last_spinner_tick = now;
         }
 
-        // Render
+        // Render using widgets
         terminal.draw(|f| {
             let size = f.area();
 
@@ -402,12 +492,27 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 ])
                 .split(size);
 
-            render_chat(f, chunks[0], &messages, &streaming_text, scroll_offset,
-                        is_agent_busy, spinner_frame);
+            // ── Chat area: use ChatView widget ──
+            let chat_area = chunks[0];
+            f.render_stateful_widget(
+                ChatView::new(&theme),
+                chat_area,
+                &mut state.chat,
+            );
+
+            // ── Separator: kept as-is (simple visual element) ──
             render_separator(f, chunks[1]);
-            render_input(f, chunks[2], &input, is_agent_busy, spinner_frame);
-            render_status_bar(f, chunks[3], &cwd, &model_id,
-                              git_branch.as_deref(), is_agent_busy, message_count);
+
+            // ── Input area: use Input widget + local popup/hint ──
+            render_input_area(f, chunks[2], &mut state, &theme);
+
+            // ── Status bar: use Footer widget ──
+            let footer_area = chunks[3];
+            f.render_stateful_widget(
+                Footer::new(&theme),
+                footer_area,
+                &mut state.footer_state,
+            );
         })?;
 
         // Poll events
@@ -416,166 +521,134 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 CEvent::Key(key) => {
                     match key.code {
                         KeyCode::Enter => {
-                            if !is_agent_busy {
-                                if input.slash_completion_active {
-                                    input.accept_slash_completion();
+                            if !state.is_agent_busy {
+                                if state.slash_completion_active {
+                                    state.accept_slash_completion();
                                     continue;
                                 }
-                                let value = input.value().to_string();
+                                let value = state.input_value().to_string();
                                 if !value.is_empty() {
                                     if value.starts_with('/') {
                                         let handled = handle_slash_command(
-                                            &value, &agent_session, &mut messages, &mut running,
+                                            &value, &agent_session, &mut state, &mut running,
                                         );
-                                        input.clear();
+                                        state.input_clear();
                                         if handled { continue; }
                                     }
-                                    messages.push(ChatMessage {
-                                        role: MessageRole::User,
-                                        content: value.clone(),
-                                        timestamp: now_millis(),
-                                    });
-                                    message_count += 1;
+                                    state.add_user_message(value.clone());
                                     // Save to input history
-                                    input_history.insert(0, value.clone());
-                                    if input_history.len() > 100 { input_history.pop(); }
-                                    history_index = 0;
-                                    streaming_text.clear();
-                                    is_agent_busy = true;
-                                    auto_scroll = true;
+                                    state.input_history.insert(0, value.clone());
+                                    if state.input_history.len() > 100 { state.input_history.pop(); }
+                                    state.history_index = 0;
+                                    state.start_streaming();
                                     let _ = prompt_tx.send(value).await;
-                                    input.clear();
+                                    state.input_clear();
                                 }
                             }
                         }
                         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            if is_agent_busy {
+                            if state.is_agent_busy {
                                 let sh = agent_session.clone_handle();
                                 tokio::spawn(async move { sh.abort().await; });
-                                is_agent_busy = false;
-                                if !streaming_text.is_empty() {
-                                    messages.push(ChatMessage {
-                                        role: MessageRole::Assistant,
-                                        content: streaming_text.clone(),
-                                        timestamp: now_millis(),
-                                    });
-                                    message_count += 1;
-                                    streaming_text.clear();
-                                }
-                                messages.push(ChatMessage {
-                                    role: MessageRole::System,
-                                    content: "⏹ Interrupted".to_string(),
-                                    timestamp: now_millis(),
-                                });
+                                state.cancel_streaming();
+                                state.add_system_message("⏹ Interrupted".to_string());
                             } else {
                                 running = false;
                             }
                         }
                         KeyCode::PageUp => {
-                            scroll_offset = scroll_offset.saturating_add(10);
-                            auto_scroll = false;
+                            state.scroll_up(10);
                         }
                         KeyCode::PageDown => {
-                            scroll_offset = scroll_offset.saturating_sub(10);
-                            if scroll_offset == 0 { auto_scroll = true; }
+                            state.scroll_down(10);
                         }
                         KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                            if !is_agent_busy {
-                                input.insert_char(c);
-                                input.update_slash_completions();
+                            if !state.is_agent_busy {
+                                state.input_insert_char(c);
+                                state.update_slash_completions();
                             }
                         }
                         KeyCode::Backspace => {
-                            if !is_agent_busy {
-                                input.backspace();
-                                input.update_slash_completions();
+                            if !state.is_agent_busy {
+                                state.input_backspace();
+                                state.update_slash_completions();
                             }
                         }
                         KeyCode::Delete => {
-                            if !is_agent_busy {
-                                input.delete();
-                                input.update_slash_completions();
+                            if !state.is_agent_busy {
+                                state.input_delete();
+                                state.update_slash_completions();
                             }
                         }
                         KeyCode::Left => {
-                            if !is_agent_busy {
+                            if !state.is_agent_busy {
                                 if key.modifiers.contains(KeyModifiers::CONTROL) {
-                                    // Word-left: find previous word boundary
-                                    let text: Vec<char> = input.text.chars().collect();
-                                    let mut pos = input.cursor;
-                                    // Skip trailing spaces
+                                    // Word-left
+                                    let text: Vec<char> = state.input.text.chars().collect();
+                                    let mut pos = state.input.cursor;
                                     while pos > 0 && text[pos - 1].is_whitespace() { pos -= 1; }
-                                    // Skip word chars
                                     while pos > 0 && !text[pos - 1].is_whitespace() { pos -= 1; }
-                                    input.cursor = pos;
+                                    state.input.cursor = pos;
                                 } else {
-                                    input.move_left();
+                                    state.input_move_left();
                                 }
                             }
                         }
                         KeyCode::Right => {
-                            if !is_agent_busy {
+                            if !state.is_agent_busy {
                                 if key.modifiers.contains(KeyModifiers::CONTROL) {
-                                    // Word-right: find next word boundary
-                                    let text: Vec<char> = input.text.chars().collect();
-                                    let mut pos = input.cursor;
-                                    // Skip word chars
+                                    // Word-right
+                                    let text: Vec<char> = state.input.text.chars().collect();
+                                    let mut pos = state.input.cursor;
                                     while pos < text.len() && !text[pos].is_whitespace() { pos += 1; }
-                                    // Skip spaces
                                     while pos < text.len() && text[pos].is_whitespace() { pos += 1; }
-                                    input.cursor = pos;
+                                    state.input.cursor = pos;
                                 } else {
-                                    input.move_right();
+                                    state.input_move_right();
                                 }
                             }
                         }
-                        KeyCode::Home => { if !is_agent_busy { input.move_home(); } }
-                        KeyCode::End => { if !is_agent_busy { input.move_end(); } }
+                        KeyCode::Home => { if !state.is_agent_busy { state.input_move_home(); } }
+                        KeyCode::End => { if !state.is_agent_busy { state.input_move_end(); } }
                         KeyCode::Tab => {
-                            if !is_agent_busy && input.slash_completion_active {
-                                input.accept_slash_completion();
+                            if !state.is_agent_busy && state.slash_completion_active {
+                                state.accept_slash_completion();
                             }
                         }
                         KeyCode::Up => {
-                            if !is_agent_busy && input.slash_completion_active {
-                                input.prev_slash_completion();
-                            } else if !is_agent_busy && input.text.is_empty() && !input_history.is_empty() {
-                                // Input history: recall previous message
-                                if history_index == 0 {
-                                    saved_input = input.text.clone();
+                            if !state.is_agent_busy && state.slash_completion_active {
+                                state.prev_slash_completion();
+                            } else if !state.is_agent_busy && state.input.text.is_empty() && !state.input_history.is_empty() {
+                                if state.history_index == 0 {
+                                    state.saved_input = state.input.text.clone();
                                 }
-                                if history_index < input_history.len() {
-                                    history_index += 1;
-                                    input.text = input_history[history_index - 1].clone();
-                                    input.cursor = input.text.chars().count();
-                                    input.clear_slash_completions();
+                                if state.history_index < state.input_history.len() {
+                                    state.history_index += 1;
+                                    state.input_set_text(state.input_history[state.history_index - 1].clone());
+                                    state.clear_slash_completions();
                                 }
                             } else {
-                                scroll_offset = scroll_offset.saturating_add(3);
-                                auto_scroll = false;
+                                state.scroll_up(3);
                             }
                         }
                         KeyCode::Down => {
-                            if !is_agent_busy && input.slash_completion_active {
-                                input.next_slash_completion();
-                            } else if !is_agent_busy && history_index > 0 {
-                                // Input history: go to newer
-                                history_index -= 1;
-                                if history_index == 0 {
-                                    input.text = saved_input.clone();
+                            if !state.is_agent_busy && state.slash_completion_active {
+                                state.next_slash_completion();
+                            } else if !state.is_agent_busy && state.history_index > 0 {
+                                state.history_index -= 1;
+                                if state.history_index == 0 {
+                                    state.input_set_text(state.saved_input.clone());
                                 } else {
-                                    input.text = input_history[history_index - 1].clone();
+                                    state.input_set_text(state.input_history[state.history_index - 1].clone());
                                 }
-                                input.cursor = input.text.chars().count();
-                                input.clear_slash_completions();
+                                state.clear_slash_completions();
                             } else {
-                                scroll_offset = scroll_offset.saturating_sub(3);
-                                if scroll_offset == 0 { auto_scroll = true; }
+                                state.scroll_down(3);
                             }
                         }
                         KeyCode::Esc => {
-                            if input.slash_completion_active {
-                                input.clear_slash_completions();
+                            if state.slash_completion_active {
+                                state.clear_slash_completions();
                             }
                         }
                         _ => {}
@@ -583,12 +656,10 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 }
                 CEvent::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        scroll_offset = scroll_offset.saturating_add(3);
-                        auto_scroll = false;
+                        state.scroll_up(3);
                     }
                     MouseEventKind::ScrollDown => {
-                        scroll_offset = scroll_offset.saturating_sub(3);
-                        if scroll_offset == 0 { auto_scroll = true; }
+                        state.scroll_down(3);
                     }
                     _ => {}
                 },
@@ -602,54 +673,32 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             match ui_event {
                 UiEvent::Start | UiEvent::Thinking => {}
                 UiEvent::TextDelta(text) => {
-                    streaming_text.push_str(&text);
+                    state.stream_text_delta(&text);
                 }
                 UiEvent::ToolCall { name, .. } => {
-                    streaming_text.push_str(&format!("\n⚙ {}\n", name));
+                    state.stream_text_delta(&format!("\n⚙ {}\n", name));
                 }
                 UiEvent::ToolStart { tool_name } => {
-                    streaming_text.push_str(&format!("\n▶ {}...\n", tool_name));
+                    state.stream_text_delta(&format!("\n▶ {}...\n", tool_name));
                 }
                 UiEvent::ToolResult { tool_name, content, is_error } => {
                     let label = if tool_name.is_empty() { "tool" } else { &tool_name };
                     if is_error {
                         let preview: String = content.chars().take(200).collect();
-                        streaming_text.push_str(&format!("  ✗ {}: {}\n", label, preview));
+                        state.stream_text_delta(&format!("  ✗ {}: {}\n", label, preview));
                     } else {
                         let preview: String = content.lines().take(3).collect::<Vec<_>>().join("\n  ");
                         if !preview.is_empty() {
-                            streaming_text.push_str(&format!("  ✓ {}\n", preview));
+                            state.stream_text_delta(&format!("  ✓ {}\n", preview));
                         }
                     }
                 }
                 UiEvent::Complete => {
-                    if !streaming_text.is_empty() {
-                        messages.push(ChatMessage {
-                            role: MessageRole::Assistant,
-                            content: streaming_text.clone(),
-                            timestamp: now_millis(),
-                        });
-                        message_count += 1;
-                        streaming_text.clear();
-                    }
-                    is_agent_busy = false;
+                    state.finish_streaming();
                 }
                 UiEvent::Error(msg) => {
-                    if !streaming_text.is_empty() {
-                        messages.push(ChatMessage {
-                            role: MessageRole::Assistant,
-                            content: streaming_text.clone(),
-                            timestamp: now_millis(),
-                        });
-                        message_count += 1;
-                        streaming_text.clear();
-                    }
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("Error: {}", msg),
-                        timestamp: now_millis(),
-                    });
-                    is_agent_busy = false;
+                    state.cancel_streaming();
+                    state.add_system_message(format!("Error: {}", msg));
                 }
                 UiEvent::CompactionStart { reason } => {
                     let reason_str = match reason {
@@ -657,11 +706,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         CompactionReason::Threshold => "auto",
                         CompactionReason::Overflow => "overflow",
                     };
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("📦 Compacting ({})...", reason_str),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message(format!("📦 Compacting ({})...", reason_str));
                 }
                 UiEvent::CompactionEnd { _reason, error_message } => {
                     let msg = if let Some(err) = error_message {
@@ -669,32 +714,17 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     } else {
                         "✅ Compaction complete".to_string()
                     };
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: msg,
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message(msg);
                 }
                 UiEvent::RetryStart { attempt, max_attempts, error_message } => {
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("🔄 Retry ({}/{}): {}", attempt, max_attempts, error_message),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message(format!("🔄 Retry ({}/{}): {}", attempt, max_attempts, error_message));
                 }
                 UiEvent::ModelChanged { model_id } => {
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("🤖 → {}", model_id),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message(format!("🤖 → {}", model_id));
+                    state.footer_state.data.model_name = model_id;
                 }
                 UiEvent::ThinkingLevelChanged { level } => {
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("💭 Thinking: {}", level),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message(format!("💭 Thinking: {}", level));
                 }
                 UiEvent::QueueUpdate { pending } => {
                     if pending > 0 {
@@ -740,7 +770,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             }
         }
 
-        if auto_scroll { scroll_offset = 0; }
+        // Auto-scroll to bottom
+        let chat_visible_height = {
+            let size = terminal.size()?;
+            size.height.saturating_sub(5)
+        };
+        state.ensure_auto_scroll(chat_visible_height);
     }
 
     // Cleanup
@@ -759,339 +794,42 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Rendering — Chat
+// Rendering — Input area (combines Input widget + hint/popup)
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn render_chat(
+fn render_input_area(
     f: &mut ratatui::Frame,
     area: Rect,
-    messages: &[ChatMessage],
-    streaming_text: &str,
-    scroll_offset: usize,
-    is_agent_busy: bool,
-    spinner_frame: usize,
-) {
-    if area.width < 4 || area.height < 1 { return; }
-
-    let mut all_lines: Vec<Line> = Vec::new();
-
-    for msg in messages {
-        let ts = format_timestamp(msg.timestamp);
-
-        match msg.role {
-            MessageRole::User => {
-                // ─── User message with cyan accent bar + timestamp ───
-                let mut first_spans = vec![
-                    Span::styled(" ▌".to_string(), Style::default().fg(palette::CYAN)),
-                    Span::styled(" ".to_string(), Style::default()),
-                ];
-                let first_line = msg.content.lines().next().unwrap_or("");
-                // We'll add the line + right-aligned timestamp later; for now just the line
-                first_spans.push(Span::styled(first_line.to_string(), Style::default().fg(palette::FG_BRIGHT)));
-                // Timestamp padding + time on the right
-                let used_w: usize = first_spans.iter().map(|s| s.content.chars().count()).sum();
-                let ts_w = ts.chars().count() + 2;
-                if used_w + ts_w < area.width as usize {
-                    let gap = area.width as usize - used_w - ts_w;
-                    first_spans.push(Span::styled(" ".repeat(gap), Style::default()));
-                    first_spans.push(Span::styled(ts, Style::default().fg(palette::FG_DIM)));
-                }
-                all_lines.push(Line::from(first_spans));
-
-                for line in msg.content.lines().skip(1) {
-                    let mut ln = vec![
-                        Span::styled(" │ ".to_string(), Style::default().fg(palette::BG_HOVER)),
-                    ];
-                    ln.extend(render_rich_line(line));
-                    all_lines.push(Line::from(ln));
-                }
-                all_lines.push(Line::from(""));
-            }
-            MessageRole::Assistant => {
-                // ─── Assistant message with green accent + timestamp ───
-                let mut first_spans = vec![
-                    Span::styled(" ▐".to_string(), Style::default().fg(palette::GREEN)),
-                    Span::styled(" ".to_string(), Style::default()),
-                ];
-                let first_line = msg.content.lines().next().unwrap_or("");
-                first_spans.push(Span::styled(first_line.to_string(), Style::default().fg(palette::FG)));
-                let used_w: usize = first_spans.iter().map(|s| s.content.chars().count()).sum();
-                let ts_w = ts.chars().count() + 2;
-                if used_w + ts_w < area.width as usize {
-                    let gap = area.width as usize - used_w - ts_w;
-                    first_spans.push(Span::styled(" ".repeat(gap), Style::default()));
-                    first_spans.push(Span::styled(ts, Style::default().fg(palette::FG_DIM)));
-                }
-                all_lines.push(Line::from(first_spans));
-
-                // Remaining lines with rich rendering (code blocks, etc)
-                let mut in_code_block = false;
-                for line in msg.content.lines().skip(1) {
-                    if line.trim_start().starts_with("```") {
-                        in_code_block = !in_code_block;
-                        if in_code_block {
-                            all_lines.push(Line::from(vec![
-                                Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
-                                Span::styled(" ┌".to_string(), Style::default().fg(palette::BG_HOVER)),
-                            ]));
-                        } else {
-                            all_lines.push(Line::from(vec![
-                                Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
-                                Span::styled(" └".to_string(), Style::default().fg(palette::BG_HOVER)),
-                            ]));
-                        }
-                        continue;
-                    }
-                    if in_code_block {
-                        all_lines.push(Line::from(vec![
-                            Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
-                            Span::styled(" │ ".to_string(), Style::default().fg(palette::BG_HOVER)),
-                            Span::styled(line.to_string(), Style::default().fg(palette::FG)),
-                        ]));
-                    } else {
-                        let mut ln = vec![
-                            Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
-                            Span::styled(" ".to_string(), Style::default()),
-                        ];
-                        ln.extend(render_rich_line(line));
-                        all_lines.push(Line::from(ln));
-                    }
-                }
-                all_lines.push(Line::from(""));
-            }
-            MessageRole::System => {
-                // ─── System message — dimmed + timestamp ───
-                let mut first_spans = vec![
-                    Span::styled("  · ".to_string(), Style::default().fg(palette::FG_DIM)),
-                ];
-                let first_line = msg.content.lines().next().unwrap_or("");
-                first_spans.push(Span::styled(first_line.to_string(), Style::default().fg(palette::FG_DIM)));
-                let used_w: usize = first_spans.iter().map(|s| s.content.chars().count()).sum();
-                let ts_w = ts.chars().count() + 2;
-                if used_w + ts_w < area.width as usize {
-                    let gap = area.width as usize - used_w - ts_w;
-                    first_spans.push(Span::styled(" ".repeat(gap), Style::default()));
-                    first_spans.push(Span::styled(ts, Style::default().fg(palette::FG_DIM)));
-                }
-                all_lines.push(Line::from(first_spans));
-
-                for line in msg.content.lines().skip(1) {
-                    all_lines.push(Line::from(vec![
-                        Span::styled("    ".to_string(), Style::default()),
-                        Span::styled(line.to_string(), Style::default().fg(palette::FG_DIM)),
-                    ]));
-                }
-                all_lines.push(Line::from(""));
-            }
-        }
-    }
-
-    // Streaming text — same rich rendering as assistant
-    if !streaming_text.is_empty() {
-        all_lines.push(Line::from(""));
-        let mut in_code_block = false;
-        for line in streaming_text.lines() {
-            if line.trim_start().starts_with("```") {
-                in_code_block = !in_code_block;
-                if in_code_block {
-                    all_lines.push(Line::from(vec![
-                        Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
-                        Span::styled(" ┌".to_string(), Style::default().fg(palette::BG_HOVER)),
-                    ]));
-                } else {
-                    all_lines.push(Line::from(vec![
-                        Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
-                        Span::styled(" └".to_string(), Style::default().fg(palette::BG_HOVER)),
-                    ]));
-                }
-                continue;
-            }
-            if in_code_block {
-                all_lines.push(Line::from(vec![
-                    Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
-                    Span::styled(" │ ".to_string(), Style::default().fg(palette::BG_HOVER)),
-                    Span::styled(line.to_string(), Style::default().fg(palette::FG)),
-                ]));
-            } else {
-                let mut ln = vec![
-                    Span::styled("  ".to_string(), Style::default()),
-                ];
-                ln.extend(render_rich_line(line));
-                all_lines.push(Line::from(ln));
-            }
-        }
-        // Animated spinner
-        if is_agent_busy {
-            let spinner = SPINNER[spinner_frame];
-            all_lines.push(Line::from(vec![
-                Span::styled(format!("  {} ", spinner), Style::default().fg(palette::MAGENTA)),
-                Span::styled("thinking...".to_string(), Style::default().fg(palette::FG_DIM)),
-            ]));
-        }
-    }
-
-    // Calculate wrapped lines for scroll
-    let wrap_width = area.width as usize;
-    let mut wrapped_count: usize = 0;
-    for line in &all_lines {
-        let w = line.width();
-        if w == 0 { wrapped_count += 1; }
-        else { wrapped_count += (w + wrap_width - 1) / wrap_width.max(1); }
-    }
-
-    let visible_height = area.height as usize;
-    let max_scroll = wrapped_count.saturating_sub(visible_height);
-    let clamped_offset = scroll_offset.min(max_scroll);
-    let scroll_from_top = max_scroll.saturating_sub(clamped_offset);
-
-    // Scroll indicator on right edge
-    let show_scroll = max_scroll > 0;
-    let scroll_pct = if max_scroll > 0 {
-        ((max_scroll - scroll_from_top) as f32 / max_scroll as f32 * 100.0) as u8
-    } else { 100 };
-
-    let chat_text = ratatui::text::Text::from(all_lines);
-    let chat_widget = Paragraph::new(chat_text)
-        .wrap(Wrap { trim: false })
-        .scroll((scroll_from_top as u16, 0))
-        .style(Style::default().bg(palette::BG));
-
-    f.render_widget(chat_widget, area);
-
-    // Scroll indicator — subtle bar on right
-    if show_scroll && visible_height > 2 {
-        let thumb_size = (visible_height * visible_height / (max_scroll + visible_height)).max(1);
-        let thumb_start = (scroll_from_top as f32 / max_scroll as f32 * visible_height as f32) as usize;
-        for i in 0..thumb_size.min(visible_height) {
-            let row = area.y + (thumb_start + i).min(visible_height - 1) as u16;
-            let col = area.x + area.width - 1;
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    "█".to_string(),
-                    Style::default().fg(palette::BG_HOVER),
-                ))),
-                Rect { x: col, y: row, width: 1, height: 1 },
-            );
-        }
-        // Percentage text at bottom-right (only when not at top or bottom)
-        if scroll_from_top > 0 && scroll_from_top < max_scroll {
-            let pct_text = format!("{}%", scroll_pct);
-            let pct_len = pct_text.len() as u16;
-            let pct_row = area.y + area.height - 1;
-            let pct_col = area.x + area.width - pct_len - 2;
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(pct_text, Style::default().fg(palette::FG_DIM)))),
-                Rect { x: pct_col, y: pct_row, width: pct_len + 1, height: 1 },
-            );
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Rendering — Separator
-// ═══════════════════════════════════════════════════════════════════════════
-
-fn render_separator(f: &mut ratatui::Frame, area: Rect) {
-    // Subtle dotted pattern: ─··─··─··─
-    let w = area.width as usize;
-    let mut spans: Vec<Span> = Vec::with_capacity(w);
-    for i in 0..w {
-        let c = match i % 4 {
-            0 => '─',
-            1 => '·',
-            2 => '·',
-            _ => ' ',
-        };
-        spans.push(Span::styled(c.to_string(), Style::default().fg(palette::BG_HOVER)));
-    }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Rendering — Input
-// ═══════════════════════════════════════════════════════════════════════════
-
-fn render_input(
-    f: &mut ratatui::Frame,
-    area: Rect,
-    input: &InputState,
-    is_agent_busy: bool,
-    spinner_frame: usize,
+    state: &mut AppState,
+    theme: &Theme,
 ) {
     if area.height < 2 { return; }
 
-    // Row 0: input field
-    // Row 1: hint/popup line
+    // Row 0: input field (using Input widget)
     let input_row = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+    // Row 1: hint/popup line (manual rendering for slash commands)
     let hint_row = Rect { x: area.x, y: area.y + 1, width: area.width, height: 1 };
+    // Row 2: bottom border
     let border_row = Rect { x: area.x, y: area.y + 2, width: area.width, height: 1 };
 
-    // ── Input field ──
-    let prompt_char = if is_agent_busy {
-        format!("{} ", SPINNER[spinner_frame])
+    // Use the Input widget for the input row
+    // When agent is busy, we show a spinner as the prompt character
+    if state.is_agent_busy {
+        // Render spinner + busy indicator manually, widget doesn't support dynamic prompt
+        render_busy_input(f, input_row, state);
     } else {
-        "❯ ".to_string()
-    };
-    let prompt_color = if is_agent_busy { palette::MAGENTA } else { palette::CYAN };
-
-    let display_text = if input.value().is_empty() && !is_agent_busy {
-        "Type a message… (enter / for commands)".to_string()
-    } else {
-        input.value().to_string()
-    };
-
-    let text_fg = if input.value().is_empty() && !is_agent_busy {
-        palette::FG_DIM
-    } else {
-        palette::FG_BRIGHT
-    };
-
-    // Horizontal scroll
-    let max_content = area.width as usize - 4; // prompt(2) + padding
-    let cursor_char = input.cursor;
-    let scroll_left = if cursor_char >= max_content {
-        cursor_char - max_content + 1
-    } else { 0 };
-
-    let visible_chars: String = display_text.chars().skip(scroll_left).take(max_content).collect();
-    let cursor_screen = cursor_char.saturating_sub(scroll_left);
-
-    let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled(prompt_char, Style::default().fg(prompt_color)));
-
-    let chars: Vec<char> = visible_chars.chars().collect();
-    let show_cursor = !input.value().is_empty();
-
-    for (i, ch) in chars.iter().enumerate() {
-        if show_cursor && i == cursor_screen {
-            spans.push(Span::styled(
-                ch.to_string(),
-                Style::default().fg(palette::BG).bg(palette::FG_BRIGHT).add_modifier(Modifier::BOLD),
-            ));
-        } else {
-            spans.push(Span::styled(ch.to_string(), Style::default().fg(text_fg)));
-        }
+        f.render_stateful_widget(
+            Input::new(theme)
+                .with_placeholder("Type a message… (enter / for commands)"),
+            input_row,
+            &mut state.input,
+        );
     }
-
-    if show_cursor && cursor_screen >= chars.len() {
-        spans.push(Span::styled(
-            " ".to_string(),
-            Style::default().fg(palette::BG).bg(palette::FG_BRIGHT),
-        ));
-    }
-
-    // Remaining padding
-    let used = chars.len().max(cursor_screen + 1);
-    if used < max_content {
-        spans.push(Span::styled(" ".repeat(max_content - used), Style::default()));
-    }
-
-    f.render_widget(Paragraph::new(Line::from(spans)), input_row);
 
     // ── Hint / popup row ──
-    if input.slash_completion_active {
-        render_slash_popup(f, hint_row, input);
-    } else if is_agent_busy {
+    if state.slash_completion_active {
+        render_slash_popup(f, hint_row, state);
+    } else if state.is_agent_busy {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "  Ctrl+C to interrupt".to_string(),
@@ -1099,7 +837,7 @@ fn render_input(
             ))),
             hint_row,
         );
-    } else if input.value().is_empty() {
+    } else if state.input_value().is_empty() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "  Enter · / commands · ↑ history · Esc cancel".to_string(),
@@ -1108,8 +846,7 @@ fn render_input(
             hint_row,
         );
     } else {
-        // Show char count when typing
-        let count = input.text.chars().count();
+        let count = state.input.text.chars().count();
         let count_str = format!("  {} chars", count);
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(count_str, Style::default().fg(palette::FG_DIM)))),
@@ -1118,27 +855,55 @@ fn render_input(
     }
 
     // ── Bottom accent line (dotted, matching separator style) ──
-    let mut border_spans: Vec<Span> = Vec::with_capacity(area.width as usize);
-    for i in 0..area.width as usize {
-        let c = match i % 4 { 0 => '─', 1 => '·', 2 => '·', _ => ' ' };
-        border_spans.push(Span::styled(c.to_string(), Style::default().fg(palette::BG_HOVER)));
-    }
-    f.render_widget(Paragraph::new(Line::from(border_spans)), border_row);
+    render_separator(f, border_row);
 }
 
-/// Slash command popup — multi-column grid layout
+/// Render input field when agent is busy (spinner prompt).
+fn render_busy_input(
+    f: &mut ratatui::Frame,
+    area: Rect,
+    state: &AppState,
+) {
+    let prompt = format!("{} ", SPINNER[state.spinner_frame]);
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::styled(prompt, Style::default().fg(palette::MAGENTA)));
+
+    // Show "waiting..." or whatever text is in input
+    let display = if state.input_value().is_empty() {
+        "waiting for response…".to_string()
+    } else {
+        state.input_value().to_string()
+    };
+
+    let text_fg = if state.input_value().is_empty() {
+        palette::FG_DIM
+    } else {
+        palette::FG_BRIGHT
+    };
+
+    spans.push(Span::styled(display, Style::default().fg(text_fg)));
+
+    // Padding
+    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+    if used < area.width as usize {
+        spans.push(Span::styled(" ".repeat(area.width as usize - used), Style::default()));
+    }
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+/// Slash command popup — multi-column grid layout (kept from original).
 fn render_slash_popup(
     f: &mut ratatui::Frame,
     area: Rect,
-    input: &InputState,
+    state: &AppState,
 ) {
-    let completions = &input.slash_completions;
+    let completions = &state.slash_completions;
     if completions.is_empty() { return; }
 
-    let selected = input.slash_completion_index;
+    let selected = state.slash_completion_index;
     let max_show = 6usize;
 
-    // Calculate visible window around selected
     let window_start = if selected >= max_show {
         selected - max_show + 1
     } else { 0 };
@@ -1155,7 +920,6 @@ fn render_slash_popup(
                 format!(" {} ", comp.name),
                 Style::default().fg(palette::BG).bg(palette::BLUE).add_modifier(Modifier::BOLD),
             ));
-            // space between items
             spans.push(Span::styled(" ".to_string(), Style::default()));
         } else {
             spans.push(Span::styled(
@@ -1166,7 +930,6 @@ fn render_slash_popup(
         }
     }
 
-    // Description on the right
     if let Some(comp) = completions.get(selected) {
         let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         let remaining = area.width as usize;
@@ -1184,79 +947,22 @@ fn render_slash_popup(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Rendering — Status Bar
+// Rendering — Separator (kept as-is)
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn render_status_bar(
-    f: &mut ratatui::Frame,
-    area: Rect,
-    cwd: &str,
-    model_id: &str,
-    git_branch: Option<&str>,
-    is_agent_busy: bool,
-    message_count: usize,
-) {
-    if area.width < 4 { return; }
-
-    let mut left: Vec<Span> = Vec::new();
-    let mut right: Vec<Span> = Vec::new();
-
-    // Left: dir + branch
-    let home = std::env::var("HOME").unwrap_or_default();
-    let display_cwd = if !home.is_empty() && cwd.starts_with(&home) {
-        format!("~{}", &cwd[home.len()..])
-    } else {
-        cwd.to_string()
-    };
-    let max_cwd = (area.width as usize / 3).max(8);
-    let display_cwd = if display_cwd.len() > max_cwd {
-        let short: String = display_cwd.chars().rev().take(max_cwd.saturating_sub(2)).collect();
-        format!("…{}", short.chars().rev().collect::<String>())
-    } else { display_cwd };
-
-    left.push(Span::styled(" ".to_string(), Style::default()));
-    left.push(Span::styled(display_cwd, Style::default().fg(palette::FG)));
-
-    if let Some(branch) = git_branch {
-        if !branch.is_empty() {
-            left.push(Span::styled(" ⎇ ".to_string(), Style::default().fg(palette::MAGENTA)));
-            left.push(Span::styled(branch.to_string(), Style::default().fg(palette::MAGENTA)));
-        }
+fn render_separator(f: &mut ratatui::Frame, area: Rect) {
+    let w = area.width as usize;
+    let mut spans: Vec<Span> = Vec::with_capacity(w);
+    for i in 0..w {
+        let c = match i % 4 {
+            0 => '─',
+            1 => '·',
+            2 => '·',
+            _ => ' ',
+        };
+        spans.push(Span::styled(c.to_string(), Style::default().fg(palette::BG_HOVER)));
     }
-
-    // Right: message count · model · status
-    if message_count > 0 {
-        right.push(Span::styled(format!("{} msgs", message_count), Style::default().fg(palette::FG_DIM)));
-        right.push(Span::styled("  ".to_string(), Style::default()));
-    }
-
-    if !model_id.is_empty() {
-        let model_display = model_id.split('/').last().unwrap_or(model_id);
-        right.push(Span::styled("● ".to_string(), Style::default().fg(palette::GREEN)));
-        right.push(Span::styled(model_display.to_string(), Style::default().fg(palette::CYAN)));
-    }
-
-    if is_agent_busy {
-        right.push(Span::styled("  ⚡".to_string(), Style::default().fg(palette::YELLOW)));
-    }
-
-    // Compose with right-alignment
-    let left_w: usize = left.iter().map(|s| s.content.chars().count()).sum();
-    let right_w: usize = right.iter().map(|s| s.content.chars().count()).sum();
-    let gap = area.width as usize;
-
-    let mut all = left;
-    let spacing = gap.saturating_sub(left_w).saturating_sub(right_w);
-    if spacing > 0 {
-        all.push(Span::styled(" ".repeat(spacing), Style::default()));
-    }
-    all.extend(right);
-
-    // Render with surface background
-    f.render_widget(
-        Paragraph::new(Line::from(all)).style(Style::default().bg(palette::BG_SURFACE)),
-        area,
-    );
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1264,7 +970,6 @@ fn render_status_bar(
 // ═══════════════════════════════════════════════════════════════════════════
 
 fn format_welcome(session_id: &str, model_id: &str) -> String {
-    // Box is 35 chars wide: ╭ + 33 × ─ + ╮
     let line = "─".repeat(33);
     format!(
 "  ╭{line}╮
@@ -1286,7 +991,7 @@ fn format_welcome(session_id: &str, model_id: &str) -> String {
 fn handle_slash_command(
     input: &str,
     session: &AgentSession,
-    messages: &mut Vec<ChatMessage>,
+    state: &mut AppState,
     running: &mut bool,
 ) -> bool {
     let trimmed = input.trim();
@@ -1299,39 +1004,31 @@ fn handle_slash_command(
 
     match cmd_lower.as_str() {
         "/help" | "/?" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: format_help(),
-                timestamp: now_millis(),
-            });
+            state.add_system_message(format_help());
             true
         }
         "/quit" | "/exit" | "/q" => { *running = false; true }
-        "/clear" => { messages.clear(); session.reset(); true }
+        "/clear" => {
+            state.chat.clear();
+            session.reset();
+            true
+        }
         "/model" => {
             if let Some(model_id) = arg {
                 match session.set_model(model_id) {
                     Ok(()) => {
-                        messages.push(ChatMessage {
-                            role: MessageRole::System,
-                            content: format!("→ model: {}", model_id),
-                            timestamp: now_millis(),
-                        });
+                        state.add_system_message(format!("→ model: {}", model_id));
+                        state.footer_state.data.model_name = model_id.to_string();
                     }
                     Err(e) => {
-                        messages.push(ChatMessage {
-                            role: MessageRole::System,
-                            content: format!("✗ {}", e),
-                            timestamp: now_millis(),
-                        });
+                        state.add_system_message(format!("✗ {}", e));
                     }
                 }
             } else {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!("Model: {}\n/model <provider/model> to switch", session.model_id()),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message(format!(
+                    "Model: {}\n/model <provider/model> to switch",
+                    session.model_id()
+                ));
             }
             true
         }
@@ -1348,68 +1045,48 @@ fn handle_slash_command(
         }
         "/session" => {
             let stats = session.session_stats();
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: format!(
-                    "Session: {}\nMessages: {} ({} user, {} assistant)\nTools: {} calls, {} results\nModel: {}\nThinking: {:?}\nAuto-compact: {}\nAuto-retry: {}",
-                    stats.session_id, stats.total_messages, stats.user_messages, stats.assistant_messages,
-                    stats.tool_calls, stats.tool_results, session.model_id(),
-                    session.thinking_level(), session.auto_compaction_enabled(), session.auto_retry_enabled(),
-                ),
-                timestamp: now_millis(),
-            });
+            state.add_system_message(format!(
+                "Session: {}\nMessages: {} ({} user, {} assistant)\nTools: {} calls, {} results\nModel: {}\nThinking: {:?}\nAuto-compact: {}\nAuto-retry: {}",
+                stats.session_id, stats.total_messages, stats.user_messages, stats.assistant_messages,
+                stats.tool_calls, stats.tool_results, session.model_id(),
+                session.thinking_level(), session.auto_compaction_enabled(), session.auto_retry_enabled(),
+            ));
             true
         }
         "/settings" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: format!(
-                    "Model: {}\nThinking: {:?}\nAuto-compact: {}\nAuto-retry: {}",
-                    session.model_id(), session.thinking_level(),
-                    session.auto_compaction_enabled(), session.auto_retry_enabled(),
-                ),
-                timestamp: now_millis(),
-            });
+            state.add_system_message(format!(
+                "Model: {}\nThinking: {:?}\nAuto-compact: {}\nAuto-retry: {}",
+                session.model_id(), session.thinking_level(),
+                session.auto_compaction_enabled(), session.auto_retry_enabled(),
+            ));
             true
         }
         "/name" => {
             if let Some(name) = arg {
                 session.set_session_name(name.to_string());
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!("Session → {}", name),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message(format!("Session → {}", name));
             } else {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "/name <name>".to_string(),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message("/name <name>".to_string());
             }
             true
         }
         "/copy" => {
-            let last = messages.iter().rev().find(|m| m.role == MessageRole::Assistant);
+            let last = state.messages().iter().rev().find(|m| m.role == MessageRole::Assistant);
             if let Some(msg) = last {
-                match clipboard_write::copy_to_clipboard(&msg.content) {
-                    Ok(()) => messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: "✓ Copied to clipboard".to_string(),
-                        timestamp: now_millis(),
-                    }),
-                    Err(e) => messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("✗ Copy failed: {}", e),
-                        timestamp: now_millis(),
-                    }),
+                // Extract text content from content blocks
+                let content: String = msg.content_blocks.iter()
+                    .filter_map(|b| match b {
+                        ContentBlock::Text { content } => Some(content.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                match clipboard_write::copy_to_clipboard(&content) {
+                    Ok(()) => state.add_system_message("✓ Copied to clipboard".to_string()),
+                    Err(e) => state.add_system_message(format!("✗ Copy failed: {}", e)),
                 }
             } else {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "No assistant message".to_string(),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message("No assistant message".to_string());
             }
             true
         }
@@ -1421,11 +1098,7 @@ fn handle_slash_command(
                 if !parsed.is_empty() { entries = parsed; break; }
             }
             if entries.is_empty() {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "No changelog found".to_string(),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message("No changelog found".to_string());
             } else {
                 let mut out = "Changelog:\n\n".to_string();
                 for entry in entries.iter().take(5) {
@@ -1439,18 +1112,12 @@ fn handle_slash_command(
                     out.push_str(&preview);
                     out.push_str("\n\n");
                 }
-                messages.push(ChatMessage {
-                    role: MessageRole::System, content: out, timestamp: now_millis(),
-                });
+                state.add_system_message(out);
             }
             true
         }
         "/hotkeys" | "/keys" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: format_hotkeys(),
-                timestamp: now_millis(),
-            });
+            state.add_system_message(format_hotkeys());
             true
         }
         "/export" => {
@@ -1462,133 +1129,84 @@ fn handle_slash_command(
                 total_user_tokens: None,
                 total_assistant_tokens: None,
             };
-            let entries: Vec<crate::session::SessionEntry> = messages.iter().map(|msg| {
+            let entries: Vec<crate::session::SessionEntry> = state.messages().iter().map(|msg| {
                 let role = match msg.role {
                     MessageRole::User => "user",
                     MessageRole::Assistant => "assistant",
                     MessageRole::System => "system",
                 };
-                crate::session::SessionEntry::simple_message(role, &msg.content)
+                let content: String = msg.content_blocks.iter()
+                    .filter_map(|b| match b {
+                        ContentBlock::Text { content } => Some(content.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                crate::session::SessionEntry::simple_message(role, &content)
             }).collect();
             match export::export_to_html(&entries, &meta, &HtmlExportOptions::default()) {
                 Ok(html) => {
                     if let Some(path) = export_path {
                         match std::fs::write(&path, &html) {
-                            Ok(()) => messages.push(ChatMessage {
-                                role: MessageRole::System,
-                                content: format!("✓ Exported: {}", path.display()),
-                                timestamp: now_millis(),
-                            }),
-                            Err(e) => messages.push(ChatMessage {
-                                role: MessageRole::System,
-                                content: format!("✗ Write failed: {}", e),
-                                timestamp: now_millis(),
-                            }),
+                            Ok(()) => state.add_system_message(format!("✓ Exported: {}", path.display())),
+                            Err(e) => state.add_system_message(format!("✗ Write failed: {}", e)),
                         }
                     } else {
-                        messages.push(ChatMessage {
-                            role: MessageRole::System,
-                            content: format!("HTML ready ({} bytes). /export <path> to save.", html.len()),
-                            timestamp: now_millis(),
-                        });
+                        state.add_system_message(format!("HTML ready ({} bytes). /export <path> to save.", html.len()));
                     }
                 }
-                Err(e) => messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!("✗ Export failed: {}", e),
-                    timestamp: now_millis(),
-                }),
+                Err(e) => state.add_system_message(format!("✗ Export failed: {}", e)),
             }
             true
         }
         "/import" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: if let Some(p) = arg {
-                    format!("Import '{}' — coming soon", p)
-                } else {
-                    "/import <path-to-jsonl>".to_string()
-                },
-                timestamp: now_millis(),
+            state.add_system_message(if let Some(p) = arg {
+                format!("Import '{}' — coming soon", p)
+            } else {
+                "/import <path-to-jsonl>".to_string()
             });
             true
         }
         "/share" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "GitHub gist sharing coming soon. Use /export for HTML.".to_string(),
-                timestamp: now_millis(),
-            });
+            state.add_system_message("GitHub gist sharing coming soon. Use /export for HTML.".to_string());
             true
         }
         "/fork" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "Use /tree to view branches. Fork via session navigation.".to_string(),
-                timestamp: now_millis(),
-            });
+            state.add_system_message("Use /tree to view branches. Fork via session navigation.".to_string());
             true
         }
         "/clone" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "Run oxi --continue in a new terminal to clone.".to_string(),
-                timestamp: now_millis(),
-            });
+            state.add_system_message("Run oxi --continue in a new terminal to clone.".to_string());
             true
         }
         "/tree" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "Linear session. Use /fork to branch from a previous message.".to_string(),
-                timestamp: now_millis(),
-            });
+            state.add_system_message("Linear session. Use /fork to branch from a previous message.".to_string());
             true
         }
         "/login" => {
             if let Some(provider) = arg {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!(
-                        "Set {} API key:\n  export {}_API_KEY=your-key",
-                        provider, provider.to_uppercase()
-                    ),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message(format!(
+                    "Set {} API key:\n  export {}_API_KEY=your-key",
+                    provider, provider.to_uppercase()
+                ));
             } else {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "/login <provider>\n\nProviders: anthropic, openai, google, groq, mistral, deepseek, xai".to_string(),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message("/login <provider>\n\nProviders: anthropic, openai, google, groq, mistral, deepseek, xai".to_string());
             }
             true
         }
         "/logout" => {
             if let Some(provider) = arg {
                 AuthStorage::new().remove(provider);
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!("✓ Removed {}", provider),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message(format!("✓ Removed {}", provider));
             } else {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "/logout <provider>".to_string(),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message("/logout <provider>".to_string());
             }
             true
         }
         "/new" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "Starting new session…".to_string(),
-                timestamp: now_millis(),
-            });
+            state.add_system_message("Starting new session…".to_string());
             session.reset();
-            messages.clear();
+            state.chat.clear();
             true
         }
         "/resume" => {
@@ -1602,11 +1220,7 @@ fn handle_slash_command(
                     .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
                     .take(10).collect();
                 if list.is_empty() {
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: "No previous sessions".to_string(),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message("No previous sessions".to_string());
                 } else {
                     let mut out = "Recent:\n\n".to_string();
                     for (i, entry) in list.iter().enumerate() {
@@ -1615,25 +1229,15 @@ fn handle_slash_command(
                         }
                     }
                     out.push_str("\n/import <path> to resume");
-                    messages.push(ChatMessage {
-                        role: MessageRole::System, content: out, timestamp: now_millis(),
-                    });
+                    state.add_system_message(out);
                 }
             } else {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "No sessions found".to_string(),
-                    timestamp: now_millis(),
-                });
+                state.add_system_message("No sessions found".to_string());
             }
             true
         }
         "/reload" => {
-            messages.push(ChatMessage {
-                role: MessageRole::System,
-                content: "✓ Configuration reloaded".to_string(),
-                timestamp: now_millis(),
-            });
+            state.add_system_message("✓ Configuration reloaded".to_string());
             true
         }
         "/scoped-models" | "/models" => {
@@ -1652,33 +1256,17 @@ fn handle_slash_command(
                 if !models.is_empty() {
                     session.set_scoped_models(models.clone());
                     let names: Vec<String> = models.iter().map(|m| format!("{}/{}", m.provider, m.model_id)).collect();
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("Scoped: {} (Ctrl+P to cycle)", names.join(", ")),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message(format!("Scoped: {} (Ctrl+P to cycle)", names.join(", ")));
                 } else {
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: "/scoped-models provider/model1,provider/model2".to_string(),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message("/scoped-models provider/model1,provider/model2".to_string());
                 }
             } else {
                 let scoped = session.scoped_models();
                 if scoped.is_empty() {
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: "No scoped models. /scoped-models <m1>,<m2>".to_string(),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message("No scoped models. /scoped-models <m1>,<m2>".to_string());
                 } else {
                     let names: Vec<String> = scoped.iter().map(|m| format!("{}/{}", m.provider, m.model_id)).collect();
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("Scoped: {}", names.join(", ")),
-                        timestamp: now_millis(),
-                    });
+                    state.add_system_message(format!("Scoped: {}", names.join(", ")));
                 }
             }
             true
@@ -1760,99 +1348,4 @@ fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
-}
-
-/// Format a millisecond timestamp as HH:MM.
-fn format_timestamp(millis: i64) -> String {
-    let secs = millis / 1000;
-    let hours = ((secs / 3600) % 24) as u8;
-    let mins = ((secs / 60) % 60) as u8;
-    format!("{}:{:02}", hours, mins)
-}
-
-/// Render a line of text with inline markdown styling.
-/// Returns Vec<Span> with proper fg/bg for **bold**, *italic*, `code`.
-fn render_rich_line(line: &str) -> Vec<Span<'static>> {
-    let mut spans: Vec<Span> = Vec::new();
-    let chars: Vec<char> = line.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-    let mut buf = String::new();
-
-    let flush = |buf: &mut String, spans: &mut Vec<Span>| {
-        if !buf.is_empty() {
-            spans.push(Span::styled(buf.clone(), Style::default().fg(palette::FG)));
-            buf.clear();
-        }
-    };
-
-    while i < len {
-        // Inline code `...`
-        if chars[i] == '`' {
-            flush(&mut buf, &mut spans);
-            i += 1;
-            let mut code = String::new();
-            while i < len && chars[i] != '`' {
-                code.push(chars[i]);
-                i += 1;
-            }
-            if i < len { i += 1; } // closing `
-            spans.push(Span::styled(
-                code,
-                Style::default().fg(palette::ORANGE),
-            ));
-        }
-        // Bold **...**
-        else if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
-            flush(&mut buf, &mut spans);
-            i += 2;
-            let mut bold = String::new();
-            while i + 1 < len && !(chars[i] == '*' && chars[i + 1] == '*') {
-                bold.push(chars[i]);
-                i += 1;
-            }
-            if i + 1 < len { i += 2; }
-            spans.push(Span::styled(
-                bold,
-                Style::default().fg(palette::FG_BRIGHT).add_modifier(Modifier::BOLD),
-            ));
-        }
-        // Italic *...*  (but not **)
-        else if chars[i] == '*' && (i + 1 >= len || chars[i + 1] != '*') {
-            flush(&mut buf, &mut spans);
-            i += 1;
-            let mut italic = String::new();
-            while i < len && chars[i] != '*' {
-                italic.push(chars[i]);
-                i += 1;
-            }
-            if i < len { i += 1; }
-            spans.push(Span::styled(
-                italic,
-                Style::default().fg(palette::FG).add_modifier(Modifier::ITALIC),
-            ));
-        }
-        // Heading ##
-        else if chars[i] == '#' && (i == 0 || chars[i - 1] == ' ') {
-            flush(&mut buf, &mut spans);
-            while i < len && chars[i] == '#' { i += 1; }
-            // skip space after #s
-            if i < len && chars[i] == ' ' { i += 1; }
-            let mut heading = String::new();
-            while i < len { heading.push(chars[i]); i += 1; }
-            spans.push(Span::styled(
-                heading,
-                Style::default().fg(palette::FG_BRIGHT).add_modifier(Modifier::BOLD),
-            ));
-        }
-        else {
-            buf.push(chars[i]);
-            i += 1;
-        }
-    }
-    flush(&mut buf, &mut spans);
-    if spans.is_empty() {
-        spans.push(Span::styled(String::new(), Style::default().fg(palette::FG)));
-    }
-    spans
 }

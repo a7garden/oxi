@@ -1,4 +1,4 @@
-//! Queue management for agent loop
+/// Queue management for agent loop
 
 use std::sync::Arc;
 use crate::events::AgentEvent;

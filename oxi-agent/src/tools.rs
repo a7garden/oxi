@@ -1,6 +1,6 @@
-//! Agent tools system
+/// Agent tools system
 //!
-//! This module provides the tool abstraction layer and built-in tools.
+/// This module provides the tool abstraction layer and built-in tools.
 
 use crate::types::ToolDefinition;
 use async_trait::async_trait;

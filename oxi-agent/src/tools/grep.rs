@@ -1,4 +1,4 @@
-//! Grep tool - search files for patterns
+/// Grep tool - search files for patterns
 
 use super::{AgentTool, AgentToolResult, ToolError};
 use async_trait::async_trait;

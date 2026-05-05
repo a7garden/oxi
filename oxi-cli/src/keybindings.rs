@@ -192,6 +192,7 @@ impl fmt::Display for KeySequence {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KeyAction {
     // Editor actions
+/// cursor  up.
     CursorUp,
 /// cursor down variant.
     CursorDown,
@@ -237,6 +238,7 @@ pub enum KeyAction {
     NewLine,
 
     // Input actions
+/// submit.
     Submit,
 /// tab variant.
     Tab,
@@ -258,6 +260,7 @@ pub enum KeyAction {
     Interrupt,
 
     // App actions
+/// clear.
     Clear,
 /// exit variant.
     Exit,
@@ -339,6 +342,7 @@ pub enum KeyAction {
     TreeFilterCycleBackward,
 
     // Custom action (for extensions)
+/// custom.
     Custom(String),
 }
 

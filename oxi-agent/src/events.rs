@@ -1,7 +1,7 @@
-//! Agent event system
+/// Agent event system
 //!
-//! Defines all events emitted during an agent run, including lifecycle,
-//! streaming, tool execution, compaction, retry, and steering events.
+/// Defines all events emitted during an agent run, including lifecycle,
+/// streaming, tool execution, compaction, retry, and steering events.
 
 use crate::compaction::CompactionEvent;
 use serde::{Deserialize, Serialize};

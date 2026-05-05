@@ -1,4 +1,4 @@
-//! Streaming implementation for agent loop
+/// Streaming implementation for agent loop
 
 use anyhow::{Error, Result};
 use futures::StreamExt;

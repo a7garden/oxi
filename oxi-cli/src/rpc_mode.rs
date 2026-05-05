@@ -100,10 +100,15 @@ pub struct JsonRpcErrorResponse {
 }
 
 // Standard JSON-RPC error codes
+/// pub.
 pub const JSONRPC_PARSE_ERROR: i64 = -32700;
+/// pub.
 pub const JSONRPC_INVALID_REQUEST: i64 = -32600;
+/// pub.
 pub const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
+/// pub.
 pub const JSONRPC_INVALID_PARAMS: i64 = -32602;
+/// pub.
 pub const JSONRPC_INTERNAL_ERROR: i64 = -32603;
 
 // ============================================================================
@@ -115,6 +120,7 @@ pub const JSONRPC_INTERNAL_ERROR: i64 = -32603;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RpcCommand {
     // ── Prompting ───────────────────────────────────────────────────
+/// prompt.
     Prompt {
         id: Option<String>,
         message: String,
@@ -122,125 +128,153 @@ pub enum RpcCommand {
         #[serde(default)]
         streaming_behavior: Option<String>,
     },
+/// steer.
     Steer {
         id: Option<String>,
         message: String,
         images: Option<Vec<ImageData>>,
     },
+/// follow  up.
     FollowUp {
         id: Option<String>,
         message: String,
         images: Option<Vec<ImageData>>,
     },
+/// abort.
     Abort {
         id: Option<String>,
     },
+/// new  session.
     NewSession {
         id: Option<String>,
         parent_session: Option<String>,
     },
 
     // ── State ───────────────────────────────────────────────────────
+/// get  state.
     GetState {
         id: Option<String>,
     },
 
     // ── Model ──────────────────────────────────────────────────────
+/// set  model.
     SetModel {
         id: Option<String>,
         provider: String,
         model_id: String,
     },
+/// cycle  model.
     CycleModel {
         id: Option<String>,
     },
+/// get  available  models.
     GetAvailableModels {
         id: Option<String>,
     },
 
     // ── Thinking ────────────────────────────────────────────────────
+/// set  thinking  level.
     SetThinkingLevel {
         id: Option<String>,
         level: String,
     },
+/// cycle  thinking  level.
     CycleThinkingLevel {
         id: Option<String>,
     },
 
     // ── Queue modes ─────────────────────────────────────────────────
+/// set  steering  mode.
     SetSteeringMode {
         id: Option<String>,
         mode: String,
     },
+/// set  follow  up  mode.
     SetFollowUpMode {
         id: Option<String>,
         mode: String,
     },
 
     // ── Compaction ──────────────────────────────────────────────────
+/// compact.
     Compact {
         id: Option<String>,
         custom_instructions: Option<String>,
     },
+/// set  auto  compaction.
     SetAutoCompaction {
         id: Option<String>,
         enabled: bool,
     },
 
     // ── Retry ───────────────────────────────────────────────────────
+/// set  auto  retry.
     SetAutoRetry {
         id: Option<String>,
         enabled: bool,
     },
+/// abort  retry.
     AbortRetry {
         id: Option<String>,
     },
 
     // ── Bash ────────────────────────────────────────────────────────
+/// bash.
     Bash {
         id: Option<String>,
         command: String,
     },
+/// abort  bash.
     AbortBash {
         id: Option<String>,
     },
 
     // ── Session ────────────────────────────────────────────────────
+/// get  session  stats.
     GetSessionStats {
         id: Option<String>,
     },
+/// export  html.
     ExportHtml {
         id: Option<String>,
         output_path: Option<String>,
     },
+/// switch  session.
     SwitchSession {
         id: Option<String>,
         session_path: String,
     },
+/// fork.
     Fork {
         id: Option<String>,
         entry_id: String,
     },
+/// clone.
     Clone {
         id: Option<String>,
     },
+/// get  fork  messages.
     GetForkMessages {
         id: Option<String>,
     },
+/// get  last  assistant  text.
     GetLastAssistantText {
         id: Option<String>,
     },
+/// set  session  name.
     SetSessionName {
         id: Option<String>,
         name: String,
     },
 
     // ── Messages ───────────────────────────────────────────────────
+/// get  messages.
     GetMessages {
         id: Option<String>,
     },
 
     // ── Commands ────────────────────────────────────────────────────
+/// get  commands.
     GetCommands {
         id: Option<String>,
     },
@@ -265,6 +299,7 @@ pub struct RpcImageSource {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RpcResponse {
+/// response.
     Response {
         id: Option<String>,
         command: String,
@@ -274,6 +309,7 @@ pub enum RpcResponse {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+/// extension  ui  request.
     ExtensionUiRequest(RpcExtensionUiRequest),
 }
 
@@ -281,6 +317,7 @@ pub enum RpcResponse {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum RpcExtensionUiRequest {
+/// select.
     Select {
         id: String,
         title: String,
@@ -288,6 +325,7 @@ pub enum RpcExtensionUiRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         timeout: Option<u64>,
     },
+/// confirm.
     Confirm {
         id: String,
         title: String,
@@ -295,6 +333,7 @@ pub enum RpcExtensionUiRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         timeout: Option<u64>,
     },
+/// input.
     Input {
         id: String,
         title: String,
@@ -303,23 +342,27 @@ pub enum RpcExtensionUiRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         timeout: Option<u64>,
     },
+/// editor.
     Editor {
         id: String,
         title: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         prefill: Option<String>,
     },
+/// notify.
     Notify {
         id: String,
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         notify_type: Option<String>,
     },
+/// set  status.
     SetStatus {
         id: String,
         status_key: String,
         status_text: Option<String>,
     },
+/// set  widget.
     SetWidget {
         id: String,
         widget_key: String,
@@ -327,10 +370,12 @@ pub enum RpcExtensionUiRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         widget_placement: Option<String>,
     },
+/// set  title.
     SetTitle {
         id: String,
         title: String,
     },
+/// set  editor  text.
     SetEditorText {
         id: String,
         text: String,
@@ -341,6 +386,7 @@ pub enum RpcExtensionUiRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RpcExtensionUiResponse {
+/// extension  ui  response.
     ExtensionUiResponse {
         id: String,
         #[serde(default)]

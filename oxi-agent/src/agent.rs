@@ -1,4 +1,4 @@
-//! Core agent implementation
+/// Core agent implementation
 
 use crate::compaction::{CompactedContext as AgentCompactedContext, CompactionEvent};
 use crate::config::AgentConfig;

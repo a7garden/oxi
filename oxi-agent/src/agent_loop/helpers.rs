@@ -1,4 +1,4 @@
-//! Helper functions for agent loop
+/// Helper functions for agent loop
 
 use oxi_ai::{ContentBlock, ToolCall, TextContent, ToolResultMessage};
 

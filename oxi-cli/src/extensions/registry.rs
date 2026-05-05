@@ -42,6 +42,7 @@ struct LoadedExtension {
     source_path: Option<PathBuf>,
 }
 
+/// pub.
 pub struct ExtensionRegistry {
     entries: HashMap<String, LoadedExtension>,
     errors: Arc<RwLock<Vec<ExtensionErrorRecord>>>,
@@ -62,12 +63,14 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn register(&mut self, ext: Arc<dyn Extension>) {
         let name = ext.name().to_string();
         tracing::info!(name = %name, "extension registered");
         self.entries.insert(name, LoadedExtension { extension: ext, enabled: true, source_path: None });
     }
 
+/// TODO: document.
     pub fn register_with_library(&mut self, ext: Arc<dyn Extension>, source_path: PathBuf, library: Library) {
         let name = ext.name().to_string();
         tracing::info!(name = %name, path = %source_path.display(), "extension registered (dynamic)");
@@ -75,6 +78,7 @@ impl ExtensionRegistry {
         self.entries.insert(name, LoadedExtension { extension: ext, enabled: true, source_path: Some(source_path) });
     }
 
+/// TODO: document.
     pub fn unregister(&mut self, name: &str) -> bool {
         if let Some(entry) = self.entries.remove(name) {
             self.call_hook_safe(name, "on_unload", || { entry.extension.on_unload(); });
@@ -85,6 +89,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn disable(&mut self, name: &str) -> Result<(), ExtensionError> {
         let ext = {
             let entry = self.entries.get_mut(name).ok_or_else(|| ExtensionError::NotFound { name: name.to_string() })?;
@@ -97,6 +102,7 @@ impl ExtensionRegistry {
         Ok(())
     }
 
+/// TODO: document.
     pub fn enable(&mut self, name: &str, ctx: &ExtensionContext) -> Result<(), ExtensionError> {
         let ext = {
             let entry = self.entries.get_mut(name).ok_or_else(|| ExtensionError::NotFound { name: name.to_string() })?;
@@ -109,10 +115,12 @@ impl ExtensionRegistry {
         Ok(())
     }
 
+/// TODO: document.
     pub fn is_enabled(&self, name: &str) -> bool {
         self.entries.get(name).map(|e| e.enabled).unwrap_or(false)
     }
 
+/// TODO: document.
     pub fn hot_reload(&mut self, name: &str, ctx: &ExtensionContext) -> Result<(), ExtensionError> {
         let source_path = {
             let entry = self.entries.get(name).ok_or_else(|| ExtensionError::NotFound { name: name.to_string() })?;
@@ -128,14 +136,17 @@ impl ExtensionRegistry {
         Ok(())
     }
 
+/// TODO: document.
     pub fn all_tools(&self) -> Vec<ToolArc> {
         self.entries.values().filter(|e| e.enabled).flat_map(|e| e.extension.register_tools()).collect()
     }
 
+/// TODO: document.
     pub fn all_commands(&self) -> Vec<Command> {
         self.entries.values().filter(|e| e.enabled).flat_map(|e| e.extension.register_commands()).collect()
     }
 
+/// TODO: document.
     pub fn emit_load(&self, ctx: &ExtensionContext) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -143,6 +154,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_unload(&self) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -150,6 +162,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_message_sent(&self, msg: &str) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -157,6 +170,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_message_received(&self, msg: &str) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -164,6 +178,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_tool_call(&self, tool: &str, params: &Value) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -171,6 +186,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_tool_result(&self, tool: &str, result: &AgentToolResult) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -178,6 +194,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_session_start(&self, session_id: &str) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -185,6 +202,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_session_end(&self, session_id: &str) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -192,6 +210,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_settings_changed(&self, settings: &Settings) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -199,6 +218,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_event(&self, event: &AgentEvent) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -206,6 +226,7 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn emit_error(&self, error: &anyhow::Error) -> Vec<(String, anyhow::Error)> {
         let mut errors = Vec::new();
         for entry in self.entries.values().filter(|e| e.enabled) {
@@ -218,6 +239,7 @@ impl ExtensionRegistry {
         errors
     }
 
+/// TODO: document.
     pub fn emit_session_shutdown(&self, event: &SessionShutdownEvent) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -225,25 +247,33 @@ impl ExtensionRegistry {
         }
     }
 
+/// TODO: document.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Extension>> {
         self.entries.get(name).map(|e| Arc::clone(&e.extension))
     }
 
+/// TODO: document.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.entries.keys().map(|s| s.as_str())
     }
 
+/// TODO: document.
     pub fn extensions(&self) -> impl Iterator<Item = &Arc<dyn Extension>> {
         self.entries.values().map(|e| &e.extension)
     }
 
+/// TODO: document.
     pub fn manifest(&self, name: &str) -> Option<ExtensionManifest> {
         self.entries.get(name).map(|e| e.extension.manifest())
     }
 
+/// TODO: document.
     pub fn len(&self) -> usize { self.entries.len() }
+/// TODO: document.
     pub fn is_empty(&self) -> bool { self.entries.is_empty() }
+/// TODO: document.
     pub fn errors(&self) -> Vec<ExtensionErrorRecord> { self.errors.read().clone() }
+/// TODO: document.
     pub fn clear_errors(&self) { self.errors.write().clear(); }
 
     fn call_hook_safe<F>(&self, ext_name: &str, hook: &str, f: F) where F: FnOnce() {
@@ -268,6 +298,7 @@ impl fmt::Debug for ExtensionRegistry {
 // Extension Runner
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// pub.
 pub struct ExtensionRunner {
     registry: ExtensionRegistry,
     states: HashMap<String, ExtensionState>,
@@ -286,12 +317,14 @@ impl ExtensionRunner {
         Self { registry: ExtensionRegistry::new(), states: HashMap::new(), order: Vec::new(), error_listeners: Vec::new(), cwd, load_errors: Vec::new() }
     }
 
+/// TODO: document.
     pub fn on_error<F>(&mut self, listener: F) -> ExtensionErrorHandle where F: Fn(&ExtensionErrorRecord) + Send + Sync + 'static {
         let arc: Arc<ExtensionErrorListener> = Arc::new(listener);
         self.error_listeners.push(Arc::clone(&arc));
         ExtensionErrorHandle { listener: Some(arc) }
     }
 
+/// TODO: document.
     pub fn emit_error_record(&self, record: ExtensionErrorRecord) {
         for listener in &self.error_listeners {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { listener(&record); }));
@@ -299,6 +332,7 @@ impl ExtensionRunner {
         self.registry.errors.write().push(record);
     }
 
+/// TODO: document.
     pub fn load_extension(&mut self, path: &Path, ctx: &ExtensionContext) -> Result<(), ExtensionError> {
         let path_display = path.display().to_string();
         if !path.exists() { return Err(ExtensionError::LoadFailed { name: path_display, reason: "File not found".to_string() }); }
@@ -333,12 +367,14 @@ impl ExtensionRunner {
         Ok(())
     }
 
+/// TODO: document.
     pub fn load_extensions_from_paths(&mut self, paths: &[PathBuf], ctx: &ExtensionContext) -> Vec<anyhow::Error> {
         let mut errors = Vec::new();
         for path in paths { if let Err(e) = self.load_extension(path, ctx) { errors.push(anyhow::anyhow!("{}", e)); } }
         errors
     }
 
+/// TODO: document.
     pub fn unload_extension(&mut self, name: &str) -> bool {
         let had = self.registry.unregister(name);
         if had { self.set_state(name, ExtensionState::Unloaded); tracing::info!(name = %name, "extension unloaded"); }
@@ -351,18 +387,28 @@ impl ExtensionRunner {
         if state == ExtensionState::Unloaded { self.order.retain(|n| n != name); }
     }
 
+/// TODO: document.
     pub fn state(&self, name: &str) -> ExtensionState { self.states.get(name).copied().unwrap_or(ExtensionState::Unloaded) }
+/// TODO: document.
     pub fn states(&self) -> &HashMap<String, ExtensionState> { &self.states }
+/// TODO: document.
     pub fn extension_order(&self) -> &[String] { &self.order }
+/// TODO: document.
     pub fn load_errors(&self) -> &[(PathBuf, String)] { &self.load_errors }
 
+/// TODO: document.
     pub fn disable(&mut self, name: &str) -> Result<(), ExtensionError> { self.registry.disable(name)?; self.set_state(name, ExtensionState::Disabled); Ok(()) }
+/// TODO: document.
     pub fn enable(&mut self, name: &str, ctx: &ExtensionContext) -> Result<(), ExtensionError> { self.registry.enable(name, ctx)?; self.set_state(name, ExtensionState::Active); Ok(()) }
+/// TODO: document.
     pub fn is_enabled(&self, name: &str) -> bool { self.registry.is_enabled(name) }
 
+/// TODO: document.
     pub fn has_handlers(&self, _event_type: &str) -> bool { self.has_enabled_extensions() }
+/// TODO: document.
     pub fn has_enabled_extensions(&self) -> bool { self.registry.extensions().any(|_| true) && self.order.iter().any(|name| self.state(name) == ExtensionState::Active) }
 
+/// TODO: document.
     pub fn all_tools(&self) -> Vec<ToolArc> {
         let mut tools = Vec::new();
         for name in &self.order {
@@ -372,6 +418,7 @@ impl ExtensionRunner {
         tools
     }
 
+/// TODO: document.
     pub fn all_commands(&self) -> Vec<Command> {
         let mut commands = Vec::new();
         for name in &self.order {
@@ -381,12 +428,15 @@ impl ExtensionRunner {
         commands
     }
 
+/// TODO: document.
     pub fn wrap_tool(&self, tool: ToolArc) -> ToolArc {
         Arc::new(WrappedTool { inner: tool, runner_state: Arc::new(RwLock::new(RunnerState { errors: self.registry.errors.clone(), error_listeners: self.error_listeners.clone() })) })
     }
 
+/// TODO: document.
     pub fn wrap_tools(&self, tools: Vec<ToolArc>) -> Vec<ToolArc> { tools.into_iter().map(|t| self.wrap_tool(t)).collect() }
 
+/// TODO: document.
     pub fn emit_tool_call(&self, tool_name: &str, params: &Value) -> ToolCallEmitResult {
         let mut result = ToolCallEmitResult::default();
         for name in &self.order {
@@ -403,6 +453,7 @@ impl ExtensionRunner {
         result
     }
 
+/// TODO: document.
     pub fn emit_tool_result_event(&self, tool_name: &str, tool_result: &AgentToolResult) -> ToolResultEmitResult {
         let mut result = ToolResultEmitResult::default();
         for name in &self.order {
@@ -417,6 +468,7 @@ impl ExtensionRunner {
         result
     }
 
+/// TODO: document.
     pub fn emit_input_event(&self, event: &mut InputEvent) -> InputEventResult {
         let mut final_result = InputEventResult::Continue;
         for name in &self.order {
@@ -439,6 +491,7 @@ impl ExtensionRunner {
         final_result
     }
 
+/// TODO: document.
     pub fn emit_context_event(&self, messages: Vec<oxi_ai::Message>) -> ContextEmitResult {
         let mut current_messages = messages;
         let mut errors = Vec::new();
@@ -459,6 +512,7 @@ impl ExtensionRunner {
         ContextEmitResult { modified, messages: current_messages, errors }
     }
 
+/// TODO: document.
     pub fn emit_before_provider_request_event(&self, payload: Value) -> ProviderRequestEmitResult {
         let mut current_payload = payload;
         let mut modified = false;
@@ -478,6 +532,7 @@ impl ExtensionRunner {
         ProviderRequestEmitResult { modified, payload: current_payload, errors }
     }
 
+/// TODO: document.
     pub fn emit_session_before_switch_event(&self, event: &SessionBeforeSwitchEvent) -> SessionBeforeEmitResult {
         let mut result = SessionBeforeEmitResult::default();
         for name in &self.order {
@@ -494,6 +549,7 @@ impl ExtensionRunner {
         result
     }
 
+/// TODO: document.
     pub fn emit_session_before_fork_event(&self, event: &SessionBeforeForkEvent) -> SessionBeforeEmitResult {
         let mut result = SessionBeforeEmitResult::default();
         for name in &self.order {
@@ -510,6 +566,7 @@ impl ExtensionRunner {
         result
     }
 
+/// TODO: document.
     pub fn emit_session_before_compact_event(&self, event: &SessionBeforeCompactEvent) -> SessionBeforeEmitResult {
         let mut result = SessionBeforeEmitResult::default();
         for name in &self.order {
@@ -526,6 +583,7 @@ impl ExtensionRunner {
         result
     }
 
+/// TODO: document.
     pub fn emit_session_before_tree_event(&self, event: &SessionBeforeTreeEvent) -> SessionBeforeEmitResult {
         let mut result = SessionBeforeEmitResult::default();
         for name in &self.order {
@@ -542,21 +600,31 @@ impl ExtensionRunner {
         result
     }
 
+/// TODO: document.
     pub fn emit_session_shutdown_event(&self, event: &SessionShutdownEvent) -> bool {
         if !self.has_enabled_extensions() { return false; }
         self.registry.emit_session_shutdown(event);
         true
     }
 
+/// TODO: document.
     pub fn emit_event(&self, event: &AgentEvent) { self.registry.emit_event(event); }
 
+/// TODO: document.
     pub fn registry(&self) -> &ExtensionRegistry { &self.registry }
+/// TODO: document.
     pub fn registry_mut(&mut self) -> &mut ExtensionRegistry { &mut self.registry }
+/// TODO: document.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Extension>> { self.registry.get(name) }
+/// TODO: document.
     pub fn names(&self) -> impl Iterator<Item = &str> { self.order.iter().map(|s| s.as_str()) }
+/// TODO: document.
     pub fn len(&self) -> usize { self.order.len() }
+/// TODO: document.
     pub fn is_empty(&self) -> bool { self.order.is_empty() }
+/// TODO: document.
     pub fn errors(&self) -> Vec<ExtensionErrorRecord> { self.registry.errors() }
+/// TODO: document.
     pub fn clear_errors(&self) { self.registry.clear_errors(); }
 }
 
@@ -566,7 +634,9 @@ impl fmt::Debug for ExtensionRunner {
     }
 }
 
+/// pub.
 pub struct ExtensionErrorHandle { listener: Option<Arc<ExtensionErrorListener>> }
+/// TODO: document.
 impl ExtensionErrorHandle { pub fn unregister(&mut self) -> Option<Arc<ExtensionErrorListener>> { self.listener.take() } }
 impl Drop for ExtensionErrorHandle { fn drop(&mut self) {} }
 

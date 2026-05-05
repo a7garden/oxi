@@ -1,12 +1,12 @@
-//! Edit file tool - make targeted edits to files
+/// Edit file tool - make targeted edits to files
 //!
-//! Supports:
-//! - Multiple non-overlapping edits in one call (`edits[]` array)
-//! - Legacy `old_text`/`new_text` single-edit mode
-//! - BOM detection and preservation
-//! - Line ending normalization (CRLF → LF for matching)
-//! - Unified diff output for previews
-//! - File mutation queue for concurrent write safety
+/// Supports:
+/// - Multiple non-overlapping edits in one call (`edits[]` array)
+/// - Legacy `old_text`/`new_text` single-edit mode
+/// - BOM detection and preservation
+/// - Line ending normalization (CRLF → LF for matching)
+/// - Unified diff output for previews
+/// - File mutation queue for concurrent write safety
 
 use super::edit_diff::{
     self, detect_line_ending, has_bom, normalize_to_lf, restore_line_endings, strip_bom, Edit,

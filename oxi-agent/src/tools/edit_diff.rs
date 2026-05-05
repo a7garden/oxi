@@ -1,10 +1,10 @@
-//! Edit diff computation engine
+/// Edit diff computation engine
 //!
-//! Computes unified diffs for edit previews. Supports:
-//! - Multiple non-overlapping edits in one call
-//! - Line ending normalization (CRLF → LF)
-//! - BOM detection and preservation
-//! - Fuzzy matching fallback
+/// Computes unified diffs for edit previews. Supports:
+/// - Multiple non-overlapping edits in one call
+/// - Line ending normalization (CRLF → LF)
+/// - BOM detection and preservation
+/// - Fuzzy matching fallback
 
 use std::fmt;
 

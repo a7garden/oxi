@@ -1,4 +1,4 @@
-//! Agent configuration
+/// Agent configuration
 
 use oxi_ai::CompactionStrategy;
 use serde::{Deserialize, Serialize};

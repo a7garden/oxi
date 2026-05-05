@@ -1,4 +1,4 @@
-//! Integration tests for oxi-agent
+/// Integration tests for oxi-agent
 
 use crate::types::{ToolCall, ToolDefinition, ToolResult};
 use crate::{Agent, AgentConfig, AgentEvent, AgentState};

@@ -1,4 +1,4 @@
-//! Context compaction events
+/// Context compaction events
 
 use oxi_ai::CompactedContext as AiCompactedContext;
 use serde::{Deserialize, Serialize};

@@ -1,4 +1,4 @@
-//! Ls tool - list directory contents
+/// Ls tool - list directory contents
 
 use super::{AgentTool, AgentToolResult, ToolError};
 use crate::tools::truncate::{format_bytes, truncate_head, TruncationOptions};

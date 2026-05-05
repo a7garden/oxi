@@ -1,8 +1,7 @@
-#![warn(missing_docs)]
+/// oxi-agent: Agent runtime for oxi
 
-//! oxi-agent: Agent runtime for oxi
-//!
-//! This crate provides an agent runtime that integrates with oxi-ai providers.
+#![allow(inner_doc_comments)]
+#![warn(missing_docs)]
 
 pub mod agent;
 pub mod agent_loop;
@@ -35,6 +34,7 @@ pub use tools::{
     ToolRegistry, WriteTool,
 };
 
+/// Standard imports for oxi-agent usage.
 pub mod prelude {
     pub use crate::agent::Agent;
     pub use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
