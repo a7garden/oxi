@@ -71,12 +71,17 @@ async fn main() -> Result<()> {
     // Create app
     let app = oxi::App::new(settings).await?;
 
-    // Register builtin tools with the agent
+    // Register builtin tools, respecting --tools filter
     let tools = app.agent_tools();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let builtins = oxi_agent::ToolRegistry::with_builtins_cwd(cwd.clone());
-    for name in builtins.names() {
-        if let Some(tool) = builtins.get(&name) {
+    let builtin_registry = if let Some(ref tools_str) = args.tools {
+        let names: Vec<&str> = tools_str.split(',').map(|s| s.trim()).collect();
+        oxi_agent::ToolRegistry::with_selected_tools(cwd.clone(), &names)
+    } else {
+        oxi_agent::ToolRegistry::with_builtins_cwd(cwd.clone())
+    };
+    for name in builtin_registry.names() {
+        if let Some(tool) = builtin_registry.get(&name) {
             tools.register_arc(tool);
         }
     }
@@ -86,7 +91,28 @@ async fn main() -> Result<()> {
         tools.register_arc(tool);
     }
 
-    if prompt.is_empty() || args.interactive {
+    // Handle --append-system-prompt
+    if let Some(ref prompt_path) = args.append_system_prompt {
+        let content = std::fs::read_to_string(prompt_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read system prompt file: {}", e))?;
+        app.agent().set_system_prompt(content);
+    }
+
+    // Route to appropriate mode
+    if args.mode.as_deref() == Some("json") || args.print {
+        let mode = if args.mode.as_deref() == Some("json") {
+            oxi::print_mode::PrintMode::Json
+        } else {
+            oxi::print_mode::PrintMode::Text
+        };
+        let options = oxi::print_mode::PrintModeOptions {
+            mode,
+            initial_message: if prompt.is_empty() { None } else { Some(prompt) },
+            messages: vec![],
+        };
+        let exit_code = oxi::print_mode::run_print_mode(&app, options).await?;
+        std::process::exit(exit_code);
+    } else if prompt.is_empty() || args.interactive {
         // TUI interactive mode
         oxi::tui_interactive::run_tui_interactive(app).await?;
     } else {

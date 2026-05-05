@@ -46,6 +46,26 @@ pub struct CliArgs {
     /// Can be specified multiple times.
     #[arg(short = 'e', long = "extension", value_name = "PATH")]
     pub extensions: Vec<PathBuf>,
+
+    /// Output mode: text or json (newline-delimited JSON events)
+    #[arg(long)]
+    pub mode: Option<String>,
+
+    /// Comma-separated list of tools to enable. Default: all builtins.
+    #[arg(long)]
+    pub tools: Option<String>,
+
+    /// Append system prompt from a file
+    #[arg(long)]
+    pub append_system_prompt: Option<PathBuf>,
+
+    /// Single-shot print mode (shorthand for non-interactive)
+    #[arg(short = 'p', long)]
+    pub print: bool,
+
+    /// Disable session persistence
+    #[arg(long)]
+    pub no_session: bool,
 }
 
 // ── Subcommands ────────────────────────────────────────────────────

@@ -260,6 +260,19 @@ pub fn create_agent_session_from_services(
 
     let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config));
 
+    // Register tools: use provided registry or fallback to builtins
+    let registry = options.tool_registry.unwrap_or_else(|| {
+        Arc::new(oxi_agent::ToolRegistry::with_builtins_cwd(
+            PathBuf::from(&cwd)
+        ))
+    });
+    let agent_tools = agent.tools();
+    for name in registry.names() {
+        if let Some(tool) = registry.get(&name) {
+            agent_tools.register_arc(tool);
+        }
+    }
+
     // Create the session
     let session = AgentSession::new(agent, settings.clone(), options.session_manager, cwd);
 
@@ -705,6 +718,7 @@ pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
                 model_id: None,
                 thinking_level: None,
                 scoped_models: Vec::new(),
+                tool_registry: None,
             },
         )?;
 

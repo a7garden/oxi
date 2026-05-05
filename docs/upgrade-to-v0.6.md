@@ -1,132 +1,153 @@
-# oxi v0.6.0 — 9점 달성 설계 문서
+# oxi v0.6.0 — 9점 달성 설계 문서 (수정본)
+
+> **리뷰 반영일**: 2026-05-05  
+> **원본 대비 변경**: 점수 예측 현실화, 기술적 부정확 수정, 위험 관리 추가, 일정 재조정
 
 ## 목표
 
-| 크레이트 | 현재 (v0.5.0) | 목표 (v0.6.0) |
-|----------|:-------------:|:------------:|
-| oxi-ai   | 8.0           | ≥ 9.0        |
-| oxi-agent| 7.4           | ≥ 9.0        |
-| oxi-tui  | 8.5           | ≥ 9.0        |
-| oxi-cli  | 7.6           | ≥ 9.0        |
-| **전체** | **7.9**       | **≥ 9.0**    |
+| 크레이트 | 현재 (v0.5.0) | Phase 4 후 | Phase 5 후 |
+|----------|:-------------:|:----------:|:----------:|
+| oxi-ai   | 8.0           | 8.9        | **9.0**    |
+| oxi-agent| 7.4           | 9.0        | **9.2**    |
+| oxi-tui  | 8.5           | 9.0        | **9.0**    |
+| oxi-cli  | 7.6           | 8.8        | **9.0**    |
+| **전체** | **7.9**       | **8.9**    | **9.1**    |
+
+### 점수 철학 (로그 스케일)
+
+```
+7→8: 비교적 쉬움 (버그 수정, 코드 정리)        ← v0.5.0이 이 단계 완료
+8→9: 상당히 어려움 (구조적 개선, 포괄 문서화)   ← v0.6.0 목표
+9→9.5: 매우 어려움 (세계적 수준, 근본적 한계 돌파)
+```
 
 ---
 
-## Phase 1: 에러 핸들링 하드닝 (7.3 → 9.0)
+## Phase 1: 에러 핸들링 하드닝
 
-> 전체 점수에 +0.4 영향. 가장 큰 ROI.
+> 예상 효과: 전체 7.9 → 8.3
 
-### 1.1 oxi-ai `unwrap()` 제거 (49개)
+### 1.1 oxi-ai `unwrap()` 제거
 
-#### 🔴 Dangerous (2개) — 반드시 수정
+#### 🔴 Dangerous (2개)
 
-| 파일:라인 | 현재 코드 | 수정 방안 |
-|-----------|----------|----------|
-| `providers/cloudflare.rs:54` | `self.account_id.as_ref().unwrap()` | `if let Some(ref aid) = self.account_id { ... } else { return Err(...) }` |
-| `oauth.rs:270` | `Url::parse(&config.endpoint).expect(...)` | `Url::parse(&config.endpoint).map_err(|e| Error::Provider(ProviderError::InvalidConfig(...)))?` |
+| 파일:라인 | 현재 코드 | 수정 |
+|-----------|----------|------|
+| `cloudflare.rs:54` | `self.account_id.as_ref().unwrap()` | `if let Some(ref aid) = self.account_id { ... } else { return Err(ProviderError::InvalidResponse("Cloudflare account_id required".into())) }` |
+| `oauth.rs:270` | `Url::parse(...).expect(...)` | `Url::parse(...).map_err(|e| ProviderError::InvalidResponse(format!("Invalid OAuth endpoint: {e}")))?` |
 
-#### ⚠️ Risky (19개) — 수정 권장
+> 참고: `ProviderError::ConfigError`는 존재하지 않음. 기존 `InvalidResponse` 또는 `InvalidApiKey` variant 재활용.
 
-**A. API 키 HeaderValue 파싱 (5개)**
-```
-providers/copilot.rs:129  api_key.parse().unwrap()
-providers/azure.rs:108    api_key.parse().unwrap()
-providers/codex.rs:289    api_key.parse().unwrap()
-providers/anthropic.rs:98 api_key.parse().unwrap()
-providers/bedrock.rs:348  token.parse().unwrap()
-```
+#### ⚠️ Risky — API 키 HeaderValue 파싱 (5개)
 
-**공통 수정 방안** — 유틸 함수 생성:
+`copilot.rs:129`, `azure.rs:108`, `codex.rs:289`, `anthropic.rs:98`, `bedrock.rs:348`
+
+**공통 유틸 함수 (새로운 variant 추가):**
+
 ```rust
+// oxi-ai/src/error.rs — ProviderError에 새 variant 추가
+#[error("Invalid API key header value")]
+InvalidApiKeyHeader,
+
 // oxi-ai/src/providers/mod.rs
-fn parse_header_value(value: &str, context: &str) -> Result<HeaderValue, ProviderError> {
-    value.parse().map_err(|_| ProviderError::ConfigError(
-        format!("Invalid {} value: contains non-visible ASCII characters", context)
-    ))
+fn parse_api_key_header(value: &str) -> Result<HeaderValue, ProviderError> {
+    value.parse().map_err(|_| ProviderError::InvalidApiKeyHeader)
 }
 ```
 
-**B. RwLock 포이즈닝 (9개)**
-```
-provider_registry.rs: 330, 336, 344, 349, 362, 382, 397, 456, 477
-```
+> `InvalidApiKey`와 구분: `InvalidApiKey` = "키가 없음", `InvalidApiKeyHeader` = "키에 HTTP 헤더로 사용 불가능한 문자 포함"
 
-**공통 수정 방안** — 포이즈닝 복구 헬퍼:
+#### ⚠️ Risky — RwLock 포이즈닝 (9개)
+
+`provider_registry.rs`: 330, 336, 344, 349, 362, 382, 397, 456, 477
+
+**Phase 1에서 바로 `parking_lot::RwLock`으로 마이그레이션** (Phase 5로 미루면 같은 코드를 두 번 수정):
+
 ```rust
-// oxi-ai/src/provider_registry.rs
-impl ProviderRegistry {
-    fn read(&self) -> RwLockReadGuard<'_, HashMap<String, Arc<dyn Provider>>> {
-        self.providers.read().unwrap_or_else(|e| e.into_inner())
-    }
-    fn write(&self) -> RwLockWriteGuard<'_, HashMap<String, Arc<dyn Provider>>> {
-        self.providers.write().unwrap_or_else(|e| e.into_inner())
-    }
-}
+// Before
+use std::sync::RwLock;
+
+// After  
+use parking_lot::RwLock;  // 이미 oxi-agent에서 사용 중
+
+// 포이즈닝 불가. .read() / .write()가 항상 성공.
+// .unwrap() 제거 불필요 — parking_lot은 반환 타입이 Guard 자체
 ```
 
-**C. model_registry 문자열 split (10개)**
-```
-model_registry.rs: 64, 147, 213, 265, 339, 407, 441, 475, 562, 600
-```
+> `parking_lot`은 이미 workspace 의존성에 있음 (`oxi-agent`가 사용 중).
 
-**공통 수정 방안** — 안전한 유틸:
+#### ⚠️ Risky — model_registry 문자열 split (10개)
+
+`model_registry.rs`: 64, 147, 213, 265, 339, 407, 441, 475, 562, 600
+
 ```rust
-// oxi-ai/src/model_registry.rs
+/// Safely extracts model name from a "provider/model" or "provider/org/model" ID.
+/// Returns the last segment after '/', or the full ID if no '/' present.
 fn extract_model_name(id: &str) -> &str {
     id.rsplit_once('/').map(|(_, name)| name).unwrap_or(id)
 }
 ```
 
-**D. Bedrock 헤더 (4개)**
+#### ⚠️ Risky — Bedrock 헤더 (4개)
+
+`bedrock.rs`: 120, 149, 343, 348
+
+`parse_api_key_header()`와 동일한 패턴의 헬퍼 사용:
+```rust
+fn parse_header(value: &str, label: &str) -> Result<HeaderValue, ProviderError> {
+    value.parse().map_err(|_| {
+        ProviderError::InvalidResponse(format!("Invalid {label} header value"))
+    })
+}
 ```
-providers/bedrock.rs: 120 (host), 149 (auth), 343, 348 (token)
-```
-→ `parse_header_value()` 유틸 사용
 
 #### ✅ Infallible (35개) — 변경 불필요
 
-정적 문자열 파싱, `serde_json::to_string(Value)` (항상 성공), `write!(Vec<u8>, ...)` (항상 성공).
-대신 `const` 또는 `HeaderValue::from_static()` 로 마이그레이션:
+정적 문자열 `.parse().unwrap()`은 `HeaderValue::from_static()`으로 바꿀 수 있으나,
+**`from_static()`은 `const fn`이 아님** (reqwest 0.12). 따라서 함수 스코프에서 캐싱:
 
 ```rust
 // Before
 "application/json".parse().unwrap()
 
-// After
-const HEADER_JSON: HeaderValue = HeaderValue::from_static("application/json");
+// After — 매직 상수는 그대로 두되, 의도를 명시하는 주석 추가
+// Infallible: "application/json" is a valid HeaderValue
+"application/json".parse().unwrap()
+```
+
+**실제로는 infallible unwrap에 `expect()`로 의도를 명시하는 것이 가장 실용적:**
+```rust
+"application/json".parse().expect("valid header value")
 ```
 
 ---
 
 ### 1.2 oxi-cli `unwrap()` 제거 (20개 risky)
 
-#### ⚠️ Risky — 수정 권장
+| 파일 | 위치 | 수정 |
+|------|------|------|
+| `lib.rs` | :302 | `SkillManager::new()` 로 대체 (빈 매니저 반환) |
+| `session.rs` | :743, :746, :1622 | `.unwrap_or_else(\|_| ".".to_string())` |
+| `session.rs` | :1357-1358 | `.ok_or_else(\|_| anyhow!("Corrupted session: entry {} not found", id))?` |
+| `session.rs` | :1648 | `.unwrap_or_default()` |
+| `export.rs` | :557, :564, :581, :614 | `let Some(l) = lines.next() else { break }` + graceful 종료 |
+| `packages.rs` | :1275 | `let Some(parent) = target_dir.parent() else { bail!("Invalid install path") }` |
+| `main.rs` | :523 | `.map(\|id\| id.get(..8).unwrap_or("????????").to_string())` |
+| `main.rs` | :558 | `if let Some(pid) = info.parent_session_id { pid } else { "unknown".into() }` |
+| `session_navigation.rs` | :381, :591, :665 | `if let Some(id) = ...` 패턴으로 변경 |
+| `branch_summarization.rs` | :592 | `if let Some(ref instr) = options.custom_instructions` |
 
-| 파일 | 위치 | 현재 코드 | 수정 방안 |
-|------|------|----------|----------|
-| `lib.rs` | :302 | `load_from_dir("/nonexistent").unwrap()` | `SkillManager::new()` 로 대체 |
-| `session.rs` | :743, :746, :1622 | `current_dir().unwrap()`, `parent().unwrap()` | `.unwrap_or_else(\|\| ".".into())` |
-| `session.rs` | :1357-1358 | `entries_map.get(id).unwrap()` | `.ok_or_else(\|\| anyhow!("..."))?` |
-| `session.rs` | :1648 | `file_stem().unwrap()` | `.unwrap_or_default()` |
-| `export.rs` | :557, :564, :581, :614 | `lines.next().unwrap()` | `if let Some(l) = lines.next()` + 에러 처리 |
-| `packages.rs` | :1275 | `target_dir.parent().unwrap()` | `let Some(parent) = ... else { bail!(...) }` |
-| `main.rs` | :523 | `meta.parent_id.unwrap()[..8]` | `.map(\|id\| &id[..8.min(id.len())])` |
-| `main.rs` | :558 | `info.parent_session_id.unwrap()` | `if let Some(pid) = info.parent_session_id` |
-| `session_navigation.rs` | :381, :591, :665 | `old_leaf_id.unwrap()` | `if let Some(id) = ...` 패턴으로 변경 |
-| `branch_summarization.rs` | :592 | `options.custom_instructions.as_ref().unwrap()` | `if let Some(ref instr) = ...` |
+#### oxi-cli RwLock (73개) — parking_lot 마이그레이션
 
-#### ✅ Infallible (73개) — 변경 불필요
-RwLock (단일 스레드), 정적 Regex, serde_json 직렬화.
+`model_registry.rs` (31개), `bash_executor.rs` (16개), `rpc_mode.rs` (4개), `theme.rs` (3개)
+
+모두 `std::sync::RwLock` → `parking_lot::RwLock`으로 변경. `.unwrap()` 자동 제거.
 
 ---
 
 ### 1.3 oxi-agent `AgentError` thiserror 마이그레이션
 
 ```rust
-// Before (manual Display impl)
-impl std::fmt::Display for AgentError { ... }
-
-// After (thiserror derive)
 #[derive(Debug, thiserror::Error)]
 pub enum AgentError {
     #[error("Tool execution failed: {0}")]
@@ -135,8 +156,14 @@ pub enum AgentError {
     #[error("Stream error: {0}")]
     Stream(String),
 
-    #[error("Agent configuration error: {0}")]
+    #[error("State error: {0}")]
+    State(String),
+
+    #[error("Configuration error: {0}")]
     Config(String),
+
+    #[error("Model not found: {0}")]
+    Model(String),
 
     #[error("Max iterations ({0}) reached")]
     MaxIterations(usize),
@@ -153,13 +180,23 @@ pub enum AgentError {
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
+
+// is_retryable()은 수동 구현 유지 (thiserror가 지원 안 함)
+impl AgentError {
+    pub fn is_retryable(&self) -> bool { ... }
+    pub fn user_friendly(&self) -> String { ... }
+}
 ```
 
 ---
 
-## Phase 2: 아키텍처 정리 (8.3 → 8.6)
+## Phase 2: 아키텍처 정리
+
+> 예상 효과: 전체 8.3 → 8.6
 
 ### 2.1 agent_loop.rs 분해 (1,660줄 → 7개 파일)
+
+**기존 API 호환성 유지:** `pub mod agent_loop` 경로 변경 없음 (file → directory).
 
 ```
 oxi-agent/src/agent_loop/
@@ -167,259 +204,402 @@ oxi-agent/src/agent_loop/
 ├── config.rs        (~80줄)  AgentLoopConfig, ToolExecutionMode, 상수
 ├── tool_exec.rs     (~280줄) execute_tool_calls_*, prepare_tool_call, 훅 디스패치
 ├── streaming.rs     (~120줄) stream_assistant_response()
-├── retry.rs         (~200줄) stream_with_retry, is_retryable_error, handle_retryable_error, 서킷 브레이커
+├── retry.rs         (~200줄) stream_with_retry, is_retryable_error, handle_retryable_error
 ├── queues.rs        (~40줄)  steer, follow_up, drain_*, clear_*
 └── helpers.rs       (~30줄)  resolve_model, should_stop_after_turn, extract_tool_calls
 ```
 
-### 2.2 Agent/AgentLoop 중복 제거
+**선행 작업:** 내부 타입들의 visibility를 `pub(crate)`로 변경:
+- `FinalizedToolCall`, `ExecutedToolCallBatch`, `FinalizedToolCallEntry`
+- `ExecutedToolCallOutcome`, `PreparedToolCallKind`, `PreparedToolCallOutcome`
 
-**공유 유틸 모듈 생성:**
+### 2.2 Agent/AgentLoop 중복 제거 (안전한 범위만)
+
+**Phase 2에서 수행:**
+1. ✅ `resolve_model_from_id()` 공유 유틸 추출 — **`parts.len() >= 2`로 통일** (버그 수정)
+2. ✅ `create_compaction_manager()` 공유 함수 추출
+3. ✅ `build_context()` 공유 함수 추출
+4. ✅ 상수 `MAX_RETRIES`, `BACKOFF_BASE_SECS` 단일 정의
+
+**Phase 2에서 수행하지 않음 (v0.7으로 연기):**
+- ❌ Agent → AgentLoop wrapper 리팩토링 (oxi-cli가 Agent에 강결합, 영향 범위 과대)
+- ❌ stream_with_retry 통합 (Agent는 mpsc::Sender, AgentLoop는 EmitFn — 시그니처가 근본적으로 다름)
+
+**공유 모듈 위치:** `shared/` 대신 명확한 이름 사용:
 ```
-oxi-agent/src/shared/
-├── mod.rs
-├── model_utils.rs   resolve_model_from_id() — split('/') 통일 (==2 → >=2 버그 수정)
-├── compaction.rs    create_compaction_manager() 공장 함수
-├── context.rs       build_context() — 메시지 + 시스템 프롬프트 + 툴 → Context
-└── retry.rs         RetryConfig, stream_with_retry_core() — Agent와 AgentLoop이 공유
+oxi-agent/src/
+├── agent.rs          (그대로)
+├── agent_loop/       (분해)
+├── model_id.rs       (NEW: resolve_model_from_id)
+├── compaction_init.rs (NEW: create_compaction_manager)
+├── context_builder.rs (NEW: build_context)
+├── retry.rs           (NEW: 상수 + is_retryable_error)
 ```
 
-**중복 제거 항목:**
+### 2.3 extensions.rs 분해 (4,202줄 → 5개 파일)
 
-| 중복 | 발생 횟수 | 공유 함수 |
-|------|:--------:|----------|
-| 모델 ID 파싱 (`split('/')`) | 7회 | `resolve_model_from_id()` |
-| 컴팩션 초기화 | 2회 | `create_compaction_manager()` |
-| Context 빌딩 | 2회 | `build_context()` |
-| 재시도 로직 | 2회 | `stream_with_retry_core()` |
-| 상수 (MAX_RETRIES, BACKOFF) | 2회 | `retry.rs`에 단일 정의 |
-
-**Agent vs AgentLoop 전략:**
-- `Agent`를 `AgentLoop`의 thin wrapper로 리팩터링
-- `Agent::run_with_channel()`은 내부적으로 `AgentLoop::run()` 호출
-- `Agent`의 fallback 모델 로직을 `AgentLoop`로 이식
-
-### 2.3 extensions.rs 분해 (4,202줄 → 14개 파일)
+**리뷰 반영:** 14개 대신 **5개**로 먼저 분해. 강결합된 타입은 하나의 types.rs에 유지:
 
 ```
 oxi-cli/src/extensions/
-├── mod.rs            (~50줄)   리익스포트
-├── permission.rs     (~30줄)   ExtensionPermission
-├── manifest.rs       (~75줄)   ExtensionManifest
-├── error.rs          (~80줄)   ExtensionError
-├── events.rs         (~200줄)  이벤트 타입 15개
-├── emit_result.rs    (~100줄)  EmitResult 타입들
-├── context.rs        (~230줄)  ExtensionContext + Builder
-├── commands.rs       (~30줄)   Command
-├── trait_def.rs      (~215줄)  Extension trait
-├── registry.rs       (~740줄)  ExtensionRegistry
-├── runner.rs         (~820줄)  ExtensionRunner
-├── loading.rs        (~80줄)   로딩 유틸
-├── state.rs          (~40줄)   ExtensionState
-└── tests/            (~1,190줄) 테스트
+├── mod.rs            (~100줄) 리익스포트 + Extension trait 정의
+├── types.rs          (~500줄) Permission, Manifest, Error, Events, Commands, EmitResult
+├── context.rs        (~230줄) ExtensionContext + Builder
+├── registry.rs       (~1,560줄) ExtensionRegistry + ExtensionRunner (아직 강결합)
+└── loading.rs        (~80줄)  로딩 유틸 (free functions)
 ```
+
+테스트는 별도 `tests/extensions.rs`로 이동.
 
 ---
 
-## Phase 3: 문서화 (7.3 → 8.5)
+## Phase 3: 문서화
 
-### 3.1 `#![warn(missing_docs)]` 추가
+> 예상 효과: 전체 8.6 → 8.9
 
-각 크레이트의 `lib.rs` / `main.rs` 상단에:
+### 3.1 문서화 먼저, lint 나중에
+
+**수정된 순서:** 문서화 완료 → `#![warn(missing_docs)]` 추가
+
+`#![warn(missing_docs)]`를 먼저 추가하면 779개 경고가 발생하여 개발이 불가능해짐.
+
+### 3.2 문서화 작업 (현실적 일정)
+
+#### Tier 1: 핵심 공개 API — 4-5일
+
+하루 ~50개. 총 ~200개.
+
+| 크레이트 | 대상 | 항목 수 |
+|----------|------|:------:|
+| oxi-ai | `Context`, `Message`, `ContentBlock`, `ToolCall`, `ToolResultMessage`, `ProviderEvent` variant 전체 | ~70 |
+| oxi-agent | `AgentLoop` 공개 메서드, `AgentTool` trait, `AgentEvent` variant | ~60 |
+| oxi-tui | `Component` trait, `Container`, `Surface`, `Theme` | ~40 |
+| oxi-cli | `SessionManager`, `CliArgs`, `AgentSession` | ~30 |
+
+#### Tier 2: `/// # Examples` — 3-4일
+
+하루 ~15개. 총 ~40개.
+
+**doctest 컴파일 검증 전략:**
+- 복잡한 API는 ```` ```ignore ```` (검증 안 함, 예시만 제공)
+- 단순 생성자/BUILDER만 ```` ``` ```` (검증됨)
+
 ```rust
+// 검증 가능한 예시 (간단한 생성자)
+/// Creates a new tool definition.
+///
+/// # Examples
+/// ```
+/// use oxi_ai::Tool;
+/// let tool = Tool::new("my_tool", "A tool");
+/// ```
+pub fn new(name: &str, description: &str) -> Self { ... }
+
+// 검증 불가 예시 (복잡한 API)  
+/// Streams a response from the provider.
+///
+/// # Examples
+/// ```ignore
+/// let stream = provider.stream(context, options).await?;
+/// while let Some(event) = stream.next().await {
+///     match event {
+///         ProviderEvent::TextDelta { delta, .. } => print!("{delta}"),
+///         _ => {}
+///     }
+/// }
+/// ```
+async fn stream(...) -> ...;
+```
+
+#### Tier 3: 아키텍처 가이드 — 2일
+
+| 문서 | 내용 |
+|------|------|
+| `oxi-ai/ARCHITECTURE.md` | Provider trait 설계, 메시지 변환 흐름도, 컴팩션 전략 |
+| `oxi-agent/ARCHITECTURE.md` | AgentLoop 이벤트 흐름도, 툴 실행 파이프라인, 재시도/복구 |
+| `oxi-tui/GUIDE.md` | 컴포넌트 구현 가이드 (trait 구현 → render → handle_event) |
+| `oxi-cli/ARCHITECTURE.md` | 세션 JSONL 구조, 확장 라이프사이클, 설정 레이어 병합 |
+
+### 3.3 `#![warn(missing_docs)]` 적용
+
+**Tier 1 완료 후에** 각 크레이트에 추가:
+
+```rust
+// lib.rs 또는 main.rs 상단
 #![warn(missing_docs)]
 ```
 
-이후 빌드 시 undocumented 공개 아이템마다 경고가 발생하므로 자연스럽게 문서화가 진행됨.
-
-### 3.2 우선 문서화 대상 (779개 미문서 항목 중)
-
-#### Tier 1: 핵심 공개 API (최우선, ~200개)
-
-| 크레이트 | 항목 | 현재 커버리지 | 목표 |
-|----------|------|:----------:|:----:|
-| oxi-ai | `Context`, `Message`, `ContentBlock`, `ToolCall`, `ToolResultMessage`, `ProviderEvent` | 부분 | 100% |
-| oxi-agent | `AgentLoop` 공개 메서드 전체, `AgentTool` trait, `AgentEvent` | 55% | 95% |
-| oxi-tui | `Component` trait, `Container`, `Surface` | 66% | 90% |
-| oxi-cli | `SessionManager`, `PackageManager`, `CliArgs`, `AgentSession` | 75% | 90% |
-
-#### Tier 2: `/// # Examples` 추가 (~50개)
-
-| 크레이트 | 대상 메서드 |
-|----------|-----------|
-| oxi-ai | `Provider::stream()`, `Context::new()`, `Tool::new()`, `complete()`, `estimate_tokens()`, `transform_messages()` |
-| oxi-agent | `AgentLoop::new()`, `AgentLoop::run()`, `AgentTool::execute()`, `ToolRegistry::with_builtins()` |
-| oxi-tui | `Component::handle_event()`, `Component::render()`, `TUI::new()`, `Surface::write_string()` |
-| oxi-cli | `CliArgs::parse()`, `SessionManager::new()`, `Settings::load()` |
-
-예시:
-```rust
-/// Creates a new conversation context with the given system prompt and messages.
-///
-/// # Examples
-///
-/// ```
-/// use oxi_ai::{Context, Message};
-///
-/// let ctx = Context::new(
-///     Some("You are a helpful assistant.".into()),
-///     vec![Message::user("Hello!")],
-///     vec![],
-/// );
-/// ```
-pub fn new(...) -> Self { ... }
-```
-
-#### Tier 3: 아키텍처 가이드 문서
-
-| 문서 | 위치 | 내용 |
-|------|------|------|
-| oxi-ai ARCHITECTURE.md | `oxi-ai/ARCHITECTURE.md` | Provider trait 설계, 메시지 변환 흐름, 컴팩션 전략 |
-| oxi-agent ARCHITECTURE.md | `oxi-agent/ARCHITECTURE.md` | AgentLoop 이벤트 흐름, 툴 실행 파이프라인, 재시도/복구 |
-| oxi-tui GUIDE.md | `oxi-tui/GUIDE.md` | 컴포넌트 구현 가이드, 렌더링 파이프라인 설명 |
-| oxi-cli ARCHITECTURE.md | `oxi-cli/ARCHITECTURE.md` | 세션 시스템, 확장 시스템, 설정 레이어 |
+이때 이미 90%+ 항목이 문서화되어 있으므로, 남은 경고만 해결하면 됨.
 
 ---
 
-## Phase 4: 테스트 보강 (7.9 → 9.0+)
+## Phase 4: 테스트 보강
 
-### 4.1 oxi-cli 통합 테스트 (현재 0개 → ~40개)
+> 예상 효과: 전체 8.9 유지 (점수 상승보다 방어적 — 회귀 방지)
+
+### 4.1 oxi-cli 통합 테스트
+
+**선행 작업:** `Cargo.toml`에 dev-dependencies 추가:
+```toml
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+```
+
+**테스트 구조 (API 키 불필요한 것만):**
 
 ```
 oxi-cli/tests/
-├── cli_commands.rs     (~300줄) 서브커맨드 E2E 테스트
-│   ├── test_sessions_list
-│   ├── test_sessions_tree
-│   ├── test_session_fork
-│   ├── test_session_delete
-│   ├── test_pkg_list
-│   ├── test_config_show
-│   ├── test_config_set_get
-│   ├── test_single_prompt_mode
-│   └── test_version_flag
-├── session_persistence.rs (~200줄) 세션 JSONL 영속성
+├── cli_parsing.rs         (~200줄) 인수 파싱 E2E
+│   ├── test_version_flag
+│   ├── test_help_flag
+│   ├── test_model_flag
+│   ├── test_provider_flag
+│   ├── test_thinking_level
+│   ├── test_sessions_subcommand
+│   └── test_config_subcommand
+├── session_persistence.rs (~200줄) 세션 파일 I/O (단위 테스트 레벨)
 │   ├── test_create_and_load_session
 │   ├── test_session_branching
-│   ├── test_session_migration_v1_to_v3
-│   └── test_corrupted_session_recovery
-└── settings_layering.rs  (~200줄) 설정 레이어 병합
+│   ├── test_session_migration
+│   └── test_corrupted_session_graceful
+└── settings_merge.rs      (~150줄) 설정 레이어 병합
     ├── test_default_values
-    ├── test_global_config_override
+    ├── test_global_override
     ├── test_project_config_merge
-    ├── test_env_var_override
-    └── test_cli_args_override
+    └── test_env_var_override
 ```
 
-사용 크레이트: `assert_cmd`, `predicates`, `tempfile`
+### 4.2 oxi-ai Mock HTTP 테스트 (~25개)
 
-### 4.2 oxi-ai Mock HTTP 테스트 (~30개)
+**mockito 사용 가능:** 이미 `dev-dependencies`에 있음.
+**base_url 주입 가능:** 모든 프로바이더가 `model.base_url`을 사용하므로 mockito 서버 URL로 교체 가능.
 
+```rust
+// 테스트 패턴
+#[tokio::test]
+async fn test_openai_streaming_text() {
+    let mut server = mockito::Server::new_async().await;
+    let mock = server.mock("POST", "/chat/completions")
+        .with_status(200)
+        .with_header("content-type", "text/event-stream")
+        .with_body_from_file("tests/fixtures/openai_stream.txt")
+        .create_async()
+        .await;
+
+    let mut model = get_model("openai", "gpt-4o").unwrap();
+    model.base_url = server.url(); // ← base_url 오버라이드
+
+    let provider = OpenAiProvider::new(api_key);
+    let stream = provider.stream(model, context, options).await;
+    // ... 검증
+}
 ```
-oxi-ai/tests/
-├── provider_mock.rs    (~400줄) mockito 기반 프로바이더 테스트
-│   ├── test_openai_streaming_text
-│   ├── test_openai_tool_call
-│   ├── test_openai_error_response
-│   ├── test_anthropic_thinking_blocks
-│   ├── test_anthropic_cache_metrics
-│   ├── test_google_streaming
-│   ├── test_bedrock_sigv4_signing
-│   ├── test_rate_limit_429
-│   ├── test_server_error_500
-│   └── test_malformed_response
-```
 
-`mockito`는 이미 `dev-dependencies`에 있음.
+**테스트 케이스:**
+- OpenAI: 텍스트 스트리밍, 툴 콜, 에러 응답(429, 500)
+- Anthropic: thinking block, cache metrics
+- Google: 기본 스트리밍
+- 에러: 잘못된 JSON, 연결 끊김, 타임아웃
 
-### 4.3 oxi-agent 에이전트 수준 통합 테스트 (~20개)
+**필요: SSE fixture 파일** (`tests/fixtures/` 디렉토리 생성)
+
+### 4.3 oxi-agent 에이전트 수준 통합 테스트 (~15개)
+
+기존 `MockProvider` + `EchoTool` 패턴 확장:
 
 ```
 oxi-agent/tests/
-├── agent_loop_integration.rs  (~300줄)
-│   ├── test_single_turn_user_assistant
+├── agent_loop_full.rs  (~300줄)
+│   ├── test_single_turn
 │   ├── test_multi_turn_tool_loop
-│   ├── test_parallel_tool_execution
-│   ├── test_sequential_tool_execution
-│   ├── test_model_switching_mid_conversation
-│   ├── test_compaction_trigger_and_recovery
-│   ├── test_circuit_breaker_open_close
-│   ├── test_fallback_model_on_failure
-│   ├── test_steering_message_injection
-│   ├── test_follow_up_queue_processing
+│   ├── test_parallel_vs_sequential
+│   ├── test_compaction_trigger
+│   ├── test_circuit_breaker_lifecycle
+│   ├── test_steering_injection
+│   ├── test_follow_up_processing
 │   ├── test_max_iterations_stop
-│   └── test_concurrent_agent_runs
+│   └── test_model_switch_preserves_context
+```
+
+### 4.4 oxi-tui ignored 테스트 해결 (4개)
+
+현재 4개의 `#[ignore]` doc-test가 있는데, 이들은 터미널이 필요한 테스트.
+해결: `#[cfg(feature = "tui-tests")]` 기능 게이트로 전환하거나,
+`CI`에서 `TERM=dumb`으로 실행 가능한지 확인 후 수정.
+
+---
+
+## Phase 5: 마지막 마일리지 (9.0 확실 달성)
+
+> 예상 효과: 전체 8.9 → 9.1
+
+### 5.1 `#![deny(clippy::unwrap_used)]` 추가
+
+Phase 1에서 모든 프로덕션 `unwrap()`을 제거했으므로,
+이제 CI에서 새로운 `unwrap()` 추가를 자동 차단:
+
+```rust
+// 각 크레이트 lib.rs/main.rs
+#![deny(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used_in_tests)]  // 테스트는 허용
+```
+
+### 5.2 Agent → AgentLoop wrapper 리팩토링 (v0.7에서 연기했던 작업)
+
+```
+oxi-agent/src/agent.rs (753줄 → ~150줄 thin wrapper)
+  - 내부적으로 AgentLoop::new() 생성
+  - run_with_channel()은 AgentLoop::run() + mpsc 어댑터
+  - switch_model(), try_fallback()을 AgentLoop으로 이식
+```
+
+### 5.3 oxi-cli 커스텀 에러 타입
+
+현재 모든 것이 `anyhow`인데, 핵심 모듈에 typed error 도입:
+
+```rust
+// oxi-cli/src/error.rs (NEW)
+#[derive(Debug, thiserror::Error)]
+pub enum SessionError {
+    #[error("Session not found: {0}")]
+    NotFound(String),
+    #[error("Corrupted session file: {0}")]
+    Corrupted(String),
+    #[error("Migration failed: v{from} → v{to}")]
+    MigrationFailed { from: u32, to: u32 },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PackageError {
+    #[error("Package not found: {0}")]
+    NotFound(String),
+    #[error("Install failed: {0}")]
+    InstallFailed(String),
+    #[error("Network error: {0}")]
+    Network(String),
+}
+```
+
+### 5.4 쉘 탭 완성 생성
+
+```rust
+// oxi-cli/src/cli.rs에 추가
+pub fn generate_completion(shell: clap_complete::Shell) -> String { ... }
+```
+
+`clap_complete` 크레이트로 bash/zsh/fish completion 스크립트 생성.
+
+---
+
+## 실행 계획 (현실적)
+
+```
+Week 1-2: Phase 1 — 에러 핸들링 하드닝
+  ├── Day 1-3:   oxi-ai unwrap 제거 + parking_lot 마이그레이션 (병렬 4 에이전트)
+  ├── Day 3-5:   oxi-cli unwrap 제거 + parking_lot 마이그레이션 (병렬 4 에이전트)
+  ├── Day 5-6:   oxi-agent AgentError thiserror 마이그레이션
+  └── Day 7-8:   전체 빌드/테스트 검증 + 위험 회귀 테스트
+
+Week 3-4: Phase 2 — 아키텍처 정리
+  ├── Day 1-4:   agent_loop.rs 분해 + 내부 visibility 조정 (병렬 4 에이전트)
+  ├── Day 5-7:   공유 유틸 추출 (model_id.rs, compaction_init.rs, context_builder.rs)
+  ├── Day 8-10:  extensions.rs 5파일 분해 (병렬 4 에이전트)
+  └── Day 11-12: 전체 빌드/테스트 검증
+
+Week 5-7: Phase 3 — 문서화
+  ├── Day 1-5:   Tier 1: 핵심 공개 API 200개 문서화 (병렬 4 에이전트, 하루 50개)
+  ├── Day 6-9:   Tier 2: # Examples 40개 + #![warn(missing_docs)] (병렬 4 에이전트)
+  ├── Day 10-11: #![warn(missing_docs)] 추가 + 남은 경고 해결
+  └── Day 12-13: ARCHITECTURE.md 4개 작성
+
+Week 8-9: Phase 4 — 테스트 보강
+  ├── Day 1-2:   dev-dependencies 추가 + fixture 파일 준비
+  ├── Day 2-4:   oxi-cli 통합 테스트 ~25개 (병렬 4 에이전트)
+  ├── Day 4-6:   oxi-ai mock HTTP 테스트 ~25개 (병렬 4 에이전트)
+  ├── Day 6-8:   oxi-agent 통합 테스트 ~15개 + oxi-tui ignored 해결 (병렬 4 에이전트)
+  └── Day 9-10:  전체 검증 + 점수 재평가
+
+Week 10-11: Phase 5 — 마지막 마일리지
+  ├── Day 1:     #![deny(clippy::unwrap_used)] 추가
+  ├── Day 2-4:   Agent → AgentLoop wrapper 리팩토링
+  ├── Day 5-6:   oxi-cli 커스텀 에러 타입
+  ├── Day 7:     쉘 탭 완성
+  └── Day 8:     최종 검증 + 점수 확정
+```
+
+**총 일정: 11주 (원본 4주에서 현실화)**
+
+---
+
+## 관련 설계 문서
+
+이 설계와 **직교하는** 설계 문서들 (겹침 없음, 실행 순서만 조정 필요):
+
+| 문서 | 관심사 | 관계 |
+|------|--------|------|
+| `docs/designs/subagent-improvements.md` | Subagent 도구 기능 개선 (프로세스 스폰, abort, usage, ToolRegistry 소유권) | main.rs, agent_session_runtime.rs 공통 변경 → **본 설계 먼저 실행 권장** |
+| `docs/oxi-architecture.md` | 전체 아키텍처 개요 | 참고 문서 |
+| `docs/oxi-design.md` | 초기 설계 문서 | 참고 문서 |
+
+**실행 순서:** v0.6 (본 설계) → subagent-improvements 순으로 진행하면 파일 충돌을 최소화할 수 있습니다.
+
+---
+
+## 위험 관리
+
+### Breaking Changes (semver v0.x에서 허용)
+
+| Phase | 변경 | 영향 |
+|-------|------|------|
+| Phase 1 | `ProviderError`에 `InvalidApiKeyHeader` variant 추가 | 패턴 매칭에 `_` 없으면 컴파일 에러. `#[non_exhaustive]` 이미 적용됨 ✅ |
+| Phase 1 | `std::sync::RwLock` → `parking_lot::RwLock` | API 동일. 내부 구현 변경. |
+| Phase 2 | `agent_loop.rs` → `agent_loop/` 디렉토리 | `pub mod agent_loop` 경로 유지. 비호환 변경 아님. |
+| Phase 2 | 공유 유틸 파일 4개 추가 | 순수 추가. 기존 API 변경 없음. |
+
+### 회귀 위험
+
+| 위험 | 완화 방안 |
+|------|----------|
+| parking_lot 마이그레이션 후 동작 변경 | parking_lot은 표준 RwLock과 동일 API. 테스트로 검증. |
+| agent_loop 분해 후 import 누락 | `cargo check --workspace`로 컴파일 검증. |
+| extensions.rs 분해 후 순환 의존 | 5개 파일 구성으로 강결합 유지 (14개 분해는 위험). |
+| 문서화 중 코드 실수 | `/// ` 주석만 추가, 코드 변경 최소화. |
+
+### CI/CD
+
+Phase 3 이후 CI에 추가:
+```yaml
+- run: cargo clippy --workspace -- -D warnings
+- run: cargo test --workspace
+- run: cargo doc --workspace --no-deps  # doc 빌드 검증
 ```
 
 ---
 
-## Phase 5: 추가 개선 (9.0+ 달성 후)
+## 파일 변경 규모 추정 (수정)
 
-### 5.1 프로바이더 파일 분리 (선택)
-
-```
-oxi-ai/src/providers/openai/
-├── mod.rs        (~100줄) OpenAiProvider struct + stream()
-├── request.rs    (~100줄) 요청 빌딩
-├── response.rs   (~200줄) SSE 파싱
-└── tests.rs      (~200줄) 단위 테스트
-```
-
-### 5.2 `#![deny(clippy::unwrap_used)]` 추가
-
-모든 프로덕션 `unwrap()` 제거 후 추가. CI에서 새로운 `unwrap()` 추가를 자동 차단.
-
-### 5.3 `parking_lot::RwLock` 마이그레이션
-
-`oxi-ai/provider_registry.rs`, `oxi-cli/model_registry.rs`의 `std::sync::RwLock`을
-`parking_lot::RwLock`으로 변경 (포이즈닝 불가, 성능 향상).
+| Phase | 파일 수 | 라인 수 (추정) | 작업 유형 |
+|-------|:------:|:------------:|----------|
+| Phase 1 | ~30 | ~600 | 수정 (unwrap → Result, RwLock 교체) |
+| Phase 2 | ~45 | ~4,000 | 재구성 (모듈 분해, 파일 이동) |
+| Phase 3 | ~80 | ~2,500 | 추가 (doc comments, ARCHITECTURE.md) |
+| Phase 4 | ~12 | ~1,800 | 추가 (테스트, fixture) |
+| Phase 5 | ~15 | ~1,200 | 수정 (Agent wrapper, 에러 타입, completion) |
+| **총계** | **~180** | **~10,100** | |
 
 ---
 
-## 실행 계획
+## 점수 예측 (현실적)
 
-```
-Week 1: Phase 1 — 에러 핸들링 하드닝
-  ├── Day 1-2: oxi-ai unwrap 49개 제거 (병렬 4 에이전트)
-  ├── Day 2-3: oxi-cli unwrap 20개 제거 (병렬 4 에이전트)
-  ├── Day 3:   oxi-agent AgentError thiserror 마이그레이션
-  └── Day 4:   전체 빌드/테스트 검증
+| 크레이트 | 현재 | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 |
+|----------|:----:|:-------:|:-------:|:-------:|:-------:|:-------:|
+| oxi-ai   | 8.0  | 8.5     | 8.5     | 8.8     | 8.9     | **9.0** |
+| oxi-agent| 7.4  | 7.8     | 8.8     | 9.0     | 9.0     | **9.2** |
+| oxi-tui  | 8.5  | 8.7     | 8.7     | 9.0     | 9.0     | **9.0** |
+| oxi-cli  | 7.6  | 8.2     | 8.3     | 8.7     | 8.8     | **9.0** |
+| **전체** | **7.9** | **8.3** | **8.6** | **8.9** | **8.9** | **9.1** |
 
-Week 2: Phase 2 — 아키텍처 정리
-  ├── Day 1-2: agent_loop.rs 분해 + shared/ 모듈 (병렬 4 에이전트)
-  ├── Day 2-3: extensions.rs 분해 (병렬 4 에이전트)
-  └── Day 4:   Agent → AgentLoop wrapper 리팩터링
-
-Week 3: Phase 3 — 문서화
-  ├── Day 1: #![warn(missing_docs)] 추가 + Tier 1 문서화 (병렬 4 에이전트)
-  ├── Day 2: /// # Examples 추가 (병렬 4 에이전트)
-  └── Day 3: ARCHITECTURE.md 작성 (병렬 4 에이전트)
-
-Week 4: Phase 4 — 테스트 보강
-  ├── Day 1-2: oxi-cli 통합 테스트 (병렬 4 에이전트)
-  ├── Day 2-3: oxi-ai mock HTTP 테스트 + oxi-agent 통합 테스트 (병렬 8 에이전트)
-  └── Day 4:   전체 검증 + 점수 재평가
-```
-
----
-
-## 점수 예측
-
-| 크레이트 | Phase 1 후 | Phase 2 후 | Phase 3 후 | Phase 4 후 |
-|----------|:----------:|:----------:|:----------:|:----------:|
-| oxi-ai   | 8.5        | 8.5        | 9.0        | **9.2**    |
-| oxi-agent| 8.0        | 9.0        | 9.2        | **9.3**    |
-| oxi-tui  | 8.7        | 8.7        | 9.2        | **9.3**    |
-| oxi-cli  | 8.2        | 8.5        | 9.0        | **9.1**    |
-| **전체** | **8.4**    | **8.7**    | **9.1**    | **9.2**    |
-
----
-
-## 파일 변경 규모 추정
-
-| Phase | 파일 수 | 라인 수 (추정) |
-|-------|:------:|:------------:|
-| Phase 1 | ~25 | ~500 (수정) |
-| Phase 2 | ~40 | ~3,000 (재구성) |
-| Phase 3 | ~80 | ~2,000 (문서 추가) |
-| Phase 4 | ~8 | ~1,500 (테스트 추가) |
-| **총계** | **~100** | **~7,000** |
+> **Phase 4 완료 시 ~8.9, Phase 5 완료 시 9.1.**
+> Phase 4만으로 9.0에 도달하려면 oxi-agent(9.0)와 oxi-tui(9.0)가 끌어올려주므로 근접하지만,
+> oxi-cli(8.8)가 발목을 잡음. Phase 5에서 커스텀 에러 + Agent wrapper로 9.0 돌파.
