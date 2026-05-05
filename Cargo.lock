@@ -2399,7 +2399,6 @@ dependencies = [
  "once_cell",
  "oxi-agent",
  "oxi-ai",
- "oxi-tui",
  "parking_lot",
  "rand 0.8.6",
  "ratatui",

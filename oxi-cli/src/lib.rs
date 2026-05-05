@@ -4,7 +4,6 @@
 
 pub mod export;
 pub mod extensions;
-pub mod interactive;
 pub mod oauth_server;
 pub mod packages;
 pub mod print_mode;
@@ -12,7 +11,6 @@ pub mod session;
 pub mod settings;
 pub mod skills;
 pub mod templates;
-pub mod tui_components;
 pub mod tui_interactive;
 
 // RPC mode for headless operation
