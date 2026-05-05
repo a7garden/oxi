@@ -144,20 +144,35 @@ pub trait AgentTool: Send + Sync {
 }
 
 // Built-in tools
+//! Module documentation.
 pub mod bash;
+//! Module documentation.
 pub mod edit;
+//! Module documentation.
 pub mod edit_diff;
+//! Module documentation.
 pub mod file_mutation_queue;
+//! Module documentation.
 pub mod find;
+//! Module documentation.
 pub mod grep;
+//! Module documentation.
 pub mod ls;
+//! Module documentation.
 pub mod path_utils;
+//! Module documentation.
 pub mod read;
+//! Module documentation.
 pub mod render_utils;
+//! Module documentation.
 pub mod tool_definition_wrapper;
+//! Module documentation.
 pub mod truncate;
+//! Module documentation.
 pub mod web_search;
+//! Module documentation.
 pub mod subagent;
+//! Module documentation.
 pub mod write;
 
 // Re-export for convenience
