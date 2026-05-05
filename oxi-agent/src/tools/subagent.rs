@@ -440,16 +440,16 @@ async fn run_single_agent(
     // Main loop: select between stdout lines and abort signal
     let mut final_text = String::new();
     let mut signal_rx = signal;
+    let mut aborted = false;
 
     loop {
-        let aborted = tokio::select! {
+        tokio::select! {
             line = line_rx.recv() => {
                 match line {
                     Some(line) => {
                         process_json_line(&line, &mut result, &mut final_text, &on_progress);
-                        continue;
                     }
-                    None => break false, // stdout EOF
+                    None => break, // stdout EOF
                 }
             }
             _ = async {
@@ -457,46 +457,46 @@ async fn run_single_agent(
                     Some(rx) => { let _ = rx.await; }
                     None => std::future::pending::<()>().await,
                 }
-            } => true,
-        };
-
-        if aborted {
-            result.stop_reason = Some("aborted".into());
-            result.error_message = Some("Aborted by user".into());
-
-            // SIGTERM → wait up to 5s → SIGKILL
-            #[cfg(unix)]
-            {
-                if let Some(pid) = child.id() {
-                    unsafe { libc::kill(pid as i32, libc::SIGTERM); }
-                }
-                let deadline = tokio::time::sleep(std::time::Duration::from_secs(5));
-                tokio::pin!(deadline);
-                tokio::select! {
-                    _ = &mut deadline => { let _ = child.start_kill(); }
-                    _ = child.wait() => {}
-                }
+            } => {
+                aborted = true;
+                break;
             }
-            #[cfg(not(unix))]
-            {
-                let _ = child.start_kill();
-                let _ = tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    child.wait(),
-                ).await;
-            }
-
-            // Collect stderr with short timeout
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_secs(1),
-                async { if let Ok(err) = stderr_handle.await { result.stderr = err; } },
-            ).await;
-            break;
         }
     }
 
-    // Normal completion
-    if result.stop_reason.is_none() || result.stop_reason.as_deref() == Some("complete") {
+    if aborted {
+        result.stop_reason = Some("aborted".into());
+        result.error_message = Some("Aborted by user".into());
+
+        // SIGTERM → wait up to 5s → SIGKILL
+        #[cfg(unix)]
+        {
+            if let Some(pid) = child.id() {
+                unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+            }
+            let deadline = tokio::time::sleep(std::time::Duration::from_secs(5));
+            tokio::pin!(deadline);
+            tokio::select! {
+                _ = &mut deadline => { let _ = child.start_kill(); }
+                _ = child.wait() => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                child.wait(),
+            ).await;
+        }
+
+        // Collect stderr with short timeout
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            async { if let Ok(err) = stderr_handle.await { result.stderr = err; } },
+        ).await;
+    } else {
+        // Normal completion
         if let Ok(err_output) = stderr_handle.await {
             result.stderr = err_output;
         }
@@ -746,7 +746,8 @@ impl AgentTool for SubagentTool {
 
                 let result = run_single_agent(
                     &self.cwd, &agents, &step.agent, &task,
-                    step.cwd.as_deref(), Some(i + 1), signal.clone(),
+                    step.cwd.as_deref(), Some(i + 1),
+                    if i == steps.len() - 1 { signal } else { None },
                     progress.clone(), &binary,
                 ).await;
 
