@@ -7,6 +7,7 @@ In Progress
 - [x] P0-1: Fix `add_overlay()` UB in oxi-tui (double-free from two owning pointers to same memory)
 - [x] P1-3: Fix mouse event conversion + other event fixes in oxi-tui
 - [x] P0-3: Add Layout System to oxi-tui
+- [x] P0-2: Buffer Renderer Output in oxi-tui (already completed in prior commit 506e2e9)
 
 ## Files Changed
 - `oxi-tui/src/overlay.rs` — Added Component passthrough methods to `OverlayHandle` trait; fixed `OverlayBox::render()` backdrop overfill
@@ -22,3 +23,5 @@ In Progress
 - Backdrop rendering intentionally removed from `OverlayBox::render()` — needs proper area management to be correct
 - Pre-existing `cargo check` errors in `cell.rs` and `surface.rs` due to `unicode_width` API mismatch — unrelated to layout changes
 - Layout tests cannot run via `cargo test` due to pre-existing `unicode_width` compilation errors, but layout code itself compiles cleanly
+- P0-2 Renderer buffering was already implemented: `buf: Vec<u8>` (16KB), all writes go to buffer, single `write_all()+flush()` in `end_sync()`. No changes needed.
+- Findings at /tmp/p0-2-renderer-buffer.md
