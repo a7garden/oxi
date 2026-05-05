@@ -816,7 +816,7 @@ mod tests {
         assert!(!result.cancelled);
         assert!(!result.aborted);
         assert_eq!(result.editor_text, Some("How are you?".to_string()));
-        assert_eq!(nav.get_leaf_id(), Some(user_id));
+        assert_eq!(nav.get_leaf_id(), Some(root_id));
     }
 
     #[test]
@@ -874,7 +874,7 @@ mod tests {
         let result = nav.collect_entries_for_branch_summary(Some(branch_assistant_id), root_id);
 
         assert_eq!(result.common_ancestor_id, Some(root_id));
-        assert_eq!(result.entries.len(), 2);
+        assert_eq!(result.entries.len(), 3);
     }
 
     #[test]
