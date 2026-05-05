@@ -38,6 +38,7 @@ pub use error::{Error, Result};
 pub use messages::*;
 pub use providers::CacheRetention;
 pub use providers::{get_provider, Provider, ProviderEvent, StreamOptions};
+pub use providers::OpenAiProvider;
 pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ValidationError};
 pub use types::*;
 
