@@ -309,8 +309,8 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let mut input = InputState::new();
     let mut is_agent_busy = false;
     let mut streaming_text = String::new();
-    let mut scroll_offset: u16 = 0;
-    let mut auto_scroll = true;
+    let mut scroll_offset: usize = 0;
+    let mut auto_scroll: bool = true;
 
     // Welcome message
     messages.push(ChatMessage {
@@ -626,7 +626,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         Ok(())
     };
 
-    // Give agent thread 5 seconds to finish, then move on
+    // Wait for agent thread to finish
     let _ = agent_handle.join();
 
     if let Err(e) = cleanup_terminal(&mut terminal) {
@@ -646,7 +646,7 @@ fn render_chat(
     area: Rect,
     messages: &[ChatMessage],
     streaming_text: &str,
-    scroll_offset: u16,
+    scroll_offset: usize,
     theme: &Theme,
 ) {
     if area.width < 4 || area.height < 1 {
@@ -669,8 +669,9 @@ fn render_chat(
 
         for line in msg.content.lines() {
             let content_fg = match msg.role {
+                MessageRole::User => theme.user_fg,
                 MessageRole::System => theme.system_fg,
-                _ => theme.assistant_fg,
+                MessageRole::Assistant => theme.assistant_fg,
             };
             all_lines.push(Line::from(vec![
                 Span::styled("  ".to_string(), Style::default()),
@@ -719,7 +720,7 @@ fn render_chat(
 
     let visible_height = area.height as usize;
     let max_scroll = wrapped_count.saturating_sub(visible_height);
-    let clamped_offset = (scroll_offset as usize).min(max_scroll);
+    let clamped_offset = scroll_offset.min(max_scroll);
     let scroll_from_top = max_scroll.saturating_sub(clamped_offset);
 
     let chat_widget = Paragraph::new(chat_text)
@@ -795,8 +796,10 @@ fn render_input(
     let mut spans: Vec<Span> = Vec::new();
     let chars: Vec<char> = visible_chars.chars().collect();
 
+    let show_cursor = !input.value().is_empty();
+
     for (i, ch) in chars.iter().enumerate() {
-        if i == cursor_screen_col {
+        if show_cursor && i == cursor_screen_col {
             spans.push(Span::styled(
                 ch.to_string(),
                 Style::default().fg(theme.input_cursor_fg).bg(theme.input_cursor_bg).add_modifier(Modifier::BOLD),
@@ -810,8 +813,7 @@ fn render_input(
     }
 
     // If cursor is at the end of visible text, show cursor on empty space
-    if cursor_screen_col >= chars.len() && cursor_screen_col < input_width {
-        // Already at end - cursor shown as a space with highlight
+    if show_cursor && cursor_screen_col >= chars.len() && cursor_screen_col < input_width {
         spans.push(Span::styled(
             " ".to_string(),
             Style::default().fg(theme.input_cursor_fg).bg(theme.input_cursor_bg),
