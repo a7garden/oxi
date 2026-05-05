@@ -5,6 +5,7 @@
 //! themes from TOML or JSON files with hot-reloading.
 
 use crate::cell::{Attributes, Color};
+use ratatui::style::Style;
 use serde::Deserialize;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -100,6 +101,48 @@ impl ColorScheme {
             selection_bg: Color::Rgb(204, 208, 218),
         }
     }
+
+    /// Convert to ratatui Style with just foreground.
+    pub fn to_style(&self) -> Style {
+        Style::default()
+            .fg(self.foreground.to_ratatui())
+            .bg(self.background.to_ratatui())
+    }
+
+    /// Convert to ratatui Style with all semantic colors.
+    pub fn to_styles(&self) -> ThemeStyles {
+        ThemeStyles {
+            normal: Style::default().fg(self.foreground.to_ratatui()).bg(self.background.to_ratatui()),
+            primary: Style::default().fg(self.primary.to_ratatui()),
+            secondary: Style::default().fg(self.secondary.to_ratatui()),
+            error: Style::default().fg(self.error.to_ratatui()),
+            warning: Style::default().fg(self.warning.to_ratatui()),
+            success: Style::default().fg(self.success.to_ratatui()),
+            muted: Style::default().fg(self.muted.to_ratatui()),
+            accent: Style::default().fg(self.accent.to_ratatui()),
+            border: Style::default().fg(self.border.to_ratatui()),
+            cursor_fg: Style::default().fg(self.cursor_fg.to_ratatui()),
+            cursor_bg: Style::default().fg(self.cursor_bg.to_ratatui()),
+            selection_bg: Style::default().bg(self.selection_bg.to_ratatui()),
+        }
+    }
+}
+
+/// Pre-computed ratatui styles for all semantic colors in a ColorScheme.
+#[derive(Clone, Debug)]
+pub struct ThemeStyles {
+    pub normal: Style,
+    pub primary: Style,
+    pub secondary: Style,
+    pub error: Style,
+    pub warning: Style,
+    pub success: Style,
+    pub muted: Style,
+    pub accent: Style,
+    pub border: Style,
+    pub cursor_fg: Style,
+    pub cursor_bg: Style,
+    pub selection_bg: Style,
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +220,16 @@ impl Theme {
             fonts: FontScheme::default(),
             spacing: Spacing::default(),
         }
+    }
+
+    /// Convert theme foreground/background to ratatui Style.
+    pub fn to_style(&self) -> Style {
+        self.colors.to_style()
+    }
+
+    /// Get all semantic styles as ThemeStyles.
+    pub fn to_styles(&self) -> ThemeStyles {
+        self.colors.to_styles()
     }
 }
 

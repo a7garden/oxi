@@ -16,8 +16,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-// Re-export from types
-pub use crate::extensions::types::ExtensionErrorRecord;
+// Re-export from types (ExtensionErrorRecord comes from mod.rs re-export)
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extension Context

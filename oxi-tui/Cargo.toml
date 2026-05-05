@@ -14,6 +14,7 @@ exclude = ["target/", "benches/"]
 [dependencies]
 # Terminal UI
 crossterm = "0.28"
+ratatui = "0.30"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -41,6 +42,7 @@ unicode-segmentation = "1.11"
 [dev-dependencies]
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
+ratatui = "0.30"
 
 [[bench]]
 name = "tui_rendering"

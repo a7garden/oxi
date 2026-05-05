@@ -3,7 +3,6 @@
 //! Functions for loading extensions from shared libraries and discovering
 //! them in standard locations.
 
-use crate::extensions::types::Extension;
 use crate::extensions::Extension as ExtensionTrait;
 use crate::extensions::NoopExtension;
 use anyhow::{bail, Context, Result};
