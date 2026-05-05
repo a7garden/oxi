@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! oxi-agent: Agent runtime for oxi
 //!
 //! This crate provides an agent runtime that integrates with oxi-ai providers.

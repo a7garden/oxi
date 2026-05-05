@@ -253,6 +253,15 @@ pub mod tokens {
     /// For typical mixed English source code and prose this gives results
     /// within ±10% of tiktoken outputs for GPT-4-class tokenizers.
     ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_ai::estimate_tokens;
+    /// let text = "Hello, world! This is a test.";
+    /// let tokens = estimate_tokens(text);
+    /// assert!(tokens > 0);
+    /// ```
+    ///
     /// # Arguments
     /// * `text` - The text to estimate tokens for
     ///

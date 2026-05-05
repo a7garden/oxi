@@ -26,6 +26,14 @@ impl Default for Context {
 
 impl Context {
     /// Create a new empty context
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_ai::Context;
+    /// let mut ctx = Context::new();
+    /// ctx.set_system_prompt("You are a helpful assistant.");
+    /// ```
     pub fn new() -> Self {
         Self {
             system_prompt: None,

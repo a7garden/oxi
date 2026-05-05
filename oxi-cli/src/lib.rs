@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! oxi: CLI coding harness
 //!
 //! This crate provides the main application logic for the oxi CLI.
