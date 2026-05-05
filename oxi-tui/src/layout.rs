@@ -54,11 +54,12 @@ pub fn split(area: Rect, direction: Direction, constraints: &[Constraint]) -> Ve
         }
     }
 
-    // Percentage
+    // Percentage — calculated against total, not remaining, so constraints
+    // are independent of Length ordering.
     for (i, c) in constraints.iter().enumerate() {
         if let Constraint::Percentage(pct) = c {
             let pct = (*pct).min(100) as u32;
-            let len = (remaining * pct / 100) as u16;
+            let len = (total as u32 * pct / 100) as u16;
             sizes[i] = len;
             remaining = remaining.saturating_sub(len as u32);
         }
