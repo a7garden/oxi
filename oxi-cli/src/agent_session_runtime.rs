@@ -199,6 +199,9 @@ pub struct CreateAgentSessionFromServicesOptions {
     pub thinking_level: Option<ThinkingLevel>,
     /// Scoped models for Ctrl+P cycling.
     pub scoped_models: Vec<ScopedModel>,
+    /// Pre-configured tool registry to copy into the new agent.
+    /// If None, builtin tools are registered automatically.
+    pub tool_registry: Option<Arc<oxi_agent::ToolRegistry>>,
 }
 
 /// Result of creating an agent session.
