@@ -102,9 +102,13 @@ pub enum CompactionReason {
 /// Result of a compaction operation.
 #[derive(Debug, Clone)]
 pub struct CompactionResult {
+    /// Compaction summary text.
     pub summary: String,
+    /// ID of the first entry kept after compaction.
     pub first_kept_entry_id: Option<Uuid>,
+    /// Token count before compaction.
     pub tokens_before: usize,
+    /// Additional compaction details.
     pub details: Option<serde_json::Value>,
 }
 
@@ -115,17 +119,24 @@ pub struct CompactionResult {
 #[derive(Debug, Clone)]
 /// Scoped model entry for Ctrl+P cycling.
 pub struct ScopedModel {
+    /// Provider name.
     pub provider: String,
+    /// Model identifier.
     pub model_id: String,
+    /// Optional thinking level override.
     pub thinking_level: Option<ThinkingLevel>,
 }
 
 /// Result from [`AgentSession::cycle_model`].
 #[derive(Debug, Clone)]
 pub struct ModelCycleResult {
+    /// Provider name.
     pub provider: String,
+    /// Model identifier.
     pub model_id: String,
+    /// Current thinking level.
     pub thinking_level: ThinkingLevel,
+    /// Whether the model is scoped (Ctrl+P).
     pub is_scoped: bool,
 }
 
@@ -169,11 +180,11 @@ pub enum StreamingBehavior {
 /// Source of user input (for extension hooks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputSource {
-/// interactive variant.
+    /// User typed at the interactive prompt.
     Interactive,
-/// extension variant.
+    /// Input from an extension.
     Extension,
-/// rpc variant.
+    /// Input from an RPC call.
     Rpc,
 }
 
@@ -190,21 +201,32 @@ impl Default for InputSource {
 /// Statistics returned by [`AgentSession::session_stats`].
 #[derive(Debug, Clone)]
 pub struct SessionStats {
+    /// Unique session identifier.
     pub session_id: String,
+    /// Number of user messages.
     pub user_messages: usize,
+    /// Number of assistant messages.
     pub assistant_messages: usize,
+    /// Number of tool calls made.
     pub tool_calls: usize,
+    /// Number of tool results returned.
     pub tool_results: usize,
+    /// Total number of messages.
     pub total_messages: usize,
+    /// Token usage statistics.
     pub tokens: TokenStats,
+    /// Estimated cost in USD.
     pub cost: f64,
 }
 
 /// Token usage statistics.
 #[derive(Debug, Clone, Default)]
 pub struct TokenStats {
+    /// Input token count.
     pub input: usize,
+    /// Output token count.
     pub output: usize,
+    /// Total token count.
     pub total: usize,
 }
 
@@ -1447,9 +1469,9 @@ impl std::ops::Deref for AgentSessionHandle {
 /// Direction for model cycling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CycleDirection {
-/// forward variant.
+    /// Cycle to the next model.
     Forward,
-/// backward variant.
+    /// Cycle to the previous model.
     Backward,
 }
 
