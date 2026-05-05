@@ -128,9 +128,12 @@ pub fn convert_responses_messages(
     let opts = options.unwrap_or_default();
     let mut messages: Vec<JsonValue> = Vec::new();
 
-    // Transform messages for the target model
-    // TODO: implement cross-provider message transformation
-    let transformed: Vec<crate::Message> = context.messages.clone();
+    // Transform messages for the target model using cross-provider transformation.
+    // This handles image downgrades, thinking block conversion, tool call ID
+    // normalization, synthetic tool results for orphaned tool calls, and skipping
+    // error/aborted assistant messages.
+    let transformed: Vec<crate::Message> =
+        crate::transform::transform_messages_for_model(&context.messages, model);
 
     // System prompt
     if opts.include_system_prompt {
