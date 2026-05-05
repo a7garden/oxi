@@ -741,17 +741,19 @@ impl AgentTool for SubagentTool {
             let steps: Vec<ChainStep> = serde_json::from_value(params["chain"].clone())
                 .map_err(|e| format!("Invalid chain parameter: {}", e))?;
             let total = steps.len();
-
             let mut results = Vec::new();
             let mut previous_output = String::new();
+            let mut abort_signal = signal;
 
             for (i, step) in steps.into_iter().enumerate() {
                 let task = step.task.replace("{previous}", &previous_output);
 
+                let step_signal = if i == total - 1 { abort_signal.take() } else { None };
+
                 let result = run_single_agent(
                     &self.cwd, &agents, &step.agent, &task,
                     step.cwd.as_deref(), Some(i + 1),
-                    if i == steps.len() - 1 { signal } else { None },
+                    step_signal,
                     progress.clone(), &binary,
                 ).await;
 
