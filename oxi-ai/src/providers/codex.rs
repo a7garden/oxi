@@ -27,7 +27,6 @@ use super::ProviderError;
 #[derive(Debug, Clone)]
 pub struct CodexConfig {
     /// Base URL for the Codex API
-    #[allow(dead_code)]
     pub base_url: String,
     /// API key for authentication
     pub api_key: Option<String>,
@@ -76,7 +75,6 @@ impl CodexProvider {
     }
 
     /// Create with explicit API key
-    #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         let mut config = CodexConfig::default();
         config.api_key = Some(api_key.into());
@@ -87,7 +85,6 @@ impl CodexProvider {
     }
 
     /// Create with custom configuration
-    #[allow(dead_code)]
     pub fn with_config(config: CodexConfig) -> Self {
         Self {
             client: shared_client(),
@@ -96,28 +93,24 @@ impl CodexProvider {
     }
 
     /// Set model ID
-    #[allow(dead_code)]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.config.model = model.into();
         self
     }
 
     /// Set temperature
-    #[allow(dead_code)]
     pub fn with_temperature(mut self, temp: f32) -> Self {
         self.config.temperature = Some(temp);
         self
     }
 
     /// Set max tokens
-    #[allow(dead_code)]
     pub fn with_max_tokens(mut self, max: usize) -> Self {
         self.config.max_tokens = Some(max);
         self
     }
 
     /// Get provider name
-    #[allow(dead_code)]
     pub fn name(&self) -> &str {
         "codex"
     }
@@ -485,9 +478,7 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 // SSE structures
 #[derive(Debug, Deserialize)]
 struct CodexSSEChunk {
-    #[allow(dead_code)]
     id: Option<String>,
-    #[allow(dead_code)]
     #[serde(rename = "model")]
     model: Option<String>,
     choices: Vec<CodexChoice>,
@@ -509,11 +500,8 @@ struct CodexDelta {
 
 #[derive(Debug, Deserialize)]
 struct CodexToolCall {
-    #[allow(dead_code)]
     index: Option<usize>,
-    #[allow(dead_code)]
     id: Option<String>,
-    #[allow(dead_code)]
     #[serde(rename = "type")]
     type_: Option<String>,
     function: Option<CodexFunctionDelta>,
@@ -521,7 +509,6 @@ struct CodexToolCall {
 
 #[derive(Debug, Deserialize)]
 struct CodexFunctionDelta {
-    #[allow(dead_code)]
     name: Option<String>,
     arguments: Option<String>,
 }

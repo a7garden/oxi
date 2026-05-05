@@ -130,28 +130,6 @@ fn validate_args_internal(
     }
 }
 
-/// Create a JSON Schema from a TypeScript-like definition
-#[allow(dead_code)]
-pub fn create_schema(fields: &[(&str, &str, &str)]) -> JsonValue {
-    let mut properties = serde_json::Map::new();
-    let mut required: Vec<&str> = Vec::new();
-
-    for (name, schema_type, description) in fields {
-        let prop = serde_json::json!({
-            "type": schema_type,
-            "description": description
-        });
-        properties.insert(name.to_string(), prop);
-        required.push(name);
-    }
-
-    serde_json::json!({
-        "type": "object",
-        "properties": properties,
-        "required": required
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

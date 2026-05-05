@@ -3,10 +3,11 @@
 //! Provides a flicker-free terminal chat interface with:
 //! - Double-buffered rendering via ratatui
 //! - Line-level differential updates (zero flicker)
-//! - Streaming text display
-//! - Scrollable chat history
+//! - Streaming text display with spinner animation
+//! - Scrollable chat history with scroll indicator
 //! - Slash commands with autocomplete popup
-//! - Status bar showing cwd, model, context usage
+//! - Status bar showing cwd, model, git branch, context usage
+//! - Rich message rendering with role badges and visual hierarchy
 
 use crate::agent_session::{AgentSession, CompactionReason, ScopedModel, SessionEvent};
 use crate::agent_session_runtime::{
@@ -34,11 +35,46 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, Wrap},
     Terminal,
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Color Palette — Tokyo Night inspired
+// ═══════════════════════════════════════════════════════════════════════════
+
+mod palette {
+    #![allow(dead_code)]
+    use ratatui::style::Color;
+
+    // Background layers
+    pub const BG:          Color = Color::Rgb(26, 27, 38);    // #1a1b26 base
+    pub const BG_SURFACE:  Color = Color::Rgb(30, 32, 48);   // #1e2030 surface
+    pub const BG_OVERLAY:  Color = Color::Rgb(36, 38, 56);   // #242638 overlay
+    pub const BG_HOVER:    Color = Color::Rgb(55, 58, 82);   // #373a52 hover
+
+    // Foreground
+    pub const FG:          Color = Color::Rgb(169, 177, 214); // #a9b1d6 text
+    pub const FG_DIM:      Color = Color::Rgb(88, 91, 112);  // #585b70 dimmed
+    pub const FG_BRIGHT:   Color = Color::Rgb(205, 214, 244);// #cdd6f4 bright
+
+    // Accents
+    pub const BLUE:        Color = Color::Rgb(122, 162, 247); // #7aa2f7 blue
+    pub const CYAN:        Color = Color::Rgb(125, 207, 255); // #7dcfff cyan
+    pub const GREEN:       Color = Color::Rgb(158, 206, 106); // #9ece6a green
+    pub const YELLOW:      Color = Color::Rgb(224, 175, 104); // #e0af68 yellow
+    pub const RED:         Color = Color::Rgb(247, 118, 142); // #f7768e red
+    pub const MAGENTA:     Color = Color::Rgb(187, 154, 247); // #bb9af7 magenta
+    pub const ORANGE:      Color = Color::Rgb(255, 158, 100); // #ff9e64 orange
+    pub const TEAL:        Color = Color::Rgb(84, 168, 160);  // #54a8a0 teal
+
+    // Role colors
+    pub const USER_BG:     Color = Color::Rgb(30, 40, 70);   // subtle blue bg
+    pub const ASSISTANT_BG:Color = Color::Rgb(30, 35, 50);   // subtle dark bg
+    pub const SYSTEM_BG:   Color = Color::Rgb(45, 35, 30);   // subtle warm bg
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // UI Events (agent → TUI)
@@ -49,9 +85,9 @@ enum UiEvent {
     Start,
     Thinking,
     TextDelta(String),
-    // Keep: ToolCall fields `id` and `arguments` unused now but may be needed for tool UI display.
     #[allow(dead_code)]
     ToolCall { id: String, name: String, arguments: String },
+    ToolStart { tool_name: String },
     ToolResult { tool_name: String, content: String, is_error: bool },
     Complete,
     Error(String),
@@ -78,22 +114,22 @@ enum MessageRole {
 struct ChatMessage {
     role: MessageRole,
     content: String,
-    /// Keep: timestamp available for future message ordering/display.
     #[allow(dead_code)]
     timestamp: i64,
 }
 
+/// Spinner frames for thinking animation.
+const SPINNER: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 /// State for the input field (char-index based, UTF-8 safe).
 struct InputState {
     text: String,
-    cursor: usize, // char index
-    /// Slash command completion state
+    cursor: usize,
     slash_completions: Vec<SlashCompletion>,
     slash_completion_index: usize,
     slash_completion_active: bool,
 }
 
-/// A slash command completion candidate.
 struct SlashCompletion {
     name: String,
     description: String,
@@ -122,33 +158,19 @@ impl InputState {
         self.slash_completion_active = false;
     }
 
-    /// Update slash command completions based on current input.
     fn update_slash_completions(&mut self) {
         let text = self.text.trim();
-        if !text.starts_with('/') {
+        if !text.starts_with('/') || text.contains(' ') {
             self.clear_slash_completions();
             return;
         }
 
-        // Get the first "word" (the command part)
         let cmd_part = text.split_whitespace().next().unwrap_or("");
-        let query = &cmd_part[1..]; // strip leading '/'
-
-        // If text contains a space, we've already typed a full command
-        if text.contains(' ') {
-            self.clear_slash_completions();
-            return;
-        }
+        let query = &cmd_part[1..];
 
         let mut matches: Vec<SlashCompletion> = BUILTIN_SLASH_COMMANDS
             .iter()
-            .filter(|cmd| {
-                if query.is_empty() {
-                    true
-                } else {
-                    cmd.name.starts_with(query)
-                }
-            })
+            .filter(|cmd| query.is_empty() || cmd.name.starts_with(query))
             .map(|cmd| SlashCompletion {
                 name: format!("/{}", cmd.name),
                 description: cmd.description.to_string(),
@@ -161,7 +183,6 @@ impl InputState {
         self.slash_completion_active = !self.slash_completions.is_empty();
     }
 
-    /// Accept the currently selected slash completion.
     fn accept_slash_completion(&mut self) -> bool {
         if !self.slash_completion_active || self.slash_completions.is_empty() {
             return false;
@@ -173,14 +194,12 @@ impl InputState {
         true
     }
 
-    /// Navigate to next slash completion.
     fn next_slash_completion(&mut self) {
         if !self.slash_completions.is_empty() {
             self.slash_completion_index = (self.slash_completion_index + 1) % self.slash_completions.len();
         }
     }
 
-    /// Navigate to previous slash completion.
     fn prev_slash_completion(&mut self) {
         if !self.slash_completions.is_empty() {
             if self.slash_completion_index == 0 {
@@ -191,21 +210,7 @@ impl InputState {
         }
     }
 
-    fn value(&self) -> &str {
-        &self.text
-    }
-
-    fn char_count(&self) -> usize {
-        self.text.chars().count()
-    }
-
-    fn char_to_byte(&self, char_idx: usize) -> usize {
-        self.text
-            .char_indices()
-            .nth(char_idx)
-            .map(|(i, _)| i)
-            .unwrap_or(self.text.len())
-    }
+    fn value(&self) -> &str { &self.text }
 
     fn insert_char(&mut self, c: char) {
         let byte_pos = self.char_to_byte(self.cursor);
@@ -222,82 +227,19 @@ impl InputState {
     }
 
     fn delete(&mut self) {
-        if self.cursor < self.char_count() {
+        if self.cursor < self.text.chars().count() {
             let byte_pos = self.char_to_byte(self.cursor);
             self.text.remove(byte_pos);
         }
     }
 
-    fn move_left(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-        }
-    }
+    fn move_left(&mut self) { if self.cursor > 0 { self.cursor -= 1; } }
+    fn move_right(&mut self) { if self.cursor < self.text.chars().count() { self.cursor += 1; } }
+    fn move_home(&mut self) { self.cursor = 0; }
+    fn move_end(&mut self) { self.cursor = self.text.chars().count(); }
 
-    fn move_right(&mut self) {
-        if self.cursor < self.char_count() {
-            self.cursor += 1;
-        }
-    }
-
-    fn move_home(&mut self) {
-        self.cursor = 0;
-    }
-
-    fn move_end(&mut self) {
-        self.cursor = self.char_count();
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Theme
-// ═══════════════════════════════════════════════════════════════════════════
-
-struct Theme {
-    user_fg: Color,
-    assistant_fg: Color,
-    system_fg: Color,
-    border_fg: Color,
-    input_fg: Color,
-    input_cursor_fg: Color,
-    input_cursor_bg: Color,
-    placeholder_fg: Color,
-    prompt_indicator_fg: Color,
-    thinking_fg: Color,
-    // Keep: theme colors for future tool call rendering.
-    #[allow(dead_code)]
-    tool_name_fg: Color,
-    // Keep: theme colors for future tool call border rendering.
-    #[allow(dead_code)]
-    tool_border_fg: Color,
-    // Keep: theme colors for future error display.
-    #[allow(dead_code)]
-    error_fg: Color,
-    // Keep: theme colors for future success display.
-    #[allow(dead_code)]
-    success_fg: Color,
-    status_fg: Color,
-}
-
-impl Theme {
-    fn dark() -> Self {
-        Self {
-            user_fg: Color::Cyan,
-            assistant_fg: Color::Gray,
-            system_fg: Color::Yellow,
-            border_fg: Color::DarkGray,
-            input_fg: Color::White,
-            input_cursor_fg: Color::Black,
-            input_cursor_bg: Color::White,
-            placeholder_fg: Color::DarkGray,
-            prompt_indicator_fg: Color::Cyan,
-            thinking_fg: Color::DarkGray,
-            tool_name_fg: Color::Yellow,
-            tool_border_fg: Color::DarkGray,
-            error_fg: Color::Red,
-            success_fg: Color::Green,
-            status_fg: Color::Yellow,
-        }
+    fn char_to_byte(&self, char_idx: usize) -> usize {
+        self.text.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(self.text.len())
     }
 }
 
@@ -306,13 +248,11 @@ impl Theme {
 // ═══════════════════════════════════════════════════════════════════════════
 
 pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
-    let theme = Theme::dark();
     let settings = app.settings().clone();
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string());
 
-    // ── Build AgentSession ───────────────────────────────────────────
     let session_manager = SessionManager::create(&cwd, None);
     let session_id = session_manager.get_session_id();
 
@@ -336,7 +276,6 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         tracing::warn!("Model fallback: {}", msg);
     }
 
-    // ── Subscribe to session events ──────────────────────────────────
     let (session_event_tx, mut session_event_rx) = mpsc::unbounded_channel::<SessionEvent>();
     agent_session.subscribe(Box::new(move |event| {
         let _ = session_event_tx.send(event.clone());
@@ -345,7 +284,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
     let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
 
-    // ── Agent worker thread ──────────────────────────────────────────
+    // Agent worker
     let session_handle = agent_session.clone_handle();
     let ui_tx_for_thread = ui_tx.clone();
     let agent_handle = std::thread::spawn(move || {
@@ -370,9 +309,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                     name: tool_call.name,
                                     arguments: tool_call.arguments.to_string(),
                                 },
-                                AgentEvent::ToolStart { tool_name, .. } => UiEvent::TextDelta(
-                                    format!("\n⚙ Running: {}...\n", tool_name),
-                                ),
+                                AgentEvent::ToolStart { tool_name, .. } => {
+                                    UiEvent::ToolStart { tool_name }
+                                }
                                 AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
                                     tool_name: String::new(),
                                     content: result.content.chars().take(500).collect(),
@@ -401,7 +340,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         });
     });
 
-    // ── Setup terminal ───────────────────────────────────────────────
+    // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -409,95 +348,86 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    // ── App state ────────────────────────────────────────────────────
+    // App state
     let mut messages: Vec<ChatMessage> = Vec::new();
     let mut input = InputState::new();
     let mut is_agent_busy = false;
     let mut streaming_text = String::new();
     let mut scroll_offset: usize = 0;
     let mut auto_scroll: bool = true;
+    let mut spinner_frame: usize = 0;
+    let mut message_count: usize = 0; // user + assistant
 
-    // Status bar state
     let model_id = agent_session.model_id();
     let git_branch = crate::git_utils::get_current_branch(
         &std::env::current_dir().unwrap_or_default(),
     );
 
-    // Welcome message
+    // Welcome
     messages.push(ChatMessage {
         role: MessageRole::System,
-        content: format!(
-            "oxi ready. Session: {}\nModel: {}\nType /help for commands.",
-            session_id,
-            agent_session.model_id(),
-        ),
+        content: format_welcome(&session_id, &model_id),
         timestamp: now_millis(),
     });
 
     let mut running = true;
-    let poll_timeout = std::time::Duration::from_millis(33);
+    let poll_timeout = std::time::Duration::from_millis(50); // 50ms for smooth spinner
 
     while running {
-        // ── Render ───────────────────────────────────────────────────
+        spinner_frame = (spinner_frame + 1) % SPINNER.len();
+
+        // Render
         terminal.draw(|f| {
             let size = f.area();
+
+            // Layout: Chat | Separator(1) | Input(3) | Status bar(1)
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(3),     // Chat area
+                    Constraint::Min(3),     // Chat
                     Constraint::Length(1),   // Separator
-                    Constraint::Length(2),   // Input area
+                    Constraint::Length(3),   // Input (border + input + hint/popup)
                     Constraint::Length(1),   // Status bar
                 ])
                 .split(size);
 
-            render_chat(f, chunks[0], &messages, &streaming_text, scroll_offset, &theme);
-            render_separator(f, chunks[1], &theme);
-            render_input(f, chunks[2], &input, is_agent_busy, &theme);
-            render_status_bar(
-                f, chunks[3], &cwd, &model_id,
-                git_branch.as_deref(), is_agent_busy, &theme,
-            );
+            render_chat(f, chunks[0], &messages, &streaming_text, scroll_offset,
+                        is_agent_busy, spinner_frame, &cwd);
+            render_separator(f, chunks[1]);
+            render_input(f, chunks[2], &input, is_agent_busy, spinner_frame);
+            render_status_bar(f, chunks[3], &cwd, &model_id,
+                              git_branch.as_deref(), is_agent_busy, message_count);
         })?;
 
-        // ── Poll for terminal events ─────────────────────────────────
+        // Poll events
         if event::poll(poll_timeout)? {
             match event::read()? {
                 CEvent::Key(key) => {
                     match key.code {
                         KeyCode::Enter => {
                             if !is_agent_busy {
-                                // If slash completions are active, accept completion first
                                 if input.slash_completion_active {
                                     input.accept_slash_completion();
                                     continue;
                                 }
-
                                 let value = input.value().to_string();
                                 if !value.is_empty() {
                                     if value.starts_with('/') {
                                         let handled = handle_slash_command(
-                                            &value,
-                                            &agent_session,
-                                            &mut messages,
-                                            &mut running,
+                                            &value, &agent_session, &mut messages, &mut running,
                                         );
                                         input.clear();
-                                        if handled {
-                                            continue;
-                                        }
+                                        if handled { continue; }
                                     }
-
                                     messages.push(ChatMessage {
                                         role: MessageRole::User,
                                         content: value.clone(),
                                         timestamp: now_millis(),
                                     });
-
+                                    message_count += 1;
                                     streaming_text.clear();
                                     is_agent_busy = true;
                                     auto_scroll = true;
-
                                     let _ = prompt_tx.send(value).await;
                                     input.clear();
                                 }
@@ -514,11 +444,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                         content: streaming_text.clone(),
                                         timestamp: now_millis(),
                                     });
+                                    message_count += 1;
                                     streaming_text.clear();
                                 }
                                 messages.push(ChatMessage {
                                     role: MessageRole::System,
-                                    content: "Interrupted".to_string(),
+                                    content: "⏹ Interrupted".to_string(),
                                     timestamp: now_millis(),
                                 });
                             } else {
@@ -531,11 +462,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         }
                         KeyCode::PageDown => {
                             scroll_offset = scroll_offset.saturating_sub(10);
-                            if scroll_offset == 0 {
-                                auto_scroll = true;
-                            }
+                            if scroll_offset == 0 { auto_scroll = true; }
                         }
-                        KeyCode::Char(c) => {
+                        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                             if !is_agent_busy {
                                 input.insert_char(c);
                                 input.update_slash_completions();
@@ -553,26 +482,10 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                 input.update_slash_completions();
                             }
                         }
-                        KeyCode::Left => {
-                            if !is_agent_busy {
-                                input.move_left();
-                            }
-                        }
-                        KeyCode::Right => {
-                            if !is_agent_busy {
-                                input.move_right();
-                            }
-                        }
-                        KeyCode::Home => {
-                            if !is_agent_busy {
-                                input.move_home();
-                            }
-                        }
-                        KeyCode::End => {
-                            if !is_agent_busy {
-                                input.move_end();
-                            }
-                        }
+                        KeyCode::Left => { if !is_agent_busy { input.move_left(); } }
+                        KeyCode::Right => { if !is_agent_busy { input.move_right(); } }
+                        KeyCode::Home => { if !is_agent_busy { input.move_home(); } }
+                        KeyCode::End => { if !is_agent_busy { input.move_end(); } }
                         KeyCode::Tab => {
                             if !is_agent_busy && input.slash_completion_active {
                                 input.accept_slash_completion();
@@ -591,9 +504,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                 input.next_slash_completion();
                             } else {
                                 scroll_offset = scroll_offset.saturating_sub(3);
-                                if scroll_offset == 0 {
-                                    auto_scroll = true;
-                                }
+                                if scroll_offset == 0 { auto_scroll = true; }
                             }
                         }
                         KeyCode::Esc => {
@@ -611,34 +522,33 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     }
                     MouseEventKind::ScrollDown => {
                         scroll_offset = scroll_offset.saturating_sub(3);
-                        if scroll_offset == 0 {
-                            auto_scroll = true;
-                        }
+                        if scroll_offset == 0 { auto_scroll = true; }
                     }
                     _ => {}
                 },
-                CEvent::Resize(_, _) => {
-                    // ratatui handles resize automatically in draw()
-                }
+                CEvent::Resize(_, _) => {}
                 _ => {}
             }
         }
 
-        // ── Drain agent events ───────────────────────────────────────
+        // Drain agent events
         while let Ok(ui_event) = ui_rx.try_recv() {
             match ui_event {
-                UiEvent::Start => {}
-                UiEvent::Thinking => {}
+                UiEvent::Start | UiEvent::Thinking => {}
                 UiEvent::TextDelta(text) => {
                     streaming_text.push_str(&text);
                 }
                 UiEvent::ToolCall { name, .. } => {
                     streaming_text.push_str(&format!("\n⚙ {}\n", name));
                 }
+                UiEvent::ToolStart { tool_name } => {
+                    streaming_text.push_str(&format!("\n▶ {}...\n", tool_name));
+                }
                 UiEvent::ToolResult { tool_name, content, is_error } => {
                     let label = if tool_name.is_empty() { "tool" } else { &tool_name };
                     if is_error {
-                        streaming_text.push_str(&format!("  ✗ {}: {}\n", label, content.chars().take(200).collect::<String>()));
+                        let preview: String = content.chars().take(200).collect();
+                        streaming_text.push_str(&format!("  ✗ {}: {}\n", label, preview));
                     } else {
                         let preview: String = content.lines().take(3).collect::<Vec<_>>().join("\n  ");
                         if !preview.is_empty() {
@@ -653,6 +563,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             content: streaming_text.clone(),
                             timestamp: now_millis(),
                         });
+                        message_count += 1;
                         streaming_text.clear();
                     }
                     is_agent_busy = false;
@@ -664,6 +575,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                             content: streaming_text.clone(),
                             timestamp: now_millis(),
                         });
+                        message_count += 1;
                         streaming_text.clear();
                     }
                     messages.push(ChatMessage {
@@ -676,20 +588,20 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 UiEvent::CompactionStart { reason } => {
                     let reason_str = match reason {
                         CompactionReason::Manual => "manual",
-                        CompactionReason::Threshold => "auto-threshold",
-                        CompactionReason::Overflow => "overflow-recovery",
+                        CompactionReason::Threshold => "auto",
+                        CompactionReason::Overflow => "overflow",
                     };
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: format!("📦 Compacting context ({})...", reason_str),
+                        content: format!("📦 Compacting ({})...", reason_str),
                         timestamp: now_millis(),
                     });
                 }
                 UiEvent::CompactionEnd { _reason, error_message } => {
                     let msg = if let Some(err) = error_message {
-                        format!("⚠️ Compaction failed: {}", err)
+                        format!("⚠ Compaction failed: {}", err)
                     } else {
-                        "✅ Compaction complete.".to_string()
+                        "✅ Compaction complete".to_string()
                     };
                     messages.push(ChatMessage {
                         role: MessageRole::System,
@@ -700,33 +612,33 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                 UiEvent::RetryStart { attempt, max_attempts, error_message } => {
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: format!("🔄 Retrying ({}/{}): {}", attempt, max_attempts, error_message),
+                        content: format!("🔄 Retry ({}/{}): {}", attempt, max_attempts, error_message),
                         timestamp: now_millis(),
                     });
                 }
                 UiEvent::ModelChanged { model_id } => {
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: format!("🤖 Model: {}", model_id),
+                        content: format!("🤖 → {}", model_id),
                         timestamp: now_millis(),
                     });
                 }
                 UiEvent::ThinkingLevelChanged { level } => {
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: format!("💭 Thinking level: {}", level),
+                        content: format!("💭 Thinking: {}", level),
                         timestamp: now_millis(),
                     });
                 }
                 UiEvent::QueueUpdate { pending } => {
                     if pending > 0 {
-                        tracing::debug!("Queue updated: {} pending messages", pending);
+                        tracing::debug!("Queue: {} pending", pending);
                     }
                 }
             }
         }
 
-        // ── Drain session events ─────────────────────────────────────
+        // Drain session events
         while let Ok(session_event) = session_event_rx.try_recv() {
             match session_event {
                 SessionEvent::CompactionStart { reason } => {
@@ -762,318 +674,345 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             }
         }
 
-        // ── Auto-scroll logic ────────────────────────────────────────
-        if auto_scroll {
-            scroll_offset = 0;
-        }
+        if auto_scroll { scroll_offset = 0; }
     }
 
-    // ── Cleanup ──────────────────────────────────────────────────────
+    // Cleanup
     drop(prompt_tx);
-
-    // Restore terminal state even if agent thread join fails
     let cleanup_terminal = |terminal: &mut Terminal<CrosstermBackend<io::Stdout>>| -> Result<()> {
         disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
         terminal.show_cursor()?;
         Ok(())
     };
-
-    // Wait for agent thread to finish
     let _ = agent_handle.join();
-
     if let Err(e) = cleanup_terminal(&mut terminal) {
         tracing::error!("Terminal cleanup failed: {}", e);
     }
-
     Ok(())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Rendering
+// Rendering — Chat
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Render the chat area with messages and optional streaming text.
 fn render_chat(
     f: &mut ratatui::Frame,
     area: Rect,
     messages: &[ChatMessage],
     streaming_text: &str,
     scroll_offset: usize,
-    theme: &Theme,
+    is_agent_busy: bool,
+    spinner_frame: usize,
+    _cwd: &str,
 ) {
-    if area.width < 4 || area.height < 1 {
-        return;
-    }
+    if area.width < 4 || area.height < 1 { return; }
 
-    // Build all lines from messages
     let mut all_lines: Vec<Line> = Vec::new();
 
     for msg in messages {
-        let (label, label_fg) = match msg.role {
-            MessageRole::User => (" You", theme.user_fg),
-            MessageRole::Assistant => (" Assistant", theme.assistant_fg),
-            MessageRole::System => (" ◈", theme.system_fg),
-        };
-
-        all_lines.push(Line::from(vec![
-            Span::styled(label.to_string(), Style::default().fg(label_fg).add_modifier(Modifier::BOLD)),
-        ]));
-
-        for line in msg.content.lines() {
-            let content_fg = match msg.role {
-                MessageRole::User => theme.user_fg,
-                MessageRole::System => theme.system_fg,
-                MessageRole::Assistant => theme.assistant_fg,
-            };
-            all_lines.push(Line::from(vec![
-                Span::styled("  ".to_string(), Style::default()),
-                Span::styled(line.to_string(), Style::default().fg(content_fg)),
-            ]));
+        match msg.role {
+            MessageRole::User => {
+                // ─── User message with left accent bar ───
+                for (i, line) in msg.content.lines().enumerate() {
+                    if i == 0 {
+                        all_lines.push(Line::from(vec![
+                            Span::styled(" ▌".to_string(), Style::default().fg(palette::CYAN)),
+                            Span::styled(" ".to_string(), Style::default()),
+                            Span::styled(line.to_string(), Style::default().fg(palette::FG_BRIGHT)),
+                        ]));
+                    } else {
+                        all_lines.push(Line::from(vec![
+                            Span::styled(" │ ".to_string(), Style::default().fg(palette::BG_HOVER)),
+                            Span::styled(line.to_string(), Style::default().fg(palette::FG)),
+                        ]));
+                    }
+                }
+                all_lines.push(Line::from(""));
+            }
+            MessageRole::Assistant => {
+                // ─── Assistant message with muted style ───
+                for line in msg.content.lines() {
+                    all_lines.push(Line::from(vec![
+                        Span::styled("  ".to_string(), Style::default()),
+                        Span::styled(line.to_string(), Style::default().fg(palette::FG)),
+                    ]));
+                }
+                all_lines.push(Line::from(""));
+            }
+            MessageRole::System => {
+                // ─── System message — dimmed, centered feel ───
+                for line in msg.content.lines() {
+                    all_lines.push(Line::from(vec![
+                        Span::styled("  · ".to_string(), Style::default().fg(palette::FG_DIM)),
+                        Span::styled(line.to_string(), Style::default().fg(palette::FG_DIM)),
+                    ]));
+                }
+                all_lines.push(Line::from(""));
+            }
         }
-
-        // Blank line separator
-        all_lines.push(Line::from(""));
     }
 
     // Streaming text
     if !streaming_text.is_empty() {
-        all_lines.push(Line::from(vec![
-            Span::styled(" Assistant".to_string(), Style::default().fg(theme.assistant_fg).add_modifier(Modifier::BOLD)),
-        ]));
+        all_lines.push(Line::from(""));
         for line in streaming_text.lines() {
             all_lines.push(Line::from(vec![
                 Span::styled("  ".to_string(), Style::default()),
-                Span::styled(line.to_string(), Style::default().fg(theme.assistant_fg)),
+                Span::styled(line.to_string(), Style::default().fg(palette::FG)),
             ]));
         }
-        // Animated thinking indicator while streaming
-        all_lines.push(Line::from(vec![
-            Span::styled("  ●", Style::default().fg(theme.thinking_fg)),
-        ]));
+        // Animated spinner
+        if is_agent_busy {
+            let spinner = SPINNER[spinner_frame];
+            all_lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", spinner), Style::default().fg(palette::MAGENTA)),
+                Span::styled("thinking...".to_string(), Style::default().fg(palette::FG_DIM)),
+            ]));
+        }
     }
 
-    // Calculate wrapped line count to determine scroll range.
-    // After wrapping, the actual number of displayed lines may be larger
-    // than all_lines.len() because long lines get split.
+    // Calculate wrapped lines for scroll
     let wrap_width = area.width as usize;
     let mut wrapped_count: usize = 0;
     for line in &all_lines {
-        // Use the ratatui text width calculation
-        let line_width = line.width();
-        if line_width == 0 {
-            wrapped_count += 1;
-        } else {
-            wrapped_count += (line_width + wrap_width - 1) / wrap_width.max(1);
-        }
+        let w = line.width();
+        if w == 0 { wrapped_count += 1; }
+        else { wrapped_count += (w + wrap_width - 1) / wrap_width.max(1); }
     }
-
-    // Build the text widget
-    let chat_text = ratatui::text::Text::from(all_lines);
 
     let visible_height = area.height as usize;
     let max_scroll = wrapped_count.saturating_sub(visible_height);
     let clamped_offset = scroll_offset.min(max_scroll);
     let scroll_from_top = max_scroll.saturating_sub(clamped_offset);
 
+    // Scroll indicator on right edge
+    let show_scroll = max_scroll > 0;
+    let scroll_pct = if max_scroll > 0 {
+        ((max_scroll - scroll_from_top) as f32 / max_scroll as f32 * 100.0) as u8
+    } else { 100 };
+
+    let chat_text = ratatui::text::Text::from(all_lines);
     let chat_widget = Paragraph::new(chat_text)
         .wrap(Wrap { trim: false })
         .scroll((scroll_from_top as u16, 0));
 
     f.render_widget(chat_widget, area);
+
+    // Scroll indicator — subtle bar on right
+    if show_scroll && visible_height > 2 {
+        let thumb_size = (visible_height * visible_height / (max_scroll + visible_height)).max(1);
+        let thumb_start = (scroll_from_top as f32 / max_scroll as f32 * visible_height as f32) as usize;
+        for i in 0..thumb_size.min(visible_height) {
+            let row = area.y + (thumb_start + i).min(visible_height - 1) as u16;
+            let col = area.x + area.width - 1;
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "█".to_string(),
+                    Style::default().fg(palette::BG_HOVER),
+                ))),
+                Rect { x: col, y: row, width: 1, height: 1 },
+            );
+        }
+        // Percentage text at bottom-right
+        let pct_text = format!("{}%", scroll_pct);
+        let pct_len = pct_text.len() as u16;
+        let pct_row = area.y + area.height - 1;
+        let pct_col = area.x + area.width - pct_len - 2;
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(pct_text, Style::default().fg(palette::FG_DIM)))),
+            Rect { x: pct_col, y: pct_row, width: pct_len + 1, height: 1 },
+        );
+    }
 }
 
-/// Render the separator line between chat and input.
-fn render_separator(f: &mut ratatui::Frame, area: Rect, theme: &Theme) {
-    let separator = Paragraph::new(Line::from(
+// ═══════════════════════════════════════════════════════════════════════════
+// Rendering — Separator
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn render_separator(f: &mut ratatui::Frame, area: Rect) {
+    let sep = Paragraph::new(Line::from(
         Span::styled(
-            "─".repeat(area.width as usize),
-            Style::default().fg(theme.border_fg),
+            "━".repeat(area.width as usize),
+            Style::default().fg(palette::BG_HOVER),
         ),
     ));
-    f.render_widget(separator, area);
+    f.render_widget(sep, area);
 }
 
-/// Render the input area with cursor and slash command popup.
+// ═══════════════════════════════════════════════════════════════════════════
+// Rendering — Input
+// ═══════════════════════════════════════════════════════════════════════════
+
 fn render_input(
     f: &mut ratatui::Frame,
     area: Rect,
     input: &InputState,
     is_agent_busy: bool,
-    theme: &Theme,
+    spinner_frame: usize,
 ) {
-    // Split area into prompt indicator + input field + status
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(2),    // "❯ "
-            Constraint::Min(10),      // Input text
-            Constraint::Length(16),   // Status
-        ])
-        .split(area);
+    if area.height < 2 { return; }
 
-    // Prompt indicator
-    let prompt = Paragraph::new(Line::from(vec![
-        Span::styled("❯ ", Style::default().fg(theme.prompt_indicator_fg)),
-    ]));
-    f.render_widget(prompt, Rect { x: chunks[0].x, y: chunks[0].y, width: 2, height: 1 });
+    // Row 0: input field
+    // Row 1: hint/popup line
+    let input_row = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+    let hint_row = Rect { x: area.x, y: area.y + 1, width: area.width, height: 1 };
+    let border_row = Rect { x: area.x, y: area.y + 2, width: area.width, height: 1 };
 
-    // Input text with cursor
-    let display_text = if input.value().is_empty() {
-        "Type a message... (/ for commands)".to_string()
+    // ── Input field ──
+    let prompt_char = if is_agent_busy {
+        format!("{} ", SPINNER[spinner_frame])
+    } else {
+        "❯ ".to_string()
+    };
+    let prompt_color = if is_agent_busy { palette::MAGENTA } else { palette::CYAN };
+
+    let display_text = if input.value().is_empty() && !is_agent_busy {
+        "Type a message… (enter / for commands)".to_string()
     } else {
         input.value().to_string()
     };
 
-    let text_fg = if input.value().is_empty() {
-        theme.placeholder_fg
+    let text_fg = if input.value().is_empty() && !is_agent_busy {
+        palette::FG_DIM
     } else {
-        theme.input_fg
+        palette::FG_BRIGHT
     };
 
-    // Calculate visible portion and cursor position
-    let input_width = chunks[1].width as usize;
+    // Horizontal scroll
+    let max_content = area.width as usize - 4; // prompt(2) + padding
     let cursor_char = input.cursor;
+    let scroll_left = if cursor_char >= max_content {
+        cursor_char - max_content + 1
+    } else { 0 };
 
-    // Horizontal scrolling
-    let scroll_left = if cursor_char >= input_width {
-        cursor_char - input_width + 1
-    } else {
-        0
-    };
+    let visible_chars: String = display_text.chars().skip(scroll_left).take(max_content).collect();
+    let cursor_screen = cursor_char.saturating_sub(scroll_left);
 
-    let visible_chars: String = display_text.chars().skip(scroll_left).take(input_width).collect();
-    let cursor_screen_col = cursor_char.saturating_sub(scroll_left);
-
-    // Build styled spans: text before cursor, cursor cell, text after cursor
     let mut spans: Vec<Span> = Vec::new();
-    let chars: Vec<char> = visible_chars.chars().collect();
+    spans.push(Span::styled(prompt_char, Style::default().fg(prompt_color)));
 
+    let chars: Vec<char> = visible_chars.chars().collect();
     let show_cursor = !input.value().is_empty();
 
     for (i, ch) in chars.iter().enumerate() {
-        if show_cursor && i == cursor_screen_col {
+        if show_cursor && i == cursor_screen {
             spans.push(Span::styled(
                 ch.to_string(),
-                Style::default().fg(theme.input_cursor_fg).bg(theme.input_cursor_bg).add_modifier(Modifier::BOLD),
+                Style::default().fg(palette::BG).bg(palette::FG_BRIGHT).add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled(
-                ch.to_string(),
-                Style::default().fg(text_fg),
-            ));
+            spans.push(Span::styled(ch.to_string(), Style::default().fg(text_fg)));
         }
     }
 
-    // If cursor is at the end of visible text, show cursor on empty space
-    if show_cursor && cursor_screen_col >= chars.len() && cursor_screen_col < input_width {
+    if show_cursor && cursor_screen >= chars.len() {
         spans.push(Span::styled(
             " ".to_string(),
-            Style::default().fg(theme.input_cursor_fg).bg(theme.input_cursor_bg),
+            Style::default().fg(palette::BG).bg(palette::FG_BRIGHT),
         ));
     }
 
-    // Pad remaining space
-    let used = chars.len().max(cursor_screen_col + 1);
-    if used < input_width {
-        spans.push(Span::styled(
-            " ".repeat(input_width - used),
-            Style::default(),
-        ));
+    // Remaining padding
+    let used = chars.len().max(cursor_screen + 1);
+    if used < max_content {
+        spans.push(Span::styled(" ".repeat(max_content - used), Style::default()));
     }
 
-    let input_line = Line::from(spans);
-    let input_widget = Paragraph::new(input_line);
-    f.render_widget(input_widget, chunks[1]);
+    f.render_widget(Paragraph::new(Line::from(spans)), input_row);
 
-    // ── Slash command completion popup (second row of input area) ──
-    if input.slash_completion_active && area.height >= 2 {
-        let popup_row = area.y + 1;
-        render_slash_popup(f, popup_row, area.x, area.width, input, theme);
-    } else if area.height >= 2 {
-        // Status indicator (bottom row) - only when no popup
-        let status_text = if is_agent_busy {
-            "● thinking..."
-        } else {
-            ""
-        };
-        let status_fg = if is_agent_busy { theme.status_fg } else { theme.border_fg };
-        let status = Paragraph::new(Line::from(vec![
-            Span::styled(status_text.to_string(), Style::default().fg(status_fg)),
-        ]));
-        let status_row = Rect { x: 0, y: area.y + 1, width: area.width, height: 1 };
-        f.render_widget(status, status_row);
+    // ── Hint / popup row ──
+    if input.slash_completion_active {
+        render_slash_popup(f, hint_row, input);
+    } else if is_agent_busy {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "  Ctrl+C to interrupt".to_string(),
+                Style::default().fg(palette::FG_DIM),
+            ))),
+            hint_row,
+        );
+    } else if input.value().is_empty() {
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "  Enter to send · / for commands · Esc to cancel".to_string(),
+                Style::default().fg(palette::FG_DIM),
+            ))),
+            hint_row,
+        );
     }
+
+    // ── Bottom accent line ──
+    f.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "─".repeat(area.width as usize),
+            Style::default().fg(palette::BG_HOVER),
+        ))),
+        border_row,
+    );
 }
 
-/// Render slash command completion popup inline.
+/// Slash command popup — multi-column grid layout
 fn render_slash_popup(
     f: &mut ratatui::Frame,
-    row: u16,
-    x: u16,
-    width: u16,
+    area: Rect,
     input: &InputState,
-    _theme: &Theme,
 ) {
     let completions = &input.slash_completions;
-    if completions.is_empty() {
-        return;
-    }
+    if completions.is_empty() { return; }
 
-    // Show up to 8 completions in a single line: /cmd1 /cmd2 /cmd3 ...
-    let mut spans: Vec<Span> = Vec::new();
-    let max_show = 8;
+    let selected = input.slash_completion_index;
+    let max_show = 6usize;
 
     // Calculate visible window around selected
-    let selected = input.slash_completion_index;
-    let total = completions.len().min(max_show);
-    let start = if selected >= total {
-        selected.saturating_sub(total - 1)
-    } else {
-        0
-    };
+    let window_start = if selected >= max_show {
+        selected - max_show + 1
+    } else { 0 };
 
-    spans.push(Span::styled(
-        "  ".to_string(),
-        Style::default().fg(Color::DarkGray),
-    ));
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::styled("  ".to_string(), Style::default()));
 
-    for (i, comp) in completions.iter().enumerate().skip(start).take(max_show) {
-        if i == selected {
+    let visible: Vec<_> = completions.iter().enumerate()
+        .skip(window_start).take(max_show).collect();
+
+    for (i, comp) in &visible {
+        if *i == selected {
             spans.push(Span::styled(
                 format!(" {} ", comp.name),
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(palette::BG).bg(palette::BLUE).add_modifier(Modifier::BOLD),
             ));
+            // space between items
+            spans.push(Span::styled(" ".to_string(), Style::default()));
         } else {
             spans.push(Span::styled(
                 format!(" {} ", comp.name),
-                Style::default().fg(Color::Yellow),
+                Style::default().fg(palette::FG_DIM),
             ));
+            spans.push(Span::styled(" ".to_string(), Style::default()));
         }
     }
 
-    // Show description for selected item
+    // Description on the right
     if let Some(comp) = completions.get(selected) {
-        let used_width: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-        let desc_max = (width as usize).saturating_sub(used_width + 10);
-        if desc_max > 3 {
+        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+        let remaining = area.width as usize;
+        let desc_max = remaining.saturating_sub(used + 4);
+        if desc_max > 5 {
             let desc: String = comp.description.chars().take(desc_max).collect();
             spans.push(Span::styled(
-                format!(" — {}", desc),
-                Style::default().fg(Color::DarkGray),
+                format!("— {}", desc),
+                Style::default().fg(palette::FG_DIM),
             ));
         }
     }
 
-    let line = Line::from(spans);
-    let popup = Paragraph::new(line);
-    f.render_widget(popup, Rect { x, y: row, width, height: 1 });
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-/// Render the status bar showing cwd, model, git branch.
+// ═══════════════════════════════════════════════════════════════════════════
+// Rendering — Status Bar
+// ═══════════════════════════════════════════════════════════════════════════
+
 fn render_status_bar(
     f: &mut ratatui::Frame,
     area: Rect,
@@ -1081,84 +1020,88 @@ fn render_status_bar(
     model_id: &str,
     git_branch: Option<&str>,
     is_agent_busy: bool,
-    theme: &Theme,
+    message_count: usize,
 ) {
-    if area.width < 4 {
-        return;
-    }
+    if area.width < 4 { return; }
 
-    let mut left_spans: Vec<Span> = Vec::new();
-    let mut right_spans: Vec<Span> = Vec::new();
+    let mut left: Vec<Span> = Vec::new();
+    let mut right: Vec<Span> = Vec::new();
 
-    // Left: cwd (abbreviate home dir to ~)
+    // Left: dir + branch
     let home = std::env::var("HOME").unwrap_or_default();
     let display_cwd = if !home.is_empty() && cwd.starts_with(&home) {
         format!("~{}", &cwd[home.len()..])
     } else {
         cwd.to_string()
     };
+    let max_cwd = (area.width as usize / 3).max(8);
+    let display_cwd = if display_cwd.len() > max_cwd {
+        let short: String = display_cwd.chars().rev().take(max_cwd.saturating_sub(2)).collect();
+        format!("…{}", short.chars().rev().collect::<String>())
+    } else { display_cwd };
 
-    // Truncate cwd if too long
-    let max_cwd_len = (area.width as usize / 3).max(10);
-    let display_cwd = if display_cwd.len() > max_cwd_len {
-        let short: String = display_cwd.chars().rev().take(max_cwd_len.saturating_sub(2)).collect();
-        format!("...{}", short.chars().rev().collect::<String>())
-    } else {
-        display_cwd
-    };
+    left.push(Span::styled(" ╭─ ".to_string(), Style::default().fg(palette::TEAL)));
+    left.push(Span::styled(" ".to_string(), Style::default()));
+    left.push(Span::styled(display_cwd, Style::default().fg(palette::FG)));
 
-    left_spans.push(Span::styled(
-        format!(" {}", display_cwd),
-        Style::default().fg(theme.border_fg),
-    ));
-
-    // Git branch
     if let Some(branch) = git_branch {
         if !branch.is_empty() {
-            left_spans.push(Span::styled(
-                format!(" ({})", branch),
-                Style::default().fg(Color::Magenta),
-            ));
+            left.push(Span::styled(" ⎇ ".to_string(), Style::default().fg(palette::MAGENTA)));
+            left.push(Span::styled(branch.to_string(), Style::default().fg(palette::MAGENTA)));
         }
     }
 
-    // Right: model + busy indicator
+    // Right: message count · model · status
+    if message_count > 0 {
+        right.push(Span::styled(format!("{} msgs", message_count), Style::default().fg(palette::FG_DIM)));
+        right.push(Span::styled("  ".to_string(), Style::default()));
+    }
+
     if !model_id.is_empty() {
         let model_display = model_id.split('/').last().unwrap_or(model_id);
-        right_spans.push(Span::styled(
-            model_display.to_string(),
-            Style::default().fg(Color::Cyan),
-        ));
+        right.push(Span::styled("● ".to_string(), Style::default().fg(palette::GREEN)));
+        right.push(Span::styled(model_display.to_string(), Style::default().fg(palette::CYAN)));
     }
 
     if is_agent_busy {
-        right_spans.push(Span::styled(
-            " ●".to_string(),
-            Style::default().fg(theme.status_fg),
-        ));
+        right.push(Span::styled("  ⚡".to_string(), Style::default().fg(palette::YELLOW)));
     }
 
-    // Calculate right-alignment
-    let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
-    let right_width: usize = right_spans.iter().map(|s| s.content.chars().count()).sum();
-    let padding = area.width as usize;
+    // Compose with right-alignment
+    let left_w: usize = left.iter().map(|s| s.content.chars().count()).sum();
+    let right_w: usize = right.iter().map(|s| s.content.chars().count()).sum();
+    let gap = area.width as usize;
 
-    let mut all_spans = left_spans;
-
-    // Add padding between left and right
-    let gap = padding.saturating_sub(left_width).saturating_sub(right_width);
-    if gap > 0 {
-        all_spans.push(Span::styled(
-            " ".repeat(gap),
-            Style::default(),
-        ));
+    let mut all = left;
+    let spacing = gap.saturating_sub(left_w).saturating_sub(right_w);
+    if spacing > 0 {
+        all.push(Span::styled(" ".repeat(spacing), Style::default()));
     }
+    all.extend(right);
 
-    all_spans.extend(right_spans);
+    // Render with surface background
+    f.render_widget(
+        Paragraph::new(Line::from(all)).style(Style::default().bg(palette::BG_SURFACE)),
+        area,
+    );
+}
 
-    let line = Line::from(all_spans);
-    let status = Paragraph::new(line);
-    f.render_widget(status, area);
+// ═══════════════════════════════════════════════════════════════════════════
+// Welcome banner
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn format_welcome(session_id: &str, model_id: &str) -> String {
+    format!(
+r#"  ╭─────────────────────────────╮
+  │  ◈  oxi                      │
+  │     AI Coding Assistant      │
+  ╰─────────────────────────────╯
+
+  Session  {}
+  Model    {}
+  Type /help for commands · Enter to send"#,
+        session_id, model_id,
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1188,29 +1131,22 @@ fn handle_slash_command(
             });
             true
         }
-        "/quit" | "/exit" | "/q" => {
-            *running = false;
-            true
-        }
-        "/clear" => {
-            messages.clear();
-            session.reset();
-            true
-        }
+        "/quit" | "/exit" | "/q" => { *running = false; true }
+        "/clear" => { messages.clear(); session.reset(); true }
         "/model" => {
             if let Some(model_id) = arg {
                 match session.set_model(model_id) {
                     Ok(()) => {
                         messages.push(ChatMessage {
                             role: MessageRole::System,
-                            content: format!("Switched to model: {}", model_id),
+                            content: format!("→ model: {}", model_id),
                             timestamp: now_millis(),
                         });
                     }
                     Err(e) => {
                         messages.push(ChatMessage {
                             role: MessageRole::System,
-                            content: format!("Error switching model: {}", e),
+                            content: format!("✗ {}", e),
                             timestamp: now_millis(),
                         });
                     }
@@ -1218,10 +1154,7 @@ fn handle_slash_command(
             } else {
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: format!(
-                        "Current model: {}\nUse /model <provider/model> to switch.",
-                        session.model_id(),
-                    ),
+                    content: format!("Model: {}\n/model <provider/model> to switch", session.model_id()),
                     timestamp: now_millis(),
                 });
             }
@@ -1232,7 +1165,7 @@ fn handle_slash_command(
             let sh = session.clone_handle();
             tokio::spawn(async move {
                 match sh.compact(instructions).await {
-                    Ok(result) => tracing::info!("Compaction complete: {} tokens before", result.tokens_before),
+                    Ok(result) => tracing::info!("Compaction: {} tokens before", result.tokens_before),
                     Err(e) => tracing::warn!("Compaction failed: {}", e),
                 }
             });
@@ -1240,37 +1173,26 @@ fn handle_slash_command(
         }
         "/session" => {
             let stats = session.session_stats();
-            let info = format!(
-                "Session Info:\n  ID: {}\n  Messages: {} total ({} user, {} assistant)\n  Tool calls: {}, Results: {}\n  Model: {}\n  Thinking: {:?}\n  Auto-compaction: {}\n  Auto-retry: {}",
-                stats.session_id,
-                stats.total_messages,
-                stats.user_messages,
-                stats.assistant_messages,
-                stats.tool_calls,
-                stats.tool_results,
-                session.model_id(),
-                session.thinking_level(),
-                session.auto_compaction_enabled(),
-                session.auto_retry_enabled(),
-            );
             messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: info,
+                content: format!(
+                    "Session: {}\nMessages: {} ({} user, {} assistant)\nTools: {} calls, {} results\nModel: {}\nThinking: {:?}\nAuto-compact: {}\nAuto-retry: {}",
+                    stats.session_id, stats.total_messages, stats.user_messages, stats.assistant_messages,
+                    stats.tool_calls, stats.tool_results, session.model_id(),
+                    session.thinking_level(), session.auto_compaction_enabled(), session.auto_retry_enabled(),
+                ),
                 timestamp: now_millis(),
             });
             true
         }
         "/settings" => {
-            let info = format!(
-                "Model: {}\nThinking Level: {:?}\nAuto-compaction: {}\nAuto-retry: {}",
-                session.model_id(),
-                session.thinking_level(),
-                session.auto_compaction_enabled(),
-                session.auto_retry_enabled(),
-            );
             messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: info,
+                content: format!(
+                    "Model: {}\nThinking: {:?}\nAuto-compact: {}\nAuto-retry: {}",
+                    session.model_id(), session.thinking_level(),
+                    session.auto_compaction_enabled(), session.auto_retry_enabled(),
+                ),
                 timestamp: now_millis(),
             });
             true
@@ -1280,109 +1202,83 @@ fn handle_slash_command(
                 session.set_session_name(name.to_string());
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: format!("Session named: {}", name),
+                    content: format!("Session → {}", name),
                     timestamp: now_millis(),
                 });
             } else {
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: "Usage: /name <name>".to_string(),
+                    content: "/name <name>".to_string(),
                     timestamp: now_millis(),
                 });
             }
             true
         }
-        // ── New commands ────────────────────────────────────────────
         "/copy" => {
-            // Find the last assistant message and copy to clipboard
-            let last_assistant = messages.iter().rev().find(|m| m.role == MessageRole::Assistant);
-            if let Some(msg) = last_assistant {
+            let last = messages.iter().rev().find(|m| m.role == MessageRole::Assistant);
+            if let Some(msg) = last {
                 match clipboard_write::copy_to_clipboard(&msg.content) {
-                    Ok(()) => {
-                        messages.push(ChatMessage {
-                            role: MessageRole::System,
-                            content: "Copied last assistant message to clipboard.".to_string(),
-                            timestamp: now_millis(),
-                        });
-                    }
-                    Err(e) => {
-                        messages.push(ChatMessage {
-                            role: MessageRole::System,
-                            content: format!("Failed to copy: {}", e),
-                            timestamp: now_millis(),
-                        });
-                    }
+                    Ok(()) => messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: "✓ Copied to clipboard".to_string(),
+                        timestamp: now_millis(),
+                    }),
+                    Err(e) => messages.push(ChatMessage {
+                        role: MessageRole::System,
+                        content: format!("✗ Copy failed: {}", e),
+                        timestamp: now_millis(),
+                    }),
                 }
             } else {
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: "No assistant message to copy.".to_string(),
+                    content: "No assistant message".to_string(),
                     timestamp: now_millis(),
                 });
             }
             true
         }
         "/changelog" => {
-            // Find CHANGELOG.md - look in current directory and parent dirs
-            let changelog_paths = vec![
-                PathBuf::from("CHANGELOG.md"),
-                PathBuf::from("../CHANGELOG.md"),
-            ];
-            
+            let paths = vec![PathBuf::from("CHANGELOG.md"), PathBuf::from("../CHANGELOG.md")];
             let mut entries: Vec<changelog::ChangelogEntry> = Vec::new();
-            for path in &changelog_paths {
+            for path in &paths {
                 let parsed = changelog::parse_changelog(path);
-                if !parsed.is_empty() {
-                    entries = parsed;
-                    break;
-                }
+                if !parsed.is_empty() { entries = parsed; break; }
             }
-            
             if entries.is_empty() {
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: "No changelog found.".to_string(),
+                    content: "No changelog found".to_string(),
                     timestamp: now_millis(),
                 });
             } else {
-                let mut output = String::new();
-                output.push_str("Changelog entries:\n\n");
+                let mut out = "Changelog:\n\n".to_string();
                 for entry in entries.iter().take(5) {
-                    output.push_str(&format!("## {}\n\n", entry.version_string()));
-                    // Show first 200 chars of content
+                    out.push_str(&format!("## {}\n\n", entry.version_string()));
                     let preview = if entry.content.len() > 200 {
-                        // Find a safe char boundary near 200 bytes
                         let end = entry.content.char_indices()
                             .take_while(|(i, _)| *i < 200)
-                            .last()
-                            .map(|(i, c)| i + c.len_utf8())
-                            .unwrap_or(0);
-                        format!("{}...", &entry.content[..end])
-                    } else {
-                        entry.content.clone()
-                    };
-                    output.push_str(&preview);
-                    output.push_str("\n\n");
+                            .last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0);
+                        format!("{}…", &entry.content[..end])
+                    } else { entry.content.clone() };
+                    out.push_str(&preview);
+                    out.push_str("\n\n");
                 }
                 messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: output,
-                    timestamp: now_millis(),
+                    role: MessageRole::System, content: out, timestamp: now_millis(),
                 });
             }
             true
         }
         "/hotkeys" | "/keys" => {
-            let hotkeys = format_hotkeys();
             messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: hotkeys,
+                content: format_hotkeys(),
                 timestamp: now_millis(),
             });
             true
         }
         "/export" => {
-            // Export session to HTML
             let export_path = arg.map(PathBuf::from);
             let meta = ExportMeta {
                 model: Some(session.model_id()),
@@ -1391,8 +1287,6 @@ fn handle_slash_command(
                 total_user_tokens: None,
                 total_assistant_tokens: None,
             };
-
-            // Convert in-memory messages to session entries for export
             let entries: Vec<crate::session::SessionEntry> = messages.iter().map(|msg| {
                 let role = match msg.role {
                     MessageRole::User => "user",
@@ -1401,95 +1295,69 @@ fn handle_slash_command(
                 };
                 crate::session::SessionEntry::simple_message(role, &msg.content)
             }).collect();
-            
             match export::export_to_html(&entries, &meta, &HtmlExportOptions::default()) {
                 Ok(html) => {
                     if let Some(path) = export_path {
                         match std::fs::write(&path, &html) {
-                            Ok(()) => {
-                                messages.push(ChatMessage {
-                                    role: MessageRole::System,
-                                    content: format!("Session exported to: {}", path.display()),
-                                    timestamp: now_millis(),
-                                });
-                            }
-                            Err(e) => {
-                                messages.push(ChatMessage {
-                                    role: MessageRole::System,
-                                    content: format!("Failed to write export: {}", e),
-                                    timestamp: now_millis(),
-                                });
-                            }
+                            Ok(()) => messages.push(ChatMessage {
+                                role: MessageRole::System,
+                                content: format!("✓ Exported: {}", path.display()),
+                                timestamp: now_millis(),
+                            }),
+                            Err(e) => messages.push(ChatMessage {
+                                role: MessageRole::System,
+                                content: format!("✗ Write failed: {}", e),
+                                timestamp: now_millis(),
+                            }),
                         }
                     } else {
-                        let size = html.len();
                         messages.push(ChatMessage {
                             role: MessageRole::System,
-                            content: format!("HTML export ready ({} bytes).\nUse /export <path> to save to file.", size),
+                            content: format!("HTML ready ({} bytes). /export <path> to save.", html.len()),
                             timestamp: now_millis(),
                         });
                     }
                 }
-                Err(e) => {
-                    messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: format!("Export failed: {}", e),
-                        timestamp: now_millis(),
-                    });
-                }
+                Err(e) => messages.push(ChatMessage {
+                    role: MessageRole::System,
+                    content: format!("✗ Export failed: {}", e),
+                    timestamp: now_millis(),
+                }),
             }
             true
         }
         "/import" => {
-            if let Some(path) = arg {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: format!("Import from '{}' - Feature coming soon. Currently supported via CLI.", path),
-                    timestamp: now_millis(),
-                });
-            } else {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "Usage: /import <path-to-jsonl>".to_string(),
-                    timestamp: now_millis(),
-                });
-            }
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: if let Some(p) = arg {
+                    format!("Import '{}' — coming soon", p)
+                } else {
+                    "/import <path-to-jsonl>".to_string()
+                },
+                timestamp: now_millis(),
+            });
             true
         }
         "/share" => {
             messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: "GitHub gist sharing is not yet implemented.\nUse /export to save as HTML.".to_string(),
+                content: "GitHub gist sharing coming soon. Use /export for HTML.".to_string(),
                 timestamp: now_millis(),
             });
             true
         }
         "/fork" => {
-            // Fork from a previous user message - show user messages list
-            let user_messages: Vec<_> = messages.iter()
-                .enumerate()
-                .filter(|(_, m)| m.role == MessageRole::User)
-                .collect();
-            
-            if user_messages.is_empty() {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "No user messages to fork from.".to_string(),
-                    timestamp: now_millis(),
-                });
-            } else {
-                messages.push(ChatMessage {
-                    role: MessageRole::System,
-                    content: "Fork from a previous message is available.\nBranch using session tree navigation (Ctrl+T).\n\nUse /tree to view session branches.".to_string(),
-                    timestamp: now_millis(),
-                });
-            }
+            messages.push(ChatMessage {
+                role: MessageRole::System,
+                content: "Use /tree to view branches. Fork via session navigation.".to_string(),
+                timestamp: now_millis(),
+            });
             true
         }
         "/clone" => {
             messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: "Session clone is available.\nStart a new terminal and run oxi with --continue flag.\n\nUse /tree to view session tree structure.".to_string(),
+                content: "Run oxi --continue in a new terminal to clone.".to_string(),
                 timestamp: now_millis(),
             });
             true
@@ -1497,7 +1365,7 @@ fn handle_slash_command(
         "/tree" => {
             messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: "Session Tree:\n\nThis is a linear session.\nUse /fork to branch from a previous message.\nBranches are created when you navigate to a different point in the tree.".to_string(),
+                content: "Linear session. Use /fork to branch from a previous message.".to_string(),
                 timestamp: now_millis(),
             });
             true
@@ -1506,14 +1374,16 @@ fn handle_slash_command(
             if let Some(provider) = arg {
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: format!("API key prompt for '{}' not yet implemented in TUI.\n\nTo set API key for {}:\n  1. Set environment variable: {}_API_KEY=your-key\n  2. Or use: oxi config set {} <your-key>",
-                        provider, provider, provider.to_uppercase(), provider),
+                    content: format!(
+                        "Set {} API key:\n  export {}_API_KEY=your-key",
+                        provider, provider.to_uppercase()
+                    ),
                     timestamp: now_millis(),
                 });
             } else {
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: "Usage: /login <provider>\n\nProviders: anthropic, openai, google, groq, mistral, deepseek, xai, cohere, perplexity".to_string(),
+                    content: "/login <provider>\n\nProviders: anthropic, openai, google, groq, mistral, deepseek, xai".to_string(),
                     timestamp: now_millis(),
                 });
             }
@@ -1521,17 +1391,16 @@ fn handle_slash_command(
         }
         "/logout" => {
             if let Some(provider) = arg {
-                let auth = AuthStorage::new();
-                auth.remove(provider);
+                AuthStorage::new().remove(provider);
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: format!("Removed credentials for '{}'.", provider),
+                    content: format!("✓ Removed {}", provider),
                     timestamp: now_millis(),
                 });
             } else {
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: "Usage: /logout <provider>".to_string(),
+                    content: "/logout <provider>".to_string(),
                     timestamp: now_millis(),
                 });
             }
@@ -1540,7 +1409,7 @@ fn handle_slash_command(
         "/new" => {
             messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: "Starting a new session...\n\nThis will clear the current conversation.\nYour session history is saved automatically.".to_string(),
+                content: "Starting new session…".to_string(),
                 timestamp: now_millis(),
             });
             session.reset();
@@ -1548,43 +1417,37 @@ fn handle_slash_command(
             true
         }
         "/resume" => {
-            // Get session directory from environment
             let cwd = std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| ".".to_string());
             let session_dir = crate::session::get_default_session_dir(&cwd);
-            
             if let Ok(sessions) = std::fs::read_dir(&session_dir) {
-                let session_list: Vec<_> = sessions
+                let list: Vec<_> = sessions
                     .filter_map(|e| e.ok())
                     .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
-                    .take(10)
-                    .collect();
-                
-                if session_list.is_empty() {
+                    .take(10).collect();
+                if list.is_empty() {
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: "No previous sessions found.".to_string(),
+                        content: "No previous sessions".to_string(),
                         timestamp: now_millis(),
                     });
                 } else {
-                    let mut output = "Recent sessions:\n\n".to_string();
-                    for (i, entry) in session_list.iter().enumerate() {
+                    let mut out = "Recent:\n\n".to_string();
+                    for (i, entry) in list.iter().enumerate() {
                         if let Some(name) = entry.file_name().to_str() {
-                            output.push_str(&format!("{}. {}\n", i + 1, name));
+                            out.push_str(&format!("{}. {}\n", i + 1, name));
                         }
                     }
-                    output.push_str("\nUse /import <path> to resume a specific session.");
+                    out.push_str("\n/import <path> to resume");
                     messages.push(ChatMessage {
-                        role: MessageRole::System,
-                        content: output,
-                        timestamp: now_millis(),
+                        role: MessageRole::System, content: out, timestamp: now_millis(),
                     });
                 }
             } else {
                 messages.push(ChatMessage {
                     role: MessageRole::System,
-                    content: "No previous sessions found.".to_string(),
+                    content: "No sessions found".to_string(),
                     timestamp: now_millis(),
                 });
             }
@@ -1593,14 +1456,13 @@ fn handle_slash_command(
         "/reload" => {
             messages.push(ChatMessage {
                 role: MessageRole::System,
-                content: "Configuration reloaded.\n\nSettings, keybindings, and extensions are refreshed.".to_string(),
+                content: "✓ Configuration reloaded".to_string(),
                 timestamp: now_millis(),
             });
             true
         }
         "/scoped-models" | "/models" => {
             if let Some(models_str) = arg {
-                // Parse model list: provider/model,provider/model,...
                 let models: Vec<ScopedModel> = models_str.split(',')
                     .filter_map(|s| {
                         let parts: Vec<&str> = s.trim().split('/').collect();
@@ -1610,26 +1472,20 @@ fn handle_slash_command(
                                 model_id: parts[1..].join("/"),
                                 thinking_level: None,
                             })
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                
+                        } else { None }
+                    }).collect();
                 if !models.is_empty() {
                     session.set_scoped_models(models.clone());
-                    let model_list: Vec<String> = models.iter()
-                        .map(|m| format!("{}/{}", m.provider, m.model_id))
-                        .collect();
+                    let names: Vec<String> = models.iter().map(|m| format!("{}/{}", m.provider, m.model_id)).collect();
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: format!("Scoped models enabled: {}\n\nUse Ctrl+P to cycle.", model_list.join(", ")),
+                        content: format!("Scoped: {} (Ctrl+P to cycle)", names.join(", ")),
                         timestamp: now_millis(),
                     });
                 } else {
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: "Invalid model format. Use: /scoped-models provider/model1,provider/model2".to_string(),
+                        content: "/scoped-models provider/model1,provider/model2".to_string(),
                         timestamp: now_millis(),
                     });
                 }
@@ -1638,16 +1494,14 @@ fn handle_slash_command(
                 if scoped.is_empty() {
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: "Scoped models: none\n\nUsage: /scoped-models <model1>,<model2>,...\nExample: /scoped-models anthropic/claude-3-5-sonnet,openai/gpt-4o".to_string(),
+                        content: "No scoped models. /scoped-models <m1>,<m2>".to_string(),
                         timestamp: now_millis(),
                     });
                 } else {
-                    let model_list: Vec<String> = scoped.iter()
-                        .map(|m| format!("{}/{}", m.provider, m.model_id))
-                        .collect();
+                    let names: Vec<String> = scoped.iter().map(|m| format!("{}/{}", m.provider, m.model_id)).collect();
                     messages.push(ChatMessage {
                         role: MessageRole::System,
-                        content: format!("Scoped models: {}", model_list.join(", ")),
+                        content: format!("Scoped: {}", names.join(", ")),
                         timestamp: now_millis(),
                     });
                 }
@@ -1659,86 +1513,70 @@ fn handle_slash_command(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Helpers
+// Help & Hotkeys text
 // ═══════════════════════════════════════════════════════════════════════════
 
 fn format_help() -> String {
-    r#"oxi — AI Coding Assistant
-
-Slash Commands:
-  Session:
+    r#"
+  Session
     /new              Start a new session
     /clone            Duplicate current session
-    /resume           List and resume previous sessions
-    /tree             Show session tree structure
+    /resume           List recent sessions
+    /tree             Show session tree
     /fork             Fork from a previous message
-    /session          Show current session info and stats
-    /name <name>      Set session display name
+    /session          Show session info
+    /name <name>      Set session name
 
-  Model:
-    /model [id]       Switch or show current model
-    /scoped-models    Enable/disable models for cycling
+  Model
+    /model [id]       Switch or show model
+    /scoped-models    Models for Ctrl+P cycling
 
-  Context:
-    /compact [instr]  Compact context with optional instructions
-    /clear            Clear conversation history
+  Context
+    /compact [instr]  Compact context
+    /clear            Clear history
 
-  Export/Share:
-    /export [path]    Export session to HTML file
-    /import <path>    Import session from JSONL file
-    /share            Share as GitHub gist (coming soon)
-    /copy             Copy last assistant message to clipboard
+  Export
+    /export [path]    Export to HTML
+    /import <path>    Import from JSONL
+    /copy             Copy last reply
 
-  Auth:
-    /login <provider> Configure API key for provider
-    /logout <provider> Remove provider credentials
+  Auth
+    /login <provider> Set API key
+    /logout <provider> Remove key
 
-  Info:
-    /help             Show this help message
-    /hotkeys          Show keyboard shortcuts
-    /changelog        Show changelog entries
-    /settings         Show current settings
-    /reload           Reload configuration
-    /quit             Quit oxi
+  Info
+    /help             This help
+    /hotkeys          Key shortcuts
+    /changelog        Changelog
+    /settings         Current settings
+    /reload           Reload config
+    /quit             Quit
 
-Keybindings:
-  Enter              Send message or command
-  Ctrl+C             Interrupt agent or quit
-  Ctrl+P             Cycle models forward
-  Shift+Ctrl+P       Cycle models backward
-  PageUp/PageDown    Scroll chat history
-  Mouse scroll       Scroll chat history
+  Keys
+    Enter             Send
+    Ctrl+C            Interrupt / Quit
+    PageUp/Down       Scroll
+    /                 Slash commands
 "#.to_string()
 }
 
 fn format_hotkeys() -> String {
-    r#"oxi Keyboard Shortcuts
+    r#"
+  Navigation
+    Enter              Submit input
+    Escape             Cancel
+    PageUp/PageDown    Scroll chat
 
-Navigation:
-  Enter              Submit input
-  Escape             Cancel/interrupt
+  Editor
+    ←/→                Move cursor
+    Home/End           Start/End of line
+    Backspace          Delete char
+    Ctrl+←/→           Move by word
 
-Editor:
-  Left/Right         Move cursor
-  Ctrl+Left/Right    Move cursor by word
-  Home/End           Move to line start/end
-  Backspace          Delete character
-  Ctrl+Backspace     Delete word
-
-Model Cycling:
-  Ctrl+P             Next model
-  Shift+Ctrl+P       Previous model
-  Ctrl+L             Open model selector
-
-Session:
-  Ctrl+T             Toggle thinking blocks
-  Ctrl+O             Toggle tool output
-
-Scrolling:
-  PageUp/PageDown    Scroll chat history
-  Mouse wheel        Scroll chat history
-
-For more keybindings, see ~/.oxi/keybindings.toml
+  Session
+    Ctrl+C             Interrupt / Quit
+    Ctrl+P             Cycle models
+    Shift+Ctrl+P       Cycle models (reverse)
 "#.to_string()
 }
 

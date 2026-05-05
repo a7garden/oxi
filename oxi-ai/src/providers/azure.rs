@@ -43,7 +43,7 @@ impl AzureProvider {
         }
     }
 
-    /// Create with explicit configuration
+    /// Create with explicit configuration (public API for external consumers)
     #[allow(dead_code)]
     pub fn with_config(
         api_key: impl Into<String>,
@@ -454,7 +454,7 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // SSE chunk structure (same as OpenAI)
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // serde deserialization structs
 struct SSEChunk {
     id: Option<String>,
     #[serde(rename = "model")]
@@ -464,7 +464,6 @@ struct SSEChunk {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct Choice {
     index: usize,
     delta: Option<Delta>,
@@ -478,7 +477,7 @@ struct Delta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // serde deserialization structs
 struct ToolCallDelta {
     index: Option<usize>,
     id: Option<String>,
@@ -488,7 +487,7 @@ struct ToolCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[allow(dead_code)] // serde deserialization structs
 struct FunctionDelta {
     name: Option<String>,
     arguments: Option<String>,

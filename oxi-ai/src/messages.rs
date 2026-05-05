@@ -33,7 +33,6 @@ impl TextContent {
     }
 
     /// Create a text content block with a signature.
-    #[allow(dead_code)]
     pub fn with_signature(text: impl Into<String>, signature: impl Into<String>) -> Self {
         Self {
             content_type: TextContentType::Text,

@@ -43,7 +43,6 @@ impl BedrockProvider {
     }
 
     /// Create a Bedrock provider with a specific default region
-    #[allow(dead_code)]
     pub fn with_region(region: impl Into<String>) -> Self {
         Self {
             client: shared_client(),
@@ -693,7 +692,6 @@ struct BedrockEvent {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct ContentBlockRef {
     #[serde(rename = "type")]
     block_type: Option<String>,
@@ -711,7 +709,6 @@ impl ContentBlockRef {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct BedrockDelta {
     #[serde(rename = "type")]
     type_: Option<String>,
@@ -724,7 +721,6 @@ struct BedrockDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct ToolUseDelta {
     #[serde(rename = "toolUseId")]
     tool_use_id: Option<String>,
@@ -733,7 +729,6 @@ struct ToolUseDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct BedrockMetadata {
     #[serde(rename = "stopReason")]
     stop_reason: Option<String>,
@@ -744,7 +739,6 @@ struct BedrockMetadata {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct BedrockUsage {
     #[serde(rename = "inputTokens")]
     input_tokens: Option<usize>,

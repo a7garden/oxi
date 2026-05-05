@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 const SETTINGS_VERSION: u32 = 2;
 
 /// Environment variable prefix for oxi settings.
+/// Keep: reserved for future env-based config loading (e.g. OXI_API_KEY).
 #[allow(dead_code)]
 const ENV_PREFIX: &str = "OXI_";
 

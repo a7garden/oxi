@@ -34,7 +34,6 @@ fn get_env(key: &str) -> Option<String> {
 }
 
 /// Bun/Linux sandbox fallback: read from /proc/self/environ
-#[allow(dead_code)]
 fn get_proc_env(_key: &str) -> Option<String> {
     #[allow(unused_imports)]
     use std::os::unix::ffi::OsStrExt;

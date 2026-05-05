@@ -87,54 +87,6 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
     }
 }
 
-/// Get all available provider names
-#[allow(dead_code)]
-pub fn provider_names() -> Vec<&'static str> {
-    vec![
-        "openai",
-        "anthropic",
-        "google",
-        "deepseek",
-        "mistral",
-        "groq",
-        "cerebras",
-        "xai",
-        "openrouter",
-        "azure",
-        "vertex",
-        "bedrock",
-        "cloudflare",
-        "copilot",
-        "openai-responses",
-        "openai-completions",
-        "codex",
-    ]
-}
-
-/// Get all available providers with names
-#[allow(dead_code)]
-pub fn providers() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("openai", "OpenAI"),
-        ("anthropic", "Anthropic"),
-        ("google", "Google"),
-        ("deepseek", "DeepSeek"),
-        ("mistral", "Mistral"),
-        ("groq", "Groq"),
-        ("cerebras", "Cerebras"),
-        ("xai", "xAI"),
-        ("openrouter", "OpenRouter"),
-        ("azure", "Azure OpenAI"),
-        ("vertex", "Google Vertex AI"),
-        ("bedrock", "Amazon Bedrock"),
-        ("cloudflare", "Cloudflare Workers AI"),
-        ("copilot", "GitHub Copilot"),
-        ("openai-responses", "OpenAI Responses API"),
-        ("openai-completions", "OpenAI Completions API (Legacy)"),
-        ("codex", "GitHub Codex"),
-    ]
-}
-
 /// Create a stream for a model using the appropriate provider
 pub async fn stream(
     model: &Model,

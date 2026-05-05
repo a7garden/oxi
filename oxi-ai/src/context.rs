@@ -3,7 +3,7 @@
 use super::{Message, Tool};
 use serde::{Deserialize, Serialize};
 
-/// Conversation context for LLM interactions
+/// Conversation context for LLM interactions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Context {
     /// System prompt sent with each request

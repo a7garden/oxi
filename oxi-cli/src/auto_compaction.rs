@@ -207,6 +207,7 @@ impl CompactionNotification {
 
 /// Auto-compaction engine
 pub struct AutoCompactor {
+    /// Keep: LLM provider stored for future background compaction execution.
     #[allow(dead_code)]
     llm: Arc<dyn Provider>,
     model: Model,

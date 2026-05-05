@@ -422,6 +422,7 @@ pub fn ansi_lines_to_html(lines: &[&str]) -> String {
 // ── Tool rendering ───────────────────────────────────────────────────
 
 /// Information about a detected tool operation in message text.
+/// Keep: used internally for structured tool rendering; may be exposed in future export formats.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 enum ToolOp {
@@ -1043,11 +1044,15 @@ fn render_tree_node(html: &mut String, node: &TreeNode, depth: usize) -> Result<
 // headers (#), unordered lists (- ), links, and paragraphs.
 // This is intentionally lightweight to avoid pulling in a heavy crate.
 
+/// Convenience wrapper — renders markdown to HTML with default options.
+/// Keep: public convenience API for callers that don't need custom options.
 #[allow(dead_code)]
 fn render_markdown(input: &str) -> String {
     render_markdown_with_options(input, &HtmlExportOptions::default())
 }
 
+/// Core markdown-to-HTML renderer (lightweight, no external crate).
+/// Keep: available for future HTML export pipelines and testable in isolation.
 #[allow(dead_code)]
 fn render_markdown_with_options(input: &str, options: &HtmlExportOptions) -> String {
     let mut out = String::with_capacity(input.len() * 2);

@@ -448,5 +448,5 @@ pub mod tokens {
     }
 }
 
-// Re-export estimate_tokens as the main function
+// Re-export `estimate` as the main token-estimation function.
 pub use tokens::estimate as estimate_tokens;

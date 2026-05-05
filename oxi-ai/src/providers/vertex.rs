@@ -226,7 +226,6 @@ fn sign_rs256(
 }
 
 #[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
 struct TokenResponse {
     access_token: String,
     expires_in: usize,
@@ -234,7 +233,6 @@ struct TokenResponse {
 }
 
 #[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
 struct ServiceAccountCreds {
     #[serde(rename = "type")]
     _type: String,

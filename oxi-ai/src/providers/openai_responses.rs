@@ -39,7 +39,6 @@ impl OpenAiResponsesProvider {
     }
 
     /// Create a provider with a specific API key
-    #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
             client: shared_client(),
@@ -545,14 +544,11 @@ enum ResponsesEvent {
         response: ResponseCreatedData,
     },
     // Fallback for unrecognized formats
-    #[allow(dead_code)]
     Unknown(JsonValue),
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct ResponseCreatedData {
-    #[allow(dead_code)]
     id: Option<String>,
     #[serde(rename = "object")]
     object: Option<String>,
@@ -563,7 +559,6 @@ struct ResponseCreatedData {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OutputItem {
     index: usize,
     #[serde(rename = "type")]
@@ -580,7 +575,6 @@ struct ContentPart {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct TextDelta {
     content_index: Option<usize>,
     output_index: Option<usize>,
@@ -588,7 +582,6 @@ struct TextDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct FunctionCallDelta {
     content_index: Option<usize>,
     output_index: Option<usize>,
@@ -598,7 +591,6 @@ struct FunctionCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct OutputTextDone {
     content_index: Option<usize>,
     output_index: Option<usize>,
@@ -611,7 +603,6 @@ struct TextContent {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct ReasoningDone {
     content_index: Option<usize>,
     output_index: Option<usize>,
@@ -627,7 +618,6 @@ struct SummaryItem {
 
 /// Unified response data that can match both completed and incomplete responses
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct ResponseWithUsageData {
     id: Option<String>,
     status: Option<String>,
@@ -636,7 +626,6 @@ struct ResponseWithUsageData {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct CompletedResponse {
     id: Option<String>,
     status: Option<String>,
@@ -644,7 +633,6 @@ struct CompletedResponse {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct IncompleteResponse {
     id: Option<String>,
     status: Option<String>,
@@ -681,7 +669,6 @@ mod tests {
     use crate::{Context, Message, Model, TextContent};
     use serde_json::json;
 
-    #[allow(dead_code)]
     fn create_test_model() -> Model {
         Model::new(
             "gpt-4o",
