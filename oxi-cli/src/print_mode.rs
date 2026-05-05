@@ -241,6 +241,11 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
             "type": "error",
             "message": message,
         }),
+        AgentEvent::Usage { input_tokens, output_tokens } => serde_json::json!({
+            "type": "usage",
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        }),
         _ => serde_json::json!({
             "type": "unknown"
         }),

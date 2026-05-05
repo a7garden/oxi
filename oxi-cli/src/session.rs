@@ -1354,7 +1354,7 @@ impl SessionManager {
             labels: &HashMap<String, String>,
             label_timestamps: &HashMap<String, String>,
         ) -> SessionTreeNode {
-            let entry = entries_map.get(id).ok_or_else(|| anyhow::anyhow!("Corrupted session: entry {} not found", id))?.clone();
+            let entry = entries_map.get(id).cloned().expect(&format!("Corrupted session: entry {} not found", id));
             let child_ids = adj.get(id).unwrap();
             let children: Vec<SessionTreeNode> = child_ids.iter().map(|cid| {
                 build(cid, adj, entries_map, labels, label_timestamps)

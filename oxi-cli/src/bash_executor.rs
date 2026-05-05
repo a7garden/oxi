@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use parking_lot::RwLock;
 use std::time::Duration;
 
 /// Result of a bash execution
@@ -84,23 +85,23 @@ impl BashExecutor {
 
     /// Get the current working directory
     pub fn cwd(&self) -> PathBuf {
-        self.cwd.read().unwrap().clone()
+        self.cwd.read().clone()
     }
 
     /// Get a copy of environment variables
     pub fn env(&self) -> HashMap<String, String> {
-        self.env.read().unwrap().clone()
+        self.env.read().clone()
     }
 
     /// Get command history
     pub fn history(&self) -> Vec<String> {
-        self.history.read().unwrap().clone()
+        self.history.read().clone()
     }
 
     /// Set working directory
     pub fn set_cwd(&self, path: PathBuf) {
         if path.exists() && path.is_dir() {
-            *self.cwd.write().unwrap() = path;
+            *self.cwd.write() = path;
         }
     }
 
@@ -114,7 +115,7 @@ impl BashExecutor {
 
     /// Remove an environment variable
     pub fn remove_env(&self, key: &str) {
-        self.env.write().unwrap().remove(key);
+        self.env.write().remove(key);
     }
 
     /// Execute a command and return the result
@@ -128,12 +129,12 @@ impl BashExecutor {
         let mut cmd = Command::new(&self.config.shell);
         cmd.arg("-c")
             .arg(&wrapped)
-            .current_dir(self.cwd.read().unwrap().as_path())
+            .current_dir(self.cwd.read().as_path())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         // Set custom environment variables
-        let env = self.env.read().unwrap();
+        let env = self.env.read();
         for (key, value) in env.iter() {
             cmd.env(key, value);
         }
@@ -153,7 +154,7 @@ impl BashExecutor {
                                     let _ = child.kill();
                                     let _ = child.wait();
                                     let duration_ms = start.elapsed().as_millis() as u64;
-                                    self.history.write().unwrap().push(command.to_string());
+                                    self.history.write().push(command.to_string());
                                     return BashResult {
                                         command: command.to_string(),
                                         stdout: String::new(),
@@ -167,7 +168,7 @@ impl BashExecutor {
                             }
                             Err(e) => {
                                 let duration_ms = start.elapsed().as_millis() as u64;
-                                self.history.write().unwrap().push(command.to_string());
+                                self.history.write().push(command.to_string());
                                 return BashResult {
                                     command: command.to_string(),
                                     stdout: String::new(),
@@ -182,7 +183,7 @@ impl BashExecutor {
                 }
                 Err(e) => {
                     let duration_ms = start.elapsed().as_millis() as u64;
-                    self.history.write().unwrap().push(command.to_string());
+                    self.history.write().push(command.to_string());
                     return BashResult {
                         command: command.to_string(),
                         stdout: String::new(),
@@ -201,7 +202,7 @@ impl BashExecutor {
         let output = match output_result {
             Ok(o) => o,
             Err(e) => {
-                self.history.write().unwrap().push(command.to_string());
+                self.history.write().push(command.to_string());
                 return BashResult {
                     command: command.to_string(),
                     stdout: String::new(),
@@ -234,15 +235,15 @@ impl BashExecutor {
             let new_cwd = if target.starts_with('/') {
                 PathBuf::from(target)
             } else {
-                self.cwd.read().unwrap().join(&target)
+                self.cwd.read().join(&target)
             };
             if new_cwd.is_dir() {
-                *self.cwd.write().unwrap() = new_cwd;
+                *self.cwd.write() = new_cwd;
             }
         }
 
         // Add to history
-        self.history.write().unwrap().push(command.to_string());
+        self.history.write().push(command.to_string());
 
         BashResult {
             command: command.to_string(),
@@ -270,7 +271,7 @@ impl BashExecutor {
 
         cmd.arg("-c")
             .arg(command)
-            .current_dir(self.cwd.read().unwrap().as_path())
+            .current_dir(self.cwd.read().as_path())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .env_clear();
@@ -283,7 +284,7 @@ impl BashExecutor {
         }
 
         // Apply user-specified overrides last so they take precedence.
-        let env = self.env.read().unwrap();
+        let env = self.env.read();
         for (key, value) in env.iter() {
             cmd.env(key, value);
         }
@@ -334,7 +335,7 @@ impl BashExecutor {
         let duration_ms = start.elapsed().as_millis() as u64;
 
         // Add to history
-        self.history.write().unwrap().push(command.to_string());
+        self.history.write().push(command.to_string());
 
         BashResult {
             command: command.to_string(),

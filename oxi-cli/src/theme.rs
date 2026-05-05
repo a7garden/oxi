@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 /// Color representation (RGB values)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -965,14 +965,14 @@ impl ThemeManager {
 
     /// Get current theme
     pub fn get_current_theme(&self) -> Option<Theme> {
-        let name = self.current_theme.read().unwrap().clone();
+        let name = self.current_theme.read().clone();
         self.themes.get(&name).cloned()
     }
 
     /// Set current theme by name
     pub fn set_current_theme(&self, name: &str) -> bool {
         if self.themes.contains_key(name) {
-            *self.current_theme.write().unwrap() = name.to_string();
+            *self.current_theme.write() = name.to_string();
             true
         } else {
             false
@@ -1060,7 +1060,7 @@ impl ThemeManager {
 
     /// Toggle between dark and light themes
     pub fn toggle_dark_light(&self) -> bool {
-        let current = self.current_theme.read().unwrap().clone();
+        let current = self.current_theme.read().clone();
         let current_theme = self.themes.get(&current)?;
 
         let next_name = if current_theme.is_dark { "oxi_light" } else { "oxi_dark" };
