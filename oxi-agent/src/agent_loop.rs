@@ -2,6 +2,7 @@
 
 use crate::{
     AgentToolResult,
+    compaction::{CompactedContext, CompactionEvent},
     error::AgentError, events::AgentEvent,
     recovery::{CircuitBreaker, CircuitBreakerConfig},
     state::SharedState, tools::{ToolRegistry, AgentTool},
@@ -12,6 +13,7 @@ use oxi_ai::{
     Context, ContentBlock, Message, Provider, ProviderEvent, StreamOptions,
     StopReason, TextContent, ToolCall, UserMessage, CompactionStrategy,
     CompactionManager as OxCompactionManager, AssistantMessage,
+    estimate_tokens, get_model, LlmCompactor,
 };
 use parking_lot::RwLock;
 use regex::Regex;
@@ -19,6 +21,7 @@ use serde_json::Value;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 const MAX_RETRIES: usize = 3;
 const BACKOFF_BASE_SECS: u64 = 2;
@@ -84,8 +87,7 @@ pub struct AgentLoop {
     config: AgentLoopConfig,
     tools: Arc<ToolRegistry>,
     state: SharedState,
-    #[allow(dead_code)]
-    compaction_manager: OxCompactionManager, // TODO: wire into auto-compaction flow
+    compaction_manager: OxCompactionManager,
     before_tool_call: Option<BeforeToolCallHook>,
     after_tool_call: Option<AfterToolCallHook>,
     steering_queue: RwLock<Vec<Message>>,
@@ -108,10 +110,29 @@ impl AgentLoop {
         tools: Arc<ToolRegistry>,
         state: SharedState,
     ) -> Self {
-        let compaction_manager = OxCompactionManager::new(
+        let mut compaction_manager = OxCompactionManager::new(
             config.compaction_strategy.clone(),
             config.context_window,
         );
+
+        // Pre-initialize the LLM compactor if compaction is enabled
+        if config.compaction_strategy != CompactionStrategy::Disabled {
+            let model_id = config.model_id.clone();
+            let model = {
+                let parts: Vec<&str> = model_id.split('/').collect();
+                if parts.len() >= 2 {
+                    get_model(parts[0], &parts[1..].join("/"))
+                } else {
+                    get_model("anthropic", &model_id)
+                }
+            };
+
+            if let Some(model) = model {
+                let llm_compactor =
+                    Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
+                compaction_manager.set_compactor(llm_compactor);
+            }
+        }
         
         Self {
             provider,

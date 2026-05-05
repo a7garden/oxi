@@ -9,10 +9,12 @@ pub enum AgentEvent {
     // ── Lifecycle events ──────────────────────────────────────────────
     AgentStart {
         prompts: Vec<oxi_ai::Message>,
+        session_id: Option<String>,
     },
     AgentEnd {
         messages: Vec<oxi_ai::Message>,
         stop_reason: Option<String>,
+        session_id: Option<String>,
     },
     TurnStart {
         turn_number: u32,
@@ -89,6 +91,7 @@ pub enum AgentEvent {
     },
     Error {
         message: String,
+        session_id: Option<String>,
     },
     Iteration {
         number: usize,
@@ -105,6 +108,7 @@ pub enum AgentEvent {
         max_retries: usize,
         retry_after_secs: u64,
         reason: String,
+        session_id: Option<String>,
     },
     Fallback {
         from_model: String,
