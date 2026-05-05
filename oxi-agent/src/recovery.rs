@@ -22,8 +22,11 @@ enum CircuitState {
 /// Configuration for the circuit breaker.
 #[derive(Debug, Clone)]
 pub struct CircuitBreakerConfig {
+    /// Number of consecutive failures before the circuit opens.
     pub failure_threshold: u32,
+    /// How long the circuit stays open before transitioning to half-open.
     pub open_duration: Duration,
+    /// Successful requests required in half-open state to close the circuit.
     pub half_open_successes: u32,
 }
 
@@ -47,6 +50,7 @@ pub struct CircuitBreaker {
 }
 
 impl CircuitBreaker {
+    /// Create a new circuit breaker with the given configuration.
     pub fn new(config: CircuitBreakerConfig) -> Self {
         Self {
             config,
@@ -120,6 +124,7 @@ impl CircuitBreaker {
         }
     }
 
+    /// Manually reset the circuit breaker to the closed state.
     pub fn reset(&self) {
         self.state
             .store(CircuitState::Closed as u8, Ordering::SeqCst);
@@ -139,44 +144,69 @@ impl CircuitBreaker {
 
 #[derive(Debug, thiserror::Error)]
 #[error("Circuit is open — retry after {remaining:?}")]
+/// Error returned when the circuit is open and requests are not allowed.
 pub struct CircuitOpenError {
+    /// Time remaining before the circuit transitions to half-open.
     pub remaining: Duration,
 }
 
 /// Partial response accumulator.
+///
+/// Collects streamed text and thinking deltas so they can be recovered
+/// if the stream terminates unexpectedly.
 #[derive(Debug, Default)]
 pub struct PartialResponse {
+    /// Accumulated response text.
     text: String,
+    /// Accumulated thinking / reasoning text.
     thinking: String,
+    /// Whether any thinking content has been received.
     has_thinking: bool,
 }
 
 impl PartialResponse {
+    /// Create a new empty partial response.
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// Append a text delta to the accumulated response.
     pub fn push_text(&mut self, delta: &str) {
         self.text.push_str(delta);
     }
+
+    /// Append a thinking delta to the accumulated reasoning.
     pub fn push_thinking(&mut self, delta: &str) {
         self.has_thinking = true;
         self.thinking.push_str(delta);
     }
+
+    /// Take ownership of the accumulated text, leaving an empty string behind.
     pub fn take_text(&mut self) -> String {
         std::mem::take(&mut self.text)
     }
+
+    /// Access the accumulated response text.
     pub fn text(&self) -> &str {
         &self.text
     }
+
+    /// Access the accumulated thinking / reasoning text.
     pub fn thinking(&self) -> &str {
         &self.thinking
     }
+
+    /// Returns `true` if any thinking content has been received.
     pub fn has_thinking(&self) -> bool {
         self.has_thinking
     }
+
+    /// Returns `true` if no text or thinking has been accumulated.
     pub fn is_empty(&self) -> bool {
         self.text.is_empty() && self.thinking.is_empty()
     }
+
+    /// Clear all accumulated content.
     pub fn clear(&mut self) {
         self.text.clear();
         self.thinking.clear();
@@ -185,8 +215,11 @@ impl PartialResponse {
 }
 
 /// Fallback model chain.
+///
+/// Ordered list of model IDs to try when the primary model fails.
 #[derive(Debug, Clone)]
 pub struct FallbackChain {
+    /// Model IDs in `provider/model` format, tried in order.
     pub models: Vec<String>,
 }
 
@@ -199,12 +232,17 @@ impl Default for FallbackChain {
 }
 
 impl FallbackChain {
+    /// Create a new fallback chain with the given model IDs.
     pub fn new(models: Vec<String>) -> Self {
         Self { models }
     }
+
+    /// Get the model ID at the given index, if it exists.
     pub fn get(&self, index: usize) -> Option<&str> {
         self.models.get(index).map(|s| s.as_str())
     }
+
+    /// Returns `true` if the chain contains no models.
     pub fn is_empty(&self) -> bool {
         self.models.is_empty()
     }

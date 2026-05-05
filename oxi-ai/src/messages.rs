@@ -187,11 +187,14 @@ impl ContentBlock {
     }
 }
 
-/// User message
+/// User message sent to the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserMessage {
+    /// Role discriminator (always `UserRole::User`).
     pub role: UserRole,
+    /// Message content – either a plain string or a list of content blocks.
     pub content: MessageContent,
+    /// Unix-epoch milliseconds when the message was created.
     pub timestamp: i64,
 }
 
@@ -203,6 +206,7 @@ pub enum UserRole {
 }
 
 impl UserMessage {
+    /// Create a new user message with the current timestamp.
     pub fn new(content: impl Into<MessageContent>) -> Self {
         Self {
             role: UserRole::User,
@@ -212,20 +216,30 @@ impl UserMessage {
     }
 }
 
-/// Assistant message
+/// Assistant message returned by the model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantMessage {
+    /// Role discriminator (always `AssistantRole::Assistant`).
     pub role: AssistantRole,
+    /// Ordered content blocks (text, thinking, tool calls, images).
     pub content: Vec<ContentBlock>,
+    /// API dialect that produced this message.
     pub api: super::Api,
+    /// Provider name (e.g. `"anthropic"`, `"openai"`).
     pub provider: String,
+    /// Model identifier string.
     pub model: String,
+    /// Token usage statistics.
     pub usage: super::Usage,
+    /// Why the model stopped generating.
     pub stop_reason: super::StopReason,
+    /// Non-fatal error message if the provider returned a partial error.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// Provider-assigned response ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,
+    /// Unix-epoch milliseconds when the message was created.
     pub timestamp: i64,
 }
 
@@ -237,6 +251,7 @@ pub enum AssistantRole {
 }
 
 impl AssistantMessage {
+    /// Create a new assistant message with the current timestamp.
     pub fn new(api: super::Api, provider: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             role: AssistantRole::Assistant,
@@ -252,6 +267,7 @@ impl AssistantMessage {
         }
     }
 
+    /// Concatenate all `Text` blocks into a single string.
     pub fn text_content(&self) -> String {
         // Pre-compute capacity to avoid reallocations.
         let estimated_len: usize = self
@@ -269,17 +285,24 @@ impl AssistantMessage {
     }
 }
 
-/// Tool result message
+/// Tool result message carrying the output of a tool invocation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResultMessage {
+    /// Role discriminator (always `ToolResultRole::ToolResult`).
     pub role: ToolResultRole,
+    /// Matches the `ToolCall::id` this result is for.
     pub tool_call_id: String,
+    /// Name of the tool that was executed.
     pub tool_name: String,
+    /// Result content blocks.
     pub content: Vec<ContentBlock>,
+    /// Optional structured details about the result.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<JsonValue>,
+    /// Whether this result represents an error.
     #[serde(default)]
     pub is_error: bool,
+    /// Unix-epoch milliseconds when the message was created.
     pub timestamp: i64,
 }
 
@@ -291,6 +314,7 @@ pub enum ToolResultRole {
 }
 
 impl ToolResultMessage {
+    /// Create a successful tool result.
     pub fn new(
         tool_call_id: impl Into<String>,
         tool_name: impl Into<String>,
@@ -307,6 +331,7 @@ impl ToolResultMessage {
         }
     }
 
+    /// Create an error tool result.
     pub fn error(
         tool_call_id: impl Into<String>,
         tool_name: impl Into<String>,
@@ -323,6 +348,7 @@ impl ToolResultMessage {
         }
     }
 
+    /// Render all content blocks into a human-readable string.
     pub fn text_content(&self) -> Result<String, crate::error::ProviderError> {
         // Pre-compute capacity estimate.
         let estimated_len: usize = self
@@ -361,20 +387,28 @@ impl ToolResultMessage {
     }
 }
 
-/// Message union
+/// Message union tagged by role.
+///
+/// Every conversation turn is one of: a [`UserMessage`], an [`AssistantMessage`],
+/// or a [`ToolResultMessage`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "role", rename_all = "camelCase")]
 pub enum Message {
+    /// A message from the user.
     User(UserMessage),
+    /// A response from the assistant.
     Assistant(AssistantMessage),
+    /// The output of a tool invocation.
     ToolResult(ToolResultMessage),
 }
 
 impl Message {
+    /// Convenience constructor for a user text message.
     pub fn user(content: impl Into<MessageContent>) -> Self {
         Message::User(UserMessage::new(content))
     }
 
+    /// Return the timestamp (milliseconds since epoch) of this message.
     pub fn timestamp(&self) -> i64 {
         match self {
             Message::User(m) => m.timestamp,
@@ -430,19 +464,23 @@ impl Message {
     }
 }
 
-/// Message content (string or content blocks)
+/// Message content – either a plain text string or a list of structured blocks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MessageContent {
+    /// A simple text string.
     Text(String),
+    /// One or more content blocks.
     Blocks(Vec<ContentBlock>),
 }
 
 impl MessageContent {
+    /// Returns `true` if this is a `Text` variant.
     pub fn is_text(&self) -> bool {
         matches!(self, MessageContent::Text(_))
     }
 
+    /// Returns the inner `&str` if this is a `Text` variant.
     pub fn as_str(&self) -> Option<&str> {
         match self {
             MessageContent::Text(s) => Some(s),
