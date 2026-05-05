@@ -409,6 +409,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         }
                         KeyCode::PageDown => {
                             scroll_offset = scroll_offset.saturating_sub(10);
+                            if scroll_offset == 0 {
+                                auto_scroll = true;
+                            }
                         }
                         KeyCode::Char(c) => {
                             if !is_agent_busy {
@@ -443,6 +446,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     }
                     MouseEventKind::ScrollDown => {
                         scroll_offset = scroll_offset.saturating_sub(3);
+                        if scroll_offset == 0 {
+                            auto_scroll = true;
+                        }
                     }
                     _ => {}
                 },
@@ -674,14 +680,28 @@ fn render_chat(
         ]));
     }
 
-    // Calculate scroll: scroll_offset is how many lines to scroll UP from the bottom
-    let total_lines = all_lines.len();
-    let visible_height = area.height as usize;
-    let max_scroll = total_lines.saturating_sub(visible_height);
-    let scroll_from_top = max_scroll.saturating_sub(scroll_offset as usize);
-
     // Build the text widget
     let chat_text = ratatui::text::Text::from(all_lines);
+
+    // Calculate wrapped line count to determine scroll range.
+    // After wrapping, the actual number of displayed lines may be larger
+    // than all_lines.len() because long lines get split.
+    let wrap_width = area.width as usize;
+    let mut wrapped_count: usize = 0;
+    for line in &all_lines {
+        // Use the ratatui text width calculation
+        let line_width = line.width();
+        if line_width == 0 {
+            wrapped_count += 1;
+        } else {
+            wrapped_count += (line_width + wrap_width - 1) / wrap_width.max(1);
+        }
+    }
+
+    let visible_height = area.height as usize;
+    let max_scroll = wrapped_count.saturating_sub(visible_height);
+    let clamped_offset = (scroll_offset as usize).min(max_scroll);
+    let scroll_from_top = max_scroll.saturating_sub(clamped_offset);
 
     let chat_widget = Paragraph::new(chat_text)
         .wrap(Wrap { trim: false })
