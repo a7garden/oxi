@@ -55,6 +55,7 @@ impl Default for ExtensionRegistry {
 }
 
 impl ExtensionRegistry {
+    /// Create a new empty extension registry.
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
@@ -317,7 +318,7 @@ impl ExtensionRunner {
         Self { registry: ExtensionRegistry::new(), states: HashMap::new(), order: Vec::new(), error_listeners: Vec::new(), cwd, load_errors: Vec::new() }
     }
 
-/// TODO: document.
+    /// Register an error listener and return a handle for unregistering.
     pub fn on_error<F>(&mut self, listener: F) -> ExtensionErrorHandle where F: Fn(&ExtensionErrorRecord) + Send + Sync + 'static {
         let arc: Arc<ExtensionErrorListener> = Arc::new(listener);
         self.error_listeners.push(Arc::clone(&arc));
@@ -634,10 +635,11 @@ impl fmt::Debug for ExtensionRunner {
     }
 }
 
-/// pub.
+/// Handle returned by [`ExtensionRunner::on_error`] for unregistering a listener.
 pub struct ExtensionErrorHandle { listener: Option<Arc<ExtensionErrorListener>> }
-/// TODO: document.
-impl ExtensionErrorHandle { pub fn unregister(&mut self) -> Option<Arc<ExtensionErrorListener>> { self.listener.take() } }
+impl ExtensionErrorHandle {
+    /// Remove and return the listener, preventing further error notifications.
+    pub fn unregister(&mut self) -> Option<Arc<ExtensionErrorListener>> { self.listener.take() } }
 impl Drop for ExtensionErrorHandle { fn drop(&mut self) {} }
 
 struct RunnerState { errors: Arc<RwLock<Vec<ExtensionErrorRecord>>>, error_listeners: Vec<Arc<ExtensionErrorListener>> }

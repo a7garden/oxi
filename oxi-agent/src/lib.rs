@@ -1,4 +1,3 @@
-#![allow(inner_doc_comments)]
 #![warn(missing_docs)]
 
 /// oxi-agent: Agent runtime for oxi
