@@ -561,3 +561,296 @@ fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Api, StopReason, Usage};
+
+    // ---- ContentBlock serialization roundtrip ----
+
+    #[test]
+    fn text_content_roundtrip() {
+        let block = ContentBlock::Text(TextContent::new("hello world"));
+        let json = serde_json::to_string(&block).unwrap();
+        let back: ContentBlock = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.as_text(), Some("hello world"));
+    }
+
+    #[test]
+    fn thinking_content_roundtrip() {
+        let block = ContentBlock::Thinking(ThinkingContent::new("inner thoughts"));
+        let json = serde_json::to_string(&block).unwrap();
+        let back: ContentBlock = serde_json::from_str(&json).unwrap();
+        assert!(back.as_thinking().is_some());
+        assert_eq!(back.as_thinking().unwrap().thinking, "inner thoughts");
+    }
+
+    #[test]
+    fn image_content_roundtrip() {
+        let block = ContentBlock::Image(ImageContent::new("base64data==", "image/png"));
+        let json = serde_json::to_string(&block).unwrap();
+        let back: ContentBlock = serde_json::from_str(&json).unwrap();
+        match back {
+            ContentBlock::Image(img) => {
+                assert_eq!(img.data, "base64data==");
+                assert_eq!(img.mime_type, "image/png");
+            }
+            _ => panic!("Expected Image block"),
+        }
+    }
+
+    #[test]
+    fn tool_call_roundtrip() {
+        let block = ContentBlock::ToolCall(ToolCall::new(
+            "call_123",
+            "read_file",
+            serde_json::json!({"path": "/foo.rs"}),
+        ));
+        let json = serde_json::to_string(&block).unwrap();
+        let back: ContentBlock = serde_json::from_str(&json).unwrap();
+        let tc = back.as_tool_call().unwrap();
+        assert_eq!(tc.id, "call_123");
+        assert_eq!(tc.name, "read_file");
+        assert_eq!(tc.arguments["path"], "/foo.rs");
+    }
+
+    // ---- Message serialization roundtrip ----
+
+    #[test]
+    fn user_message_roundtrip() {
+        let msg = Message::user("Hello, assistant!");
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: Message = serde_json::from_str(&json).unwrap();
+        match &back {
+            Message::User(u) => {
+                assert!(matches!(&u.content, MessageContent::Text(s) if s == "Hello, assistant!"));
+            }
+            _ => panic!("Expected User message"),
+        }
+    }
+
+    #[test]
+    fn user_message_blocks_roundtrip() {
+        let blocks = vec![
+            ContentBlock::Text(TextContent::new("part one")),
+            ContentBlock::Text(TextContent::new("part two")),
+        ];
+        let msg = Message::User(UserMessage::new(MessageContent::Blocks(blocks)));
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: Message = serde_json::from_str(&json).unwrap();
+        match &back {
+            Message::User(u) => match &u.content {
+                MessageContent::Blocks(blocks) => assert_eq!(blocks.len(), 2),
+                _ => panic!("Expected Blocks"),
+            },
+            _ => panic!("Expected User message"),
+        }
+    }
+
+    #[test]
+    fn assistant_message_roundtrip() {
+        let mut msg = AssistantMessage::new(Api::AnthropicMessages, "anthropic", "claude-3");
+        msg.content.push(ContentBlock::Text(TextContent::new("Hi!")));
+        msg.content.push(ContentBlock::Thinking(ThinkingContent::new("hmm")));
+        msg.usage = Usage {
+            input: 100,
+            output: 50,
+            ..Default::default()
+        };
+        msg.stop_reason = StopReason::Stop;
+        msg.response_id = Some("resp_abc".to_string());
+
+        let msg = Message::Assistant(msg);
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: Message = serde_json::from_str(&json).unwrap();
+
+        match &back {
+            Message::Assistant(a) => {
+                assert_eq!(a.content.len(), 2);
+                assert_eq!(a.usage.input, 100);
+                assert_eq!(a.response_id.as_deref(), Some("resp_abc"));
+            }
+            _ => panic!("Expected Assistant message"),
+        }
+    }
+
+    #[test]
+    fn tool_result_message_roundtrip() {
+        let msg = Message::ToolResult(ToolResultMessage::new(
+            "call_1",
+            "bash",
+            vec![ContentBlock::Text(TextContent::new("output"))],
+        ));
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: Message = serde_json::from_str(&json).unwrap();
+        match &back {
+            Message::ToolResult(t) => {
+                assert_eq!(t.tool_call_id, "call_1");
+                assert_eq!(t.tool_name, "bash");
+                assert!(!t.is_error);
+            }
+            _ => panic!("Expected ToolResult message"),
+        }
+    }
+
+    // ---- text_content() ----
+
+    #[test]
+    fn user_text_content() {
+        let msg = Message::user("Hello!");
+        assert_eq!(msg.text_content().unwrap(), "Hello!");
+    }
+
+    #[test]
+    fn user_blocks_text_content() {
+        let blocks = vec![
+            ContentBlock::Text(TextContent::new("line 1")),
+            ContentBlock::Text(TextContent::new("line 2")),
+        ];
+        let msg = Message::User(UserMessage::new(MessageContent::Blocks(blocks)));
+        assert_eq!(msg.text_content().unwrap(), "line 1\nline 2");
+    }
+
+    #[test]
+    fn assistant_text_content() {
+        let mut a = AssistantMessage::new(Api::OpenAiCompletions, "openai", "gpt-4");
+        a.content.push(ContentBlock::Text(TextContent::new("part A")));
+        a.content.push(ContentBlock::Thinking(ThinkingContent::new("hidden")));
+        a.content.push(ContentBlock::Text(TextContent::new("part B")));
+
+        let msg = Message::Assistant(a);
+        let text = msg.text_content().unwrap();
+        // text_content on assistant only returns Text blocks
+        assert_eq!(text, "part Apart B");
+    }
+
+    #[test]
+    fn tool_result_text_content() {
+        let msg = ToolResultMessage::new(
+            "call_1",
+            "read",
+            vec![
+                ContentBlock::Text(TextContent::new("file contents")),
+                ContentBlock::Image(ImageContent::new("aaa", "image/png")),
+            ],
+        );
+        let text = msg.text_content().unwrap();
+        assert!(text.contains("file contents"));
+        assert!(text.contains("[Image]"));
+    }
+
+    // ---- transform_for_provider ----
+
+    #[test]
+    fn transform_openai_to_anthropic_keeps_thinking() {
+        let mut a = AssistantMessage::new(Api::OpenAiCompletions, "openai", "gpt-4");
+        a.content.push(ContentBlock::Text(TextContent::new("Hello")));
+        a.content.push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
+        let messages = vec![Message::Assistant(a)];
+
+        let transformed = transform_for_provider(&messages, &Api::OpenAiCompletions, &Api::AnthropicMessages);
+        match &transformed[0] {
+            Message::Assistant(a) => {
+                // Anthropic keeps thinking blocks as-is
+                assert_eq!(a.content.len(), 2);
+                assert!(matches!(&a.content[1], ContentBlock::Thinking(_)));
+            }
+            _ => panic!("Expected Assistant"),
+        }
+    }
+
+    #[test]
+    fn transform_anthropic_to_openai_converts_thinking() {
+        let mut a = AssistantMessage::new(Api::AnthropicMessages, "anthropic", "claude-3");
+        a.content.push(ContentBlock::Text(TextContent::new("Hello")));
+        a.content.push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
+        let messages = vec![Message::Assistant(a)];
+
+        let transformed = transform_for_provider(&messages, &Api::AnthropicMessages, &Api::OpenAiCompletions);
+        match &transformed[0] {
+            Message::Assistant(a) => {
+                // Thinking converted to text, then merged with adjacent text
+                assert!(a.content.iter().all(|b| matches!(b, ContentBlock::Text(_))));
+                let full_text: String = a.content.iter().filter_map(|b| b.as_text()).collect();
+                assert!(full_text.contains("Hello"));
+                assert!(full_text.contains("<thinking>"));
+                assert!(full_text.contains("pondering"));
+            }
+            _ => panic!("Expected Assistant"),
+        }
+    }
+
+    #[test]
+    fn transform_roundtrip_openai_anthropic_openai() {
+        let mut a = AssistantMessage::new(Api::OpenAiCompletions, "openai", "gpt-4");
+        a.content.push(ContentBlock::Text(TextContent::new("Hello")));
+        a.content.push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
+        a.content.push(ContentBlock::Text(TextContent::new("World")));
+        let original = vec![Message::Assistant(a)];
+
+        // OpenAI -> Anthropic (keeps thinking)
+        let step1 = transform_for_provider(&original, &Api::OpenAiCompletions, &Api::AnthropicMessages);
+        // Anthropic -> OpenAI (converts thinking to text)
+        let step2 = transform_for_provider(&step1, &Api::AnthropicMessages, &Api::OpenAiCompletions);
+
+        match &step2[0] {
+            Message::Assistant(a) => {
+                let full_text: String = a.content.iter().filter_map(|b| b.as_text()).collect();
+                assert!(full_text.contains("Hello"));
+                assert!(full_text.contains("World"));
+                assert!(full_text.contains("<thinking>"));
+            }
+            _ => panic!("Expected Assistant"),
+        }
+    }
+
+    // ---- Adjacent text block merging ----
+
+    #[test]
+    fn merge_adjacent_text_blocks_basic() {
+        let blocks = vec![
+            ContentBlock::Text(TextContent::new("a")),
+            ContentBlock::Text(TextContent::new("b")),
+            ContentBlock::Text(TextContent::new("c")),
+        ];
+        let merged = merge_adjacent_text_blocks(blocks);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].as_text(), Some("a\nb\nc"));
+    }
+
+    #[test]
+    fn merge_adjacent_text_blocks_with_intervening() {
+        let blocks = vec![
+            ContentBlock::Text(TextContent::new("a")),
+            ContentBlock::Text(TextContent::new("b")),
+            ContentBlock::ToolCall(ToolCall::new("1", "tool", serde_json::json!({}))),
+            ContentBlock::Text(TextContent::new("c")),
+        ];
+        let merged = merge_adjacent_text_blocks(blocks);
+        assert_eq!(merged.len(), 3); // "a\nb", ToolCall, "c"
+        assert_eq!(merged[0].as_text(), Some("a\nb"));
+        assert!(merged[1].as_tool_call().is_some());
+        assert_eq!(merged[2].as_text(), Some("c"));
+    }
+
+    #[test]
+    fn merge_adjacent_text_blocks_empty() {
+        let blocks: Vec<ContentBlock> = vec![];
+        let merged = merge_adjacent_text_blocks(blocks);
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn message_content_from_conversions() {
+        let mc: MessageContent = "hello".into();
+        assert!(mc.is_text());
+        assert_eq!(mc.as_str(), Some("hello"));
+
+        let mc: MessageContent = "world".to_string().into();
+        assert!(mc.is_text());
+
+        let mc: MessageContent = TextContent::new("block").into();
+        assert!(!mc.is_text());
+    }
+}

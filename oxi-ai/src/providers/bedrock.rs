@@ -572,6 +572,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                         Some("toolUse") => {
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: event.index.unwrap_or(0),
+                                tool_call_id: block.id.clone(),
                                 partial: partial_message.clone(),
                             });
                         }
@@ -698,6 +699,9 @@ struct ContentBlockRef {
     block_type: Option<String>,
     #[serde(rename = "index")]
     index: Option<usize>,
+    /// Tool call ID present for toolUse blocks
+    #[serde(default)]
+    id: Option<String>,
 }
 
 impl ContentBlockRef {

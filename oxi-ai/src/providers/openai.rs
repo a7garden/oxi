@@ -424,3 +424,253 @@ struct PromptTokensDetails {
     #[serde(rename = "cached_tokens")]
     cached_tokens: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PROVIDER: &str = "openai";
+    const MODEL: &str = "gpt-4o";
+
+    // ── SSE event parsing ──────────────────────────────────────────────
+
+    #[test]
+    fn parse_single_text_event() {
+        let sse = "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}\n\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::TextDelta { delta, content_index, .. } => {
+                assert_eq!(delta, "Hello");
+                assert_eq!(*content_index, 0);
+            }
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_multiple_text_events() {
+        let sse = concat!
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n",
+            "\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo!\"}}]}\n",
+            "\n"
+        ;
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 2);
+        let texts: Vec<&str> = events.iter().filter_map(|e| match e {
+            ProviderEvent::TextDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        }).collect();
+        assert_eq!(texts, vec!["Hel", "lo!"]);
+    }
+
+    #[test]
+    fn parse_done_terminator() {
+        let sse = concat!
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"X\"}}]}\n",
+            "\n",
+            "data: [DONE]\n",
+            "\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"NEVER\"}}]}\n"
+        ;
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        // Should stop at [DONE]; the final data line is never parsed
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::TextDelta { delta, .. } => assert_eq!(delta, "X"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    // ── Content extraction ─────────────────────────────────────────────
+
+    #[test]
+    fn parse_finish_reason_stop() {
+        let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}]}\n\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::Stop)),
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_finish_reason_length() {
+        let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"length\"}]}\n\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        match &events[0] {
+            ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::Length)),
+            other => panic!("expected Done with Length, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_finish_reason_tool_calls() {
+        let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"tool_calls\"}]}\n\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        match &events[0] {
+            ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::ToolUse)),
+            other => panic!("expected Done with ToolUse, got {other:?}"),
+        }
+    }
+
+    // ── Tool call delta accumulation ───────────────────────────────────
+
+    #[test]
+    fn parse_tool_call_deltas() {
+        let sse = concat!
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\n",
+            "\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\\\"SF\\\"}\"}}]}}]}\n",
+            "\n"
+        ;
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 2);
+        let deltas: Vec<&str> = events.iter().filter_map(|e| match e {
+            ProviderEvent::ToolCallDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        }).collect();
+        assert_eq!(deltas, vec!["", "{\"city\":\"SF\"}"]);
+    }
+
+    #[test]
+    fn parse_tool_call_with_no_arguments_field() {
+        // function field present but arguments is null → should default to ""
+        let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"run\"}}]}}]}\n\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::ToolCallDelta { delta, .. } => assert_eq!(delta, ""),
+            other => panic!("expected ToolCallDelta, got {other:?}"),
+        }
+    }
+
+    // ── Usage accumulation ─────────────────────────────────────────────
+
+    #[test]
+    fn parse_usage_in_chunk() {
+        let sse = concat!
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n",
+            "\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":8,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n"
+        ;
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        // TextDelta + Done
+        assert_eq!(events.len(), 2);
+        match &events[1] {
+            ProviderEvent::Done { message, .. } => {
+                assert_eq!(message.usage.input, 10);
+                assert_eq!(message.usage.output, 8);
+                assert_eq!(message.usage.total_tokens, 18);
+                assert_eq!(message.usage.cache_read, 3);
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_usage_without_cache_details() {
+        let sse = concat!
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n"
+        ;
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        match &events[0] {
+            ProviderEvent::Done { message, .. } => {
+                assert_eq!(message.usage.input, 5);
+                assert_eq!(message.usage.output, 2);
+                assert_eq!(message.usage.cache_read, 0);
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    // ── Empty / malformed handling ─────────────────────────────────────
+
+    #[test]
+    fn parse_empty_input() {
+        let events = parse_sse_events("", PROVIDER, MODEL);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn parse_only_empty_lines() {
+        let events = parse_sse_events("\n\n\n", PROVIDER, MODEL);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn parse_malformed_json_after_data() {
+        let sse = "data: {not json at all}\ndata: also bad\ndata: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        // Malformed lines are skipped, only the valid one emits
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::TextDelta { delta, .. } => assert_eq!(delta, "ok"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_empty_data_line() {
+        let sse = "data: \ndata: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"X\"}}]}\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn parse_non_data_lines_ignored() {
+        let sse = "event: ping\nid: 42\nretry: 5000\ndata: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Y\"}}]}\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn parse_carriage_return_line_endings() {
+        let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"CR\"}}]}\r\n\r\n";
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::TextDelta { delta, .. } => assert_eq!(delta, "CR"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    // ── Mixed content + tool + done ────────────────────────────────────
+
+    #[test]
+    fn parse_full_stream_with_text_tool_and_done() {
+        let sse = concat!
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Let me\"}}]}\n",
+            "\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" check\"}}]}\n",
+            "\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\\\"rust\\\"}\"}}]}}]}\n",
+            "\n",
+            "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"tool_calls\"}]}\n",
+            "\n",
+            "data: [DONE]\n"
+        ;
+        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        assert_eq!(events.len(), 4); // 2 TextDelta + 1 ToolCallDelta + 1 Done
+
+        let mut text_count = 0;
+        let mut tool_count = 0;
+        let mut done_count = 0;
+        for e in &events {
+            match e {
+                ProviderEvent::TextDelta { .. } => text_count += 1,
+                ProviderEvent::ToolCallDelta { .. } => tool_count += 1,
+                ProviderEvent::Done { reason, .. } => {
+                    done_count += 1;
+                    assert!(matches!(reason, StopReason::ToolUse));
+                }
+                other => panic!("unexpected event: {other:?}"),
+            }
+        }
+        assert_eq!(text_count, 2);
+        assert_eq!(tool_count, 1);
+        assert_eq!(done_count, 1);
+    }
+}

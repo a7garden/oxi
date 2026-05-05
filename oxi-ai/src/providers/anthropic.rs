@@ -313,6 +313,7 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                         Some("tool_use") => {
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: block.index.unwrap_or(0),
+                                tool_call_id: block.id.clone(),
                                 partial: partial_message.clone(),
                             });
                         }
@@ -415,6 +416,8 @@ struct ContentBlockStart {
     #[serde(rename = "type")]
     type_: Option<String>,
     index: Option<usize>,
+    /// Tool call ID present for tool_use blocks (Anthropic sends this in content_block_start)
+    id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -438,4 +441,295 @@ struct AnthropicUsage {
     cache_read: usize,
     #[serde(rename = "cache_creation")]
     cache_creation: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MODEL: &str = "claude-3-5-sonnet-20241022";
+
+    // ── message_start ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_message_start() {
+        let sse = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], ProviderEvent::Start { .. }));
+    }
+
+    // ── content_block_start ────────────────────────────────────────────
+
+    #[test]
+    fn parse_text_block_start() {
+        let sse = "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::TextStart { content_index, .. } => assert_eq!(*content_index, 0),
+            other => panic!("expected TextStart, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_thinking_block_start() {
+        let sse = "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], ProviderEvent::ThinkingStart { .. }));
+    }
+
+    #[test]
+    fn parse_tool_use_block_start() {
+        let sse = "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_1\",\"name\":\"search\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::ToolCallStart { content_index, .. } => assert_eq!(*content_index, 1),
+            other => panic!("expected ToolCallStart, got {other:?}"),
+        }
+    }
+
+    // ── content_block_delta ────────────────────────────────────────────
+
+    #[test]
+    fn parse_text_delta() {
+        let sse = "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::TextDelta { delta, content_index, .. } => {
+                assert_eq!(delta, "Hello");
+                assert_eq!(*content_index, 0);
+            }
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_thinking_delta() {
+        let sse = "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me reason...\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::ThinkingDelta { delta, .. } => assert_eq!(delta, "Let me reason..."),
+            other => panic!("expected ThinkingDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_input_json_delta() {
+        let sse = "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\":\\\"SF\\\"}\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::ToolCallDelta { delta, content_index, .. } => {
+                assert_eq!(delta, "{\"city\":\"SF\"}");
+                assert_eq!(*content_index, 1);
+            }
+            other => panic!("expected ToolCallDelta, got {other:?}"),
+        }
+    }
+
+    // ── message_delta (completion) ─────────────────────────────────────
+
+    #[test]
+    fn parse_message_delta_end_turn() {
+        let sse = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":15}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::Stop)),
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_delta_max_tokens() {
+        let sse = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"max_tokens\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        match &events[0] {
+            ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::Length)),
+            other => panic!("expected Done with Length, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_message_delta_stop_sequence() {
+        let sse = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"stop_sequence\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        match &events[0] {
+            ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::Stop)),
+            other => panic!("expected Done with Stop, got {other:?}"),
+        }
+    }
+
+    // ── message_stop ───────────────────────────────────────────────────
+
+    #[test]
+    fn parse_message_stop_no_event_emitted() {
+        let sse = "data: {\"type\":\"message_stop\"}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert!(events.is_empty());
+    }
+
+    // ── Thinking block full flow ───────────────────────────────────────
+
+    #[test]
+    fn parse_thinking_block_flow() {
+        let sse = concat!
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"I should\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" check this.\"}}\n",
+            "\n"
+        ;
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 3);
+        assert!(matches!(&events[0], ProviderEvent::ThinkingStart { .. }));
+        let thinking: Vec<&str> = events[1..].iter().filter_map(|e| match e {
+            ProviderEvent::ThinkingDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        }).collect();
+        assert_eq!(thinking, vec!["I should", " check this."]);
+    }
+
+    // ── Usage accumulation ─────────────────────────────────────────────
+
+    #[test]
+    fn parse_usage_from_message_start() {
+        let sse = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"},\"usage\":{\"input_tokens\":100,\"output_tokens\":0,\"cache_read\":80,\"cache_creation\":20}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n",
+            "\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":100,\"output_tokens\":50,\"cache_read\":80,\"cache_creation\":20}}\n"
+        );
+        let events = parse_anthropic_events(sse, MODEL);
+        // Start + TextDelta + Done
+        assert_eq!(events.len(), 3);
+        match &events[2] {
+            ProviderEvent::Done { message, .. } => {
+                assert_eq!(message.usage.input, 100);
+                assert_eq!(message.usage.output, 50);
+                assert_eq!(message.usage.total_tokens, 150);
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    // ── Cache metrics ──────────────────────────────────────────────────
+
+    #[test]
+    fn parse_cache_metrics() {
+        let sse = concat!(
+            "data: {\"type\":\"message_start\",\"usage\":{\"input_tokens\":50,\"output_tokens\":0,\"cache_read\":40,\"cache_creation\":10}}\n",
+            "\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"input_tokens\":50,\"output_tokens\":20,\"cache_read\":40,\"cache_creation\":10}}\n"
+        );
+        let events = parse_anthropic_events(sse, MODEL);
+        // Start + Done
+        assert_eq!(events.len(), 2);
+        match &events[1] {
+            ProviderEvent::Done { message, .. } => {
+                assert_eq!(message.usage.cache_read, 40);
+                assert_eq!(message.usage.cache_write, 10);
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    // ── Empty / malformed handling ─────────────────────────────────────
+
+    #[test]
+    fn parse_empty_input() {
+        let events = parse_anthropic_events("", MODEL);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn parse_done_marker_is_ignored() {
+        // Anthropic uses event-type based termination, but [DONE] should be silently skipped
+        let sse = "data: [DONE]\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn parse_malformed_json_is_skipped() {
+        let sse = "data: {broken\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::TextDelta { delta, .. } => assert_eq!(delta, "ok"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_non_data_lines_ignored() {
+        let sse = "event: ping\nid: 42\ndata: {\"type\":\"message_start\"}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn parse_empty_data_line_skipped() {
+        let sse = "data: \ndata: {\"type\":\"message_start\"}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn parse_unknown_event_type_ignored() {
+        let sse = "data: {\"type\":\"ping\"}\ndata: {\"type\":\"message_start\"}\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn parse_carriage_return_line_endings() {
+        let sse = "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"CR\"}}\r\n\r\n";
+        let events = parse_anthropic_events(sse, MODEL);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ProviderEvent::TextDelta { delta, .. } => assert_eq!(delta, "CR"),
+            other => panic!("expected TextDelta, got {other:?}"),
+        }
+    }
+
+    // ── Full stream ────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_full_anthropic_stream() {
+        let sse = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}\n",
+            "\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n",
+            "\n",
+            "data: {\"type\":\"message_stop\"}\n"
+        );
+        let events = parse_anthropic_events(sse, MODEL);
+        // Start + TextStart + 2×TextDelta + Done
+        assert_eq!(events.len(), 5);
+
+        assert!(matches!(&events[0], ProviderEvent::Start { .. }));
+        assert!(matches!(&events[1], ProviderEvent::TextStart { .. }));
+
+        let texts: Vec<&str> = events[2..4].iter().filter_map(|e| match e {
+            ProviderEvent::TextDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        }).collect();
+        assert_eq!(texts, vec!["Hello", " world"]);
+
+        assert!(matches!(&events[4], ProviderEvent::Done { reason: StopReason::Stop, .. }));
+    }
 }

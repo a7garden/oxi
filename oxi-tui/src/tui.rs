@@ -585,3 +585,207 @@ impl Drop for TUI {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cell::Cell;
+    use crate::terminal::{CursorVisibility, Position, Size, Terminal};
+
+    /// A mock terminal that doesn't touch the real TTY.
+    struct MockTerminal {
+        size: Size,
+    }
+
+    impl MockTerminal {
+        fn new(w: u16, h: u16) -> Self {
+            Self {
+                size: Size::new(w, h),
+            }
+        }
+    }
+
+    impl Terminal for MockTerminal {
+        fn size(&mut self) -> anyhow::Result<Size> {
+            Ok(self.size)
+        }
+        fn cursor_pos(&self) -> anyhow::Result<Position> {
+            Ok(Position { row: 0, col: 0 })
+        }
+        fn set_cursor_pos(&mut self, _pos: Position) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn set_cursor_visibility(&mut self, _v: CursorVisibility) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn clear_screen(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn clear_line(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn flush(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn query_cursor_position(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn set_ime_cursor(&mut self, _row: u16, _col: u16) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_tui() -> TUI {
+        TUI::new(MockTerminal::new(80, 24))
+    }
+
+    // --- TUI creation ---
+
+    #[test]
+    fn tui_creation() {
+        let tui = make_tui();
+        assert_eq!(tui.children_count(), 0);
+        assert_eq!(tui.focus_index(), 0);
+        assert!(!tui.is_running());
+    }
+
+    #[test]
+    fn tui_default_size() {
+        let mut tui = make_tui();
+        let size = tui.size().unwrap();
+        assert_eq!(size.width, 80);
+        assert_eq!(size.height, 24);
+    }
+
+    #[test]
+    fn tui_drop_does_not_panic() {
+        // Creating and dropping should not panic even though start() was never called
+        let tui = make_tui();
+        drop(tui);
+    }
+
+    // --- Overlay stack management ---
+
+    #[test]
+    fn overlay_add_and_clear() {
+        let mut tui = make_tui();
+
+        // Create a simple overlay content
+        struct TestOverlay;
+        impl crate::component::Component for TestOverlay {
+            fn request_render(&mut self) {}
+            fn is_dirty(&self) -> bool { false }
+            fn clear_dirty(&mut self) {}
+            fn handle_event(&mut self, _event: &crate::Event) -> bool { false }
+            fn render(&mut self, _surface: &mut Surface, _area: crate::Rect) {}
+            fn min_size(&self) -> crate::terminal::Size { crate::terminal::Size::new(1, 1) }
+        }
+        impl crate::overlay::OverlayContent for TestOverlay {}
+
+        let opts = crate::overlay::OverlayOptions::default();
+        let id0 = tui.add_overlay(TestOverlay, opts.clone());
+        assert_eq!(id0, 0);
+
+        let id1 = tui.add_overlay(TestOverlay, opts);
+        assert_eq!(id1, 1);
+
+        // Remove overlay 0
+        tui.remove_overlay(0);
+
+        // Clear all
+        tui.clear_overlays();
+    }
+
+    #[test]
+    fn request_render_sets_dirty() {
+        let mut tui = make_tui();
+        tui.dirty = false;
+        tui.request_render();
+        assert!(tui.dirty);
+    }
+
+    // --- Render strategy heuristic ---
+
+    #[test]
+    fn render_strategy_first_render_is_full() {
+        let mut tui = make_tui();
+        // No prev_surface → Full
+        let size = Size::new(80, 24);
+        let strategy = tui.determine_render_strategy(size);
+        assert!(matches!(strategy, RenderStrategy::Full));
+    }
+
+    #[test]
+    fn render_strategy_width_change_is_full() {
+        let mut tui = make_tui();
+        // Simulate first render done
+        let size = Size::new(80, 24);
+        let _ = tui.determine_render_strategy(size);
+        // Now set a prev_surface
+        tui.prev_surface = Some(Surface::new(80, 24));
+        tui.last_width = 80;
+        tui.last_height = 24;
+
+        // Width changed
+        let new_size = Size::new(120, 24);
+        let strategy = tui.determine_render_strategy(new_size);
+        assert!(matches!(strategy, RenderStrategy::Full));
+    }
+
+    #[test]
+    fn render_strategy_same_size_is_incremental() {
+        let mut tui = make_tui();
+        // Set prev_surface with same dimensions
+        let prev = Surface::new(80, 24);
+        // No dirty rows → no first/last dirty → should go to Incremental default
+        tui.prev_surface = Some(prev);
+        tui.last_width = 80;
+        tui.last_height = 24;
+
+        let size = Size::new(80, 24);
+        let strategy = tui.determine_render_strategy(size);
+        assert!(matches!(strategy, RenderStrategy::Incremental));
+    }
+
+    #[test]
+    fn render_strategy_dirty_in_lower_quarter_is_incremental() {
+        let mut tui = make_tui();
+        let mut prev = Surface::new(80, 24);
+        // Mark row 5 as dirty (well below 3/4 of 24 = 18)
+        prev.set(5, 0, Cell::new('X'));
+        tui.prev_surface = Some(prev);
+        tui.last_width = 80;
+        tui.last_height = 24;
+
+        let size = Size::new(80, 24);
+        let strategy = tui.determine_render_strategy(size);
+        assert!(matches!(strategy, RenderStrategy::Incremental));
+    }
+
+    #[test]
+    fn render_strategy_dirty_in_upper_quarter_is_full() {
+        let mut tui = make_tui();
+        let mut prev = Surface::new(80, 24);
+        // Mark row 22 as dirty (above 3/4 of 24 = 18)
+        prev.set(22, 0, Cell::new('X'));
+        tui.prev_surface = Some(prev);
+        tui.last_width = 80;
+        tui.last_height = 24;
+
+        let size = Size::new(80, 24);
+        let strategy = tui.determine_render_strategy(size);
+        assert!(matches!(strategy, RenderStrategy::Full));
+    }
+
+    #[test]
+    fn force_redraw_marks_prev_surface_dirty() {
+        let mut tui = make_tui();
+        tui.prev_surface = Some(Surface::new(80, 24));
+        tui.dirty = false;
+        tui.force_redraw();
+        assert!(tui.dirty);
+        if let Some(ref s) = tui.prev_surface {
+            assert!(s.is_any_dirty());
+        }
+    }
+}

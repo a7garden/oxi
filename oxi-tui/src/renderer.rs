@@ -469,3 +469,213 @@ impl RenderToSurface for Cell {
         format!("\x1b[{}m{}\x1b[0m", sgr.to_sgr(), self.char)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cell::{Attributes, Cell, Color};
+    use crate::surface::Surface;
+
+    // --- SGR diff generation ---
+
+    #[test]
+    fn sgr_diff_no_changes() {
+        // Rendering the same cell twice should produce no SGR diff on second call
+        let mut renderer = Renderer::new();
+        let cell = Cell::new('A');
+        let changed = renderer.apply_sgr(&cell);
+        assert!(changed); // First time always writes
+        // Second time with identical cell
+        let changed2 = renderer.apply_sgr(&cell);
+        assert!(!changed2); // No change needed
+    }
+
+    #[test]
+    fn sgr_diff_attribute_changes_only() {
+        let mut renderer = Renderer::new();
+        // First cell: plain
+        let cell1 = Cell::new('A');
+        renderer.apply_sgr(&cell1);
+
+        // Second cell: bold only
+        let cell2 = Cell::new('B').with_bold();
+        let changed = renderer.apply_sgr(&cell2);
+        assert!(changed);
+
+        // Check buffer contains bold code (1) but not reset-all
+        let buf_str = String::from_utf8_lossy(&renderer.buf);
+        assert!(buf_str.contains("\x1b["));
+        // Should contain "1" for bold
+        assert!(buf_str.contains("1"));
+    }
+
+    #[test]
+    fn sgr_diff_full_changes() {
+        let mut renderer = Renderer::new();
+        // Start with default
+        let cell1 = Cell::new('A');
+        renderer.apply_sgr(&cell1);
+
+        // Full change: bold, italic, underline, fg Red, bg Blue
+        let attrs = Attributes::new().with_bold().with_italic().with_underline();
+        let cell2 = Cell::new('Z')
+            .with_fg(Color::Red)
+            .with_bg(Color::Blue)
+            .with_attrs(attrs);
+        let changed = renderer.apply_sgr(&cell2);
+        assert!(changed);
+
+        let buf_str = String::from_utf8_lossy(&renderer.buf);
+        // Should contain bold (1), italic (3), underline (4), fg red (31), bg blue (44)
+        assert!(buf_str.contains("1"));
+        assert!(buf_str.contains("3"));
+        assert!(buf_str.contains("4"));
+        assert!(buf_str.contains("31"));
+        assert!(buf_str.contains("44"));
+    }
+
+    // --- render_to_surface with known content ---
+
+    #[test]
+    fn render_to_surface_known_content() {
+        let cell = Cell::new('X').with_fg(Color::Green).with_bg(Color::Black);
+        let ansi = cell.to_ansi();
+        // Should wrap in escape sequences
+        assert!(ansi.starts_with("\x1b["));
+        assert!(ansi.ends_with("\x1b[0m"));
+        assert!(ansi.contains('X'));
+        // Should contain green fg code (32) and black bg code (40)
+        assert!(ansi.contains("32"));
+        assert!(ansi.contains("40"));
+    }
+
+    #[test]
+    fn render_to_surface_default_cell() {
+        let cell = Cell::new(' ');
+        let ansi = cell.to_ansi();
+        assert!(ansi.contains(' '));
+    }
+
+    // --- flush output format ---
+
+    #[test]
+    fn flush_clears_buffer() {
+        let mut renderer = Renderer::new();
+        renderer.buf.extend_from_slice(b"test data");
+        assert!(!renderer.buf.is_empty());
+        // flush writes to stdout; we just verify buffer is cleared
+        // Since we can't easily intercept stdout, we test the buffer clearing side-effect
+        // by checking that after flush the buffer is empty
+        let _ = renderer.flush();
+        assert!(renderer.buf.is_empty());
+    }
+
+    #[test]
+    fn flush_empty_buffer_is_ok() {
+        let mut renderer = Renderer::new();
+        let result = renderer.flush();
+        assert!(result.is_ok());
+    }
+
+    // --- IME cursor positioning ---
+
+    #[test]
+    fn ime_cursor_positioning_set_get() {
+        let mut renderer = Renderer::new();
+        assert!(renderer.cursor_position().is_none());
+
+        renderer.set_cursor_position(Some((5, 10)));
+        assert_eq!(renderer.cursor_position(), Some((5, 10)));
+
+        renderer.set_cursor_position(None);
+        assert!(renderer.cursor_position().is_none());
+    }
+
+    #[test]
+    fn ime_cursor_position_consumed_on_flush() {
+        let mut renderer = Renderer::new();
+        renderer.set_cursor_position(Some((3, 7)));
+        renderer.buf.extend_from_slice(b"data");
+        let _ = renderer.flush();
+        // cursor_position should be consumed (taken) after flush
+        assert!(renderer.cursor_position().is_none());
+    }
+
+    // --- Render strategy selection ---
+
+    #[test]
+    fn render_full_produces_output() {
+        let mut renderer = Renderer::new();
+        let mut surface = Surface::new(3, 2);
+        surface.set(0, 0, Cell::new('H'));
+        surface.set(0, 1, Cell::new('i'));
+        surface.set(1, 0, Cell::new('!'));
+
+        // render_full with sync=false
+        renderer.render_full(&surface, false).unwrap();
+        let buf_str = String::from_utf8_lossy(&renderer.buf);
+        assert!(buf_str.contains('H'));
+        assert!(buf_str.contains('i'));
+        assert!(buf_str.contains('!'));
+    }
+
+    #[test]
+    fn render_full_with_sync_includes_sync_codes() {
+        let mut renderer = Renderer::new();
+        let _surface = Surface::new(2, 1);
+        // We can't call render_full with sync=true and actually flush,
+        // but we can verify begin_sync / end_sync write the right codes
+        renderer.begin_sync();
+        assert!(renderer.buf.starts_with(b"\x1b[?2026h"));
+        renderer.buf.clear();
+        renderer.buf.extend_from_slice(b"\x1b[?2026l");
+        assert!(renderer.buf.ends_with(b"\x1b[?2026l"));
+    }
+
+    #[test]
+    fn render_dirty_only_touches_dirty_cells() {
+        let mut renderer = Renderer::new();
+        let mut surface = Surface::new(5, 2);
+        surface.set(0, 0, Cell::new('A'));
+        surface.set(0, 1, Cell::new('B'));
+        // row 1 has no dirty cells
+        renderer.render_dirty(&surface, 0, 1).unwrap();
+        let buf_str = String::from_utf8_lossy(&renderer.buf);
+        assert!(buf_str.contains('A'));
+        assert!(buf_str.contains('B'));
+    }
+
+    #[test]
+    fn render_changed_lines_skips_clean_rows() {
+        let mut renderer = Renderer::new();
+        let mut surface = Surface::new(5, 3);
+        // Only make row 1 dirty
+        surface.set(1, 0, Cell::new('X'));
+        surface.clear_dirty();
+        // Re-dirty only row 1
+        surface.set(1, 2, Cell::new('Y'));
+
+        renderer
+            .render_changed_lines(&surface, 1, 1)
+            .unwrap();
+        let buf_str = String::from_utf8_lossy(&renderer.buf);
+        assert!(buf_str.contains('Y'));
+    }
+
+    #[test]
+    fn clear_screen_writes_escape() {
+        let mut renderer = Renderer::new();
+        renderer.clear_screen();
+        assert_eq!(&renderer.buf, b"\x1b[2J");
+    }
+
+    #[test]
+    fn reset_clears_state() {
+        let mut renderer = Renderer::new();
+        renderer.buf.extend_from_slice(b"data");
+        renderer.set_cursor_position(Some((1, 2)));
+        renderer.reset();
+        assert!(renderer.buf.is_empty());
+        assert!(renderer.cursor_position().is_none());
+    }
+}

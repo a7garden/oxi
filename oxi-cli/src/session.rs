@@ -458,6 +458,32 @@ impl SessionEntry {
         }
     }
 
+    /// Create a simple message entry with a role string and content
+    pub fn simple_message(role: &str, content: &str) -> Self {
+        use crate::session::ContentValue;
+        let message = match role {
+            "user" => AgentMessage::User {
+                content: ContentValue::String(content.to_string()),
+            },
+            "assistant" => AgentMessage::Assistant {
+                content: vec![AssistantContentBlock::Text {
+                    text: content.to_string(),
+                }],
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
+            },
+            "system" => AgentMessage::System {
+                content: ContentValue::String(content.to_string()),
+            },
+            _ => AgentMessage::System {
+                content: ContentValue::String(content.to_string()),
+            },
+        };
+        Self::new(message)
+    }
+
     /// Create a branched entry with a parent reference
     pub fn branched(message: AgentMessage, parent_id: &str) -> Self {
         Self {

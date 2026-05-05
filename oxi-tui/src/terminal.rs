@@ -177,3 +177,130 @@ impl Terminal for CrosstermTerminal {
         true
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A mock terminal for testing the trait without a real TTY.
+    struct MockTerminal {
+        size: Size,
+        cursor: Position,
+        cursor_visible: CursorVisibility,
+    }
+
+    impl MockTerminal {
+        fn new(w: u16, h: u16) -> Self {
+            Self {
+                size: Size::new(w, h),
+                cursor: Position { row: 0, col: 0 },
+                cursor_visible: CursorVisibility::Visible,
+            }
+        }
+    }
+
+    impl Terminal for MockTerminal {
+        fn size(&mut self) -> Result<Size> {
+            Ok(self.size)
+        }
+        fn cursor_pos(&self) -> Result<Position> {
+            Ok(self.cursor)
+        }
+        fn set_cursor_pos(&mut self, pos: Position) -> Result<()> {
+            self.cursor = pos;
+            Ok(())
+        }
+        fn set_cursor_visibility(&mut self, v: CursorVisibility) -> Result<()> {
+            self.cursor_visible = v;
+            Ok(())
+        }
+        fn clear_screen(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn clear_line(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn flush(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn query_cursor_position(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn set_ime_cursor(&mut self, _row: u16, _col: u16) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn size_struct_new() {
+        let s = Size::new(80, 24);
+        assert_eq!(s.width, 80);
+        assert_eq!(s.height, 24);
+    }
+
+    #[test]
+    fn position_struct_fields() {
+        let p = Position { row: 5, col: 10 };
+        assert_eq!(p.row, 5);
+        assert_eq!(p.col, 10);
+    }
+
+    #[test]
+    fn cursor_visibility_default() {
+        assert_eq!(CursorVisibility::default(), CursorVisibility::Visible);
+    }
+
+    #[test]
+    fn mock_terminal_size() {
+        let mut t = MockTerminal::new(100, 50);
+        let size = t.size().unwrap();
+        assert_eq!(size.width, 100);
+        assert_eq!(size.height, 50);
+    }
+
+    #[test]
+    fn mock_terminal_cursor_movement() {
+        let mut t = MockTerminal::new(80, 24);
+        let pos = Position { row: 10, col: 20 };
+        t.set_cursor_pos(pos).unwrap();
+        let result = t.cursor_pos().unwrap();
+        assert_eq!(result.row, 10);
+        assert_eq!(result.col, 20);
+    }
+
+    #[test]
+    fn mock_terminal_cursor_visibility() {
+        let mut t = MockTerminal::new(80, 24);
+        t.set_cursor_visibility(CursorVisibility::Hidden).unwrap();
+        assert_eq!(t.cursor_visible, CursorVisibility::Hidden);
+        t.set_cursor_visibility(CursorVisibility::Visible).unwrap();
+        assert_eq!(t.cursor_visible, CursorVisibility::Visible);
+    }
+
+    #[test]
+    fn terminal_trait_object_safe() {
+        // Verify we can use the trait as a trait object (Box<dyn Terminal>)
+        let _t: Box<dyn Terminal> = Box::new(MockTerminal::new(80, 24));
+        // If this compiles, the trait is object-safe
+    }
+
+    #[test]
+    fn terminal_trait_dispatch() {
+        // Verify dynamic dispatch works correctly
+        let mut t: Box<dyn Terminal> = Box::new(MockTerminal::new(120, 40));
+        let size = t.size().unwrap();
+        assert_eq!(size.width, 120);
+        assert_eq!(size.height, 40);
+
+        t.set_cursor_pos(Position { row: 5, col: 5 }).unwrap();
+        let pos = t.cursor_pos().unwrap();
+        assert_eq!(pos.row, 5);
+        assert_eq!(pos.col, 5);
+    }
+
+    #[test]
+    fn default_sync_update_supported() {
+        let t = MockTerminal::new(80, 24);
+        assert!(t.supports_sync_update());
+    }
+}

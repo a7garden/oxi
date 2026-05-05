@@ -730,8 +730,8 @@ impl ChatView {
                 .next()
                 .map(|l| {
                     let max_chars = max_width.saturating_sub(4);
-                    if l.len() > max_chars {
-                        format!("  {}…", &l[..max_chars.saturating_sub(1)])
+                    if l.chars().count() > max_chars {
+                        format!("  {}…", truncate_to_chars(l, max_chars.saturating_sub(1)))
                     } else {
                         format!("  {}", l)
                     }
@@ -776,8 +776,8 @@ impl ChatView {
         let arg_text = arguments.trim();
         if !arg_text.is_empty() {
             for raw_line in arg_text.lines().take(8) {
-                let truncated = if raw_line.len() > max_width.saturating_sub(6) {
-                    format!("│ {}", &raw_line[..max_width.saturating_sub(7)])
+                let truncated = if raw_line.chars().count() > max_width.saturating_sub(6) {
+                    format!("│ {}", truncate_to_chars(raw_line, max_width.saturating_sub(7)))
                 } else {
                     format!("│ {}", raw_line)
                 };
@@ -845,10 +845,10 @@ impl ChatView {
         // Content preview
         let content_lines: Vec<&str> = content.lines().take(TOOL_RESULT_PREVIEW_LINES).collect();
         for raw_line in content_lines {
-            let truncated = if raw_line.len() > TOOL_RESULT_MAX_CHARS {
+            let truncated = if raw_line.chars().count() > TOOL_RESULT_MAX_CHARS {
                 format!(
                     "│ {}…",
-                    &raw_line[..TOOL_RESULT_MAX_CHARS.saturating_sub(1)]
+                    truncate_to_chars(raw_line, TOOL_RESULT_MAX_CHARS.saturating_sub(1))
                 )
             } else {
                 format!("│ {}", raw_line)
@@ -910,8 +910,8 @@ impl ChatView {
 
         // Error message lines
         for raw_line in message.lines().take(6) {
-            let truncated = if raw_line.len() > max_width.saturating_sub(4) {
-                format!("│ {}…", &raw_line[..max_width.saturating_sub(5)])
+            let truncated = if raw_line.chars().count() > max_width.saturating_sub(4) {
+                format!("│ {}…", truncate_to_chars(raw_line, max_width.saturating_sub(5)))
             } else {
                 format!("│ {}", raw_line)
             };
@@ -1122,6 +1122,15 @@ fn margin_line(margin: u16) -> RenderedLine {
 
 fn empty_line() -> RenderedLine {
     RenderedLine { cells: Vec::new() }
+}
+
+/// Safely truncate a string to at most `max_chars` Unicode characters,
+/// returning a slice guaranteed to end on a char boundary.
+fn truncate_to_chars(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
 }
 
 /// Simple timestamp millisecond helper (avoids pulling in chrono in tests).

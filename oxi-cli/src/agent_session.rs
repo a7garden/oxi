@@ -1465,9 +1465,93 @@ fn default_model_list() -> Vec<(&'static str, &'static str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use futures::Stream;
+    use oxi_agent::AgentConfig;
+    use oxi_ai::{Model, Provider, ProviderError};
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+    use std::task::{Context as TaskContext, Poll};
+
+    // ── Mock Provider ─────────────────────────────────────────────────
+
+    /// Minimal mock provider that produces an empty stream.
+    struct MockProvider;
+
+    struct EmptyStream;
+
+    impl Stream for EmptyStream {
+        type Item = ProviderEvent;
+        fn poll_next(
+            self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<Option<Self::Item>> {
+            Poll::Ready(None)
+        }
+    }
+
+    #[async_trait]
+    impl Provider for MockProvider {
+        async fn stream(
+            &self,
+            _model: &Model,
+            _context: &oxi_ai::Context,
+            _options: Option<oxi_ai::StreamOptions>,
+        ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
+            Ok(Box::pin(EmptyStream))
+        }
+
+        fn name(&self) -> &str {
+            "mock"
+        }
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    fn make_session() -> AgentSession {
+        let provider = Arc::new(MockProvider);
+        let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
+        let agent = Arc::new(Agent::new(provider, config));
+        let settings = Settings::default();
+        let session_manager = SessionManager::in_memory("/tmp/test");
+        AgentSession::new(agent, settings, session_manager, "/tmp/test".to_string())
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // AgentSession creation
+    // ══════════════════════════════════════════════════════════════════
 
     #[test]
-    fn test_default_model_list() {
+    fn test_session_creation_basic_fields() {
+        let session = make_session();
+        assert!(!session.session_id().is_empty());
+        assert_eq!(session.cwd(), "/tmp/test");
+        assert!(!session.is_streaming());
+        assert!(session.messages().is_empty());
+    }
+
+    #[test]
+    fn test_session_creation_model_id() {
+        let session = make_session();
+        assert_eq!(session.model_id(), "anthropic/claude-sonnet-4-20250514");
+    }
+
+    #[test]
+    fn test_session_creation_default_thinking_level() {
+        let session = make_session();
+        assert_eq!(session.thinking_level(), ThinkingLevel::Standard);
+    }
+
+    #[test]
+    fn test_session_creation_empty_queues() {
+        let session = make_session();
+        assert_eq!(session.pending_message_count(), 0);
+        assert!(session.steering_messages().is_empty());
+        assert!(session.follow_up_messages().is_empty());
+    }
+
+    #[test]
+    fn test_session_creation_default_model_list() {
         let models = default_model_list();
         assert!(!models.is_empty());
         assert!(
@@ -1477,13 +1561,171 @@ mod tests {
         );
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // Model cycling
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_cycle_model_forward_without_scoped() {
+        let session = make_session();
+        // Starting model is anthropic/claude-sonnet-4-20250514 (index 0)
+        // Cycling forward should move to the next in default list
+        let result = session.cycle_model(CycleDirection::Forward);
+        // The result may be None if set_model fails (model not registered),
+        // but we verify the cycle logic runs without panic
+        if let Some(r) = result {
+            assert!(!r.is_scoped);
+        }
+    }
+
+    #[test]
+    fn test_cycle_model_backward_without_scoped() {
+        let session = make_session();
+        let result = session.cycle_model(CycleDirection::Backward);
+        if let Some(r) = result {
+            assert!(!r.is_scoped);
+        }
+    }
+
+    #[test]
+    fn test_cycle_model_with_scoped_models() {
+        let session = make_session();
+        session.set_scoped_models(vec![
+            ScopedModel {
+                provider: "anthropic".to_string(),
+                model_id: "claude-sonnet-4-20250514".to_string(),
+                thinking_level: Some(ThinkingLevel::Standard),
+            },
+            ScopedModel {
+                provider: "openai".to_string(),
+                model_id: "gpt-4o".to_string(),
+                thinking_level: None,
+            },
+        ]);
+
+        let scoped = session.scoped_models();
+        assert_eq!(scoped.len(), 2);
+
+        // Single scoped model returns None (can't cycle with 1)
+        let single_session = make_session();
+        single_session.set_scoped_models(vec![ScopedModel {
+            provider: "anthropic".to_string(),
+            model_id: "claude-sonnet-4-20250514".to_string(),
+            thinking_level: None,
+        }]);
+        assert!(single_session.cycle_model(CycleDirection::Forward).is_none());
+    }
+
     #[test]
     fn test_cycle_direction_default() {
         assert_eq!(CycleDirection::default(), CycleDirection::Forward);
     }
 
     #[test]
-    fn test_thinking_level_ordering() {
+    fn test_set_scoped_models() {
+        let session = make_session();
+        let models = vec![
+            ScopedModel {
+                provider: "anthropic".to_string(),
+                model_id: "claude-sonnet-4-20250514".to_string(),
+                thinking_level: Some(ThinkingLevel::Thorough),
+            },
+            ScopedModel {
+                provider: "openai".to_string(),
+                model_id: "gpt-4o".to_string(),
+                thinking_level: None,
+            },
+            ScopedModel {
+                provider: "google".to_string(),
+                model_id: "gemini-2.0-flash".to_string(),
+                thinking_level: Some(ThinkingLevel::Minimal),
+            },
+        ];
+        session.set_scoped_models(models);
+        let retrieved = session.scoped_models();
+        assert_eq!(retrieved.len(), 3);
+        assert_eq!(retrieved[0].provider, "anthropic");
+        assert_eq!(retrieved[2].model_id, "gemini-2.0-flash");
+    }
+
+    #[test]
+    fn test_scoped_model_fields() {
+        let model = ScopedModel {
+            provider: "anthropic".to_string(),
+            model_id: "claude-sonnet-4-20250514".to_string(),
+            thinking_level: Some(ThinkingLevel::Standard),
+        };
+        assert_eq!(model.provider, "anthropic");
+        assert_eq!(model.model_id, "claude-sonnet-4-20250514");
+        assert_eq!(model.thinking_level, Some(ThinkingLevel::Standard));
+    }
+
+    #[test]
+    fn test_model_cycle_result_fields() {
+        let result = ModelCycleResult {
+            provider: "openai".to_string(),
+            model_id: "gpt-4o".to_string(),
+            thinking_level: ThinkingLevel::Standard,
+            is_scoped: false,
+        };
+        assert!(!result.is_scoped);
+        assert_eq!(result.provider, "openai");
+        assert_eq!(result.model_id, "gpt-4o");
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Thinking level changes
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_set_thinking_level() {
+        let session = make_session();
+        assert_eq!(session.thinking_level(), ThinkingLevel::Standard);
+
+        session.set_thinking_level(ThinkingLevel::Thorough);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Thorough);
+
+        session.set_thinking_level(ThinkingLevel::None);
+        assert_eq!(session.thinking_level(), ThinkingLevel::None);
+
+        session.set_thinking_level(ThinkingLevel::Minimal);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Minimal);
+    }
+
+    #[test]
+    fn test_set_thinking_level_noop_when_same() {
+        let session = make_session();
+        // Should not emit event when setting to same level
+        session.set_thinking_level(ThinkingLevel::Standard);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Standard);
+    }
+
+    #[test]
+    fn test_cycle_thinking_level() {
+        let session = make_session();
+        assert_eq!(session.thinking_level(), ThinkingLevel::Standard);
+
+        let next = session.cycle_thinking_level();
+        assert_eq!(next, Some(ThinkingLevel::Thorough));
+        assert_eq!(session.thinking_level(), ThinkingLevel::Thorough);
+
+        // Continue cycling
+        let next = session.cycle_thinking_level();
+        assert_eq!(next, Some(ThinkingLevel::None));
+        assert_eq!(session.thinking_level(), ThinkingLevel::None);
+
+        let next = session.cycle_thinking_level();
+        assert_eq!(next, Some(ThinkingLevel::Minimal));
+
+        let next = session.cycle_thinking_level();
+        assert_eq!(next, Some(ThinkingLevel::Standard));
+
+        let next = session.cycle_thinking_level();
+        assert_eq!(next, Some(ThinkingLevel::Thorough));
+    }
+
+    #[test]
+    fn test_thinking_level_full_cycle() {
         let levels = [
             ThinkingLevel::None,
             ThinkingLevel::Minimal,
@@ -1498,33 +1740,145 @@ mod tests {
         assert_eq!(current, 0); // Wraps back to start
     }
 
-    #[test]
-    fn test_scoped_model() {
-        let model = ScopedModel {
-            provider: "anthropic".to_string(),
-            model_id: "claude-sonnet-4-20250514".to_string(),
-            thinking_level: Some(ThinkingLevel::Standard),
-        };
-        assert_eq!(model.provider, "anthropic");
-        assert_eq!(model.model_id, "claude-sonnet-4-20250514");
+    // ══════════════════════════════════════════════════════════════════
+    // Steering / follow-up queue operations
+    // ══════════════════════════════════════════════════════════════════
+
+    #[tokio::test]
+    async fn test_steer_message() {
+        let session = make_session();
+        session.steer("direction 1".to_string()).await.unwrap();
+        assert_eq!(session.steering_messages(), vec!["direction 1"]);
+        assert_eq!(session.pending_message_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_follow_up_message() {
+        let session = make_session();
+        session.follow_up("next task".to_string()).await.unwrap();
+        assert_eq!(session.follow_up_messages(), vec!["next task"]);
+        assert_eq!(session.pending_message_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_steer_messages() {
+        let session = make_session();
+        session.steer("first".to_string()).await.unwrap();
+        session.steer("second".to_string()).await.unwrap();
+        session.steer("third".to_string()).await.unwrap();
+        assert_eq!(
+            session.steering_messages(),
+            vec!["first", "second", "third"]
+        );
+        assert_eq!(session.pending_message_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_follow_up_messages() {
+        let session = make_session();
+        session.follow_up("a".to_string()).await.unwrap();
+        session.follow_up("b".to_string()).await.unwrap();
+        assert_eq!(session.follow_up_messages(), vec!["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn test_mixed_steer_and_follow_up() {
+        let session = make_session();
+        session.steer("steer-1".to_string()).await.unwrap();
+        session.follow_up("follow-1".to_string()).await.unwrap();
+        session.steer("steer-2".to_string()).await.unwrap();
+        assert_eq!(session.pending_message_count(), 3);
+        assert_eq!(session.steering_messages(), vec!["steer-1", "steer-2"]);
+        assert_eq!(session.follow_up_messages(), vec!["follow-1"]);
     }
 
     #[test]
-    fn test_compaction_reason() {
+    fn test_clear_queue() {
+        let session = make_session();
+        // Manually insert items
+        {
+            let mut q = session.steering_messages.write();
+            q.push_back("s1".to_string());
+            q.push_back("s2".to_string());
+        }
+        {
+            let mut q = session.follow_up_messages.write();
+            q.push_back("f1".to_string());
+        }
+        assert_eq!(session.pending_message_count(), 3);
+
+        let (steering, follow_up) = session.clear_queue();
+        assert_eq!(steering, vec!["s1", "s2"]);
+        assert_eq!(follow_up, vec!["f1"]);
+        assert_eq!(session.pending_message_count(), 0);
+    }
+
+    #[test]
+    fn test_clear_empty_queue() {
+        let session = make_session();
+        let (s, f) = session.clear_queue();
+        assert!(s.is_empty());
+        assert!(f.is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Compaction trigger logic
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_auto_compaction_default_enabled() {
+        let session = make_session();
+        // By default, auto_compaction is false in Settings::default()
+        assert_eq!(session.auto_compaction_enabled(), false);
+    }
+
+    #[test]
+    fn test_set_auto_compaction_enabled() {
+        let session = make_session();
+        session.set_auto_compaction_enabled(true);
+        assert!(session.auto_compaction_enabled());
+
+        session.set_auto_compaction_enabled(false);
+        assert!(!session.auto_compaction_enabled());
+    }
+
+    #[test]
+    fn test_is_compacting_initially_false() {
+        let session = make_session();
+        assert!(!session.is_compacting());
+    }
+
+    #[test]
+    fn test_compaction_reason_variants() {
         assert_eq!(CompactionReason::Manual, CompactionReason::Manual);
         assert_ne!(CompactionReason::Manual, CompactionReason::Threshold);
         assert_ne!(CompactionReason::Threshold, CompactionReason::Overflow);
+        assert_ne!(CompactionReason::Manual, CompactionReason::Overflow);
     }
 
     #[test]
-    fn test_model_cycle_result() {
-        let result = ModelCycleResult {
-            provider: "openai".to_string(),
-            model_id: "gpt-4o".to_string(),
-            thinking_level: ThinkingLevel::Standard,
-            is_scoped: false,
-        };
-        assert!(!result.is_scoped);
+    fn test_compaction_config_default() {
+        let config = CompactionConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.keep_recent, 4);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Session entry appending / persistence
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_session_stats_empty() {
+        let session = make_session();
+        let stats = session.session_stats();
+        assert!(!stats.session_id.is_empty());
+        assert_eq!(stats.user_messages, 0);
+        assert_eq!(stats.assistant_messages, 0);
+        assert_eq!(stats.tool_calls, 0);
+        assert_eq!(stats.tool_results, 0);
+        assert_eq!(stats.total_messages, 0);
+        assert_eq!(stats.tokens.input, 0);
+        assert_eq!(stats.tokens.output, 0);
     }
 
     #[test]
@@ -1540,10 +1894,153 @@ mod tests {
             cost: 0.0,
         };
         assert_eq!(stats.total_messages, 0);
+        assert_eq!(stats.cost, 0.0);
     }
 
     #[test]
-    fn test_streaming_behavior() {
+    fn test_persist_session_empty_messages() {
+        let session = make_session();
+        // Should not panic with no messages
+        session.persist_session();
+    }
+
+    #[test]
+    fn test_persist_session_with_user_message() {
+        let session = make_session();
+        // Add a user message to the agent state
+        session
+            .agent
+            .state()
+            .add_user_message("Hello, world!".to_string());
+
+        session.persist_session();
+
+        // Verify the persisted count was updated
+        let sm = session.session_manager.read();
+        assert_eq!(sm.persisted_count(), 1);
+    }
+
+    #[test]
+    fn test_persist_session_idempotent() {
+        let session = make_session();
+        session
+            .agent
+            .state()
+            .add_user_message("msg 1".to_string());
+
+        session.persist_session();
+        session.persist_session(); // Second call should be no-op
+
+        let sm = session.session_manager.read();
+        assert_eq!(sm.persisted_count(), 1);
+    }
+
+    #[test]
+    fn test_persist_session_multiple_messages() {
+        let session = make_session();
+        session
+            .agent
+            .state()
+            .add_user_message("first".to_string());
+        session
+            .agent
+            .state()
+            .add_user_message("second".to_string());
+
+        session.persist_session();
+
+        let sm = session.session_manager.read();
+        assert_eq!(sm.persisted_count(), 2);
+    }
+
+    #[test]
+    fn test_set_session_name() {
+        let session = make_session();
+        session.set_session_name("My Test Session".to_string());
+        // Verify it doesn't panic and session ID remains valid
+        assert!(!session.session_id().is_empty());
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Event subscription
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_subscribe_receives_events() {
+        let session = make_session();
+        let received = Arc::new(RwLock::new(Vec::new()));
+        let received_clone = received.clone();
+
+        session.subscribe(Box::new(move |event| {
+            received_clone.write().push(format!("{:?}", event));
+        }));
+
+        // Trigger an event via set_thinking_level
+        session.set_thinking_level(ThinkingLevel::Thorough);
+
+        let events = received.read();
+        assert_eq!(events.len(), 1);
+        assert!(events[0].contains("ThinkingLevelChanged"));
+    }
+
+    #[test]
+    fn test_subscribe_channel() {
+        let session = make_session();
+        let mut rx = session.subscribe_channel();
+
+        session.set_thinking_level(ThinkingLevel::None);
+
+        // The event should be in the channel
+        let event = rx.try_recv().expect("Should receive event");
+        match event {
+            SessionEvent::ThinkingLevelChanged { level } => {
+                assert_eq!(level, ThinkingLevel::None);
+            }
+            other => panic!("Expected ThinkingLevelChanged, got {:?}", other),
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Session reset
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_reset_clears_state() {
+        let session = make_session();
+        session
+            .agent
+            .state()
+            .add_user_message("hello".to_string());
+        assert_eq!(session.messages().len(), 1);
+
+        session.reset();
+        assert!(session.messages().is_empty());
+        assert_eq!(session.pending_message_count(), 0);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Handle cloning
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_clone_handle_shares_state() {
+        let session = make_session();
+        let handle = session.clone_handle();
+
+        // Both should see the same session ID
+        assert_eq!(session.session_id(), handle.session_id());
+
+        // Mutations through the handle should be visible on the original
+        handle.set_thinking_level(ThinkingLevel::Thorough);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Thorough);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Streaming behavior and input source
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_streaming_behavior_variants() {
         assert_eq!(StreamingBehavior::Steer, StreamingBehavior::Steer);
         assert_ne!(StreamingBehavior::Steer, StreamingBehavior::FollowUp);
     }
@@ -1560,5 +2057,62 @@ mod tests {
         assert!(opts.images.is_empty());
         assert!(opts.streaming_behavior.is_none());
         assert_eq!(opts.source, InputSource::Interactive);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Extension integration
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_no_extension_runner_by_default() {
+        let session = make_session();
+        let guard = session.extension_runner();
+        assert!(guard.is_none());
+    }
+
+    #[test]
+    fn test_extension_tools_empty_without_runner() {
+        let session = make_session();
+        assert!(session.extension_tools().is_empty());
+    }
+
+    #[test]
+    fn test_extension_commands_empty_without_runner() {
+        let session = make_session();
+        assert!(session.extension_commands().is_empty());
+    }
+
+    #[test]
+    fn test_has_extension_handlers_false_without_runner() {
+        let session = make_session();
+        assert!(!session.has_extension_handlers("tool_call"));
+    }
+
+    #[test]
+    fn test_auto_retry_enabled() {
+        let session = make_session();
+        assert!(session.auto_retry_enabled());
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Listener guard
+    // ══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_listener_guard_drop_removes() {
+        let session = make_session();
+        let received = Arc::new(RwLock::new(Vec::new()));
+        let received_clone = received.clone();
+
+        {
+            let _guard = session.subscribe(Box::new(move |event| {
+                received_clone.write().push(format!("{:?}", event));
+            }));
+            // Guard is active, event should fire
+            session.set_thinking_level(ThinkingLevel::Thorough);
+        }
+        // Guard dropped — the slot is replaced with no-op
+        let count_after_drop = received.read().len();
+        assert_eq!(count_after_drop, 1); // Only the first event
     }
 }

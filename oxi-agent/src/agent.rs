@@ -451,6 +451,7 @@ impl Agent {
                 }
                 ProviderEvent::ToolCallStart {
                     content_index,
+                    tool_call_id: _,
                     partial,
                     ..
                 } => {
