@@ -224,9 +224,13 @@ pub fn derive_code_challenge(verifier: &str) -> String {
 /// Configuration for a PKCE-based authorization-code OAuth provider.
 #[derive(Debug, Clone)]
 pub struct OAuthConfig {
+    /// OAuth authorization endpoint URL.
     pub authorization_endpoint: String,
+    /// OAuth token endpoint URL.
     pub token_endpoint: String,
+    /// OAuth client identifier.
     pub client_id: String,
+    /// OAuth redirect URI.
     pub redirect_uri: String,
     /// Space-separated scopes.
     pub scopes: String,

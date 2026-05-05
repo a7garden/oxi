@@ -1,3 +1,4 @@
+#![allow(inner_doc_comments)]
 #![warn(missing_docs)]
 
 //! oxi-ai: Unified LLM API for oxi
