@@ -38,7 +38,8 @@ impl OpenAiResponsesProvider {
         }
     }
 
-    /// Create a provider with a specific API key
+    /// Create a provider with a specific API key (public API for external consumers)
+    #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
             client: shared_client(),
@@ -544,10 +545,12 @@ enum ResponsesEvent {
         response: ResponseCreatedData,
     },
     // Fallback for unrecognized formats
+    #[allow(dead_code)] // variant data consumed by serde
     Unknown(JsonValue),
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct ResponseCreatedData {
     id: Option<String>,
     #[serde(rename = "object")]
@@ -559,6 +562,7 @@ struct ResponseCreatedData {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct OutputItem {
     index: usize,
     #[serde(rename = "type")]
@@ -575,6 +579,7 @@ struct ContentPart {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct TextDelta {
     content_index: Option<usize>,
     output_index: Option<usize>,
@@ -582,6 +587,7 @@ struct TextDelta {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct FunctionCallDelta {
     content_index: Option<usize>,
     output_index: Option<usize>,
@@ -591,6 +597,7 @@ struct FunctionCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct OutputTextDone {
     content_index: Option<usize>,
     output_index: Option<usize>,
@@ -603,6 +610,7 @@ struct TextContent {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct ReasoningDone {
     content_index: Option<usize>,
     output_index: Option<usize>,
@@ -618,24 +626,11 @@ struct SummaryItem {
 
 /// Unified response data that can match both completed and incomplete responses
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct ResponseWithUsageData {
     id: Option<String>,
     status: Option<String>,
     usage: Option<UsageData>,
-    incomplete_details: Option<IncompleteDetails>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CompletedResponse {
-    id: Option<String>,
-    status: Option<String>,
-    usage: Option<UsageData>,
-}
-
-#[derive(Debug, Deserialize)]
-struct IncompleteResponse {
-    id: Option<String>,
-    status: Option<String>,
     incomplete_details: Option<IncompleteDetails>,
 }
 
@@ -645,6 +640,7 @@ struct IncompleteDetails {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct UsageData {
     input_tokens: usize,
     output_tokens: usize,

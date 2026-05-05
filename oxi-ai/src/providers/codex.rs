@@ -26,7 +26,8 @@ use super::ProviderError;
 /// Configuration for Codex provider
 #[derive(Debug, Clone)]
 pub struct CodexConfig {
-    /// Base URL for the Codex API
+    /// Base URL for the Codex API (reserved for future use)
+    #[allow(dead_code)]
     pub base_url: String,
     /// API key for authentication
     pub api_key: Option<String>,
@@ -74,7 +75,8 @@ impl CodexProvider {
         }
     }
 
-    /// Create with explicit API key
+    /// Create with explicit API key (public API for external consumers)
+    #[allow(dead_code)]
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         let mut config = CodexConfig::default();
         config.api_key = Some(api_key.into());
@@ -84,7 +86,8 @@ impl CodexProvider {
         }
     }
 
-    /// Create with custom configuration
+    /// Create with custom configuration (public API)
+    #[allow(dead_code)]
     pub fn with_config(config: CodexConfig) -> Self {
         Self {
             client: shared_client(),
@@ -92,25 +95,29 @@ impl CodexProvider {
         }
     }
 
-    /// Set model ID
+    /// Set model ID (public API builder)
+    #[allow(dead_code)]
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.config.model = model.into();
         self
     }
 
-    /// Set temperature
+    /// Set temperature (public API builder)
+    #[allow(dead_code)]
     pub fn with_temperature(mut self, temp: f32) -> Self {
         self.config.temperature = Some(temp);
         self
     }
 
-    /// Set max tokens
+    /// Set max tokens (public API builder)
+    #[allow(dead_code)]
     pub fn with_max_tokens(mut self, max: usize) -> Self {
         self.config.max_tokens = Some(max);
         self
     }
 
-    /// Get provider name
+    /// Get provider name (public API)
+    #[allow(dead_code)]
     pub fn name(&self) -> &str {
         "codex"
     }
@@ -477,6 +484,7 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // SSE structures
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct CodexSSEChunk {
     id: Option<String>,
     #[serde(rename = "model")]
@@ -499,6 +507,7 @@ struct CodexDelta {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct CodexToolCall {
     index: Option<usize>,
     id: Option<String>,
@@ -508,6 +517,7 @@ struct CodexToolCall {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // serde deserialization structs
 struct CodexFunctionDelta {
     name: Option<String>,
     arguments: Option<String>,
