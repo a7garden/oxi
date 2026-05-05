@@ -66,36 +66,49 @@ pub fn parse_json_line(line: &str) -> Result<Value, serde_json::Error> {
 /// JSON-RPC 2.0 request
 #[derive(Debug, Clone, Deserialize)]
 pub struct JsonRpcRequest {
+    /// JSON-RPC protocol version.
     pub jsonrpc: String, // must be "2.0"
     #[serde(default)]
+    /// Request correlation ID.
     pub id: Option<Value>,
+    /// JSON-RPC method name.
     pub method: String,
     #[serde(default)]
+    /// Method parameters.
     pub params: Option<Value>,
 }
 
 /// JSON-RPC 2.0 success response
 #[derive(Debug, Clone, Serialize)]
 pub struct JsonRpcSuccessResponse {
+    /// JSON-RPC protocol version.
     pub jsonrpc: String,
+    /// Request correlation ID.
     pub id: Value,
+    /// Result value.
     pub result: Value,
 }
 
 /// JSON-RPC 2.0 error object
 #[derive(Debug, Clone, Serialize)]
 pub struct JsonRpcError {
+    /// Error code.
     pub code: i64,
+    /// Error message.
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Response data.
     pub data: Option<Value>,
 }
 
 /// JSON-RPC 2.0 error response
 #[derive(Debug, Clone, Serialize)]
 pub struct JsonRpcErrorResponse {
+    /// JSON-RPC protocol version.
     pub jsonrpc: String,
+    /// Request correlation ID.
     pub id: Value,
+    /// Error message.
     pub error: JsonRpcError,
 }
 
@@ -120,162 +133,212 @@ pub const JSONRPC_INTERNAL_ERROR: i64 = -32603;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RpcCommand {
     // ── Prompting ───────────────────────────────────────────────────
-/// prompt.
+    /// Send a prompt message to the agent.
     Prompt {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         message: String,
+        /// TODO: document.
         images: Option<Vec<ImageData>>,
         #[serde(default)]
+        /// TODO: document.
         streaming_behavior: Option<String>,
     },
-/// steer.
+    /// Send a steering message to interrupt the current stream.
     Steer {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         message: String,
+        /// TODO: document.
         images: Option<Vec<ImageData>>,
     },
-/// follow  up.
+    /// Send a follow-up message to be processed after the current stream.
     FollowUp {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         message: String,
+        /// TODO: document.
         images: Option<Vec<ImageData>>,
     },
-/// abort.
+    /// Abort the current agent response.
     Abort {
+        /// TODO: document.
         id: Option<String>,
     },
-/// new  session.
+    /// Create a new session.
     NewSession {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         parent_session: Option<String>,
     },
 
     // ── State ───────────────────────────────────────────────────────
-/// get  state.
+    /// Get the current agent state.
     GetState {
+        /// TODO: document.
         id: Option<String>,
     },
 
     // ── Model ──────────────────────────────────────────────────────
-/// set  model.
+    /// Set the active model.
     SetModel {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         provider: String,
+        /// TODO: document.
         model_id: String,
     },
-/// cycle  model.
+    /// Cycle to the next available model.
     CycleModel {
+        /// TODO: document.
         id: Option<String>,
     },
-/// get  available  models.
+    /// List all available models.
     GetAvailableModels {
+        /// TODO: document.
         id: Option<String>,
     },
 
     // ── Thinking ────────────────────────────────────────────────────
-/// set  thinking  level.
+    /// Set the thinking level.
     SetThinkingLevel {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         level: String,
     },
-/// cycle  thinking  level.
+    /// Cycle to the next thinking level.
     CycleThinkingLevel {
+        /// TODO: document.
         id: Option<String>,
     },
 
     // ── Queue modes ─────────────────────────────────────────────────
-/// set  steering  mode.
+    /// Set the steering mode.
     SetSteeringMode {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         mode: String,
     },
-/// set  follow  up  mode.
+    /// Set the follow-up mode.
     SetFollowUpMode {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         mode: String,
     },
 
     // ── Compaction ──────────────────────────────────────────────────
-/// compact.
+    /// Manually trigger compaction.
     Compact {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         custom_instructions: Option<String>,
     },
-/// set  auto  compaction.
+    /// Enable or disable auto-compaction.
     SetAutoCompaction {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         enabled: bool,
     },
 
     // ── Retry ───────────────────────────────────────────────────────
-/// set  auto  retry.
+    /// Enable or disable auto-retry.
     SetAutoRetry {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         enabled: bool,
     },
-/// abort  retry.
+    /// Abort the current retry attempt.
     AbortRetry {
+        /// TODO: document.
         id: Option<String>,
     },
 
     // ── Bash ────────────────────────────────────────────────────────
-/// bash.
+    /// Execute a bash command.
     Bash {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         command: String,
     },
-/// abort  bash.
+    /// Abort the running bash command.
     AbortBash {
+        /// TODO: document.
         id: Option<String>,
     },
 
     // ── Session ────────────────────────────────────────────────────
-/// get  session  stats.
+    /// Get session statistics.
     GetSessionStats {
+        /// TODO: document.
         id: Option<String>,
     },
-/// export  html.
+    /// Export the session as HTML.
     ExportHtml {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         output_path: Option<String>,
     },
-/// switch  session.
+    /// Switch to a different session.
     SwitchSession {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         session_path: String,
     },
-/// fork.
+    /// Fork the session at a given entry.
     Fork {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         entry_id: String,
     },
-/// clone.
+    /// Clone the current session.
     Clone {
+        /// TODO: document.
         id: Option<String>,
     },
-/// get  fork  messages.
+    /// Get messages from the forked session.
     GetForkMessages {
+        /// TODO: document.
         id: Option<String>,
     },
-/// get  last  assistant  text.
+    /// Get the last assistant text response.
     GetLastAssistantText {
+        /// TODO: document.
         id: Option<String>,
     },
-/// set  session  name.
+    /// Set the session display name.
     SetSessionName {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         name: String,
     },
 
     // ── Messages ───────────────────────────────────────────────────
-/// get  messages.
+    /// Get all session messages.
     GetMessages {
+        /// TODO: document.
         id: Option<String>,
     },
 
     // ── Commands ────────────────────────────────────────────────────
 /// get  commands.
     GetCommands {
+        /// TODO: document.
         id: Option<String>,
     },
 }
@@ -283,15 +346,19 @@ pub enum RpcCommand {
 /// Image data for RPC commands
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageData {
+    /// source.
     pub source: String,
     #[serde(rename = "type")]
+    /// Image media type.
     pub media_type: String,
 }
 
 /// Base64-encoded image data
 #[derive(Debug, Clone)]
 pub struct RpcImageSource {
+    /// Response data.
     pub data: Vec<u8>,
+    /// mime type.
     pub mime_type: String,
 }
 
@@ -301,12 +368,17 @@ pub struct RpcImageSource {
 pub enum RpcResponse {
 /// response.
     Response {
+        /// TODO: document.
         id: Option<String>,
+        /// TODO: document.
         command: String,
+        /// TODO: document.
         success: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         data: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         error: Option<String>,
     },
 /// extension  ui  request.
@@ -319,65 +391,94 @@ pub enum RpcResponse {
 pub enum RpcExtensionUiRequest {
 /// select.
     Select {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         title: String,
+        /// TODO: document.
         options: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         timeout: Option<u64>,
     },
 /// confirm.
     Confirm {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         title: String,
+        /// TODO: document.
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         timeout: Option<u64>,
     },
 /// input.
     Input {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         title: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         placeholder: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         timeout: Option<u64>,
     },
 /// editor.
     Editor {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         title: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         prefill: Option<String>,
     },
 /// notify.
     Notify {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         notify_type: Option<String>,
     },
 /// set  status.
     SetStatus {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         status_key: String,
+        /// TODO: document.
         status_text: Option<String>,
     },
 /// set  widget.
     SetWidget {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         widget_key: String,
+        /// TODO: document.
         widget_lines: Option<Vec<String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        /// TODO: document.
         widget_placement: Option<String>,
     },
 /// set  title.
     SetTitle {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         title: String,
     },
 /// set  editor  text.
     SetEditorText {
+        /// TODO: document.
         id: String,
+        /// TODO: document.
         text: String,
     },
 }
@@ -386,14 +487,18 @@ pub enum RpcExtensionUiRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RpcExtensionUiResponse {
-/// extension  ui  response.
+    /// Respond to an extension UI request.
     ExtensionUiResponse {
+        /// TODO: document.
         id: String,
         #[serde(default)]
+        /// TODO: document.
         value: Option<String>,
         #[serde(default)]
+        /// TODO: document.
         confirmed: Option<bool>,
         #[serde(default)]
+        /// TODO: document.
         cancelled: Option<bool>,
     },
 }
@@ -404,37 +509,53 @@ pub struct SessionState {
     /// Current model info
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<ModelInfo>,
+    /// thinking level.
     pub thinking_level: String,
+    /// is streaming.
     pub is_streaming: bool,
+    /// is compacting.
     pub is_compacting: bool,
+    /// steering mode.
     pub steering_mode: String,
+    /// follow up mode.
     pub follow_up_mode: String,
     /// Session file path
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_file: Option<String>,
+    /// Session identifier.
     pub session_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// session name.
     pub session_name: Option<String>,
+    /// auto compaction enabled.
     pub auto_compaction_enabled: bool,
+    /// message count.
     pub message_count: usize,
+    /// pending message count.
     pub pending_message_count: usize,
 }
 
 /// Model information for session state
 #[derive(Debug, Clone, Serialize)]
 pub struct ModelInfo {
+    /// Provider name.
     pub provider: String,
+    /// Request correlation ID.
     pub id: String,
 }
 
 /// Command info for get_commands response
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandInfo {
+    /// Name value.
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// description.
     pub description: Option<String>,
+    /// source.
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// source info.
     pub source_info: Option<SourceInfo>,
 }
 
@@ -442,24 +563,32 @@ pub struct CommandInfo {
 #[derive(Debug, Clone, Serialize)]
 pub struct SourceInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// File path.
     pub path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// origin.
     pub origin: Option<String>,
 }
 
 /// Result of a session stat query
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionStats {
+    /// message count.
     pub message_count: usize,
+    /// token count.
     pub token_count: Option<usize>,
+    /// last activity.
     pub last_activity: Option<i64>,
 }
 
 /// Result of compaction
 #[derive(Debug, Clone, Serialize)]
 pub struct CompactionResult {
+    /// original count.
     pub original_count: usize,
+    /// compacted count.
     pub compacted_count: usize,
+    /// tokens saved.
     pub tokens_saved: Option<usize>,
 }
 
@@ -474,21 +603,36 @@ pub enum RpcEvent {
     /// Agent started processing
     AgentStart,
     /// Streaming text chunk
-    TextChunk { text: String },
+    TextChunk {
+        /// Streaming text content.
+        text: String,
+    },
     /// Agent is thinking
     Thinking,
     /// Tool execution started
-    ToolStart { tool: String },
+    ToolStart {
+        /// Name of the tool being executed.
+        tool: String,
+    },
     /// Tool execution finished
-    ToolEnd { tool: String },
+    ToolEnd {
+        /// Name of the tool that finished.
+        tool: String,
+    },
     /// Agent finished processing
     AgentEnd,
     /// Error occurred
-    Error { message: String },
+    Error {
+        /// Error message.
+        message: String,
+    },
     /// Extension error
     ExtensionError {
+        /// TODO: document.
         extension_path: String,
+        /// TODO: document.
         event: String,
+        /// TODO: document.
         error: String,
     },
 }
@@ -499,6 +643,7 @@ pub enum RpcEvent {
 
 /// Tracks pending extension UI requests awaiting client responses.
 pub struct PendingExtensionRequest {
+    /// resolve.
     pub resolve: tokio::sync::oneshot::Sender<RpcExtensionUiResponse>,
 }
 

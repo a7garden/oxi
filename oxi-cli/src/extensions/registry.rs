@@ -314,6 +314,7 @@ impl Default for ExtensionRunner {
 }
 
 impl ExtensionRunner {
+    /// Create a new extension runner for the given working directory.
     pub fn new(cwd: PathBuf) -> Self {
         Self { registry: ExtensionRegistry::new(), states: HashMap::new(), order: Vec::new(), error_listeners: Vec::new(), cwd, load_errors: Vec::new() }
     }
