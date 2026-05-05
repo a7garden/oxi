@@ -152,7 +152,7 @@ impl Surface {
     pub fn write_string(&mut self, row: u16, col: u16, s: &str) {
         let mut current_col = col as usize;
         for c in s.chars() {
-            let char_width = unicode_width::unicode_width(c).unwrap_or(1);
+            let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
             if current_col + char_width > self.width as usize {
                 break;
             }
@@ -185,7 +185,7 @@ impl Surface {
     ) {
         let mut current_col = col as usize;
         for c in s.chars() {
-            let char_width = unicode_width::unicode_width(c).unwrap_or(1);
+            let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
             if current_col + char_width > self.width as usize {
                 break;
             }
@@ -214,7 +214,7 @@ impl Surface {
         // We need to figure out where the string ended in column terms
         let mut current_col = col as usize;
         for c in s.chars() {
-            let char_width = unicode_width::unicode_width(c).unwrap_or(1);
+            let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
             current_col += char_width;
         }
         let space_cell = Cell::new(' ').with_bg(bg);
@@ -320,5 +320,123 @@ impl Surface {
 impl Default for Surface {
     fn default() -> Self {
         Self::new(80, 24)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_ascii_string() {
+        let mut surface = Surface::new(20, 1);
+        surface.write_string(0, 0, "Hello");
+        assert_eq!(surface.get(0, 0).unwrap().char, 'H');
+        assert_eq!(surface.get(0, 1).unwrap().char, 'e');
+        assert_eq!(surface.get(0, 4).unwrap().char, 'o');
+        // Column 5 should still be default
+        assert_eq!(surface.get(0, 5).unwrap().char, ' ');
+    }
+
+    #[test]
+    fn write_korean_string() {
+        // Each Korean character is 2 columns wide
+        let mut surface = Surface::new(20, 1);
+        surface.write_string(0, 0, "안녕하세요");
+        // 5 chars * 2 columns = 10 columns
+        assert_eq!(surface.get(0, 0).unwrap().char, '안');
+        assert!(surface.get(0, 1).unwrap().is_wide_continuation());
+        assert_eq!(surface.get(0, 2).unwrap().char, '녕');
+        assert!(surface.get(0, 3).unwrap().is_wide_continuation());
+        assert_eq!(surface.get(0, 4).unwrap().char, '하');
+        assert!(surface.get(0, 5).unwrap().is_wide_continuation());
+        assert_eq!(surface.get(0, 6).unwrap().char, '세');
+        assert!(surface.get(0, 7).unwrap().is_wide_continuation());
+        assert_eq!(surface.get(0, 8).unwrap().char, '요');
+        assert!(surface.get(0, 9).unwrap().is_wide_continuation());
+        // Column 10 should still be default
+        assert_eq!(surface.get(0, 10).unwrap().char, ' ');
+    }
+
+    #[test]
+    fn write_mixed_string() {
+        // "Hello 세계" = H(1) e(1) l(1) l(1) o(1) ' '(1) 세(2) 계(2) = 10 columns
+        let mut surface = Surface::new(20, 1);
+        surface.write_string(0, 0, "Hello 세계");
+        assert_eq!(surface.get(0, 0).unwrap().char, 'H');
+        assert_eq!(surface.get(0, 5).unwrap().char, ' ');
+        // '세' starts at column 6
+        assert_eq!(surface.get(0, 6).unwrap().char, '세');
+        assert!(surface.get(0, 7).unwrap().is_wide_continuation());
+        // '계' starts at column 8
+        assert_eq!(surface.get(0, 8).unwrap().char, '계');
+        assert!(surface.get(0, 9).unwrap().is_wide_continuation());
+        // Column 10 is empty
+        assert_eq!(surface.get(0, 10).unwrap().char, ' ');
+    }
+
+    #[test]
+    fn write_string_overflows_width() {
+        // Surface is 5 columns wide, writing "안녕하세요" (10 columns)
+        let mut surface = Surface::new(5, 1);
+        surface.write_string(0, 0, "안녕하세요");
+        // Only '안' fits (2 cols) + '녕' would need cols 2-3, fits too
+        // '하' would need cols 4-5, but col 5 doesn't exist (width=5, cols 0-4)
+        // Actually: '안' = cols 0-1, '녕' = cols 2-3, '하' needs cols 4-5, 5 >= width -> break
+        assert_eq!(surface.get(0, 0).unwrap().char, '안');
+        assert!(surface.get(0, 1).unwrap().is_wide_continuation());
+        assert_eq!(surface.get(0, 2).unwrap().char, '녕');
+        assert!(surface.get(0, 3).unwrap().is_wide_continuation());
+        // Col 4 should be default (wide char '하' doesn't fit)
+        assert_eq!(surface.get(0, 4).unwrap().char, ' ');
+    }
+
+    #[test]
+    fn wide_continuation_cell() {
+        let cont = Cell::wide_continuation();
+        assert!(cont.is_wide_continuation());
+        assert_eq!(cont.char, '\u{0}');
+
+        let normal = Cell::new('A');
+        assert!(!normal.is_wide_continuation());
+    }
+
+    #[test]
+    fn cell_unicode_width() {
+        assert_eq!(Cell::new('A').width(), 1);
+        assert_eq!(Cell::new('안').width(), 2);
+        assert_eq!(Cell::new(' ').width(), 1);
+    }
+
+    #[test]
+    fn write_string_styled_applies_colors() {
+        let mut surface = Surface::new(20, 1);
+        surface.write_string_styled(
+            0,
+            0,
+            "Hi",
+            Color::Red,
+            Color::Blue,
+            Attributes::new().with_bold(),
+        );
+        let cell = surface.get(0, 0).unwrap();
+        assert_eq!(cell.char, 'H');
+        assert_eq!(cell.fg, Color::Red);
+        assert_eq!(cell.bg, Color::Blue);
+        assert!(cell.attrs.bold);
+    }
+
+    #[test]
+    fn write_line_fills_rest_with_bg_spaces() {
+        let mut surface = Surface::new(10, 1);
+        surface.write_line(0, 0, "Hi", Color::Default, Color::Blue);
+        assert_eq!(surface.get(0, 0).unwrap().char, 'H');
+        assert_eq!(surface.get(0, 1).unwrap().char, 'i');
+        // Remaining cols should be spaces with Blue bg
+        for col in 2..10 {
+            let cell = surface.get(0, col).unwrap();
+            assert_eq!(cell.char, ' ');
+            assert_eq!(cell.bg, Color::Blue);
+        }
     }
 }

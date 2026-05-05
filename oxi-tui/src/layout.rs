@@ -188,7 +188,9 @@ impl Container {
 
     /// Get a mutable reference to a child by index.
     pub fn child_mut(&mut self, index: usize) -> Option<&mut (dyn Component + '_)> {
-        self.children.get_mut(index).map(|c| c.as_mut() as &mut dyn Component)
+        self.children
+            .get_mut(index)
+            .map(|c| c.as_mut() as &mut dyn Component)
     }
 
     /// Set layout direction.
@@ -282,7 +284,11 @@ mod tests {
     #[test]
     fn vertical_split_with_length_constraints() {
         let area = Rect::new(0, 0, 80, 24);
-        let constraints = vec![Constraint::Length(5), Constraint::Length(10), Constraint::Length(9)];
+        let constraints = vec![
+            Constraint::Length(5),
+            Constraint::Length(10),
+            Constraint::Length(9),
+        ];
         let rects = split(area, Direction::Vertical, &constraints);
 
         assert_eq!(rects.len(), 3);
@@ -350,7 +356,11 @@ mod tests {
     #[test]
     fn mixed_constraints() {
         let area = Rect::new(0, 0, 80, 24);
-        let constraints = vec![Constraint::Length(3), Constraint::Flex(1), Constraint::Flex(2)];
+        let constraints = vec![
+            Constraint::Length(3),
+            Constraint::Flex(1),
+            Constraint::Flex(2),
+        ];
         let rects = split(area, Direction::Vertical, &constraints);
 
         assert_eq!(rects.len(), 3);

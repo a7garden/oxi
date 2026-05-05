@@ -187,7 +187,8 @@ pub fn copy_to_clipboard(text: &str) -> Result<()> {
     } else {
         // Fallback: print OSC52 sequence
         print!("{}", generate_osc52_sequence(text));
-        std::io::stdout().flush().ok();
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
         Ok(())
     }
 }

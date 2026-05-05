@@ -109,7 +109,7 @@ impl Cell {
 
     /// Get the display width of this cell's character.
     pub fn width(&self) -> usize {
-        unicode_width::unicode_width(self.char).unwrap_or(0)
+        unicode_width::UnicodeWidthChar::width(self.char).unwrap_or(0)
     }
 
     /// Create a wide-character continuation cell (placeholder for 2nd column of a wide char).

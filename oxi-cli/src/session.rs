@@ -1782,7 +1782,7 @@ pub struct NewSessionOptions {
 // Helper Functions
 // ============================================================================
 
-fn get_default_session_dir(cwd: &str) -> String {
+pub fn get_default_session_dir(cwd: &str) -> String {
     let agent_dir = get_agent_dir();
     let safe_path = format!("--{}--", cwd.replace('/', "-").replace('\\', "-").replace(':', "-"));
     let session_dir = format!("{}/sessions/{}", agent_dir, safe_path);
