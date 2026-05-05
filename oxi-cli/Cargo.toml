@@ -22,7 +22,6 @@ path = "src/lib.rs"
 [dependencies]
 oxi-ai = { version = "0.4.2", path = "../oxi-ai" }
 oxi-agent = { version = "0.4.2", path = "../oxi-agent" }
-oxi-tui = { version = "0.4.2", path = "../oxi-tui" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

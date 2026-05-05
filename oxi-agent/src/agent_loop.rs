@@ -1327,9 +1327,10 @@ mod tests {
         let state = SharedState::new();
         
         let loop_instance = AgentLoop::new(provider, config, tools, state);
-        let mut events = Vec::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
         
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
+        let result = loop_instance.run("Hello".to_string(), move |e| events_clone.lock().unwrap().push(e)).await;
         
         assert!(result.is_ok());
     }
@@ -1404,10 +1405,12 @@ mod tests {
         let state = SharedState::new();
         
         let loop_instance = AgentLoop::new(provider, config, tools, state);
-        let mut events = Vec::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
         
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
+        let result = loop_instance.run("Hello".to_string(), move |e| events_clone.lock().unwrap().push(e)).await;
         
+        let events = events.lock().unwrap();
         assert!(events.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
     }
     
@@ -1474,9 +1477,10 @@ mod tests {
         let state = SharedState::new();
         
         let loop_instance = AgentLoop::new(provider, config, tools, state);
-        let mut events = Vec::new();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
         
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
+        let result = loop_instance.run("Hello".to_string(), move |e| events_clone.lock().unwrap().push(e)).await;
         
         assert!(result.is_ok());
     }
@@ -1487,8 +1491,9 @@ mod tests {
         
         loop_instance.follow_up(Message::User(UserMessage::new("Follow-up message")));
         
-        let mut events = Vec::new();
-        let result = loop_instance.run("Hello".to_string(), |e| events.push(e)).await;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_clone = events.clone();
+        let result = loop_instance.run("Hello".to_string(), move |e| events_clone.lock().unwrap().push(e)).await;
         
         assert!(result.is_ok());
     }

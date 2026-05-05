@@ -446,7 +446,7 @@ pub fn parse_streaming_json(input: &str) -> JsonValue {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Message, TextContent};
+    use crate::{Message, Api};
 
     #[test]
     fn test_encode_text_signature_v1() {
