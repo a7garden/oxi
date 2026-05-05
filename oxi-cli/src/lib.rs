@@ -299,7 +299,7 @@ impl App {
         });
         let skills = SkillManager::load_from_dir(&skills_dir).unwrap_or_else(|e| {
             tracing::debug!("Skills not loaded: {}", e);
-            SkillManager { skills: std::collections::HashMap::new() }
+            SkillManager::new()
         });
 
         // Build agent config from settings
