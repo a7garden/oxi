@@ -1244,9 +1244,6 @@ mod tests {
             auto_retry_enabled: true,
             auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
             auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
-            auto_retry_enabled: true,
-            auto_retry_max_attempts: AUTO_RETRY_MAX_ATTEMPTS,
-            auto_retry_base_delay_ms: AUTO_RETRY_BASE_DELAY_MS,
         };
         assert_eq!(config.max_iterations, 10);
         assert_eq!(config.tool_execution, ToolExecutionMode::Parallel);
@@ -1368,7 +1365,7 @@ mod tests {
                 Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>,
                 oxi_ai::ProviderError,
             > {
-                Err(oxi_ai::ProviderError::Other("Test error".to_string()))
+                Err(oxi_ai::ProviderError::StreamError("Test error".to_string()))
             }
             
             fn name(&self) -> &str {
