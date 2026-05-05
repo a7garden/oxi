@@ -1,24 +1,25 @@
-# Progress
+# Progress: Clean up pi-mono references in oxi source code comments
 
-## Status
-Completed
+## Status: ✅ COMPLETE
 
-## Tasks
-- [x] Clean up pi-mono references in documentation files
-- [x] Previous task: Clean up pi-mono references in target/package directory
-- [x] Previous task: Remove libtmux_detect.rlib from root
+## Summary
+Updated 30 files across 4 crates (oxi-cli, oxi-agent, oxi-ai, oxi-tui) to clean up pi-mono references in doc comments.
 
-## Files Changed
-### Documentation Cleanup
-- `docs/oxi-design.md` — Removed "clean-room Rust implementation of pi-mono" framing
-- `docs/pi-architecture-research.md` — Renamed to `docs/oxi-architecture.md`, rewritten to document oxi's own architecture
-- `docs/LINE_COUNT_AUDIT.md` — Swapped tables to show oxi first (oxi vs pi-mono instead of pi-mono vs oxi)
+## What was done
+- Replaced `Ported from pi-mono/...` with simple module descriptions
+- Replaced `Based on pi-mono/...` with appropriate descriptions  
+- Removed all `(pi-mono parity)` comment suffixes (9 occurrences in extensions.rs)
+- Changed `Feature parity with pi-mono` to `Features:` 
+- Changed `matching pi-mono format` to simple descriptions
+- Kept "Originally inspired by pi-mono" where appropriate (5 files)
+- All changes are doc comments only — no functional code was modified
 
-### Previous Cleanup
-- `target/package/` — deleted (32M freed, old packaged versions)
-- `libtmux_detect.rlib` — deleted (414KB stale artifact)
+## Files changed: 30
+- oxi-cli: 17 files
+- oxi-agent: 6 files  
+- oxi-ai: 4 files
+- oxi-tui: 2 files
 
-## Notes
-- README.md, CHANGELOG.md, and all crate READMEs (oxi-agent, oxi-ai, oxi-cli, oxi-tui) had no pi-mono references
-- Main pi-mono references were in design/architecture documentation and the audit doc
-- Renamed pi-architecture-research.md (research about pi-mono) to oxi-architecture.md (documents oxi's own architecture)
+## Verification
+- `grep -rn 'pi-mono' --include='*.rs' | grep -v 'Originally inspired by'` → 0 results
+- Detailed findings written to /tmp/oxi-cleanup-comments.md
