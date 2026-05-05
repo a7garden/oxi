@@ -26,19 +26,19 @@ pub const CURRENT_SESSION_VERSION: i32 = 3;
 /// Session metadata stored separately from entries (backward compatibility)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMeta {
-    /// The id.
+    /// Unique session identifier.
     pub id: Uuid,
-    /// The parent id.
+    /// ID of the parent session this was branched from.
     pub parent_id: Option<Uuid>,
-    /// The root id.
+    /// ID of the root session in the branch chain.
     pub root_id: Option<Uuid>,
-    /// The branch point.
+    /// Entry ID where this session was branched.
     pub branch_point: Option<Uuid>,
-    /// The created at.
+    /// Creation timestamp in milliseconds since epoch.
     pub created_at: i64,
-    /// The updated at.
+    /// Last update timestamp in milliseconds since epoch.
     pub updated_at: i64,
-    /// The name.
+    /// Optional human-readable session name.
     pub name: Option<String>,
 }
 
@@ -174,12 +174,20 @@ impl From<&str> for ContentValue {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ContentBlock {
-    /// The Text { text.
+    /// Plain text content block.
     #[serde(rename = "text")]
-    Text { text: String },
-    /// The Image { data.
+    Text {
+        /// The text content.
+        text: String,
+    },
+    /// Image content block.
     #[serde(rename = "image")]
-    Image { data: String, media_type: Option<String> },
+    Image {
+        /// Base64-encoded image data.
+        data: String,
+        /// MIME type of the image.
+        media_type: Option<String>,
+    },
 }
 
 // ============================================================================
@@ -333,12 +341,18 @@ impl AgentMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AssistantContentBlock {
-    /// The Text { text.
+    /// Plain text content block.
     #[serde(rename = "text")]
-    Text { text: String },
-    /// The Thinking { thinking.
+    Text {
+        /// The text content.
+        text: String,
+    },
+    /// Extended thinking content block.
     #[serde(rename = "thinking")]
-    Thinking { thinking: String },
+    Thinking {
+        /// The thinking content.
+        thinking: String,
+    },
     /// Tool Call.
     #[serde(rename = "toolCall")]
     ToolCall {
@@ -358,12 +372,20 @@ pub enum AssistantContentBlock {
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
     },
-    /// The ImageResult { data.
+    /// Image result content block.
     #[serde(rename = "image")]
-    ImageResult { data: String, media_type: String },
-    /// The Refusal { content.
+    ImageResult {
+        /// Base64-encoded image data.
+        data: String,
+        /// MIME type of the image.
+        media_type: String,
+    },
+    /// Refusal content block.
     #[serde(rename = "refusal")]
-    Refusal { content: String },
+    Refusal {
+        /// The refusal reason.
+        content: String,
+    },
 }
 
 /// Usage statistics from an assistant message

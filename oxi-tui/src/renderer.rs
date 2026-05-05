@@ -1,3 +1,5 @@
+//! Surface-to-terminal renderer using ANSI escape sequences.
+
 use crate::cell::Cell;
 use crate::surface::Surface;
 use std::io::{self, Write};

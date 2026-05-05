@@ -11,15 +11,20 @@ use crate::Theme;
 /// Completion entry.
 #[derive(Debug, Clone)]
 pub struct Completion {
+    /// Completion text to insert.
     pub text: String,
+    /// Display text for the popup.
     pub display: String,
 }
 
 /// State for the Input widget.
 #[derive(Debug, Default)]
 pub struct InputState {
+    /// Current input text.
     pub text: String,
+    /// Cursor position (character index).
     pub cursor: usize,
+    /// Placeholder shown when input is empty.
     pub placeholder: Option<String>,
     completions: Vec<Completion>,
     completion_index: usize,
@@ -128,6 +133,7 @@ pub struct Input<'a> {
 }
 
 impl<'a> Input<'a> {
+    /// Create a new Input widget with the given theme.
     pub fn new(theme: &'a Theme) -> Self {
         Self {
             theme,
@@ -136,16 +142,19 @@ impl<'a> Input<'a> {
         }
     }
 
+    /// Replace the theme.
     pub fn with_theme(mut self, theme: &'a Theme) -> Self {
         self.theme = theme;
         self
     }
 
+    /// Set the placeholder text.
     pub fn with_placeholder(mut self, placeholder: &'a str) -> Self {
         self.placeholder = Some(placeholder);
         self
     }
 
+    /// Set the prompt character.
     pub fn with_prompt_char(mut self, c: char) -> Self {
         self.prompt_char = c;
         self
