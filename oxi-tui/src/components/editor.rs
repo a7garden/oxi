@@ -807,15 +807,14 @@ impl Component for Editor {
             }
 
             // Render cursor if at end of line
-            if cursor_in_line == content.len() && self.focused {
-                if x < area.x + area.width {
+            if cursor_in_line == content.len() && self.focused
+                && x < area.x + area.width {
                     let mut cell = Cell::new(' ');
                     cell.fg = crate::Color::Indexed(0);
                     cell.bg = crate::Color::Indexed(15);
                     surface.set(y, x, cell);
                     x += 1;
                 }
-            }
 
             // Highlight trigger if completion active
             if self.completion_active && line_idx == self.current_line {

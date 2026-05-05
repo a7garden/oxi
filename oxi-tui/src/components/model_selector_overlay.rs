@@ -237,10 +237,10 @@ impl ModelSelectorOverlay {
     fn sort_models(mut models: Vec<ModelItem>, current: Option<&ModelItem>) -> Vec<ModelItem> {
         models.sort_by(|a, b| {
             // Current model first
-            let a_is_current = current.map_or(false, |c| {
+            let a_is_current = current.is_some_and(|c| {
                 c.provider == a.provider && c.id == a.id
             });
-            let b_is_current = current.map_or(false, |c| {
+            let b_is_current = current.is_some_and(|c| {
                 c.provider == b.provider && c.id == b.id
             });
             if a_is_current && !b_is_current {
@@ -364,12 +364,12 @@ impl ModelSelectorOverlay {
             if x >= col + max_width {
                 break;
             }
-            surface.set(row, x, Cell::new(c).with_fg(fg.clone()).with_bg(bg.clone()));
+            surface.set(row, x, Cell::new(c).with_fg(fg).with_bg(bg));
         }
         // Clear remainder
         let text_w = visible_width(&truncated) as u16;
         for x in col + text_w..col + max_width {
-            surface.set(row, x, Cell::new(' ').with_fg(fg.clone()).with_bg(bg.clone()));
+            surface.set(row, x, Cell::new(' ').with_fg(fg).with_bg(bg));
         }
     }
 }

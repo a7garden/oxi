@@ -118,10 +118,8 @@ impl FileCompleter {
     /// Parse a prefix into directory and filename pattern.
     fn parse_prefix(&self, prefix: &str) -> (String, PathBuf) {
         // Handle tilde expansion
-        if prefix.starts_with('~') {
+        if let Some(remainder) = prefix.strip_prefix('~') {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-            let remainder = &prefix[1..];
-
             if remainder.is_empty() || remainder.starts_with('/') {
                 // ~ or ~/...
                 let path = PathBuf::from(&home);

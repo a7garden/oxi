@@ -336,7 +336,7 @@ impl Component for CommandPalette {
 
         for vi in start..end {
             let row = list_start + (vi - start) as u16;
-            if row >= y + total_height + 1 {
+            if row > y + total_height {
                 break;
             }
             let cmd_idx = self.filtered_indices[vi];

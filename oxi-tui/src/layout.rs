@@ -67,8 +67,8 @@ pub fn split(area: Rect, direction: Direction, constraints: &[Constraint]) -> Ve
     // Min and Flex: distribute remaining space
     let flex_total: u32 = constraints
         .iter()
-        .enumerate()
-        .map(|(_i, c)| match c {
+        
+        .map(|c| match c {
             Constraint::Flex(w) => *w as u32,
             Constraint::Min(min) => {
                 // Min acts like flex(1) but ensures at least `min` cells
@@ -95,9 +95,7 @@ pub fn split(area: Rect, direction: Direction, constraints: &[Constraint]) -> Ve
                     let actual = allocated.min(remaining);
                     sizes[i] = actual as u16;
                     remaining = remaining.saturating_sub(actual);
-                    if leftover > 0 {
-                        leftover -= 1;
-                    }
+                    leftover = leftover.saturating_sub(1);
                 }
             }
         } else {

@@ -35,6 +35,7 @@ impl Attributes {
 
 /// Text color (24-bit true color).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Color {
     Black,
     Red,
@@ -49,14 +50,10 @@ pub enum Color {
     /// 24-bit RGB
     Rgb(u8, u8, u8),
     /// Default terminal color
+    #[default]
     Default,
 }
 
-impl Default for Color {
-    fn default() -> Self {
-        Color::Default
-    }
-}
 
 /// A single cell in the terminal grid.
 #[derive(Debug, Clone, PartialEq)]

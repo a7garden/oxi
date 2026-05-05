@@ -344,12 +344,11 @@ impl TUI {
         }
 
         // Pass to focused component
-        if self.focus_index < self.children.len() {
-            if self.children[self.focus_index].handle_event(&event) {
+        if self.focus_index < self.children.len()
+            && self.children[self.focus_index].handle_event(&event) {
                 self.request_render();
                 return;
             }
-        }
 
         // Global key handling
         if let crate::Event::Key(key) = &event {

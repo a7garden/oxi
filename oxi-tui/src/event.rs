@@ -168,6 +168,7 @@ pub struct ResizeEvent {
 
 /// Unified input event type.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default)]
 pub enum Event {
     /// Keyboard input
     Key(KeyEvent),
@@ -182,6 +183,7 @@ pub enum Event {
     /// Paste event (text being pasted)
     Paste(String),
     /// No-op for tick/frame events
+    #[default]
     None,
 }
 
@@ -212,8 +214,3 @@ impl Event {
     }
 }
 
-impl Default for Event {
-    fn default() -> Self {
-        Event::None
-    }
-}

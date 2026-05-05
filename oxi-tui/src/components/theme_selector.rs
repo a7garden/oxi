@@ -340,9 +340,9 @@ impl Component for ThemeSelector {
 
             // Selection colors
             let (fg, bg) = if is_selected && self.focused {
-                (Color::Default, theme.fg_color.clone())
+                (Color::Default, theme.fg_color)
             } else {
-                (theme.fg_color.clone(), Color::Default)
+                (theme.fg_color, Color::Default)
             };
 
             // Render indicator
@@ -350,13 +350,13 @@ impl Component for ThemeSelector {
             surface.set(
                 row,
                 area.x,
-                Cell::new(indicator.chars().next().unwrap()).with_fg(fg.clone()).with_bg(bg.clone()),
+                Cell::new(indicator.chars().next().unwrap()).with_fg(fg).with_bg(bg),
             );
 
             // Render color swatches (3 small colored squares)
-            let swatch_bg = theme.bg_color.clone();
-            let swatch_fg = theme.fg_color.clone();
-            let swatch_accent = theme.accent_color.clone();
+            let swatch_bg = theme.bg_color;
+            let swatch_fg = theme.fg_color;
+            let swatch_accent = theme.accent_color;
 
             for (i, color) in [swatch_bg, swatch_fg, swatch_accent]
                 .iter()
@@ -367,8 +367,8 @@ impl Component for ThemeSelector {
                     row,
                     col,
                     Cell::new('█')
-                        .with_fg(color.clone())
-                        .with_bg(bg.clone()),
+                        .with_fg(*color)
+                        .with_bg(bg),
                 );
             }
 
@@ -386,7 +386,7 @@ impl Component for ThemeSelector {
                     surface.set(
                         row,
                         col,
-                        Cell::new(c).with_fg(fg.clone()).with_bg(bg.clone()),
+                        Cell::new(c).with_fg(fg).with_bg(bg),
                     );
                 }
             }
@@ -401,8 +401,8 @@ impl Component for ThemeSelector {
                         row,
                         col,
                         Cell::new(c)
-                            .with_fg(fg.clone())
-                            .with_bg(bg.clone()),
+                            .with_fg(fg)
+                            .with_bg(bg),
                     );
                 }
             }

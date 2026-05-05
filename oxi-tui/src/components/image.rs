@@ -164,7 +164,7 @@ impl Image {
         let b64 = self.base64_data().to_string();
 
         let chunk_size = 4096;
-        let total_chunks = (b64.len() + chunk_size - 1) / chunk_size;
+        let total_chunks = b64.len().div_ceil(chunk_size);
         let mut lines: Vec<String> = Vec::new();
 
         // First chunk includes image metadata.
