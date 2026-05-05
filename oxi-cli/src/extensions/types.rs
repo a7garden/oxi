@@ -11,9 +11,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
 
-// Re-export common types used across modules
-pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Extension Permissions
 // ═══════════════════════════════════════════════════════════════════════════
