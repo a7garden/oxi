@@ -1,0 +1,18 @@
+# OpenAI Tool Call Streaming Fixture
+# Demonstrates tool call delta accumulation
+
+data: {"id":"chatcmpl-xyz789","object":"chat.completion.chunk","created":1677652288,"model":"gpt-4o-mini","system_fingerprint":"fp_44709d6fcb","choices":[{"index":0,"delta":{"role":"assistant","content":null},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xyz789","object":"chat.completion.chunk","created":1677652289,"model":"gpt-4o-mini","system_fingerprint":"fp_44709d6fcb","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_abc123xyz","type":"function","function":{"name":"get_current_weather","arguments":""}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xyz789","object":"chat.completion.chunk","created":1677652290,"model":"gpt-4o-mini","system_fingerprint":"fp_44709d6fcb","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":"{"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xyz789","object":"chat.completion.chunk","created":1677652291,"model":"gpt-4o-mini","system_fingerprint":"fp_44709d6fcb","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":"\n  \"location":}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xyz789","object":"chat.completion.chunk","created":1677652292,"model":"gpt-4o-mini","system_fingerprint":"fp_44709d6fcb","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":" \"San Francisco,"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xyz789","object":"chat.completion.chunk","created":1677652293,"model":"gpt-4o-mini","system_fingerprint":"fp_44709d6fcb","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":" CA\"\n"}}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-xyz789","object":"chat.completion.chunk","created":1677652294,"model":"gpt-4o-mini","system_fingerprint":"fp_44709d6fcb","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"","arguments":"}"}}]},"finish_reason":"tool_calls"}]}
+
+data: [DONE]
