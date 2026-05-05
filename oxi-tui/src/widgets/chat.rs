@@ -57,8 +57,6 @@ pub struct ChatViewState {
     pub scroll_offset: u16,
     /// Content height in rows.
     content_height: u16,
-    /// Last rendered width (to detect reflow needed).
-    last_width: u16,
     /// Focused thinking block (message_index, block_index).
     focused_thinking: Option<(usize, usize)>,
 }

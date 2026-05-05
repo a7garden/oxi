@@ -1,15 +1,12 @@
 //! Extension loading and discovery.
-//!
-//! Functions for loading extensions from shared libraries and discovering
-//! them in standard locations.
 
-use crate::extensions::Extension as ExtensionTrait;
-use crate::extensions::NoopExtension;
-use anyhow::{bail, Context, Result};
-use libloading::{Library, Symbol};
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use anyhow::{bail, Context, Result};
+use libloading::{Library, Symbol};
+
+// Re-export Extension trait from parent module
+use crate::extensions::Extension as ExtensionTrait;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extension Discovery
@@ -52,10 +49,7 @@ pub fn discover_extensions_in_dir(dir: &Path) -> Vec<PathBuf> {
 
     for entry in entries.flatten() {
         let path = entry.path();
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
         if path.is_dir() {
             // Check for index.so / index.dylib / index.dll in subdirectory
@@ -130,14 +124,12 @@ pub fn discover_extensions(
         };
 
         if resolved.is_dir() {
-            // Discover in directory
             add_paths(
                 &mut all_paths,
                 &mut seen,
                 discover_extensions_in_dir(&resolved),
             );
         } else if resolved.exists() {
-            // Direct file
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             resolved.hash(&mut hasher);
@@ -159,26 +151,16 @@ pub fn discover_extensions(
 const ENTRY_SYMBOL: &[u8] = b"oxi_extension_create\0";
 
 /// Function signature that a shared library must export.
-///
-/// The library must expose:
-///
-/// ```c,ignore
-/// extern "C" fn oxi_extension_create() -> *mut dyn Extension
-/// ```
-type CreateFn = unsafe fn() -> *mut dyn crate::extensions::Extension;
+type CreateFn = unsafe fn() -> *mut dyn ExtensionTrait;
 
 /// Load an extension from a shared library (.so / .dll / .dylib).
 ///
 /// The library **must** export an `oxi_extension_create` entry-point that
 /// returns a heap-allocated trait object.
-pub fn load_extension(path: &Path) -> Result<Arc<dyn Extension>> {
-    let extension = load_extension_inner(path)?;
-    Ok(extension)
-}
-
-fn load_extension_inner(path: &Path) -> Result<Arc<dyn Extension>> {
+pub fn load_extension(path: &Path) -> Result<Arc<dyn ExtensionTrait>> {
     // Validate file extension
-    let ext = path.extension().and_then(OsStr::to_str).unwrap_or("");
+    let ext = std::ffi::OsStr::to_str(path.extension().unwrap_or(std::ffi::OsStr::new("")))
+        .unwrap_or("");
 
     let valid = matches!(ext, "so" | "dylib" | "dll");
     if !valid {
@@ -213,12 +195,12 @@ fn load_extension_inner(path: &Path) -> Result<Arc<dyn Extension>> {
     }
 
     // Wrap the raw pointer in an Arc directly via Box
-    let boxed: Box<dyn Extension> = unsafe { Box::from_raw(raw_ptr) };
+    let boxed: Box<dyn ExtensionTrait> = unsafe { Box::from_raw(raw_ptr) };
     Ok(Arc::from(boxed))
 }
 
 /// Load multiple extensions from file paths, collecting errors.
-pub fn load_extensions(paths: &[&Path]) -> (Vec<Arc<dyn Extension>>, Vec<anyhow::Error>) {
+pub fn load_extensions(paths: &[&Path]) -> (Vec<Arc<dyn ExtensionTrait>>, Vec<anyhow::Error>) {
     let mut loaded = Vec::with_capacity(paths.len());
     let mut errors = Vec::new();
 

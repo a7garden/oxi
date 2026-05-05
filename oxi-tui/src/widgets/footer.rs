@@ -4,7 +4,6 @@ use ratatui::{
     widgets::Widget,
     buffer::Buffer,
     layout::Rect,
-    style::{Style, Modifier},
 };
 use crate::Theme;
 
@@ -43,6 +42,7 @@ impl Default for FooterData {
 }
 
 impl FooterData {
+    /// Format token counts as "↑Nk ↓Mk ROk WPk".
     pub fn format_tokens(input: u32, output: u32, cache_read: u32, cache_write: u32) -> String {
         let mut parts = Vec::new();
         if input > 0 {
@@ -70,6 +70,7 @@ impl FooterData {
         }
     }
 
+    /// Format session duration as "Xs", "Xm", or "XhYm".
     pub fn format_duration(secs: u64) -> String {
         if secs < 60 {
             format!("{}s", secs)
@@ -79,20 +80,71 @@ impl FooterData {
             format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
         }
     }
+
+    /// Build the left-side status string.
+    pub fn left_status(&self) -> String {
+        let mut parts = Vec::new();
+
+        if !self.model_name.is_empty() {
+            if !self.provider_name.is_empty() {
+                parts.push(format!("({}) {}", self.provider_name, self.model_name));
+            } else {
+                parts.push(self.model_name.clone());
+            }
+        }
+
+        let tokens = Self::format_tokens(
+            self.input_tokens,
+            self.output_tokens,
+            self.cache_read_tokens,
+            self.cache_write_tokens,
+        );
+        if !tokens.is_empty() {
+            parts.push(tokens);
+        }
+
+        if self.total_cost > 0.0 {
+            parts.push(format!("${:.3}", self.total_cost));
+        }
+
+        parts.join(" ")
+    }
+
+    /// Build the right-side status string.
+    pub fn right_status(&self) -> String {
+        let mut parts = Vec::new();
+
+        if let Some(ref branch) = self.git_branch {
+            if !branch.is_empty() {
+                parts.push(format!("@{}", branch));
+            }
+        }
+
+        if self.context_window_pct > 0.0 {
+            parts.push(format!("{:.1}%", self.context_window_pct));
+        }
+
+        if self.session_duration_secs > 0 {
+            parts.push(Self::format_duration(self.session_duration_secs));
+        }
+
+        parts.join(" ")
+    }
 }
 
-/// Footer state — wraps shared FooterData with rendering position.
+/// Footer state — wraps FooterData for stateful rendering.
 #[derive(Debug, Default)]
 pub struct FooterState {
     pub data: FooterData,
 }
 
-/// Footer widget.
+/// Footer widget — renders status bar with model, tokens, branch, duration.
 pub struct Footer<'a> {
     theme: &'a Theme,
 }
 
 impl<'a> Footer<'a> {
+    /// Create with the default dark theme (placeholder — use FooterState for real data).
     pub fn new() -> Self {
         Self { theme: &crate::Theme::dark() }
     }
@@ -116,26 +168,18 @@ impl Widget for Footer<'_> {
 
         let styles = self.theme.to_styles();
         let dim = styles.muted;
-
-        // Build left and right sections
-        let mut left_parts: Vec<String> = Vec::new();
-        let mut right_parts: Vec<String> = Vec::new();
-
-        // Left: model, tokens, cost
-        if !self.theme.colors.name.is_empty() {
-            // Actually use data from state if available - for now build from data
-            // Note: this widget doesn't hold state, so we use theme-based defaults
-            // The actual data comes from the call site
-        }
-
-        // Write content row by row
         let y = area.y;
         let max_w = area.width as usize;
 
-        // Left section
-        let left_text = "".to_string();
-        let right_text = "".to_string();
+        // Left section — theme name as placeholder
+        let left_text = format!("● {}", self.theme.name);
+        let left_len = left_text.chars().count();
 
+        // Right section placeholder (real data comes from FooterState in StatefulWidget version)
+        let right_text = "";
+        let right_len = right_text.chars().count();
+
+        // Write left text
         for (col, c) in left_text.chars().enumerate() {
             if col < max_w {
                 buf.get_mut(area.x + col as u16, y)
@@ -144,17 +188,19 @@ impl Widget for Footer<'_> {
             }
         }
 
-        for (col, c) in right_text.chars().enumerate() {
-            let col_from_right = area.width as usize - 1 - col;
-            if col_from_right < max_w {
-                buf.get_mut(col_from_right as u16, y)
+        // Write right text right-aligned
+        let right_start = max_w.saturating_sub(right_len);
+        for (i, c) in right_text.chars().enumerate() {
+            let col = right_start + i;
+            if col < max_w {
+                buf.get_mut(area.x + col as u16, y)
                     .set_char(c)
                     .set_style(dim);
             }
         }
 
         // Clear remainder
-        let used = left_text.chars().count();
+        let used = left_len.max(right_start);
         for col in used..max_w {
             buf.get_mut(area.x + col as u16, y)
                 .set_char(' ')
@@ -179,6 +225,7 @@ mod tests {
         assert_eq!(FooterData::format_tokens(0, 0, 0, 0), "");
         assert_eq!(FooterData::format_tokens(1500, 0, 0, 0), "↑1.5k");
         assert_eq!(FooterData::format_tokens(0, 2500, 0, 0), "↓2.5k");
+        assert_eq!(FooterData::format_tokens(1500, 2500, 500, 100), "↑1.5k ↓2.5k R500 W100");
     }
 
     #[test]
@@ -186,5 +233,25 @@ mod tests {
         assert_eq!(FooterData::format_duration(30), "30s");
         assert_eq!(FooterData::format_duration(90), "1m");
         assert_eq!(FooterData::format_duration(3661), "1h1m");
+        assert_eq!(FooterData::format_duration(0), "0s");
+    }
+
+    #[test]
+    fn footer_data_status_strings() {
+        let mut data = FooterData::default();
+        data.model_name = "claude-sonnet-4".to_string();
+        data.provider_name = "anthropic".to_string();
+        data.git_branch = Some("main".to_string());
+        data.input_tokens = 1500;
+        data.output_tokens = 2500;
+
+        let left = data.left_status();
+        assert!(left.contains("anthropic"));
+        assert!(left.contains("claude-sonnet-4"));
+        assert!(left.contains("↑1.5k"));
+        assert!(left.contains("↓2.5k"));
+
+        let right = data.right_status();
+        assert!(right.contains("@main"));
     }
 }

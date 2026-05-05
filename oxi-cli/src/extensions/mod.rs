@@ -3,44 +3,44 @@
 //! Extensions allow custom tools, commands, and event hooks to be loaded
 //! dynamically at runtime. Extensions can be loaded from shared libraries
 //! (.so/.dll/.dylib) via the `-e`/`--extension` CLI flag.
+//!
+//! # Architecture
+//!
+//! The extension system provides:
+//!
+//! - **Extension manifest** — metadata, permissions, configuration schema
+//! - **Extension lifecycle hooks** — `on_load`, `on_unload`, message/tool/session events
+//! - **Extension context** — access to settings, session state, tool registration, messaging
+//! - **Extension error handling** — graceful degradation with logging
+//! - **Extension registry** — name-based lookup, enable/disable, hot-reload
 
 pub mod context;
 pub mod loading;
 pub mod registry;
 pub mod types;
 
-// Re-export all types from submodules for public API
-pub use crate::extensions::types::{
-    ExtensionManifest, ExtensionPermission, ExtensionError, ExtensionErrorRecord,
-    ExtensionState, Command,
-    SessionSwitchReason, SessionShutdownReason, ModelSelectSource, InputSource,
-    InputEventResult,
-    SessionBeforeSwitchEvent, SessionBeforeForkEvent, SessionBeforeCompactEvent,
-    SessionCompactEvent, SessionShutdownEvent, SessionBeforeTreeEvent, SessionTreeEvent,
-    ContextEvent, BeforeProviderRequestEvent, AfterProviderResponseEvent,
-    ModelSelectEvent, ThinkingLevelSelectEvent, BashEvent, InputEvent,
-    ToolCallEmitResult, ToolResultEmitResult, ContextEmitResult,
-    ProviderRequestEmitResult, SessionBeforeEmitResult,
-    ExtensionErrorListener,
-    AgentTool, AgentToolResult,
+// Re-export all public types from submodules
+pub use crate::extensions::context::{
+    ExtensionContext, ExtensionContextBuilder,
 };
-
-pub use crate::extensions::context::{ExtensionContext, ExtensionContextBuilder};
-
-pub use crate::extensions::registry::{
-    ExtensionRegistry, ExtensionRunner, ExtensionErrorHandle,
-};
-
 pub use crate::extensions::loading::{
-    load_extension, load_extensions, discover_extensions, discover_extensions_in_dir,
+    discover_extensions, discover_extensions_in_dir, load_extension, load_extensions,
+    NoopExtension,
 };
-
-// Re-export common types from oxi-agent
-pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Extension Lifecycle Trait
-// ═══════════════════════════════════════════════════════════════════════════
+pub use crate::extensions::registry::{
+    ExtensionErrorHandle, ExtensionRegistry, ExtensionRunner, LoadedExtension, RunnerState,
+};
+pub use crate::extensions::types::{
+    AfterProviderResponseEvent, AfterProviderResponseEvent, BashEvent,
+    BeforeProviderRequestEvent, Command, ContextEmitResult, ContextEvent,
+    ExtensionError, ExtensionErrorListener, ExtensionErrorRecord, ExtensionManifest,
+    ExtensionPermission, ExtensionState, InputEvent, InputEventResult, InputSource,
+    ModelSelectEvent, ModelSelectSource, ProviderRequestEmitResult,
+    SessionBeforeCompactEvent, SessionBeforeEmitResult, SessionBeforeForkEvent,
+    SessionBeforeSwitchEvent, SessionShutdownEvent, SessionShutdownReason,
+    SessionSwitchReason, SessionTreeEvent, SessionBeforeTreeEvent, ThinkingLevelSelectEvent,
+    ToolCallEmitResult, ToolResultEmitResult,
+};
 
 /// Core trait that every oxi extension must implement.
 ///
@@ -69,7 +69,7 @@ pub trait Extension: Send + Sync {
     // ── Registration ─────────────────────────────────────────────────
 
     /// Return custom tools this extension contributes.
-    fn register_tools(&self) -> Vec<std::sync::Arc<dyn AgentTool>> {
+    fn register_tools(&self) -> Vec<std::sync::Arc<dyn crate::extensions::types::AgentTool>> {
         vec![]
     }
 
@@ -106,7 +106,7 @@ pub trait Extension: Send + Sync {
     fn on_tool_call(&self, _tool: &str, _params: &serde_json::Value) {}
 
     /// Called after a tool finishes execution.
-    fn on_tool_result(&self, _tool: &str, _result: &AgentToolResult) {}
+    fn on_tool_result(&self, _tool: &str, _result: &crate::extensions::types::AgentToolResult) {}
 
     // ── Session hooks ────────────────────────────────────────────────
 
@@ -127,13 +127,15 @@ pub trait Extension: Send + Sync {
     ///
     /// This is the low-level catch-all. Prefer the typed hooks above
     /// when possible.
-    fn on_event(&self, _event: &AgentEvent) {}
+    fn on_event(&self, _event: &crate::extensions::types::AgentEvent) {}
 
     // ── Enhanced tool call hooks ─────────────────────────────────────
 
     /// Called immediately before a tool is executed.
     ///
     /// Use this for pre-processing, validation, or logging tool calls.
+    /// Return `Err` to abort the tool execution (optional, implement
+    /// [`on_before_tool_call_with_result`] for that).
     fn on_before_tool_call(
         &self,
         _tool: &str,
@@ -149,7 +151,7 @@ pub trait Extension: Send + Sync {
     fn on_after_tool_call(
         &self,
         _tool: &str,
-        _result: &AgentToolResult,
+        _result: &crate::extensions::types::AgentToolResult,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
@@ -157,6 +159,9 @@ pub trait Extension: Send + Sync {
     // ── Compaction hooks ─────────────────────────────────────────────
 
     /// Called before context compaction begins.
+    ///
+    /// Use this to save any state that should be preserved through compaction,
+    /// or to log that compaction is starting.
     fn on_before_compaction(
         &self,
         _ctx: &crate::CompactionContext,
@@ -165,6 +170,9 @@ pub trait Extension: Send + Sync {
     }
 
     /// Called after context compaction completes.
+    ///
+    /// The `summary` contains the generated summary of the compacted messages.
+    /// Use this to restore state, update indices, or log compaction results.
     fn on_after_compaction(&self, _summary: &str) -> Result<(), anyhow::Error> {
         Ok(())
     }
@@ -172,6 +180,8 @@ pub trait Extension: Send + Sync {
     // ── Error hook ──────────────────────────────────────────────────
 
     /// Called when an error occurs in the agent.
+    ///
+    /// Use this to log errors, send notifications, or perform recovery actions.
     fn on_error(&self, _error: &anyhow::Error) -> Result<(), anyhow::Error> {
         Ok(())
     }
@@ -179,6 +189,8 @@ pub trait Extension: Send + Sync {
     // ── Session lifecycle hooks ─────────────────────
 
     /// Called before switching to another session.
+    ///
+    /// Return `Err` to cancel the switch.
     fn session_before_switch(
         &self,
         _event: &SessionBeforeSwitchEvent,
@@ -187,11 +199,15 @@ pub trait Extension: Send + Sync {
     }
 
     /// Called before forking a session.
+    ///
+    /// Return `Err` to cancel the fork.
     fn session_before_fork(&self, _event: &SessionBeforeForkEvent) -> Result<(), anyhow::Error> {
         Ok(())
     }
 
     /// Called before context compaction starts (fine-grained variant).
+    ///
+    /// Unlike `on_before_compaction`, this receives the structured event data.
     fn session_before_compact(
         &self,
         _event: &SessionBeforeCompactEvent,
@@ -208,6 +224,8 @@ pub trait Extension: Send + Sync {
     fn session_shutdown(&self, _event: &SessionShutdownEvent) {}
 
     /// Called before navigating in the session tree.
+    ///
+    /// Return `Err` to cancel the navigation.
     fn session_before_tree(
         &self,
         _event: &SessionBeforeTreeEvent,
@@ -262,26 +280,10 @@ pub trait Extension: Send + Sync {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Built-in "noop" extension for testing
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// A minimal extension that does nothing — useful as a template and for tests.
-pub struct NoopExtension;
-
-impl Extension for NoopExtension {
-    fn name(&self) -> &str {
-        "noop"
-    }
-
-    fn description(&self) -> &str {
-        "Built-in no-op extension"
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Test Helpers
-// ═══════════════════════════════════════════════════════════════════════════
+// Internal re-exports for use in this module
+use crate::extensions::types::{
+    AgentEvent, AgentTool, AgentToolResult, SessionCompactEvent,
+};
 
 /// A test extension that records lifecycle hook invocations.
 #[cfg(test)]
@@ -1458,6 +1460,10 @@ mod tests {
 
     #[test]
     fn test_extension_state_serialization() {
+        use serde::{Deserialize, Serialize};
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Wrapper(ExtensionState);
+
         let state = ExtensionState::Active;
         let json = serde_json::to_string(&state).unwrap();
         assert_eq!(json, "\"active\"");

@@ -4,12 +4,25 @@
 //! including permission enums, manifest, error types, event structures,
 //! command definitions, and emit result types.
 
+use anyhow::{bail, Context, Result};
+use libloading::{Library, Symbol};
 use oxi_ai::Message;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fmt;
 use std::path::PathBuf;
+
+// Re-export AgentEvent, AgentTool, AgentToolResult from oxi_agent
+pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+// Re-export common types used across modules
+pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extension Permissions
@@ -554,6 +567,3 @@ impl Command {
 
 /// Callback invoked when an extension error is recorded.
 pub type ExtensionErrorListener = dyn Fn(&ExtensionErrorRecord) + Send + Sync;
-
-// Re-export Extension trait from oxi_agent for type signatures
-pub use oxi_agent::AgentTool;
