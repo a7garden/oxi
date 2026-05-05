@@ -405,7 +405,6 @@ impl Agent {
                                 "Primary model failed: {}",
                                 primary_err.user_friendly()
                             ),
-                            session_id: None,
                         })
                         .await;
 
@@ -431,7 +430,6 @@ impl Agent {
                                 .send(AgentEvent::Error {
                             session_id: None,
                                     message: msg.clone(),
-                                    session_id: None,
                                 })
                                 .await;
                             return Err(Error::msg(msg));
@@ -526,7 +524,6 @@ impl Agent {
                         .send(AgentEvent::Error {
                             session_id: None,
                             message: format!("⚠ {}", friendly),
-                            session_id: None,
                         })
                         .await;
                     return Err(Error::msg(friendly));

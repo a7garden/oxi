@@ -156,7 +156,7 @@ async fn run_single_prompt(
                             AgentEvent::Complete { .. } => {
                                 _stop_reason = Some("complete".to_string());
                             }
-                            AgentEvent::Error { message } => {
+                            AgentEvent::Error { message, .. } => {
                                 had_error = true;
                                 error_message = message.clone();
                                 _stop_reason = Some("error".to_string());
@@ -237,7 +237,7 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
         AgentEvent::Complete { .. } => serde_json::json!({
             "type": "complete"
         }),
-        AgentEvent::Error { message } => serde_json::json!({
+        AgentEvent::Error { message, .. } => serde_json::json!({
             "type": "error",
             "message": message,
         }),
@@ -324,6 +324,7 @@ mod tests {
     fn test_event_to_json_error() {
         let event = AgentEvent::Error {
             message: "Something went wrong".to_string(),
+            session_id: None,
         };
         let json = event_to_json(&event);
         assert_eq!(json["type"], "error");

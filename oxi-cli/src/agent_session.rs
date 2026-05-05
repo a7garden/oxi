@@ -550,11 +550,13 @@ impl AgentSession {
                             Ok(Err(e)) => {
                                 let _ = tx.send(AgentEvent::Error {
                                     message: e.to_string(),
+                                    session_id: None,
                                 });
                             }
                             Err(join_err) => {
                                 let _ = tx.send(AgentEvent::Error {
                                     message: format!("Agent task failed: {}", join_err),
+                                    session_id: None,
                                 });
                             }
                         }
@@ -1066,7 +1068,7 @@ impl AgentSession {
                         let tool_result = oxi_agent::AgentToolResult::success(&result.content);
                         runner.emit_tool_result_event(tool_name, &tool_result);
                     }
-                    AgentEvent::Error { message } => {
+                    AgentEvent::Error { message, .. } => {
                         let err = anyhow::anyhow!("{}", message);
                         runner.registry().emit_error(&err);
                     }
