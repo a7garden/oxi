@@ -187,12 +187,12 @@ impl Agent {
         Ok(())
     }
 
-    /// Get the tool registry
+    /// Get a handle to the tool registry.
     pub fn tools(&self) -> Arc<ToolRegistry> {
         Arc::clone(&self.tools)
     }
 
-    /// Get a clone of the current state
+    /// Get a snapshot of the current agent state.
     pub fn state(&self) -> AgentState {
         self.state.get_state()
     }
@@ -202,7 +202,7 @@ impl Agent {
         self.state.reset();
     }
 
-    /// Add a tool to the agent
+    /// Register a tool that the agent can invoke during a run.
     pub fn add_tool<T: AgentTool + 'static>(&self, tool: T) {
         self.tools.register(tool);
     }
@@ -217,7 +217,10 @@ impl Agent {
         &self.compaction_manager
     }
 
-    /// Run the agent with a prompt, returning events via a channel
+    /// Run the agent with a prompt, collecting all events into a vector.
+    ///
+    /// Convenience wrapper around [`run_with_channel`] that gathers every
+    /// [`AgentEvent`] produced during the run.
     pub async fn run(&self, prompt: String) -> Result<(Response, Vec<AgentEvent>)> {
         let mut events = Vec::new();
         let (tx, mut rx) = mpsc::channel::<AgentEvent>(100);
@@ -228,7 +231,9 @@ impl Agent {
         result.map(|r| (r, events))
     }
 
-    /// Run agent with event channel
+    /// Run the agent, delivering events through the provided channel.
+    ///
+    /// Handles compaction, streaming, tool execution, retries, and fallback.
     pub async fn run_with_channel(
         &self,
         prompt: String,
@@ -602,7 +607,10 @@ impl Agent {
         }
     }
 
-    /// Run agent with streaming callback
+    /// Run the agent, invoking `on_event` for each [`AgentEvent`] produced.
+    ///
+    /// Blocking convenience wrapper suitable for callers that prefer a
+    /// callback-based API over a channel.
     pub async fn run_streaming<F>(&self, prompt: String, mut on_event: F) -> Result<Response>
     where
         F: FnMut(AgentEvent) + Send,
