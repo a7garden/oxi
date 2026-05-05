@@ -18,6 +18,7 @@ pub mod rpc_mode;
 
 // Image processing modules
 pub mod clipboard_image;
+pub mod clipboard_write;
 pub mod image_convert;
 pub mod image_resize;
 pub mod file_processor;

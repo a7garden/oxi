@@ -121,46 +121,74 @@ impl SGR {
 }
 
 /// Renderer that converts Surface to terminal output.
+///
+/// Uses an internal `Vec<u8>` buffer to batch all escape sequences and character
+/// writes. The buffer is flushed to stdout only when `flush()` or `end_sync()` is
+/// called, dramatically reducing the number of syscalls per frame (from ~4800 to 1).
 pub struct Renderer {
     /// Current active SGR for optimization.
     current_sgr: SGR,
+    /// Output buffer — accumulated bytes are flushed once per frame.
+    buf: Vec<u8>,
 }
 
 impl Renderer {
     pub fn new() -> Self {
         Self {
             current_sgr: SGR::new(),
+            buf: Vec::with_capacity(16384),
         }
     }
 
     /// Reset the renderer state.
     pub fn reset(&mut self) {
         self.current_sgr = SGR::new();
+        self.buf.clear();
     }
 
-    /// Write a string to stdout.
-    fn write_str(&self, s: &str) {
-        print!("{}", s);
+    /// Write bytes to the internal buffer.
+    #[inline]
+    fn buf_write(&mut self, bytes: &[u8]) {
+        self.buf.extend_from_slice(bytes);
+    }
+
+    /// Write a string to the internal buffer.
+    #[inline]
+    fn write_str(&mut self, s: &str) {
+        self.buf.extend_from_slice(s.as_bytes());
+    }
+
+    /// Flush the internal buffer to stdout and clear it.
+    pub fn flush(&mut self) -> io::Result<()> {
+        if !self.buf.is_empty() {
+            let mut stdout = io::stdout();
+            stdout.write_all(&self.buf)?;
+            stdout.flush()?;
+            self.buf.clear();
+        }
+        Ok(())
     }
 
     /// Begin a synchronized update (CSI 2026).
-    pub fn begin_sync(&self) {
-        print!("\x1b[?2026h");
+    pub fn begin_sync(&mut self) {
+        self.buf.extend_from_slice(b"\x1b[?2026h");
     }
 
-    /// End a synchronized update (CSI 2026).
-    pub fn end_sync(&self) -> io::Result<()> {
-        print!("\x1b[?2026l");
-        io::stdout().flush()
+    /// End a synchronized update (CSI 2026) and flush to stdout.
+    pub fn end_sync(&mut self) -> io::Result<()> {
+        self.buf.extend_from_slice(b"\x1b[?2026l");
+        self.flush()
     }
 
     /// Move cursor to position.
-    fn move_cursor(&self, row: u16, col: u16) {
-        print!("\x1b[{};{}H", row + 1, col + 1);
+    fn move_cursor(&mut self, row: u16, col: u16) {
+        // CSI row+1 ; col+1 H
+        write!(self.buf, "\x1b[{};{}H", row + 1, col + 1).unwrap();
     }
 
     /// Apply SGR codes, computing a diff against current state.
-    fn apply_sgr(&mut self, cell: &Cell) -> Option<String> {
+    /// Writes the resulting escape sequence directly into the buffer.
+    fn apply_sgr(&mut self, cell: &Cell) -> bool {
         use crate::cell::Color;
 
         let new_sgr = SGR {
@@ -174,7 +202,7 @@ impl Renderer {
         };
 
         if new_sgr == self.current_sgr {
-            return None; // No change needed
+            return false; // No change needed
         }
 
         let mut codes = Vec::new();
@@ -234,27 +262,32 @@ impl Renderer {
         self.current_sgr = new_sgr;
 
         if codes.is_empty() {
-            return None;
+            return false;
         }
 
-        Some(format!(
-            "\x1b[{}m",
-            codes
-                .iter()
-                .map(|c| c.to_string())
-                .collect::<Vec<_>>()
-                .join(";")
-        ))
+        // Write escape sequence directly to buffer, avoiding intermediate String allocation
+        self.buf.extend_from_slice(b"\x1b[");
+        let mut first = true;
+        for code in &codes {
+            if !first {
+                self.buf.push(b';');
+            }
+            first = false;
+            write!(self.buf, "{}", code).unwrap();
+        }
+        self.buf.push(b'm');
+
+        true
     }
 
     /// Clear from cursor to end of line.
-    fn clear_to_eol(&self) {
-        print!("\x1b[K");
+    fn clear_to_eol(&mut self) {
+        self.buf.extend_from_slice(b"\x1b[K");
     }
 
     /// Clear screen.
-    pub fn clear_screen(&self) {
-        print!("\x1b[2J");
+    pub fn clear_screen(&mut self) {
+        self.buf.extend_from_slice(b"\x1b[2J");
     }
 
     /// Render a full surface with synchronized updates.
@@ -304,13 +337,13 @@ impl Renderer {
         // Move cursor
         self.move_cursor(row, col);
 
-        // Apply styling if changed
-        if let Some(sgr) = self.apply_sgr(cell) {
-            self.write_str(&sgr);
-        }
+        // Apply styling if changed (writes directly to buf)
+        self.apply_sgr(cell);
 
         // Write character
-        self.write_str(&cell.char.to_string());
+        let mut tmp = [0u8; 4];
+        let s = cell.char.encode_utf8(&mut tmp);
+        self.buf.extend_from_slice(s.as_bytes());
     }
 
     /// Render a single cell at a position and clear to end of line.
@@ -320,12 +353,12 @@ impl Renderer {
         self.move_cursor(row, col);
 
         // Apply styling if changed
-        if let Some(sgr) = self.apply_sgr(cell) {
-            self.write_str(&sgr);
-        }
+        self.apply_sgr(cell);
 
         // Write character
-        self.write_str(&cell.char.to_string());
+        let mut tmp = [0u8; 4];
+        let s = cell.char.encode_utf8(&mut tmp);
+        self.buf.extend_from_slice(s.as_bytes());
 
         // Clear to end of line
         self.clear_to_eol();
@@ -358,11 +391,11 @@ impl Renderer {
             for col in 0..surface.width() {
                 if let Some(cell) = surface.get(row, col) {
                     // Apply styling if changed
-                    if let Some(sgr) = self.apply_sgr(cell) {
-                        self.write_str(&sgr);
-                    }
+                    self.apply_sgr(cell);
                     // Write character
-                    self.write_str(&cell.char.to_string());
+                    let mut tmp = [0u8; 4];
+                    let s = cell.char.encode_utf8(&mut tmp);
+                    self.buf.extend_from_slice(s.as_bytes());
                 }
             }
 

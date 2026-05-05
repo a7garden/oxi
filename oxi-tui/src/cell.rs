@@ -107,6 +107,26 @@ impl Cell {
         self.with_attrs(attrs)
     }
 
+    /// Get the display width of this cell's character.
+    pub fn width(&self) -> usize {
+        unicode_width::unicode_width(self.char).unwrap_or(0)
+    }
+
+    /// Create a wide-character continuation cell (placeholder for 2nd column of a wide char).
+    pub fn wide_continuation() -> Self {
+        Self {
+            char: '\u{0}',
+            fg: Color::Default,
+            bg: Color::Default,
+            attrs: Attributes::new(),
+        }
+    }
+
+    /// Check if this cell is a wide-char continuation.
+    pub fn is_wide_continuation(&self) -> bool {
+        self.char == '\u{0}'
+    }
+
     /// Reset cell to empty with default colors.
     pub fn reset(&mut self) {
         self.char = ' ';

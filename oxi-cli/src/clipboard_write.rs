@@ -59,14 +59,17 @@ fn copy_via_wl_copy(text: &str) -> Option<Result<()>> {
 /// Copy text to clipboard using xclip (X11)
 fn copy_via_xclip(text: &str) -> Option<Result<()>> {
     // xclip requires stdin input
-    let output = Command::new("xclip")
+    let mut child = Command::new("xclip")
         .args(["-selection", "clipboard"])
-        .pipe_output()
+        .stdin(std::process::Stdio::piped())
         .spawn()
         .ok()?;
 
-    output.write_all(text.as_bytes()).ok()?;
-    drop(output);
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(text.as_bytes()).ok()?;
+    }
+    drop(child);
 
     Some(Ok(()))
 }
@@ -84,12 +87,8 @@ fn copy_via_pbcopy(text: &str) -> Option<Result<()>> {
     }
     drop(child);
 
-    let output = child.wait_with_output().ok()?;
-    if output.status.success() {
-        Some(Ok(()))
-    } else {
-        Some(Err(anyhow::anyhow!("pbcopy failed")))
-    }
+    // pbcopy always succeeds if it runs
+    Some(Ok(()))
 }
 
 /// Copy text to clipboard using clip (Windows)

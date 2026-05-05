@@ -10,6 +10,7 @@ pub mod event;
 pub mod fuzzy;
 pub mod keybindings;
 pub mod keys;
+pub mod layout;
 pub mod kill_ring;
 pub mod overlay;
 pub mod renderer;
@@ -39,6 +40,7 @@ pub use event::{
 };
 pub use fuzzy::{fuzzy_match, fuzzy_rank, FuzzyResult};
 pub use kill_ring::KillRing;
+pub use layout::{split, Constraint, Container as LayoutContainer, Direction};
 pub use overlay::{OverlayBox, OverlayContent, OverlayHandle, OverlayOptions};
 pub use renderer::Renderer;
 pub use stdin_buffer::{BufferingMode, StdinBuffer, StdinBufferEvent, StdinBufferOptions};
