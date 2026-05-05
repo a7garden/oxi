@@ -491,7 +491,7 @@ impl<'a> InteractiveLoop<'a> {
                     self.session.finish_response();
                     self.session.thinking = false;
                 }
-                AgentEvent::Error { message } => {
+                AgentEvent::Error { message, .. } => {
                     self.session
                         .append_to_response(&format!("[Error: {}]", message));
                     self.session.finish_response();

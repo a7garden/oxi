@@ -1501,7 +1501,7 @@ mod tests {
 
     #[test]
     fn test_agent_end_event_type() {
-        let event = AgentEvent::AgentEnd { messages: vec![], stop_reason: None };
+        let event = AgentEvent::AgentEnd { messages: vec![], stop_reason: None, session_id: None };
         assert_eq!(event.type_name(), "agent_end");
         assert!(event.is_terminal());
     }

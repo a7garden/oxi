@@ -58,6 +58,16 @@ Complete
 - Fixed broken function signatures in agent_loop.rs (continue_loop, run_loop) caused by prior edits
 - Note: 4 remaining compile errors in agent.rs (missing `session_id` field) are from another agent's changes
 
+### Fix 16: Wire session_id into telemetry — ✅ Done
+- Added `session_id: Option<String>` field to `AgentStart`, `AgentEnd`, `Error`, and `Retry` variants of `AgentEvent`
+- `AgentLoop` now passes `self.session_id` into all emitted events (lifecycle, error, retry)
+- Added `tracing::info!` spans at session start/end with `session_id` field
+- Added `tracing::error!` for provider stream errors and circuit breaker trips with `session_id`
+- Added `tracing::warn!` for retry attempts with `session_id`
+- Fixed duplicate `session_id: None` fields in `agent.rs` (3 instances) from prior commit
+- Removed `#[allow(dead_code)]` and TODO comment from `session_id` field in AgentLoop
+- `cargo check -p oxi-agent --tests` passes clean
+
 ### Fix key/model/pkg/tpl: Failing test fixes — ✅ Done
 - Fixed 6 tests (race conditions, parsing bugs, assertions)
 

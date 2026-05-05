@@ -384,7 +384,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                     is_error: true,
                                 },
                                 AgentEvent::Complete { .. } => UiEvent::Complete,
-                                AgentEvent::Error { message } => UiEvent::Error(message),
+                                AgentEvent::Error { message, .. } => UiEvent::Error(message),
                                 _ => continue,
                             };
                             if ui_fwd.send(ui_event).await.is_err() {
