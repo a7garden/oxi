@@ -1,15 +1,15 @@
-//! Subagent tool — delegate tasks to specialized agents
+/// Subagent tool — delegate tasks to specialized agents
 //!
-//! Spawns a separate `oxi --mode json` process for each invocation,
-//! giving it an isolated context window.
+/// Spawns a separate `oxi --mode json` process for each invocation,
+/// giving it an isolated context window.
 //!
-//! Supports three modes:
-//!   - Single: { agent: "name", task: "..." }
-//!   - Parallel: { tasks: [{ agent, task }, ...] }
-//!   - Chain: { chain: [{ agent, task: "... {previous} ..." }, ...] }
+/// Supports three modes:
+///   - Single: { agent: "name", task: "..." }
+///   - Parallel: { tasks: [{ agent, task }, ...] }
+///   - Chain: { chain: [{ agent, task: "... {previous} ..." }, ...] }
 //!
-//! Agent definitions are markdown files with YAML frontmatter,
-//! discovered from `~/.oxi/agents/` (user) and `.oxi/agents/` (project).
+/// Agent definitions are markdown files with YAML frontmatter,
+/// discovered from `~/.oxi/agents/` (user) and `.oxi/agents/` (project).
 
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
 use async_trait::async_trait;

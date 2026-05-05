@@ -1,6 +1,6 @@
-//! Tool definition wrapping utilities
+/// Tool definition wrapping utilities
 //!
-//! Provides adapters for converting between tool representations.
+/// Provides adapters for converting between tool representations.
 
 use crate::tools::{AgentTool, AgentToolResult, ToolError};
 use crate::types::ToolDefinition;

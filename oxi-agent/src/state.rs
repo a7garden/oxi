@@ -1,4 +1,4 @@
-//! Agent state management
+/// Agent state management
 
 use crate::types::{StopReason, ToolResult};
 use oxi_ai::{ContentBlock, Message, TextContent};

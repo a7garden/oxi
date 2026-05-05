@@ -1,4 +1,4 @@
-//! Retry logic for agent loop
+/// Retry logic for agent loop
 
 use crate::{AgentError, AgentToolResult, AgentEvent};
 use anyhow::{Error, Result};

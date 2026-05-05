@@ -1,6 +1,6 @@
-//! Context builder utilities
+/// Context builder utilities
 //!
-//! Builds a Context from agent state for provider calls.
+/// Builds a Context from agent state for provider calls.
 
 use crate::state::AgentState;
 use crate::tools::ToolRegistry;

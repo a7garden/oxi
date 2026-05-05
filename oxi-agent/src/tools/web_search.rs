@@ -1,10 +1,10 @@
-//! Web search tool - search the web using DuckDuckGo HTML API
+/// Web search tool - search the web using DuckDuckGo HTML API
 //!
-//! Features:
-//! - DuckDuckGo HTML search (no API key required)
-//! - Configurable result count
-//! - Title, URL, and snippet extraction
-//! - Region/language support
+/// Features:
+/// - DuckDuckGo HTML search (no API key required)
+/// - Configurable result count
+/// - Title, URL, and snippet extraction
+/// - Region/language support
 
 use super::{AgentTool, AgentToolResult, ToolError};
 use async_trait::async_trait;

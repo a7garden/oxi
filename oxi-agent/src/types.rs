@@ -1,4 +1,4 @@
-//! Core types for oxi-agent
+/// Core types for oxi-agent
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

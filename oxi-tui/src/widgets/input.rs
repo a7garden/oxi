@@ -278,17 +278,17 @@ mod tests {
         assert_eq!(state.text, "ab");
         state.insert_char('한');
         assert_eq!(state.text, "ab한");
-        assert_eq!(state.cursor, 4); // 2 + 1 + 1 (chars)
+        assert_eq!(state.cursor, 3); // a + b + 한 = 3 chars
     }
 
     #[test]
     fn input_state_backspace() {
         let mut state = InputState::default();
         state.text = "ab한".to_string();
-        state.cursor = 4;
+        state.cursor = 3;
         state.backspace();
         assert_eq!(state.text, "ab");
-        assert_eq!(state.cursor, 3);
+        assert_eq!(state.cursor, 2);
     }
 
     #[test]

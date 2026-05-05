@@ -1,12 +1,12 @@
-//! Write file tool
+/// Write file tool
 //!
-//! Supports:
-//! - Creating parent directories if they don't exist
-//! - Append mode (append=true)
-//! - Line count reporting
-//! - Diff-style output preview (first/last few lines for large files)
-//! - File mutation queue for serialized writes (concurrent safety)
-//! - Output truncation for very large content
+/// Supports:
+/// - Creating parent directories if they don't exist
+/// - Append mode (append=true)
+/// - Line count reporting
+/// - Diff-style output preview (first/last few lines for large files)
+/// - File mutation queue for serialized writes (concurrent safety)
+/// - Output truncation for very large content
 
 use super::file_mutation_queue::global_mutation_queue;
 use super::truncate::{self, TruncationOptions};

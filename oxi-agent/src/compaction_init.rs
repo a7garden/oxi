@@ -1,4 +1,4 @@
-//! Compaction initialization utilities
+/// Compaction initialization utilities
 
 use crate::{CompactionManager, CompactionStrategy};
 use crate::model_id::resolve_model_from_id;

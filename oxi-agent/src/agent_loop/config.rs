@@ -1,4 +1,4 @@
-//! Agent loop configuration types
+/// Agent loop configuration types
 
 /// Default max auto-retry attempts (for errors detected in assistant
 /// messages, not provider-level errors).

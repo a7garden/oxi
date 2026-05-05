@@ -19,6 +19,7 @@ mod transform;
 mod types;
 pub mod utils;
 
+/// Standard imports for oxi-ai usage.
 pub mod prelude {
     pub use crate::compaction::{
         CompactedContext, CompactionManager, CompactionStrategy, Compactor, LlmCompactor,

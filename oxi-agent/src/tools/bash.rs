@@ -1,13 +1,13 @@
-//! Bash tool - execute shell commands
+/// Bash tool - execute shell commands
 //!
-//! Features:
-//! - Timeout support with process group kill
-//! - Working directory (cwd) parameter
-//! - Environment variables support
-//! - Duration timing reporting
-//! - Output truncation (2000 lines / 50KB defaults via truncate module)
-//! - Separate stdout/stderr capture combined at end
-//! - Process tree kill on abort/cancel via signal
+/// Features:
+/// - Timeout support with process group kill
+/// - Working directory (cwd) parameter
+/// - Environment variables support
+/// - Duration timing reporting
+/// - Output truncation (2000 lines / 50KB defaults via truncate module)
+/// - Separate stdout/stderr capture combined at end
+/// - Process tree kill on abort/cancel via signal
 
 use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};

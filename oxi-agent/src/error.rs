@@ -1,4 +1,4 @@
-//! Error types for oxi-agent
+/// Error types for oxi-agent
 
 /// Agent-specific errors
 #[derive(Debug, thiserror::Error)]

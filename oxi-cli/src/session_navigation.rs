@@ -573,6 +573,7 @@ impl SessionNavigator {
         let (new_leaf_id, editor_text) = Self::determine_leaf_and_editor(target_entry);
 
         // Switch leaf (with or without summary)
+        let has_summary = summary_text.is_some();
         let summary_entry_id = if let Some(text) = summary_text {
             // Create summary at target position (can be null for root)
             let summary_id = self.branch_with_summary(new_leaf_id, text, summary_details, from_extension);
@@ -599,7 +600,6 @@ impl SessionNavigator {
 
         // Attach label to target entry when not summarizing
         let has_label = label.is_some();
-        let has_summary = summary_text.is_some();
         if has_label && !has_summary {
             self.append_label_change(target_id, label);
         }

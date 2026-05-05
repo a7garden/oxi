@@ -1,4 +1,4 @@
-//! Agent loop implementation
+/// Agent loop implementation
 
 pub mod config;
 pub mod tool_exec;

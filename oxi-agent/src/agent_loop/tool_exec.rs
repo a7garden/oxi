@@ -1,4 +1,4 @@
-//! Tool execution logic for agent loop
+/// Tool execution logic for agent loop
 
 use crate::{AgentToolResult, AgentEvent};
 use crate::tools::AgentTool;

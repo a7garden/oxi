@@ -1,12 +1,12 @@
-//! Error recovery and circuit breaker for the agent runtime.
+/// Error recovery and circuit breaker for the agent runtime.
 //!
-//! Provides:
-//! - **Circuit breaker**: Tracks consecutive failures and opens the circuit
-//!   after a threshold, preventing further requests during a cooldown period.
-//! - **Partial response recovery**: When a stream fails mid-response, the
-//!   accumulated text is preserved and delivered as a partial result.
-//! - **Graceful degradation**: When the primary model fails, falls back
-//!   through a configured chain of models.
+/// Provides:
+/// - **Circuit breaker**: Tracks consecutive failures and opens the circuit
+///   after a threshold, preventing further requests during a cooldown period.
+/// - **Partial response recovery**: When a stream fails mid-response, the
+///   accumulated text is preserved and delivered as a partial result.
+/// - **Graceful degradation**: When the primary model fails, falls back
+///   through a configured chain of models.
 
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::time::{Duration, Instant};

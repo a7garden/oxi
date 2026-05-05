@@ -16,6 +16,7 @@ pub type ExtensionToolArc = Arc<ExtensionTool>;
 // Extension Context
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// pub.
 pub struct ExtensionContext {
     pub cwd: PathBuf,
     settings: Arc<RwLock<Settings>>,
@@ -65,21 +66,29 @@ impl ExtensionContext {
         }
     }
 
+/// TODO: document.
     pub fn settings(&self) -> Settings { self.settings.read().clone() }
+/// TODO: document.
     pub fn is_idle(&self) -> bool { *self.idle.read() }
 
+/// TODO: document.
     pub fn register_tool(&self, tool: ExtensionToolArc) { (self.tool_registrar)(tool); }
+/// TODO: document.
     pub fn send_message(&self, text: &str) { (self.message_sender)(text); }
 
+/// TODO: document.
     pub fn record_error(&self, extension_name: &str, event: &str, error: &str) {
         let record = ExtensionErrorRecord::new(extension_name, event, error);
         tracing::warn!(extension = extension_name, event = event, error = error, "Extension error recorded");
         self.errors.write().push(record);
     }
 
+/// TODO: document.
     pub fn errors(&self) -> Vec<ExtensionErrorRecord> { self.errors.read().clone() }
+/// TODO: document.
     pub fn clear_errors(&self) { self.errors.write().clear(); }
 
+/// TODO: document.
     pub fn config_get(&self, path: &str) -> Option<Value> {
         let mut current = &self.config;
         for key in path.split('.') {
@@ -88,18 +97,27 @@ impl ExtensionContext {
         Some(current.clone())
     }
 
+/// TODO: document.
     pub fn read_file(&self, relative_path: &Path) -> Result<String> {
         let full_path = self.cwd.join(relative_path);
         std::fs::read_to_string(&full_path).with_context(|| format!("Failed to read file: {}", full_path.display()))
     }
 
+/// TODO: document.
     pub fn get_tools(&self) -> Vec<ExtensionToolArc> { (self.tool_getter)() }
+/// TODO: document.
     pub fn set_tools(&self, tools: Vec<ExtensionToolArc>) { (self.tool_setter)(tools); }
+/// TODO: document.
     pub fn set_model(&self, model: &str) { (self.model_setter)(model); }
+/// TODO: document.
     pub fn set_thinking_level(&self, level: &str) { (self.thinking_level_setter)(level); }
+/// TODO: document.
     pub fn append_system_prompt(&self, text: &str) { (self.system_prompt_appender)(text); }
+/// TODO: document.
     pub fn set_session_name(&self, name: &str) { (self.session_name_setter)(name); }
+/// TODO: document.
     pub fn get_session_entries(&self) -> Vec<Value> { (self.session_entries_getter)() }
+/// TODO: document.
     pub fn fork_session(&self, entry_id: &str) -> Result<String> { (self.session_fork)(entry_id) }
 }
 
@@ -107,6 +125,7 @@ impl ExtensionContext {
 // Extension Context Builder
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// pub.
 pub struct ExtensionContextBuilder {
     cwd: PathBuf,
     settings: Option<Arc<RwLock<Settings>>>,
@@ -138,22 +157,38 @@ impl ExtensionContextBuilder {
         }
     }
 
+/// TODO: document.
     pub fn settings(mut self, settings: Arc<RwLock<Settings>>) -> Self { self.settings = Some(settings); self }
+/// TODO: document.
     pub fn config(mut self, config: Value) -> Self { self.config = config; self }
+/// TODO: document.
     pub fn session_id(mut self, id: impl Into<String>) -> Self { self.session_id = Some(id.into()); self }
+/// TODO: document.
     pub fn idle(mut self, idle: Arc<RwLock<bool>>) -> Self { self.idle = idle; self }
+/// TODO: document.
     pub fn tool_registrar(mut self, registrar: Arc<dyn Fn(ExtensionToolArc) + Send + Sync>) -> Self { self.tool_registrar = Some(registrar); self }
+/// TODO: document.
     pub fn message_sender(mut self, sender: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.message_sender = Some(sender); self }
+/// TODO: document.
     pub fn errors(mut self, errors: Arc<RwLock<Vec<ExtensionErrorRecord>>>) -> Self { self.errors = Some(errors); self }
+/// TODO: document.
     pub fn tool_getter(mut self, getter: Arc<dyn Fn() -> Vec<ExtensionToolArc> + Send + Sync>) -> Self { self.tool_getter = Some(getter); self }
+/// TODO: document.
     pub fn tool_setter(mut self, setter: Arc<dyn Fn(Vec<ExtensionToolArc>) + Send + Sync>) -> Self { self.tool_setter = Some(setter); self }
+/// TODO: document.
     pub fn model_setter(mut self, setter: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.model_setter = Some(setter); self }
+/// TODO: document.
     pub fn thinking_level_setter(mut self, setter: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.thinking_level_setter = Some(setter); self }
+/// TODO: document.
     pub fn system_prompt_appender(mut self, appender: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.system_prompt_appender = Some(appender); self }
+/// TODO: document.
     pub fn session_name_setter(mut self, setter: Arc<dyn Fn(&str) + Send + Sync>) -> Self { self.session_name_setter = Some(setter); self }
+/// TODO: document.
     pub fn session_entries_getter(mut self, getter: Arc<dyn Fn() -> Vec<Value> + Send + Sync>) -> Self { self.session_entries_getter = Some(getter); self }
+/// TODO: document.
     pub fn session_fork(mut self, fork: Arc<dyn Fn(&str) -> Result<String> + Send + Sync>) -> Self { self.session_fork = Some(fork); self }
 
+/// TODO: document.
     pub fn build(self) -> ExtensionContext {
         ExtensionContext {
             cwd: self.cwd,
