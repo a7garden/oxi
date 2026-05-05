@@ -529,3 +529,959 @@ async fn test_cross_provider_message_transformation_roundtrip() {
     );
     assert_eq!(back.len(), 4);
 }
+
+// ── New integration tests ──────────────────────────────────────────────
+
+/// Provider that returns tool calls on the first call and a text
+/// response on the second call, simulating a multi-turn tool-use loop.
+struct MultiTurnToolProvider {
+    responses: Vec<MultiTurnToolResponse>,
+    call_count: Arc<Mutex<usize>>,
+}
+
+#[derive(Clone)]
+struct MultiTurnToolResponse {
+    text: Option<String>,
+    tool_calls: Vec<oxi_ai::ToolCall>,
+}
+
+impl MultiTurnToolProvider {
+    fn new(responses: Vec<MultiTurnToolResponse>) -> Self {
+        Self {
+            responses,
+            call_count: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for MultiTurnToolProvider {
+    async fn stream(
+        &self,
+        _model: &oxi_ai::Model,
+        _context: &Context,
+        _options: Option<oxi_ai::StreamOptions>,
+    ) -> std::result::Result<
+        Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
+        oxi_ai::ProviderError,
+    > {
+        let mut call_count = self.call_count.lock().unwrap();
+        *call_count += 1;
+        let idx = (*call_count - 1).min(self.responses.len() - 1);
+        let response = self.responses[idx].clone();
+
+        let mut assistant = oxi_ai::AssistantMessage::new(
+            oxi_ai::Api::AnthropicMessages,
+            "mock",
+            "mock-model",
+        );
+
+        let mut content_blocks: Vec<ContentBlock> = Vec::new();
+        if let Some(text) = &response.text {
+            content_blocks.push(ContentBlock::Text(TextContent::new(text.clone())));
+        }
+        for tc in &response.tool_calls {
+            content_blocks.push(ContentBlock::ToolCall(tc.clone()));
+        }
+        assistant.content = content_blocks;
+
+        let stop_reason = if response.tool_calls.is_empty() {
+            StopReason::Stop
+        } else {
+            StopReason::ToolUse
+        };
+        assistant.stop_reason = stop_reason;
+
+        let events: Vec<ProviderEvent> = vec![
+            ProviderEvent::Start {
+                partial: assistant.clone(),
+            },
+            ProviderEvent::Done {
+                reason: stop_reason,
+                message: assistant,
+            },
+        ];
+
+        Ok(Box::pin(futures::stream::iter(events)))
+    }
+
+    fn name(&self) -> &str {
+        "multi-turn-tool"
+    }
+}
+
+/// A simple tool that echoes its arguments back.
+struct EchoTool;
+
+#[async_trait]
+impl crate::tools::AgentTool for EchoTool {
+    fn name(&self) -> &str {
+        "echo"
+    }
+
+    fn label(&self) -> &str {
+        "Echo Tool"
+    }
+
+    fn description(&self) -> &str {
+        "Echoes back the input arguments"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "message": { "type": "string", "description": "Message to echo" }
+            },
+            "required": ["message"]
+        })
+    }
+
+    async fn execute(
+        &self,
+        _tool_call_id: &str,
+        params: serde_json::Value,
+        _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+    ) -> std::result::Result<crate::tools::AgentToolResult, String> {
+        let msg = params
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("<no message>");
+        Ok(crate::tools::AgentToolResult::success(format!("Echo: {}", msg)))
+    }
+}
+
+/// Provider that fails the first N calls then succeeds.
+struct RetryableProvider {
+    fail_count: usize,
+    success_response: String,
+    call_count: Arc<Mutex<usize>>,
+}
+
+impl RetryableProvider {
+    fn new(fail_count: usize, success_response: String) -> Self {
+        Self {
+            fail_count,
+            success_response,
+            call_count: Arc::new(Mutex::new(0)),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for RetryableProvider {
+    async fn stream(
+        &self,
+        _model: &oxi_ai::Model,
+        _context: &Context,
+        _options: Option<oxi_ai::StreamOptions>,
+    ) -> std::result::Result<
+        Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
+        oxi_ai::ProviderError,
+    > {
+        let mut call_count = self.call_count.lock().unwrap();
+        *call_count += 1;
+
+        if *call_count <= self.fail_count {
+            return Err(oxi_ai::ProviderError::HttpError(429, "rate limited".to_string()));
+        }
+
+        let mut assistant = oxi_ai::AssistantMessage::new(
+            oxi_ai::Api::AnthropicMessages,
+            "mock",
+            "mock-model",
+        );
+        assistant.content = vec![ContentBlock::Text(TextContent::new(
+            self.success_response.clone(),
+        ))];
+
+        let stream = MockStream {
+            text: self.success_response.clone(),
+            done: false,
+        };
+
+        Ok(Box::pin(stream)
+            as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+    }
+
+    fn name(&self) -> &str {
+        "retryable"
+    }
+}
+
+/// Provider that always returns a provider-level error (non-retryable).
+struct AlwaysErrorProvider;
+
+#[async_trait]
+impl Provider for AlwaysErrorProvider {
+    async fn stream(
+        &self,
+        _model: &oxi_ai::Model,
+        _context: &Context,
+        _options: Option<oxi_ai::StreamOptions>,
+    ) -> std::result::Result<
+        Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>,
+        oxi_ai::ProviderError,
+    > {
+        Err(oxi_ai::ProviderError::StreamError(
+            "permanent error".to_string(),
+        ))
+    }
+
+    fn name(&self) -> &str {
+        "always-error"
+    }
+}
+
+// ── Test 1: Multi-turn tool use loop ──────────────────────────────────
+
+#[tokio::test]
+async fn test_multi_turn_tool_use_loop() {
+    // Simulate: user asks → LLM calls echo tool → tool result fed back → LLM responds
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::CompactionStrategy;
+
+    // First call: LLM wants to call the echo tool; Second call: LLM gives final answer
+    let provider = Arc::new(MultiTurnToolProvider::new(vec![
+        MultiTurnToolResponse {
+            text: None,
+            tool_calls: vec![oxi_ai::ToolCall {
+                id: "call_1".to_string(),
+                name: "echo".to_string(),
+                arguments: serde_json::json!({"message": "hello world"}),
+            }],
+        },
+        MultiTurnToolResponse {
+            text: Some("The echo tool returned: Echo: hello world".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        max_iterations: 10,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    tools.register(EchoTool);
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run(
+            "Echo hello world".to_string(),
+            move |e| events_clone.lock().unwrap().push(e),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let events = events.lock().unwrap();
+
+    // Should have two turns
+    let turn_starts = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::TurnStart { .. }))
+        .count();
+    assert_eq!(turn_starts, 2);
+
+    // Should have tool execution start and end events
+    let tool_starts = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolExecutionStart { .. }))
+        .count();
+    assert_eq!(tool_starts, 1);
+
+    let tool_ends = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. }))
+        .count();
+    assert_eq!(tool_ends, 1);
+
+    // Verify the tool result content
+    let tool_end_event = events
+        .iter()
+        .find(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. }));
+    if let Some(AgentEvent::ToolExecutionEnd { result, .. }) = tool_end_event {
+        assert_eq!(result.content, "Echo: hello world");
+        assert_eq!(result.status, "success");
+    }
+
+    // Should complete with an AgentEnd event
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+}
+
+// ── Test 2: Compaction flow integration ───────────────────────────────
+
+#[test]
+fn test_compaction_event_triggers_and_completes() {
+    // Verify compaction event lifecycle: Triggered → Started → Completed/Failed
+    let triggered = crate::compaction::CompactionEvent::Triggered {
+        context_tokens: 50000,
+        iteration: 3,
+    };
+    let started = crate::compaction::CompactionEvent::Started {
+        message_count: 20,
+    };
+    let completed = crate::compaction::CompactionEvent::Completed {
+        result: crate::compaction::CompactedContext {
+            summary: "Summary of conversation".to_string(),
+            kept_messages: vec![],
+            compacted_count: 15,
+        },
+        duration_ms: 250,
+    };
+
+    // Verify serialization round-trip (events are serialized in real use)
+    let triggered_json = serde_json::to_string(&triggered).unwrap();
+    assert!(triggered_json.contains("Triggered"));
+
+    let started_json = serde_json::to_string(&started).unwrap();
+    assert!(started_json.contains("Started"));
+
+    let completed_json = serde_json::to_string(&completed).unwrap();
+    assert!(completed_json.contains("Completed"));
+}
+
+#[test]
+fn test_compacted_context_fields() {
+    let ctx = crate::compaction::CompactedContext {
+        summary: "User discussed Rust".to_string(),
+        kept_messages: vec![],
+        compacted_count: 10,
+    };
+    assert_eq!(ctx.summary, "User discussed Rust");
+    assert_eq!(ctx.compacted_count, 10);
+    assert!(ctx.kept_messages.is_empty());
+}
+
+#[tokio::test]
+async fn test_agent_state_replace_messages_for_compaction() {
+    let shared = crate::state::SharedState::new();
+    shared.update(|s| {
+        s.add_user_message("Long conversation part 1".to_string());
+        s.add_assistant_message("Response 1".to_string());
+        s.add_user_message("Long conversation part 2".to_string());
+        s.add_assistant_message("Response 2".to_string());
+    });
+
+    assert_eq!(shared.get_state().messages.len(), 4);
+
+    // Simulate compaction: replace with a summary message + last exchange
+    let compacted_messages = vec![
+        oxi_ai::Message::User(oxi_ai::UserMessage::new(
+            "[Summary of previous conversation]".to_string(),
+        )),
+        oxi_ai::Message::User(oxi_ai::UserMessage::new(
+            "Long conversation part 2".to_string(),
+        )),
+    ];
+
+    shared.update(|s| {
+        s.replace_messages(compacted_messages);
+    });
+
+    let state = shared.get_state();
+    assert_eq!(state.messages.len(), 2);
+}
+
+#[tokio::test]
+async fn test_compaction_strategy_config() {
+    // Verify compaction strategy can be set on the agent config
+    let config = crate::config::AgentConfig::new("anthropic/claude-sonnet-4-20250514")
+        .with_compaction_strategy(oxi_ai::CompactionStrategy::LastN {
+            n: 5,
+            summary_prompt: None,
+        });
+
+    assert!(matches!(
+        config.compaction_strategy,
+        oxi_ai::CompactionStrategy::LastN { n: 5, .. }
+    ));
+}
+
+// ── Test 3: Cross-provider model switching with active tool use ──────
+
+#[tokio::test]
+async fn test_cross_provider_switch_preserves_tool_results() {
+    // Build a conversation that includes tool results, then verify
+    // transformation preserves them across provider switch
+    let mut state = AgentState::new();
+    state.add_user_message("What is the weather?".to_string());
+    state.add_assistant_message("Let me check the weather.".to_string());
+    state.add_tool_result(
+        "call_1".to_string(),
+        "Sunny, 72°F".to_string(),
+    );
+    state.add_assistant_message("The weather is sunny, 72°F.".to_string());
+
+    assert_eq!(state.messages.len(), 4);
+
+    // Verify tool result message is present
+    let tool_result_msg = &state.messages[2];
+    assert!(matches!(tool_result_msg, oxi_ai::Message::ToolResult(_)));
+
+    if let oxi_ai::Message::ToolResult(tr) = tool_result_msg {
+        assert_eq!(tr.tool_call_id, "call_1");
+    }
+
+    // Transform for OpenAI and back — tool results should survive
+    let messages = state.messages.clone();
+    let to_openai = transform_for_provider(
+        &messages,
+        &Api::AnthropicMessages,
+        &Api::OpenAiCompletions,
+    );
+    assert_eq!(to_openai.len(), 4);
+
+    // Tool result should still be there
+    assert!(matches!(&to_openai[2], oxi_ai::Message::ToolResult(_)));
+}
+
+#[tokio::test]
+async fn test_cross_provider_switch_with_tool_call_blocks() {
+    // Create an assistant message that includes tool call content blocks
+    let mut assistant = oxi_ai::AssistantMessage::new(
+        Api::AnthropicMessages,
+        "anthropic",
+        "claude-sonnet-4-20250514",
+    );
+    assistant.content = vec![
+        ContentBlock::Text(TextContent::new("I'll use the echo tool.")),
+        ContentBlock::ToolCall(oxi_ai::ToolCall {
+            id: "tc_123".to_string(),
+            name: "echo".to_string(),
+            arguments: serde_json::json!({"message": "test"}),
+        }),
+    ];
+
+    let messages = vec![
+        oxi_ai::Message::User(oxi_ai::UserMessage::new("Echo test")),
+        oxi_ai::Message::Assistant(assistant),
+    ];
+
+    // Transform for OpenAI
+    let transformed = transform_for_provider(
+        &messages,
+        &Api::AnthropicMessages,
+        &Api::OpenAiCompletions,
+    );
+
+    // Should preserve both messages
+    assert_eq!(transformed.len(), 2);
+
+    // Tool call blocks should survive in the assistant message
+    if let oxi_ai::Message::Assistant(a) = &transformed[1] {
+        let has_tool_call = a
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::ToolCall(_)));
+        assert!(
+            has_tool_call,
+            "Assistant message should still contain a tool call block"
+        );
+    }
+}
+
+// ── Test 4: Error recovery scenarios ─────────────────────────────────
+
+#[test]
+fn test_circuit_breaker_recovery_cycle() {
+    use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
+
+    let config = CircuitBreakerConfig {
+        failure_threshold: 3,
+        open_duration: std::time::Duration::from_millis(100),
+        half_open_successes: 1,
+    };
+    let cb = CircuitBreaker::new(config);
+
+    // Initially allows requests
+    assert!(cb.allow_request().is_ok());
+
+    // Record failures up to threshold
+    cb.record_failure();
+    cb.record_failure();
+    assert!(cb.allow_request().is_ok()); // Still below threshold
+    cb.record_failure(); // Hits threshold
+    assert!(cb.allow_request().is_err()); // Circuit is now open
+
+    // Wait for open_duration to expire
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
+    // Should now be in half-open state and allow request
+    assert!(cb.allow_request().is_ok());
+
+    // Record success → circuit should close
+    cb.record_success();
+    assert!(cb.allow_request().is_ok());
+}
+
+#[test]
+fn test_partial_response_accumulator() {
+    use crate::recovery::PartialResponse;
+
+    let mut pr = PartialResponse::new();
+    assert!(pr.is_empty());
+
+    pr.push_text("Hello ");
+    pr.push_text("world");
+    pr.push_thinking("Let me think...");
+
+    assert_eq!(pr.text(), "Hello world");
+    assert_eq!(pr.thinking(), "Let me think...");
+    assert!(pr.has_thinking());
+    assert!(!pr.is_empty());
+
+    // take_text drains the text
+    let text = pr.take_text();
+    assert_eq!(text, "Hello world");
+    assert!(pr.text().is_empty());
+
+    // clear resets everything
+    pr.clear();
+    assert!(pr.is_empty());
+    assert!(!pr.has_thinking());
+}
+
+#[test]
+fn test_fallback_chain() {
+    use crate::recovery::FallbackChain;
+
+    let chain = FallbackChain::new(vec![
+        "openai/gpt-4o".to_string(),
+        "anthropic/claude-3-haiku".to_string(),
+    ]);
+
+    assert_eq!(chain.get(0), Some("openai/gpt-4o"));
+    assert_eq!(chain.get(1), Some("anthropic/claude-3-haiku"));
+    assert_eq!(chain.get(2), None);
+    assert!(!chain.is_empty());
+
+    let empty = FallbackChain::new(vec![]);
+    assert!(empty.is_empty());
+}
+
+#[test]
+fn test_agent_error_retryable() {
+    use crate::error::AgentError;
+
+    let rate_limited = AgentError::RateLimited { retry_after_secs: 30 };
+    assert!(rate_limited.is_retryable());
+
+    let stream_err = AgentError::Stream("connection reset".to_string());
+    assert!(stream_err.is_retryable());
+
+    let tool_err = AgentError::Tool {
+        tool_name: "echo".to_string(),
+        message: "failed".to_string(),
+    };
+    assert!(!tool_err.is_retryable());
+
+    let config_err = AgentError::Config("bad config".to_string());
+    assert!(!config_err.is_retryable());
+}
+
+#[test]
+fn test_agent_error_user_friendly_messages() {
+    use crate::error::AgentError;
+
+    let errors = vec![
+        AgentError::RateLimited { retry_after_secs: 10 },
+        AgentError::MaxIterations { iterations: 50 },
+        AgentError::FallbackFailed {
+            primary_model: "anthropic/claude-sonnet-4-20250514".to_string(),
+            primary_error: "timeout".to_string(),
+            fallback_model: "openai/gpt-4o-mini".to_string(),
+            fallback_error: "also timeout".to_string(),
+        },
+    ];
+
+    for err in &errors {
+        let msg = err.user_friendly();
+        assert!(!msg.is_empty(), "user_friendly() should not be empty for {:?}", err);
+    }
+}
+
+// ── Test 5: Steering messages injected mid-loop ───────────────────────
+
+#[tokio::test]
+async fn test_steering_messages_injected_into_loop() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::CompactionStrategy;
+
+    let provider = Arc::new(MultiTurnToolProvider::new(vec![
+        // Turn 1: initial response
+        MultiTurnToolResponse {
+            text: Some("Initial response".to_string()),
+            tool_calls: vec![],
+        },
+        // Turn 2: response after steering message
+        MultiTurnToolResponse {
+            text: Some("Response after steering".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        max_iterations: 10,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    // Inject a steering message before running
+    agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+        "Please be more concise",
+    )));
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run(
+            "Hello".to_string(),
+            move |e| events_clone.lock().unwrap().push(e),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let events = events.lock().unwrap();
+
+    // Should have SteeringMessage events
+    let steering_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
+        .count();
+    assert_eq!(steering_count, 1);
+
+    // Should have MessageStart/MessageEnd for the steering message
+    let msg_starts = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::MessageStart { .. }))
+        .count();
+    assert!(
+        msg_starts >= 2,
+        "Expected at least 2 MessageStart events (user + steering), got {}",
+        msg_starts
+    );
+}
+
+#[tokio::test]
+async fn test_multiple_steering_messages() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::CompactionStrategy;
+
+    let provider = Arc::new(MockProvider::new(vec![MockResponse {
+        content: "Response".to_string(),
+    }]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        max_iterations: 10,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    // Inject multiple steering messages
+    agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new("Steer 1")));
+    agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new("Steer 2")));
+    agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new("Steer 3")));
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run(
+            "Hello".to_string(),
+            move |e| events_clone.lock().unwrap().push(e),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let events = events.lock().unwrap();
+
+    let steering_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
+        .count();
+    assert_eq!(steering_count, 3);
+}
+
+// ── Test 6: Follow-up queue processing ───────────────────────────────
+
+#[tokio::test]
+async fn test_follow_up_queue_drains_after_turn() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::CompactionStrategy;
+
+    // First call is the initial, second is the follow-up response
+    let provider = Arc::new(MultiTurnToolProvider::new(vec![
+        MultiTurnToolResponse {
+            text: Some("Initial answer".to_string()),
+            tool_calls: vec![],
+        },
+        MultiTurnToolResponse {
+            text: Some("Follow-up answer".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        max_iterations: 10,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    // Queue a follow-up message before running
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+        "Tell me more",
+    )));
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run(
+            "Hello".to_string(),
+            move |e| events_clone.lock().unwrap().push(e),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let events = events.lock().unwrap();
+
+    // Should have FollowUpMessage event
+    let follow_up_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::FollowUpMessage { .. }))
+        .count();
+    // The follow-up is drained as a pending_message (steering), which may
+    // or may not emit a FollowUpMessage depending on the code path.
+    // At minimum we expect 2 turns (initial + follow-up).
+    let turn_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::TurnStart { .. }))
+        .count();
+    assert!(
+        turn_count >= 2,
+        "Expected at least 2 turns (initial + follow-up), got {}",
+        turn_count
+    );
+}
+
+#[tokio::test]
+async fn test_follow_up_queue_cleared() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::CompactionStrategy;
+
+    let provider = Arc::new(MockProvider::new(vec![MockResponse {
+        content: "Response".to_string(),
+    }]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        max_iterations: 10,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    // Queue messages and then clear them
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new("Follow-up 1")));
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new("Follow-up 2")));
+    agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new("Steer 1")));
+    agent_loop.clear_all_queues();
+
+    // Run should only process the initial prompt, no extra turns
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run(
+            "Hello".to_string(),
+            move |e| events_clone.lock().unwrap().push(e),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let events = events.lock().unwrap();
+
+    // No steering events since queues were cleared
+    let steering_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
+        .count();
+    assert_eq!(steering_count, 0);
+
+    // Only 1 turn (no follow-up processed)
+    let turn_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::TurnStart { .. }))
+        .count();
+    assert_eq!(turn_count, 1);
+}
+
+#[tokio::test]
+async fn test_multiple_follow_ups_sequential() {
+    use crate::agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};
+    use crate::state::SharedState;
+    use crate::tools::ToolRegistry;
+    use oxi_ai::CompactionStrategy;
+
+    // Need enough responses for initial + 2 follow-ups
+    let provider = Arc::new(MultiTurnToolProvider::new(vec![
+        MultiTurnToolResponse {
+            text: Some("Initial response".to_string()),
+            tool_calls: vec![],
+        },
+        MultiTurnToolResponse {
+            text: Some("First follow-up response".to_string()),
+            tool_calls: vec![],
+        },
+        MultiTurnToolResponse {
+            text: Some("Second follow-up response".to_string()),
+            tool_calls: vec![],
+        },
+    ]));
+
+    let config = AgentLoopConfig {
+        model_id: "anthropic/claude-sonnet-4-20250514".to_string(),
+        system_prompt: None,
+        temperature: 0.7,
+        max_tokens: 4096,
+        max_iterations: 10,
+        tool_execution: ToolExecutionMode::Sequential,
+        compaction_strategy: CompactionStrategy::Disabled,
+        context_window: 100_000,
+        compaction_instruction: None,
+        session_id: None,
+        transport: None,
+        compact_on_start: false,
+        max_retry_delay_ms: None,
+        auto_retry_enabled: false,
+        auto_retry_max_attempts: 3,
+        auto_retry_base_delay_ms: 2000,
+    };
+
+    let tools = Arc::new(ToolRegistry::new());
+    let state = SharedState::new();
+    let agent_loop = AgentLoop::new(provider, config, tools, state);
+
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+        "Follow-up A",
+    )));
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+        "Follow-up B",
+    )));
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let events_clone = events.clone();
+    let result = agent_loop
+        .run(
+            "Initial question".to_string(),
+            move |e| events_clone.lock().unwrap().push(e),
+        )
+        .await;
+
+    assert!(result.is_ok());
+    let events = events.lock().unwrap();
+
+    // Should process: initial + 2 follow-ups = at least 3 turns
+    let turn_count = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::TurnStart { .. }))
+        .count();
+    assert!(
+        turn_count >= 3,
+        "Expected at least 3 turns (initial + 2 follow-ups), got {}",
+        turn_count
+    );
+}

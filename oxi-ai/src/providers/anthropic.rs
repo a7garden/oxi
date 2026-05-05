@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn parse_thinking_block_flow() {
-        let sse = concat!
+        let sse = concat!(
             "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n",
             "\n",
             "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"I should\"}}\n",

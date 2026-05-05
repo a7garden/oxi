@@ -450,12 +450,12 @@ mod tests {
 
     #[test]
     fn parse_multiple_text_events() {
-        let sse = concat!
+        let sse = concat!(
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n",
             "\n",
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo!\"}}]}\n",
             "\n"
-        ;
+        );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
         assert_eq!(events.len(), 2);
         let texts: Vec<&str> = events.iter().filter_map(|e| match e {
@@ -467,13 +467,13 @@ mod tests {
 
     #[test]
     fn parse_done_terminator() {
-        let sse = concat!
+        let sse = concat!(
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"X\"}}]}\n",
             "\n",
             "data: [DONE]\n",
             "\n",
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"NEVER\"}}]}\n"
-        ;
+        );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
         // Should stop at [DONE]; the final data line is never parsed
         assert_eq!(events.len(), 1);
@@ -520,12 +520,12 @@ mod tests {
 
     #[test]
     fn parse_tool_call_deltas() {
-        let sse = concat!
+        let sse = concat!(
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"get_weather\",\"arguments\":\"\"}}]}}]}\n",
             "\n",
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\\\"SF\\\"}\"}}]}}]}\n",
             "\n"
-        ;
+        );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
         assert_eq!(events.len(), 2);
         let deltas: Vec<&str> = events.iter().filter_map(|e| match e {
@@ -551,11 +551,11 @@ mod tests {
 
     #[test]
     fn parse_usage_in_chunk() {
-        let sse = concat!
+        let sse = concat!(
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n",
             "\n",
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":8,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n"
-        ;
+        );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
         // TextDelta + Done
         assert_eq!(events.len(), 2);
@@ -572,9 +572,9 @@ mod tests {
 
     #[test]
     fn parse_usage_without_cache_details() {
-        let sse = concat!
+        let sse = concat!(
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n"
-        ;
+        );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
         match &events[0] {
             ProviderEvent::Done { message, .. } => {
@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn parse_full_stream_with_text_tool_and_done() {
-        let sse = concat!
+        let sse = concat!(
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Let me\"}}]}\n",
             "\n",
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" check\"}}]}\n",
@@ -651,7 +651,7 @@ mod tests {
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"tool_calls\"}]}\n",
             "\n",
             "data: [DONE]\n"
-        ;
+        );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
         assert_eq!(events.len(), 4); // 2 TextDelta + 1 ToolCallDelta + 1 Done
 

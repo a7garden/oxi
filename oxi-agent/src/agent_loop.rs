@@ -7,7 +7,7 @@ use crate::{
     state::SharedState, tools::{ToolRegistry, AgentTool},
 };
 use anyhow::{Error, Result};
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use oxi_ai::{
     Context, ContentBlock, Message, Provider, ProviderEvent, StreamOptions,
     StopReason, TextContent, ToolCall, UserMessage, CompactionStrategy,
