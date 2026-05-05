@@ -50,10 +50,6 @@ use std::time::Duration;
 // ── Constants ─────────────────────────────────────────────────────────
 
 const NETWORK_TIMEOUT_SECS: u64 = 10;
-#[allow(dead_code)]
-const UPDATE_CHECK_CONCURRENCY: usize = 4;
-#[allow(dead_code)]
-const GIT_UPDATE_CONCURRENCY: usize = 4;
 const LOCKFILE_NAME: &str = "oxi-lock.json";
 const MANIFEST_NAME: &str = "oxi-package.toml";
 const NPM_MANIFEST_NAME: &str = "package.json";
@@ -82,13 +78,6 @@ impl std::fmt::Display for ResourceKind {
 }
 
 /// All resource kinds for iteration
-#[allow(dead_code)]
-const RESOURCE_KINDS: [ResourceKind; 4] = [
-    ResourceKind::Extension,
-    ResourceKind::Skill,
-    ResourceKind::Prompt,
-    ResourceKind::Theme,
-];
 
 /// Package manifest describing bundled resources
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -878,45 +867,6 @@ impl PackageManager {
     fn emit_progress(&self, event: ProgressEvent) {
         if let Some(ref cb) = self.progress_callback {
             cb(event);
-        }
-    }
-
-    #[allow(dead_code)]
-    fn with_progress<F>(
-        &self,
-        action: ProgressAction,
-        source: &str,
-        message: &str,
-        op: F,
-    ) -> Result<()>
-    where
-        F: FnOnce() -> Result<()>,
-    {
-        self.emit_progress(ProgressEvent {
-            event_type: ProgressEventType::Start,
-            action,
-            source: source.to_string(),
-            message: Some(message.to_string()),
-        });
-        match op() {
-            Ok(()) => {
-                self.emit_progress(ProgressEvent {
-                    event_type: ProgressEventType::Complete,
-                    action,
-                    source: source.to_string(),
-                    message: None,
-                });
-                Ok(())
-            }
-            Err(e) => {
-                self.emit_progress(ProgressEvent {
-                    event_type: ProgressEventType::Error,
-                    action,
-                    source: source.to_string(),
-                    message: Some(e.to_string()),
-                });
-                Err(e)
-            }
         }
     }
 
@@ -1717,14 +1667,6 @@ impl PackageManager {
         }
 
         updates
-    }
-
-    /// Check if offline mode is enabled
-    #[allow(dead_code)]
-    fn is_offline() -> bool {
-        std::env::var("OXI_OFFLINE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
-            .unwrap_or(false)
     }
 
     // ── List / query ──────────────────────────────────────────────────

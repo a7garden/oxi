@@ -773,6 +773,10 @@ impl Component for Editor {
         if let Event::Key(key) = event {
             match key.code {
                 KeyCode::Char(c) => {
+                    if key.modifiers.ctrl {
+                        return false;
+                    }
+                    self.snapshot();
                     self.insert_char(c);
                     self.try_trigger_completion();
                     true
@@ -781,10 +785,12 @@ impl Component for Editor {
                     if !self.delete_back() {
                         return true;
                     }
+                    self.snapshot();
                     self.try_trigger_completion();
                     true
                 }
                 KeyCode::Delete => {
+                    self.snapshot();
                     self.delete_forward();
                     true
                 }
@@ -792,6 +798,7 @@ impl Component for Editor {
                     if self.completion_active {
                         return self.accept_completion();
                     }
+                    self.snapshot();
                     // Split line at cursor
                     let line = self.current_mut();
                     let cursor = Self::line_cursor(line);
@@ -808,11 +815,27 @@ impl Component for Editor {
                     true
                 }
                 KeyCode::Left => {
-                    self.move_left();
+                    if key.modifiers.ctrl {
+                        self.move_word_left();
+                    } else {
+                        self.move_left();
+                    }
                     true
                 }
                 KeyCode::Right => {
-                    self.move_right();
+                    if key.modifiers.ctrl {
+                        self.move_word_right();
+                    } else {
+                        self.move_right();
+                    }
+                    true
+                }
+                KeyCode::Char('z') if key.modifiers.ctrl => {
+                    self.undo();
+                    true
+                }
+                KeyCode::Char('y') if key.modifiers.ctrl => {
+                    self.redo();
                     true
                 }
                 KeyCode::Up => {
@@ -1001,6 +1024,11 @@ impl Component for Editor {
     fn is_focused(&self) -> bool {
         self.focused
     }
+}
+
+/// Check if a character is a word character for word-wise movement.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
 }
 
 // Private helper
@@ -1330,5 +1358,189 @@ mod tests {
             assert!(editor.delete_back());
         }
         assert_eq!(editor.content(), "");
+    }
+
+    // ===== Undo/Redo tests =====
+
+    #[test]
+    fn test_undo_basic() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        assert!(!editor.can_undo());
+        assert!(!editor.can_redo());
+
+        // Simulate typing via event handler
+        editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('a'))));
+        editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('b'))));
+        editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('c'))));
+        assert_eq!(editor.content(), "abc");
+
+        // Undo
+        let did_undo = editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Char('z'),
+            KeyModifiers::new().with_ctrl(),
+        )));
+        assert!(did_undo);
+        assert!(editor.can_redo());
+        // After undo, content should revert to previous snapshot
+    }
+
+    #[test]
+    fn test_undo_redo_cycle() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+
+        editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('h'))));
+        editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('i'))));
+        assert_eq!(editor.content(), "hi");
+
+        // Undo twice
+        editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Char('z'),
+            KeyModifiers::new().with_ctrl(),
+        )));
+        editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Char('z'),
+            KeyModifiers::new().with_ctrl(),
+        )));
+
+        // Redo twice
+        editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Char('y'),
+            KeyModifiers::new().with_ctrl(),
+        )));
+        editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Char('y'),
+            KeyModifiers::new().with_ctrl(),
+        )));
+        assert_eq!(editor.content(), "hi");
+    }
+
+    #[test]
+    fn test_undo_on_empty_editor() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        let result = editor.undo();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_redo_on_empty_editor() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        let result = editor.redo();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_undo_after_backspace() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+
+        editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('a'))));
+        editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Char('b'))));
+        editor.handle_event(&Event::Key(KeyEvent::new(KeyCode::Backspace)));
+        assert_eq!(editor.content(), "a");
+
+        // Undo should restore "ab"
+        editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Char('z'),
+            KeyModifiers::new().with_ctrl(),
+        )));
+        assert!(editor.can_redo());
+    }
+
+    // ===== Word-wise movement tests =====
+
+    #[test]
+    fn test_move_word_left_basic() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("hello world");
+        // cursor at end
+        assert_eq!(editor.cursor(), 11);
+
+        editor.move_word_left();
+        // Should skip "world" and land at start of "world"
+        assert_eq!(editor.cursor(), 6); // at 'w'
+
+        editor.move_word_left();
+        // Should skip space and land at start of "hello"
+        assert_eq!(editor.cursor(), 0); // at 'h'
+    }
+
+    #[test]
+    fn test_move_word_right_basic() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("hello world");
+        // Move cursor to start
+        editor.current_mut().cursor = 0;
+
+        editor.move_word_right();
+        // Should skip "hello" and space, land at start of "world"
+        assert_eq!(editor.cursor(), 6);
+
+        editor.move_word_right();
+        // Should skip "world" to end
+        assert_eq!(editor.cursor(), 11);
+    }
+
+    #[test]
+    fn test_move_word_left_at_start() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("hello");
+        editor.current_mut().cursor = 0;
+        assert!(!editor.move_word_left());
+    }
+
+    #[test]
+    fn test_move_word_right_at_end() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("hello");
+        assert!(!editor.move_word_right());
+    }
+
+    #[test]
+    fn test_ctrl_left_right_events() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("foo bar baz");
+        // cursor at end
+
+        // Ctrl+Left
+        let handled = editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Left,
+            KeyModifiers::new().with_ctrl(),
+        )));
+        assert!(handled);
+        assert_eq!(editor.cursor(), 8); // start of "baz"
+
+        // Ctrl+Right
+        let handled = editor.handle_event(&Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Right,
+            KeyModifiers::new().with_ctrl(),
+        )));
+        assert!(handled);
+        assert_eq!(editor.cursor(), 11); // end
+    }
+
+    #[test]
+    fn test_move_word_with_underscores() {
+        let mut editor = Editor::new();
+        editor.on_focus();
+        editor.set_content("foo_bar baz");
+        // cursor at end
+        assert_eq!(editor.cursor(), 11);
+
+        editor.move_word_left();
+        // Should skip "baz" to start of "baz"
+        assert_eq!(editor.cursor(), 8);
+
+        editor.move_word_left();
+        // Should skip space and "foo_bar" (underscores are word chars)
+        assert_eq!(editor.cursor(), 0);
     }
 }
