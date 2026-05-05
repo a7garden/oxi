@@ -16,7 +16,6 @@ use crate::auth_storage::AuthStorage;
 use crate::changelog;
 use crate::export::{self, ExportMeta, HtmlExportOptions};
 use crate::clipboard_write;
-use crate::keybindings;
 use crate::session::SessionManager;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
@@ -1200,7 +1199,7 @@ fn handle_slash_command(
         }
         "/logout" => {
             if let Some(provider) = arg {
-                let mut auth = AuthStorage::new();
+                let auth = AuthStorage::new();
                 auth.remove(provider);
                 messages.push(ChatMessage {
                     role: MessageRole::System,
@@ -1231,10 +1230,10 @@ fn handle_slash_command(
             let cwd = std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| ".".to_string());
-            let session_dir = session::get_default_session_dir(&cwd);
+            let session_dir = crate::session::get_default_session_dir(&cwd);
             
             if let Ok(sessions) = std::fs::read_dir(&session_dir) {
-                let mut session_list: Vec<_> = sessions
+                let session_list: Vec<_> = sessions
                     .filter_map(|e| e.ok())
                     .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
                     .take(10)
@@ -1338,7 +1337,7 @@ fn handle_slash_command(
 }
 
 // Helper to get entries from session manager
-fn session_manager_get_entries(session: &AgentSession) -> Vec<crate::session::SessionEntry> {
+fn session_manager_get_entries(_session: &AgentSession) -> Vec<crate::session::SessionEntry> {
     // Get session manager from session internals
     // This is a workaround - ideally we'd expose this properly
     Vec::new() // Placeholder - actual implementation would need session access
