@@ -3,7 +3,7 @@ use crate::surface::Surface;
 use std::io::{self, Write};
 
 /// ANSI escape codes for text attributes.
-struct SGR {
+struct Sgr {
     bold: bool,
     italic: bool,
     underline: bool,
@@ -14,7 +14,7 @@ struct SGR {
     bg: Option<crate::cell::Color>,
 }
 
-impl PartialEq for SGR {
+impl PartialEq for Sgr {
     fn eq(&self, other: &Self) -> bool {
         self.bold == other.bold
             && self.italic == other.italic
@@ -26,7 +26,7 @@ impl PartialEq for SGR {
     }
 }
 
-impl SGR {
+impl Sgr {
     fn new() -> Self {
         Self {
             bold: false,
@@ -127,7 +127,7 @@ impl SGR {
 /// called, dramatically reducing the number of syscalls per frame (from ~4800 to 1).
 pub struct Renderer {
     /// Current active SGR for optimization.
-    current_sgr: SGR,
+    current_sgr: Sgr,
     /// Output buffer — accumulated bytes are flushed once per frame.
     buf: Vec<u8>,
 }
@@ -135,14 +135,14 @@ pub struct Renderer {
 impl Renderer {
     pub fn new() -> Self {
         Self {
-            current_sgr: SGR::new(),
+            current_sgr: Sgr::new(),
             buf: Vec::with_capacity(16384),
         }
     }
 
     /// Reset the renderer state.
     pub fn reset(&mut self) {
-        self.current_sgr = SGR::new();
+        self.current_sgr = Sgr::new();
         self.buf.clear();
     }
 
@@ -194,7 +194,7 @@ impl Renderer {
     fn apply_sgr(&mut self, cell: &Cell) -> bool {
         use crate::cell::Color;
 
-        let new_sgr = SGR {
+        let new_sgr = Sgr {
             bold: cell.attrs.bold,
             italic: cell.attrs.italic,
             underline: cell.attrs.underline,
@@ -428,7 +428,7 @@ pub trait RenderToSurface {
 
 impl RenderToSurface for Cell {
     fn to_ansi(&self) -> String {
-        let sgr = SGR {
+        let sgr = Sgr {
             bold: self.attrs.bold,
             italic: self.attrs.italic,
             underline: self.attrs.underline,

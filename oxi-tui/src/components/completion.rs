@@ -134,10 +134,10 @@ impl FileCompleter {
         }
 
         // Handle absolute paths
-        if prefix.starts_with('/') {
+        if let Some(stripped) = prefix.strip_prefix('/') {
             let parts: Vec<&str> = prefix.split('/').collect();
             if parts.len() == 1 {
-                return (prefix[1..].to_string(), PathBuf::from("/"));
+                return (stripped.to_string(), PathBuf::from("/"));
             }
             let pattern = parts.last().unwrap_or(&"").to_string();
             let dir = parts[..parts.len() - 1].join("/");
@@ -149,8 +149,8 @@ impl FileCompleter {
 
         // Handle ./ and ../
         if prefix.starts_with("./") || prefix.starts_with("../") {
-            let (pattern, rel_path) = if prefix.starts_with("./") {
-                (&prefix[2..], PathBuf::from("."))
+            let (pattern, rel_path) = if let Some(stripped) = prefix.strip_prefix("./") {
+                (stripped, PathBuf::from("."))
             } else {
                 (&prefix[3..], self.base_path.clone())
             };
