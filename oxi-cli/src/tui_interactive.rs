@@ -774,40 +774,108 @@ fn render_chat(
     let mut all_lines: Vec<Line> = Vec::new();
 
     for msg in messages {
+        let ts = format_timestamp(msg.timestamp);
+
         match msg.role {
             MessageRole::User => {
-                // ─── User message with left accent bar ───
-                for (i, line) in msg.content.lines().enumerate() {
-                    if i == 0 {
-                        all_lines.push(Line::from(vec![
-                            Span::styled(" ▌".to_string(), Style::default().fg(palette::CYAN)),
-                            Span::styled(" ".to_string(), Style::default()),
-                            Span::styled(line.to_string(), Style::default().fg(palette::FG_BRIGHT)),
-                        ]));
-                    } else {
-                        all_lines.push(Line::from(vec![
-                            Span::styled(" │ ".to_string(), Style::default().fg(palette::BG_HOVER)),
-                            Span::styled(line.to_string(), Style::default().fg(palette::FG)),
-                        ]));
-                    }
+                // ─── User message with cyan accent bar + timestamp ───
+                let mut first_spans = vec![
+                    Span::styled(" ▌".to_string(), Style::default().fg(palette::CYAN)),
+                    Span::styled(" ".to_string(), Style::default()),
+                ];
+                let first_line = msg.content.lines().next().unwrap_or("");
+                // We'll add the line + right-aligned timestamp later; for now just the line
+                first_spans.push(Span::styled(first_line.to_string(), Style::default().fg(palette::FG_BRIGHT)));
+                // Timestamp padding + time on the right
+                let used_w: usize = first_spans.iter().map(|s| s.content.chars().count()).sum();
+                let ts_w = ts.chars().count() + 2;
+                if used_w + ts_w < area.width as usize {
+                    let gap = area.width as usize - used_w - ts_w;
+                    first_spans.push(Span::styled(" ".repeat(gap), Style::default()));
+                    first_spans.push(Span::styled(ts, Style::default().fg(palette::FG_DIM)));
+                }
+                all_lines.push(Line::from(first_spans));
+
+                for line in msg.content.lines().skip(1) {
+                    let mut ln = vec![
+                        Span::styled(" │ ".to_string(), Style::default().fg(palette::BG_HOVER)),
+                    ];
+                    ln.extend(render_rich_line(line));
+                    all_lines.push(Line::from(ln));
                 }
                 all_lines.push(Line::from(""));
             }
             MessageRole::Assistant => {
-                // ─── Assistant message with muted style ───
-                for line in msg.content.lines() {
-                    all_lines.push(Line::from(vec![
-                        Span::styled("  ".to_string(), Style::default()),
-                        Span::styled(line.to_string(), Style::default().fg(palette::FG)),
-                    ]));
+                // ─── Assistant message with green accent + timestamp ───
+                let mut first_spans = vec![
+                    Span::styled(" ▐".to_string(), Style::default().fg(palette::GREEN)),
+                    Span::styled(" ".to_string(), Style::default()),
+                ];
+                let first_line = msg.content.lines().next().unwrap_or("");
+                first_spans.push(Span::styled(first_line.to_string(), Style::default().fg(palette::FG)));
+                let used_w: usize = first_spans.iter().map(|s| s.content.chars().count()).sum();
+                let ts_w = ts.chars().count() + 2;
+                if used_w + ts_w < area.width as usize {
+                    let gap = area.width as usize - used_w - ts_w;
+                    first_spans.push(Span::styled(" ".repeat(gap), Style::default()));
+                    first_spans.push(Span::styled(ts, Style::default().fg(palette::FG_DIM)));
+                }
+                all_lines.push(Line::from(first_spans));
+
+                // Remaining lines with rich rendering (code blocks, etc)
+                let mut in_code_block = false;
+                for line in msg.content.lines().skip(1) {
+                    if line.trim_start().starts_with("```") {
+                        in_code_block = !in_code_block;
+                        if in_code_block {
+                            all_lines.push(Line::from(vec![
+                                Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
+                                Span::styled(" ┌".to_string(), Style::default().fg(palette::BG_HOVER)),
+                            ]));
+                        } else {
+                            all_lines.push(Line::from(vec![
+                                Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
+                                Span::styled(" └".to_string(), Style::default().fg(palette::BG_HOVER)),
+                            ]));
+                        }
+                        continue;
+                    }
+                    if in_code_block {
+                        all_lines.push(Line::from(vec![
+                            Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
+                            Span::styled(" │ ".to_string(), Style::default().fg(palette::BG_HOVER)),
+                            Span::styled(line.to_string(), Style::default().fg(palette::FG)),
+                        ]));
+                    } else {
+                        let mut ln = vec![
+                            Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
+                            Span::styled(" ".to_string(), Style::default()),
+                        ];
+                        ln.extend(render_rich_line(line));
+                        all_lines.push(Line::from(ln));
+                    }
                 }
                 all_lines.push(Line::from(""));
             }
             MessageRole::System => {
-                // ─── System message — dimmed, centered feel ───
-                for line in msg.content.lines() {
+                // ─── System message — dimmed + timestamp ───
+                let mut first_spans = vec![
+                    Span::styled("  · ".to_string(), Style::default().fg(palette::FG_DIM)),
+                ];
+                let first_line = msg.content.lines().next().unwrap_or("");
+                first_spans.push(Span::styled(first_line.to_string(), Style::default().fg(palette::FG_DIM)));
+                let used_w: usize = first_spans.iter().map(|s| s.content.chars().count()).sum();
+                let ts_w = ts.chars().count() + 2;
+                if used_w + ts_w < area.width as usize {
+                    let gap = area.width as usize - used_w - ts_w;
+                    first_spans.push(Span::styled(" ".repeat(gap), Style::default()));
+                    first_spans.push(Span::styled(ts, Style::default().fg(palette::FG_DIM)));
+                }
+                all_lines.push(Line::from(first_spans));
+
+                for line in msg.content.lines().skip(1) {
                     all_lines.push(Line::from(vec![
-                        Span::styled("  · ".to_string(), Style::default().fg(palette::FG_DIM)),
+                        Span::styled("    ".to_string(), Style::default()),
                         Span::styled(line.to_string(), Style::default().fg(palette::FG_DIM)),
                     ]));
                 }
@@ -816,14 +884,39 @@ fn render_chat(
         }
     }
 
-    // Streaming text
+    // Streaming text — same rich rendering as assistant
     if !streaming_text.is_empty() {
         all_lines.push(Line::from(""));
+        let mut in_code_block = false;
         for line in streaming_text.lines() {
-            all_lines.push(Line::from(vec![
-                Span::styled("  ".to_string(), Style::default()),
-                Span::styled(line.to_string(), Style::default().fg(palette::FG)),
-            ]));
+            if line.trim_start().starts_with("```") {
+                in_code_block = !in_code_block;
+                if in_code_block {
+                    all_lines.push(Line::from(vec![
+                        Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
+                        Span::styled(" ┌".to_string(), Style::default().fg(palette::BG_HOVER)),
+                    ]));
+                } else {
+                    all_lines.push(Line::from(vec![
+                        Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
+                        Span::styled(" └".to_string(), Style::default().fg(palette::BG_HOVER)),
+                    ]));
+                }
+                continue;
+            }
+            if in_code_block {
+                all_lines.push(Line::from(vec![
+                    Span::styled(" │".to_string(), Style::default().fg(palette::BG_HOVER)),
+                    Span::styled(" │ ".to_string(), Style::default().fg(palette::BG_HOVER)),
+                    Span::styled(line.to_string(), Style::default().fg(palette::FG)),
+                ]));
+            } else {
+                let mut ln = vec![
+                    Span::styled("  ".to_string(), Style::default()),
+                ];
+                ln.extend(render_rich_line(line));
+                all_lines.push(Line::from(ln));
+            }
         }
         // Animated spinner
         if is_agent_busy {
@@ -897,13 +990,19 @@ fn render_chat(
 // ═══════════════════════════════════════════════════════════════════════════
 
 fn render_separator(f: &mut ratatui::Frame, area: Rect) {
-    let sep = Paragraph::new(Line::from(
-        Span::styled(
-            "━".repeat(area.width as usize),
-            Style::default().fg(palette::BG_HOVER),
-        ),
-    ));
-    f.render_widget(sep, area);
+    // Subtle dotted pattern: ─··─··─··─
+    let w = area.width as usize;
+    let mut spans: Vec<Span> = Vec::with_capacity(w);
+    for i in 0..w {
+        let c = match i % 4 {
+            0 => '─',
+            1 => '·',
+            2 => '·',
+            _ => ' ',
+        };
+        spans.push(Span::styled(c.to_string(), Style::default().fg(palette::BG_HOVER)));
+    }
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1001,21 +1100,28 @@ fn render_input(
     } else if input.value().is_empty() {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                "  Enter to send · / for commands · Esc to cancel".to_string(),
+                "  Enter · / commands · ↑ history · Esc cancel".to_string(),
                 Style::default().fg(palette::FG_DIM),
             ))),
             hint_row,
         );
+    } else {
+        // Show char count when typing
+        let count = input.text.chars().count();
+        let count_str = format!("  {} chars", count);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(count_str, Style::default().fg(palette::FG_DIM)))),
+            hint_row,
+        );
     }
 
-    // ── Bottom accent line ──
-    f.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "─".repeat(area.width as usize),
-            Style::default().fg(palette::BG_HOVER),
-        ))),
-        border_row,
-    );
+    // ── Bottom accent line (dotted, matching separator style) ──
+    let mut border_spans: Vec<Span> = Vec::with_capacity(area.width as usize);
+    for i in 0..area.width as usize {
+        let c = match i % 4 { 0 => '─', 1 => '·', 2 => '·', _ => ' ' };
+        border_spans.push(Span::styled(c.to_string(), Style::default().fg(palette::BG_HOVER)));
+    }
+    f.render_widget(Paragraph::new(Line::from(border_spans)), border_row);
 }
 
 /// Slash command popup — multi-column grid layout
@@ -1652,4 +1758,99 @@ fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64
+}
+
+/// Format a millisecond timestamp as HH:MM.
+fn format_timestamp(millis: i64) -> String {
+    let secs = millis / 1000;
+    let hours = ((secs / 3600) % 24) as u8;
+    let mins = ((secs / 60) % 60) as u8;
+    format!("{}:{:02}", hours, mins)
+}
+
+/// Render a line of text with inline markdown styling.
+/// Returns Vec<Span> with proper fg/bg for **bold**, *italic*, `code`.
+fn render_rich_line(line: &str) -> Vec<Span<'static>> {
+    let mut spans: Vec<Span> = Vec::new();
+    let chars: Vec<char> = line.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+    let mut buf = String::new();
+
+    let flush = |buf: &mut String, spans: &mut Vec<Span>| {
+        if !buf.is_empty() {
+            spans.push(Span::styled(buf.clone(), Style::default().fg(palette::FG)));
+            buf.clear();
+        }
+    };
+
+    while i < len {
+        // Inline code `...`
+        if chars[i] == '`' {
+            flush(&mut buf, &mut spans);
+            i += 1;
+            let mut code = String::new();
+            while i < len && chars[i] != '`' {
+                code.push(chars[i]);
+                i += 1;
+            }
+            if i < len { i += 1; } // closing `
+            spans.push(Span::styled(
+                code,
+                Style::default().fg(palette::ORANGE),
+            ));
+        }
+        // Bold **...**
+        else if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
+            flush(&mut buf, &mut spans);
+            i += 2;
+            let mut bold = String::new();
+            while i + 1 < len && !(chars[i] == '*' && chars[i + 1] == '*') {
+                bold.push(chars[i]);
+                i += 1;
+            }
+            if i + 1 < len { i += 2; }
+            spans.push(Span::styled(
+                bold,
+                Style::default().fg(palette::FG_BRIGHT).add_modifier(Modifier::BOLD),
+            ));
+        }
+        // Italic *...*  (but not **)
+        else if chars[i] == '*' && (i + 1 >= len || chars[i + 1] != '*') {
+            flush(&mut buf, &mut spans);
+            i += 1;
+            let mut italic = String::new();
+            while i < len && chars[i] != '*' {
+                italic.push(chars[i]);
+                i += 1;
+            }
+            if i < len { i += 1; }
+            spans.push(Span::styled(
+                italic,
+                Style::default().fg(palette::FG).add_modifier(Modifier::ITALIC),
+            ));
+        }
+        // Heading ##
+        else if chars[i] == '#' && (i == 0 || chars[i - 1] == ' ') {
+            flush(&mut buf, &mut spans);
+            while i < len && chars[i] == '#' { i += 1; }
+            // skip space after #s
+            if i < len && chars[i] == ' ' { i += 1; }
+            let mut heading = String::new();
+            while i < len { heading.push(chars[i]); i += 1; }
+            spans.push(Span::styled(
+                heading,
+                Style::default().fg(palette::FG_BRIGHT).add_modifier(Modifier::BOLD),
+            ));
+        }
+        else {
+            buf.push(chars[i]);
+            i += 1;
+        }
+    }
+    flush(&mut buf, &mut spans);
+    if spans.is_empty() {
+        spans.push(Span::styled(String::new(), Style::default().fg(palette::FG)));
+    }
+    spans
 }
