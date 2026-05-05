@@ -1063,6 +1063,7 @@ pub struct ExtensionRegistry {
     /// Shared error buffer for recording extension errors.
     errors: Arc<RwLock<Vec<ExtensionErrorRecord>>>,
     /// Keep dynamically loaded libraries alive so vtables stay valid.
+    /// Must be kept even though not read directly — dropping would unload the library.
     #[allow(dead_code)]
     libraries: Vec<Library>,
 }
@@ -2738,6 +2739,7 @@ impl Drop for ExtensionErrorHandle {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Internal state shared between a wrapped tool and its runner.
+/// Keep: stores error listeners for future tool error broadcasting.
 #[allow(dead_code)]
 struct RunnerState {
     errors: Arc<RwLock<Vec<ExtensionErrorRecord>>>,
@@ -2752,6 +2754,7 @@ struct RunnerState {
 /// 3. Notifies extensions via `on_after_tool_call` and `on_tool_result`
 struct WrappedTool {
     inner: Arc<dyn AgentTool>,
+    /// Keep: runner_state holds error listeners for wrapped tool execution.
     #[allow(dead_code)]
     runner_state: Arc<RwLock<RunnerState>>,
 }

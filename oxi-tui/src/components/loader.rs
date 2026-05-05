@@ -184,3 +184,209 @@ impl Component for Loader {
         self.focused
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::component::Component;
+    use crate::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn test_loader_new() {
+        let loader = Loader::new();
+        assert!(loader.message.is_none());
+        assert_eq!(loader.frame, 0);
+        assert!(!loader.cancelled);
+        assert!(loader.dirty);
+    }
+
+    #[test]
+    fn test_loader_with_message() {
+        let loader = Loader::new().with_message("Loading...");
+        assert_eq!(loader.message.as_deref(), Some("Loading..."));
+    }
+
+    #[test]
+    fn test_loader_with_color() {
+        let loader = Loader::new().with_color(Color::Cyan);
+        assert_eq!(loader.fg_color, Color::Cyan);
+    }
+
+    #[test]
+    fn test_loader_set_message() {
+        let mut loader = Loader::new();
+        loader.set_message("Processing");
+        assert_eq!(loader.message.as_deref(), Some("Processing"));
+    }
+
+    #[test]
+    fn test_loader_tick() {
+        let mut loader = Loader::new();
+        assert_eq!(loader.frame, 0);
+        loader.tick();
+        assert_eq!(loader.frame, 1);
+        // Tick wraps around
+        for _ in 0..SPINNER_FRAMES.len() - 1 {
+            loader.tick();
+        }
+        assert_eq!(loader.frame, 0);
+    }
+
+    #[test]
+    fn test_loader_tick_does_not_advance_when_cancelled() {
+        let mut loader = Loader::new();
+        loader.cancel();
+        assert_eq!(loader.frame, 0);
+        loader.tick();
+        assert_eq!(loader.frame, 0); // no advancement when cancelled
+    }
+
+    #[test]
+    fn test_loader_cancel() {
+        let mut loader = Loader::new();
+        loader.cancel();
+        assert!(loader.is_cancelled());
+        assert_eq!(loader.message.as_deref(), Some("Cancelled"));
+    }
+
+    #[test]
+    fn test_loader_reset() {
+        let mut loader = Loader::new();
+        loader.tick();
+        loader.tick();
+        loader.cancel();
+        loader.reset();
+        assert!(!loader.is_cancelled());
+        assert_eq!(loader.frame, 0);
+    }
+
+    #[test]
+    fn test_loader_set_done() {
+        let mut loader = Loader::new();
+        loader.set_done("Complete!");
+        assert!(loader.is_cancelled());
+        assert_eq!(loader.message.as_deref(), Some("Complete!"));
+    }
+
+    #[test]
+    fn test_loader_default() {
+        let loader = Loader::default();
+        assert!(loader.message.is_none());
+    }
+
+    #[test]
+    fn test_loader_name() {
+        let loader = Loader::new();
+        assert_eq!(loader.name(), "Loader");
+    }
+
+    #[test]
+    fn test_loader_dirty_flag() {
+        let mut loader = Loader::new();
+        assert!(loader.is_dirty());
+        loader.clear_dirty();
+        assert!(!loader.is_dirty());
+        loader.request_render();
+        assert!(loader.is_dirty());
+    }
+
+    #[test]
+    fn test_loader_min_size_no_message() {
+        let loader = Loader::new();
+        let min = loader.min_size();
+        assert_eq!(min.width, 3); // spinner + space + no message
+        assert_eq!(min.height, 1);
+    }
+
+    #[test]
+    fn test_loader_min_size_with_message() {
+        let loader = Loader::new().with_message("Loading...");
+        let min = loader.min_size();
+        // spinner (1) + space (1) + "Loading..." (10) = 12, plus extra for spinner + space = 3 + msg_width
+        assert_eq!(min.width, 13);
+        assert_eq!(min.height, 1);
+    }
+
+    #[test]
+    fn test_loader_handle_event_unfocused() {
+        let mut loader = Loader::new();
+        let event = Event::Key(KeyEvent::new(KeyCode::Escape));
+        assert!(!loader.handle_event(&event));
+    }
+
+    #[test]
+    fn test_loader_handle_event_escape() {
+        let mut loader = Loader::new();
+        loader.on_focus();
+        let event = Event::Key(KeyEvent::new(KeyCode::Escape));
+        assert!(loader.handle_event(&event));
+        assert!(loader.is_cancelled());
+    }
+
+    #[test]
+    fn test_loader_handle_event_ctrl_c() {
+        let mut loader = Loader::new();
+        loader.on_focus();
+        let event = Event::Key(KeyEvent::with_modifiers(
+            KeyCode::Char('c'),
+            KeyModifiers::new().with_ctrl(),
+        ));
+        assert!(loader.handle_event(&event));
+        assert!(loader.is_cancelled());
+    }
+
+    #[test]
+    fn test_loader_handle_event_other_key() {
+        let mut loader = Loader::new();
+        loader.on_focus();
+        let event = Event::Key(KeyEvent::new(KeyCode::Char('a')));
+        assert!(!loader.handle_event(&event));
+    }
+
+    #[test]
+    fn test_loader_focus() {
+        let mut loader = Loader::new();
+        assert!(!loader.is_focused());
+        loader.on_focus();
+        assert!(loader.is_focused());
+        loader.on_unfocus();
+        assert!(!loader.is_focused());
+    }
+
+    #[test]
+    fn test_loader_render_active() {
+        let mut loader = Loader::new().with_message("Loading...");
+        let mut surface = Surface::new(80, 1);
+        let area = Rect::new(0, 0, 80, 1);
+        loader.render(&mut surface, area);
+        // Should have rendered a spinner char in the first cell
+        let cell = surface.get(0, 0).unwrap();
+        assert_eq!(cell.char, SPINNER_FRAMES[0]);
+        // Should have rendered message chars
+        let msg_cell = surface.get(0, 2).unwrap();
+        assert_eq!(msg_cell.char, 'L');
+    }
+
+    #[test]
+    fn test_loader_render_cancelled() {
+        let mut loader = Loader::new().with_message("Loading...");
+        loader.cancel();
+        let mut surface = Surface::new(80, 1);
+        let area = Rect::new(0, 0, 80, 1);
+        loader.render(&mut surface, area);
+        // Should show checkmark
+        let cell = surface.get(0, 0).unwrap();
+        assert_eq!(cell.char, '✓');
+        assert_eq!(cell.fg, Color::Green);
+    }
+
+    #[test]
+    fn test_loader_render_truncates_message() {
+        let long_msg = "A".repeat(200);
+        let mut loader = Loader::new().with_message(long_msg);
+        let mut surface = Surface::new(20, 1);
+        let area = Rect::new(0, 0, 20, 1);
+        loader.render(&mut surface, area);
+        // Should not panic; message should be truncated to fit area
+    }
+}

@@ -861,4 +861,110 @@ mod tests {
         footer.request_render();
         assert!(footer.is_dirty());
     }
+
+    // ===== Additional edge-case tests =====
+
+    #[test]
+    fn test_footer_data_update_tokens() {
+        let data = FooterData::new();
+        data.update_tokens(100, 200);
+        assert_eq!(data.get_input_tokens(), 100);
+        assert_eq!(data.get_output_tokens(), 200);
+    }
+
+    #[test]
+    fn test_footer_data_update_cache_tokens() {
+        let data = FooterData::new();
+        data.update_cache_tokens(50, 75);
+        assert_eq!(data.get_cache_read_tokens(), 50);
+        assert_eq!(data.get_cache_write_tokens(), 75);
+    }
+
+    #[test]
+    fn test_footer_data_update_all_tokens() {
+        let data = FooterData::new();
+        data.update_all_tokens(10, 20, 30, 40);
+        assert_eq!(data.get_input_tokens(), 10);
+        assert_eq!(data.get_output_tokens(), 20);
+        assert_eq!(data.get_cache_read_tokens(), 30);
+        assert_eq!(data.get_cache_write_tokens(), 40);
+    }
+
+    #[test]
+    fn test_footer_data_set_context_window_pct_clamped() {
+        let mut data = FooterData::new();
+        data.set_context_window_pct(150.0);
+        assert_eq!(data.context_window_pct, 100.0);
+        data.set_context_window_pct(-10.0);
+        assert_eq!(data.context_window_pct, 0.0);
+        data.set_context_window_pct(50.0);
+        assert_eq!(data.context_window_pct, 50.0);
+    }
+
+    #[test]
+    fn test_footer_data_set_session_duration() {
+        let mut data = FooterData::new();
+        data.set_session_duration(300);
+        assert_eq!(data.session_duration_secs, 300);
+    }
+
+    #[test]
+    fn test_footer_data_extension_status() {
+        let mut data = FooterData::new();
+        data.set_extension_status("ext1", Some("running"));
+        assert_eq!(data.extension_statuses.get("ext1").unwrap(), "running");
+        data.set_extension_status("ext1", None);
+        assert!(data.extension_statuses.get("ext1").is_none());
+    }
+
+    #[test]
+    fn test_footer_render_main_line_model_only() {
+        let mut data = FooterData::new();
+        data.model_name = "gpt-4".to_string();
+        let footer = Footer::new(data);
+        let line = footer.render_main_line();
+        assert!(line.contains("gpt-4"));
+    }
+
+    #[test]
+    fn test_footer_render_main_line_no_thinking() {
+        let mut data = create_test_footer_data();
+        data.thinking_level = "off".to_string();
+        let footer = Footer::new(data);
+        let line = footer.render_main_line();
+        // Should not contain "thinking" when off
+        assert!(!line.contains("thinking"));
+    }
+
+    #[test]
+    fn test_footer_format_tokens_empty() {
+        let tokens = Footer::format_tokens(0, 0, 0, 0);
+        assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn test_footer_format_tokens_only_input() {
+        let tokens = Footer::format_tokens(100, 0, 0, 0);
+        assert!(tokens.contains("↑100"));
+        assert!(!tokens.contains("↓"));
+    }
+
+    #[test]
+    fn test_footer_render_with_extensions_hidden() {
+        let data = create_test_footer_data();
+        let mut footer = Footer::new(data);
+        footer.set_show_extension_statuses(false);
+        // Height should be 1 even with extensions hidden
+        assert_eq!(footer.height(), 1);
+    }
+
+    #[test]
+    fn test_footer_format_duration_zero() {
+        assert_eq!(Footer::format_duration(0), "0s");
+    }
+
+    #[test]
+    fn test_footer_format_duration_exactly_one_hour() {
+        assert_eq!(Footer::format_duration(3600), "1h0m");
+    }
 }

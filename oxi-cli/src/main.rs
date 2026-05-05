@@ -3,7 +3,8 @@
 //! A command-line interface for interacting with AI models.
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::Parser;
+use oxi::cli::{CliArgs, Commands, ConfigCommands, PkgCommands};
 use oxi::extensions::ExtensionRegistry;
 use oxi::packages::{PackageManager, ResourceKind};
 use oxi::session::{AgentMessage, SessionManager};
@@ -13,137 +14,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-/// CLI arguments
-#[derive(Parser, Debug)]
-#[command(name = "oxi")]
-#[command(about = "CLI coding harness for oxi")]
-#[command(version = "0.4.4")]
-struct Args {
-    #[command(subcommand)]
-    command: Option<Commands>,
 
-    /// Provider to use (e.g., anthropic, openai, google, deepseek)
-    #[arg(short, long)]
-    provider: Option<String>,
-
-    /// Model to use (e.g., claude-sonnet-4-20250514, gpt-4o)
-    #[arg(short, long)]
-    model: Option<String>,
-
-    /// Initial prompt (non-interactive mode)
-    #[arg(default_value = "")]
-    prompt: Vec<String>,
-
-    /// Interactive mode (default when no prompt is given)
-    #[arg(short, long)]
-    interactive: bool,
-
-    /// Thinking level (none, minimal, standard, thorough)
-    #[arg(long)]
-    thinking: Option<String>,
-
-    /// Load an extension from a shared library (.so / .dll / .dylib).
-    /// Can be specified multiple times.
-    #[arg(short = 'e', long = "extension", value_name = "PATH")]
-    extensions: Vec<PathBuf>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// List all sessions
-    Sessions,
-    /// Show session tree structure
-    Tree {
-        /// Session ID to show tree for (default: current/last session)
-        #[arg(default_value = "")]
-        session_id: String,
-    },
-    /// Fork a new session from a specific entry
-    Fork {
-        /// Parent session ID
-        parent_id: String,
-        /// Entry ID to branch from
-        entry_id: String,
-    },
-    /// Delete a session
-    Delete {
-        /// Session ID to delete
-        session_id: String,
-    },
-    /// Package management
-    Pkg {
-        #[command(subcommand)]
-        action: PkgCommands,
-    },
-    /// Configuration management
-    Config {
-        #[command(subcommand)]
-        action: ConfigCommands,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum PkgCommands {
-    /// Install a package from a local path or npm:@scope/name
-    Install {
-        /// Package source: a local directory path or npm:@scope/name
-        source: String,
-    },
-    /// List installed packages
-    List,
-    /// Uninstall a package by name
-    Uninstall {
-        /// Package name to uninstall
-        name: String,
-    },
-    /// Update a package to the latest version
-    Update {
-        /// Package name to update (updates all if omitted)
-        name: Option<String>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum ConfigCommands {
-    /// Show current configuration
-    Show,
-    /// List all enabled resources
-    List {
-        /// Resource type filter (extensions, skills, prompts, themes)
-        resource_type: Option<String>,
-    },
-    /// Enable a resource (extension, skill, prompt, or theme)
-    Enable {
-        /// Resource type: extension, skill, prompt, or theme
-        resource_type: String,
-        /// Resource path or name
-        name: String,
-    },
-    /// Disable a resource
-    Disable {
-        /// Resource type: extension, skill, prompt, or theme
-        resource_type: String,
-        /// Resource path or name
-        name: String,
-    },
-    /// Set a configuration value
-    Set {
-        /// Setting key (e.g. theme, default_model, thinking_level)
-        key: String,
-        /// Setting value
-        value: String,
-    },
-    /// Get a configuration value
-    Get {
-        /// Setting key
-        key: String,
-    },
-}
-
-/// Parse thinking level from string (delegates to settings module)
-fn parse_thinking_level(s: &str) -> Option<oxi::settings::ThinkingLevel> {
-    oxi::settings::parse_thinking_level(s)
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -152,8 +23,8 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    // Parse arguments
-    let args = Args::parse();
+    // Parse arguments (using unified CliArgs from cli module)
+    let args = CliArgs::parse();
 
     // Handle subcommands
     if let Some(command) = &args.command {
@@ -168,7 +39,7 @@ async fn main() -> Result<()> {
 
     // Apply thinking level if specified
     if let Some(ref level_str) = args.thinking {
-        if let Some(level) = parse_thinking_level(level_str) {
+        if let Some(level) = oxi::settings::parse_thinking_level(level_str) {
             settings.thinking_level = level;
         } else {
             anyhow::bail!(
@@ -769,15 +640,16 @@ async fn run_single_prompt(app: oxi::App, prompt: &str) -> Result<()> {
     Ok(())
 }
 
+// Keep: readline-based interactive mode fallback, alternative to TUI.
 #[allow(dead_code)]
 enum CommandResult {
     Handled,
     NewSession(Uuid),
-    #[allow(dead_code)]
     Quit,
 }
 
 /// Interactive mode (simple readline-based fallback)
+/// Keep: alternative to TUI for environments without terminal capabilities.
 #[allow(dead_code)]
 async fn interactive_mode(app: oxi::App) -> Result<()> {
     use std::io::{self, Write};
@@ -847,6 +719,7 @@ async fn interactive_mode(app: oxi::App) -> Result<()> {
 }
 
 /// Handle `/template <name> [key=value ...]` — expand a template and send as a message.
+/// Keep: part of readline interactive_mode command handling.
 #[allow(dead_code)]
 async fn handle_template_expand(
     line: &str,
@@ -897,6 +770,7 @@ async fn handle_template_expand(
     Ok(CommandResult::Handled)
 }
 
+/// Keep: part of readline interactive_mode command handling.
 #[allow(dead_code)]
 async fn handle_command(
     line: &str,
