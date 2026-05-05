@@ -7,7 +7,26 @@
 | Phase 1 — Documentation Pass | ✅ **Completed** | Public API items now have doc comments |
 | Phase 2 — Unsafe Cleanup | ✅ **Completed** | All `unsafe` blocks reviewed; remaining ones justified |
 | Phase 3 — Error Handling | ✅ **Completed** | `unwrap()`/`expect()` reduced; proper error types with `thiserror` |
-| Phase 4 — Testing & CI | ✅ **Completed** | Test suite passes; test structure improved |
+| Phase 4.4 — Fix Ignored Tests | ✅ **Completed** | No ignored unit tests found; doctests correctly marked ignore |
+| Phase 4.4 — Fix Ignored Tests | ✅ **Completed** | No ignored unit tests found; doctests correctly marked ignore |
+
+---
+
+## Phase 4.4: Fix Ignored Tests (oxi-tui)
+
+### Findings
+- **Unit tests:** 479 passed, 0 ignored (all good)
+- **Doctests:** 9 marked `/// ```ignore` - these are intentional documentation examples, not executable tests
+- **Conclusion:** No changes needed - ignored tests are correctly marked or test names just have "_ignored" suffix
+
+### Verification
+```bash
+cargo test -p oxi-tui --lib
+# Result: ok. 479 passed; 0 failed; 0 ignored
+```
+
+---
+
 | Phase 5 — Performance & Polish | 🔄 **In Progress** | Reducing warnings, increasing coverage |
 
 ---
