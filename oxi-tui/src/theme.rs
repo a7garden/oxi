@@ -131,17 +131,29 @@ impl ColorScheme {
 /// Pre-computed ratatui styles for all semantic colors in a ColorScheme.
 #[derive(Clone, Debug)]
 pub struct ThemeStyles {
+    /// Normal / default text style.
     pub normal: Style,
+    /// Primary color style.
     pub primary: Style,
+    /// Secondary color style.
     pub secondary: Style,
+    /// Error / red style.
     pub error: Style,
+    /// Warning / yellow style.
     pub warning: Style,
+    /// Success / green style.
     pub success: Style,
+    /// Muted / dimmed style.
     pub muted: Style,
+    /// Accent / highlight style.
     pub accent: Style,
+    /// Border / separator style.
     pub border: Style,
+    /// Cursor foreground style.
     pub cursor_fg: Style,
+    /// Cursor background style.
     pub cursor_bg: Style,
+    /// Selection background style.
     pub selection_bg: Style,
 }
 
@@ -152,11 +164,17 @@ pub struct ThemeStyles {
 /// Text style scheme for semantic elements.
 #[derive(Clone, Debug)]
 pub struct FontScheme {
+    /// Normal weight text.
     pub normal: Attributes,
+    /// Bold text.
     pub bold: Attributes,
+    /// Italic text.
     pub italic: Attributes,
+    /// Bold italic text.
     pub bold_italic: Attributes,
+    /// Heading text (bold).
     pub heading: Attributes,
+    /// Link text (underlined).
     pub link: Attributes,
 }
 
@@ -180,9 +198,13 @@ impl Default for FontScheme {
 /// Spacing/padding configuration (in character cells).
 #[derive(Clone, Debug, Copy)]
 pub struct Spacing {
+    /// Padding around content.
     pub padding: u16,
+    /// Outer margin.
     pub margin: u16,
+    /// Width of borders.
     pub border_width: u16,
+    /// Extra line spacing.
     pub line_spacing: u16,
 }
 
@@ -246,26 +268,41 @@ impl Default for Theme {
 /// Serializable representation of a theme file.
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct ThemeFile {
+    /// Human-readable name of the theme.
     #[serde(default)]
     pub name: String,
+    /// Color definitions.
     #[serde(default)]
     pub colors: ThemeFileColors,
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct ThemeFileColors {
+    /// Foreground / text color.
     pub foreground: Option<String>,
+    /// Background color.
     pub background: Option<String>,
+    /// Primary accent color.
     pub primary: Option<String>,
+    /// Secondary color.
     pub secondary: Option<String>,
+    /// Error color.
     pub error: Option<String>,
+    /// Warning color.
     pub warning: Option<String>,
+    /// Success color.
     pub success: Option<String>,
+    /// Muted / dimmed text color.
     pub muted: Option<String>,
+    /// Accent highlight color.
     pub accent: Option<String>,
+    /// Border / separator color.
     pub border: Option<String>,
+    /// Cursor foreground color.
     pub cursor_fg: Option<String>,
+    /// Cursor background color.
     pub cursor_bg: Option<String>,
+    /// Selection background color.
     pub selection_bg: Option<String>,
 }
 
