@@ -59,8 +59,8 @@ pub struct CliArgs {
     #[arg(long)]
     pub append_system_prompt: Option<PathBuf>,
 
-    /// Single-shot print mode (shorthand for non-interactive)
-    #[arg(short = 'p', long)]
+    /// Single-shot print mode (non-interactive)
+    #[arg(long)]
     pub print: bool,
 
     /// Disable session persistence
