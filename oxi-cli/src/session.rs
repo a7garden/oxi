@@ -2213,7 +2213,7 @@ mod tests {
         assert_eq!(manager.get_leaf_id(), Some(id4));
 
         // Get tree - 1 root (id1), with 2 children (id2 and id4)
-        let tree = manager.get_tree(Uuid::nil());
+        let tree = manager.get_tree(Uuid::nil()).unwrap();
         assert_eq!(tree.len(), 1); // One root
         assert_eq!(tree[0].children.len(), 2); // id1 has 2 children: id2 and id4
     }
@@ -2460,7 +2460,7 @@ mod tests {
         manager.branch(&id2).unwrap();
         let id_c = manager.append_message(user_msg("branch-C"));
 
-        let tree = manager.get_tree(Uuid::nil());
+        let tree = manager.get_tree(Uuid::nil()).unwrap();
         let node2 = &tree[0].children[0];
         assert_eq!(node2.entry.id, id2);
         assert_eq!(node2.children.len(), 3);
@@ -2495,7 +2495,7 @@ mod tests {
         manager.branch(&id5).unwrap();
         manager.append_message(user_msg("7"));
 
-        let tree = manager.get_tree(Uuid::nil());
+        let tree = manager.get_tree(Uuid::nil()).unwrap();
 
         // node2 has 2 children: id3 and id5
         let node2 = &tree[0].children[0];
@@ -2662,7 +2662,7 @@ mod tests {
         manager.add_label(&id1, "start").unwrap();
         manager.add_label(&id2, "response").unwrap();
 
-        let tree = manager.get_tree(Uuid::nil());
+        let tree = manager.get_tree(Uuid::nil()).unwrap();
         let node1 = &tree[0];
         assert_eq!(node1.label, Some("start".to_string()));
 
@@ -2755,7 +2755,7 @@ mod tests {
     #[test]
     fn test_get_tree_empty_session() {
         let manager = SessionManager::in_memory("/tmp");
-        let tree = manager.get_tree(Uuid::nil());
+        let tree = manager.get_tree(Uuid::nil()).unwrap();
         assert!(tree.is_empty());
     }
 
@@ -2785,7 +2785,7 @@ mod tests {
         manager.branch_with_summary(Some(&id3), "Tried wrong approach", None, None);
         manager.append_message(user_msg("better approach"));
 
-        let tree = manager.get_tree(Uuid::nil());
+        let tree = manager.get_tree(Uuid::nil()).unwrap();
         // Root node
         assert_eq!(tree.len(), 1);
 
