@@ -5,7 +5,8 @@
 //! - Line-level differential updates (zero flicker)
 //! - Streaming text display
 //! - Scrollable chat history
-//! - Slash commands for session management, export, and settings
+//! - Slash commands with autocomplete popup
+//! - Status bar showing cwd, model, context usage
 
 use crate::agent_session::{AgentSession, CompactionReason, ScopedModel, SessionEvent};
 use crate::agent_session_runtime::{
@@ -14,9 +15,10 @@ use crate::agent_session_runtime::{
 };
 use crate::auth_storage::AuthStorage;
 use crate::changelog;
-use crate::export::{self, ExportMeta, HtmlExportOptions};
 use crate::clipboard_write;
+use crate::export::{self, ExportMeta, HtmlExportOptions};
 use crate::session::SessionManager;
+use crate::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
 use std::io;
@@ -85,16 +87,108 @@ struct ChatMessage {
 struct InputState {
     text: String,
     cursor: usize, // char index
+    /// Slash command completion state
+    slash_completions: Vec<SlashCompletion>,
+    slash_completion_index: usize,
+    slash_completion_active: bool,
+}
+
+/// A slash command completion candidate.
+struct SlashCompletion {
+    name: String,
+    description: String,
 }
 
 impl InputState {
     fn new() -> Self {
-        Self { text: String::new(), cursor: 0 }
+        Self {
+            text: String::new(),
+            cursor: 0,
+            slash_completions: Vec::new(),
+            slash_completion_index: 0,
+            slash_completion_active: false,
+        }
     }
 
     fn clear(&mut self) {
         self.text.clear();
         self.cursor = 0;
+        self.clear_slash_completions();
+    }
+
+    fn clear_slash_completions(&mut self) {
+        self.slash_completions.clear();
+        self.slash_completion_index = 0;
+        self.slash_completion_active = false;
+    }
+
+    /// Update slash command completions based on current input.
+    fn update_slash_completions(&mut self) {
+        let text = self.text.trim();
+        if !text.starts_with('/') {
+            self.clear_slash_completions();
+            return;
+        }
+
+        // Get the first "word" (the command part)
+        let cmd_part = text.split_whitespace().next().unwrap_or("");
+        let query = &cmd_part[1..]; // strip leading '/'
+
+        // If text contains a space, we've already typed a full command
+        if text.contains(' ') {
+            self.clear_slash_completions();
+            return;
+        }
+
+        let mut matches: Vec<SlashCompletion> = BUILTIN_SLASH_COMMANDS
+            .iter()
+            .filter(|cmd| {
+                if query.is_empty() {
+                    true
+                } else {
+                    cmd.name.starts_with(query)
+                }
+            })
+            .map(|cmd| SlashCompletion {
+                name: format!("/{}", cmd.name),
+                description: cmd.description.to_string(),
+            })
+            .collect();
+
+        matches.sort_by(|a, b| a.name.cmp(&b.name));
+        self.slash_completions = matches;
+        self.slash_completion_index = 0;
+        self.slash_completion_active = !self.slash_completions.is_empty();
+    }
+
+    /// Accept the currently selected slash completion.
+    fn accept_slash_completion(&mut self) -> bool {
+        if !self.slash_completion_active || self.slash_completions.is_empty() {
+            return false;
+        }
+        let completion = &self.slash_completions[self.slash_completion_index];
+        self.text = completion.name.clone();
+        self.cursor = self.text.chars().count();
+        self.clear_slash_completions();
+        true
+    }
+
+    /// Navigate to next slash completion.
+    fn next_slash_completion(&mut self) {
+        if !self.slash_completions.is_empty() {
+            self.slash_completion_index = (self.slash_completion_index + 1) % self.slash_completions.len();
+        }
+    }
+
+    /// Navigate to previous slash completion.
+    fn prev_slash_completion(&mut self) {
+        if !self.slash_completions.is_empty() {
+            if self.slash_completion_index == 0 {
+                self.slash_completion_index = self.slash_completions.len() - 1;
+            } else {
+                self.slash_completion_index -= 1;
+            }
+        }
     }
 
     fn value(&self) -> &str {
@@ -323,6 +417,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let mut scroll_offset: usize = 0;
     let mut auto_scroll: bool = true;
 
+    // Status bar state
+    let model_id = agent_session.model_id();
+    let git_branch = crate::git_utils::get_current_branch(
+        &std::env::current_dir().unwrap_or_default(),
+    );
+
     // Welcome message
     messages.push(ChatMessage {
         role: MessageRole::System,
@@ -347,12 +447,17 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     Constraint::Min(3),     // Chat area
                     Constraint::Length(1),   // Separator
                     Constraint::Length(2),   // Input area
+                    Constraint::Length(1),   // Status bar
                 ])
                 .split(size);
 
             render_chat(f, chunks[0], &messages, &streaming_text, scroll_offset, &theme);
             render_separator(f, chunks[1], &theme);
             render_input(f, chunks[2], &input, is_agent_busy, &theme);
+            render_status_bar(
+                f, chunks[3], &cwd, &model_id,
+                git_branch.as_deref(), is_agent_busy, &theme,
+            );
         })?;
 
         // ── Poll for terminal events ─────────────────────────────────
@@ -362,6 +467,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                     match key.code {
                         KeyCode::Enter => {
                             if !is_agent_busy {
+                                // If slash completions are active, accept completion first
+                                if input.slash_completion_active {
+                                    input.accept_slash_completion();
+                                    continue;
+                                }
+
                                 let value = input.value().to_string();
                                 if !value.is_empty() {
                                     if value.starts_with('/') {
@@ -427,16 +538,19 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         KeyCode::Char(c) => {
                             if !is_agent_busy {
                                 input.insert_char(c);
+                                input.update_slash_completions();
                             }
                         }
                         KeyCode::Backspace => {
                             if !is_agent_busy {
                                 input.backspace();
+                                input.update_slash_completions();
                             }
                         }
                         KeyCode::Delete => {
                             if !is_agent_busy {
                                 input.delete();
+                                input.update_slash_completions();
                             }
                         }
                         KeyCode::Left => {
@@ -457,6 +571,34 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         KeyCode::End => {
                             if !is_agent_busy {
                                 input.move_end();
+                            }
+                        }
+                        KeyCode::Tab => {
+                            if !is_agent_busy && input.slash_completion_active {
+                                input.accept_slash_completion();
+                            }
+                        }
+                        KeyCode::Up => {
+                            if !is_agent_busy && input.slash_completion_active {
+                                input.prev_slash_completion();
+                            } else {
+                                scroll_offset = scroll_offset.saturating_add(3);
+                                auto_scroll = false;
+                            }
+                        }
+                        KeyCode::Down => {
+                            if !is_agent_busy && input.slash_completion_active {
+                                input.next_slash_completion();
+                            } else {
+                                scroll_offset = scroll_offset.saturating_sub(3);
+                                if scroll_offset == 0 {
+                                    auto_scroll = true;
+                                }
+                            }
+                        }
+                        KeyCode::Esc => {
+                            if input.slash_completion_active {
+                                input.clear_slash_completions();
                             }
                         }
                         _ => {}
