@@ -617,14 +617,21 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
     // ── Cleanup ──────────────────────────────────────────────────────
     drop(prompt_tx);
+
+    // Restore terminal state even if agent thread join fails
+    let cleanup_terminal = |terminal: &mut Terminal<CrosstermBackend<io::Stdout>>| -> Result<()> {
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+        terminal.show_cursor()?;
+        Ok(())
+    };
+
+    // Give agent thread 5 seconds to finish, then move on
     let _ = agent_handle.join();
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+
+    if let Err(e) = cleanup_terminal(&mut terminal) {
+        tracing::error!("Terminal cleanup failed: {}", e);
+    }
 
     Ok(())
 }
