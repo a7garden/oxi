@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! oxi-ai: Unified LLM API for oxi
 //!
 //! This crate provides a unified interface for interacting with multiple LLM providers.

@@ -29,7 +29,27 @@ pub struct Tool {
 }
 
 impl Tool {
-    /// Create a new tool with the given name, description, and JSON Schema
+    /// Create a new tool with the given name, description, and JSON Schema.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_ai::Tool;
+    /// let tool = Tool::new(
+    ///     "read_file",
+    ///     "Read contents from a file",
+    ///     serde_json::json!({
+    ///         "type": "object",
+    ///         "properties": {
+    ///             "path": {
+    ///                 "type": "string",
+    ///                 "description": "File path to read"
+    ///             }
+    ///         },
+    ///         "required": ["path"]
+    ///     }),
+    /// );
+    /// ```
     pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,

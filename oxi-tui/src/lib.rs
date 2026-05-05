@@ -1,3 +1,5 @@
+#![warn(missing_docs)]
+
 //! oxi-tui: Terminal UI library for oxi
 //!
 //! This crate provides terminal UI primitives and built-in components.
