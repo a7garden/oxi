@@ -1044,7 +1044,13 @@ fn handle_slash_command(
                     output.push_str(&format!("## {}\n\n", entry.version_string()));
                     // Show first 200 chars of content
                     let preview = if entry.content.len() > 200 {
-                        format!("{}...", &entry.content[..200])
+                        // Find a safe char boundary near 200 bytes
+                        let end = entry.content.char_indices()
+                            .take_while(|(i, _)| *i < 200)
+                            .last()
+                            .map(|(i, c)| i + c.len_utf8())
+                            .unwrap_or(0);
+                        format!("{}...", &entry.content[..end])
                     } else {
                         entry.content.clone()
                     };
@@ -1071,7 +1077,6 @@ fn handle_slash_command(
         "/export" => {
             // Export session to HTML
             let export_path = arg.map(PathBuf::from);
-            let entries = session_manager_get_entries(session);
             let meta = ExportMeta {
                 model: Some(session.model_id()),
                 provider: None,
@@ -1079,6 +1084,16 @@ fn handle_slash_command(
                 total_user_tokens: None,
                 total_assistant_tokens: None,
             };
+
+            // Convert in-memory messages to session entries for export
+            let entries: Vec<crate::session::SessionEntry> = messages.iter().map(|msg| {
+                let role = match msg.role {
+                    MessageRole::User => "user",
+                    MessageRole::Assistant => "assistant",
+                    MessageRole::System => "system",
+                };
+                crate::session::SessionEntry::simple_message(role, &msg.content)
+            }).collect();
             
             match export::export_to_html(&entries, &meta, &HtmlExportOptions::default()) {
                 Ok(html) => {
@@ -1100,10 +1115,10 @@ fn handle_slash_command(
                             }
                         }
                     } else {
-                        // Print HTML to stdout if no path given
+                        let size = html.len();
                         messages.push(ChatMessage {
                             role: MessageRole::System,
-                            content: format!("HTML export ({} bytes) - use /export <path> to save to file", html.len()),
+                            content: format!("HTML export ready ({} bytes).\nUse /export <path> to save to file.", size),
                             timestamp: now_millis(),
                         });
                     }

@@ -267,7 +267,35 @@ impl TUI {
     }
 
     /// Poll for a single event (non-blocking with timeout).
-    fn poll_event(&self, timeout: std::time::Duration) -> Option<crate::Event> {
+    ///
+    /// When a cursor position query is pending (`cursor_marker_pending = true`),
+    /// this method attempts to parse the terminal's CSI response from crossterm's
+    /// event stream. Crossterm internally consumes `ESC[row;colR` as an
+    /// `InternalEvent::CursorPosition`, but its public `Event` enum does not
+    /// expose it. As a fallback, we check the cursor position synchronously
+    /// via the terminal's `cursor_pos()` method.
+    fn poll_event(&mut self, timeout: std::time::Duration) -> Option<crate::Event> {
+        // If we have a pending cursor position query, try to get the response.
+        // We attempt a non-blocking poll first; if crossterm reports an event
+        // is available, we read it normally. If not, and we're still pending,
+        // we do a synchronous cursor position query.
+        if self.cursor_marker_pending {
+            // Give the terminal a brief window to respond
+            if !crossterm::event::poll(std::time::Duration::from_millis(5)).ok()? {
+                // No regular event — try to read the cursor position synchronously.
+                // This sends ESC[6n and blocks for the response internally.
+                self.cursor_marker_pending = false;
+                if let Ok(pos) = self.terminal.cursor_pos() {
+                    return Some(crate::Event::CursorPosition(pos.row, pos.col));
+                }
+                return None;
+            }
+            // Event is available — read it via crossterm (cursor position report
+            // will be consumed internally and discarded by the EventFilter).
+            // Fall through to normal handling.
+            self.cursor_marker_pending = false;
+        }
+
         if crossterm::event::poll(timeout).ok()? {
             crossterm::event::read().ok().map(Self::convert_event)
         } else {
