@@ -14,30 +14,50 @@ pub type ActionId = &'static str;
 /// Parsed key sequence.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeySequence {
+    /// Whether Ctrl modifier is active.
     pub ctrl: bool,
+    /// Whether Alt modifier is active.
     pub alt: bool,
+    /// Whether Shift modifier is active.
     pub shift: bool,
+    /// The key itself.
     pub key: KeyName,
 }
 
 /// Key name (after modifiers stripped).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KeyName {
+    /// A printable ASCII character.
     Char(char),
+    /// Enter / Return key.
     Enter,
+    /// Escape key.
     Escape,
+    /// Tab key.
     Tab,
+    /// Backspace key.
     Backspace,
+    /// Delete key.
     Delete,
+    /// Insert key.
     Insert,
+    /// Arrow Up.
     Up,
+    /// Arrow Down.
     Down,
+    /// Arrow Left.
     Left,
+    /// Arrow Right.
     Right,
+    /// Home key.
     Home,
+    /// End key.
     End,
+    /// Page Up key.
     PageUp,
+    /// Page Down key.
     PageDown,
+    /// Function key F1-F12.
     F(u8),
 }
 
@@ -144,21 +164,37 @@ impl KeySequence {
 
 /// Well-known action IDs.
 pub mod actions {
+    /// Submit current input line.
     pub const INPUT_SUBMIT: &str = "app.input.submit";
+    /// Insert a newline in the editor.
     pub const INPUT_NEWLINE: &str = "app.input.newLine";
+    /// Interrupt / cancel the current operation.
     pub const INTERRUPT: &str = "app.interrupt";
+    /// Clear the editor content.
     pub const CLEAR: &str = "app.clear";
+    /// Exit the application.
     pub const EXIT: &str = "app.exit";
+    /// Suspend to background.
     pub const SUSPEND: &str = "app.suspend";
+    /// Cycle thinking / reasoning depth.
     pub const CYCLE_THINKING: &str = "app.thinking.cycle";
+    /// Toggle thinking block visibility.
     pub const TOGGLE_THINKING: &str = "app.thinking.toggle";
+    /// Cycle to next model.
     pub const CYCLE_MODEL_FWD: &str = "app.model.cycleForward";
+    /// Cycle to previous model.
     pub const CYCLE_MODEL_BWD: &str = "app.model.cycleBackward";
+    /// Open the model selector.
     pub const SELECT_MODEL: &str = "app.model.select";
+    /// Start a new session.
     pub const NEW_SESSION: &str = "app.session.new";
+    /// Expand / collapse tool output panel.
     pub const EXPAND_TOOLS: &str = "app.tools.expand";
+    /// Open external editor.
     pub const EXTERNAL_EDITOR: &str = "app.editor.external";
+    /// Scroll the view up.
     pub const SCROLL_UP: &str = "app.scroll.up";
+    /// Scroll the view down.
     pub const SCROLL_DOWN: &str = "app.scroll.down";
 }
 
@@ -195,6 +231,7 @@ pub struct KeybindingRegistry {
 }
 
 impl KeybindingRegistry {
+    /// Create a new registry populated with default keybindings.
     pub fn new() -> Self {
         let mut bindings = HashMap::new();
         for &(action, keys, desc) in DEFAULT_BINDINGS {
