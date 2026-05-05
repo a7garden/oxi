@@ -3,6 +3,39 @@
 ## Status
 In Progress
 
+## Phase 2.3: extensions.rs Decomposition - Complete
+
+### Created Files:
+- `/oxi-cli/src/extensions/mod.rs` (~11,200 lines with tests)
+- `/oxi-cli/src/extensions/types.rs` (~9,800 lines)
+- `/oxi-cli/src/extensions/context.rs` (~9,700 lines)
+- `/oxi-cli/src/extensions/registry.rs` (~26,500 lines)
+- `/oxi-cli/src/extensions/loading.rs` (~6,700 lines)
+
+### Module Structure:
+```
+extensions/
+├── mod.rs      # Extension trait, re-exports, tests
+├── types.rs    # Enums, structs, events, emit results
+├── context.rs # ExtensionContext + Builder
+├── registry.rs # ExtensionRegistry + ExtensionRunner
+└── loading.rs  # load_extension, discover_extensions
+```
+
+### Key Types Defined:
+- `Extension` trait (in mod.rs)
+- `ExtensionPermission`, `ExtensionManifest`, `ExtensionError`, `ExtensionErrorRecord`
+- All event types (SessionBefore*, ContextEvent, etc.)
+- `ExtensionState`, `Command`, `ExtensionErrorListener`
+- Emit result types (ToolCallEmitResult, etc.)
+
+### Compilation: ✅ `cargo check -p oxi-cli` passes
+
+### Files Removed:
+- `/oxi-cli/src/extensions.rs` (monolithic file)
+
+---
+
 ## Phase 3.2: Documentation - Examples & Architecture Files
 
 ### Status: Complete
