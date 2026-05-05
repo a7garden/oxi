@@ -344,6 +344,7 @@ impl AppState {
 // Main entry point
 // ═══════════════════════════════════════════════════════════════════════════
 
+/// TODO: document.
 pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     let settings = app.settings().clone();
     let cwd = std::env::current_dir()
