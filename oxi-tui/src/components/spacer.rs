@@ -45,11 +45,13 @@ impl Spacer {
         }
     }
 
+/// with_bg function.
     pub fn with_bg(mut self, color: Color) -> Self {
         self.bg_color = Some(color);
         self
     }
 
+/// set_size function.
     pub fn set_size(&mut self, width: u16, height: u16) {
         self.width = width;
         self.height = height;

@@ -50,11 +50,13 @@ impl AgentToolResult {
         }
     }
 
+/// TODO: document this function.
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = Some(metadata);
         self
     }
 
+/// TODO: document this function.
     pub fn with_content_blocks(mut self, blocks: Vec<oxi_ai::ContentBlock>) -> Self {
         self.content_blocks = Some(blocks);
         self

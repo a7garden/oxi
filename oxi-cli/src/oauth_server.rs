@@ -95,24 +95,31 @@ impl OAuthCallbackServer {
 #[derive(Debug, thiserror::Error)]
 pub enum OAuthError {
     #[error("IO error: {0}")]
+/// io variant.
     Io(#[from] std::io::Error),
 
     #[error("Invalid callback URL: {0}")]
+/// invalid callback variant.
     InvalidCallback(String),
 
     #[error("Missing authorization code")]
+/// missing code variant.
     MissingCode,
 
     #[error("Missing state parameter")]
+/// missing state variant.
     MissingState,
 
     #[error("Server shutdown")]
+/// shutdown variant.
     Shutdown,
 
     #[error("Callback timeout")]
+/// timeout variant.
     Timeout,
 
     #[error("HTTP parse error: {0}")]
+/// http parse variant.
     HttpParse(#[from] url::ParseError),
 }
 

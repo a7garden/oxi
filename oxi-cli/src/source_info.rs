@@ -5,8 +5,11 @@
 /// Whether a source comes from the user, the project, or is temporary.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceScope {
+/// user variant.
     User,
+/// project variant.
     Project,
+/// temporary variant.
     Temporary,
 }
 
@@ -19,7 +22,9 @@ impl Default for SourceScope {
 /// Whether a source is a package or top-level.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceOrigin {
+/// package variant.
     Package,
+/// top level variant.
     TopLevel,
 }
 

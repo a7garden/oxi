@@ -34,6 +34,7 @@ use self::tool_exec::execute_tool_calls;
 
 type EmitFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 
+/// AgentLoop.
 pub struct AgentLoop {
     provider: Arc<dyn Provider>,
     config: AgentLoopConfig,
@@ -88,32 +89,39 @@ impl AgentLoop {
         }
     }
 
+/// TODO: document this function.
     pub fn with_before_tool_call(mut self, hook: BeforeToolCallHook) -> Self {
         self.before_tool_call = Some(hook);
         self
     }
 
+/// TODO: document this function.
     pub fn with_after_tool_call(mut self, hook: AfterToolCallHook) -> Self {
         self.after_tool_call = Some(hook);
         self
     }
 
+/// TODO: document this function.
     pub fn steer(&self, message: Message) {
         self.steering_queue.write().push(message);
     }
 
+/// TODO: document this function.
     pub fn follow_up(&self, message: Message) {
         self.follow_up_queue.write().push(message);
     }
 
+/// TODO: document this function.
     pub fn clear_steering_queue(&self) {
         clear_steering_queue(self);
     }
 
+/// TODO: document this function.
     pub fn clear_follow_up_queue(&self) {
         clear_follow_up_queue(self);
     }
 
+/// TODO: document this function.
     pub fn clear_all_queues(&self) {
         clear_all_queues(self);
     }
@@ -126,14 +134,17 @@ impl AgentLoop {
         drain_follow_up_queue(self)
     }
 
+/// TODO: document this function.
     pub fn cancel_auto_retry(&self) {
         cancel_auto_retry(self);
     }
 
+/// TODO: document this function.
     pub fn auto_retry_attempt(&self) -> usize {
         auto_retry_attempt_method(self)
     }
 
+/// TODO: document this function.
     pub async fn run(
         &self,
         prompt: String,
@@ -144,6 +155,7 @@ impl AgentLoop {
         self.run_messages(vec![message], emit).await
     }
 
+/// TODO: document this function.
     pub async fn run_messages(
         &self,
         prompts: Vec<Message>,
@@ -186,6 +198,7 @@ impl AgentLoop {
         Ok(all_events)
     }
 
+/// TODO: document this function.
     pub async fn continue_loop(
         &self,
         emit: impl Fn(AgentEvent) + Send + Sync + 'static,

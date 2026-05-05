@@ -148,7 +148,9 @@ pub fn detect_capabilities() -> TerminalCapabilities {
 /// Pixel dimensions of a single terminal cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CellDimensions {
+    /// Width in pixels.
     pub width_px: u32,
+    /// Height in pixels.
     pub height_px: u32,
 }
 
@@ -165,7 +167,9 @@ impl Default for CellDimensions {
 /// Pixel dimensions of an image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageDimensions {
+    /// Width in pixels.
     pub width_px: u32,
+    /// Height in pixels.
     pub height_px: u32,
 }
 
@@ -176,10 +180,15 @@ pub struct ImageDimensions {
 /// Image MIME type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
+    /// PNG image.
     Png,
+    /// JPEG image.
     Jpeg,
+    /// GIF image.
     Gif,
+    /// WebP image.
     WebP,
+    /// BMP image.
     Bmp,
 }
 

@@ -68,8 +68,11 @@ impl Line {
 /// Mention suggestion for @ mentions.
 #[derive(Debug, Clone)]
 pub struct Mention {
+    /// Display name.
     pub name: String,
+    /// Path or identifier.
     pub path: String,
+    /// Whether this is a file mention.
     pub is_file: bool,
 }
 

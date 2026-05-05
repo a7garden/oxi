@@ -1,6 +1,6 @@
 //! Tests for oxi-ai error types: creation, display, From impls, and error chains.
 
-use oxi_ai::error::{Error, ProviderError, ValidationError};
+use oxi_ai::{Error, ProviderError, ValidationError as ToolsValidationError};
 
 // ---------------------------------------------------------------------------
 // ProviderError variant creation and display
@@ -73,7 +73,8 @@ fn stream_error_display() {
 #[test]
 fn json_parse_error_display() {
     let bad_json = "{invalid";
-    let serde_err: serde_json::Error = serde_json::from_str::<serde_json::Value>(bad_json).unwrap_err();
+    let serde_err: serde_json::Error =
+        serde_json::from_str::<serde_json::Value>(bad_json).unwrap_err();
     let err = ProviderError::JsonParse(serde_err);
     assert!(err.to_string().starts_with("JSON parse error:"));
 }
@@ -112,20 +113,6 @@ fn from_json_error_to_provider_error() {
     assert!(matches!(provider_err, ProviderError::JsonParse(_)));
 }
 
-#[test]
-fn from_json_error_to_validation_error() {
-    let serde_err = serde_json::from_str::<serde_json::Value>("}").unwrap_err();
-    let val_err: ValidationError = serde_err.into();
-    assert!(matches!(val_err, ValidationError::InvalidJson(_)));
-}
-
-#[test]
-fn from_validation_error_to_top_level_error() {
-    let val_err = ValidationError::SchemaValidation("missing required property".into());
-    let top: Error = val_err.into();
-    assert!(matches!(top, Error::Validation(_)));
-}
-
 // ---------------------------------------------------------------------------
 // Error chain preserves context
 // ---------------------------------------------------------------------------
@@ -147,15 +134,16 @@ fn io_error_chain_through_provider() {
     let io_err = std::io::Error::new(std::io::ErrorKind::BrokenPipe, "broken pipe");
     let provider_err = ProviderError::IoError(io_err);
     let top: Error = provider_err.into();
-    // Should have "Provider error" wrapper + "IO error" wrapper + "broken pipe"
     let msg = top.to_string();
-    assert!(msg.contains("broken pipe"), "should preserve root cause: {msg}");
+    assert!(
+        msg.contains("broken pipe"),
+        "should preserve root cause: {msg}"
+    );
 }
 
 #[test]
 fn double_wrap_preserves_message() {
     let io_err = std::io::Error::new(std::io::ErrorKind::TimedOut, "read timed out");
-    // io -> ProviderError::IoError -> Error::Provider
     let top: Error = ProviderError::IoError(io_err).into();
     let msg = top.to_string();
     assert!(
@@ -212,25 +200,30 @@ fn invalid_api_key_format_message() {
     );
 }
 
+// Tools::ValidationError is the publicly exposed one
 #[test]
-fn validation_missing_field_helpful() {
-    let err = ValidationError::MissingRequiredField("model".into());
+fn tools_validation_missing_field_helpful() {
+    let err = ToolsValidationError::SchemaValidation("missing required property 'model'".into());
     let msg = err.to_string();
-    assert!(
-        msg.contains("model"),
-        "should mention the missing field name: {msg}"
-    );
+    assert!(msg.contains("model"), "should mention field: {msg}");
 }
 
 #[test]
-fn validation_schema_error_helpful() {
+fn tools_validation_schema_error_helpful() {
     let detail = "additionalProperties: additional property 'foo' not allowed";
-    let err = ValidationError::SchemaValidation(detail.into());
+    let err = ToolsValidationError::SchemaValidation(detail.into());
     let msg = err.to_string();
     assert!(
         msg.contains("foo"),
         "should include schema error detail: {msg}"
     );
+}
+
+#[test]
+fn tools_validation_invalid_json() {
+    let serde_err = serde_json::from_str::<serde_json::Value>("}").unwrap_err();
+    let err = ToolsValidationError::InvalidJson(serde_err);
+    assert!(err.to_string().contains("Invalid JSON"));
 }
 
 // ---------------------------------------------------------------------------

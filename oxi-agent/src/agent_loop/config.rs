@@ -10,6 +10,7 @@ pub const AUTO_RETRY_MAX_ATTEMPTS: usize = 3;
 pub const AUTO_RETRY_BASE_DELAY_MS: u64 = 2000;
 
 #[derive(Clone)]
+/// AgentLoopConfig.
 pub struct AgentLoopConfig {
     pub model_id: String,
     pub system_prompt: Option<String>,
@@ -30,8 +31,11 @@ pub struct AgentLoopConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// ToolExecutionMode.
 pub enum ToolExecutionMode {
+/// parallel variant.
     Parallel,
+/// sequential variant.
     Sequential,
 }
 

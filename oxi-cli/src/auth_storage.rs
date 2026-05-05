@@ -137,10 +137,13 @@ impl AuthCredential {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CredentialValidationError {
     #[error("Field '{0}' must not be empty")]
+/// empty field variant.
     EmptyField(String),
     #[error("Placeholder value detected: '{0}'")]
+/// placeholder value variant.
     PlaceholderValue(String),
     #[error("Invalid expiry timestamp")]
+/// invalid expiry variant.
     InvalidExpiry,
 }
 
@@ -181,16 +184,22 @@ pub type AuthResult<T> = Result<T, AuthError>;
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum AuthError {
     #[error("Failed to read auth storage: {0}")]
+/// read error variant.
     ReadError(String),
     #[error("Failed to write auth storage: {0}")]
+/// write error variant.
     WriteError(String),
     #[error("Credential not found: {0}")]
+/// not found variant.
     NotFound(String),
     #[error("Invalid credential format: {0}")]
+/// invalid format variant.
     InvalidFormat(String),
     #[error("Keyring error: {0}")]
+/// keyring error variant.
     KeyringError(String),
     #[error("Credential validation failed: {0}")]
+/// validation failed variant.
     ValidationFailed(String),
 }
 
@@ -1029,11 +1038,13 @@ pub mod keyring_support {
 
     // Non-keyring fallbacks
     #[cfg(not(feature = "keyring"))]
+/// TODO: document this function.
     pub fn get_keyring_secret(_service: &str, _account: &str) -> Option<String> {
         None
     }
 
     #[cfg(not(feature = "keyring"))]
+/// TODO: document this function.
     pub fn set_keyring_secret(
         _service: &str,
         _account: &str,
@@ -1045,6 +1056,7 @@ pub mod keyring_support {
     }
 
     #[cfg(not(feature = "keyring"))]
+/// TODO: document this function.
     pub fn delete_keyring_secret(_service: &str, _account: &str) -> AuthResult<()> {
         Err(AuthError::KeyringError(
             "Keyring support not compiled".to_string(),

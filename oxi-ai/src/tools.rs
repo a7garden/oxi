@@ -143,12 +143,15 @@ impl Tool {
 #[derive(Error, Debug)]
 pub enum ValidationError {
     #[error("Invalid JSON: {0}")]
+/// invalid json variant.
     InvalidJson(#[from] serde_json::Error),
 
     #[error("Schema validation failed: {0}")]
+/// schema validation variant.
     SchemaValidation(String),
 
     #[error("Missing required field: {0}")]
+/// missing required field variant.
     MissingRequiredField(String),
 }
 

@@ -42,6 +42,7 @@ impl Provider {
         }
     }
 
+/// TODO: document this function.
     pub fn with_website(mut self, website: impl Into<String>) -> Self {
         self.website = Some(website.into());
         self

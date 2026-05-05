@@ -6,11 +6,14 @@ use crate::{Cell, Color, Component, Event, KeyCode, KeyEvent, Rect, Size, Surfac
 /// A single item in the select list.
 #[derive(Debug, Clone)]
 pub struct SelectItem {
+    /// Display label.
     pub label: String,
+    /// Optional description shown alongside.
     pub description: Option<String>,
 }
 
 impl SelectItem {
+    /// Create a new item with just a label.
     pub fn new(label: impl Into<String>) -> Self {
         Self {
             label: label.into(),
@@ -18,6 +21,7 @@ impl SelectItem {
         }
     }
 
+    /// Add a description.
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = Some(desc.into());
         self
@@ -41,6 +45,7 @@ pub struct SelectList {
 }
 
 impl SelectList {
+    /// Create a list pre-loaded with items.
     pub fn new(items: Vec<SelectItem>) -> Self {
         let filtered_indices = (0..items.len()).collect();
         Self {
@@ -56,23 +61,27 @@ impl SelectList {
         }
     }
 
+    /// Set the callback invoked when an item is selected.
     pub fn on_select(mut self, f: impl Fn(&SelectItem) + Send + 'static) -> Self {
         self.on_select = Some(Box::new(f));
         self
     }
 
+    /// Replace the item list.
     pub fn set_items(&mut self, items: Vec<SelectItem>) {
         self.items = items;
         self.apply_filter();
         self.dirty = true;
     }
 
+    /// Get the currently selected item.
     pub fn selected_item(&self) -> Option<&SelectItem> {
         self.filtered_indices
             .get(self.selected)
             .and_then(|&i| self.items.get(i))
     }
 
+    /// Set the filter string and re-apply.
     pub fn set_filter(&mut self, filter: &str) {
         self.filter = filter.to_string();
         self.apply_filter();

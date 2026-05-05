@@ -41,25 +41,42 @@ pub enum MessageRole {
 #[derive(Debug, Clone)]
 pub enum ContentBlockDisplay {
     /// Ordinary text / markdown content.
-    Text { content: String },
+    Text {
+        /// The text content.
+        content: String,
+    },
     /// Thinking / reasoning content (collapsible).
-    Thinking { content: String, collapsed: bool },
+    Thinking {
+        /// The thinking text.
+        content: String,
+        /// Whether the block is collapsed.
+        collapsed: bool,
+    },
     /// A tool call made by the assistant.
     ToolCall {
+        /// Unique call identifier.
         id: String,
+        /// Tool name.
         name: String,
+        /// JSON-encoded arguments.
         arguments: String,
     },
     /// The result of a tool call.
     ToolResult {
+        /// Name of the tool that produced this result.
         tool_name: String,
+        /// The result content.
         content: String,
+        /// Whether the result is an error.
         is_error: bool,
     },
     /// An error message displayed prominently to the user.
     Error {
+        /// Short error title.
         title: String,
+        /// Detailed error message.
         message: String,
+        /// Whether the user can retry.
         retryable: bool,
     },
 }

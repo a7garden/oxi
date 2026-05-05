@@ -88,6 +88,7 @@ pub struct OverlayBox<T: OverlayContent> {
 }
 
 impl<T: OverlayContent> OverlayBox<T> {
+    /// Create a new overlay wrapping the given content.
     pub fn new(content: T, options: OverlayOptions) -> Self {
         Self {
             content,
@@ -97,22 +98,27 @@ impl<T: OverlayContent> OverlayBox<T> {
         }
     }
 
+    /// Get a reference to the inner content.
     pub fn content(&self) -> &T {
         &self.content
     }
 
+    /// Get a mutable reference to the inner content.
     pub fn content_mut(&mut self) -> &mut T {
         &mut self.content
     }
 
+    /// Get a reference to the overlay options.
     pub fn options(&self) -> &OverlayOptions {
         &self.options
     }
 
+    /// Get the overlay ID.
     pub fn id(&self) -> usize {
         self.id
     }
 
+    /// Set the overlay ID.
     pub fn set_id(&mut self, id: usize) {
         self.id = id;
     }

@@ -5,7 +5,9 @@ use crate::{Cell, Color, Component, Event, Rect, Size, Surface};
 /// Border style (character set).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BorderStyle {
+    /// Single-line border characters.
     Single,
+    /// Double-line border characters.
     Double,
 }
 
@@ -20,6 +22,7 @@ pub struct Box {
 }
 
 impl Box {
+    /// Create a new box with default settings.
     pub fn new() -> Self {
         Self {
             title: None,
@@ -31,31 +34,37 @@ impl Box {
         }
     }
 
+    /// Set the box title.
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
         self
     }
 
+    /// Set the border style.
     pub fn with_border_style(mut self, style: BorderStyle) -> Self {
         self.border_style = style;
         self
     }
 
+    /// Set inner padding.
     pub fn with_padding(mut self, padding: u16) -> Self {
         self.padding = padding;
         self
     }
 
+    /// Set foreground color for the border.
     pub fn with_fg(mut self, color: Color) -> Self {
         self.fg_color = color;
         self
     }
 
+    /// Set background color inside the box.
     pub fn with_bg(mut self, color: Color) -> Self {
         self.bg_color = Some(color);
         self
     }
 
+    /// Change the title at runtime.
     pub fn set_title(&mut self, title: impl Into<String>) {
         self.title = Some(title.into());
         self.dirty = true;

@@ -297,7 +297,9 @@ impl Default for KeybindingRegistry {
 /// Errors loading keybinding config.
 #[derive(Debug, thiserror::Error)]
 pub enum KeybindingError {
+/// Variant.
     #[error("IO error: {0}")] Io(String),
+/// Variant.
     #[error("Parse error: {0}")] Parse(String),
 }
 

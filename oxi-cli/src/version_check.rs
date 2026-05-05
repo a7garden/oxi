@@ -26,6 +26,7 @@ pub struct CratesIoResponse {
 }
 
 #[derive(Debug, Deserialize)]
+/// CrateInfo.
 pub struct CrateInfo {
     pub latest_version: Option<CrateVersion>,
     #[serde(default)]

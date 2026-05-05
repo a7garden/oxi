@@ -15,6 +15,7 @@ const DEFAULT_MAX_LINES: usize = 2000;
 /// Default max output bytes (for truncation)
 const DEFAULT_MAX_BYTES: usize = 50 * 1024;
 
+/// LsTool.
 pub struct LsTool;
 
 impl LsTool {

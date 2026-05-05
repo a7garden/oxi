@@ -16,6 +16,7 @@ pub struct Rect {
 }
 
 impl Rect {
+    /// Create a new rectangle.
     pub fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
         Self {
             x,
@@ -25,6 +26,7 @@ impl Rect {
         }
     }
 
+    /// Create a rectangle from just dimensions, positioned at the origin.
     pub fn from_size(width: u16, height: u16) -> Self {
         Self {
             x: 0,

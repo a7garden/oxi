@@ -275,11 +275,13 @@ impl EventBusBuilder {
         }
     }
 
+/// TODO: document this function.
     pub fn with_channel(mut self, channel: impl Into<String>) -> Self {
         self.channels.push(channel.into());
         self
     }
 
+/// TODO: document this function.
     pub fn build(self) -> Arc<EventBus> {
         let bus = EventBus::arc();
         let _ = self.channels; // Channels are created on-demand
@@ -295,14 +297,23 @@ impl Default for EventBusBuilder {
 
 /// Common channel names
 pub mod channels {
+/// SESSION constant.
     pub const SESSION: &str = "session:*";
+/// MESSAGE constant.
     pub const MESSAGE: &str = "session:message";
+/// TOOL constant.
     pub const TOOL: &str = "session:tool";
+/// ERROR constant.
     pub const ERROR: &str = "session:error";
+/// TOKEN_USAGE constant.
     pub const TOKEN_USAGE: &str = "session:token_usage";
+/// MODEL constant.
     pub const MODEL: &str = "session:model";
+/// THINKING constant.
     pub const THINKING: &str = "session:thinking";
+/// STREAM constant.
     pub const STREAM: &str = "session:stream";
+/// CUSTOM constant.
     pub const CUSTOM: &str = "session:custom";
 }
 

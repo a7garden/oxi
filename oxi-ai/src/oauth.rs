@@ -26,33 +26,43 @@ use std::path::PathBuf;
 #[derive(Debug, thiserror::Error)]
 pub enum OAuthError {
     #[error("IO error: {0}")]
+/// io variant.
     Io(#[from] io::Error),
 
     #[error("HTTP request failed: {0}")]
+/// http variant.
     Http(#[from] reqwest::Error),
 
     #[error("JSON error: {0}")]
+/// json variant.
     Json(#[from] serde_json::Error),
 
     #[error("Token expired and no refresh_token available")]
+/// no refresh token variant.
     NoRefreshToken,
 
     #[error("Token refresh failed: {0}")]
+/// refresh failed variant.
     RefreshFailed(String),
 
     #[error("Device flow polling timed out after {0}s")]
+/// device flow timeout variant.
     DeviceFlowTimeout(u64),
 
     #[error("Device flow authorization pending")]
+/// device flow pending variant.
     DeviceFlowPending,
 
     #[error("Device flow rejected by user")]
+/// device flow rejected variant.
     DeviceFlowRejected,
 
     #[error("Missing environment variable: {0}")]
+/// missing env variant.
     MissingEnv(String),
 
     #[error("Invalid state: {0}")]
+/// invalid state variant.
     InvalidState(String),
 }
 
@@ -470,9 +480,13 @@ pub struct DeviceCodeResponse {
 /// Result of the device-flow token polling.
 #[derive(Debug)]
 pub enum DeviceFlowResult {
+/// success variant.
     Success(TokenBundle),
+/// pending variant.
     Pending,
+/// rejected variant.
     Rejected,
+/// timeout variant.
     Timeout(u64),
 }
 

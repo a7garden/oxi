@@ -19,6 +19,7 @@ pub struct SettingsOverlay {
 }
 
 impl SettingsOverlay {
+    /// Create a new settings overlay with a title and settings list.
     pub fn new(title: impl Into<String>, settings: SettingsList) -> Self {
         Self {
             settings,
@@ -31,11 +32,15 @@ impl SettingsOverlay {
         }
     }
 
+/// on_save function.
+    /// Set the save callback.
     pub fn on_save(mut self, f: impl Fn() + Send + 'static) -> Self {
         self.on_save = Some(Box::new(f));
         self
     }
 
+/// show function.
+    /// Show the overlay.
     pub fn show(&mut self) {
         self.visible = true;
         self.focused = true;
@@ -44,6 +49,8 @@ impl SettingsOverlay {
         self.dirty = true;
     }
 
+/// hide function.
+    /// Hide the overlay.
     pub fn hide(&mut self) {
         self.visible = false;
         self.focused = false;
@@ -51,10 +58,14 @@ impl SettingsOverlay {
         self.dirty = true;
     }
 
+/// is_visible function.
+    /// Check if the overlay is visible.
     pub fn is_visible(&self) -> bool {
         self.visible
     }
 
+/// settings_mut function.
+    /// Get mutable access to the inner settings list.
     pub fn settings_mut(&mut self) -> &mut SettingsList {
         &mut self.settings
     }

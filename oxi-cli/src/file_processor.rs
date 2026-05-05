@@ -49,11 +49,13 @@ impl FileProcessorOptions {
         Self::default()
     }
 
+/// TODO: document this function.
     pub fn max_image_bytes(mut self, bytes: usize) -> Self {
         self.max_image_bytes = bytes;
         self
     }
 
+/// TODO: document this function.
     pub fn extract_frontmatter(mut self, extract: bool) -> Self {
         self.extract_frontmatter = extract;
         self

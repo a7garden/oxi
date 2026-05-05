@@ -50,8 +50,11 @@ pub fn detect_line_ending(content: &str) -> LineEnding {
 /// Line ending type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEnding {
+/// lf variant.
     Lf,
+/// crlf variant.
     Crlf,
+/// cr variant.
     Cr,
 }
 

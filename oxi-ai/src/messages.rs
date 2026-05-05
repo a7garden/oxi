@@ -19,7 +19,9 @@ pub struct TextContent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "text")]
+/// TextContentType.
 pub enum TextContentType {
+/// text variant.
     Text,
 }
 
@@ -61,7 +63,9 @@ pub struct ThinkingContent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "thinking")]
+/// ThinkingContentType.
 pub enum ThinkingContentType {
+/// thinking variant.
     Thinking,
 }
 
@@ -91,7 +95,9 @@ pub struct ImageContent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "image")]
+/// ImageContentType.
 pub enum ImageContentType {
+/// image variant.
     Image,
 }
 
@@ -125,7 +131,9 @@ pub struct ToolCall {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "toolCall")]
+/// ToolCallType.
 pub enum ToolCallType {
+/// tool call variant.
     ToolCall,
 }
 
@@ -200,8 +208,10 @@ pub struct UserMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "user")]
+/// UserRole.
 pub enum UserRole {
     #[serde(rename = "user")]
+/// user variant.
     User,
 }
 
@@ -245,8 +255,10 @@ pub struct AssistantMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "assistant")]
+/// AssistantRole.
 pub enum AssistantRole {
     #[serde(rename = "assistant")]
+/// assistant variant.
     Assistant,
 }
 
@@ -308,8 +320,10 @@ pub struct ToolResultMessage {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename = "toolResult")]
+/// ToolResultRole.
 pub enum ToolResultRole {
     #[serde(rename = "toolResult")]
+/// tool result variant.
     ToolResult,
 }
 

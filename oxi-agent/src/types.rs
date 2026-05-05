@@ -82,10 +82,16 @@ pub struct Response {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+/// StopReason.
 pub enum StopReason {
+/// stop variant.
     Stop,
+/// length variant.
     Length,
+/// tool use variant.
     ToolUse,
+/// error variant.
     Error,
+/// aborted variant.
     Aborted,
 }

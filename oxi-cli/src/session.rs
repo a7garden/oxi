@@ -26,16 +26,24 @@ pub const CURRENT_SESSION_VERSION: i32 = 3;
 /// Session metadata stored separately from entries (backward compatibility)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMeta {
+    /// The id.
     pub id: Uuid,
+    /// The parent id.
     pub parent_id: Option<Uuid>,
+    /// The root id.
     pub root_id: Option<Uuid>,
+    /// The branch point.
     pub branch_point: Option<Uuid>,
+    /// The created at.
     pub created_at: i64,
+    /// The updated at.
     pub updated_at: i64,
+    /// The name.
     pub name: Option<String>,
 }
 
 impl SessionMeta {
+    /// New.
     pub fn new(id: Uuid) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
@@ -50,6 +58,7 @@ impl SessionMeta {
     }
 
 
+    /// Branched from.
     pub fn branched_from(parent_id: Uuid, root_id: Option<Uuid>, branch_point: Uuid) -> Self {
         let now = Utc::now().timestamp_millis();
         Self {
@@ -67,10 +76,15 @@ impl SessionMeta {
 /// Information about where a session branched from
 #[derive(Debug, Clone)]
 pub struct BranchInfo {
+    /// The session id.
     pub session_id: Uuid,
+    /// The parent session id.
     pub parent_session_id: Option<Uuid>,
+    /// The root session id.
     pub root_session_id: Option<Uuid>,
+    /// The branch point entry id.
     pub branch_point_entry_id: Option<Uuid>,
+    /// The parent session name.
     pub parent_session_name: Option<String>,
 }
 
@@ -81,18 +95,25 @@ pub struct BranchInfo {
 /// Session header stored as the first line in JSONL files
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionHeader {
+    /// The entry type.
     #[serde(rename = "type")]
     pub entry_type: String,
+    /// The version.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<i32>,
+    /// The id.
     pub id: String,
+    /// The timestamp.
     pub timestamp: String,
+    /// The cwd.
     pub cwd: String,
+    /// The parent session.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_session: Option<String>,
 }
 
 impl SessionHeader {
+    /// New.
     pub fn new(id: String, cwd: String, parent_session: Option<String>) -> Self {
         Self {
             entry_type: "session".to_string(),
@@ -113,11 +134,14 @@ impl SessionHeader {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ContentValue {
+    /// String.
     String(String),
+    /// Blocks.
     Blocks(Vec<ContentBlock>),
 }
 
 impl ContentValue {
+    /// As str.
     pub fn as_str(&self) -> &str {
         match self {
             ContentValue::String(s) => s,
@@ -150,8 +174,10 @@ impl From<&str> for ContentValue {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ContentBlock {
+    /// The Text { text.
     #[serde(rename = "text")]
     Text { text: String },
+    /// The Image { data.
     #[serde(rename = "image")]
     Image { data: String, media_type: Option<String> },
 }
@@ -164,70 +190,106 @@ pub enum ContentBlock {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "role")]
 pub enum AgentMessage {
+    /// User.
     #[serde(rename = "user")]
     User { 
+        /// The content.
         #[serde(flatten)]
         content: ContentValue,
     },
+    /// Assistant.
     #[serde(rename = "assistant")]
     Assistant {
+        /// The content.
         content: Vec<AssistantContentBlock>,
+        /// The provider.
         #[serde(skip_serializing_if = "Option::is_none")]
         provider: Option<String>,
+        /// The model id.
         #[serde(skip_serializing_if = "Option::is_none")]
         model_id: Option<String>,
+        /// The usage.
         #[serde(skip_serializing_if = "Option::is_none")]
         usage: Option<Usage>,
+        /// The stop reason.
         #[serde(rename = "stopReason", skip_serializing_if = "Option::is_none")]
         stop_reason: Option<String>,
     },
+    /// Tool Result.
     #[serde(rename = "toolResult")]
     ToolResult {
+        /// The content.
         content: ContentValue,
+        /// The tool call id.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
     },
+    /// System.
     #[serde(rename = "system")]
     System {
+        /// The content.
         #[serde(flatten)]
         content: ContentValue,
     },
+    /// Bash Execution.
     #[serde(rename = "bashExecution")]
     BashExecution {
+        /// The command.
         command: String,
+        /// The output.
         output: String,
+        /// The exit code.
         #[serde(rename = "exitCode")]
         exit_code: Option<i32>,
+        /// The cancelled.
         cancelled: bool,
+        /// The truncated.
         truncated: bool,
+        /// The full output path.
         #[serde(rename = "fullOutputPath", skip_serializing_if = "Option::is_none")]
         full_output_path: Option<String>,
+        /// The exclude from context.
         #[serde(rename = "excludeFromContext", skip_serializing_if = "Option::is_none")]
         exclude_from_context: Option<bool>,
+        /// The timestamp.
         timestamp: i64,
     },
+    /// Custom.
     #[serde(rename = "custom")]
     Custom {
+        /// The custom type.
         #[serde(rename = "customType")]
         custom_type: String,
+        /// The content.
         content: ContentValue,
+        /// The display.
         display: bool,
+        /// The details.
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<serde_json::Value>,
+        /// The timestamp.
         timestamp: i64,
     },
+    /// Branch Summary.
     #[serde(rename = "branchSummary")]
     BranchSummary {
+        /// The summary.
         summary: String,
+        /// The from id.
         #[serde(rename = "fromId")]
         from_id: String,
+        /// The timestamp.
         timestamp: i64,
     },
+    /// Compaction Summary.
     #[serde(rename = "compactionSummary")]
     CompactionSummary {
+        /// The summary.
         summary: String,
+        /// The tokens before.
         #[serde(rename = "tokensBefore")]
         tokens_before: i64,
+        /// The timestamp.
         timestamp: i64,
     },
 }
@@ -271,24 +333,35 @@ impl AgentMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum AssistantContentBlock {
+    /// The Text { text.
     #[serde(rename = "text")]
     Text { text: String },
+    /// The Thinking { thinking.
     #[serde(rename = "thinking")]
     Thinking { thinking: String },
+    /// Tool Call.
     #[serde(rename = "toolCall")]
     ToolCall {
+        /// The id.
         id: String,
+        /// The name.
         name: String,
+        /// The arguments.
         arguments: serde_json::Value,
     },
+    /// Tool Plan.
     #[serde(rename = "toolPlan")]
     ToolPlan {
+        /// The content.
         content: String,
+        /// The tool call id.
         #[serde(rename = "toolCallId")]
         tool_call_id: String,
     },
+    /// The ImageResult { data.
     #[serde(rename = "image")]
     ImageResult { data: String, media_type: String },
+    /// The Refusal { content.
     #[serde(rename = "refusal")]
     Refusal { content: String },
 }
@@ -296,14 +369,19 @@ pub enum AssistantContentBlock {
 /// Usage statistics from an assistant message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Usage {
+    /// The input.
     #[serde(rename = "inputTokens", skip_serializing_if = "Option::is_none")]
     pub input: Option<i64>,
+    /// The output.
     #[serde(rename = "outputTokens", skip_serializing_if = "Option::is_none")]
     pub output: Option<i64>,
+    /// The cache read.
     #[serde(rename = "cacheReadTokens", skip_serializing_if = "Option::is_none")]
     pub cache_read: Option<i64>,
+    /// The cache write.
     #[serde(rename = "cacheWriteTokens", skip_serializing_if = "Option::is_none")]
     pub cache_write: Option<i64>,
+    /// The total tokens.
     #[serde(rename = "totalTokens", skip_serializing_if = "Option::is_none")]
     pub total_tokens: Option<i64>,
 }
@@ -315,27 +393,35 @@ pub struct Usage {
 /// Base fields for all session entries (internal use)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEntryBase {
+    /// The entry type.
     #[serde(rename = "type")]
     pub entry_type: String,
+    /// The id.
     pub id: String,
+    /// The parent id.
     #[serde(rename = "parentId")]
     pub parent_id: Option<String>,
+    /// The timestamp.
     pub timestamp: String,
 }
 
 /// Message entry with AgentMessage content
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMessageEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The message.
     pub message: AgentMessage,
 }
 
 /// Thinking level change entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ThinkingLevelChangeEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The thinking level.
     #[serde(rename = "thinkingLevel")]
     pub thinking_level: String,
 }
@@ -343,9 +429,12 @@ pub struct ThinkingLevelChangeEntry {
 /// Model change entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelChangeEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The provider.
     pub provider: String,
+    /// The model id.
     #[serde(rename = "modelId")]
     pub model_id: String,
 }
@@ -353,15 +442,21 @@ pub struct ModelChangeEntry {
 /// Compaction entry for context window management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompactionEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The summary.
     pub summary: String,
+    /// The first kept entry id.
     #[serde(rename = "firstKeptEntryId")]
     pub first_kept_entry_id: String,
+    /// The tokens before.
     #[serde(rename = "tokensBefore")]
     pub tokens_before: i64,
+    /// The details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
+    /// The from hook.
     #[serde(rename = "fromHook", skip_serializing_if = "Option::is_none")]
     pub from_hook: Option<bool>,
 }
@@ -369,13 +464,18 @@ pub struct CompactionEntry {
 /// Branch summary entry for abandoned branches
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BranchSummaryEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The from id.
     #[serde(rename = "fromId")]
     pub from_id: String,
+    /// The summary.
     pub summary: String,
+    /// The details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
+    /// The from hook.
     #[serde(rename = "fromHook", skip_serializing_if = "Option::is_none")]
     pub from_hook: Option<bool>,
 }
@@ -383,10 +483,13 @@ pub struct BranchSummaryEntry {
 /// Custom entry for extensions to store extension-specific data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The custom type.
     #[serde(rename = "customType")]
     pub custom_type: String,
+    /// The data.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
@@ -394,31 +497,41 @@ pub struct CustomEntry {
 /// Label entry for user-defined bookmarks/markers on entries
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LabelEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The target id.
     #[serde(rename = "targetId")]
     pub target_id: String,
+    /// The label.
     pub label: Option<String>,
 }
 
 /// Session metadata entry (e.g., user-defined display name)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfoEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The name.
     pub name: Option<String>,
 }
 
 /// Custom message entry for extensions to inject messages into LLM context
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomMessageEntry {
+    /// The base.
     #[serde(flatten)]
     pub base: SessionEntryBase,
+    /// The custom type.
     #[serde(rename = "customType")]
     pub custom_type: String,
+    /// The content.
     pub content: ContentValue,
+    /// The details.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<serde_json::Value>,
+    /// The display.
     pub display: bool,
 }
 
@@ -426,14 +539,23 @@ pub struct CustomMessageEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum SessionEntryEnum {
+    /// Message.
     Message(SessionMessageEntry),
+    /// Thinking Level Change.
     ThinkingLevelChange(ThinkingLevelChangeEntry),
+    /// Model Change.
     ModelChange(ModelChangeEntry),
+    /// Compaction.
     Compaction(CompactionEntry),
+    /// Branch Summary.
     BranchSummary(BranchSummaryEntry),
+    /// Custom.
     Custom(CustomEntry),
+    /// Label.
     Label(LabelEntry),
+    /// Session Info.
     SessionInfo(SessionInfoEntry),
+    /// Custom Message.
     CustomMessage(CustomMessageEntry),
 }
 
@@ -441,9 +563,13 @@ pub enum SessionEntryEnum {
 /// This wraps the internal enum representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionEntry {
+    /// The id.
     pub id: String,
+    /// The parent id.
     pub parent_id: Option<String>,
+    /// The timestamp.
     pub timestamp: i64,
+    /// The message.
     pub message: AgentMessage,
 }
 
@@ -504,7 +630,9 @@ impl SessionEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum FileEntry {
+    /// Header.
     Header(SessionHeader),
+    /// Entry.
     Entry(SessionEntryEnum),
 }
 
@@ -515,15 +643,20 @@ pub enum FileEntry {
 /// Context built from session entries for the LLM
 #[derive(Debug, Clone)]
 pub struct SessionContext {
+    /// The messages.
     pub messages: Vec<AgentMessage>,
+    /// The thinking level.
     pub thinking_level: String,
+    /// The model.
     pub model: Option<ModelInfo>,
 }
 
 /// Model information
 #[derive(Debug, Clone)]
 pub struct ModelInfo {
+    /// The provider.
     pub provider: String,
+    /// The model id.
     pub model_id: String,
 }
 
@@ -534,15 +667,25 @@ pub struct ModelInfo {
 /// Session metadata for listing
 #[derive(Debug, Clone)]
 pub struct SessionInfo {
+    /// The path.
     pub path: String,
+    /// The id.
     pub id: String,
+    /// The cwd.
     pub cwd: String,
+    /// The name.
     pub name: Option<String>,
+    /// The parent session path.
     pub parent_session_path: Option<String>,
+    /// The created.
     pub created: DateTime<Utc>,
+    /// The modified.
     pub modified: DateTime<Utc>,
+    /// The message count.
     pub message_count: i64,
+    /// The first message.
     pub first_message: String,
+    /// The all messages text.
     pub all_messages_text: String,
 }
 
@@ -553,9 +696,13 @@ pub struct SessionInfo {
 /// Tree node for get_tree()
 #[derive(Debug, Clone)]
 pub struct SessionTreeNode {
+    /// The entry.
     pub entry: SessionEntry,
+    /// The children.
     pub children: Vec<SessionTreeNode>,
+    /// The label.
     pub label: Option<String>,
+    /// The label timestamp.
     pub label_timestamp: Option<String>,
 }
 
@@ -1788,12 +1935,18 @@ fn convert_from_session_entry(entry: &SessionEntry) -> SessionEntryEnum {
 // Session Statistics
 // ============================================================================
 
+/// Session Stats.
 #[derive(Debug, Clone)]
 pub struct SessionStats {
+    /// The message count.
     pub message_count: i64,
+    /// The user message count.
     pub user_message_count: i64,
+    /// The assistant message count.
     pub assistant_message_count: i64,
+    /// The total chars.
     pub total_chars: i64,
+    /// The estimated tokens.
     pub estimated_tokens: i64,
 }
 
@@ -1801,9 +1954,12 @@ pub struct SessionStats {
 // NewSessionOptions
 // ============================================================================
 
+/// New Session Options.
 #[derive(Debug, Clone)]
 pub struct NewSessionOptions {
+    /// The id.
     pub id: Option<String>,
+    /// The parent session.
     pub parent_session: Option<String>,
 }
 
@@ -1811,6 +1967,7 @@ pub struct NewSessionOptions {
 // Helper Functions
 // ============================================================================
 
+/// Get default session dir.
 pub fn get_default_session_dir(cwd: &str) -> String {
     let agent_dir = get_agent_dir();
     let safe_path = format!("--{}--", cwd.replace('/', "-").replace('\\', "-").replace(':', "-"));

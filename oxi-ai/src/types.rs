@@ -57,8 +57,11 @@ impl fmt::Display for Api {
 #[serde(rename_all = "lowercase")]
 pub enum CacheRetention {
     #[default]
+/// none variant.
     None,
+/// short variant.
     Short,
+/// long variant.
     Long,
 }
 
@@ -68,15 +71,22 @@ pub enum CacheRetention {
 #[non_exhaustive]
 pub enum ThinkingLevel {
     #[default]
+/// off variant.
     Off,
+/// minimal variant.
     Minimal,
+/// low variant.
     Low,
+/// medium variant.
     Medium,
+/// high variant.
     High,
+/// x high variant.
     XHigh,
 }
 
 impl ThinkingLevel {
+/// TODO: document this function.
     pub fn as_str(&self) -> Option<&str> {
         match self {
             ThinkingLevel::Off => None,
@@ -94,7 +104,9 @@ impl ThinkingLevel {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum InputModality {
+/// text variant.
     Text,
+/// image variant.
     Image,
 }
 

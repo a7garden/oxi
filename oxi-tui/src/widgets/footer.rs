@@ -1,7 +1,7 @@
 //! Footer widget — status bar with model info, tokens, cost, git branch.
 
 use ratatui::{
-    widgets::Widget,
+    widgets::{StatefulWidget, Widget},
     buffer::Buffer,
     layout::Rect,
 };
@@ -144,47 +144,84 @@ pub struct Footer<'a> {
 }
 
 impl<'a> Footer<'a> {
-    /// Create with the default dark theme (placeholder — use FooterState for real data).
-    pub fn new() -> Self {
-        Self { theme: &crate::Theme::dark() }
-    }
-
-    pub fn with_theme(theme: &'a Theme) -> Self {
+    /// Create with a theme reference.
+    pub fn new(theme: &'a Theme) -> Self {
         Self { theme }
-    }
-}
-
-impl Default for Footer<'static> {
-    fn default() -> Self {
-        Self { theme: &Theme::dark() }
     }
 }
 
 impl Widget for Footer<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        // Delegate to stateful version with empty state
+        let mut state = FooterState::default();
+        StatefulWidget::render(self, area, buf, &mut state);
+    }
+}
+
+impl StatefulWidget for Footer<'_> {
+    type State = FooterState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         if area.width < 4 {
             return;
         }
 
         let styles = self.theme.to_styles();
-        let dim = styles.muted;
         let y = area.y;
         let max_w = area.width as usize;
 
-        // Left section — theme name as placeholder
-        let left_text = format!("● {}", self.theme.name);
-        let left_len = left_text.chars().count();
+        // Build left side: pwd + git branch
+        let mut left_text = String::new();
+        if let Some(ref pwd) = state.data.pwd {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let display = if !home.is_empty() && pwd.starts_with(&home) {
+                format!("~{}", &pwd[home.len()..])
+            } else {
+                pwd.clone()
+            };
+            let max_cwd = (max_w / 3).max(8);
+            if display.len() > max_cwd {
+                let short: String = display.chars().rev().take(max_cwd.saturating_sub(2)).collect();
+                left_text = format!("…{}", short.chars().rev().collect::<String>());
+            } else {
+                left_text = display;
+            }
+        }
 
-        // Right section placeholder (real data comes from FooterState in StatefulWidget version)
-        let right_text = "";
+        // Build right side: model + status
+        let mut right_parts: Vec<String> = Vec::new();
+        if !state.data.model_name.is_empty() {
+            let model_display = state.data.model_name.split('/').last().unwrap_or(&state.data.model_name);
+            right_parts.push(format!("● {}", model_display));
+        }
+
+        let left_len = left_text.chars().count();
+        let right_text = right_parts.join("  ");
         let right_len = right_text.chars().count();
 
-        // Write left text
-        for (col, c) in left_text.chars().enumerate() {
+        // Write left text with normal style
+        for (col, c) in (" ".to_string() + &left_text).chars().enumerate() {
             if col < max_w {
                 buf.get_mut(area.x + col as u16, y)
                     .set_char(c)
-                    .set_style(dim);
+                    .set_style(styles.normal);
+            }
+        }
+
+        // Git branch in accent color after cwd
+        if let Some(ref branch) = state.data.git_branch {
+            if !branch.is_empty() {
+                let branch_str = format!(" ⎇ {}", branch);
+                let branch_start = left_len + 1; // +1 for leading space
+                for (i, c) in branch_str.chars().enumerate() {
+                    let col = branch_start + i;
+                    if col < max_w {
+                        buf.get_mut(area.x + col as u16, y)
+                            .set_char(c)
+                            .set_style(styles.accent);
+                    }
+                }
+                // update left_len to account for branch
             }
         }
 
@@ -195,16 +232,16 @@ impl Widget for Footer<'_> {
             if col < max_w {
                 buf.get_mut(area.x + col as u16, y)
                     .set_char(c)
-                    .set_style(dim);
+                    .set_style(styles.normal);
             }
         }
 
-        // Clear remainder
-        let used = left_len.max(right_start);
-        for col in used..max_w {
-            buf.get_mut(area.x + col as u16, y)
-                .set_char(' ')
-                .set_style(dim);
+        // Clear remainder with background
+        for col in 0..max_w {
+            let cell = buf.get_mut(area.x + col as u16, y);
+            if cell.symbol() == "\0" || cell.symbol() == " " {
+                cell.set_char(' ').set_style(styles.normal);
+            }
         }
     }
 }

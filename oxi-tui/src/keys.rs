@@ -125,8 +125,11 @@ fn kitty_active() -> bool {
 /// Key event type reported by Kitty keyboard protocol flag 2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyEventType {
+/// press.
     Press,
+/// repeat.
     Repeat,
+/// release.
     Release,
 }
 

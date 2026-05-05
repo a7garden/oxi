@@ -41,8 +41,11 @@ impl TextOptions {
 /// Text alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextAlign {
+    /// Left-aligned.
     Left,
+    /// Center-aligned.
     Center,
+    /// Right-aligned.
     Right,
 }
 
@@ -54,6 +57,7 @@ pub struct Text {
 }
 
 impl Text {
+    /// Create a new text component.
     pub fn new(content: &str) -> Self {
         Self {
             content: content.to_string(),
@@ -62,6 +66,7 @@ impl Text {
         }
     }
 
+    /// Create with custom options.
     pub fn with_options(content: &str, options: TextOptions) -> Self {
         Self {
             content: content.to_string(),
@@ -83,6 +88,7 @@ impl Text {
         self.dirty = true;
     }
 
+    /// Replace the displayed text.
     pub fn set_text(&mut self, content: &str) {
         if self.content != content {
             self.content = content.to_string();
@@ -90,6 +96,7 @@ impl Text {
         }
     }
 
+    /// Get the current text.
     pub fn text(&self) -> &str {
         &self.content
     }

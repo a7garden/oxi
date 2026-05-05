@@ -168,9 +168,13 @@ pub struct CompactionNotification {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// NotificationLevel.
 pub enum NotificationLevel {
+/// info variant.
     Info,
+/// warning variant.
     Warning,
+/// error variant.
     Error,
 }
 

@@ -14,15 +14,19 @@ pub const FS_WATCH_RETRY_DELAY_MS: u64 = 5000;
 #[derive(Debug, thiserror::Error)]
 pub enum FsWatchError {
     #[error("Failed to create watcher: {0}")]
+/// create error variant.
     CreateError(String),
 
     #[error("Failed to watch path: {0}")]
+/// watch error variant.
     WatchError(String),
 
     #[error("Watch event channel closed unexpectedly")]
+/// channel closed variant.
     ChannelClosed,
 
     #[error("IO error: {0}")]
+/// io error variant.
     IoError(#[from] std::io::Error),
 }
 

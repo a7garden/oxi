@@ -21,6 +21,7 @@ use std::path::Path;
 use tokio::fs;
 use tokio::sync::oneshot;
 
+/// EditTool.
 pub struct EditTool;
 
 impl EditTool {
