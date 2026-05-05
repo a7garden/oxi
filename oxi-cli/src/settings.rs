@@ -672,8 +672,10 @@ impl Settings {
 /// Supported settings file formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SettingsFormat {
+    /// JSON format.
     #[default]
     Json,
+    /// TOML format.
     Toml,
 }
 

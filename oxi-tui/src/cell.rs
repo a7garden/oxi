@@ -6,28 +6,37 @@ use std::fmt;
 /// Text attributes for styling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Attributes {
+    /// Bold / bright weight.
     pub bold: bool,
+    /// Italic / oblique style.
     pub italic: bool,
+    /// Underline.
     pub underline: bool,
+    /// Strikethrough.
     pub strikethrough: bool,
+    /// Reversed foreground/background.
     pub reversed: bool,
 }
 
 impl Attributes {
+    /// Create a new empty attribute set.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Add bold attribute.
     pub fn with_bold(mut self) -> Self {
         self.bold = true;
         self
     }
 
+    /// Add italic attribute.
     pub fn with_italic(mut self) -> Self {
         self.italic = true;
         self
     }
 
+    /// Add underline attribute.
     pub fn with_underline(mut self) -> Self {
         self.underline = true;
         self
@@ -108,9 +117,13 @@ impl Color {
 /// A single cell in the terminal grid.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Cell {
+    /// The character stored in this cell.
     pub char: char,
+    /// Foreground color.
     pub fg: Color,
+    /// Background color.
     pub bg: Color,
+    /// Text attributes.
     pub attrs: Attributes,
 }
 
@@ -126,6 +139,7 @@ impl Default for Cell {
 }
 
 impl Cell {
+    /// Create a cell with a single character and default styling.
     pub fn new(char: char) -> Self {
         Self {
             char,
@@ -133,21 +147,25 @@ impl Cell {
         }
     }
 
+    /// Set the foreground color, returning the cell.
     pub fn with_fg(mut self, fg: Color) -> Self {
         self.fg = fg;
         self
     }
 
+    /// Set the background color, returning the cell.
     pub fn with_bg(mut self, bg: Color) -> Self {
         self.bg = bg;
         self
     }
 
+    /// Set the text attributes, returning the cell.
     pub fn with_attrs(mut self, attrs: Attributes) -> Self {
         self.attrs = attrs;
         self
     }
 
+    /// Add bold attribute.
     pub fn with_bold(self) -> Self {
         let mut attrs = self.attrs;
         attrs.bold = true;
@@ -199,13 +217,18 @@ impl fmt::Display for Cell {
 
 /// Builder for creating cells with multiple properties.
 pub struct CellBuilder {
+    /// Character to render.
     char: char,
+    /// Foreground color.
     fg: Color,
+    /// Background color.
     bg: Color,
+    /// Text attributes.
     attrs: Attributes,
 }
 
 impl CellBuilder {
+    /// Start building a cell with the given character.
     pub fn new(char: char) -> Self {
         Self {
             char,
@@ -215,31 +238,37 @@ impl CellBuilder {
         }
     }
 
+    /// Set the foreground color.
     pub fn foreground(mut self, color: Color) -> Self {
         self.fg = color;
         self
     }
 
+    /// Set the background color.
     pub fn background(mut self, color: Color) -> Self {
         self.bg = color;
         self
     }
 
+    /// Add bold attribute.
     pub fn bold(mut self) -> Self {
         self.attrs.bold = true;
         self
     }
 
+    /// Add italic attribute.
     pub fn italic(mut self) -> Self {
         self.attrs.italic = true;
         self
     }
 
+    /// Add underline attribute.
     pub fn underline(mut self) -> Self {
         self.attrs.underline = true;
         self
     }
 
+    /// Build the final cell.
     pub fn build(self) -> Cell {
         Cell {
             char: self.char,

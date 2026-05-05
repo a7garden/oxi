@@ -56,32 +56,41 @@ impl KeyCode {
 /// Modifier keys that can be combined with other inputs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct KeyModifiers {
+    /// Whether Shift is held.
     pub shift: bool,
+    /// Whether Ctrl is held.
     pub ctrl: bool,
+    /// Whether Alt is held.
     pub alt: bool,
+    /// Whether Meta/Super is held.
     pub meta: bool,
 }
 
 impl KeyModifiers {
+    /// Create a new zeroed modifier set.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Add Shift modifier.
     pub fn with_shift(mut self) -> Self {
         self.shift = true;
         self
     }
 
+    /// Add Ctrl modifier.
     pub fn with_ctrl(mut self) -> Self {
         self.ctrl = true;
         self
     }
 
+    /// Add Alt modifier.
     pub fn with_alt(mut self) -> Self {
         self.alt = true;
         self
     }
 
+    /// Add Meta/Super modifier.
     pub fn with_meta(mut self) -> Self {
         self.meta = true;
         self
@@ -91,11 +100,14 @@ impl KeyModifiers {
 /// Keyboard event with key code and modifiers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyEvent {
+    /// The key code.
     pub code: KeyCode,
+    /// Active modifier keys.
     pub modifiers: KeyModifiers,
 }
 
 impl KeyEvent {
+    /// Create a new key event with no modifiers.
     pub fn new(code: KeyCode) -> Self {
         Self {
             code,
@@ -103,6 +115,7 @@ impl KeyEvent {
         }
     }
 
+    /// Create a new key event with explicit modifiers.
     pub fn with_modifiers(code: KeyCode, modifiers: KeyModifiers) -> Self {
         Self { code, modifiers }
     }
@@ -126,21 +139,32 @@ impl KeyEvent {
 /// Mouse button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseButton {
+    /// Left mouse button.
     Left,
+    /// Right mouse button.
     Right,
+    /// Middle / scroll wheel button.
     Middle,
+    /// No button (scroll or move events).
     None,
 }
 
 /// Mouse event type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseEventKind {
+    /// A mouse button was pressed.
     Press,
+    /// A mouse button was released.
     Release,
+    /// A complete click (press + release at same position).
     Click,
+    /// A double click.
     DoubleClick,
+    /// Mouse button held while moving.
     Drag,
+    /// Scroll wheel up.
     ScrollUp,
+    /// Scroll wheel down.
     ScrollDown,
     /// Horizontal scroll left (touchpad).
     ScrollLeft,
@@ -153,16 +177,22 @@ pub enum MouseEventKind {
 /// Mouse event with position and button.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MouseEvent {
+    /// The kind of mouse event.
     pub kind: MouseEventKind,
+    /// Which button is involved.
     pub button: MouseButton,
+    /// Row coordinate (0-indexed).
     pub row: u16,
+    /// Column coordinate (0-indexed).
     pub col: u16,
 }
 
 /// Resize event when terminal size changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResizeEvent {
+    /// New terminal width in columns.
     pub width: u16,
+    /// New terminal height in rows.
     pub height: u16,
 }
 
