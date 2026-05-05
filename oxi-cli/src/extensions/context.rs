@@ -2,7 +2,7 @@
 
 use crate::settings::Settings;
 use crate::extensions::types::ExtensionErrorRecord;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use parking_lot::RwLock;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
