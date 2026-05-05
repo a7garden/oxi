@@ -1,5 +1,4 @@
 /// Error recovery and circuit breaker for the agent runtime.
-//!
 /// Provides:
 /// - **Circuit breaker**: Tracks consecutive failures and opens the circuit
 ///   after a threshold, preventing further requests during a cooldown period.

@@ -92,6 +92,7 @@ pub enum AuthSource {
 }
 
 impl ApiKeyAuth {
+    /// Create a new API key auth with the given key and source.
     pub fn new(api_key: Option<String>, source: AuthSource) -> Self {
         Self { api_key, source }
     }
@@ -136,6 +137,7 @@ pub struct OAuthAuth {
 }
 
 impl OAuthAuth {
+    /// Create a new OAuth auth without an existing token.
     pub fn new(provider_name: &str) -> Self {
         Self {
             provider_name: provider_name.to_string(),
@@ -144,6 +146,7 @@ impl OAuthAuth {
         }
     }
 
+    /// Create a new OAuth auth with an existing token.
     pub fn with_token(provider_name: &str, token: OAuthTokenInfo) -> Self {
         Self {
             provider_name: provider_name.to_string(),
@@ -204,6 +207,7 @@ pub struct AmbientAuth {
 }
 
 impl AmbientAuth {
+    /// Create a new ambient auth with a custom check function.
     pub fn new<F>(provider_name: &str, check_fn: F) -> Self
     where
         F: Fn() -> bool + Send + Sync + 'static,
@@ -522,8 +526,11 @@ impl ProviderAuthRegistry {
 /// Authentication status
 #[derive(Debug, Clone)]
 pub struct AuthStatus {
+    /// Whether authentication is configured.
     pub configured: bool,
+    /// The source of the authentication credential.
     pub source: AuthSource,
+    /// Optional human-readable label for the auth method.
     pub label: Option<String>,
 }
 

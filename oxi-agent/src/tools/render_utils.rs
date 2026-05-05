@@ -1,5 +1,4 @@
 /// Tool output rendering utilities
-//!
 /// Provides helpers for formatting tool results for display.
 
 /// Shorten a file path by replacing the home directory prefix with `~`.

@@ -1,5 +1,4 @@
 /// Edit file tool - make targeted edits to files
-//!
 /// Supports:
 /// - Multiple non-overlapping edits in one call (`edits[]` array)
 /// - Legacy `old_text`/`new_text` single-edit mode

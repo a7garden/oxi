@@ -1,21 +1,34 @@
-//! oxi-agent: Agent runtime for oxi
-
 #![allow(inner_doc_comments)]
 #![warn(missing_docs)]
 
+/// oxi-agent: Agent runtime for oxi
+
 pub mod agent;
+//! Module documentation.
 pub mod agent_loop;
+//! Module documentation.
 pub mod compaction;
+//! Module documentation.
 pub mod compaction_init;
+//! Module documentation.
 pub mod config;
+//! Module documentation.
 pub mod context_builder;
+//! Module documentation.
 pub mod error;
+//! Module documentation.
 pub mod events;
+//! Module documentation.
 pub mod model_id;
+//! Module documentation.
 pub mod recovery;
+//! Module documentation.
 pub mod retry_constants;
+//! Module documentation.
 pub mod state;
+//! Module documentation.
 pub mod tools;
+//! Module documentation.
 pub mod types;
 
 pub use agent::Agent;

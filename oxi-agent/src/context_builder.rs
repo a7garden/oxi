@@ -1,5 +1,4 @@
 /// Context builder utilities
-//!
 /// Builds a Context from agent state for provider calls.
 
 use crate::state::AgentState;

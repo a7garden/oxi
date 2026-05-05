@@ -1,5 +1,4 @@
 /// Agent event system
-//!
 /// Defines all events emitted during an agent run, including lifecycle,
 /// streaming, tool execution, compaction, retry, and steering events.
 

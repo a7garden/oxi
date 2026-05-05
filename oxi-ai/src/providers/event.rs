@@ -9,7 +9,10 @@ use crate::{AssistantMessage, StopReason, ToolCall};
 #[non_exhaustive]
 pub enum ProviderEvent {
     /// Stream started with partial assistant message.
-    Start { partial: AssistantMessage },
+    Start {
+        /// Partial assistant message state.
+        partial: AssistantMessage,
+    },
 
     /// Text content block started.
     TextStart {

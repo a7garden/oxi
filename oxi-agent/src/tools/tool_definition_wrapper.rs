@@ -1,5 +1,4 @@
 /// Tool definition wrapping utilities
-//!
 /// Provides adapters for converting between tool representations.
 
 use crate::tools::{AgentTool, AgentToolResult, ToolError};
