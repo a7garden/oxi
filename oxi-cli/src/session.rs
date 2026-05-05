@@ -701,6 +701,10 @@ fn migrate_to_current_version(entries: &mut Vec<FileEntry>) -> bool {
 // ============================================================================
 
 /// Manages conversation sessions as append-only trees stored in JSONL files.
+///
+/// SessionManager handles session persistence, branching, and tree traversal.
+/// Each session is stored as a JSONL file where each line is a session entry.
+/// Entries form a tree structure allowing for session branching and history.
 pub struct SessionManager {
     session_id: String,
     session_file: Option<String>,
@@ -719,7 +723,7 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
-    /// Create a new session
+    /// Create a new session and persist it to disk.
     pub fn create(cwd: &str, session_dir: Option<&str>) -> Self {
         let dir = session_dir
             .map(|s| s.to_string())
@@ -730,7 +734,7 @@ impl SessionManager {
         manager
     }
 
-    /// Open a specific session file
+    /// Open an existing session from a file path.
     pub fn open(path: &str, session_dir: Option<&str>, cwd_override: Option<&str>) -> Self {
         let entries = load_entries_from_file(path);
         let header = entries.iter().find_map(|e| match e {
@@ -750,7 +754,7 @@ impl SessionManager {
         manager
     }
 
-    /// Continue the most recent session, or create new if none
+    /// Continue the most recent session, or create a new one if none exists.
     pub fn continue_recent(cwd: &str, session_dir: Option<&str>) -> Self {
         let dir = session_dir
             .map(|s| s.to_string())
@@ -762,7 +766,7 @@ impl SessionManager {
         Self::create(cwd, None)
     }
 
-    /// Create an in-memory session (no file persistence)
+    /// Create an in-memory session without file persistence.
     pub fn in_memory(cwd: &str) -> Self {
         let cwd = cwd.to_string();
         Self::new_internal(&cwd, "", None, false)
