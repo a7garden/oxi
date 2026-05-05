@@ -4,21 +4,12 @@
 //! including permission enums, manifest, error types, event structures,
 //! command definitions, and emit result types.
 
-use anyhow::{bail, Context, Result};
-use libloading::{Library, Symbol};
-use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
 use oxi_ai::Message;
-use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fmt;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-// Re-export common types used across modules
-pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
+use std::path::PathBuf;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Extension Permissions

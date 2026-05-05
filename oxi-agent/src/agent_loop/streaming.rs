@@ -43,7 +43,7 @@ pub(crate) async fn stream_assistant_response(
         ..Default::default()
     };
 
-    let stream = retry::stream_with_retry(loop_ref, &model, &context, Some(stream_options), emit).await?;
+    let stream = super::retry::stream_with_retry(loop_ref, &model, &context, Some(stream_options), emit).await?;
 
     let mut partial_message: Option<oxi_ai::AssistantMessage> = None;
     let mut added_partial = false;

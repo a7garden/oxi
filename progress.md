@@ -82,4 +82,18 @@ In Progress
 
 - Complex examples use ` ```ignore ``` ` to avoid doc-test failures
 - Simple examples use ` ```rust ``` ` for compile verification
-- All architecture files include ASCII diagrams for portability
+- All architecture files include ASCII diagrams for portability## Phase 2.1: agent_loop.rs Decomposition - Complete
+
+### Created Files:
+- /Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/agent_loop/mod.rs (474 lines)
+- /Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/agent_loop/config.rs (64 lines)
+- /Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/agent_loop/queues.rs (27 lines)
+- /Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/agent_loop/helpers.rs (62 lines)
+- /Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/agent_loop/streaming.rs (152 lines)
+- /Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/agent_loop/retry.rs (179 lines)
+- /Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/agent_loop/tool_exec.rs (357 lines)
+
+### Compilation: ✅ cargo check -p oxi-agent passes
+
+### Files Removed:
+- /Volumes/MERCURY/PROJECTS/oxi/oxi-agent/src/agent_loop.rs (monolithic file)
