@@ -1,6 +1,6 @@
 //! Provider ID to display name mappings.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/provider-display-names.ts`.
+//! Human-readable display names for supported LLM providers.
 
 use std::collections::HashMap;
 use once_cell::sync::Lazy;

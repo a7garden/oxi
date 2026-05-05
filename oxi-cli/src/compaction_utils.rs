@@ -1,6 +1,6 @@
 //! Shared utilities for compaction and branch summarization.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/compaction/utils.ts`.
+//! Originally inspired by pi-mono's compaction utilities.
 //!
 //! Provides:
 //! - File operation tracking (`FileOperations`, `extract_file_ops`, `compute_file_lists`)

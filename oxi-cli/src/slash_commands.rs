@@ -1,6 +1,6 @@
 //! Built-in slash command definitions.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/slash-commands.ts`.
+//! Built-in slash command definitions.
 
 use crate::source_info::SourceInfo;
 

@@ -1,6 +1,6 @@
 //! Source information tracking for messages and resources.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/source-info.ts`.
+//! Provides metadata describing where a resource originated.
 
 /// Whether a source comes from the user, the project, or is temporary.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

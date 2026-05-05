@@ -1,6 +1,6 @@
 //! Session working directory tracking and validation.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/session-cwd.ts`.
+//! Session working directory tracking and validation.
 
 use std::path::Path;
 

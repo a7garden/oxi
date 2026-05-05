@@ -1,7 +1,6 @@
 //! Agent session runtime — service container and runtime factory.
 //!
-//! Ported from `pi-mono/packages/coding-agent/src/core/agent-session-runtime.ts`
-//! and `agent-session-services.ts`.
+//! Originally inspired by pi-mono's agent-session-runtime and agent-session-services.
 //!
 //! This module provides:
 //!

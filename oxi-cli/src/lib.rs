@@ -94,7 +94,7 @@ pub mod tmux_detect;
 pub mod tools_manager;
 pub mod version_check;
 
-// Core modules ported from pi-mono
+// Core modules
 pub mod defaults;
 pub mod provider_display_names;
 pub mod session_cwd;
