@@ -109,7 +109,6 @@ impl BashExecutor {
     pub fn set_env(&self, key: &str, value: &str) {
         self.env
             .write()
-            .unwrap()
             .insert(key.to_string(), value.to_string());
     }
 
