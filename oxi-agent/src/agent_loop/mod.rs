@@ -12,9 +12,8 @@ use crate::events::AgentEvent;
 use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
 use crate::{AgentToolResult, error::AgentError, state::SharedState, tools::ToolRegistry};
 use anyhow::{Error, Result};
-use futures::StreamExt;
 use oxi_ai::{
-    Context, ContentBlock, Message, Provider, ProviderEvent, StreamOptions,
+    ContentBlock, Message, Provider, ProviderEvent, StreamOptions,
     StopReason, TextContent, ToolCall, UserMessage, CompactionStrategy,
     CompactionManager as OxCompactionManager, AssistantMessage,
     estimate_tokens, LlmCompactor,
@@ -26,11 +25,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use config::{AgentLoopConfig, BeforeToolCallHook, AfterToolCallHook, ToolExecutionMode};
-use queues::{drain_steering_queue, drain_follow_up_queue, clear_steering_queue, clear_follow_up_queue, clear_all_queues};
-use retry::{stream_with_retry, is_retryable_error, handle_retryable_error, cancel_auto_retry, auto_retry_attempt_method};
-use streaming::stream_assistant_response;
-use helpers::should_stop_after_turn;
-use tool_exec::{execute_tool_calls, should_terminate_batch, create_tool_result_message};
+use self::queues::{drain_steering_queue, drain_follow_up_queue, clear_steering_queue, clear_follow_up_queue, clear_all_queues};
+use self::retry::{stream_with_retry, is_retryable_error, handle_retryable_error, cancel_auto_retry, auto_retry_attempt_method};
+use self::streaming::stream_assistant_response;
+use self::helpers::should_stop_after_turn;
+use self::tool_exec::{execute_tool_calls, should_terminate_batch, create_tool_result_message};
 
 type EmitFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 

@@ -1,16 +1,6 @@
 //! Helper functions for agent loop
 
-use crate::compaction::CompactableMessage;
-use oxi_ai::{ContentBlock, ToolCall};
-use crate::AgentToolResult;
-use oxi_ai::ToolResultMessage;
-
-/// Resolve model from model ID string.
-///
-/// Returns the resolved model or None if not found.
-pub fn resolve_model(model_id: &str) -> Option<oxi_ai::Model> {
-    crate::model_id::resolve_model_from_id(model_id)
-}
+use oxi_ai::{ContentBlock, ToolCall, TextContent, ToolResultMessage};
 
 /// Extract tool calls from an assistant message.
 pub fn extract_tool_calls(message: &oxi_ai::AssistantMessage) -> Vec<ToolCall> {
@@ -26,11 +16,11 @@ pub fn extract_tool_calls(message: &oxi_ai::AssistantMessage) -> Vec<ToolCall> {
 }
 
 /// Create a tool result message from a finalized tool call.
-pub fn create_tool_result_message(finalized: &FinalizedToolCallRef) -> ToolResultMessage {
+pub fn create_tool_result_message(finalized: &FinalizedToolCall) -> ToolResultMessage {
     let content_blocks = if let Some(ref blocks) = finalized.result.content_blocks {
         blocks.clone()
     } else {
-        vec![ContentBlock::Text(oxi_ai::TextContent::new(finalized.result.output.clone()))]
+        vec![ContentBlock::Text(TextContent::new(finalized.result.output.clone()))]
     };
 
     ToolResultMessage::new(
@@ -41,13 +31,33 @@ pub fn create_tool_result_message(finalized: &FinalizedToolCallRef) -> ToolResul
 }
 
 /// Check if a batch of finalized tool calls should terminate the loop.
-pub fn should_terminate_batch(finalized_calls: &[FinalizedToolCallRef]) -> bool {
+pub fn should_terminate_batch(finalized_calls: &[FinalizedToolCall]) -> bool {
     finalized_calls.iter().any(|f| f.result.terminate)
 }
 
-/// Reference type for finalized tool calls (used by helper functions).
-pub struct FinalizedToolCallRef<'a> {
-    pub tool_call: &'a oxi_ai::ToolCall,
-    pub result: &'a AgentToolResult,
+/// Check if loop should stop after a turn.
+pub fn should_stop_after_turn(
+    messages: &[oxi_ai::Message],
+    assistant_message: &oxi_ai::AssistantMessage,
+    max_iterations: usize,
+) -> bool {
+    let current_iteration = messages.iter().filter(|m| matches!(m, oxi_ai::Message::Assistant(_))).count();
+
+    if current_iteration >= max_iterations {
+        return true;
+    }
+
+    match assistant_message.stop_reason {
+        oxi_ai::StopReason::Stop | oxi_ai::StopReason::Length => true,
+        _ => false,
+    }
+}
+
+use crate::AgentToolResult;
+
+/// Finalized tool call with result.
+pub struct FinalizedToolCall {
+    pub tool_call: oxi_ai::ToolCall,
+    pub result: AgentToolResult,
     pub is_error: bool,
 }
