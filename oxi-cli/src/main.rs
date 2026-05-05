@@ -17,7 +17,7 @@ use uuid::Uuid;
 #[derive(Parser, Debug)]
 #[command(name = "oxi")]
 #[command(about = "CLI coding harness for oxi")]
-#[command(version = "0.4.2")]
+#[command(version = "0.4.3")]
 struct Args {
     #[command(subcommand)]
     command: Option<Commands>,
