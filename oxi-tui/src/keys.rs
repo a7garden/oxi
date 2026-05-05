@@ -12,6 +12,32 @@
 //! - UTF-8 multi-byte character decoding
 //!
 //! Originally inspired by pi-mono's terminal key input parsing.
+//!
+//! # File structure (2,448 lines, intentionally monolithic)
+//!
+//! This file is intentionally kept as a single module. All sections share
+//! private types, constants, and utility functions. Splitting into submodules
+//! would require widening their visibility to `pub(crate)` with no
+//! corresponding benefit — the module currently has no external consumers.
+//!
+//! Section layout:
+//! 1. Constants (modifier bits, codepoints)
+//! 2. Kitty protocol state (global statics)
+//! 3. KeyEventType enum + tracking
+//! 4. Kitty numpad normalization
+//! 5. Kitty sequence parser (~218 lines)
+//! 6. xterm modifyOtherKeys parser (~28 lines)
+//! 7. Printable key decoding
+//! 8. Key release/repeat detection
+//! 9. Modifier ↔ KeyModifiers conversion
+//! 10. Codepoint → KeyCode mapping
+//! 11. Mouse event parsing (~97 lines)
+//! 12. UTF-8 decoding
+//! 13. Main parser: `parse_event` (~60 lines)
+//! 14. Legacy escape sequences (~433 lines)
+//! 15. Helpers (shift_key, ctrl_key, alt_key)
+//! 16. Key string matching + formatting (~727 lines)
+//! 17. Tests (~453 lines)
 
 use crate::event::{
     Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,

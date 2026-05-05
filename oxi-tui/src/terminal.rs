@@ -55,6 +55,15 @@ pub trait Terminal: Send {
     /// Flush pending output.
     fn flush(&mut self) -> Result<()>;
 
+    /// Query the terminal for the current cursor position.
+    /// Writes `ESC[6n` to stdout and flushes. The terminal will respond
+    /// with `ESC[row;colR` which should be parsed by the event loop.
+    fn query_cursor_position(&mut self) -> Result<()>;
+
+    /// Set the hardware cursor position for IME support.
+    /// This writes the cursor positioning escape sequence directly.
+    fn set_ime_cursor(&mut self, row: u16, col: u16) -> Result<()>;
+
     /// Check if terminal supports synchronized output (CSI 2026).
     fn supports_sync_update(&self) -> bool {
         true
@@ -145,6 +154,20 @@ impl Terminal for CrosstermTerminal {
     }
 
     fn flush(&mut self) -> Result<()> {
+        io::stdout().flush()?;
+        Ok(())
+    }
+
+    fn query_cursor_position(&mut self) -> Result<()> {
+        // ESC[6n — Device Status Report: request cursor position
+        io::stdout().write_all(b"\x1b[6n")?;
+        io::stdout().flush()?;
+        Ok(())
+    }
+
+    fn set_ime_cursor(&mut self, row: u16, col: u16) -> Result<()> {
+        // ESC[row+1;col+1H — Cursor Position
+        write!(io::stdout(), "\x1b[{};{}H", row + 1, col + 1)?;
         io::stdout().flush()?;
         Ok(())
     }

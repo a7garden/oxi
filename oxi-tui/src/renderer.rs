@@ -130,6 +130,9 @@ pub struct Renderer {
     current_sgr: Sgr,
     /// Output buffer — accumulated bytes are flushed once per frame.
     buf: Vec<u8>,
+    /// Desired cursor position for IME support.
+    /// If set, the hardware cursor is positioned here after flushing.
+    cursor_position: Option<(u16, u16)>,
 }
 
 impl Renderer {
@@ -137,6 +140,7 @@ impl Renderer {
         Self {
             current_sgr: Sgr::new(),
             buf: Vec::with_capacity(16384),
+            cursor_position: None,
         }
     }
 
@@ -144,6 +148,24 @@ impl Renderer {
     pub fn reset(&mut self) {
         self.current_sgr = Sgr::new();
         self.buf.clear();
+        self.cursor_position = None;
+    }
+
+    /// Set the desired cursor position for IME input.
+    ///
+    /// When `flush()` or `end_sync()` is called, the cursor will be
+    /// positioned at `(row, col)` after all content has been written.
+    /// The cursor will also be made visible.
+    ///
+    /// Pass `None` to disable IME cursor positioning.
+    pub fn set_cursor_position(&mut self, pos: Option<(u16, u16)>) {
+        self.cursor_position = pos;
+    }
+
+    /// Get the currently set IME cursor position, if any.
+    #[allow(dead_code)]
+    pub fn cursor_position(&self) -> Option<(u16, u16)> {
+        self.cursor_position
     }
 
     /// Write bytes to the internal buffer.
@@ -161,10 +183,18 @@ impl Renderer {
     }
 
     /// Flush the internal buffer to stdout and clear it.
+    /// If a cursor position has been set for IME, it is written after all
+    /// content so the hardware cursor ends up at the right place.
     pub fn flush(&mut self) -> io::Result<()> {
         if !self.buf.is_empty() {
             let mut stdout = io::stdout();
             stdout.write_all(&self.buf)?;
+            // Write cursor position for IME support if set
+            if let Some((row, col)) = self.cursor_position.take() {
+                write!(stdout, "\x1b[{};{}H", row + 1, col + 1)?;
+                // Show cursor when IME position is set
+                stdout.write_all(b"\x1b[?25h")?;
+            }
             stdout.flush()?;
             self.buf.clear();
         }
