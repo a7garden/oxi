@@ -103,6 +103,19 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
+    /// Create a new agent loop with the given provider, config, tools, and state.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use oxi_agent::{AgentLoop, AgentLoopConfig, ToolRegistry, SharedState};
+    /// use std::sync::Arc;
+    ///
+    /// let registry = Arc::new(ToolRegistry::with_builtins());
+    /// let state = SharedState::new();
+    /// // ... create provider and config ...
+    /// let loop = AgentLoop::new(provider, config, registry, state);
+    /// ```
     pub fn new(
         provider: Arc<dyn Provider>,
         config: AgentLoopConfig,
@@ -156,6 +169,16 @@ impl AgentLoop {
         self.steering_queue.write().push(message);
     }
 
+    /// Steer the agent with a direct message (e.g., system prompt, correction).
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use oxi_ai::Message;
+    /// let loop = /* ... */;
+    /// loop.steer(Message::User("Actually, be more concise.".into()));
+    /// ```
+
     pub fn follow_up(&self, message: Message) {
         self.follow_up_queue.write().push(message);
     }
@@ -188,6 +211,19 @@ impl AgentLoop {
         prompt: String,
         emit: impl Fn(AgentEvent) + Send + Sync + 'static,
     ) -> Result<Vec<AgentEvent>> {
+        /// Run an agent with a simple prompt, collecting all events.
+        ///
+        /// # Examples
+        ///
+        /// ```ignore
+        /// use oxi_agent::{AgentLoop, AgentEvent};
+        /// use std::sync::Arc;
+        ///
+        /// async fn run_example(loop: Arc<AgentLoop>) {
+        ///     let mut events = Vec::new();
+        ///     loop.run("Hello, world!".to_string(), |e| events.push(e)).await;
+        /// }
+        /// ```
         let message = Message::User(UserMessage::new(prompt));
         let emit = Arc::new(emit);
         self.run_messages(vec![message], emit).await

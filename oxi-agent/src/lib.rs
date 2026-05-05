@@ -7,7 +7,9 @@
 pub mod agent;
 pub mod agent_loop;
 pub mod compaction;
+pub mod compaction_init;
 pub mod config;
+pub mod context_builder;
 pub mod error;
 pub mod events;
 pub mod model_id;
@@ -26,6 +28,8 @@ pub use recovery::{
     CircuitBreaker, CircuitBreakerConfig, CircuitOpenError, FallbackChain, PartialResponse,
 };
 pub use state::{AgentState, SharedState};
+pub use compaction::{CompactedContext, CompactionEvent};
+pub use oxi_ai::{CompactionManager, CompactionStrategy};
 pub use tools::{
     AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool, LsTool, ReadTool,
     ToolRegistry, WriteTool,

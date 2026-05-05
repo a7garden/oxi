@@ -286,6 +286,15 @@ impl Settings {
     /// 2. Global `~/.oxi/settings.toml`
     /// 3. Project `.oxi/settings.toml`
     /// 4. Environment variable overrides
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use oxi_cli::Settings;
+    ///
+    /// let settings = Settings::load().expect("Failed to load settings");
+    /// println!("Using model: {}", settings.effective_model(None));
+    /// ```
     pub fn load() -> Result<Self> {
         Self::load_from_cwd()
     }

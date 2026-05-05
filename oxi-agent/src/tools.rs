@@ -91,7 +91,33 @@ pub trait AgentTool: Send + Sync {
     /// JSON Schema for parameters
     fn parameters_schema(&self) -> Value;
 
-    /// Execute the tool
+    /// Execute the tool with the given tool call ID and parameters.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use oxi_agent::{AgentTool, AgentToolResult};
+    /// use serde_json::json;
+    /// use async_trait::async_trait;
+    ///
+    /// struct MyTool;
+    ///
+    /// #[async_trait]
+    /// impl AgentTool for MyTool {
+    ///     fn name(&self) -> &str { "my_tool" }
+    ///     fn label(&self) -> &str { "My Tool" }
+    ///     fn description(&self) -> &str { "A custom tool" }
+    ///     fn parameters_schema(&self) -> Value { json!({
+    ///         "type": "object",
+    ///         "properties": {}
+    ///     }) }
+    ///
+    ///     async fn execute(&self, tool_call_id: &str, params: Value, _signal: Option<oneshot::Receiver<()>>) -> Result<AgentToolResult, String> {
+    ///         println!("Tool '{}' called with params: {:?}", tool_call_id, params);
+    ///         Ok(AgentToolResult::success("Done!"))
+    ///     }
+    /// }
+    /// ```
     async fn execute(
         &self,
         tool_call_id: &str,
@@ -200,6 +226,17 @@ impl ToolRegistry {
     }
 
     /// Create a registry with all built-in tools
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_agent::ToolRegistry;
+    /// let registry = ToolRegistry::with_builtins();
+    /// let tools = registry.names();
+    /// assert!(tools.contains(&"read".to_string()));
+    /// assert!(tools.contains(&"write".to_string()));
+    /// assert!(tools.contains(&"bash".to_string()));
+    /// ```
     pub fn with_builtins() -> Self {
         Self::with_builtins_cwd(PathBuf::from("."))
     }

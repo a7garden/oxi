@@ -68,6 +68,21 @@ impl Default for TransformOptions {
 /// This is the primary entry-point.  It dispatches to the appropriate
 /// directional converter and then applies the requested post-processing
 /// options.
+///
+/// # Cross-provider transformation flow
+///
+/// ```ignore
+/// use oxi_ai::{transform_messages, Api};
+///
+/// // Convert messages from Anthropic format to OpenAI format
+/// let anthropic_msgs = vec![/* ... */];
+/// let openai_msgs = transform_messages(
+///     &anthropic_msgs,
+///     Api::AnthropicMessages,
+///     Api::OpenAiCompletions,
+///     Default::default(),
+/// );
+/// ```
 pub fn transform_messages(
     messages: &[Message],
     from_api: Api,

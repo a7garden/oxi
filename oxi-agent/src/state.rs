@@ -119,13 +119,14 @@ impl AgentState {
     }
 }
 
-/// Thread-safe agent state wrapper
+/// Thread-safe agent state wrapper.
 #[derive(Default)]
 pub struct SharedState {
     state: RwLock<AgentState>,
 }
 
 impl SharedState {
+    /// Create a new SharedState with default (empty) agent state.
     pub fn new() -> Self {
         Self::default()
     }

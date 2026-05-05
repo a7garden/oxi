@@ -76,6 +76,9 @@ impl Rect {
 }
 
 /// A 2D surface containing cells ready for rendering.
+///
+/// Surface provides a grid of cells that can be written to and then
+/// rendered to the terminal. It tracks dirty cells for efficient updates.
 #[derive(Debug, Clone)]
 pub struct Surface {
     width: u16,
@@ -149,6 +152,17 @@ impl Surface {
     }
 
     /// Write a string at (row, col), respecting width limits and wide characters.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use oxi_tui::Surface;
+    ///
+    /// let mut surface = Surface::new(20, 5);
+    /// surface.write_string(0, 0, "Hello, world!");
+    /// surface.write_string(1, 0, "こんにちは"); // Korean chars are 2 columns wide
+    /// surface.write_string(2, 0, "Hello 世界"); // Mixed ASCII + CJK
+    /// ```
     pub fn write_string(&mut self, row: u16, col: u16, s: &str) {
         let mut current_col = col as usize;
         for c in s.chars() {

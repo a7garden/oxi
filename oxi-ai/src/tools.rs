@@ -63,6 +63,19 @@ impl Tool {
     }
 
     /// Create a simple tool with a single string parameter
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_ai::Tool;
+    /// let tool = Tool::with_string_param(
+    ///     "get_weather",
+    ///     "Get current weather",
+    ///     "location",
+    ///     "City name",
+    /// );
+    /// assert_eq!(tool.name, "get_weather");
+    /// ```
     pub fn with_string_param(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -98,6 +111,20 @@ impl Tool {
     }
 
     /// Validate arguments against the tool's JSON Schema
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use oxi_ai::Tool;
+    /// let tool = Tool::with_string_param(
+    ///     "get_weather",
+    ///     "Get weather",
+    ///     "location",
+    ///     "City",
+    /// );
+    /// let result = tool.validate(&serde_json::json!({"location": "London"}));
+    /// assert!(result.is_ok());
+    /// ```
     pub fn validate(&self, args: &JsonValue) -> Result<JsonValue, ValidationError> {
         validate_args_internal(&self.parameters, args)
     }

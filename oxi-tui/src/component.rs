@@ -3,6 +3,9 @@
 use crate::{Event, Rect, Size, Surface};
 
 /// Component trait - all UI elements implement this.
+///
+/// Components are the fundamental building blocks of the TUI. Each component
+/// can handle events, render to a surface, and manage focus state.
 pub trait Component: Send {
     /// Get the component's name for debugging.
     fn name(&self) -> &str {
@@ -13,6 +16,18 @@ pub trait Component: Send {
     fn request_render(&mut self);
 
     /// Check if this component has pending render requests.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use oxi_tui::Component;
+    ///
+    /// fn maybe_update(component: &mut dyn Component) {
+    ///     if component.is_dirty() {
+    ///         // Re-render needed
+    ///     }
+    /// }
+    /// ```
     fn is_dirty(&self) -> bool;
 
     /// Clear the dirty flag.
@@ -20,12 +35,75 @@ pub trait Component: Send {
 
     /// Handle an input event.
     /// Returns true if the event was consumed.
+    ///
+    /// # Event handling pattern
+    ///
+    /// ```ignore
+    /// use oxi_tui::{Event, Component};
+    ///
+    /// impl Component for MyComponent {
+    ///     fn handle_event(&mut self, event: &Event) -> bool {
+    ///         match event {
+    ///             Event::Key(key) => {
+    ///                 match (key.modifiers, key.code) {
+    ///                     (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+    ///                         // Handle Ctrl+C
+    ///                         true
+    ///                     }
+    ///                     _ => false,
+    ///                 }
+    ///             }
+    ///             Event::Mouse(_) => {
+    ///                 // Handle mouse events
+    ///                 true
+    ///             }
+    ///             _ => false,
+    ///         }
+    ///     }
+    /// }
+    /// ```
     fn handle_event(&mut self, event: &Event) -> bool;
 
     /// Render this component into the given surface area.
+    ///
+    /// # Rendering pattern
+    ///
+    /// ```ignore
+    /// use oxi_tui::{Component, Surface, Rect, Cell, Color};
+    ///
+    /// impl Component for MyComponent {
+    ///     fn render(&mut self, surface: &mut Surface, area: Rect) {
+    ///         // Fill background
+    ///         let cell = Cell::new(' ').with_bg(Color::Blue);
+    ///         surface.fill_row(area.y, area.x, area.right(), cell);
+    ///
+    ///         // Write text
+    ///         surface.write_string_styled(
+    ///             area.y,
+    ///             area.x,
+    ///             "Hello!",
+    ///             Color::White,
+    ///             Color::Blue,
+    ///             Attributes::new(),
+    ///         );
+    ///     }
+    /// }
+    /// ```
     fn render(&mut self, surface: &mut Surface, area: Rect);
 
     /// Get the component's minimum size.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use oxi_tui::{Component, Size};
+    ///
+    /// impl Component for MyComponent {
+    ///     fn min_size(&self) -> Size {
+    ///         Size { width: 10, height: 3 }
+    ///     }
+    /// }
+    /// ```
     fn min_size(&self) -> Size;
 
     /// Get desired size, may be larger than min_size.
