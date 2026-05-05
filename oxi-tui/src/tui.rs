@@ -47,6 +47,8 @@ pub struct TUI {
     last_height: u16,
     /// Running state.
     running: bool,
+    /// Whether we have a pending cursor position query (ESC[6n sent).
+    cursor_marker_pending: bool,
     /// Event handle callback.
     event_handler: Option<Box<dyn FnMut(crate::Event) + Send>>,
     /// Layout for arranging children.
@@ -75,6 +77,7 @@ impl TUI {
             last_width: size.width,
             last_height: size.height,
             running: false,
+            cursor_marker_pending: false,
             event_handler: None,
             layout: None,
         }
@@ -232,6 +235,35 @@ impl TUI {
     /// Check if TUI is running.
     pub fn is_running(&self) -> bool {
         self.running
+    }
+
+    /// Request a cursor position report from the terminal.
+    ///
+    /// Sends `ESC[6n` to the terminal. When the terminal responds with
+    /// `ESC[row;colR`, the next call to [`poll_event`](Self::poll_event)
+    /// will return [`Event::CursorPosition(row, col)`](crate::Event::CursorPosition).
+    ///
+    /// This is useful for IME (Input Method Editor) support: after rendering,
+    /// call this to discover where the cursor is, so the hardware cursor can
+    /// be placed at the text input position for CJK input methods.
+    pub fn request_cursor_position_query(&mut self) -> Result<()> {
+        self.cursor_marker_pending = true;
+        self.terminal.query_cursor_position()?;
+        Ok(())
+    }
+
+    /// Set the IME cursor position for the next render.
+    ///
+    /// The cursor will be placed at `(row, col)` after the frame is flushed,
+    /// and the cursor will be made visible. This is needed for terminals to
+    /// show the IME composition window at the correct position.
+    pub fn set_ime_cursor(&mut self, row: u16, col: u16) {
+        self.renderer.set_cursor_position(Some((row, col)));
+    }
+
+    /// Clear the IME cursor positioning.
+    pub fn clear_ime_cursor(&mut self) {
+        self.renderer.set_cursor_position(None);
     }
 
     /// Poll for a single event (non-blocking with timeout).
