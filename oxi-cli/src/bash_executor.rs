@@ -107,9 +107,7 @@ impl BashExecutor {
 
     /// Set an environment variable
     pub fn set_env(&self, key: &str, value: &str) {
-        self.env
-            .write()
-            .insert(key.to_string(), value.to_string());
+        self.env.write().insert(key.to_string(), value.to_string());
     }
 
     /// Remove an environment variable

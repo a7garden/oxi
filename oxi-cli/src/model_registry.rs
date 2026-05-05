@@ -417,7 +417,6 @@ impl ModelRegistry {
     pub fn get_available(&self) -> Vec<Model> {
         self.models
             .read()
-            .unwrap()
             .iter()
             .filter(|m| self.has_configured_auth(m))
             .cloned()
@@ -428,7 +427,6 @@ impl ModelRegistry {
     pub fn find(&self, provider: &str, model_id: &str) -> Option<Model> {
         self.models
             .read()
-            .unwrap()
             .iter()
             .find(|m| m.provider == provider && m.id == model_id)
             .cloned()
@@ -484,7 +482,6 @@ impl ModelRegistry {
             || self
                 .provider_request_configs
                 .read()
-                .unwrap()
                 .get(&model.provider)
                 .and_then(|c| c.api_key.as_ref())
                 .is_some()
@@ -542,7 +539,6 @@ impl ModelRegistry {
         let provider_api_key = self
             .provider_request_configs
             .read()
-            .unwrap()
             .get(provider)
             .and_then(|c| c.api_key.clone());
 
@@ -584,7 +580,6 @@ impl ModelRegistry {
         let api_key_str = self
             .provider_request_configs
             .read()
-            .unwrap()
             .get(provider)
             .and_then(|c| c.api_key.clone())?;
 
@@ -596,7 +591,6 @@ impl ModelRegistry {
         let mut providers: Vec<String> = self
             .models
             .read()
-            .unwrap()
             .iter()
             .map(|m| m.provider.clone())
             .collect();
@@ -615,7 +609,6 @@ impl ModelRegistry {
                     || self
                         .provider_request_configs
                         .read()
-                        .unwrap()
                         .get(p)
                         .and_then(|c| c.api_key.as_ref())
                         .is_some()
@@ -665,14 +658,12 @@ impl ModelRegistry {
         if !self
             .registered_providers
             .read()
-            .unwrap()
             .contains_key(provider_name)
         {
             return;
         }
         self.registered_providers
             .write()
-            .unwrap()
             .remove(provider_name);
         self.refresh();
     }
@@ -685,7 +676,6 @@ impl ModelRegistry {
     pub fn filter_by_provider(&self, provider: &str) -> Vec<Model> {
         self.models
             .read()
-            .unwrap()
             .iter()
             .filter(|m| m.provider == provider)
             .cloned()
@@ -696,7 +686,6 @@ impl ModelRegistry {
     pub fn filter_by_capability(&self, reasoning: bool) -> Vec<Model> {
         self.models
             .read()
-            .unwrap()
             .iter()
             .filter(|m| m.reasoning == reasoning)
             .cloned()
@@ -707,7 +696,6 @@ impl ModelRegistry {
     pub fn filter_by_modality(&self, modality: InputModality) -> Vec<Model> {
         self.models
             .read()
-            .unwrap()
             .iter()
             .filter(|m| m.input.contains(&modality))
             .cloned()
@@ -719,7 +707,6 @@ impl ModelRegistry {
         let lower = pattern.to_lowercase();
         self.models
             .read()
-            .unwrap()
             .iter()
             .filter(|m| {
                 m.id.to_lowercase().contains(&lower)
@@ -1078,7 +1065,6 @@ impl ModelRegistry {
 
         self.provider_request_configs
             .write()
-            .unwrap()
             .insert(
                 provider_name.to_string(),
                 ProviderRequestConfig {
@@ -1119,7 +1105,6 @@ impl ModelRegistry {
 
         self.provider_request_configs
             .write()
-            .unwrap()
             .insert(
                 provider_name.to_string(),
                 ProviderRequestConfig {
@@ -1138,7 +1123,6 @@ impl ModelRegistry {
         let provider_config = self
             .provider_request_configs
             .read()
-            .unwrap()
             .get(&model.provider)
             .cloned();
 
@@ -1172,7 +1156,6 @@ impl ModelRegistry {
         let model_headers_raw = self
             .model_request_headers
             .read()
-            .unwrap()
             .get(&model_headers_key)
             .cloned();
         let model_headers = resolve_headers(
