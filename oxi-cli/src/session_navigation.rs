@@ -753,18 +753,20 @@ mod tests {
     /// No-op summarizer for tests that don't need summarization.
     struct NoOpSummarizer;
     impl Summarizer for NoOpSummarizer {
-        async fn summarize(
+        fn summarize(
             &self,
             _entries: &[SessionEntryType],
             _custom_instructions: Option<&str>,
             _replace_instructions: bool,
-        ) -> Result<BranchSummaryResult, SummarizationError> {
-            Ok(BranchSummaryResult {
-                summary: None,
-                read_files: vec![],
-                modified_files: vec![],
-                aborted: false,
-                error: None,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<BranchSummaryResult, SummarizationError>> + Send + 'static>> {
+            Box::pin(async {
+                Ok(BranchSummaryResult {
+                    summary: None,
+                    read_files: vec![],
+                    modified_files: vec![],
+                    aborted: false,
+                    error: None,
+                })
             })
         }
     }
