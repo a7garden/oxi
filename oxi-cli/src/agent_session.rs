@@ -51,27 +51,37 @@ use uuid::Uuid;
 pub enum SessionEvent {
     /// A steering or follow-up queue changed.
     QueueUpdate {
+        /// Current steering messages.
         steering: Vec<String>,
+        /// Current follow-up messages.
         follow_up: Vec<String>,
     },
     /// Compaction started.
     CompactionStart {
+        /// Why compaction was triggered.
         reason: CompactionReason,
     },
     /// Compaction finished (or failed / was aborted).
     CompactionEnd {
+        /// Why compaction was triggered.
         reason: CompactionReason,
+        /// Compaction result if successful.
         result: Option<CompactionResult>,
+        /// Whether compaction was aborted.
         aborted: bool,
+        /// Whether compaction will be retried.
         will_retry: bool,
+        /// Error message if compaction failed.
         error_message: Option<String>,
     },
     /// Session display name changed.
     SessionInfoChanged {
+        /// New session name.
         name: Option<String>,
     },
     /// Thinking level changed.
     ThinkingLevelChanged {
+        /// New thinking level.
         level: ThinkingLevel,
     },
     /// Passthrough agent event.
@@ -102,7 +112,6 @@ pub struct CompactionResult {
 // Model cycling
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Scoped model entry for Ctrl+P cycling.
 #[derive(Debug, Clone)]
 /// Scoped model entry for Ctrl+P cycling.
 pub struct ScopedModel {
