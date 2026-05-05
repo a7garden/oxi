@@ -85,7 +85,7 @@ impl FuzzyMatcher {
         // All pattern characters must be found
         if pattern_idx == pattern_lower.len() {
             // Bonus for shorter candidates (more exact matches)
-            score += (50 as usize).saturating_sub(candidate.len().min(50));
+            score += 50_usize.saturating_sub(candidate.len().min(50));
 
             Some(score)
         } else {
@@ -98,7 +98,7 @@ impl FuzzyMatcher {
         candidate
             .chars()
             .nth(pos)
-            .map_or(false, |c| c == '/' || c == '\\')
+            .is_some_and(|c| c == '/' || c == '\\')
     }
 
     /// Match a pattern against multiple candidates and return sorted results.

@@ -212,7 +212,7 @@ fn parse_blocks(input: &str) -> Vec<Block> {
         if trimmed.starts_with("```") {
             let lang = trimmed.trim_start_matches('`').trim().to_string();
             let mut code_lines: Vec<String> = Vec::new();
-            while let Some(cl) = lines.next() {
+            for cl in lines.by_ref() {
                 if cl.trim().starts_with("```") {
                     break;
                 }
@@ -400,7 +400,7 @@ fn strip_ordered_marker(s: &str) -> &str {
     let digits_end = s.chars().take_while(|c| c.is_ascii_digit()).count();
     let rest = &s[digits_end..];
     // skip . or ) and following spaces
-    rest.trim_start_matches(|c: char| c == '.' || c == ')')
+    rest.trim_start_matches(['.', ')'])
         .trim_start()
 }
 
@@ -481,7 +481,7 @@ fn parse_inline_runs(
                 || (chars[i] == '_' && chars[i + 1] == '_'))
         {
             let marker = chars[i];
-            let close: String = std::iter::repeat(marker).take(2).collect();
+            let close: String = std::iter::repeat_n(marker, 2).collect();
             let search_from = i + 2;
             if let Some(end) = find_closing_marker(&chars, search_from, &close) {
                 let bold_text: String = chars[i + 2..end].iter().collect();
@@ -1383,7 +1383,7 @@ fn render_inline_runs_wrapped(runs: &[InlineRun], max_width: usize) -> Vec<Style
 
         if is_space {
             // Add space if there's room and we're not at line start
-            if !current_line.is_empty() && current_line.len() + 1 <= max_width {
+            if !current_line.is_empty() && current_line.len() < max_width {
                 current_line.chars.push(word[0].clone());
             }
             continue;

@@ -545,12 +545,11 @@ impl<R: Read> StdinBuffer<R> {
     fn emit_data_sequence(&mut self, seq: &[u8], events: &mut Vec<StdinBufferEvent>) {
         // Kitty deduplication: suppress the raw codepoint event when it
         // matches the pending Kitty printable sequence.
-        if seq.len() == 1 {
-            if Some(seq[0] as u32) == self.pending_kitty_cp {
+        if seq.len() == 1
+            && Some(seq[0] as u32) == self.pending_kitty_cp {
                 self.pending_kitty_cp = None;
                 return;
             }
-        }
 
         // Check if this sequence itself is a Kitty printable sequence
         self.pending_kitty_cp = parse_kitty_printable_codepoint(seq);

@@ -4,24 +4,25 @@
 In Progress
 
 ## Tasks
-- [x] P0-1: Fix `add_overlay()` UB in oxi-tui (double-free from two owning pointers to same memory)
-- [x] P1-3: Fix mouse event conversion + other event fixes in oxi-tui
-- [x] P0-3: Add Layout System to oxi-tui
-- [x] P0-2: Buffer Renderer Output in oxi-tui (already completed in prior commit 506e2e9)
+
+### P1-2: Add Full-Width Character Support to Surface in oxi-tui ✅ DONE
+
+**Completed:**
+- Added `Cell::width()` method using `unicode_width::UnicodeWidthChar::width()`
+- Added `Cell::wide_continuation()` factory for wide-char placeholder cells (null char marker)
+- Added `Cell::is_wide_continuation()` check method
+- Fixed `Surface::write_string()` to account for wide character widths and mark continuation cells
+- Added `Surface::write_string_styled()` with fg/bg/attrs support and wide-char awareness
+- Added `Surface::write_line()` that writes a styled string and fills remaining row with bg-colored spaces
+- Added 8 passing tests covering ASCII, Korean, mixed, overflow, continuation, styling, and write_line
 
 ## Files Changed
-- `oxi-tui/src/overlay.rs` — Added Component passthrough methods to `OverlayHandle` trait; fixed `OverlayBox::render()` backdrop overfill
-- `oxi-tui/src/tui.rs` — Simplified `OverlayHandleWrapper` to single `Box<dyn OverlayHandle>`; removed all `unsafe` code
-- `oxi-tui/src/event.rs` — Added `Moved`, `ScrollLeft`, `ScrollRight` variants to `MouseEventKind`; added `#[allow(dead_code)]` to `KeyCode::Number`
-- `oxi-tui/src/tui.rs` — Fixed mouse event conversion: `Moved` now maps to `Moved` (not `Drag`); button detection uses crossterm's actual button from `mouse.kind` instead of key modifiers; handles all crossterm `MouseEventKind` variants including `Down/Up/Drag` with proper button extraction
-- `oxi-tui/src/layout.rs` — New file: `Direction` enum, `Constraint` enum (Length/Percentage/Min/Flex), `split()` function, `Container` component with nested layout support, 12 unit tests
-- `oxi-tui/src/lib.rs` — Added `pub mod layout` and `pub use layout::{split, Constraint, Container as LayoutContainer, Direction}`
-- `oxi-tui/src/tui.rs` — Added `layout: Option<(Direction, Vec<Constraint>)>` field, `set_layout()`, `clear_layout()` methods; layout-aware rendering in `render()`
+
+- `oxi-tui/src/cell.rs` — Added `width()`, `wide_continuation()`, `is_wide_continuation()` methods
+- `oxi-tui/src/surface.rs` — Fixed `write_string()` for wide chars, added `write_string_styled()`, `write_line()`, and 8 tests
+- `progress.md` — This file
 
 ## Notes
-- All 313 unit tests + 12 doc tests pass
-- Backdrop rendering intentionally removed from `OverlayBox::render()` — needs proper area management to be correct
-- Pre-existing `cargo check` errors in `cell.rs` and `surface.rs` due to `unicode_width` API mismatch — unrelated to layout changes
-- Layout tests cannot run via `cargo test` due to pre-existing `unicode_width` compilation errors, but layout code itself compiles cleanly
-- P0-2 Renderer buffering was already implemented: `buf: Vec<u8>` (16KB), all writes go to buffer, single `write_all()+flush()` in `end_sync()`. No changes needed.
-- Findings at /tmp/p0-2-renderer-buffer.md
+
+- Pre-existing test failure `layout::tests::horizontal_split_with_percentage_constraints` is unrelated to this change
+- Uses `unicode_width` crate (already a dependency) via `UnicodeWidthChar::width()` trait method

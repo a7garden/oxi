@@ -86,9 +86,9 @@ impl SGR {
                 Color::Magenta => codes.push(35),
                 Color::Cyan => codes.push(36),
                 Color::White => codes.push(37),
-                Color::Indexed(n) => codes.extend_from_slice(&[38, 5, *n as u8]),
+                Color::Indexed(n) => codes.extend_from_slice(&[38, 5, (*n)]),
                 Color::Rgb(r, g, b) => {
-                    codes.extend_from_slice(&[38, 2, *r as u8, *g as u8, *b as u8])
+                    codes.extend_from_slice(&[38, 2, (*r), (*g), (*b)])
                 }
             }
         }
@@ -105,9 +105,9 @@ impl SGR {
                 Color::Magenta => codes.push(45),
                 Color::Cyan => codes.push(46),
                 Color::White => codes.push(47),
-                Color::Indexed(n) => codes.extend_from_slice(&[48, 5, *n as u8]),
+                Color::Indexed(n) => codes.extend_from_slice(&[48, 5, (*n)]),
                 Color::Rgb(r, g, b) => {
-                    codes.extend_from_slice(&[48, 2, *r as u8, *g as u8, *b as u8])
+                    codes.extend_from_slice(&[48, 2, (*r), (*g), (*b)])
                 }
             }
         }
@@ -148,11 +148,14 @@ impl Renderer {
 
     /// Write bytes to the internal buffer.
     #[inline]
+    #[allow(dead_code)]
+    #[inline]
     fn buf_write(&mut self, bytes: &[u8]) {
         self.buf.extend_from_slice(bytes);
     }
 
     /// Write a string to the internal buffer.
+    #[allow(dead_code)]
     #[inline]
     fn write_str(&mut self, s: &str) {
         self.buf.extend_from_slice(s.as_bytes());
@@ -233,9 +236,9 @@ impl Renderer {
                 Some(Color::Magenta) => codes.push(35),
                 Some(Color::Cyan) => codes.push(36),
                 Some(Color::White) => codes.push(37),
-                Some(Color::Indexed(n)) => codes.extend_from_slice(&[38, 5, *n as u8]),
+                Some(Color::Indexed(n)) => codes.extend_from_slice(&[38, 5, (*n)]),
                 Some(Color::Rgb(r, g, b)) => {
-                    codes.extend_from_slice(&[38, 2, *r as u8, *g as u8, *b as u8])
+                    codes.extend_from_slice(&[38, 2, (*r), (*g), (*b)])
                 }
             }
         }
@@ -252,9 +255,9 @@ impl Renderer {
                 Some(Color::Magenta) => codes.push(45),
                 Some(Color::Cyan) => codes.push(46),
                 Some(Color::White) => codes.push(47),
-                Some(Color::Indexed(n)) => codes.extend_from_slice(&[48, 5, *n as u8]),
+                Some(Color::Indexed(n)) => codes.extend_from_slice(&[48, 5, (*n)]),
                 Some(Color::Rgb(r, g, b)) => {
-                    codes.extend_from_slice(&[48, 2, *r as u8, *g as u8, *b as u8])
+                    codes.extend_from_slice(&[48, 2, (*r), (*g), (*b)])
                 }
             }
         }

@@ -173,7 +173,7 @@ fn normalize_kitty_functional_codepoint(cp: i64) -> i64 {
 /// 'Shift+a' for identity comparison purposes.
 fn normalize_shifted_letter(cp: i64, modifier: u8) -> i64 {
     let effective = modifier & !(modifier_bits::CAPS_LOCK | modifier_bits::NUM_LOCK);
-    if (effective & modifier_bits::SHIFT) != 0 && cp >= 65 && cp <= 90 {
+    if (effective & modifier_bits::SHIFT) != 0 && (65..=90).contains(&cp) {
         cp + 32
     } else {
         cp
@@ -420,9 +420,9 @@ fn parse_modify_other_keys(data: &[u8]) -> Option<ParsedModifyOtherKeys> {
         return None;
     }
     let inner = &s[5..s.len() - 1]; // strip "\x1b[27;" and "~"
-    let mut parts = inner.splitn(2, ';');
-    let mod_str = parts.next()?;
-    let cp_str = parts.next()?;
+    let (mod_str, cp_str) = inner.split_once(';')?;
+    
+    
     let mod_val: u8 = mod_str.parse().ok()?;
     let cp: i64 = cp_str.parse().ok()?;
     Some(ParsedModifyOtherKeys {
@@ -563,9 +563,9 @@ fn codepoint_to_key_code(cp: i64) -> Option<KeyCode> {
         codepoints::DOWN => Some(KeyCode::Down),
         codepoints::LEFT => Some(KeyCode::Left),
         codepoints::RIGHT => Some(KeyCode::Right),
-        cp if cp >= 48 && cp <= 57 => Some(KeyCode::Char(char::from_u32(cp as u32)?)),
-        cp if cp >= 97 && cp <= 122 => Some(KeyCode::Char(char::from_u32(cp as u32)?)),
-        cp if cp >= 65 && cp <= 90 => Some(KeyCode::Char(char::from_u32(cp as u32)?.to_ascii_lowercase())),
+        cp if (48..=57).contains(&cp) => Some(KeyCode::Char(char::from_u32(cp as u32)?)),
+        cp if (97..=122).contains(&cp) => Some(KeyCode::Char(char::from_u32(cp as u32)?)),
+        cp if (65..=90).contains(&cp) => Some(KeyCode::Char(char::from_u32(cp as u32)?.to_ascii_lowercase())),
         cp if cp >= 32 => char::from_u32(cp as u32).map(KeyCode::Char),
         _ => None,
     }
@@ -616,8 +616,8 @@ fn kitty_codepoint_to_key_code(parsed: &ParsedKitty) -> Option<KeyCode> {
     let eff_cp = normalize_shifted_letter(cp, parsed.modifier);
 
     // Determine if we should use the base layout key
-    let is_latin = eff_cp >= 97 && eff_cp <= 122;
-    let is_digit = eff_cp >= 48 && eff_cp <= 57;
+    let is_latin = (97..=122).contains(&eff_cp);
+    let is_digit = (48..=57).contains(&eff_cp);
     let is_symbol = is_symbol_cp(eff_cp);
     let use_base = !is_latin && !is_digit && !is_symbol;
 
@@ -811,8 +811,8 @@ fn parse_legacy_escape(data: &[u8]) -> Option<Event> {
     let s = std::str::from_utf8(data).ok()?;
 
     // Kitty-protocol-aware legacy sequences
-    if kitty_active() {
-        if data == b"\x1b\r" || data == b"\n" {
+    if kitty_active()
+        && (data == b"\x1b\r" || data == b"\n") {
             return Some(Event::Key(KeyEvent::with_modifiers(
                 KeyCode::Enter,
                 KeyModifiers {
@@ -821,7 +821,6 @@ fn parse_legacy_escape(data: &[u8]) -> Option<Event> {
                 },
             )));
         }
-    }
 
     // F1-F4 via SS3: ESC O P/Q/R/S
     if data.len() == 3 && data[0] == ESC && data[1] == b'O' {
@@ -1043,7 +1042,7 @@ fn parse_csi_tilde(_data: &[u8], inner: &str) -> Option<Event> {
 /// Parse two-byte ESC prefix sequences: ESC <byte>.
 fn parse_esc_prefix(second: u8) -> Option<Event> {
     // Ctrl+Alt + letter: ESC + ctrl_char (1..26)
-    if second >= 1 && second <= 26 {
+    if (1..=26).contains(&second) {
         let ch = char::from(second + 96); // 1→'a', 2→'b', ...
         return Some(Event::Key(KeyEvent::with_modifiers(
             KeyCode::Char(ch),
@@ -1056,7 +1055,7 @@ fn parse_esc_prefix(second: u8) -> Option<Event> {
     }
 
     // Alt+letter/digit: ESC + letter/digit
-    if (second >= b'a' && second <= b'z') || (second >= b'0' && second <= b'9') {
+    if (b'a'..=b'z').contains(&second) || (b'0'..=b'9').contains(&second) {
         let ch = second as char;
         return Some(Event::Key(KeyEvent::with_modifiers(
             KeyCode::Char(ch),
@@ -1207,7 +1206,7 @@ fn parse_raw_char(data: &[u8]) -> Option<Event> {
             return Some(Event::key(KeyCode::Backspace));
         }
         // Ctrl+letter: raw 1..26
-        if b >= 1 && b <= 26 {
+        if (1..=26).contains(&b) {
             let ch = char::from(b + 96);
             return Some(Event::Key(KeyEvent::with_modifiers(
                 KeyCode::Char(ch),
@@ -1218,7 +1217,7 @@ fn parse_raw_char(data: &[u8]) -> Option<Event> {
             )));
         }
         // Printable ASCII (32..126)
-        if b >= 32 && b <= 126 {
+        if (32..=126).contains(&b) {
             return Some(Event::key(KeyCode::Char(b as char)));
         }
     }
@@ -1364,8 +1363,8 @@ pub fn matches_key(data: &[u8], key_id: &str) -> bool {
         if let Some(base) = kitty.base_layout_key {
             if base == expected_cp {
                 let cp = actual_cp;
-                let is_latin = cp >= 97 && cp <= 122;
-                let is_digit = cp >= 48 && cp <= 57;
+                let is_latin = (97..=122).contains(&cp);
+                let is_digit = (48..=57).contains(&cp);
                 let is_symbol = is_symbol_cp(cp);
                 if !is_latin && !is_digit && !is_symbol {
                     return true;
@@ -1456,16 +1455,15 @@ pub fn matches_key(data: &[u8], key_id: &str) -> bool {
                 }
                 return false;
             }
-            if modifier == 0 {
-                if data == b"\r"
+            if modifier == 0
+                && (data == b"\r"
                     || (!kitty_active() && data == b"\n")
                     || data == b"\x1bOM"
                     || try_kitty(codepoints::ENTER, 0)
-                    || try_kitty(codepoints::KP_ENTER, 0)
+                    || try_kitty(codepoints::KP_ENTER, 0))
                 {
                     return true;
                 }
-            }
             try_kitty(codepoints::ENTER, modifier)
                 || try_kitty(codepoints::KP_ENTER, modifier)
                 || try_mok(codepoints::ENTER, modifier)
@@ -1521,11 +1519,9 @@ pub fn matches_key(data: &[u8], key_id: &str) -> bool {
                     if modifier == modifier_bits::ALT
                         && !kitty_active()
                         && (is_letter || is_digit)
-                    {
-                        if data.len() == 2 && data[0] == ESC && data[1] == ch as u8 {
+                        && data.len() == 2 && data[0] == ESC && data[1] == ch as u8 {
                             return true;
                         }
-                    }
                     // Ctrl legacy: raw ctrl char
                     if modifier == modifier_bits::CTRL {
                         if let Some(ctrl_ch) = raw_ctrl_char(ch) {
@@ -1570,7 +1566,7 @@ pub fn matches_key(data: &[u8], key_id: &str) -> bool {
             // Function keys
             if key.starts_with('f') && key.len() <= 3 {
                 if let Ok(num) = key[1..].parse::<u8>() {
-                    if num >= 1 && num <= 12 && modifier == 0 {
+                    if (1..=12).contains(&num) && modifier == 0 {
                         return matches_legacy_fn(data, num);
                     }
                 }
@@ -1596,7 +1592,7 @@ pub fn matches_key(data: &[u8], key_id: &str) -> bool {
 fn raw_ctrl_char(ch: char) -> Option<char> {
     let lower = ch.to_ascii_lowercase();
     let code = lower as u32;
-    if (code >= 97 && code <= 122)
+    if (97..=122).contains(&code)
         || lower == '['
         || lower == '\\'
         || lower == ']'
@@ -1627,7 +1623,7 @@ fn matches_legacy_fn(data: &[u8], num: u8) -> bool {
         12 => &[b"\x1b[24~"],
         _ => &[],
     };
-    candidates.iter().any(|c| data == *c)
+    candidates.contains(&data)
 }
 
 /// Check if data matches a legacy unmodified key sequence.
@@ -1645,7 +1641,7 @@ fn matches_legacy_cp(data: &[u8], key: &str) -> bool {
         "pagedown" => &[b"\x1b[6~", b"\x1b[[6~"],
         _ => &[],
     };
-    seqs.iter().any(|s| data == *s)
+    seqs.contains(&data)
 }
 
 /// Check if data matches a legacy modified key sequence (shift or ctrl).
@@ -1664,7 +1660,7 @@ fn matches_legacy_modifier_cp(data: &[u8], key: &str, modifier: u8) -> bool {
             "end" => &[b"\x1b[8$"],
             _ => &[],
         };
-        return seqs.iter().any(|s| data == *s);
+        return seqs.contains(&data);
     }
     if modifier == modifier_bits::CTRL {
         let seqs: &[&[u8]] = match key {
@@ -1680,7 +1676,7 @@ fn matches_legacy_modifier_cp(data: &[u8], key: &str, modifier: u8) -> bool {
             "end" => &[b"\x1b[8^"],
             _ => &[],
         };
-        return seqs.iter().any(|s| data == *s);
+        return seqs.contains(&data);
     }
     false
 }
@@ -1701,11 +1697,10 @@ pub fn parse_key(data: &[u8]) -> Option<String> {
     let s = std::str::from_utf8(data).ok()?;
 
     // Kitty-active legacy
-    if kitty_active() {
-        if data == b"\x1b\r" || data == b"\n" {
+    if kitty_active()
+        && (data == b"\x1b\r" || data == b"\n") {
             return Some("shift+enter".to_string());
         }
-    }
 
     // Legacy sequence map
     if let Some(id) = legacy_sequence_id(s) {
@@ -1775,10 +1770,10 @@ pub fn parse_key(data: &[u8]) -> Option<String> {
     // Ctrl+Alt+letter / Alt+letter from ESC prefix
     if data.len() == 2 && data[0] == ESC {
         let code = data[1];
-        if code >= 1 && code <= 26 {
+        if (1..=26).contains(&code) {
             return Some(format!("ctrl+alt+{}", char::from(code + 96)));
         }
-        if (code >= b'a' && code <= b'z') || (code >= b'0' && code <= b'9') {
+        if (b'a'..=b'z').contains(&code) || (b'0'..=b'9').contains(&code) {
             return Some(format!("alt+{}", code as char));
         }
     }
@@ -1828,10 +1823,10 @@ pub fn parse_key(data: &[u8]) -> Option<String> {
     // Raw Ctrl+letter
     if data.len() == 1 {
         let code = data[0];
-        if code >= 1 && code <= 26 {
+        if (1..=26).contains(&code) {
             return Some(format!("ctrl+{}", char::from(code + 96)));
         }
-        if code >= 32 && code <= 126 {
+        if (32..=126).contains(&code) {
             return Some((code as char).to_string());
         }
     }
@@ -1839,7 +1834,7 @@ pub fn parse_key(data: &[u8]) -> Option<String> {
     // Multi-byte UTF-8 printable
     if data.len() > 1 {
         if let Ok(s) = std::str::from_utf8(data) {
-            if s.chars().all(|c| c >= ' ' as char) {
+            if s.chars().all(|c| c >= ' ') {
                 return Some(s.to_string());
             }
         }
@@ -1931,8 +1926,8 @@ fn format_codepoint_key_impl(cp: i64, modifier: u8, base_layout_key: Option<i64>
     let normalized = normalize_kitty_functional_codepoint(cp);
     let identity = normalize_shifted_letter(normalized, modifier);
 
-    let is_latin = identity >= 97 && identity <= 122;
-    let is_digit = identity >= 48 && identity <= 57;
+    let is_latin = (97..=122).contains(&identity);
+    let is_digit = (48..=57).contains(&identity);
     let is_symbol = is_symbol_cp(identity);
     let effective = if is_latin || is_digit || is_symbol {
         identity
@@ -1993,7 +1988,7 @@ fn codepoint_to_key_name(cp: i64) -> Option<String> {
         codepoints::DOWN => Some("down".to_string()),
         codepoints::LEFT => Some("left".to_string()),
         codepoints::RIGHT => Some("right".to_string()),
-        cp if cp >= 32 && cp <= 126 => Some((cp as u8 as char).to_string()),
+        cp if (32..=126).contains(&cp) => Some((cp as u8 as char).to_string()),
         cp => char::from_u32(cp as u32).map(|c| c.to_string()),
     }
 }

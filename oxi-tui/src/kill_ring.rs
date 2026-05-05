@@ -41,7 +41,7 @@ impl KillRing {
             return;
         }
         // Skip if identical to the most recent entry
-        if self.entries.first().map_or(false, |e| e == &text) {
+        if self.entries.first() == Some(&text) {
             return;
         }
         if self.entries.len() >= self.capacity {

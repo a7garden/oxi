@@ -89,7 +89,7 @@ impl KeySequence {
             // F-keys: f1..f12
             s if s.starts_with('f') && s.len() <= 3 => {
                 let num: u8 = s[1..].parse().ok()?;
-                if num >= 1 && num <= 12 {
+                if (1..=12).contains(&num) {
                     KeyName::F(num)
                 } else {
                     return None;
@@ -239,10 +239,7 @@ impl KeybindingRegistry {
 
     /// Look up which action matches the given key sequence.
     pub fn action_for(&self, seq: &KeySequence) -> Option<ActionId> {
-        for action in self.bindings.keys() {
-            if self.matches(action, seq) { return Some(action); }
-        }
-        None
+        self.bindings.keys().find(|&action| self.matches(action, seq)).map(|v| v as _)
     }
 
     /// Get the description for an action.

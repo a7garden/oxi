@@ -163,7 +163,7 @@ pub fn visible_width(text: &str) -> usize {
     // Sum grapheme widths via unicode-width
     clean
         .graphemes(true)
-        .map(|g| grapheme_visible_width(g))
+        .map(grapheme_visible_width)
         .sum()
 }
 
@@ -188,7 +188,7 @@ fn grapheme_visible_width(g: &str) -> usize {
 
 /// Fast check: is every byte a printable ASCII character (0x20..=0x7E)?
 fn is_printable_ascii(s: &str) -> bool {
-    s.bytes().all(|b| b >= 0x20 && b <= 0x7E)
+    s.bytes().all(|b| (0x20..=0x7E).contains(&b))
 }
 
 // ---------------------------------------------------------------------------
@@ -812,7 +812,7 @@ pub fn word_at(text: &str, pos: usize) -> Option<(usize, usize)> {
         Some(ch) => is_word(ch),
         None => {
             // Past the end – look backwards
-            text.chars().last().map_or(false, |ch| is_word(ch))
+            text.chars().last().is_some_and(&is_word)
         }
     };
 
