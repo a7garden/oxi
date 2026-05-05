@@ -149,20 +149,35 @@ pub trait AgentTool: Send + Sync {
 }
 
 // Built-in tools
+/// Bash shell execution tool.
 pub mod bash;
+/// In-place file edit tool.
 pub mod edit;
+/// Diff-based edit helpers.
 pub mod edit_diff;
+/// Serialised file-mutation queue.
 pub mod file_mutation_queue;
+/// File-system find tool.
 pub mod find;
+/// Content search (grep) tool.
 pub mod grep;
+/// Directory listing tool.
 pub mod ls;
+/// Path manipulation utilities.
 pub mod path_utils;
+/// File reading tool.
 pub mod read;
+/// Rendering utilities for tool output.
 pub mod render_utils;
+/// Tool definition wrapper helpers.
 pub mod tool_definition_wrapper;
+/// Output truncation helpers.
 pub mod truncate;
+/// Web search tool.
 pub mod web_search;
+/// Sub-agent delegation tool.
 pub mod subagent;
+/// File writing tool.
 pub mod write;
 
 // Re-export for convenience

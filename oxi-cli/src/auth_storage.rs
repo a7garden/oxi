@@ -20,7 +20,10 @@ use parking_lot::RwLock;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthCredential {
     /// API key credential
-    ApiKey { key: String },
+    ApiKey {
+        /// The API key string.
+        key: String,
+    },
     /// OAuth credential with token management
     OAuth {
 /// access_token.

@@ -36,9 +36,17 @@ pub enum AgentSessionEvent {
         duration_ms: u64,
     },
     /// An error occurred
-    Error { message: String, recoverable: bool },
+    Error {
+        /// Error message text.
+        message: String,
+        /// Whether the error is recoverable.
+        recoverable: bool,
+    },
     /// Model started generating a response
-    ModelStart { model_id: String },
+    ModelStart {
+        /// Identifier of the model being used.
+        model_id: String,
+    },
     /// Model finished generating a response
     ModelEnd {
 /// model_id.
@@ -58,7 +66,10 @@ pub enum AgentSessionEvent {
         cached_tokens: Option<u32>,
     },
     /// Session started
-    SessionStart { session_id: String },
+    SessionStart {
+        /// Unique session identifier.
+        session_id: String,
+    },
     /// Session ended
     SessionEnd {
 /// session_id.
@@ -69,9 +80,15 @@ pub enum AgentSessionEvent {
     /// Thinking block started
     ThinkingStart,
     /// Thinking block ended
-    ThinkingEnd { thoughts: String },
+    ThinkingEnd {
+        /// The thinking content.
+        thoughts: String,
+    },
     /// Stream chunk received
-    StreamChunk { content: String },
+    StreamChunk {
+        /// Chunk text content.
+        content: String,
+    },
     /// Tool call requested
     ToolCall {
 /// tool_name.

@@ -1,11 +1,17 @@
 #![allow(inner_doc_comments)]
 /// Agent loop implementation
 
+/// Agent-loop configuration.
 pub mod config;
+/// Tool execution strategies.
 pub mod tool_exec;
+/// Streaming response handling.
 pub mod streaming;
+/// Retry logic for the agent loop.
 pub mod retry;
+/// Internal message/event queues.
 pub mod queues;
+/// Miscellaneous helper functions.
 pub mod helpers;
 
 // Re-export for sibling module access
