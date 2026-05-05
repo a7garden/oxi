@@ -29,25 +29,12 @@ const MAX_CONCURRENCY: usize = 4;
 
 type ProgressFn = ProgressCallback;
 
-// ── Temp dir RAII guard ────────────────────────────────────────────────
+// ── Temp dir helper (no RAII — let OS clean up after subprocess exits) ──
 
-/// RAII guard that cleans up a temp directory on drop.
-struct TempDirGuard(PathBuf);
-
-impl TempDirGuard {
-    fn new(prefix: &str) -> Result<Self, String> {
-        let path = std::env::temp_dir().join(format!("{}-{}", prefix, uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&path).map_err(|e| format!("Failed to create temp dir: {}", e))?;
-        Ok(Self(path))
-    }
-    fn path(&self) -> &Path { &self.0 }
-    fn prompt_path(&self) -> PathBuf { self.0.join("system_prompt.md") }
-}
-
-impl Drop for TempDirGuard {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
+fn create_system_prompt_temp_dir(prefix: &str) -> Result<PathBuf, String> {
+    let path = std::env::temp_dir().join(format!("{}-{}", prefix, uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&path).map_err(|e| format!("Failed to create temp dir: {}", e))?;
+    Ok(path)
 }
 
 // ── Agent Discovery ────────────────────────────────────────────────────
@@ -375,9 +362,9 @@ async fn run_single_agent(
         }
     }
 
-    // System prompt via temp file (RAII cleanup)
-    let tmp_dir = match TempDirGuard::new("oxi-subagent") {
-        Ok(g) => g,
+    // System prompt via temp file (keep alive until process completes)
+    let tmp_dir = match create_system_prompt_temp_dir("oxi-subagent") {
+        Ok(tmp) => Some(tmp),
         Err(e) => {
             result.exit_code = 1;
             result.stderr = e.clone();
@@ -385,10 +372,12 @@ async fn run_single_agent(
             return result;
         }
     };
-    if !agent.system_prompt.is_empty() {
-        if let Ok(()) = std::fs::write(tmp_dir.prompt_path(), &agent.system_prompt) {
-            args.push("--append-system-prompt".to_string());
-            args.push(tmp_dir.prompt_path().to_str().unwrap_or_default().to_string());
+    if let Some(ref tmp) = tmp_dir {
+        if !agent.system_prompt.is_empty() {
+            if std::fs::write(tmp.join("system_prompt.md"), &agent.system_prompt).is_ok() {
+                args.push("--append-system-prompt".to_string());
+                args.push(tmp.join("system_prompt.md").to_str().unwrap_or_default().to_string());
+            }
         }
     }
 

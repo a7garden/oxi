@@ -7,6 +7,8 @@ pub mod retry;
 pub mod queues;
 pub mod helpers;
 
+// Re-export for sibling module access
+pub use config::{AgentLoopConfig, BeforeToolCallHook, AfterToolCallHook, ToolExecutionMode};
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
 use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
@@ -24,12 +26,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-use config::{AgentLoopConfig, BeforeToolCallHook, AfterToolCallHook, ToolExecutionMode};
 use self::queues::{drain_steering_queue, drain_follow_up_queue, clear_steering_queue, clear_follow_up_queue, clear_all_queues};
 use self::retry::{stream_with_retry, is_retryable_error, handle_retryable_error, cancel_auto_retry, auto_retry_attempt_method};
 use self::streaming::stream_assistant_response;
 use self::helpers::should_stop_after_turn;
-use self::tool_exec::{execute_tool_calls, should_terminate_batch, create_tool_result_message};
+use self::tool_exec::execute_tool_calls;
 
 type EmitFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
 

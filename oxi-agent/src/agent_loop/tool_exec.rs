@@ -1,9 +1,9 @@
 //! Tool execution logic for agent loop
 
-use crate::{AgentToolResult, AgentEvent, Message, ToolCall};
+use crate::{AgentToolResult, AgentEvent};
 use crate::tools::AgentTool;
 use anyhow::Result;
-use oxi_ai::{AssistantMessage, ContentBlock, TextContent, ToolResultMessage};
+use oxi_ai::{AssistantMessage, ContentBlock, Message, TextContent, ToolCall, ToolResultMessage};
 use std::pin::Pin;
 use std::sync::Arc;
 
