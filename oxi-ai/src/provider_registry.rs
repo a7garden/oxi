@@ -7,7 +7,7 @@ use crate::env_api_keys;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 /// Information about an OAuth token
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,13 +327,12 @@ impl ProviderAuthRegistry {
     pub fn set_runtime_key(&self, provider: &str, api_key: String) {
         self.runtime_overrides
             .write()
-            .unwrap()
             .insert(provider.to_string(), api_key);
     }
 
     /// Remove a runtime override
     pub fn remove_runtime_key(&self, provider: &str) {
-        self.runtime_overrides.write().unwrap().remove(provider);
+        self.runtime_overrides.write().remove(provider);
     }
 
     /// Set a fallback resolver for providers not in the registry
@@ -341,12 +340,12 @@ impl ProviderAuthRegistry {
     where
         F: Fn(&str) -> Option<String> + Send + Sync + 'static,
     {
-        *self.fallback_resolver.write().unwrap() = Some(Box::new(resolver));
+        *self.fallback_resolver.write() = Some(Box::new(resolver));
     }
 
     /// Remove fallback resolver
     pub fn clear_fallback_resolver(&self) {
-        *self.fallback_resolver.write().unwrap() = None;
+        *self.fallback_resolver.write() = None;
     }
 
     /// Get API key for a provider using the resolution chain
@@ -359,7 +358,7 @@ impl ProviderAuthRegistry {
     pub fn get_api_key(&self, provider: &str) -> Option<String> {
         // 1. Runtime override takes highest priority
         {
-            let overrides = self.runtime_overrides.read().unwrap();
+            let overrides = self.runtime_overrides.read();
             if let Some(key) = overrides.get(provider) {
                 return Some(key.clone());
             }
@@ -379,7 +378,7 @@ impl ProviderAuthRegistry {
 
         // 4. Fallback resolver
         {
-            let resolver = self.fallback_resolver.read().unwrap();
+            let resolver = self.fallback_resolver.read();
             if let Some(ref fallback) = *resolver {
                 return fallback(provider);
             }

@@ -465,9 +465,9 @@ pub struct RpcServer {
     /// Port for TCP mode (0 for stdio mode)
     port: u16,
     /// Shutdown flag
-    shutdown: Arc<std::sync::RwLock<bool>>,
+    shutdown: Arc<parking_lot::RwLock<bool>>,
     /// Session state
-    session_state: Arc<std::sync::RwLock<SessionState>>,
+    session_state: Arc<parking_lot::RwLock<SessionState>>,
     /// Pending extension UI requests
     pending_extension_requests: Arc<Mutex<Vec<(String, oneshot::Sender<RpcExtensionUiResponse>)>>>,
     /// Event subscribers
@@ -509,12 +509,12 @@ impl RpcServer {
 
     /// Check if shutdown has been requested
     pub fn is_shutdown_requested(&self) -> bool {
-        *self.shutdown.read().unwrap()
+        *self.shutdown.read()
     }
 
     /// Request shutdown
     pub fn request_shutdown(&self) {
-        *self.shutdown.write().unwrap() = true;
+        *self.shutdown.write() = true;
     }
 
     /// Update session state
@@ -522,13 +522,13 @@ impl RpcServer {
     where
         F: FnOnce(&mut SessionState),
     {
-        let mut state = self.session_state.write().unwrap();
+        let mut state = self.session_state.write();
         f(&mut state);
     }
 
     /// Get current session state
     pub fn get_session_state(&self) -> SessionState {
-        self.session_state.read().unwrap().clone()
+        self.session_state.read().clone()
     }
 
     /// Emit an event to subscribers
@@ -826,7 +826,7 @@ impl Default for JsonlLineReader {
 
 /// Thread-safe output writer that ensures atomic JSONL writes.
 pub struct RpcOutput {
-    inner: Arc<std::sync::Mutex<std::io::Stdout>>,
+    inner: Arc<parking_lot::Mutex<std::io::Stdout>>,
 }
 
 impl RpcOutput {

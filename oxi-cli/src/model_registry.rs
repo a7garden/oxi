@@ -16,7 +16,7 @@ use oxi_ai::{Api, CompatSettings, Cost, InputModality, Model};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use parking_lot::RwLock;
 
 // =============================================================================
 // JSON Schema types for models.json
@@ -390,14 +390,14 @@ impl ModelRegistry {
     /// Reload models from disk (built-in + custom from models.json).
     pub fn refresh(&self) {
         // Clear caches
-        self.provider_request_configs.write().unwrap().clear();
-        self.model_request_headers.write().unwrap().clear();
-        *self.load_error.write().unwrap() = None;
+        self.provider_request_configs.write().clear();
+        self.model_request_headers.write().clear();
+        *self.load_error.write() = None;
 
         self.load_models_internal();
 
         // Re-apply registered providers
-        let providers = self.registered_providers.read().unwrap().clone();
+        let providers = self.registered_providers.read().clone();
         for (name, config) in &providers {
             self.apply_provider_config(name, config);
         }
@@ -405,12 +405,12 @@ impl ModelRegistry {
 
     /// Get any error from loading models.json.
     pub fn get_error(&self) -> Option<String> {
-        self.load_error.read().unwrap().clone()
+        self.load_error.read().clone()
     }
 
     /// Get all models (built-in + custom).
     pub fn get_all(&self) -> Vec<Model> {
-        self.models.read().unwrap().clone()
+        self.models.read().clone()
     }
 
     /// Get only models that have auth configured.
@@ -441,7 +441,7 @@ impl ModelRegistry {
     /// - `"provider/model-id"`
     /// - `"model-id"` (searches all providers)
     pub fn resolve_model(&self, model_str: &str) -> Option<Model> {
-        let models = self.models.read().unwrap();
+        let models = self.models.read();
 
         if let Some(slash) = model_str.find('/') {
             let provider = &model_str[..slash];
@@ -518,7 +518,7 @@ impl ModelRegistry {
     /// Get the display name for a provider, allocating if necessary for
     /// dynamically registered names.
     pub fn get_provider_display_name_owned(&self, provider: &str) -> String {
-        if let Some(config) = self.registered_providers.read().unwrap().get(provider) {
+        if let Some(config) = self.registered_providers.read().get(provider) {
             if let Some(ref name) = config.name {
                 return name.clone();
             }
@@ -741,14 +741,14 @@ impl ModelRegistry {
         };
 
         if let Some(ref error) = custom_result.error {
-            *self.load_error.write().unwrap() = Some(error.clone());
+            *self.load_error.write() = Some(error.clone());
             // Keep built-in models even if custom models failed to load
         }
 
         let built_in = self.load_built_in_models(&custom_result.overrides, &custom_result.model_overrides);
         let combined = self.merge_custom_models(built_in, &custom_result.models);
 
-        *self.models.write().unwrap() = combined;
+        *self.models.write() = combined;
     }
 
     /// Load built-in models from model_db and apply provider/model overrides.
@@ -1096,7 +1096,7 @@ impl ModelRegistry {
         headers: Option<&HashMap<String, String>>,
     ) {
         let key = format!("{}:{}", provider_name, model_id);
-        let mut hdr_map = self.model_request_headers.write().unwrap();
+        let mut hdr_map = self.model_request_headers.write();
 
         match headers {
             Some(h) if !h.is_empty() => {
@@ -1222,7 +1222,7 @@ impl ModelRegistry {
         if let Some(ref models) = config.models {
             if !models.is_empty() {
                 // Full replacement: remove existing models for this provider
-                let mut all_models = self.models.write().unwrap();
+                let mut all_models = self.models.write();
                 all_models.retain(|m| m.provider != provider_name);
 
                 for model_def in models {
@@ -1260,7 +1260,7 @@ impl ModelRegistry {
             }
         } else if config.base_url.is_some() {
             // Override-only: update baseUrl for existing models
-            let mut all_models = self.models.write().unwrap();
+            let mut all_models = self.models.write();
             if let Some(ref base_url) = config.base_url {
                 for m in all_models.iter_mut() {
                     if m.provider == provider_name {
@@ -1272,7 +1272,7 @@ impl ModelRegistry {
     }
 
     fn upsert_registered_provider(&self, provider_name: &str, config: ProviderConfigInput) {
-        let mut providers = self.registered_providers.write().unwrap();
+        let mut providers = self.registered_providers.write();
         match providers.get_mut(provider_name) {
             Some(existing) => {
                 // Merge: defined values in incoming override, preserve undefined
