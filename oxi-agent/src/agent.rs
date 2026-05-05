@@ -400,10 +400,12 @@ impl Agent {
                     // Retry exhausted – try fallback model
                     let _ = tx
                         .send(AgentEvent::Error {
+                            session_id: None,
                             message: format!(
                                 "Primary model failed: {}",
                                 primary_err.user_friendly()
                             ),
+                            session_id: None,
                         })
                         .await;
 
@@ -427,7 +429,9 @@ impl Agent {
                             let msg = fallback_err.user_friendly();
                             let _ = tx
                                 .send(AgentEvent::Error {
+                            session_id: None,
                                     message: msg.clone(),
+                                    session_id: None,
                                 })
                                 .await;
                             return Err(Error::msg(msg));
@@ -520,7 +524,9 @@ impl Agent {
                     };
                     let _ = tx_clone
                         .send(AgentEvent::Error {
+                            session_id: None,
                             message: format!("⚠ {}", friendly),
+                            session_id: None,
                         })
                         .await;
                     return Err(Error::msg(friendly));
@@ -649,6 +655,7 @@ impl Agent {
                         let delay = BACKOFF_BASE_SECS.pow(attempt as u32 + 1);
                         let _ = tx
                             .send(AgentEvent::Retry {
+                                session_id: None,
                                 attempt: attempt + 1,
                                 max_retries: MAX_RETRIES,
                                 retry_after_secs: delay,

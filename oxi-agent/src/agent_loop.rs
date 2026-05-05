@@ -239,6 +239,8 @@ impl AgentLoop {
             stop_reason,
             session_id: self.session_id.clone(),
         });
+
+        Ok(all_events)
     }
 
     pub async fn continue_loop(
@@ -655,7 +657,8 @@ impl AgentLoop {
                     } else {
                         raw_msg
                     };
-                    emit(AgentEvent::Error { message: format!("⚠ {}", friendly) });
+                    tracing::error!(session_id = ?self.session_id, "Provider stream error: {}", friendly);
+                    emit(AgentEvent::Error { message: format!("⚠ {}", friendly), session_id: self.session_id.clone() });
                     return Err(Error::msg(friendly));
                 }
 
@@ -1173,8 +1176,10 @@ impl AgentLoop {
         for attempt in 0..=MAX_RETRIES {
             // Check the circuit breaker before each attempt.
             if let Err(open_err) = self.circuit_breaker.allow_request() {
+                tracing::error!(session_id = ?self.session_id, "Circuit breaker open: {}", open_err);
                 emit(AgentEvent::Error {
                     message: format!("Circuit breaker open: {}", open_err),
+                    session_id: self.session_id.clone(),
                 });
                 return Err(AgentError::Stream(format!("Circuit breaker open: {}", open_err)).into());
             }
@@ -1204,11 +1209,13 @@ impl AgentLoop {
                             delay
                         };
 
+                        tracing::warn!(session_id = ?self.session_id, attempt, max_retries = MAX_RETRIES, "Retrying stream request: {}", msg);
                         emit(AgentEvent::Retry {
                             attempt: attempt + 1,
                             max_retries: MAX_RETRIES,
                             retry_after_secs: final_delay,
                             reason: msg.clone(),
+                            session_id: self.session_id.clone(),
                         });
                         tokio::time::sleep(tokio::time::Duration::from_secs(final_delay)).await;
                     }
