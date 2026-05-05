@@ -257,13 +257,11 @@ pub fn truncate_to_width(
     // Fast path: pure ASCII
     if is_printable_ascii(text) && !text.contains('\x1b') {
         let mut byte_end = text.len();
-        let mut idx = 0;
-        for (i, _) in text.char_indices() {
+        for (idx, (i, _)) in text.char_indices().enumerate() {
             if idx == target {
                 byte_end = i;
                 break;
             }
-            idx += 1;
         }
         let prefix = &text[..byte_end];
         return finalize_truncation(prefix, target, ellipsis, ellipsis_w, max_width, pad);

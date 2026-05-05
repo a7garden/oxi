@@ -147,7 +147,6 @@ impl Renderer {
     }
 
     /// Write bytes to the internal buffer.
-    #[inline]
     #[allow(dead_code)]
     #[inline]
     fn buf_write(&mut self, bytes: &[u8]) {
