@@ -1040,14 +1040,15 @@ fn test_registry_with_builtins() {
     assert!(names.contains(&"grep".to_string()));
     assert!(names.contains(&"find".to_string()));
     assert!(names.contains(&"ls".to_string()));
-    assert_eq!(names.len(), 7);
+    assert!(names.contains(&"web_search".to_string()));
+    assert_eq!(names.len(), 8);
 }
 
 #[test]
 fn test_registry_definitions() {
     let registry = ToolRegistry::with_builtins();
     let defs = registry.definitions();
-    assert_eq!(defs.len(), 7);
+    assert_eq!(defs.len(), 8);
 
     // Each should have name, description, and input_schema
     for def in &defs {
