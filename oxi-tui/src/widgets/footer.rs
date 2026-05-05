@@ -10,16 +10,27 @@ use crate::Theme;
 /// Footer data — shared state for token counts and session info.
 #[derive(Debug, Clone)]
 pub struct FooterData {
+    /// Active model name.
     pub model_name: String,
+    /// Provider name.
     pub provider_name: String,
+    /// Current git branch.
     pub git_branch: Option<String>,
+    /// Current working directory.
     pub pwd: Option<String>,
+    /// Input token count.
     pub input_tokens: u32,
+    /// Output token count.
     pub output_tokens: u32,
+    /// Cache read token count.
     pub cache_read_tokens: u32,
+    /// Cache write token count.
     pub cache_write_tokens: u32,
+    /// Context window usage percentage.
     pub context_window_pct: f32,
+    /// Total session cost.
     pub total_cost: f64,
+    /// Session duration in seconds.
     pub session_duration_secs: u64,
 }
 
@@ -135,6 +146,7 @@ impl FooterData {
 /// Footer state — wraps FooterData for stateful rendering.
 #[derive(Debug, Default)]
 pub struct FooterState {
+    /// The footer data.
     pub data: FooterData,
 }
 

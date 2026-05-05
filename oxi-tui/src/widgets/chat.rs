@@ -11,8 +11,11 @@ use crate::Theme;
 /// ChatView message role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageRole {
+    /// Message from the user.
     User,
+    /// Message from the assistant.
     Assistant,
+    /// System message.
     System,
 }
 
@@ -20,29 +23,63 @@ pub enum MessageRole {
 #[derive(Debug, Clone)]
 pub enum ContentBlock {
     /// Ordinary text / markdown.
-    Text { content: String },
+    Text {
+        /// The text content.
+        content: String,
+    },
     /// Collapsible thinking / reasoning block.
-    Thinking { content: String, collapsed: bool },
+    Thinking {
+        /// The thinking text.
+        content: String,
+        /// Whether the block is collapsed.
+        collapsed: bool,
+    },
     /// A tool call made by the assistant.
-    ToolCall { id: String, name: String, arguments: String },
+    ToolCall {
+        /// Unique call identifier.
+        id: String,
+        /// Tool name.
+        name: String,
+        /// JSON-encoded arguments.
+        arguments: String,
+    },
     /// The result of a tool call.
-    ToolResult { tool_name: String, content: String, is_error: bool },
+    ToolResult {
+        /// Name of the tool.
+        tool_name: String,
+        /// Result content.
+        content: String,
+        /// Whether the result is an error.
+        is_error: bool,
+    },
     /// An error message.
-    Error { title: String, message: String, retryable: bool },
+    Error {
+        /// Error title.
+        title: String,
+        /// Detailed message.
+        message: String,
+        /// Whether the user can retry.
+        retryable: bool,
+    },
 }
 
 /// Display representation of a chat message.
 #[derive(Debug, Clone)]
 pub struct ChatMessage {
+    /// Role of the sender.
     pub role: MessageRole,
+    /// Ordered list of content blocks.
     pub content_blocks: Vec<ContentBlock>,
+    /// Unix timestamp in milliseconds.
     pub timestamp: i64,
 }
 
 /// Streaming state for the in-progress assistant message.
 #[derive(Debug, Clone)]
 pub struct StreamingState {
+    /// The partial message being streamed.
     pub message: ChatMessage,
+    /// Content index of the active block.
     pub active_content_index: usize,
 }
 
@@ -172,10 +209,12 @@ pub struct ChatView<'a> {
 }
 
 impl<'a> ChatView<'a> {
+    /// Create a new ChatView with the given theme.
     pub fn new(theme: &'a Theme) -> Self {
         Self { theme, scrollbar: true }
     }
 
+    /// Toggle scrollbar visibility.
     pub fn with_scrollbar(mut self, show: bool) -> Self {
         self.scrollbar = show;
         self
