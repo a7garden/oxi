@@ -374,56 +374,63 @@ impl Agent {
             ..Default::default()
         };
 
-        let mut stream = {
+        // Clone provider out of the lock *before* any .await so the
+        // RwLockReadGuard is dropped immediately and cannot span an await point.
+        let provider: Arc<dyn Provider> = {
             let inner = self.config();
-            match Self::stream_with_retry(
-                inner.provider.as_ref(),
-                &model,
-                &context,
-                Some(stream_options),
-                &tx,
-            )
-            .await
-            {
-                Ok(s) => s,
-                Err(primary_err) => {
-                    // Retry exhausted – try fallback model
-                    let _ = tx
-                        .send(AgentEvent::Error {
-                            session_id: None,
-                            message: format!(
-                                "Primary model failed: {}",
-                                primary_err.user_friendly()
-                            ),
-                        })
-                        .await;
+            Arc::clone(&inner.provider)
+        };
 
+        let mut stream = match Self::stream_with_retry(
+            provider.as_ref(),
+            &model,
+            &context,
+            Some(stream_options),
+            &tx,
+        )
+        .await
+        {
+            Ok(s) => s,
+            Err(primary_err) => {
+                // Retry exhausted – try fallback model
+                let _ = tx
+                    .send(AgentEvent::Error {
+                        session_id: None,
+                        message: format!(
+                            "Primary model failed: {}",
+                            primary_err.user_friendly()
+                        ),
+                    })
+                    .await;
+
+                let fallback_options = {
                     let inner2 = self.config();
-                    match self
-                        .try_fallback(
-                            &model,
-                            &context,
-                            Some(StreamOptions {
-                                temperature: inner2.config.temperature,
-                                max_tokens: inner2.config.max_tokens,
-                                ..Default::default()
-                            }),
-                            &tx,
-                            primary_err.to_string(),
-                        )
-                        .await
-                    {
-                        Ok(s) => s,
-                        Err(fallback_err) => {
-                            let msg = fallback_err.user_friendly();
-                            let _ = tx
-                                .send(AgentEvent::Error {
-                            session_id: None,
-                                    message: msg.clone(),
-                                })
-                                .await;
-                            return Err(Error::msg(msg));
-                        }
+                    StreamOptions {
+                        temperature: inner2.config.temperature,
+                        max_tokens: inner2.config.max_tokens,
+                        ..Default::default()
+                    }
+                };
+                match self
+                    .try_fallback(
+                        &model,
+                        &context,
+                        Some(fallback_options),
+                        &tx,
+                        primary_err.to_string(),
+                    )
+                    .await
+                {
+                    Ok(s) => s,
+                    Err(fallback_err) => {
+                        let msg = fallback_err.user_friendly();
+                        let _ = tx
+                            .send(AgentEvent::Error {
+                        session_id: None,
+                                message: msg.clone(),
+                            })
+                            .await;
+                        return Err(Error::msg(msg));
                     }
                 }
             }

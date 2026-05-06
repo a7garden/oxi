@@ -29,7 +29,7 @@ use oxi_ai::{
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use self::queues::{drain_steering_queue, drain_follow_up_queue, clear_steering_queue, clear_follow_up_queue, clear_all_queues};
@@ -53,7 +53,7 @@ pub struct AgentLoop {
     follow_up_queue: RwLock<Vec<Message>>,
     session_id: Option<String>,
     auto_retry_attempt: AtomicUsize,
-    auto_retry_cancel: RwLock<bool>,
+    auto_retry_cancel: AtomicBool,
     circuit_breaker: CircuitBreaker,
 }
 
@@ -91,7 +91,7 @@ impl AgentLoop {
             follow_up_queue: RwLock::new(Vec::new()),
             session_id: config.session_id.clone(),
             auto_retry_attempt: AtomicUsize::new(0),
-            auto_retry_cancel: RwLock::new(false),
+            auto_retry_cancel: AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
         }
     }
