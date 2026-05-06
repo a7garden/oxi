@@ -74,17 +74,17 @@ pub fn get_image_dimensions(bytes: &[u8], mime: &str) -> Result<(u32, u32)> {
 /// PNG header format: 89 50 4E 47 0D 0A 1A 0A [length:4] [type:4] [data...]
 /// Width at offset 16, Height at offset 20 (big-endian)
 fn get_png_dimensions_fast(bytes: &[u8]) -> Option<(u32, u32)> {
-    if bytes.len() < 24 {
+    if bytes.len() < 32 {
         return None;
     }
     if !bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) {
         return None;
     }
 
-    // Skip to IHDR chunk (should be at offset 8, but verify)
-    // Chunk format: [length:4 big-endian] [type:4] [data:length]
-    let length = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
-    if &bytes[20..24] != b"IHDR" {
+    // PNG structure: 8-byte signature, then chunks.
+    // First chunk is IHDR: [length:4 big-endian] [type:4 = "IHDR"] [data:13 bytes]
+    let length = u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    if &bytes[12..16] != b"IHDR" {
         return None;
     }
 
@@ -93,8 +93,8 @@ fn get_png_dimensions_fast(bytes: &[u8]) -> Option<(u32, u32)> {
         return None;
     }
 
-    let width = u32::from_be_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
-    let height = u32::from_be_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]);
+    let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+    let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
 
     Some((width, height))
 }

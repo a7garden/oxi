@@ -368,7 +368,7 @@ Content"#;
         let content = r#"---
 name: My Skill
 description: A complex skill with various field types
-version: 1.0
+version: "1.0"
 enabled: true
 tags: ["rust", "coding"]
 ---

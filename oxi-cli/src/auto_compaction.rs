@@ -695,7 +695,7 @@ mod tests {
         // Above compaction threshold (80%)
         let notif = compactor.get_notification(110000, 128000); // 85.9%
         assert!(notif.is_some());
-        assert!(notif.unwrap().message.contains("85"));
+        assert!(notif.unwrap().message.contains("86"));
     }
 
     #[test]
