@@ -4,7 +4,6 @@ use ratatui::{
     widgets::StatefulWidget,
     buffer::Buffer,
     layout::Rect,
-    style::Style,
 };
 use crate::Theme;
 
@@ -94,8 +93,6 @@ pub struct ChatViewState {
     pub scroll_offset: u16,
     /// Content height in rows.
     content_height: u16,
-    /// Focused thinking block (message_index, block_index).
-    focused_thinking: Option<(usize, usize)>,
 }
 
 impl ChatViewState {
@@ -240,7 +237,7 @@ impl StatefulWidget for ChatView<'_> {
         // Fill background
         for row in area.y..area.y + area.height {
             for col in area.x..area.x + area.width {
-                buf.get_mut(col, row).set_char(' ')
+                buf[(col, row)].set_char(' ')
                     .set_style(styles.normal);
             }
         }
@@ -325,7 +322,7 @@ impl StatefulWidget for ChatView<'_> {
 
         // Render visible lines
         let start = clamped_offset as usize;
-        let end = (start + visible_height).min(all_lines.len());
+        let _end = (start + visible_height).min(all_lines.len());
 
         for (vi, line_tuple) in all_lines.iter().skip(start).take(visible_height).enumerate() {
             let (role, text, _timestamp) = line_tuple;
@@ -345,7 +342,7 @@ impl StatefulWidget for ChatView<'_> {
             // Write prefix
             let mut col = area.x;
             for c in prefix_char.chars() {
-                buf.get_mut(col, row).set_char(c).set_style(prefix_style);
+                buf[(col, row)].set_char(c).set_style(prefix_style);
                 col += 1;
             }
 
@@ -356,13 +353,13 @@ impl StatefulWidget for ChatView<'_> {
                 let cell_col = area.x + margin + i as u16;
                 if cell_col < area.x + area.width {
                     let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16;
-                    buf.get_mut(cell_col, row).set_char(c).set_style(styles.normal);
+                    buf[(cell_col, row)].set_char(c).set_style(styles.normal);
                     // Mark continuation cells for wide chars
                     if char_width > 1 {
                         for w in 1..char_width {
                             let cont_col = cell_col + w;
                             if cont_col < area.x + area.width {
-                                buf.get_mut(cont_col, row).set_char('\u{0}').set_style(styles.normal);
+                                buf[(cont_col, row)].set_char('\u{0}').set_style(styles.normal);
                             }
                         }
                     }
@@ -372,7 +369,7 @@ impl StatefulWidget for ChatView<'_> {
             // Clear remainder of row
             let text_end = area.x + margin + text.chars().count() as u16;
             for cl in text_end..area.x + area.width {
-                buf.get_mut(cl, row).set_char(' ').set_style(styles.normal);
+                buf[(cl, row)].set_char(' ').set_style(styles.normal);
             }
         }
 
@@ -385,8 +382,7 @@ impl StatefulWidget for ChatView<'_> {
 
             for i in 0..thumb_size.min(visible_height as u16) {
                 let sb_row = area.y + thumb_pos.saturating_add(i).min(area.y + area.height - 1);
-                buf.get_mut(area.x + area.width - 1, sb_row)
-                    .set_char('█')
+                buf[(area.x + area.width - 1, sb_row)].set_char('█')
                     .set_style(styles.muted);
             }
         }

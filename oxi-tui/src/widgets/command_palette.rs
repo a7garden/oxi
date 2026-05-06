@@ -282,7 +282,7 @@ impl StatefulWidget for CommandPalette<'_> {
             return;
         }
 
-        let styles = self.theme.to_styles();
+        let _styles = self.theme.to_styles();
 
         // -- colour setup --
         let fg = self.theme.colors.foreground.to_ratatui();
@@ -303,7 +303,7 @@ impl StatefulWidget for CommandPalette<'_> {
         let backdrop = Style::default().bg(Color::Rgb(20, 20, 30));
         for row in area.y..area.y + area.height {
             for col in area.x..area.x + area.width {
-                buf.get_mut(col, row).set_style(backdrop);
+                buf[(col, row)].set_style(backdrop);
             }
         }
 
@@ -318,33 +318,33 @@ impl StatefulWidget for CommandPalette<'_> {
         let border_style = Style::default().fg(border_color).bg(overlay_bg);
         // corners
         if in_bounds(x, y) {
-            buf.get_mut(x, y).set_char('┌').set_style(border_style);
+            buf[(x, y)].set_char('┌').set_style(border_style);
         }
         if in_bounds(x + palette_w - 1, y) {
-            buf.get_mut(x + palette_w - 1, y).set_char('┐').set_style(border_style);
+            buf[(x + palette_w - 1, y)].set_char('┐').set_style(border_style);
         }
         if in_bounds(x, bottom_y) {
-            buf.get_mut(x, bottom_y).set_char('└').set_style(border_style);
+            buf[(x, bottom_y)].set_char('└').set_style(border_style);
         }
         if in_bounds(x + palette_w - 1, bottom_y) {
-            buf.get_mut(x + palette_w - 1, bottom_y).set_char('┘').set_style(border_style);
+            buf[(x + palette_w - 1, bottom_y)].set_char('┘').set_style(border_style);
         }
         // top & bottom edges
         for col in (x + 1)..(x + palette_w - 1) {
             if in_bounds(col, y) {
-                buf.get_mut(col, y).set_char('─').set_style(border_style);
+                buf[(col, y)].set_char('─').set_style(border_style);
             }
             if in_bounds(col, bottom_y) {
-                buf.get_mut(col, bottom_y).set_char('─').set_style(border_style);
+                buf[(col, bottom_y)].set_char('─').set_style(border_style);
             }
         }
         // left & right edges
         for row in (y + 1)..bottom_y {
             if in_bounds(x, row) {
-                buf.get_mut(x, row).set_char('│').set_style(border_style);
+                buf[(x, row)].set_char('│').set_style(border_style);
             }
             if in_bounds(x + palette_w - 1, row) {
-                buf.get_mut(x + palette_w - 1, row).set_char('│').set_style(border_style);
+                buf[(x + palette_w - 1, row)].set_char('│').set_style(border_style);
             }
         }
 
@@ -352,7 +352,7 @@ impl StatefulWidget for CommandPalette<'_> {
         let sep_y = y + 2; // border-top(1) + input(1) = separator row
         for col in (x + 1)..(x + palette_w - 1) {
             if in_bounds(col, sep_y) {
-                buf.get_mut(col, sep_y).set_char('─').set_style(border_style);
+                buf[(col, sep_y)].set_char('─').set_style(border_style);
             }
         }
 
@@ -361,7 +361,7 @@ impl StatefulWidget for CommandPalette<'_> {
         for row in (y + 1)..bottom_y {
             for col in (x + 1)..(x + palette_w - 1) {
                 if in_bounds(col, row) {
-                    buf.get_mut(col, row).set_char(' ').set_style(inner_bg);
+                    buf[(col, row)].set_char(' ').set_style(inner_bg);
                 }
             }
         }
@@ -377,8 +377,7 @@ impl StatefulWidget for CommandPalette<'_> {
         for (i, &c) in prompt_chars.iter().enumerate() {
             let col = inner_x + i as u16;
             if (i as usize) < inner_w && in_bounds(col, input_y) {
-                buf.get_mut(col, input_y)
-                    .set_char(c)
+                buf[(col, input_y)].set_char(c)
                     .set_style(Style::default().fg(primary).bg(overlay_bg));
             }
         }
@@ -388,8 +387,7 @@ impl StatefulWidget for CommandPalette<'_> {
         for (i, c) in state.query.chars().enumerate() {
             let col = inner_x + prompt_len as u16 + i as u16;
             if (prompt_len + i) < inner_w && in_bounds(col, input_y) {
-                buf.get_mut(col, input_y)
-                    .set_char(c)
+                buf[(col, input_y)].set_char(c)
                     .set_style(Style::default().fg(fg).bg(overlay_bg));
             }
         }
@@ -397,8 +395,7 @@ impl StatefulWidget for CommandPalette<'_> {
         // cursor block
         let cursor_col = inner_x + prompt_len as u16 + state.query.len() as u16;
         if (prompt_len + state.query.len()) < inner_w && in_bounds(cursor_col, input_y) {
-            buf.get_mut(cursor_col, input_y)
-                .set_char(' ')
+            buf[(cursor_col, input_y)].set_char(' ')
                 .set_style(Style::default().fg(Color::Black).bg(primary));
         }
 
@@ -420,8 +417,7 @@ impl StatefulWidget for CommandPalette<'_> {
             for (i, c) in msg.chars().enumerate() {
                 let col = inner_x + i as u16;
                 if i < inner_w && in_bounds(col, list_start_y) {
-                    buf.get_mut(col, list_start_y)
-                        .set_char(c)
+                    buf[(col, list_start_y)].set_char(c)
                         .set_style(Style::default().fg(muted).bg(overlay_bg));
                 }
             }
@@ -454,8 +450,7 @@ impl StatefulWidget for CommandPalette<'_> {
                 for (i, c) in cat_str.chars().enumerate() {
                     let col = inner_x + i as u16;
                     if col_offset + i < inner_w && in_bounds(col, row) {
-                        buf.get_mut(col, row)
-                            .set_char(c)
+                        buf[(col, row)].set_char(c)
                             .set_style(if is_selected {
                                 Style::default().fg(Color::Black).bg(primary)
                             } else {
@@ -472,7 +467,7 @@ impl StatefulWidget for CommandPalette<'_> {
             for (i, c) in name_str.chars().enumerate() {
                 let col = inner_x + (col_offset + i) as u16;
                 if col_offset + i < inner_w && in_bounds(col, row) {
-                    buf.get_mut(col, row).set_char(c).set_style(item_style);
+                    buf[(col, row)].set_char(c).set_style(item_style);
                 }
             }
             col_offset += name_str.chars().count();
@@ -481,7 +476,7 @@ impl StatefulWidget for CommandPalette<'_> {
             for i in col_offset..inner_w.saturating_sub(0) {
                 let col = inner_x + i as u16;
                 if in_bounds(col, row) {
-                    buf.get_mut(col, row).set_char(' ').set_style(item_style);
+                    buf[(col, row)].set_char(' ').set_style(item_style);
                 }
             }
 
@@ -492,8 +487,7 @@ impl StatefulWidget for CommandPalette<'_> {
                 for (i, c) in shortcut.chars().enumerate() {
                     let col = inner_x + (sc_start + i) as u16;
                     if sc_start + i < inner_w && in_bounds(col, row) {
-                        buf.get_mut(col, row)
-                            .set_char(c)
+                        buf[(col, row)].set_char(c)
                             .set_style(if is_selected {
                                 Style::default()
                                     .fg(Color::Black)
