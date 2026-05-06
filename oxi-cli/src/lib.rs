@@ -14,7 +14,7 @@ pub mod session_navigation;
 pub mod settings;
 pub mod skills;
 pub mod templates;
-pub mod tui_interactive;
+pub mod tui;
 
 // RPC mode for headless operation
 pub mod rpc_mode;
