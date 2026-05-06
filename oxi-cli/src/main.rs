@@ -57,7 +57,7 @@ async fn main() -> Result<()> {
             "openai-completions" | "openai" => {
                 let provider = oxi_ai::OpenAiProvider::with_base_url_and_key(
                     &cp.base_url,
-                    api_key,
+                    api_key.clone(),
                 );
                 oxi_ai::register_provider(&cp.name, provider);
                 tracing::info!("Registered custom provider '{}' (openai-completions) -> {}", cp.name, cp.base_url);
@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
             "openai-responses" | "responses" => {
                 let provider = oxi_ai::OpenAiResponsesProvider::with_base_url_and_key(
                     &cp.base_url,
-                    api_key,
+                    api_key.clone(),
                 );
                 oxi_ai::register_provider(&cp.name, provider);
                 tracing::info!("Registered custom provider '{}' (openai-responses) -> {}", cp.name, cp.base_url);
@@ -75,6 +75,46 @@ async fn main() -> Result<()> {
                     "Unknown API type '{}' for custom provider '{}'. Supported: openai-completions, openai-responses",
                     cp.api, cp.name
                 );
+            }
+        }
+
+        // Auto-fetch models from /v1/models endpoint
+        if let Some(ref key) = api_key {
+            match oxi_ai::fetch_models_blocking(&cp.base_url, key) {
+                Ok(model_ids) => {
+                    let count = model_ids.len();
+                    for model_id in &model_ids {
+                        let api_type = match api.as_str() {
+                            "openai-responses" | "responses" => oxi_ai::Api::OpenAiResponses,
+                            _ => oxi_ai::Api::OpenAiCompletions,
+                        };
+                        let model = oxi_ai::Model {
+                            id: model_id.clone(),
+                            name: model_id.clone(),
+                            api: api_type,
+                            provider: cp.name.clone(),
+                            base_url: cp.base_url.clone(),
+                            reasoning: false,
+                            input: vec![oxi_ai::InputModality::Text],
+                            cost: oxi_ai::Cost::default(),
+                            context_window: 128_000,
+                            max_tokens: 8_192,
+                            headers: Default::default(),
+                            compat: None,
+                        };
+                        oxi_ai::register_model(model);
+                    }
+                    tracing::info!(
+                        "[oxi] auto-fetched {} models from '{}' ({})",
+                        count, cp.name, cp.base_url
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "[oxi] 경고: {} 모델 조회 실패: {}",
+                        cp.name, e
+                    );
+                }
             }
         }
     }
@@ -192,6 +232,9 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         }
         Commands::Config { action } => {
             handle_config_command(action)?;
+        }
+        Commands::Models { provider } => {
+            handle_models_command(provider)?;
         }
     }
 
@@ -642,6 +685,81 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Handle `oxi models [--provider <name>]`
+fn handle_models_command(provider: &Option<String>) -> Result<()> {
+    use oxi_ai::{get_all_models, get_provider_models, model_count};
+
+    // If a custom provider is specified, also try to fetch models dynamically
+    if let Some(ref provider_name) = *provider {
+        let settings = Settings::load().unwrap_or_default();
+        if let Some(cp) = settings.custom_providers.iter().find(|cp| cp.name == *provider_name) {
+            let api_key = std::env::var(&cp.api_key_env).ok();
+            if let Some(ref key) = api_key {
+                match oxi_ai::fetch_models_blocking(&cp.base_url, key) {
+                    Ok(model_ids) => {
+                        let api_type = match cp.api.to_lowercase().as_str() {
+                            "openai-responses" | "responses" => oxi_ai::Api::OpenAiResponses,
+                            _ => oxi_ai::Api::OpenAiCompletions,
+                        };
+                        for model_id in &model_ids {
+                            let model = oxi_ai::Model {
+                                id: model_id.clone(),
+                                name: model_id.clone(),
+                                api: api_type,
+                                provider: cp.name.clone(),
+                                base_url: cp.base_url.clone(),
+                                reasoning: false,
+                                input: vec![oxi_ai::InputModality::Text],
+                                cost: oxi_ai::Cost::default(),
+                                context_window: 128_000,
+                                max_tokens: 8_192,
+                                headers: Default::default(),
+                                compat: None,
+                            };
+                            oxi_ai::register_model(model);
+                        }
+                        if model_ids.is_empty() {
+                            println!("No models found for provider '{}'.", provider_name);
+                        } else {
+                            println!("Models from '{}' ({} fetched):", provider_name, model_ids.len());
+                            for id in &model_ids {
+                                println!("  {}", id);
+                            }
+                        }
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        eprintln!("[oxi] 경고: {} 모델 조회 실패: {}", provider_name, e);
+                    }
+                }
+            } else {
+                eprintln!("[oxi] API key not set for provider '{}' (expected: {})", provider_name, cp.api_key_env);
+            }
+        }
+
+        // Fallback: show static models for this provider
+        let models = get_provider_models(provider_name);
+        if models.is_empty() {
+            println!("No models found for provider '{}' (static or dynamic).", provider_name);
+        } else {
+            println!("Models for provider '{}' ({}):", provider_name, models.len());
+            for m in models {
+                println!("  {} ({})", m.id, m.name);
+            }
+        }
+        return Ok(());
+    }
+
+    // No provider filter: show everything
+    let all: Vec<_> = get_all_models().collect();
+    let static_count = model_count();
+    println!("Available models ({} static, {} total):", static_count, all.len());
+    for entry in &all {
+        println!("  {}/{} — {}", entry.provider, entry.id, entry.name);
+    }
     Ok(())
 }
 

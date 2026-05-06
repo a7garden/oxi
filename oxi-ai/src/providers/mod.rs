@@ -21,6 +21,7 @@ mod options;
 pub mod register_builtins;
 mod trait_def;
 mod vertex;
+pub mod model_fetch;
 
 use futures::Stream;
 use std::pin::Pin;
