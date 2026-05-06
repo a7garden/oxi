@@ -1608,7 +1608,25 @@ mod tests {
 
     #[test]
     fn test_get_default_model() {
-        // With env var set for anthropic
+        // Clear all provider API keys to avoid interference from environment
+        for key in &[
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+            "MISTRAL_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "XAI_API_KEY",
+            "COHERE_API_KEY",
+            "CO_API_KEY",
+            "PERPLEXITY_API_KEY",
+            "MINIMAX_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
+        
+        // Set only anthropic API key
         std::env::set_var("ANTHROPIC_API_KEY", "test-key");
         let registry = ModelRegistry::create(AuthStorage::in_memory(), None);
         let model = registry.get_default_model();
