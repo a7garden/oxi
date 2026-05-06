@@ -12,6 +12,7 @@ pub mod print_mode;
 pub mod session;
 pub mod session_navigation;
 pub mod settings;
+pub mod settings_validation;
 pub mod skills;
 pub mod templates;
 pub mod tui;
