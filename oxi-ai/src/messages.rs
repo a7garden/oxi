@@ -636,7 +636,14 @@ fn transform_content_blocks(blocks: &[ContentBlock], to_api: &super::Api) -> Vec
 /// Merge adjacent `ContentBlock::Text` blocks into a single block.
 fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
     let mut result = Vec::with_capacity(blocks.len());
-    let mut pending_text = String::new();
+    let estimated_len = blocks
+        .iter()
+        .map(|b| match b {
+            ContentBlock::Text(t) => t.text.len() + 1,
+            _ => 0,
+        })
+        .sum::<usize>();
+    let mut pending_text = String::with_capacity(estimated_len.max(256));
 
     for block in blocks {
         match block {

@@ -136,12 +136,12 @@ pub(crate) async fn handle_retryable_error(
         messages.pop();
     }
 
-    *loop_ref.auto_retry_cancel.write() = false;
+    loop_ref.auto_retry_cancel.store(false, Ordering::SeqCst);
 
     tokio::select! {
         _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {}
         _ = tokio::task::yield_now() => {
-            if *loop_ref.auto_retry_cancel.read() {
+            if loop_ref.auto_retry_cancel.load(Ordering::SeqCst) {
                 emit(AgentEvent::AutoRetryEnd {
                     success: false,
                     attempt,
@@ -153,7 +153,7 @@ pub(crate) async fn handle_retryable_error(
         }
     }
 
-    if *loop_ref.auto_retry_cancel.read() {
+    if loop_ref.auto_retry_cancel.load(Ordering::SeqCst) {
         emit(AgentEvent::AutoRetryEnd {
             success: false,
             attempt,
@@ -168,7 +168,7 @@ pub(crate) async fn handle_retryable_error(
 
 /// Cancel any in-progress auto-retry wait.
 pub fn cancel_auto_retry(loop_ref: &super::AgentLoop) {
-    *loop_ref.auto_retry_cancel.write() = true;
+    loop_ref.auto_retry_cancel.store(true, Ordering::SeqCst);
 }
 
 /// Returns the current auto-retry attempt number (0 = no retry in progress).

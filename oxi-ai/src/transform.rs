@@ -384,7 +384,14 @@ fn intermediate_to_blocks(
 /// Merge adjacent [`ContentBlock::Text`] blocks into a single block.
 fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
     let mut result = Vec::with_capacity(blocks.len());
-    let mut pending = String::new();
+    let estimated_len = blocks
+        .iter()
+        .map(|b| match b {
+            ContentBlock::Text(t) => t.text.len() + 1,
+            _ => 0,
+        })
+        .sum::<usize>();
+    let mut pending = String::with_capacity(estimated_len.max(256));
 
     for block in blocks {
         match block {

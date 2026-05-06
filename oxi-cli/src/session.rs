@@ -308,7 +308,14 @@ impl AgentMessage {
         match self {
             AgentMessage::User { content } => content.as_str().to_string(),
             AgentMessage::Assistant { content, .. } => {
-                let mut text = String::new();
+                let estimated_len = content
+                    .iter()
+                    .map(|b| match b {
+                        AssistantContentBlock::Text { text: t } => t.len(),
+                        _ => 0,
+                    })
+                    .sum::<usize>();
+                let mut text = String::with_capacity(estimated_len.max(256));
                 for block in content {
                     match block {
                         AssistantContentBlock::Text { text: t } => text.push_str(t),
