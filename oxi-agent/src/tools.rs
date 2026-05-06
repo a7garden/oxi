@@ -165,6 +165,8 @@ pub mod grep;
 pub mod ls;
 /// Path manipulation utilities.
 pub mod path_utils;
+/// Path security (traversal protection).
+pub mod path_security;
 /// File reading tool.
 pub mod read;
 /// Rendering utilities for tool output.

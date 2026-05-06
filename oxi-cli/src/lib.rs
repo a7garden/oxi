@@ -98,6 +98,7 @@ pub(crate) mod resource_loader_compat;
 pub(crate) mod output_guard;
 pub(crate) mod tmux_detect;
 pub(crate) mod tools_manager;
+pub(crate) mod shutdown;
 pub(crate) mod version_check;
 
 // Core modules

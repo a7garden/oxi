@@ -9,7 +9,7 @@ pub mod types;
 
 // Re-export types from submodules
 pub use crate::extensions::context::{ExtensionContext, ExtensionContextBuilder};
-pub use crate::extensions::loading::{discover_extensions, discover_extensions_in_dir, load_extension, load_extensions};
+pub use crate::extensions::loading::{discover_extensions, discover_extensions_in_dir, load_extension, load_extensions, validate_extension, ValidatedExtension};
 pub use crate::extensions::registry::{ExtensionErrorHandle, ExtensionRegistry, ExtensionRunner};
 pub use crate::extensions::types::{
     AfterProviderResponseEvent, BashEvent, BeforeProviderRequestEvent, Command,
