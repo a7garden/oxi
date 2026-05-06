@@ -323,17 +323,15 @@ mod tests {
         assert_eq!(detect_mime_type(&png_header), "image/png");
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_detect_mime_type_jpeg() {
-        let jpeg_header = vec![0xFF, 0xD8, 0xFF, 0xE0];
+        let jpeg_header = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x00, 0x00, 0x00];
         assert_eq!(detect_mime_type(&jpeg_header), "image/jpeg");
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_detect_mime_type_gif() {
-        let gif_header = vec![0x47, 0x49, 0x46, 0x38, 0x39, 0x61];
+        let gif_header = vec![0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x00, 0x00];
         assert_eq!(detect_mime_type(&gif_header), "image/gif");
     }
 
@@ -344,10 +342,9 @@ mod tests {
         assert_eq!(detect_mime_type(&webp_header), "image/webp");
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_detect_mime_type_bmp() {
-        let bmp_header = vec![0x42, 0x4D, 0x00, 0x00];
+        let bmp_header = vec![0x42, 0x4D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
         assert_eq!(detect_mime_type(&bmp_header), "image/bmp");
     }
 

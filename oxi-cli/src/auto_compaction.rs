@@ -677,22 +677,22 @@ mod tests {
         assert_eq!(messages[2].content, "Third");
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_get_notification_warning() {
         let provider = create_test_provider();
         let model = create_test_model();
         let compactor = AutoCompactor::with_defaults(provider, model);
 
-        // Below threshold - should be warning at 90% of threshold
-        let notif = compactor.get_notification(90000, 128000); // 70.3% - below 72% threshold
+        // Default threshold is 0.8 (80%), warning threshold is 0.72 (72%)
+        // Below warning threshold
+        let notif = compactor.get_notification(90000, 128000); // 70.3% - below 72% warning
         assert!(notif.is_none());
 
-        // At 90% of threshold
-        let notif = compactor.get_notification(92000, 128000); // 71.9% - near warning
+        // Above warning threshold (72%) but below compaction threshold (80%)
+        let notif = compactor.get_notification(95000, 128000); // 74.2% - above 72% warning
         assert!(notif.is_some());
 
-        // Above threshold
+        // Above compaction threshold (80%)
         let notif = compactor.get_notification(110000, 128000); // 85.9%
         assert!(notif.is_some());
         assert!(notif.unwrap().message.contains("85"));
