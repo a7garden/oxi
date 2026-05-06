@@ -1,17 +1,21 @@
 //! Model registry for oxi-ai
 //!
 //! Provides a centralized registry of available LLM models.
+//! Supports both static built-in models and dynamic runtime registration
+//! for custom OpenAI-compatible providers.
 
 use crate::{Api, Cost, InputModality, Model};
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Extract the model name after the last '/', or return the whole id if no '/' is present.
 fn extract_model_name(id: &str) -> &str {
     id.rsplit_once('/').map(|(_, name)| name).unwrap_or(id)
 }
 
-/// Global model registry
+/// Global model registry (static built-in models)
 static MODELS: Lazy<HashMap<String, Model>> = Lazy::new(|| {
     let mut map = HashMap::new();
 
@@ -667,7 +671,42 @@ impl ModelRegistry {
     }
 }
 
-/// Convenience function to get a model
+// ── Dynamic model registration ──────────────────────────────────────
+
+/// Runtime registry for dynamically registered models (e.g., from custom providers).
+static DYNAMIC_MODELS: Lazy<RwLock<HashMap<String, Model>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+/// Register a model at runtime.
+///
+/// Call this during startup for each custom provider's model.
+/// If a model with the same `provider/model_id` key already exists,
+/// the new one replaces it.
+pub fn register_model(model: Model) {
+    let key = format!("{}/{}", model.provider, model.id);
+    DYNAMIC_MODELS.write().insert(key, model);
+}
+
+/// Unregister a previously registered dynamic model.
+pub fn unregister_model(provider: &str, model_id: &str) {
+    let key = format!("{}/{}", provider, model_id);
+    DYNAMIC_MODELS.write().remove(&key);
+}
+
+/// Look up a model by provider and model ID, checking both dynamic and static registries.
+///
+/// Dynamic models take priority over static ones.
+pub fn lookup_model(provider: &str, model_id: &str) -> Option<Model> {
+    let key = format!("{}/{}", provider, model_id);
+    // Dynamic models take priority
+    if let Some(m) = DYNAMIC_MODELS.read().get(&key) {
+        return Some(m.clone());
+    }
+    // Then static models
+    MODELS.get(&key).cloned()
+}
+
+/// Convenience function to get a model (static registry only – use [`lookup_model`] for dynamic too)
 pub fn get_model(provider: &str, model_id: &str) -> Option<&'static Model> {
     ModelRegistry::get(provider, model_id)
 }

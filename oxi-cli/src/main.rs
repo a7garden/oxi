@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     // Validate settings
     let report = settings.validate();
     for warn in &report.warnings {
-        tracing::warn!("설정 경고: {} — {}", warn.field, warn.message);
+        tracing::warn!("설정 경고: {} - {}", warn.field, warn.message);
     }
     if !report.is_valid() {
         eprintln!("❌ 설정 오류 {}건:", report.errors.len());
@@ -46,6 +46,37 @@ async fn main() -> Result<()> {
             eprintln!("   • {}: {}", err.field, err.message);
         }
         std::process::exit(1);
+    }
+
+    // Register custom OpenAI-compatible providers from settings
+    for cp in &settings.custom_providers {
+        let api_key = std::env::var(&cp.api_key_env).ok();
+        let api = cp.api.to_lowercase();
+
+        match api.as_str() {
+            "openai-completions" | "openai" => {
+                let provider = oxi_ai::OpenAiProvider::with_base_url_and_key(
+                    &cp.base_url,
+                    api_key,
+                );
+                oxi_ai::register_provider(&cp.name, provider);
+                tracing::info!("Registered custom provider '{}' (openai-completions) -> {}", cp.name, cp.base_url);
+            }
+            "openai-responses" | "responses" => {
+                let provider = oxi_ai::OpenAiResponsesProvider::with_base_url_and_key(
+                    &cp.base_url,
+                    api_key,
+                );
+                oxi_ai::register_provider(&cp.name, provider);
+                tracing::info!("Registered custom provider '{}' (openai-responses) -> {}", cp.name, cp.base_url);
+            }
+            _ => {
+                tracing::warn!(
+                    "Unknown API type '{}' for custom provider '{}'. Supported: openai-completions, openai-responses",
+                    cp.api, cp.name
+                );
+            }
+        }
     }
 
     // Apply thinking level if specified
@@ -308,6 +339,16 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
                     }
                 }
             }
+
+            // Show custom providers
+            if settings.custom_providers.is_empty() {
+                println!("  Custom providers: (none)");
+            } else {
+                println!("  Custom providers:");
+                for cp in &settings.custom_providers {
+                    println!("    - {} ({} @ {})", cp.name, cp.api, cp.base_url);
+                }
+            }
         }
 
         ConfigCommands::List { resource_type } => {
@@ -535,18 +576,69 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
                 "skills" => format!("{:?}", settings.skills),
                 "prompts" => format!("{:?}", settings.prompts),
                 "themes" => format!("{:?}", settings.themes),
+                "custom_providers" => {
+                    let items: Vec<String> = settings.custom_providers.iter()
+                        .map(|cp| format!("{} ({} @ {})", cp.name, cp.api, cp.base_url))
+                        .collect();
+                    if items.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        items.join(", ")
+                    }
+                }
                 _ => {
                     anyhow::bail!(
                         "Unknown setting: '{}'. Valid keys: theme, default_model, default_provider, \
                          thinking_level, extensions_enabled, stream_responses, auto_compaction, \
                          tool_timeout, max_tokens, temperature, session_history_size, \
-                         extensions, skills, prompts, themes",
+                         extensions, skills, prompts, themes, custom_providers",
                         key
                     );
                 }
             };
 
             println!("{} = {}", key, value);
+        }
+
+        ConfigCommands::AddProvider { name, base_url, api_key_env, api } => {
+            use oxi::settings::CustomProvider;
+
+            let mut settings = Settings::load()?;
+
+            // Check if provider already exists
+            if settings.custom_providers.iter().any(|cp| cp.name == *name) {
+                // Update existing
+                if let Some(cp) = settings.custom_providers.iter_mut().find(|cp| cp.name == *name) {
+                    cp.base_url = base_url.clone();
+                    cp.api_key_env = api_key_env.clone();
+                    cp.api = api.clone();
+                }
+                settings.save()?;
+                println!("Updated custom provider '{}' -> {} ({})", name, base_url, api);
+            } else {
+                settings.custom_providers.push(CustomProvider {
+                    name: name.clone(),
+                    base_url: base_url.clone(),
+                    api_key_env: api_key_env.clone(),
+                    api: api.clone(),
+                });
+                settings.save()?;
+                println!("Added custom provider '{}' -> {} ({})", name, base_url, api);
+            }
+        }
+
+        ConfigCommands::RemoveProvider { name } => {
+            let mut settings = Settings::load()?;
+            let original_len = settings.custom_providers.len();
+            settings.custom_providers.retain(|cp| cp.name != *name);
+
+            if settings.custom_providers.len() == original_len {
+                println!("Custom provider '{}' not found.", name);
+                return Ok(());
+            }
+
+            settings.save()?;
+            println!("Removed custom provider '{}'", name);
         }
     }
 
