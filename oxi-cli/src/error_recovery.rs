@@ -143,13 +143,22 @@ pub enum RetryableError {
     /// Network connectivity issues
     NetworkError,
     /// Rate limit exceeded
-    RateLimitError { retry_after: u64 },
+    RateLimitError {
+        /// Seconds until retry is allowed
+        retry_after: u64,
+    },
     /// Server-side errors (5xx)
-    ServerError { code: u16 },
+    ServerError {
+        /// HTTP status code
+        code: u16,
+    },
     /// Request timeout
     Timeout,
     /// Service unavailable
-    ServiceUnavailable { retry_after: u64 },
+    ServiceUnavailable {
+        /// Seconds until retry is allowed
+        retry_after: u64,
+    },
     /// Temporary failure
     TemporaryFailure,
 }
@@ -290,15 +299,23 @@ pub enum RetryResult<T> {
     Success(T),
     /// All retries exhausted
     Exhausted {
-/// attempts.
+        /// Number of retry attempts made
         attempts: u32,
-/// last_error.
+        /// The last error encountered
         last_error: RetryableError,
     },
     /// User aborted the retry
-    Aborted { attempts: u32 },
+    Aborted {
+        /// Number of retry attempts made
+        attempts: u32,
+    },
     /// Timeout exceeded
-    TimedOut { attempts: u32, elapsed_ms: u64 },
+    TimedOut {
+        /// Number of retry attempts made
+        attempts: u32,
+        /// Total elapsed time in milliseconds
+        elapsed_ms: u64,
+    },
 }
 
 /// Execute a function with retry logic
