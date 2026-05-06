@@ -60,7 +60,7 @@ pub async fn stream_with_retry_core(
         match provider.stream(model, context, options.clone()).await {
             Ok(stream) => {
                 on_success();
-                return Ok(stream.boxed());
+                return Ok(stream as futures::stream::BoxStream<'static, ProviderEvent>);
             }
             Err(e) => {
                 on_failure();

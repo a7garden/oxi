@@ -80,8 +80,6 @@ pub type AfterToolCallHook = Arc<
         + Send + Sync,
 >;
 
-/// Maximum retry attempts for provider stream requests.
-pub const MAX_RETRIES: usize = 3;
-
-/// Base delay in seconds for exponential backoff.
-pub const BACKOFF_BASE_SECS: u64 = 2;
+// MAX_RETRIES and BACKOFF_BASE_SECS are now defined in crate::stream_retry
+// and re-exported from crate::agent_loop::retry.
+pub use crate::stream_retry::{MAX_RETRIES, BACKOFF_BASE_SECS};

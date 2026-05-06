@@ -1,12 +1,12 @@
 /// Retry logic for agent loop
 
 use crate::{AgentError, AgentEvent};
-use crate::stream_retry::{self, RetryCallback, MAX_RETRIES, BACKOFF_BASE_SECS};
+use crate::stream_retry::{self, RetryCallback};
 use anyhow::Result;
 use oxi_ai::{Context, Model, ProviderEvent, StreamOptions, StopReason, Message};
 use regex::Regex;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+
 
 pub use crate::stream_retry::{MAX_RETRIES, BACKOFF_BASE_SECS};
 
@@ -55,19 +55,18 @@ pub(crate) async fn stream_with_retry(
     };
 
     let provider = loop_ref.provider.as_ref();
-    let cb_success = loop_ref.circuit_breaker.record_success;
-    let cb_failure = loop_ref.circuit_breaker.record_failure;
+    let max_delay = loop_ref.config.max_retry_delay_ms;
+    let cb_ref = &loop_ref.circuit_breaker;
 
-    // We can't capture &CircuitBreaker in the closures easily because
-    // stream_with_retry_core takes FnOnce, so we record directly.
     let result = stream_retry::stream_with_retry_core(
         provider,
         model,
         context,
         options,
         &cb,
-        || { cb_success(); },
-        || { cb_failure(); },
+        max_delay,
+        || { cb_ref.record_success(); },
+        || { cb_ref.record_failure(); },
     )
     .await;
 
