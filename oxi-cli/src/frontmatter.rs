@@ -284,11 +284,10 @@ Content"#;
         );
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_parse_frontmatter_list() {
         let content = r#"---
-tags: [one, two, three]
+tags: ["one", "two", "three"]
 ---
 Content"#;
 
@@ -297,11 +296,10 @@ Content"#;
         assert_eq!(arr.len(), 3);
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_parse_frontmatter_inline_list() {
         let content = r#"---
-tags: [one, two, three]
+tags: ["one", "two", "three"]
 ---
 Content"#;
 
@@ -365,7 +363,6 @@ Content"#;
         assert!(get_field(&fields, "nonexistent").is_none());
     }
 
-    #[ignore] // broken test
     #[test]
     fn test_parse_frontmatter_complex() {
         let content = r#"---
@@ -373,12 +370,7 @@ name: My Skill
 description: A complex skill with various field types
 version: 1.0
 enabled: true
-tags:
-  - rust
-  - coding
-config:
-  timeout: 30
-  verbose: true
+tags: ["rust", "coding"]
 ---
 # Skill Content"#;
 

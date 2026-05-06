@@ -1514,6 +1514,22 @@ mod tests {
 
     #[test]
     fn test_get_api_key_and_headers_no_auth() {
+        // Remove all known provider env keys to avoid race conditions with parallel tests
+        for key in &[
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GOOGLE_API_KEY",
+            "GEMINI_API_KEY",
+            "GROQ_API_KEY",
+            "MISTRAL_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "XAI_API_KEY",
+            "COHERE_API_KEY",
+            "CO_API_KEY",
+            "PERPLEXITY_API_KEY",
+        ] {
+            std::env::remove_var(key);
+        }
         let registry = ModelRegistry::create(AuthStorage::in_memory(), None);
         let model = registry.find("anthropic", "claude-sonnet-4-20250514").unwrap();
         let result = registry.get_api_key_and_headers(&model);
