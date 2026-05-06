@@ -52,7 +52,10 @@ struct AgentInner {
     provider: Arc<dyn Provider>,
 }
 
-/// Agent runtime
+/// Agent 런타임.
+///
+/// 프로바이더, 도구 레지스트리, 상태, 컴팩션 매니저를 통합 관리하며
+/// 프롬프트 실행, 모델 전환, 도구 호출, 폴백 등의 에이전트 루프를 제공한다.
 pub struct Agent {
     inner: RwLock<AgentInner>,
     tools: Arc<ToolRegistry>,

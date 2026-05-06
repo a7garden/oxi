@@ -5,44 +5,44 @@ use thiserror::Error;
 /// Provider-specific errors
 #[derive(Error, Debug)]
 pub enum ProviderError {
+    /// API 키가 누락됨.
     #[error("Missing API key")]
-/// missing api key variant.
     MissingApiKey,
 
+    /// 알 수 없는 프로바이더.
     #[error("Unknown provider: {0}")]
-/// unknown provider variant.
     UnknownProvider(String),
 
+    /// 프로바이더가 아직 구현되지 않음.
     #[error("Provider not implemented: {0}")]
-/// not implemented variant.
     NotImplemented(String),
 
+    /// HTTP 오류 (상태 코드 + 메시지).
     #[error("HTTP error {0}: {1}")]
-/// http error variant.
     HttpError(u16, String),
 
+    /// HTTP 요청 실패.
     #[error("Request failed: {0}")]
-/// request failed variant.
     RequestFailed(#[from] reqwest::Error),
 
+    /// I/O 오류.
     #[error("IO error: {0}")]
-/// io error variant.
     IoError(#[from] std::io::Error),
 
+    /// 프로바이더로부터 올바르지 않은 응답.
     #[error("Invalid response: {0}")]
-/// invalid response variant.
     InvalidResponse(String),
 
+    /// API 키 형식이 올바르지 않음.
     #[error("Invalid API key format")]
-/// invalid api key variant.
     InvalidApiKey,
 
+    /// JSON 파싱 오류.
     #[error("JSON parse error: {0}")]
-/// json parse variant.
     JsonParse(#[from] serde_json::Error),
 
+    /// 스트리밍 오류.
     #[error("Stream error: {0}")]
-/// stream error variant.
     StreamError(String),
 }
 
@@ -62,16 +62,16 @@ pub enum ValidationError {
 /// Unified error type for oxi-ai
 #[derive(Error, Debug)]
 pub enum Error {
+    /// 프로바이더 오래의 래핑.
     #[error("Provider error: {0}")]
-/// provider variant.
     Provider(#[from] ProviderError),
 
+    /// 유효성 검사 오래의 래핑.
     #[error("Validation error: {0}")]
-/// validation variant.
     Validation(#[from] ValidationError),
 
+    /// I/O 오류의 래핑.
     #[error("IO error: {0}")]
-/// io variant.
     Io(#[from] std::io::Error),
 }
 
