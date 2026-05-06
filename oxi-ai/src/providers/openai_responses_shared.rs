@@ -57,7 +57,7 @@ pub fn short_hash(input: &str) -> String {
     let hash = simple_hash(input.as_bytes());
     let mut out = String::with_capacity(12);
     for byte in &hash[..6] {
-        write!(&mut out, "{:02x}", byte).unwrap();
+        write!(&mut out, "{:02x}", byte).expect("writing to string");
     }
     out
 }
