@@ -187,7 +187,7 @@ impl Default for InteractiveSession {
             thinking: false,
             current_response: String::new(),
             session_id: None,
-/// TODO: document.
+// FIXME: document.
             name: None,
             entries: Vec::new(),
         }
@@ -197,7 +197,7 @@ impl Default for InteractiveSession {
 impl InteractiveSession {
     /// Create a new empty interactive session.
     pub fn new() -> Self {
-/// TODO: document.
+// FIXME: document.
         Self::default()
     }
 
@@ -216,7 +216,7 @@ impl InteractiveSession {
         self.messages.push(ChatMessage::assistant(content.clone()));
         // Also add to entries for session persistence
         let entry = session::SessionEntry::new(session::AgentMessage::Assistant {
-/// TODO: document.
+// FIXME: document.
             content: vec![session::AssistantContentBlock::Text { text: content }],
             provider: None,
             model_id: None,
