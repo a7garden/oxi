@@ -106,6 +106,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: ConfigCommands,
     },
+    /// List available models
+    Models {
+        /// Filter by provider name (e.g., openai, anthropic, minimax)
+        #[arg(long)]
+        provider: Option<String>,
+    },
 }
 
 // ── Package subcommands ────────────────────────────────────────────
@@ -529,6 +535,28 @@ mod tests {
                 _ => panic!("Expected RemoveProvider subcommand"),
             },
             _ => panic!("Expected Config command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_models_command() {
+        let args = parse_args_from(["oxi", "models"]).unwrap();
+        match args.command {
+            Some(Commands::Models { provider }) => {
+                assert!(provider.is_none());
+            }
+            _ => panic!("Expected Models command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_models_with_provider() {
+        let args = parse_args_from(["oxi", "models", "--provider", "minimax"]).unwrap();
+        match args.command {
+            Some(Commands::Models { provider }) => {
+                assert_eq!(provider, Some("minimax".to_string()));
+            }
+            _ => panic!("Expected Models command"),
         }
     }
 }
