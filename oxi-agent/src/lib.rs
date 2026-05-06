@@ -28,6 +28,8 @@ pub mod state;
 pub mod tools;
 /// Shared type aliases and helpers.
 pub mod types;
+/// Shared streaming retry logic.
+pub mod stream_retry;
 
 pub use agent::Agent;
 pub use agent_loop::{AgentLoop, AgentLoopConfig, ToolExecutionMode};

@@ -15,13 +15,36 @@ use oxi_ai::{
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::mpsc;
 
-use crate::agent_loop::config::{MAX_RETRIES, BACKOFF_BASE_SECS};
+use crate::stream_retry::{self, RetryCallback};
 
 /// Default fallback model used when the primary model fails.
 const DEFAULT_FALLBACK_MODEL: &str = "openai/gpt-4o-mini";
+
+/// [`RetryCallback`] that emits [`AgentEvent::Retry`] through an mpsc channel.
+struct MpscRetryCallback {
+    tx: mpsc::Sender<AgentEvent>,
+}
+
+impl RetryCallback for MpscRetryCallback {
+    fn on_retry(&self, attempt: usize, max_retries: usize, delay_secs: u64, reason: String) {
+        let tx = self.tx.clone();
+        // Fire-and-forget: send from a spawned task so we don't need &self to be 'static.
+        tokio::spawn(async move {
+            let _ = tx
+                .send(AgentEvent::Retry {
+                    session_id: None,
+                    attempt,
+                    max_retries,
+                    retry_after_secs: delay_secs,
+                    reason,
+                })
+                .await;
+        });
+    }
+}
 
 /// Mutable agent internals protected by a read-write lock.
 struct AgentInner {
@@ -592,9 +615,8 @@ impl Agent {
 
     /// Attempt to stream from the provider with retry + exponential back-off.
     ///
-    /// On persistent rate-limit or transient errors the method retries up to
-    /// [`MAX_RETRIES`] times with `2^attempt` seconds delay. If all retries
-    /// fail, the error is returned to the caller.
+    /// Delegates to [`stream_retry::stream_with_retry_core`] and emits
+    /// [`AgentEvent::Retry`] events through the channel.
     async fn stream_with_retry(
         provider: &dyn Provider,
         model: &oxi_ai::Model,
@@ -602,43 +624,18 @@ impl Agent {
         options: Option<StreamOptions>,
         tx: &mpsc::Sender<AgentEvent>,
     ) -> std::result::Result<futures::stream::BoxStream<'static, ProviderEvent>, AgentError> {
-        let mut last_err: Option<String> = None;
-
-        for attempt in 0..=MAX_RETRIES {
-            match provider.stream(model, context, options.clone()).await {
-                Ok(stream) => return Ok(stream.boxed()),
-                Err(e) => {
-                    let msg = e.to_string();
-                    let is_rate_limit = matches!(e, oxi_ai::ProviderError::HttpError(429, _));
-
-                    if !is_rate_limit && attempt == 0 {
-                        // Non-retryable, bail immediately.
-                        return Err(AgentError::Stream(msg));
-                    }
-
-                    last_err = Some(msg.clone());
-
-                    if attempt < MAX_RETRIES {
-                        let delay = BACKOFF_BASE_SECS.pow(attempt as u32 + 1);
-                        let _ = tx
-                            .send(AgentEvent::Retry {
-                                session_id: None,
-                                attempt: attempt + 1,
-                                max_retries: MAX_RETRIES,
-                                retry_after_secs: delay,
-                                reason: msg.clone(),
-                            })
-                            .await;
-                        tokio::time::sleep(Duration::from_secs(delay)).await;
-                    }
-                }
-            }
-        }
-
-        Err(AgentError::RetriesExhausted {
-            attempts: MAX_RETRIES,
-            last_error: last_err.unwrap_or_default(),
-        })
+        let cb = MpscRetryCallback { tx: tx.clone() };
+        stream_retry::stream_with_retry_core(
+            provider,
+            model,
+            context,
+            options,
+            &cb,
+            None,  // no max_delay cap for Agent
+            || {},   // no circuit-breaker tracking for Agent
+            || {},
+        )
+        .await
     }
 
     /// Try a fallback model when the primary model fails.
