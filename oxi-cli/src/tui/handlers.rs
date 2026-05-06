@@ -11,7 +11,6 @@ use crossterm::event::{Event as CEvent, KeyCode, KeyModifiers, MouseEventKind};
 /// Actions returned from input handling that need async work in the main loop.
 pub(crate) enum Action {
     SendPrompt(String),
-    None,
 }
 
 /// Handle a crossterm input event. Returns an action if the main loop needs to do async work.
@@ -41,7 +40,7 @@ async fn handle_key(
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
     session: &AgentSession,
-    ui_tx: &mpsc::Sender<UiEvent>,
+    _ui_tx: &mpsc::Sender<UiEvent>,
     running: &mut bool,
 ) -> Option<Action> {
     match key.code {

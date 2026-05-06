@@ -4,7 +4,7 @@ use super::handlers;
 use super::render;
 use super::slash;
 use super::welcome;
-use crate::agent_session::{AgentSession, CompactionReason, ScopedModel, SessionEvent};
+use crate::agent_session::{CompactionReason, SessionEvent};
 use crate::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
@@ -15,23 +15,21 @@ use anyhow::Result;
 use oxi_agent::AgentEvent;
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{
-    chat::{ChatMessage, ChatView, ChatViewState, ContentBlock, MessageRole},
-    footer::{Footer, FooterState},
-    input::{Input, InputState},
+    chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},
+    footer::FooterState,
+    input::InputState,
 };
 use std::io;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event as CEvent},
+    event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
     Terminal,
 };
 
