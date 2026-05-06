@@ -105,10 +105,10 @@ impl AzureProvider {
         let mut headers = reqwest::header::HeaderMap::new();
 
         // Azure uses api-key header instead of Bearer token
-        headers.insert("api-key", api_key.parse().unwrap());
+        headers.insert("api-key", api_key.parse().expect("valid header value"));
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("valid header value"),
         );
 
         // Add custom headers from options

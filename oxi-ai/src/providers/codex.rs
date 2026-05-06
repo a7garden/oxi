@@ -280,31 +280,31 @@ impl Provider for CodexProvider {
         // Authorization: Bearer token
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_key).parse().unwrap(),
+            format!("Bearer {}", api_key).parse().expect("valid bearer header"),
         );
 
         // GitHub Copilot specific: x-github-token header
         headers.insert(
             reqwest::header::HeaderName::from_static("x-github-token"),
-            api_key.parse().unwrap(),
+            api_key.parse().expect("valid header value"),
         );
 
         // Content type
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("valid header value"),
         );
 
         // Copilot-specific headers
         headers.insert(
             reqwest::header::HeaderName::from_static("x-github-api-version"),
-            "2024-11-20".parse().unwrap(),
+            "2024-11-20".parse().expect("valid header value"),
         );
 
         // Copilot intent header for code-specific requests
         headers.insert(
             reqwest::header::HeaderName::from_static("x-copilot-integration"),
-            "oxi-codex".parse().unwrap(),
+            "oxi-codex".parse().expect("valid header value"),
         );
 
         // Add custom headers from options

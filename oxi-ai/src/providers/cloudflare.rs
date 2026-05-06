@@ -51,7 +51,7 @@ impl CloudflareProvider {
         let base_url = if self.account_id.is_some() {
             format!(
                 "https://api.cloudflare.com/client/v4/accounts/{}/workers/ai/v1",
-                self.account_id.as_ref().unwrap()
+                self.account_id.as_ref().expect("account_id verified above")
             )
         } else {
             "https://api.cloudflare.com/client/v4/workers/ai/v1".to_string()
@@ -141,11 +141,11 @@ impl Provider for CloudflareProvider {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_token).parse().unwrap(),
+            format!("Bearer {}", api_token).parse().expect("valid bearer header"),
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("valid header value"),
         );
 
         for (k, v) in &options.headers {

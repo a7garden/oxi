@@ -80,7 +80,7 @@ impl VertexProvider {
             serde_json::from_str(&creds_json).map_err(|_| ProviderError::InvalidApiKey)?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("system time after epoch")
             .as_secs();
         let header = base64_url_encode(&serde_json::json!({"alg": "RS256", "typ": "JWT"}));
         let claims = serde_json::json!({
@@ -201,7 +201,7 @@ impl Provider for VertexProvider {
 
 fn base64_url_encode(value: &serde_json::Value) -> String {
     use base64::Engine as _;
-    let json = serde_json::to_string(value).unwrap();
+    let json = serde_json::to_string(value).expect("serializing json value");
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json.as_bytes())
 }
 

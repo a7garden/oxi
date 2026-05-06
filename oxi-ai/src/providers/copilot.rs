@@ -126,19 +126,19 @@ impl Provider for CopilotProvider {
         // GitHub Copilot specific: x-github-token header
         headers.insert(
             reqwest::header::HeaderName::from_static("x-github-token"),
-            api_key.parse().unwrap(),
+            api_key.parse().expect("valid header value"),
         );
 
         // Content type
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("valid header value"),
         );
 
         // Copilot-specific headers for context
         headers.insert(
             reqwest::header::HeaderName::from_static("x-github-api-version"),
-            "2024-11-20".parse().unwrap(),
+            "2024-11-20".parse().expect("valid header value"),
         );
 
         // Add custom headers from options
