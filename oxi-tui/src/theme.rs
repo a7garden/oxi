@@ -71,22 +71,22 @@ impl Default for ColorScheme {
 }
 
 impl ColorScheme {
-    /// Default dark color scheme.
+    /// Default dark color scheme (Tokyo Night inspired).
     pub fn dark() -> Self {
         Self {
-            foreground: Color::Rgb(220, 223, 228), // #dcdfe4
-            background: Color::Rgb(30, 30, 44),    // #1e1e2c
-            primary: Color::Rgb(137, 180, 250),    // #89b4fa
-            secondary: Color::Rgb(166, 227, 161),  // #a6e3a1
-            error: Color::Rgb(243, 139, 168),      // #f38ba8
-            warning: Color::Rgb(249, 226, 175),    // #f9e2af
-            success: Color::Rgb(166, 227, 161),    // #a6e3a1
-            muted: Color::Indexed(8),              // bright black / gray
-            accent: Color::Rgb(203, 166, 247),     // #cba6f7
-            border: Color::Indexed(8),
-            cursor_fg: Color::Rgb(30, 30, 44),
-            cursor_bg: Color::Rgb(220, 223, 228),
-            selection_bg: Color::Rgb(60, 60, 80),
+            foreground: Color::Rgb(205, 214, 244), // #cdd6f4
+            background: Color::Rgb(26, 27, 38),    // #1a1b26
+            primary: Color::Rgb(122, 162, 247),    // #7aa2f7
+            secondary: Color::Rgb(158, 206, 106),  // #9ece6a
+            error: Color::Rgb(247, 118, 142),      // #f7768e
+            warning: Color::Rgb(224, 175, 104),    // #e0af68
+            success: Color::Rgb(158, 206, 106),    // #9ece6a
+            muted: Color::Rgb(88, 91, 112),        // #585b70
+            accent: Color::Rgb(187, 154, 247),     // #bb9af7
+            border: Color::Rgb(55, 58, 82),        // #373a52
+            cursor_fg: Color::Rgb(26, 27, 38),     // #1a1b26
+            cursor_bg: Color::Rgb(205, 214, 244),  // #cdd6f4
+            selection_bg: Color::Rgb(55, 58, 82),  // #373a52
         }
     }
 
