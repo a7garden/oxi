@@ -170,6 +170,23 @@ pub enum ConfigCommands {
         /// Setting key
         key: String,
     },
+    /// Add a custom OpenAI-compatible provider
+    AddProvider {
+        /// Provider name (e.g. minimax)
+        name: String,
+        /// Base URL (e.g. https://api.minimax.chat/v1)
+        base_url: String,
+        /// Environment variable name for API key (e.g. MINIMAX_API_KEY)
+        api_key_env: String,
+        /// API type: openai-completions or openai-responses (default: openai-completions)
+        #[arg(default_value = "openai-completions")]
+        api: String,
+    },
+    /// Remove a custom provider
+    RemoveProvider {
+        /// Provider name to remove
+        name: String,
+    },
 }
 
 // ── Parsing helpers ────────────────────────────────────────────────

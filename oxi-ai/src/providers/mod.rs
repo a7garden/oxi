@@ -52,19 +52,59 @@ pub use openai_responses::OpenAiResponsesProvider;
 pub use options::{StreamOptions, ThinkingBudgets};
 pub use trait_def::Provider;
 
-/// Provider factory functions
+use once_cell::sync::Lazy;
+use parking_lot::RwLock;
+use std::collections::HashMap;
+use std::sync::Arc;
 
-/// Returns a shared, lazily-initialized `reqwest::Client`.
-///
-/// All providers should use this instead of creating their own `Client::new()`
-/// to benefit from connection pooling and avoid unnecessary resource allocation.
+/// Shared client singleton.
 pub fn shared_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
+// ── Custom provider registry ────────────────────────────────────────
+
+/// Runtime registry for custom (user-defined) providers.
+///
+/// Custom providers are registered from `~/.oxi/settings.toml` `[[custom_provider]]`
+/// sections during startup.  They take priority over the built-in match arm in
+/// [`get_provider`].
+static CUSTOM_PROVIDERS: Lazy<RwLock<HashMap<String, Arc<dyn Provider>>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
+
+/// Register a custom provider at runtime.
+///
+/// This is called from `oxi-cli` during startup for each `[[custom_provider]]` entry
+/// found in settings.
+pub fn register_provider(name: &str, provider: impl Provider + 'static) {
+    CUSTOM_PROVIDERS
+        .write()
+        .insert(name.to_string(), Arc::new(provider));
+}
+
+/// Unregister a previously registered custom provider.
+pub fn unregister_provider(name: &str) {
+    CUSTOM_PROVIDERS.write().remove(name);
+}
+
+/// Return the set of currently registered custom provider names.
+pub fn custom_provider_names() -> Vec<String> {
+    CUSTOM_PROVIDERS.read().keys().cloned().collect()
+}
+
 /// Get a provider by name
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
+    // 1. Check custom providers first (higher priority than builtins)
+    {
+        let custom = CUSTOM_PROVIDERS.read();
+        if let Some(provider) = custom.get(name) {
+            // Clone the Arc and wrap in a newtype that implements Provider via Arc delegation
+            return Some(Box::new(ArcedProvider(provider.clone())));
+        }
+    }
+
+    // 2. Built-in providers
     match name {
         "openai" | "groq" | "cerebras" | "xai" | "openrouter" | "fireworks" | "huggingface" => {
             Some(Box::new(openai::OpenAiProvider::new()))
@@ -84,6 +124,25 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         "openai-completions" | "completions" => Some(Box::new(openai_completions::OpenAICompletionsProvider::new())),
         "codex" | "github-codex" | "copilot-codex" => Some(Box::new(codex::CodexProvider::new())),
         _ => None,
+    }
+}
+
+/// Wrapper that lets us return a cloned `Arc<dyn Provider>` as `Box<dyn Provider>`.
+struct ArcedProvider(Arc<dyn Provider>);
+
+#[async_trait::async_trait]
+impl Provider for ArcedProvider {
+    async fn stream(
+        &self,
+        model: &Model,
+        context: &Context,
+        options: Option<StreamOptions>,
+    ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
+        self.0.stream(model, context, options).await
+    }
+
+    fn name(&self) -> &str {
+        self.0.name()
     }
 }
 

@@ -42,8 +42,9 @@ pub use context::Context;
 pub use error::{Error, Result};
 pub use messages::*;
 pub use providers::CacheRetention;
-pub use providers::{get_provider, Provider, ProviderEvent, StreamOptions};
+pub use providers::{get_provider, register_provider, unregister_provider, custom_provider_names, Provider, ProviderEvent, StreamOptions};
 pub use providers::OpenAiProvider;
+pub use providers::OpenAiResponsesProvider;
 pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ValidationError};
 pub use types::*;
 
@@ -64,7 +65,7 @@ pub use transform::{
 
 // Model registry (runtime mutable registry)
 mod model_registry;
-pub use model_registry::{get_model, get_models, get_providers, ModelRegistry};
+pub use model_registry::{get_model, get_models, get_providers, register_model, unregister_model, lookup_model, ModelRegistry};
 
 // Static model database (comprehensive)
 pub mod model_db;

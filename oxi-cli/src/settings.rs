@@ -38,6 +38,27 @@ pub enum ThinkingLevel {
     Thorough,
 }
 
+/// A custom OpenAI-compatible provider configuration.
+///
+/// Custom providers are loaded from `~/.oxi/settings.toml` via `[[custom_provider]]` sections
+/// and registered at runtime so that models like `minimax/minimax-m2.5` can be used directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomProvider {
+    /// Unique provider name (e.g. `"minimax"`).
+    pub name: String,
+    /// Base URL of the OpenAI-compatible API (e.g. `"https://api.minimax.chat/v1"`).
+    pub base_url: String,
+    /// Environment variable name that holds the API key (e.g. `"MINIMAX_API_KEY"`).
+    pub api_key_env: String,
+    /// API dialect: `"openai-completions"` or `"openai-responses"`.
+    #[serde(default = "default_custom_provider_api")]
+    pub api: String,
+}
+
+fn default_custom_provider_api() -> String {
+    "openai-completions".to_string()
+}
+
 /// Application settings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -115,6 +136,11 @@ pub struct Settings {
     /// List of theme paths to load
     #[serde(default)]
     pub themes: Vec<String>,
+
+       // ── Custom OpenAI-compatible providers ──────────────────────────────
+    /// Registered custom providers (loaded from `[[custom_provider]]` TOML sections).
+    #[serde(default)]
+    pub custom_providers: Vec<CustomProvider>,
 }
 
 fn default_theme() -> String {
@@ -155,6 +181,7 @@ impl Default for Settings {
             skills: Vec::new(),
             prompts: Vec::new(),
             themes: Vec::new(),
+            custom_providers: Vec::new(),
         }
     }
 }

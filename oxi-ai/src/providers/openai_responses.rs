@@ -27,6 +27,7 @@ use super::shared_client;
 pub struct OpenAiResponsesProvider {
     client: &'static Client,
     api_key: Option<String>,
+    base_url: Option<String>,
 }
 
 impl OpenAiResponsesProvider {
@@ -35,6 +36,7 @@ impl OpenAiResponsesProvider {
         Self {
             client: shared_client(),
             api_key: std::env::var("OPENAI_API_KEY").ok(),
+            base_url: None,
         }
     }
 
@@ -44,6 +46,18 @@ impl OpenAiResponsesProvider {
         Self {
             client: shared_client(),
             api_key: Some(api_key.into()),
+            base_url: None,
+        }
+    }
+
+    /// Create a provider with a custom base URL and optional API key.
+    ///
+    /// Used for registering custom OpenAI-compatible providers (Minimax, ZAI, etc.).
+    pub fn with_base_url_and_key(base_url: &str, api_key: Option<String>) -> Self {
+        Self {
+            client: shared_client(),
+            api_key,
+            base_url: Some(base_url.to_string()),
         }
     }
 }
@@ -65,7 +79,8 @@ impl Provider for OpenAiResponsesProvider {
         let options = options.unwrap_or_default();
 
         // Build the request URL
-        let url = format!("{}/responses", model.base_url);
+        let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
+        let url = format!("{}/responses", effective_base_url);
 
         // Get API key
         let api_key = options
