@@ -1,4 +1,4 @@
-#![allow(inner_doc_comments)]
+#![allow(unused_doc_comments)]
 #![warn(missing_docs)]
 
 //! oxi-agent: Agent runtime for oxi
@@ -12,12 +12,8 @@ pub mod agent;
 pub mod agent_loop;
 /// Context compaction strategies and data types.
 pub mod compaction;
-/// One-time compaction initialisation helpers.
-pub mod compaction_init;
 /// Agent configuration types.
 pub mod config;
-/// Prompt / context assembly for model calls.
-pub mod context_builder;
 /// Error types for agent operations.
 pub mod error;
 /// Event types emitted during the agent loop.
@@ -26,8 +22,6 @@ pub mod events;
 pub mod model_id;
 /// Fault-recovery primitives (circuit breaker, fallback chains).
 pub mod recovery;
-/// Retry policy constants.
-pub mod retry_constants;
 /// Agent state machine and shared mutable state.
 pub mod state;
 /// Built-in tool implementations and registry.

@@ -1,13 +1,11 @@
 /// Retry logic for agent loop
 
-use crate::{AgentError, AgentToolResult, AgentEvent};
-use anyhow::{Error, Result};
+use crate::{AgentError, AgentEvent};
+use anyhow::Result;
 use oxi_ai::{Context, Model, ProviderEvent, StreamOptions, StopReason, Message};
-use parking_lot::RwLock;
 use regex::Regex;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 pub use super::config::{BACKOFF_BASE_SECS, MAX_RETRIES};
 

@@ -1,8 +1,5 @@
 /// Queue management for agent loop
 
-use std::sync::Arc;
-use crate::events::AgentEvent;
-use parking_lot::RwLock;
 
 pub(crate) fn clear_steering_queue(loop_ref: &super::AgentLoop) {
     loop_ref.steering_queue.write().clear();

@@ -1,4 +1,4 @@
-#![allow(inner_doc_comments)]
+#![allow(unused_doc_comments)]
 /// Agent tools system
 /// This module provides the tool abstraction layer and built-in tools.
 

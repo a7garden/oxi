@@ -9,49 +9,49 @@ pub const AUTO_RETRY_MAX_ATTEMPTS: usize = 3;
 #[allow(dead_code)]
 pub const AUTO_RETRY_BASE_DELAY_MS: u64 = 2000;
 
+/// Configuration for an [`crate::AgentLoop`] instance.
 #[derive(Clone)]
-/// AgentLoopConfig.
 pub struct AgentLoopConfig {
-/// pub.
+    /// Model identifier in `provider/model` format.
     pub model_id: String,
-/// pub.
+    /// Optional system prompt prepended to every request.
     pub system_prompt: Option<String>,
-/// pub.
+    /// Sampling temperature (0.0 – 2.0).
     pub temperature: f32,
-/// pub.
+    /// Maximum tokens the model may generate per request.
     pub max_tokens: u32,
-/// pub.
+    /// Maximum number of assistant turns before the loop stops.
     pub max_iterations: usize,
-/// pub.
+    /// Whether tool calls run in parallel or sequentially.
     pub tool_execution: ToolExecutionMode,
-/// pub.
+    /// Compaction strategy for managing context window usage.
     pub compaction_strategy: oxi_ai::CompactionStrategy,
-/// pub.
+    /// Approximate context window size in tokens.
     pub context_window: usize,
-/// pub.
+    /// Optional instruction injected into the compaction prompt.
     pub compaction_instruction: Option<String>,
-/// pub.
+    /// Optional session identifier for logging and tracing.
     pub session_id: Option<String>,
-/// pub.
+    /// Optional transport override (e.g. "sse", "stdio").
     pub transport: Option<String>,
-/// pub.
+    /// Whether to trigger compaction before the first turn.
     pub compact_on_start: bool,
-/// pub.
+    /// Optional cap on retry back-off delay (milliseconds).
     pub max_retry_delay_ms: Option<u64>,
-/// pub.
+    /// Enable automatic retry on retryable assistant errors.
     pub auto_retry_enabled: bool,
-/// pub.
+    /// Maximum number of auto-retry attempts.
     pub auto_retry_max_attempts: usize,
-/// pub.
+    /// Base delay in milliseconds for auto-retry exponential back-off.
     pub auto_retry_base_delay_ms: u64,
 }
 
+/// Controls whether tool calls execute concurrently or one at a time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// ToolExecutionMode.
 pub enum ToolExecutionMode {
-/// parallel variant.
+    /// Execute all tool calls concurrently.
     Parallel,
-/// sequential variant.
+    /// Execute tool calls one at a time, in order.
     Sequential,
 }
 
@@ -68,13 +68,13 @@ use anyhow::{Error, Result};
 use crate::AgentToolResult;
 use serde_json::Value;
 
-/// pub.
+/// Hook invoked before each tool call; may return an override result.
 pub type BeforeToolCallHook = Arc<
     dyn Fn(&str, &Value) -> Pin<Box<dyn Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
         + Send + Sync,
 >;
 
-/// pub.
+/// Hook invoked after each tool call; may return a modified result.
 pub type AfterToolCallHook = Arc<
     dyn Fn(&str, &AgentToolResult) -> Pin<Box<dyn Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
         + Send + Sync,

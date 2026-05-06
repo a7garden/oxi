@@ -6,7 +6,6 @@ use oxi_ai::{
     ContentBlock, Context, Message, ProviderEvent, StreamOptions, TextContent, ThinkingContent,
     Tool as OxTool,
 };
-use std::pin::Pin;
 
 pub(crate) async fn stream_assistant_response(
     loop_ref: &super::AgentLoop,

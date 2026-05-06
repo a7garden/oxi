@@ -1,9 +1,8 @@
 /// Tool execution logic for agent loop
 
 use crate::{AgentToolResult, AgentEvent};
-use crate::tools::AgentTool;
 use anyhow::Result;
-use oxi_ai::{AssistantMessage, ContentBlock, Message, TextContent, ToolCall, ToolResultMessage};
+use oxi_ai::{AssistantMessage, Message, ToolCall, ToolResultMessage};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -47,7 +46,7 @@ pub(crate) async fn execute_tool_calls(
     tool_calls: Vec<ToolCall>,
     emit: &super::EmitFn,
 ) -> Result<ExecutedToolCallBatch> {
-    if loop_ref.config.tool_execution == super::config::ToolExecutionMode::Sequential {
+    if loop_ref.config.tool_execution == ToolExecutionMode::Sequential {
         execute_tool_calls_sequential(loop_ref, messages, assistant_message, tool_calls, emit).await
     } else {
         execute_tool_calls_parallel(loop_ref, messages, assistant_message, tool_calls, emit).await
@@ -231,7 +230,7 @@ pub(crate) async fn execute_prepared_tool_call_static(
     tool_call: ToolCall,
     tool: Option<Arc<dyn crate::tools::AgentTool>>,
     args: serde_json::Value,
-    after_hook: Option<super::config::AfterToolCallHook>,
+    after_hook: Option<AfterToolCallHook>,
     emit: Arc<dyn Fn(AgentEvent) + Send + Sync>,
 ) -> ExecutedToolCallOutcome {
     let tool_call_id = tool_call.id.clone();
@@ -321,7 +320,7 @@ async fn prepare_tool_call(
 }
 
 async fn execute_prepared_tool_call(
-    loop_ref: &super::AgentLoop,
+    _loop_ref: &super::AgentLoop,
     prepared: &PreparedToolCallOutcome,
     emit: &super::EmitFn,
 ) -> ExecutedToolCallOutcome {
