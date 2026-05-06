@@ -175,11 +175,9 @@ impl StatefulWidget for Input<'_> {
         let y = area.y;
 
         // Prompt
-        buf.get_mut(area.x, y)
-            .set_char(self.prompt_char)
+        buf[(area.x, y)].set_char(self.prompt_char)
             .set_style(styles.primary);
-        buf.get_mut(area.x + 1, y)
-            .set_char(' ')
+        buf[(area.x + 1, y)].set_char(' ')
             .set_style(styles.normal);
 
         // Determine what to display
@@ -214,14 +212,13 @@ impl StatefulWidget for Input<'_> {
                 // Check if cursor
                 let char_idx = scroll + i;
                 if state.cursor == char_idx && !state.text.is_empty() {
-                    buf.get_mut(col, y)
-                        .set_char(c)
+                    buf[(col, y)].set_char(c)
                         .set_style(Style::default()
                             .fg(self.theme.colors.cursor_fg.to_ratatui())
                             .bg(self.theme.colors.cursor_bg.to_ratatui())
                             .add_modifier(Modifier::BOLD));
                 } else {
-                    buf.get_mut(col, y).set_char(c).set_style(text_fg);
+                    buf[(col, y)].set_char(c).set_style(text_fg);
                 }
             }
         }
@@ -239,8 +236,7 @@ impl StatefulWidget for Input<'_> {
             } else {
                 cursor_screen_pos
             };
-            buf.get_mut(cursor_col, y)
-                .set_char(' ')
+            buf[(cursor_col, y)].set_char(' ')
                 .set_style(Style::default()
                     .fg(self.theme.colors.cursor_fg.to_ratatui())
                     .bg(self.theme.colors.cursor_bg.to_ratatui()));
@@ -253,7 +249,7 @@ impl StatefulWidget for Input<'_> {
             cursor_screen_pos + 1
         };
         for col in clear_from..area.x + area.width {
-            buf.get_mut(col, y).set_char(' ').set_style(text_fg);
+            buf[(col, y)].set_char(' ').set_style(text_fg);
         }
     }
 }

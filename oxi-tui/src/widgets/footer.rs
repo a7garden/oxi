@@ -214,8 +214,7 @@ impl StatefulWidget for Footer<'_> {
         // Write left text with normal style
         for (col, c) in (" ".to_string() + &left_text).chars().enumerate() {
             if col < max_w {
-                buf.get_mut(area.x + col as u16, y)
-                    .set_char(c)
+                buf[(area.x + col as u16, y)].set_char(c)
                     .set_style(styles.normal);
             }
         }
@@ -228,8 +227,7 @@ impl StatefulWidget for Footer<'_> {
                 for (i, c) in branch_str.chars().enumerate() {
                     let col = branch_start + i;
                     if col < max_w {
-                        buf.get_mut(area.x + col as u16, y)
-                            .set_char(c)
+                        buf[(area.x + col as u16, y)].set_char(c)
                             .set_style(styles.accent);
                     }
                 }
@@ -242,15 +240,14 @@ impl StatefulWidget for Footer<'_> {
         for (i, c) in right_text.chars().enumerate() {
             let col = right_start + i;
             if col < max_w {
-                buf.get_mut(area.x + col as u16, y)
-                    .set_char(c)
+                buf[(area.x + col as u16, y)].set_char(c)
                     .set_style(styles.normal);
             }
         }
 
         // Clear remainder with background
         for col in 0..max_w {
-            let cell = buf.get_mut(area.x + col as u16, y);
+            let cell = &mut buf[(area.x + col as u16, y)];
             if cell.symbol() == "\0" || cell.symbol() == " " {
                 cell.set_char(' ').set_style(styles.normal);
             }
