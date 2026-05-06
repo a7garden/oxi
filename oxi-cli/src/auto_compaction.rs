@@ -128,22 +128,28 @@ pub enum CompactorEvent {
     },
     /// Compaction completed successfully
     Completed {
-/// result.
+/// The resulting compacted context.
         result: CompactedContext,
-/// tokens_after.
+/// Number of tokens after compaction.
         tokens_after: usize,
     },
     /// Compaction was aborted
-    Aborted { reason: String },
+    Aborted {
+        /// Reason for abortion
+        reason: String,
+    },
     /// Compaction failed
-    Failed { error: String },
+    Failed {
+        /// Error message
+        error: String,
+    },
     /// Context is approaching threshold
     Warning {
-/// current_ratio.
+        /// Current context size ratio (0.0–1.0)
         current_ratio: f32,
-/// tokens.
+        /// Current token count
         tokens: usize,
-/// max_tokens.
+        /// Maximum allowed tokens
         max_tokens: usize,
     },
 }
@@ -158,7 +164,12 @@ pub enum CompactionReason {
     /// Context overflow detected
     Overflow,
     /// Iteration-based compaction
-    Iteration { current: usize, every_n: usize },
+    Iteration {
+        /// Current iteration count
+        current: usize,
+        /// Compaction interval
+        every_n: usize,
+    },
 }
 
 impl std::fmt::Display for CompactionReason {
