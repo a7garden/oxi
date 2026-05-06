@@ -282,8 +282,6 @@ impl StatefulWidget for CommandPalette<'_> {
             return;
         }
 
-        let _styles = self.theme.to_styles();
-
         // -- colour setup --
         let fg = self.theme.colors.foreground.to_ratatui();
         let primary = self.theme.colors.primary.to_ratatui();

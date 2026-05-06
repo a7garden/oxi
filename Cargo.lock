@@ -2496,7 +2496,6 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
- "tempfile",
  "toml",
  "tracing",
  "unicode-width 0.1.14",

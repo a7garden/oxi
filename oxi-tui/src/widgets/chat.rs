@@ -393,10 +393,6 @@ impl StatefulWidget for ChatView<'_> {
 mod tests {
     use super::*;
 
-    fn test_theme() -> Theme {
-        Theme::dark()
-    }
-
     #[test]
     fn chat_state_empty() {
         let state = ChatViewState::default();

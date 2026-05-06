@@ -261,33 +261,48 @@ impl InteractiveSession {
     }
 }
 
-/// Build the system prompt based on thinking level and active skills
+/// Build the system prompt based on thinking level and active skills.
+///
+/// Delegates to [`system_prompt::build_system_prompt`] with a simple options
+/// struct derived from the given thinking level and skill contents.
 fn build_system_prompt(thinking_level: ThinkingLevel, skill_contents: &[String]) -> String {
-    let mut prompt = match thinking_level {
+    let custom_prompt = match thinking_level {
         ThinkingLevel::None => {
-            String::from("You are a helpful AI assistant. Provide direct, concise answers.")
+            Some(String::from("You are a helpful AI assistant. Provide direct, concise answers."))
         }
         ThinkingLevel::Minimal => {
-            String::from("You are a helpful AI assistant. Provide clear and helpful answers.")
+            Some(String::from("You are a helpful AI assistant. Provide clear and helpful answers."))
         }
-        ThinkingLevel::Standard => String::from(
+        ThinkingLevel::Standard => Some(String::from(
             "You are a helpful AI coding assistant. Think through problems \
              step by step when helpful, but keep responses focused and actionable.",
-        ),
-        ThinkingLevel::Thorough => String::from(
+        )),
+        ThinkingLevel::Thorough => Some(String::from(
             "You are an expert AI coding assistant. Take time to thoroughly \
              analyze problems, consider edge cases, and provide comprehensive \
              solutions with explanations. Think deeply before responding.",
-        ),
+        )),
     };
 
-    // Append active skill content
-    for content in skill_contents {
-        prompt.push_str("\n\n---\n# Active Skill\n\n");
-        prompt.push_str(content);
-    }
+    let skills: Vec<system_prompt::Skill> = skill_contents
+        .iter()
+        .enumerate()
+        .map(|(i, content)| system_prompt::Skill {
+            name: format!("skill-{}", i),
+            content: content.clone(),
+        })
+        .collect();
 
-    prompt
+    let options = system_prompt::BuildSystemPromptOptions {
+        custom_prompt,
+        skills,
+        cwd: std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        ..Default::default()
+    };
+
+    system_prompt::build_system_prompt(&options)
 }
 
 impl App {

@@ -672,26 +672,38 @@ fn parse_model_id(model_id: &str) -> (String, String) {
 }
 
 /// Build the system prompt based on thinking level.
+///
+/// Delegates to [`crate::system_prompt::build_system_prompt`].
 fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
-    match thinking_level {
+    let custom_prompt = match thinking_level {
         ThinkingLevel::None => {
-            "You are a helpful AI assistant. Provide direct, concise answers.".to_string()
+            Some("You are a helpful AI assistant. Provide direct, concise answers.".to_string())
         }
         ThinkingLevel::Minimal => {
-            "You are a helpful AI assistant. Provide clear and helpful answers.".to_string()
+            Some("You are a helpful AI assistant. Provide clear and helpful answers.".to_string())
         }
-        ThinkingLevel::Standard => {
+        ThinkingLevel::Standard => Some(
             "You are a helpful AI coding assistant. Think through problems \
              step by step when helpful, but keep responses focused and actionable."
-                .to_string()
-        }
-        ThinkingLevel::Thorough => {
+                .to_string(),
+        ),
+        ThinkingLevel::Thorough => Some(
             "You are an expert AI coding assistant. Take time to thoroughly \
              analyze problems, consider edge cases, and provide comprehensive \
              solutions with explanations. Think deeply before responding."
-                .to_string()
-        }
-    }
+                .to_string(),
+        ),
+    };
+
+    let options = crate::system_prompt::BuildSystemPromptOptions {
+        custom_prompt,
+        cwd: std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        ..Default::default()
+    };
+
+    crate::system_prompt::build_system_prompt(&options)
 }
 
 /// Get the default sessions directory.

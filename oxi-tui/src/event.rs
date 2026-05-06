@@ -9,14 +9,12 @@ pub enum KeyCode {
     Escape,
     /// Tab key
     Tab,
-    /// Backspace
     /// Backspace key
     Backspace,
     /// Delete key
     Delete,
     /// Arrow up
     Up,
-/// Variant.
     /// Arrow down
     Down,
     /// Arrow left
@@ -37,9 +35,6 @@ pub enum KeyCode {
     F(u8),
     /// Character keys (A-Z, numbers, symbols)
     Char(char),
-    /// Number keys (0-9) - distinct from Char('0') etc.
-    #[allow(dead_code)]
-    Number(u8),
 }
 
 impl KeyCode {
@@ -47,7 +42,6 @@ impl KeyCode {
     pub fn as_char(&self) -> Option<char> {
         match self {
             KeyCode::Char(c) => Some(*c),
-            KeyCode::Number(n) => Some(char::from(b'0' + *n)),
             _ => None,
         }
     }
