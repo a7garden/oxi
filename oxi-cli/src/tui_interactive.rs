@@ -48,34 +48,6 @@ use ratatui::{
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Color Palette — Tokyo Night inspired (kept for separator & popup rendering)
-// ═══════════════════════════════════════════════════════════════════════════
-
-mod palette {
-    #![allow(dead_code)]
-    use ratatui::style::Color;
-
-    pub const BG:          Color = Color::Rgb(26, 27, 38);
-    pub const BG_SURFACE:  Color = Color::Rgb(30, 32, 48);
-    pub const BG_OVERLAY:  Color = Color::Rgb(36, 38, 56);
-    pub const BG_HOVER:    Color = Color::Rgb(55, 58, 82);
-    pub const FG:          Color = Color::Rgb(169, 177, 214);
-    pub const FG_DIM:      Color = Color::Rgb(88, 91, 112);
-    pub const FG_BRIGHT:   Color = Color::Rgb(205, 214, 244);
-    pub const BLUE:        Color = Color::Rgb(122, 162, 247);
-    pub const CYAN:        Color = Color::Rgb(125, 207, 255);
-    pub const GREEN:       Color = Color::Rgb(158, 206, 106);
-    pub const YELLOW:      Color = Color::Rgb(224, 175, 104);
-    pub const RED:         Color = Color::Rgb(247, 118, 142);
-    pub const MAGENTA:     Color = Color::Rgb(187, 154, 247);
-    pub const ORANGE:      Color = Color::Rgb(255, 158, 100);
-    pub const TEAL:        Color = Color::Rgb(84, 168, 160);
-    pub const USER_BG:     Color = Color::Rgb(30, 40, 70);
-    pub const ASSISTANT_BG:Color = Color::Rgb(30, 35, 50);
-    pub const SYSTEM_BG:   Color = Color::Rgb(45, 35, 30);
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // UI Events (agent → TUI)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -502,7 +474,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             );
 
             // ── Separator: kept as-is (simple visual element) ──
-            render_separator(f, chunks[1]);
+            render_separator(f, chunks[1], &theme);
 
             // ── Input area: use Input widget + local popup/hint ──
             render_input_area(f, chunks[2], &mut state, &theme);
@@ -817,7 +789,7 @@ fn render_input_area(
     // When agent is busy, we show a spinner as the prompt character
     if state.is_agent_busy {
         // Render spinner + busy indicator manually, widget doesn't support dynamic prompt
-        render_busy_input(f, input_row, state);
+        render_busy_input(f, input_row, state, theme);
     } else {
         f.render_stateful_widget(
             Input::new(theme)
@@ -829,12 +801,12 @@ fn render_input_area(
 
     // ── Hint / popup row ──
     if state.slash_completion_active {
-        render_slash_popup(f, hint_row, state);
+        render_slash_popup(f, hint_row, state, theme);
     } else if state.is_agent_busy {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "  Ctrl+C to interrupt".to_string(),
-                Style::default().fg(palette::FG_DIM),
+                Style::default().fg(theme.colors.muted.to_ratatui()),
             ))),
             hint_row,
         );
@@ -842,7 +814,7 @@ fn render_input_area(
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "  Enter · / commands · ↑ history · Esc cancel".to_string(),
-                Style::default().fg(palette::FG_DIM),
+                Style::default().fg(theme.colors.muted.to_ratatui()),
             ))),
             hint_row,
         );
@@ -850,13 +822,13 @@ fn render_input_area(
         let count = state.input.text.chars().count();
         let count_str = format!("  {} chars", count);
         f.render_widget(
-            Paragraph::new(Line::from(Span::styled(count_str, Style::default().fg(palette::FG_DIM)))),
+            Paragraph::new(Line::from(Span::styled(count_str, Style::default().fg(theme.colors.muted.to_ratatui())))),
             hint_row,
         );
     }
 
     // ── Bottom accent line (dotted, matching separator style) ──
-    render_separator(f, border_row);
+    render_separator(f, border_row, theme);
 }
 
 /// Render input field when agent is busy (spinner prompt).
@@ -864,10 +836,11 @@ fn render_busy_input(
     f: &mut ratatui::Frame,
     area: Rect,
     state: &AppState,
+    theme: &Theme,
 ) {
     let prompt = format!("{} ", SPINNER[state.spinner_frame]);
     let mut spans: Vec<Span> = Vec::new();
-    spans.push(Span::styled(prompt, Style::default().fg(palette::MAGENTA)));
+    spans.push(Span::styled(prompt, Style::default().fg(theme.colors.accent.to_ratatui())));
 
     // Show "waiting..." or whatever text is in input
     let display = if state.input_value().is_empty() {
@@ -877,9 +850,9 @@ fn render_busy_input(
     };
 
     let text_fg = if state.input_value().is_empty() {
-        palette::FG_DIM
+        theme.colors.muted.to_ratatui()
     } else {
-        palette::FG_BRIGHT
+        theme.colors.foreground.to_ratatui()
     };
 
     spans.push(Span::styled(display, Style::default().fg(text_fg)));
@@ -898,6 +871,7 @@ fn render_slash_popup(
     f: &mut ratatui::Frame,
     area: Rect,
     state: &AppState,
+    theme: &Theme,
 ) {
     let completions = &state.slash_completions;
     if completions.is_empty() { return; }
@@ -919,13 +893,13 @@ fn render_slash_popup(
         if *i == selected {
             spans.push(Span::styled(
                 format!(" {} ", comp.name),
-                Style::default().fg(palette::BG).bg(palette::BLUE).add_modifier(Modifier::BOLD),
+                Style::default().fg(theme.colors.background.to_ratatui()).bg(theme.colors.primary.to_ratatui()).add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::styled(" ".to_string(), Style::default()));
         } else {
             spans.push(Span::styled(
                 format!(" {} ", comp.name),
-                Style::default().fg(palette::FG_DIM),
+                Style::default().fg(theme.colors.muted.to_ratatui()),
             ));
             spans.push(Span::styled(" ".to_string(), Style::default()));
         }
@@ -939,7 +913,7 @@ fn render_slash_popup(
             let desc: String = comp.description.chars().take(desc_max).collect();
             spans.push(Span::styled(
                 format!("— {}", desc),
-                Style::default().fg(palette::FG_DIM),
+                Style::default().fg(theme.colors.muted.to_ratatui()),
             ));
         }
     }
@@ -951,7 +925,7 @@ fn render_slash_popup(
 // Rendering — Separator (kept as-is)
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn render_separator(f: &mut ratatui::Frame, area: Rect) {
+fn render_separator(f: &mut ratatui::Frame, area: Rect, theme: &Theme) {
     let w = area.width as usize;
     let mut spans: Vec<Span> = Vec::with_capacity(w);
     for i in 0..w {
@@ -961,7 +935,7 @@ fn render_separator(f: &mut ratatui::Frame, area: Rect) {
             2 => '·',
             _ => ' ',
         };
-        spans.push(Span::styled(c.to_string(), Style::default().fg(palette::BG_HOVER)));
+        spans.push(Span::styled(c.to_string(), Style::default().fg(theme.colors.border.to_ratatui())));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
