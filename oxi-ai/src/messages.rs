@@ -424,11 +424,18 @@ impl Message {
 
     /// Convenience constructor for an assistant message.
     pub fn assistant(content: Vec<ContentBlock>) -> Self {
-        Message::Assistant(AssistantMessage::new(
-            Api::AnthropicMessages,
-            "assistant",
-            "assistant",
-        ))
+        Message::Assistant(AssistantMessage {
+            role: AssistantRole::Assistant,
+            content,
+            api: Api::AnthropicMessages,
+            provider: "assistant".to_string(),
+            model: "assistant".to_string(),
+            usage: super::Usage::default(),
+            stop_reason: super::StopReason::Stop,
+            error_message: None,
+            response_id: None,
+            timestamp: chrono::Utc::now().timestamp_millis(),
+        })
     }
 
     /// Convenience constructor for a tool result message.

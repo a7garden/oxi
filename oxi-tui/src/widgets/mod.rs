@@ -1,8 +1,7 @@
 //! Widgets — ratatui-based UI components.
 //!
 //! This module provides TUI widgets built on top of ratatui's Widget/StatefulWidget
-//! traits. These replace the legacy components in `../components/` for the ratatui-based
-//! TUI implementation.
+//! traits for the ratatui-based TUI implementation.
 //!
 //! # Architecture
 //!
