@@ -1,5 +1,7 @@
 #![allow(unused_doc_comments)]
 #![warn(missing_docs)]
+#![warn(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used_in_tests)]
 
 //! oxi-ai: Unified LLM API for oxi
 //!

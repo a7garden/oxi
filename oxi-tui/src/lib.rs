@@ -1,4 +1,6 @@
 #![warn(missing_docs)]
+#![warn(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used_in_tests)]
 
 //! oxi-tui: Terminal UI library for oxi
 //!
