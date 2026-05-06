@@ -15,6 +15,7 @@ mod messages;
 pub mod oauth;
 pub mod provider_registry;
 mod providers;
+pub mod secret;
 mod tools;
 mod transform;
 mod types;
