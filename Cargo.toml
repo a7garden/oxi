@@ -1,3 +1,6 @@
 [workspace]
 resolver = "2"
 members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-cli"]
+
+[workspace.dependencies]
+thiserror = "2"
