@@ -35,6 +35,19 @@ async fn main() -> Result<()> {
     // Apply CLI overrides
     settings.merge_cli(args.model.clone(), args.provider.clone());
 
+    // Validate settings
+    let report = settings.validate();
+    for warn in &report.warnings {
+        tracing::warn!("설정 경고: {} — {}", warn.field, warn.message);
+    }
+    if !report.is_valid() {
+        eprintln!("❌ 설정 오류 {}건:", report.errors.len());
+        for err in &report.errors {
+            eprintln!("   • {}: {}", err.field, err.message);
+        }
+        std::process::exit(1);
+    }
+
     // Apply thinking level if specified
     if let Some(ref level_str) = args.thinking {
         if let Some(level) = oxi::settings::parse_thinking_level(level_str) {
