@@ -1,77 +1,77 @@
 /// Retry logic for agent loop
 
 use crate::{AgentError, AgentEvent};
+use crate::stream_retry::{self, RetryCallback, MAX_RETRIES, BACKOFF_BASE_SECS};
 use anyhow::Result;
 use oxi_ai::{Context, Model, ProviderEvent, StreamOptions, StopReason, Message};
 use regex::Regex;
-use std::pin::Pin;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
-pub use super::config::{BACKOFF_BASE_SECS, MAX_RETRIES};
+pub use crate::stream_retry::{MAX_RETRIES, BACKOFF_BASE_SECS};
+
+/// [`RetryCallback`] that emits [`AgentEvent::Retry`] through the AgentLoop emit function.
+struct EmitRetryCallback<'a> {
+    emit: &'a super::EmitFn,
+    session_id: Option<String>,
+}
+
+impl RetryCallback for EmitRetryCallback<'_> {
+    fn on_retry(&self, attempt: usize, max_retries: usize, delay_secs: u64, reason: String) {
+        (self.emit)(AgentEvent::Retry {
+            attempt,
+            max_retries,
+            retry_after_secs: delay_secs,
+            reason,
+            session_id: self.session_id.clone(),
+        });
+    }
+}
 
 /// Stream with automatic retry on transient provider errors.
+///
+/// Wraps [`stream_retry::stream_with_retry_core`] with circuit-breaker
+/// checks and per-session event emission.
 pub(crate) async fn stream_with_retry(
     loop_ref: &super::AgentLoop,
     model: &Model,
     context: &Context,
     options: Option<StreamOptions>,
     emit: &super::EmitFn,
-) -> Result<Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>> {
-    let mut last_err: Option<String> = None;
-
-    for attempt in 0..=MAX_RETRIES {
-        if let Err(open_err) = loop_ref.circuit_breaker.allow_request() {
-            tracing::error!(session_id = ?loop_ref.session_id, "Circuit breaker open: {}", open_err);
-            emit(AgentEvent::Error {
-                message: format!("Circuit breaker open: {}", open_err),
-                session_id: loop_ref.session_id.clone(),
-            });
-            return Err(AgentError::Stream(format!("Circuit breaker open: {}", open_err)).into());
-        }
-
-        match loop_ref.provider.stream(model, context, options.clone()).await {
-            Ok(stream) => {
-                loop_ref.circuit_breaker.record_success();
-                return Ok(Box::pin(stream) as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
-            }
-            Err(e) => {
-                loop_ref.circuit_breaker.record_failure();
-                let msg = e.to_string();
-                let is_rate_limit = matches!(e, oxi_ai::ProviderError::HttpError(429, _));
-
-                if !is_rate_limit && attempt == 0 {
-                    return Err(AgentError::Stream(msg).into());
-                }
-
-                last_err = Some(msg.clone());
-
-                if attempt < MAX_RETRIES {
-                    let delay = BACKOFF_BASE_SECS.pow(attempt as u32 + 1);
-
-                    let final_delay = if let Some(max_delay) = loop_ref.config.max_retry_delay_ms {
-                        delay.min(max_delay)
-                    } else {
-                        delay
-                    };
-
-                    tracing::warn!(session_id = ?loop_ref.session_id, attempt, max_retries = MAX_RETRIES, "Retrying stream request: {}", msg);
-                    emit(AgentEvent::Retry {
-                        attempt: attempt + 1,
-                        max_retries: MAX_RETRIES,
-                        retry_after_secs: final_delay,
-                        reason: msg.clone(),
-                        session_id: loop_ref.session_id.clone(),
-                    });
-                    tokio::time::sleep(tokio::time::Duration::from_secs(final_delay)).await;
-                }
-            }
-        }
+) -> Result<futures::stream::BoxStream<'static, ProviderEvent>> {
+    // Pre-check: circuit breaker.
+    if let Err(open_err) = loop_ref.circuit_breaker.allow_request() {
+        tracing::error!(session_id = ?loop_ref.session_id, "Circuit breaker open: {}", open_err);
+        emit(AgentEvent::Error {
+            message: format!("Circuit breaker open: {}", open_err),
+            session_id: loop_ref.session_id.clone(),
+        });
+        return Err(AgentError::Stream(format!("Circuit breaker open: {}", open_err)).into());
     }
 
-    Err(AgentError::RetriesExhausted {
-        attempts: MAX_RETRIES,
-        last_error: last_err.unwrap_or_default(),
-    }.into())
+    let cb = EmitRetryCallback {
+        emit,
+        session_id: loop_ref.session_id.clone(),
+    };
+
+    let provider = loop_ref.provider.as_ref();
+    let cb_success = loop_ref.circuit_breaker.record_success;
+    let cb_failure = loop_ref.circuit_breaker.record_failure;
+
+    // We can't capture &CircuitBreaker in the closures easily because
+    // stream_with_retry_core takes FnOnce, so we record directly.
+    let result = stream_retry::stream_with_retry_core(
+        provider,
+        model,
+        context,
+        options,
+        &cb,
+        || { cb_success(); },
+        || { cb_failure(); },
+    )
+    .await;
+
+    result.map_err(Into::into)
 }
 
 /// Detect whether an assistant message contains a retryable error.

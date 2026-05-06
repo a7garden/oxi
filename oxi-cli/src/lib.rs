@@ -4,43 +4,44 @@
 //!
 //! This crate provides the main application logic for the oxi CLI.
 
-pub mod export;
+pub(crate) mod export;
 pub mod extensions;
-pub mod oauth_server;
+pub(crate) mod oauth_server;
 pub mod packages;
 pub mod print_mode;
 pub mod session;
-pub mod session_navigation;
+pub(crate) mod session_navigation;
 pub mod settings;
-pub mod settings_validation;
+pub(crate) mod settings_validation;
 pub mod skills;
-pub mod templates;
+pub(crate) mod templates;
 pub mod tui;
 
 // RPC mode for headless operation
-pub mod rpc_mode;
+pub(crate) mod rpc_mode;
 
 // Image processing modules
-pub mod clipboard_image;
-pub mod clipboard_write;
-pub mod image_convert;
-pub mod image_resize;
-pub mod file_processor;
+pub(crate) mod clipboard_image;
+pub(crate) mod clipboard_write;
+pub(crate) mod image_convert;
+pub(crate) mod image_resize;
+pub(crate) mod file_processor;
 
 // Utility modules
-pub mod auth_storage;
-pub mod auto_compaction;
-pub mod branch_summarization;
-pub mod bash_executor;
-pub mod changelog;
-pub mod child_process;
+pub(crate) mod auth_storage;
+pub(crate) mod auto_compaction;
+pub(crate) mod branch_summarization;
+pub(crate) mod bash_executor;
+pub(crate) mod changelog;
+pub(crate) mod child_process;
+// cli must be pub for main.rs binary
 pub mod cli;
-pub mod diagnostics;
-pub mod error_recovery;
-pub mod fs_watch;
-pub mod mime_detect;
-pub mod paths;
-pub mod sleep;
+pub(crate) mod diagnostics;
+pub(crate) mod error_recovery;
+pub(crate) mod fs_watch;
+pub(crate) mod mime_detect;
+pub(crate) mod paths;
+pub(crate) mod sleep;
 
 // Re-exports for extension hooks
 pub use crate::error_recovery::{RetryConfig, RetryableError};
@@ -84,20 +85,20 @@ impl CompactionContext {
         self.target_tokens as f32 / self.tokens_before as f32
     }
 }
-pub mod event_bus;
-pub mod footer_data;
-pub mod git_utils;
-pub mod keybindings;
-pub mod messages;
-pub mod model_registry;
-pub mod model_resolver;
-pub mod resource_loader;
-pub mod frontmatter;
-pub mod resource_loader_compat;
-pub mod output_guard;
-pub mod tmux_detect;
-pub mod tools_manager;
-pub mod version_check;
+pub(crate) mod event_bus;
+pub(crate) mod footer_data;
+pub(crate) mod git_utils;
+pub(crate) mod keybindings;
+pub(crate) mod messages;
+pub(crate) mod model_registry;
+pub(crate) mod model_resolver;
+pub(crate) mod resource_loader;
+pub(crate) mod frontmatter;
+pub(crate) mod resource_loader_compat;
+pub(crate) mod output_guard;
+pub(crate) mod tmux_detect;
+pub(crate) mod tools_manager;
+pub(crate) mod version_check;
 
 // Core modules
 pub mod defaults;
@@ -106,7 +107,7 @@ pub mod session_cwd;
 pub mod slash_commands;
 pub mod agent_session;
 pub mod agent_session_runtime;
-pub mod compaction_utils;
+pub(crate) mod compaction_utils;
 pub mod source_info;
 pub mod system_prompt;
 pub mod telemetry;
