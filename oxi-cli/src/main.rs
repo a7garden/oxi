@@ -173,7 +173,8 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
     match action {
         PkgCommands::Install { source } => {
             if source.starts_with("npm:") {
-                let name = source.strip_prefix("npm:").unwrap();
+                let name = source.strip_prefix("npm:")
+                    .ok_or_else(|| anyhow::anyhow!("Invalid npm source format: {}", source))?;
                 let manifest = mgr.install_npm(name)?;
                 let counts = mgr.resource_counts(&manifest.name).unwrap_or_default();
                 println!(

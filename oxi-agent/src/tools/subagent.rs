@@ -434,8 +434,8 @@ async fn run_single_agent(
         }
     };
 
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
+    let stdout = child.stdout.take().expect("stdout piped but missing");
+    let stderr = child.stderr.take().expect("stderr piped but missing");
 
     // Spawn stdout reader → channel
     let (line_tx, mut line_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -847,8 +847,8 @@ impl AgentTool for SubagentTool {
 
         // ── Single mode ──
         if has_single {
-            let agent_name = params["agent"].as_str().unwrap();
-            let task = params["task"].as_str().unwrap();
+            let agent_name = params["agent"].as_str().ok_or("Missing required parameter: agent")?;
+            let task = params["task"].as_str().ok_or("Missing required parameter: task")?;
             let agent_cwd = params["cwd"].as_str();
 
             let result = run_single_agent(

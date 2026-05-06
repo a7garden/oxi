@@ -356,14 +356,14 @@ impl AgentTool for BashTool {
         let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
         let env = params.get("env").and_then(|v: &Value| v.as_object());
 
-        let progress_cb = self.progress_callback.lock().unwrap().clone();
+        let progress_cb = self.progress_callback.lock().expect("progress callback lock poisoned").clone();
 
         Self::run_command(command, cwd, env, timeout, &progress_cb, signal).await
     }
 
     fn on_progress(&self, callback: ProgressCallback) {
         let cb = self.progress_callback.clone();
-        let mut guard = cb.lock().unwrap();
+        let mut guard = cb.lock().expect("progress callback lock poisoned");
         *guard = Some(callback);
     }
 }

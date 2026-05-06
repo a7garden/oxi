@@ -362,7 +362,7 @@ impl ParsedSource {
 /// Parse an npm spec into (name, pinned)
 fn parse_npm_spec(spec: &str) -> (String, bool) {
     // Handle scoped packages like @scope/name@version
-    let re = regex::Regex::new(r"^(@?[^@]+(?:/[^@]+)?)(?:@(.+))?$").unwrap();
+    let re = regex::Regex::new(r"^(@?[^@]+(?:/[^@]+)?)(?:@(.+))?$").expect("valid static regex");
     if let Some(caps) = re.captures(spec) {
         let name = caps.get(1).map(|m| m.as_str()).unwrap_or(spec);
         let has_version = caps.get(2).is_some();

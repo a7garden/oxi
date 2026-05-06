@@ -328,7 +328,7 @@ impl AgentTool for ReadTool {
             _ => {}
         }
 
-        let progress_cb = self.progress_callback.lock().unwrap().clone();
+        let progress_cb = self.progress_callback.lock().expect("progress callback lock poisoned").clone();
 
         // Check if it's an image file
         if Self::image_mime_type(path).is_some() {
@@ -341,7 +341,7 @@ impl AgentTool for ReadTool {
 
     fn on_progress(&self, callback: ProgressCallback) {
         let cb = self.progress_callback.clone();
-        let mut guard = cb.lock().unwrap();
+        let mut guard = cb.lock().expect("progress callback lock poisoned");
         *guard = Some(callback);
     }
 }

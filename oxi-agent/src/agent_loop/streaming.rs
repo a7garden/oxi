@@ -54,7 +54,7 @@ pub(crate) async fn stream_assistant_response(
                 partial_message = Some(partial.clone());
                 messages.push(Message::Assistant(partial.clone()));
                 added_partial = true;
-                emit(super::AgentEvent::MessageStart { message: messages.last().unwrap().clone() });
+                emit(super::AgentEvent::MessageStart { message: messages.last().expect("messages non-empty after push").clone() });
             }
 
             ProviderEvent::TextDelta { delta, partial, .. } => {

@@ -1752,12 +1752,12 @@ impl SessionManager {
             .write(true)
             .open(&new_session_file)
             .map_err(|e| e.to_string())?;
-        writeln!(&mut handle, "{}", serde_json::to_string(&new_header).unwrap()).map_err(|e| e.to_string())?;
+        writeln!(&mut handle, "{}", serde_json::to_string(&new_header).expect("session header serializable")).map_err(|e| e.to_string())?;
 
         // Copy all non-header entries from source
         for file_entry in &source_entries {
             if let FileEntry::Entry(_) = file_entry {
-                writeln!(&mut handle, "{}", serde_json::to_string(file_entry).unwrap())
+                writeln!(&mut handle, "{}", serde_json::to_string(file_entry).expect("session entry serializable"))
                     .map_err(|e| e.to_string())?;
             }
         }
