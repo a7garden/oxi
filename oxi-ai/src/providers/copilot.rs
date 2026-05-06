@@ -120,7 +120,7 @@ impl Provider for CopilotProvider {
         // Authorization: Bearer token
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_key).parse().unwrap(),
+            format!("Bearer {}", api_key).parse().expect("valid bearer header"),
         );
 
         // GitHub Copilot specific: x-github-token header

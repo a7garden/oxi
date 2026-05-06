@@ -38,7 +38,7 @@ pub fn sanitize_surrogates(text: &str) -> String {
                 if (0xDC00..=0xDFFF).contains(&next_code) {
                     // Properly paired surrogate - keep both
                     result.push(ch);
-                    result.push(chars.next().unwrap());
+                    result.push(chars.next().expect("peeked char exists"));
                     continue;
                 }
             }

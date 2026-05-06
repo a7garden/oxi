@@ -116,10 +116,10 @@ impl BedrockProvider {
         let content_hash = hex_encode(hash_sha256(body));
 
         // Set required headers
-        headers.insert("content-type", "application/json".parse().unwrap());
-        headers.insert("host", host.parse().unwrap());
-        headers.insert("x-amz-date", datetime.parse().unwrap());
-        headers.insert("x-amz-content-sha256", content_hash.parse().unwrap());
+        headers.insert("content-type", "application/json".parse().expect("valid header value"));
+        headers.insert("host", host.parse().expect("valid header value"));
+        headers.insert("x-amz-date", datetime.parse().expect("valid header value"));
+        headers.insert("x-amz-content-sha256", content_hash.parse().expect("valid header value"));
 
         // Build canonical request
         let canonical_request =
@@ -146,7 +146,7 @@ impl BedrockProvider {
             signature
         );
 
-        headers.insert("authorization", authorization.parse().unwrap());
+        headers.insert("authorization", authorization.parse().expect("valid header value"));
 
         Ok(())
     }
@@ -340,12 +340,12 @@ impl Provider for BedrockProvider {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::CONTENT_TYPE,
-            "application/json".parse().unwrap(),
+            "application/json".parse().expect("valid header value"),
         );
 
         // Add session token if present (for temporary credentials)
         if let Some(token) = session_token {
-            headers.insert("x-amz-security-token", token.parse().unwrap());
+            headers.insert("x-amz-security-token", token.parse().expect("valid header value"));
         }
 
         // Sign the request

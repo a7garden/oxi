@@ -95,9 +95,9 @@ impl Provider for AnthropicProvider {
 
         // Build headers
         let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert("x-api-key", api_key.parse().unwrap());
-        headers.insert("content-type", "application/json".parse().unwrap());
-        headers.insert("anthropic-version", "2023-06-01".parse().unwrap());
+        headers.insert("x-api-key", api_key.parse().expect("valid header value"));
+        headers.insert("content-type", "application/json".parse().expect("valid header value"));
+        headers.insert("anthropic-version", "2023-06-01".parse().expect("valid header value"));
 
         for (k, v) in &options.headers {
             if let (Ok(name), Ok(value)) = (
