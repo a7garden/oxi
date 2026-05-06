@@ -1494,6 +1494,16 @@ mod tests {
             "COHERE_API_KEY",
             "CO_API_KEY",
             "PERPLEXITY_API_KEY",
+            "ZAI_API_KEY",
+            "FIREWORKS_API_KEY",
+            "OPENROUTER_API_KEY",
+            "CEREBRAS_API_KEY",
+            "KIMI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "XIAOMI_API_KEY",
+            "CLOUDFLARE_API_KEY",
+            "MINIMAX_API_KEY",
+            "MINIMAX_CN_API_KEY",
         ] {
             std::env::remove_var(key);
         }
@@ -1527,6 +1537,16 @@ mod tests {
             "COHERE_API_KEY",
             "CO_API_KEY",
             "PERPLEXITY_API_KEY",
+            "ZAI_API_KEY",
+            "FIREWORKS_API_KEY",
+            "OPENROUTER_API_KEY",
+            "CEREBRAS_API_KEY",
+            "KIMI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "XIAOMI_API_KEY",
+            "CLOUDFLARE_API_KEY",
+            "MINIMAX_API_KEY",
+            "MINIMAX_CN_API_KEY",
         ] {
             std::env::remove_var(key);
         }
@@ -1624,7 +1644,7 @@ mod tests {
 
     #[test]
     fn test_get_default_model() {
-        // Clear all provider API keys to avoid interference from environment
+        // Clear all known provider API keys to avoid interference from environment
         for key in &[
             "ANTHROPIC_API_KEY",
             "OPENAI_API_KEY",
@@ -1638,17 +1658,30 @@ mod tests {
             "CO_API_KEY",
             "PERPLEXITY_API_KEY",
             "MINIMAX_API_KEY",
+            "ZAI_API_KEY",
+            "FIREWORKS_API_KEY",
+            "OPENROUTER_API_KEY",
+            "CEREBRAS_API_KEY",
+            "KIMI_API_KEY",
+            "MOONSHOT_API_KEY",
+            "XIAOMI_API_KEY",
+            "CLOUDFLARE_API_KEY",
+            "CLOUDFLARE_AI_GATEWAY_API_KEY",
+            "AI_GATEWAY_API_KEY",
+            "AZURE_OPENAI_API_KEY",
+            "GOOGLE_CLOUD_API_KEY",
+            "MINIMAX_CN_API_KEY",
         ] {
             std::env::remove_var(key);
         }
-        
-        // Set only anthropic API key
-        std::env::set_var("ANTHROPIC_API_KEY", "test-key");
-        let registry = ModelRegistry::create(AuthStorage::in_memory(), None);
+
+        // Use runtime key (not env var) to avoid parallel test interference
+        let auth = AuthStorage::in_memory();
+        auth.set_runtime_key("anthropic", "test-key".to_string());
+        let registry = ModelRegistry::create(auth, None);
         let model = registry.get_default_model();
         assert!(model.is_some());
         assert_eq!(model.unwrap().provider, "anthropic");
-        std::env::remove_var("ANTHROPIC_API_KEY");
     }
 
     #[test]
