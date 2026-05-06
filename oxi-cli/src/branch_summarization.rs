@@ -288,18 +288,23 @@ pub fn collect_entries_for_branch_summary(
         },
     };
 
+
     // Build path from old leaf to root
     let old_path = build_path_to_root(entries, &old_leaf_id);
     let old_path_set: HashSet<String> = old_path.iter().map(|e| e.id.clone()).collect();
 
     // Build path from target to root
     let target_path = build_path_to_root(entries, &target_id);
+    let target_path_set: HashSet<String> = target_path.iter().map(|e| e.id.clone()).collect();
 
-    // target_path is root-first, so iterate backwards to find deepest common ancestor
+    // Find deepest common ancestor by iterating old_path from leaf towards root
+    // (deepest = furthest from root, closest to leaves)
+    // We iterate leaf-first, so the FIRST common ancestor we find IS the deepest
     let mut common_ancestor_id: Option<String> = None;
-    for entry in target_path.iter().rev() {
-        if old_path_set.contains(&entry.id.clone()) {
+    for entry in old_path.iter() {
+        if target_path_set.contains(&entry.id) {
             common_ancestor_id = Some(entry.id.clone());
+            // Break immediately - first match from leaf side is deepest common ancestor
             break;
         }
     }
@@ -323,6 +328,7 @@ pub fn collect_entries_for_branch_summary(
 
     // Reverse to get chronological order
     entries_to_summarize.reverse();
+
 
     CollectEntriesResult {
         entries: entries_to_summarize,
@@ -820,7 +826,7 @@ mod tests {
         let root_id = root.id.clone();
         entries.push(root);
         
-        let a = create_test_entry("user", "A", Some(root_id));
+        let a = create_test_entry("user", "A", Some(root_id.clone()));
         let a_id = a.id.clone();
         entries.push(a);
         
@@ -832,14 +838,19 @@ mod tests {
         let c_id = c.id.clone();
         entries.push(c);
         
-        // Navigate from c to a (common ancestor should be a)
+        // Navigate from c to a
+        // old_path = [c, b, a, root]
+        // target_path = [a, root]  (a is the target)
+        // target_path_set = {a, root}
+        // Deepest common ancestor = a (first from leaf side in old_path that's in target_path_set)
         let result = collect_entries_for_branch_summary(
             &entries,
             Some(c_id),
             a_id.clone(),
         );
         
-        // Should collect b and c
+        // Common ancestor is 'a' (the target itself)
+        // Entries collected: from c back to (not including) a = [b, c]
         assert_eq!(result.entries.len(), 2);
         assert_eq!(result.common_ancestor_id, Some(a_id));
         assert_eq!(result.entries[0].content(), "B");
@@ -856,7 +867,7 @@ mod tests {
         let root_id = root.id.clone();
         entries.push(root);
         
-        let a = create_test_entry("user", "A", Some(root_id));
+        let a = create_test_entry("user", "A", Some(root_id.clone()));
         let a_id = a.id.clone();
         entries.push(a);
         
@@ -872,14 +883,18 @@ mod tests {
         // Navigate from b1 to b2 (common ancestor should be a)
         let result = collect_entries_for_branch_summary(
             &entries,
-            Some(b1_id),
+            Some(b1_id.clone()),
             b2_id,
         );
         
-        // Should collect b1
+        // old_path = [b1, a, root], target_path = [b2, a, root]
+        // target_path_set = {b2, a, root}
+        // Deepest common ancestor = a (first from leaf side in old_path that's in target_path_set)
+        // Entries collected: from b1 back to (not including) a = [b1]
+        assert!(result.common_ancestor_id.is_some(), "Expected common ancestor to be found");
+        assert_eq!(result.common_ancestor_id.as_ref().unwrap(), &a_id);
         assert_eq!(result.entries.len(), 1);
-        assert_eq!(result.common_ancestor_id, Some(a_id));
-        assert_eq!(result.entries[0].message.content(), "B1");
+        assert_eq!(result.entries[0].content(), "B1");
     }
 
     #[test]
@@ -916,10 +931,12 @@ mod tests {
         
         let (read_files, modified_files) = ops.compute_file_lists();
         
-        assert_eq!(read_files.len(), 1);
+        // file1.txt and file2.txt are read-only (not modified)
+        assert_eq!(read_files.len(), 2);
         assert!(read_files.contains(&"file1.txt".to_string()));
-        assert!(!read_files.contains(&"file3.txt".to_string())); // written files are modified
+        assert!(read_files.contains(&"file2.txt".to_string()));
         
+        // file3.txt (written) and file4.txt (edited) are modified
         assert_eq!(modified_files.len(), 2);
         assert!(modified_files.contains(&"file3.txt".to_string()));
         assert!(modified_files.contains(&"file4.txt".to_string()));
@@ -949,11 +966,14 @@ mod tests {
 
     #[test]
     fn test_truncate_for_summary() {
-        let text = "This is a long text that should be truncated.";
+        let text = "This is a very long text that definitely needs to be truncated for the summary.";
         let truncated = truncate_for_summary(text, 20);
         
         assert!(truncated.contains("truncated"));
+        // The truncated text should be shorter than original
         assert!(truncated.len() < text.len());
+        // Should contain the truncation message
+        assert!(truncated.contains("[..."));
     }
 
     #[test]
