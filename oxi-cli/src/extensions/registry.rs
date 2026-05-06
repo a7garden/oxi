@@ -337,7 +337,14 @@ impl ExtensionRunner {
 /// TODO: document.
     pub fn load_extension(&mut self, path: &Path, ctx: &ExtensionContext) -> Result<(), ExtensionError> {
         let path_display = path.display().to_string();
-        if !path.exists() { return Err(ExtensionError::LoadFailed { name: path_display, reason: "File not found".to_string() }); }
+
+        // Pre-load validation (existence, size, extension, checksum)
+        let validated = crate::extensions::loading::validate_extension(path)?;
+        tracing::debug!(
+            path = %path_display,
+            checksum = %validated.checksum,
+            "extension binary validated"
+        );
 
         let ext_os = path.extension().and_then(OsStr::to_str).unwrap_or("");
         if !matches!(ext_os, "so" | "dylib" | "dll") {
