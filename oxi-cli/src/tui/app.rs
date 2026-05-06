@@ -415,7 +415,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         let _ = prompt_tx.send(value).await;
                         state.input_clear();
                     }
-                    handlers::Action::None => {}
+                    // no action
                 }
             }
         }
