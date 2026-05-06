@@ -472,4 +472,63 @@ mod tests {
             "Standard"
         );
     }
+
+    #[test]
+    fn test_parse_config_add_provider() {
+        let args = parse_args_from([
+            "oxi", "config", "add-provider",
+            "minimax",
+            "https://api.minimax.chat/v1",
+            "MINIMAX_API_KEY",
+            "openai-completions",
+        ]).unwrap();
+        match args.command {
+            Some(Commands::Config { action }) => match action {
+                ConfigCommands::AddProvider { name, base_url, api_key_env, api } => {
+                    assert_eq!(name, "minimax");
+                    assert_eq!(base_url, "https://api.minimax.chat/v1");
+                    assert_eq!(api_key_env, "MINIMAX_API_KEY");
+                    assert_eq!(api, "openai-completions");
+                }
+                _ => panic!("Expected AddProvider subcommand"),
+            },
+            _ => panic!("Expected Config command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_config_add_provider_default_api() {
+        let args = parse_args_from([
+            "oxi", "config", "add-provider",
+            "zai",
+            "https://api.z.ai/v1",
+            "ZAI_API_KEY",
+        ]).unwrap();
+        match args.command {
+            Some(Commands::Config { action }) => match action {
+                ConfigCommands::AddProvider { name, base_url, api_key_env, api } => {
+                    assert_eq!(name, "zai");
+                    assert_eq!(base_url, "https://api.z.ai/v1");
+                    assert_eq!(api_key_env, "ZAI_API_KEY");
+                    assert_eq!(api, "openai-completions"); // default
+                }
+                _ => panic!("Expected AddProvider subcommand"),
+            },
+            _ => panic!("Expected Config command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_config_remove_provider() {
+        let args = parse_args_from(["oxi", "config", "remove-provider", "minimax"]).unwrap();
+        match args.command {
+            Some(Commands::Config { action }) => match action {
+                ConfigCommands::RemoveProvider { name } => {
+                    assert_eq!(name, "minimax");
+                }
+                _ => panic!("Expected RemoveProvider subcommand"),
+            },
+            _ => panic!("Expected Config command"),
+        }
+    }
 }
