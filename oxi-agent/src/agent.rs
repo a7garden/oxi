@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-use crate::retry_constants::*;
+use crate::agent_loop::config::{MAX_RETRIES, BACKOFF_BASE_SECS};
 
 /// Default fallback model used when the primary model fails.
 const DEFAULT_FALLBACK_MODEL: &str = "openai/gpt-4o-mini";

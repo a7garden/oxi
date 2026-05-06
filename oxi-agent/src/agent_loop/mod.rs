@@ -1,4 +1,4 @@
-#![allow(inner_doc_comments)]
+#![allow(unused_doc_comments)]
 /// Agent loop implementation
 
 /// Agent-loop configuration.
@@ -19,22 +19,21 @@ pub use config::{AgentLoopConfig, BeforeToolCallHook, AfterToolCallHook, ToolExe
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
 use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
-use crate::{AgentToolResult, error::AgentError, state::SharedState, tools::ToolRegistry};
+use crate::{state::SharedState, tools::ToolRegistry};
 use anyhow::{Error, Result};
 use oxi_ai::{
-    ContentBlock, Message, Provider, ProviderEvent, StreamOptions,
-    StopReason, TextContent, ToolCall, UserMessage, CompactionStrategy,
-    CompactionManager as OxCompactionManager, AssistantMessage,
+    Message, Provider,
+    StopReason, UserMessage, CompactionStrategy,
+    CompactionManager as OxCompactionManager,
     estimate_tokens, LlmCompactor,
 };
 use parking_lot::RwLock;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use self::queues::{drain_steering_queue, drain_follow_up_queue, clear_steering_queue, clear_follow_up_queue, clear_all_queues};
-use self::retry::{stream_with_retry, is_retryable_error, handle_retryable_error, cancel_auto_retry, auto_retry_attempt_method};
+use self::retry::{is_retryable_error, handle_retryable_error, cancel_auto_retry, auto_retry_attempt_method};
 use self::streaming::stream_assistant_response;
 use self::helpers::should_stop_after_turn;
 use self::tool_exec::execute_tool_calls;

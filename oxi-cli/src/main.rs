@@ -9,8 +9,6 @@ use oxi::extensions::ExtensionRegistry;
 use oxi::packages::{PackageManager, ResourceKind};
 use oxi::session::{AgentMessage, SessionManager};
 use oxi::settings::Settings;
-use oxi::templates::TemplateManager;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
