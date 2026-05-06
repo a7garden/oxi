@@ -1502,4 +1502,103 @@ stream_responses = false
         assert!(serde_json::from_str::<serde_json::Value>(&content).is_ok());
         assert!(content.contains("json-theme"));
     }
+
+    // ── Custom provider tests ───────────────────────────────────────
+
+    #[test]
+    fn test_custom_provider_default_api() {
+        use super::CustomProvider;
+        let cp = CustomProvider {
+            name: "test".to_string(),
+            base_url: "https://api.test.com/v1".to_string(),
+            api_key_env: "TEST_API_KEY".to_string(),
+            api: super::default_custom_provider_api(),
+        };
+        assert_eq!(cp.api, "openai-completions");
+    }
+
+    #[test]
+    fn test_custom_provider_toml_deserialize() {
+        let toml_content = r#"
+[[custom_providers]]
+name = "minimax"
+base_url = "https://api.minimax.chat/v1"
+api_key_env = "MINIMAX_API_KEY"
+api = "openai-completions"
+
+[[custom_providers]]
+name = "zai"
+base_url = "https://api.z.ai/v1"
+api_key_env = "ZAI_API_KEY"
+api = "openai-responses"
+"#;
+        let settings: Settings = toml::from_str(toml_content).unwrap();
+        assert_eq!(settings.custom_providers.len(), 2);
+        assert_eq!(settings.custom_providers[0].name, "minimax");
+        assert_eq!(settings.custom_providers[0].base_url, "https://api.minimax.chat/v1");
+        assert_eq!(settings.custom_providers[0].api_key_env, "MINIMAX_API_KEY");
+        assert_eq!(settings.custom_providers[0].api, "openai-completions");
+        assert_eq!(settings.custom_providers[1].name, "zai");
+        assert_eq!(settings.custom_providers[1].api, "openai-responses");
+    }
+
+    #[test]
+    fn test_custom_provider_json_deserialize() {
+        let json_content = r#"{
+            "custom_providers": [
+                {
+                    "name": "minimax",
+                    "base_url": "https://api.minimax.chat/v1",
+                    "api_key_env": "MINIMAX_API_KEY",
+                    "api": "openai-completions"
+                }
+            ]
+        }"#;
+        let settings: Settings = serde_json::from_str(json_content).unwrap();
+        assert_eq!(settings.custom_providers.len(), 1);
+        assert_eq!(settings.custom_providers[0].name, "minimax");
+    }
+
+    #[test]
+    fn test_custom_provider_toml_roundtrip() {
+        let mut settings = Settings::default();
+        settings.custom_providers.push(super::CustomProvider {
+            name: "test".to_string(),
+            base_url: "https://api.test.com/v1".to_string(),
+            api_key_env: "TEST_API_KEY".to_string(),
+            api: "openai-completions".to_string(),
+        });
+
+        let toml_str = toml::to_string_pretty(&settings).unwrap();
+        let parsed: Settings = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.custom_providers.len(), 1);
+        assert_eq!(parsed.custom_providers[0].name, "test");
+        assert_eq!(parsed.custom_providers[0].base_url, "https://api.test.com/v1");
+    }
+
+    #[test]
+    fn test_custom_provider_defaults_empty() {
+        let settings = Settings::default();
+        assert!(settings.custom_providers.is_empty());
+    }
+
+    #[test]
+    fn test_custom_provider_layer_file() {
+        let base = Settings::default();
+
+        let tmp = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
+        let toml_content = r#"
+[[custom_providers]]
+name = "my-provider"
+base_url = "https://api.my-provider.com/v1"
+api_key_env = "MY_PROVIDER_API_KEY"
+"#;
+        tmp.as_file().write_all(toml_content.as_bytes()).unwrap();
+
+        let merged = Settings::layer_file(&base, tmp.path()).unwrap();
+        assert_eq!(merged.custom_providers.len(), 1);
+        assert_eq!(merged.custom_providers[0].name, "my-provider");
+        // Default api value
+        assert_eq!(merged.custom_providers[0].api, "openai-completions");
+    }
 }
