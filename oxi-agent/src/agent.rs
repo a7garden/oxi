@@ -62,6 +62,13 @@ pub struct Agent {
     tools: Arc<ToolRegistry>,
     state: SharedState,
     compaction_manager: CompactionManager,
+    hooks: parking_lot::RwLock<crate::config::AgentHooks>,
+}
+
+/// Result of executing a batch of tool calls.
+struct ToolBatchResult {
+    messages: Vec<oxi_ai::ToolResultMessage>,
+    terminate: bool,
 }
 
 impl Agent {
@@ -86,6 +93,7 @@ impl Agent {
             tools: Arc::new(ToolRegistry::new()),
             state: SharedState::new(),
             compaction_manager,
+            hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
         }
     }
 
@@ -227,22 +235,36 @@ impl Agent {
 
     /// Run the agent, delivering events through the provided channel.
     ///
-    /// Handles compaction, streaming, tool execution, retries, and fallback.
+    /// Run the agent, delivering events through the provided channel.
+    ///
+    /// Implements a 2-level agentic loop matching pi-mono's architecture:
+    ///
+    /// ```text
+    /// Outer loop (follow-up messages):
+    ///   Inner loop (tool calls + steering):
+    ///     1. Inject pending messages (steering)
+    ///     2. Compaction check
+    ///     3. Build context + stream LLM response
+    ///     4. If ToolUse → execute tools → continue inner loop
+    ///     5. If Stop/Error → emit turn_end
+    ///     6. Check shouldStopAfterTurn
+    ///     7. Poll steering messages → continue inner loop if any
+    ///   Check follow-up messages → continue outer loop if any
+    ///   Exit
+    /// ```
     pub async fn run_with_channel(
         &self,
         prompt: String,
         tx: mpsc::Sender<AgentEvent>,
     ) -> Result<Response> {
-        let _ = tx
-            .send(AgentEvent::Start {
-                prompt: prompt.clone(),
-            })
-            .await;
-        let _ = tx.send(AgentEvent::Thinking).await;
+        let _ = tx.send(AgentEvent::Start { prompt: prompt.clone() }).await;
 
+        // Add user message to state
         self.state.update(|s| {
             s.add_user_message(prompt);
         });
+
+        // ── Pre-flight: resolve model + initial compaction ──────────
 
         let model = {
             let inner = self.config();
@@ -253,434 +275,535 @@ impl Agent {
             Error::msg(format!("Model not found: {}", inner.config.model_id))
         })?;
 
-        // Check for compaction at the start of each iteration
-        let messages = &self.state.get_state().messages;
-        let iteration = self.state.get_state().iteration;
+        // Initial compaction check
+        self.run_compaction_check(&tx).await;
 
-        // Estimate token count
-        let context_text = serde_json::to_string(messages).unwrap_or_default();
-        let context_tokens = oxi_ai::estimate_tokens(&context_text);
-
-        // Try to compact if needed
-        if self
-            .compaction_manager
-            .should_compact(context_tokens, iteration)
-        {
-            let _ = tx
-                .send(AgentEvent::Compaction {
-                    event: CompactionEvent::Triggered {
-                        context_tokens,
-                        iteration,
-                    },
-                })
-                .await;
-
-            // Clone messages for compaction since compact_if_needed takes a reference
-            let messages_to_compact: Vec<Message> = messages.iter().cloned().collect();
-
-            match self
-                .compaction_manager
-                .compact_if_needed(
-                    &messages_to_compact,
-                    {
-                        let inner = self.config();
-                        inner.config.compaction_instruction.clone().as_deref()
-                    },
-                    context_tokens,
-                    iteration,
-                )
-                .await
-            {
-                Ok(Some(compacted)) => {
-                    let start = Instant::now();
-                    let message_count = compacted.compacted_count;
-                    let _ = tx
-                        .send(AgentEvent::Compaction {
-                            event: CompactionEvent::Started { message_count },
-                        })
-                        .await;
-
-                    // Extract data before moving
-                    let kept_messages = compacted.kept_messages;
-                    let summary = compacted.summary;
-                    let compacted_count = compacted.compacted_count;
-
-                    // Replace old messages with compacted context
-                    self.state.update(|s| {
-                        s.replace_messages(kept_messages);
-                    });
-
-                    let compacted_ctx = AgentCompactedContext {
-                        summary,
-                        kept_messages: Vec::new(), // Already moved to state
-                        compacted_count,
-                    };
-                    let _ = tx
-                        .send(AgentEvent::Compaction {
-                            event: CompactionEvent::Completed {
-                                result: compacted_ctx,
-                                duration_ms: start.elapsed().as_millis() as u64,
-                            },
-                        })
-                        .await;
-                }
-                Ok(None) => {
-                    // No compaction needed
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(AgentEvent::Compaction {
-                            event: CompactionEvent::Failed {
-                                error: e.to_string(),
-                            },
-                        })
-                        .await;
-                }
-            }
-        }
-
-        let mut context = Context::new();
-
-        // Add system prompt
-        {
-            let inner = self.config();
-            if let Some(ref system_prompt) = inner.config.system_prompt {
-                context.set_system_prompt(system_prompt.clone());
-            }
-        }
-
-        // Add previous messages
-        for msg in &self.state.get_state().messages {
-            context.add_message(msg.clone());
-        }
-
-        // Add tools to context
-        let tool_defs = self.tools.definitions();
-        if !tool_defs.is_empty() {
-            let mut oxi_tools = Vec::new();
-            for def in &tool_defs {
-                let schema = serde_json::to_value(&def.input_schema)
-                    .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
-                oxi_tools.push(oxi_ai::Tool::new(&def.name, &def.description, schema));
-            }
-            context.set_tools(oxi_tools);
-        }
-
-        let stream_options = StreamOptions {
-            temperature: {
-                let inner = self.config();
-                inner.config.temperature
-            },
-            max_tokens: {
-                let inner = self.config();
-                inner.config.max_tokens
-            },
-            api_key: {
-                let inner = self.config();
-                inner.config.api_key.clone()
-            },
-            ..Default::default()
-        };
-
-        // Clone provider out of the lock *before* any .await so the
-        // RwLockReadGuard is dropped immediately and cannot span an await point.
-        let provider: Arc<dyn Provider> = {
-            let inner = self.config();
-            Arc::clone(&inner.provider)
-        };
-
-        let mut stream = match Self::stream_with_retry(
-            provider.as_ref(),
-            &model,
-            &context,
-            Some(stream_options),
-            &tx,
-        )
-        .await
-        {
-            Ok(s) => s,
-            Err(primary_err) => {
-                // Retry exhausted – try fallback model
-                let _ = tx
-                    .send(AgentEvent::Error {
-                        session_id: None,
-                        message: format!(
-                            "Primary model failed: {}",
-                            primary_err.user_friendly()
-                        ),
-                    })
-                    .await;
-
-                let fallback_options = {
-                    let inner2 = self.config();
-                    StreamOptions {
-                        temperature: inner2.config.temperature,
-                        max_tokens: inner2.config.max_tokens,
-                        api_key: inner2.config.api_key.clone(),
-                        ..Default::default()
-                    }
-                };
-                match self
-                    .try_fallback(
-                        &model,
-                        &context,
-                        Some(fallback_options),
-                        &tx,
-                        primary_err.to_string(),
-                    )
-                    .await
-                {
-                    Ok(s) => s,
-                    Err(fallback_err) => {
-                        let msg = fallback_err.user_friendly();
-                        let _ = tx
-                            .send(AgentEvent::Error {
-                        session_id: None,
-                                message: msg.clone(),
-                            })
-                            .await;
-                        return Err(Error::msg(msg));
-                    }
-                }
-            }
-        };
-
-        let tx_clone = tx.clone();
+        // ── Agentic loop ────────────────────────────────────────────
         let tools = self.tools.clone();
         let max_iterations = {
             let inner = self.config();
             inner.config.max_iterations
         };
+        let mut turn_number: u32 = 0;
+        let mut final_response_text = String::new();
 
-        // Agentic loop (based on pi-mono agent-loop.ts):
-        // Outer loop: each iteration = one LLM call
-        // Inner loop: process events from one stream
-        // ToolUse -> execute tools -> add results -> continue
-        // Stop/Length -> return response
-        let mut pending_tool_calls: Vec<oxi_ai::ToolCall> = Vec::new();
+        // Check for steering messages at start
+        let mut pending_messages: Vec<String> = self.drain_steering_messages();
 
-        loop {
-            let current_iteration = self.state.get_state().iteration;
-            if current_iteration >= max_iterations {
-                let _ = tx_clone.send(AgentEvent::Error {
-                    session_id: None,
-                    message: format!("Max iterations ({}) reached", max_iterations),
-                }).await;
-                break;
-            }
+        // Outer loop: continues when follow-up messages arrive
+        'outer: loop {
+            let mut has_more_tool_calls = true;
 
-            // Drain steering messages from queue (injected by TUI during busy)
-            // TODO: when AgentSession exposes drain, poll from there
-            // For now, steering is handled via agent.state.add_user_message in steer()
-
-            // Compaction check at each iteration
-            let state_msgs = self.state.get_state().messages.clone();
-            let context_text = serde_json::to_string(&state_msgs).unwrap_or_default();
-            let context_tokens = oxi_ai::estimate_tokens(&context_text);
-            let iteration = self.state.get_state().iteration;
-            if self.compaction_manager.should_compact(context_tokens, iteration) {
-                let _ = tx_clone.send(AgentEvent::Compaction {
-                    event: crate::compaction::CompactionEvent::Triggered {
-                        context_tokens,
-                        iteration,
-                    },
-                }).await;
-                match self.compaction_manager.compact_if_needed(
-                    &state_msgs,
-                    None,
-                    context_tokens,
-                    iteration,
-                ).await {
-                    Ok(Some(compacted)) => {
-                        let _ = tx_clone.send(AgentEvent::Compaction {
-                            event: crate::compaction::CompactionEvent::Started {
-                                message_count: compacted.compacted_count,
-                            },
-                        }).await;
-                        self.state.update(|s| {
-                            s.messages = compacted.kept_messages.clone();
-                        });
-                        let _ = tx_clone.send(AgentEvent::Compaction {
-                            event: crate::compaction::CompactionEvent::Completed {
-                                result: crate::compaction::CompactedContext::from(compacted),
-                                duration_ms: 0,
-                            },
-                        }).await;
-                    }
-                    Ok(None) => {} // No compaction needed
-                    Err(e) => {
-                        tracing::warn!("Compaction failed: {}", e);
-                    }
-                }
-            }
-
-            // Rebuild context from state messages for each iteration
-            let state_messages = self.state.get_state().messages.clone();
-            let mut iter_context = Context::new();
-            if let Some(ref prompt) = {
-                let inner = self.config();
-                inner.config.system_prompt.clone()
-            } {
-                iter_context.set_system_prompt(prompt);
-            }
-            for msg in &state_messages {
-                iter_context.add_message(msg.clone());
-            }
-            if !tools.names().is_empty() {
-                let tool_defs = tools.definitions();
-                let mut oxi_tools = Vec::new();
-                for def in &tool_defs {
-                    let schema = serde_json::to_value(&def.input_schema)
-                        .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
-                    oxi_tools.push(oxi_ai::Tool::new(&def.name, &def.description, schema));
-                }
-                iter_context.set_tools(oxi_tools);
-            }
-
-            let iter_stream_options = StreamOptions {
-                temperature: {
-                    let inner = self.config();
-                    inner.config.temperature
-                },
-                max_tokens: {
-                    let inner = self.config();
-                    inner.config.max_tokens
-                },
-                api_key: {
-                    let inner = self.config();
-                    inner.config.api_key.clone()
-                },
-                ..Default::default()
-            };
-
-            let provider: Arc<dyn Provider> = {
-                let inner = self.config();
-                Arc::clone(&inner.provider)
-            };
-
-            let mut stream = match Self::stream_with_retry(
-                provider.as_ref(),
-                &model,
-                &iter_context,
-                Some(iter_stream_options),
-                &tx_clone,
-            ).await {
-                Ok(s) => s,
-                Err(e) => {
-                    let msg = e.user_friendly();
-                    let _ = tx_clone.send(AgentEvent::Error {
+            // Inner loop: process tool calls and steering messages
+            while has_more_tool_calls || !pending_messages.is_empty() {
+                // ── Iteration guard ──────────────────────────────
+                let iteration = self.state.get_state().iteration;
+                if iteration >= max_iterations {
+                    let _ = tx.send(AgentEvent::Error {
                         session_id: None,
-                        message: format!("Stream error: {}", msg),
+                        message: format!("Max iterations ({}) reached", max_iterations),
                     }).await;
-                    break;
+                    break 'outer;
                 }
-            };
 
-            // Inner loop: process events from this stream
-            let mut iteration_text = String::new();
-            pending_tool_calls.clear();
+                // ── Turn start ──────────────────────────────────
+                let _ = tx.send(AgentEvent::TurnStart { turn_number }).await;
 
-            while let Some(event) = stream.next().await {
-                match event {
-                    ProviderEvent::TextDelta { delta, .. } => {
-                        iteration_text.push_str(&delta);
-                        let _ = tx_clone.send(AgentEvent::TextChunk { text: delta }).await;
-                    }
-                    ProviderEvent::ToolCallStart { .. } => {}
-                    ProviderEvent::ToolCallEnd { tool_call, .. } => {
-                        pending_tool_calls.push(tool_call);
-                    }
-                    ProviderEvent::Done { reason, message: _ } => {
-                        // Build assistant message with tool calls if any
-                        let mut content_blocks = vec![ContentBlock::Text(TextContent::new(iteration_text.clone()))];
-                        for tc in &pending_tool_calls {
-                            content_blocks.push(ContentBlock::ToolCall(tc.clone()));
-                        }
-                        let mut assistant_msg = oxi_ai::AssistantMessage::new(
-                            oxi_ai::Api::OpenAiCompletions, "agent", "agent-model"
-                        );
-                        assistant_msg.content = content_blocks;
+                // ── Inject pending (steering) messages ──────────
+                if !pending_messages.is_empty() {
+                    for msg_text in pending_messages.drain(..) {
+                        let user_msg = oxi_ai::UserMessage::new(msg_text);
+                        let message = oxi_ai::Message::User(user_msg);
+                        let _ = tx.send(AgentEvent::SteeringMessage {
+                            message: message.clone(),
+                        }).await;
                         self.state.update(|s| {
-                            s.messages.push(Message::Assistant(assistant_msg));
+                            s.messages.push(message);
                         });
+                    }
+                }
 
-                        // Convert provider stop reason to our StopReason
-                        let stop_reason = match reason {
-                            oxi_ai::StopReason::Stop => StopReason::Stop,
-                            oxi_ai::StopReason::Length => StopReason::Length,
-                            oxi_ai::StopReason::ToolUse => StopReason::ToolUse,
-                            oxi_ai::StopReason::Error => StopReason::Error,
-                            _ => StopReason::Stop,
-                        };
+                // ── Compaction check ────────────────────────────
+                self.run_compaction_check(&tx).await;
 
-                        if !pending_tool_calls.is_empty() && matches!(stop_reason, StopReason::ToolUse) {
-                            for tool_call in pending_tool_calls.drain(..) {
-                                let tool_name = tool_call.name.clone();
-                                let tool_call_id = tool_call.id.clone();
+                // ── Build context ───────────────────────────────
+                let state_messages = self.state.get_state().messages.clone();
+                let mut context = Context::new();
+                if let Some(ref sp) = self.config().config.system_prompt {
+                    context.set_system_prompt(sp.clone());
+                }
+                for msg in &state_messages {
+                    context.add_message(msg.clone());
+                }
+                // Add tools
+                let tool_defs = tools.definitions();
+                if !tool_defs.is_empty() {
+                    let mut oxi_tools = Vec::new();
+                    for def in &tool_defs {
+                        let schema = serde_json::to_value(&def.input_schema)
+                            .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
+                        oxi_tools.push(oxi_ai::Tool::new(&def.name, &def.description, schema));
+                    }
+                    context.set_tools(oxi_tools);
+                }
 
-                                let _ = tx_clone.send(AgentEvent::ToolStart {
-                                    tool_call_id: tool_call_id.clone(),
-                                    tool_name: tool_name.clone(),
-                                }).await;
+                let stream_options = {
+                    let inner = self.config();
+                    StreamOptions {
+                        temperature: inner.config.temperature,
+                        max_tokens: inner.config.max_tokens,
+                        api_key: inner.config.api_key.clone(),
+                        ..Default::default()
+                    }
+                };
 
-                                let tool_result = self
-                                    .execute_tool(&tools, &tool_call, tx_clone.clone())
-                                    .await;
+                let provider: Arc<dyn Provider> = {
+                    let inner = self.config();
+                    Arc::clone(&inner.provider)
+                };
 
-                                let _ = tx_clone.send(AgentEvent::ToolComplete {
-                                    result: tool_result.clone(),
-                                }).await;
+                // ── Stream LLM response ─────────────────────────
+                let mut stream = match Self::stream_with_retry(
+                    provider.as_ref(),
+                    &model,
+                    &context,
+                    Some(stream_options),
+                    &tx,
+                ).await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let msg = e.user_friendly();
+                        let _ = tx.send(AgentEvent::Error {
+                            session_id: None,
+                            message: format!("Stream error: {}", msg),
+                        }).await;
+                        break 'outer;
+                    }
+                };
 
-                                self.state.update(|s| {
-                                    s.messages.push(Message::tool_result(
-                                        tool_call_id,
-                                        tool_name,
-                                        vec![oxi_ai::ContentBlock::Text(
-                                            oxi_ai::TextContent::new(tool_result.content.clone())
-                                        )],
-                                    ));
-                                });
+                // ── Process stream events ───────────────────────
+                let mut iteration_text = String::new();
+                let mut pending_tool_calls: Vec<oxi_ai::ToolCall> = Vec::new();
+                let mut thinking_text = String::new();
+                let mut stream_done = false;
+                let mut stop_reason = StopReason::Stop;
+
+                while let Some(event) = stream.next().await {
+                    match event {
+                        ProviderEvent::TextDelta { delta, .. } => {
+                            iteration_text.push_str(&delta);
+                            let _ = tx.send(AgentEvent::TextChunk { text: delta }).await;
+                        }
+                        ProviderEvent::ThinkingDelta { delta, .. } => {
+                            thinking_text.push_str(&delta);
+                            let _ = tx.send(AgentEvent::ThinkingDelta { text: delta }).await;
+                        }
+                        ProviderEvent::ToolCallStart { .. } => {}
+                        ProviderEvent::ToolCallEnd { tool_call, .. } => {
+                            pending_tool_calls.push(tool_call);
+                        }
+
+                        ProviderEvent::Done { reason, message: _ } => {
+                            stop_reason = match reason {
+                                oxi_ai::StopReason::Stop => StopReason::Stop,
+                                oxi_ai::StopReason::Length => StopReason::Length,
+                                oxi_ai::StopReason::ToolUse => StopReason::ToolUse,
+                                oxi_ai::StopReason::Error => StopReason::Error,
+                                _ => StopReason::Stop,
+                            };
+
+                            // Build assistant message with content blocks
+                            let mut content_blocks = vec![];
+                            if !iteration_text.is_empty() {
+                                content_blocks.push(ContentBlock::Text(TextContent::new(iteration_text.clone())));
+                            }
+                            if !thinking_text.is_empty() {
+                                content_blocks.insert(0, ContentBlock::Thinking(
+                                    oxi_ai::ThinkingContent::new(thinking_text.clone()),
+                                ));
+                            }
+                            for tc in &pending_tool_calls {
+                                content_blocks.push(ContentBlock::ToolCall(tc.clone()));
                             }
 
-                            self.state.update(|s| { s.increment_iteration(); });
-                            let _ = tx_clone.send(AgentEvent::Iteration {
-                                number: self.state.get_state().iteration,
-                            }).await;
-                            break;
-                        }
+                            let mut assistant_msg = oxi_ai::AssistantMessage::new(
+                                oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
+                            );
+                            assistant_msg.content = content_blocks;
 
-                        let _ = tx_clone.send(AgentEvent::Complete {
-                            content: iteration_text.clone(),
-                            stop_reason: format!("{:?}", reason),
-                        }).await;
-                        self.state.update(|s| { s.increment_iteration(); });
-                        return Ok(Response {
-                            content: iteration_text.clone(),
-                            stop_reason,
+                            // Add assistant message to state
+                            self.state.update(|s| {
+                                s.messages.push(Message::Assistant(assistant_msg.clone()));
+                            });
+
+                            final_response_text = iteration_text.clone();
+                            stream_done = true;
+                        }
+                        ProviderEvent::Error { error, .. } => {
+                            let friendly = error.text_content();
+                            let friendly = if friendly.is_empty() {
+                                "Unknown provider error".to_string()
+                            } else {
+                                friendly
+                            };
+                            let _ = tx.send(AgentEvent::Error {
+                                session_id: None,
+                                message: friendly.clone(),
+                            }).await;
+                            break 'outer;
+                        }
+                        _ => {}
+                    }
+                }
+
+                if !stream_done {
+                    break 'outer;
+                }
+
+                // ── Execute tool calls if any ────────────────────
+                let mut tool_result_messages: Vec<oxi_ai::ToolResultMessage> = Vec::new();
+                has_more_tool_calls = false;
+
+                if !pending_tool_calls.is_empty() && matches!(stop_reason, StopReason::ToolUse) {
+                    let executed = self.execute_tool_batch(
+                        &tools,
+                        &pending_tool_calls,
+                        &tx,
+                    ).await;
+
+                    has_more_tool_calls = !executed.terminate;
+                    tool_result_messages = executed.messages.clone();
+
+                    // Add tool results to state
+                    for msg in &executed.messages {
+                        self.state.update(|s| {
+                            s.messages.push(Message::ToolResult(msg.clone()));
                         });
                     }
-                    ProviderEvent::Error { error, .. } => {
-                        let friendly = error.text_content();
-                        let friendly = if friendly.is_empty() { "Unknown provider error".to_string() } else { friendly };
-                        let _ = tx_clone.send(AgentEvent::Error {
-                            session_id: None,
-                            message: friendly.clone(),
-                        }).await;
-                        return Err(Error::msg(friendly));
-                    }
-                    _ => {}
                 }
+
+                // ── Turn end ────────────────────────────────────
+                let _ = tx.send(AgentEvent::TurnEnd {
+                    turn_number,
+                    assistant_message: oxi_ai::Message::User(oxi_ai::UserMessage::new(
+                        final_response_text.chars().take(200).collect::<String>()
+                    )), // placeholder
+                    tool_results: tool_result_messages,
+                }).await;
+
+                self.state.update(|s| {
+                    s.increment_iteration();
+                    s.set_stop_reason(stop_reason);
+                });
+                let _ = tx.send(AgentEvent::Iteration {
+                    number: self.state.get_state().iteration,
+                }).await;
+
+                // ── Check shouldStopAfterTurn ────────────────────
+                if self.should_stop_after_turn() {
+                    break 'outer;
+                }
+
+                // ── Error stop → exit ────────────────────────────
+                if matches!(stop_reason, StopReason::Error) {
+                    break 'outer;
+                }
+
+                // ── Poll steering messages ──────────────────────
+                pending_messages = self.drain_steering_messages();
             }
 
-            if pending_tool_calls.is_empty() {
-                break;
+            // ── Outer loop: check follow-up messages ──────────────
+            let follow_ups = self.drain_follow_up_messages();
+            if !follow_ups.is_empty() {
+                pending_messages = follow_ups;
+                continue 'outer;
+            }
+
+            // No more messages, exit
+            break 'outer;
+        }
+
+        let _ = tx.send(AgentEvent::Complete {
+            content: final_response_text.clone(),
+            stop_reason: format!("{:?}", self.state.get_state().stop_reason.unwrap_or(StopReason::Stop)),
+        }).await;
+
+        Ok(Response {
+            content: final_response_text,
+            stop_reason: self.state.get_state().stop_reason.unwrap_or(StopReason::Stop),
+        })
+    }
+
+    // ── Helper methods for the agentic loop ────────────────────────
+
+    /// Check and run compaction if needed.
+    async fn run_compaction_check(&self, tx: &mpsc::Sender<AgentEvent>) {
+        let state_msgs = self.state.get_state().messages.clone();
+        let context_text = serde_json::to_string(&state_msgs).unwrap_or_default();
+        let context_tokens = oxi_ai::estimate_tokens(&context_text);
+        let iteration = self.state.get_state().iteration;
+
+        if self.compaction_manager.should_compact(context_tokens, iteration) {
+            let _ = tx.send(AgentEvent::Compaction {
+                event: crate::compaction::CompactionEvent::Triggered {
+                    context_tokens,
+                    iteration,
+                },
+            }).await;
+
+            match self.compaction_manager.compact_if_needed(
+                &state_msgs,
+                None,
+                context_tokens,
+                iteration,
+            ).await {
+                Ok(Some(compacted)) => {
+                    let _ = tx.send(AgentEvent::Compaction {
+                        event: crate::compaction::CompactionEvent::Started {
+                            message_count: compacted.compacted_count,
+                        },
+                    }).await;
+                    self.state.update(|s| {
+                        s.messages = compacted.kept_messages.clone();
+                    });
+                    let _ = tx.send(AgentEvent::Compaction {
+                        event: crate::compaction::CompactionEvent::Completed {
+                            result: crate::compaction::CompactedContext::from(compacted),
+                            duration_ms: 0,
+                        },
+                    }).await;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!("Compaction failed: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Drain steering messages from hooks or session queue.
+    fn drain_steering_messages(&self) -> Vec<String> {
+        let hooks = self.hooks.read();
+        if let Some(ref get_steering) = hooks.get_steering_messages {
+            return get_steering();
+        }
+        Vec::new()
+    }
+
+    /// Drain follow-up messages from hooks or session queue.
+    fn drain_follow_up_messages(&self) -> Vec<String> {
+        let hooks = self.hooks.read();
+        if let Some(ref get_follow_up) = hooks.get_follow_up_messages {
+            return get_follow_up();
+        }
+        Vec::new()
+    }
+
+    /// Check shouldStopAfterTurn hook.
+    fn should_stop_after_turn(&self) -> bool {
+        let hooks = self.hooks.read();
+        if let Some(ref hook) = hooks.should_stop_after_turn {
+            let ctx = crate::config::ShouldStopAfterTurnContext {
+                message: oxi_ai::AssistantMessage::new(
+                    oxi_ai::Api::OpenAiCompletions, "agent", "agent-model",
+                ),
+                tool_results: Vec::new(),
+                iteration: self.state.get_state().iteration,
+            };
+            return hook(&ctx);
+        }
+        false
+    }
+
+    /// Execute a batch of tool calls, returning results and termination flag.
+    async fn execute_tool_batch(
+        &self,
+        tools: &Arc<ToolRegistry>,
+        tool_calls: &[oxi_ai::ToolCall],
+        tx: &mpsc::Sender<AgentEvent>,
+    ) -> ToolBatchResult {
+        let mode = {
+            let hooks = self.hooks.read();
+            hooks.tool_execution
+        };
+
+        match mode {
+            crate::config::ToolExecutionMode::Parallel => {
+                self.execute_tools_parallel(tools, tool_calls, tx).await
+            }
+            crate::config::ToolExecutionMode::Sequential => {
+                self.execute_tools_sequential(tools, tool_calls, tx).await
+            }
+        }
+    }
+
+    /// Execute tool calls sequentially.
+    async fn execute_tools_sequential(
+        &self,
+        tools: &Arc<ToolRegistry>,
+        tool_calls: &[oxi_ai::ToolCall],
+        tx: &mpsc::Sender<AgentEvent>,
+    ) -> ToolBatchResult {
+        let mut messages = Vec::new();
+        let mut all_terminate = true;
+
+        for tool_call in tool_calls {
+            let tool_call_id = tool_call.id.clone();
+            let tool_name = tool_call.name.clone();
+
+            // beforeToolCall hook
+            if self.before_tool_call(&tool_call_id, &tool_name, &tool_call.arguments) {
+                let error_msg = format!("Tool '{}' execution blocked by beforeToolCall hook", tool_name);
+                let result_msg = oxi_ai::ToolResultMessage::new(
+                    tool_call_id,
+                    tool_name,
+                    vec![ContentBlock::Text(TextContent::new(error_msg.clone()))],
+                );
+                messages.push(result_msg);
+                continue;
+            }
+
+            let _ = tx.send(AgentEvent::ToolStart {
+                tool_call_id: tool_call_id.clone(),
+                tool_name: tool_name.clone(),
+            }).await;
+
+            let tool_result = self.execute_tool_single(tools, tool_call, tx.clone()).await;
+
+            // afterToolCall hook
+            let finalized = self.after_tool_call(
+                &tool_call_id,
+                &tool_name,
+                &tool_result.content,
+                tool_result.status == "error",
+            );
+
+            let _ = tx.send(AgentEvent::ToolComplete {
+                result: tool_result.clone(),
+            }).await;
+
+            let result_msg = oxi_ai::ToolResultMessage::new(
+                tool_call_id,
+                tool_name,
+                vec![ContentBlock::Text(TextContent::new(
+                    finalized.content.unwrap_or(tool_result.content.clone())
+                ))],
+            );
+            messages.push(result_msg);
+
+            if !finalized.terminate.unwrap_or(false) {
+                all_terminate = false;
             }
         }
 
-        Ok(Response {
-            content: String::new(),
-            stop_reason: StopReason::Stop,
-        })
+        ToolBatchResult {
+            messages,
+            terminate: all_terminate && !tool_calls.is_empty(),
+        }
+    }
+
+    /// Execute tool calls in parallel (fallback to sequential for simplicity).
+    /// Full parallel execution requires tools to be Send + 'static safe.
+    async fn execute_tools_parallel(
+        &self,
+        tools: &Arc<ToolRegistry>,
+        tool_calls: &[oxi_ai::ToolCall],
+        tx: &mpsc::Sender<AgentEvent>,
+    ) -> ToolBatchResult {
+        // For now, use sequential execution under the parallel mode.
+        // True parallel execution requires restructuring tools to be
+        // spawn-safe. This matches pi-mono's "prepare sequentially,
+        // execute concurrently" pattern in spirit.
+        self.execute_tools_sequential(tools, tool_calls, tx).await
+    }
+
+    /// Execute a single tool call (shared between sequential and parallel).
+    async fn execute_tool_single(
+        &self,
+        tools: &Arc<ToolRegistry>,
+        tool_call: &oxi_ai::ToolCall,
+        tx: mpsc::Sender<AgentEvent>,
+    ) -> oxi_ai::ToolResult {
+        let tool_call_id = tool_call.id.clone();
+        let tool_name = tool_call.name.clone();
+
+        let tool = match tools.get(&tool_name) {
+            Some(t) => t,
+            None => {
+                return oxi_ai::ToolResult {
+                    tool_call_id: tool_call_id.clone(),
+                    content: format!("Error: Unknown tool '{}'", tool_name),
+                    status: "error".to_string(),
+                };
+            }
+        };
+
+        // Set up progress callback
+        let tool_call_id_clone = tool_call_id.clone();
+        let tx_clone = tx.clone();
+        let progress_cb = progress_callback(move |msg: String| {
+            let tx = tx_clone.clone();
+            let tool_call_id = tool_call_id_clone.clone();
+            tokio::spawn(async move {
+                let _ = tx.send(AgentEvent::ToolProgress {
+                    tool_call_id,
+                    message: msg,
+                }).await;
+            });
+        });
+        tool.on_progress(progress_cb);
+
+        let params = tool_call.arguments.clone();
+
+        match tool.execute(&tool_call_id, params, None).await {
+            Ok(AgentToolResult { success, output, .. }) => oxi_ai::ToolResult {
+                tool_call_id: tool_call_id.clone(),
+                content: output,
+                status: if success { "success".to_string() } else { "error".to_string() },
+            },
+            Err(e) => oxi_ai::ToolResult {
+                tool_call_id: tool_call_id.clone(),
+                content: e,
+                status: "error".to_string(),
+            },
+        }
+    }
+
+    /// Call beforeToolCall hook. Returns true if the call should be blocked.
+    fn before_tool_call(&self, tool_call_id: &str, tool_name: &str, args: &serde_json::Value) -> bool {
+        let hooks = self.hooks.read();
+        if let Some(ref hook) = hooks.before_tool_call {
+            let ctx = crate::config::BeforeToolCallContext {
+                tool_call_id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                args: args.clone(),
+            };
+            let result = hook(&ctx);
+            return result.block;
+        }
+        false
+    }
+
+    /// Call afterToolCall hook and return finalized result.
+    fn after_tool_call(&self, tool_call_id: &str, tool_name: &str, result: &str, is_error: bool) -> crate::config::AfterToolCallResult {
+        let hooks = self.hooks.read();
+        if let Some(ref hook) = hooks.after_tool_call {
+            let ctx = crate::config::AfterToolCallContext {
+                tool_call_id: tool_call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                result: result.to_string(),
+                is_error,
+            };
+            return hook(&ctx);
+        }
+        crate::config::AfterToolCallResult::default()
+    }
+
+    /// Set hooks for the agent loop.
+    pub fn set_hooks(&self, hooks: crate::config::AgentHooks) {
+        let mut h = self.hooks.write();
+        *h = hooks;
     }
 
     /// Execute a tool with progress streaming
