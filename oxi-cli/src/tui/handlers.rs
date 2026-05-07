@@ -353,6 +353,14 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         UiEvent::ImageBlock { mime_type, base64_data } => {
             state.stream_image(mime_type, base64_data);
         }
+        UiEvent::TokenUsage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, context_window_pct, total_cost } => {
+            state.footer_state.data.input_tokens = input_tokens;
+            state.footer_state.data.output_tokens = output_tokens;
+            state.footer_state.data.cache_read_tokens = cache_read_tokens;
+            state.footer_state.data.cache_write_tokens = cache_write_tokens;
+            state.footer_state.data.context_window_pct = context_window_pct;
+            state.footer_state.data.total_cost = total_cost;
+        }
     }
 }
 
