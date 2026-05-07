@@ -457,7 +457,6 @@ impl Agent {
         // Inner loop: process events from one stream
         // ToolUse -> execute tools -> add results -> continue
         // Stop/Length -> return response
-        let mut final_response_text = String::new();
         let mut pending_tool_calls: Vec<oxi_ai::ToolCall> = Vec::new();
 
         loop {
@@ -540,7 +539,6 @@ impl Agent {
                 match event {
                     ProviderEvent::TextDelta { delta, .. } => {
                         iteration_text.push_str(&delta);
-                        final_response_text.push_str(&delta);
                         let _ = tx_clone.send(AgentEvent::TextChunk { text: delta }).await;
                     }
                     ProviderEvent::ToolCallStart { .. } => {}
@@ -612,7 +610,7 @@ impl Agent {
                         }).await;
                         self.state.update(|s| { s.increment_iteration(); });
                         return Ok(Response {
-                            content: final_response_text,
+                            content: iteration_text.clone(),
                             stop_reason,
                         });
                     }
@@ -635,7 +633,7 @@ impl Agent {
         }
 
         Ok(Response {
-            content: final_response_text,
+            content: String::new(),
             stop_reason: StopReason::Stop,
         })
     }
