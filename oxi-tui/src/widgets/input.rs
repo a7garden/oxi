@@ -45,6 +45,13 @@ impl InputState {
         self.cursor += 1;
     }
 
+    /// Insert a string at cursor (for IME composition and paste).
+    pub fn insert_str(&mut self, s: &str) {
+        let byte_pos = self.char_to_byte(self.cursor);
+        self.text.insert_str(byte_pos, s);
+        self.cursor += s.chars().count();
+    }
+
     /// Delete character before cursor.
     pub fn backspace(&mut self) {
         if self.cursor > 0 {
