@@ -85,6 +85,7 @@ pub struct SearchResult {
 
 /// Parse a3s-search CLI output into structured results.
 fn parse_a3s_output(raw: &str) -> Vec<SearchResult> {
+    let header_re = regex::Regex::new(r"^(\d+)\.\s+(.+)$").expect("valid regex");
     let mut results = Vec::new();
     let mut current: Option<PartialResult> = None;
 
@@ -97,10 +98,7 @@ fn parse_a3s_output(raw: &str) -> Vec<SearchResult> {
         }
 
         // Match result header: "N. Title"
-        if let Some(caps) = regex::Regex::new(r"^(\d+)\.\s+(.+)$")
-            .ok()
-            .and_then(|re| re.captures(trimmed))
-        {
+        if let Some(caps) = header_re.captures(trimmed) {
             // Flush previous
             if let Some(prev) = current.take() {
                 if !prev.title.is_empty() && !prev.url.is_empty() {
@@ -197,17 +195,15 @@ fn parse_engine_names(s: &str) -> Vec<String> {
 
 // ── Search execution ──────────────────────────────────────────────
 
-/// Search using a3s-search binary.
-async fn search_a3s(
+/// Search using a3s-search binary (path already resolved).
+async fn search_a3s_with_bin(
+    bin: &std::path::Path,
     query: &str,
     engines: &str,
     limit: usize,
     signal: Option<oneshot::Receiver<()>>,
 ) -> Result<Vec<SearchResult>, ToolError> {
-    let bin = find_a3s_binary()
-        .ok_or_else(|| "a3s-search binary not found. Install with: cargo install a3s-search --no-default-features".to_string())?;
-
-    let mut cmd = tokio::process::Command::new(&bin);
+    let mut cmd = tokio::process::Command::new(bin);
     cmd.arg(query)
         .arg("-e")
         .arg(engines)
@@ -393,8 +389,9 @@ fn format_results(results: &[SearchResult]) -> String {
         .iter()
         .enumerate()
         .map(|(i, r)| {
-            let snippet = if r.snippet.len() > 200 {
-                format!("{}...", &r.snippet[..200])
+            let snippet = if r.snippet.chars().count() > 200 {
+                let truncated: String = r.snippet.chars().take(200).collect();
+                format!("{}...", truncated)
             } else {
                 r.snippet.clone()
             };
@@ -431,9 +428,9 @@ impl WebSearchTool {
         limit: usize,
         signal: Option<oneshot::Receiver<()>>,
     ) -> Result<Vec<SearchResult>, ToolError> {
-        // Try a3s-search first
-        if find_a3s_binary().is_some() {
-            match search_a3s(query, engines, limit, signal).await {
+        // Try a3s-search first (only if binary is available)
+        if let Some(bin) = find_a3s_binary() {
+            match search_a3s_with_bin(&bin, query, engines, limit, signal).await {
                 Ok(results) => return Ok(results),
                 Err(e) => {
                     tracing::warn!("a3s-search failed, falling back to DuckDuckGo: {}", e);

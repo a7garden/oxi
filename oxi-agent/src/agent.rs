@@ -1,6 +1,5 @@
 /// Core agent implementation
 
-use crate::compaction::{CompactedContext as AgentCompactedContext, CompactionEvent};
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::events::AgentEvent;
@@ -12,11 +11,10 @@ use futures::StreamExt;
 use oxi_ai::{
     progress_callback, transform_for_provider, CompactionManager, CompactionStrategy,
     ContentBlock, Context, LlmCompactor, Message, Provider, ProviderEvent, StreamOptions,
-    TextContent, ToolCall,
+    TextContent,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio::sync::mpsc;
 
 use crate::stream_retry::{self, RetryCallback};
@@ -53,10 +51,10 @@ struct AgentInner {
     provider: Arc<dyn Provider>,
 }
 
-/// Agent 런타임.
+/// Agent runtime.
 ///
-/// 프로바이더, 도구 레지스트리, 상태, 컴팩션 매니저를 통합 관리하며
-/// 프롬프트 실행, 모델 전환, 도구 호출, 폴백 등의 에이전트 루프를 제공한다.
+/// Manages provider, tool registry, state, and compaction, providing an
+/// agentic loop for prompt execution, model switching, tool calls, and fallback.
 pub struct Agent {
     inner: RwLock<AgentInner>,
     tools: Arc<ToolRegistry>,
@@ -235,8 +233,6 @@ impl Agent {
 
     /// Run the agent, delivering events through the provided channel.
     ///
-    /// Run the agent, delivering events through the provided channel.
-    ///
     /// Implements a 2-level agentic loop matching pi-mono's architecture:
     ///
     /// ```text
@@ -307,6 +303,7 @@ impl Agent {
                 }
 
                 // ── Turn start ──────────────────────────────────
+                turn_number += 1;
                 let _ = tx.send(AgentEvent::TurnStart { turn_number }).await;
 
                 // ── Inject pending (steering) messages ──────────
@@ -371,13 +368,29 @@ impl Agent {
                     &tx,
                 ).await {
                     Ok(s) => s,
-                    Err(e) => {
-                        let msg = e.user_friendly();
+                    Err(primary_err) => {
+                        // Try fallback model before giving up
                         let _ = tx.send(AgentEvent::Error {
                             session_id: None,
-                            message: format!("Stream error: {}", msg),
+                            message: format!("Primary model failed: {}", primary_err.user_friendly()),
                         }).await;
-                        break 'outer;
+
+                        match self.try_fallback(
+                            &model,
+                            &context,
+                            None,
+                            &tx,
+                            primary_err.to_string(),
+                        ).await {
+                            Ok(s) => s,
+                            Err(fallback_err) => {
+                                let _ = tx.send(AgentEvent::Error {
+                                    session_id: None,
+                                    message: format!("Fallback also failed: {}", fallback_err.user_friendly()),
+                                }).await;
+                                break 'outer;
+                            }
+                        }
                     }
                 };
 
@@ -524,11 +537,21 @@ impl Agent {
                 }
 
                 // ── Turn end ────────────────────────────────────
+                // Build the turn's assistant message for TurnEnd event
+                let turn_assistant = {
+                    let mut content_blocks = vec![];
+                    if !iteration_text.is_empty() {
+                        content_blocks.push(ContentBlock::Text(TextContent::new(iteration_text.clone())));
+                    }
+                    let mut msg = oxi_ai::AssistantMessage::new(
+                        oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
+                    );
+                    msg.content = content_blocks;
+                    oxi_ai::Message::Assistant(msg)
+                };
                 let _ = tx.send(AgentEvent::TurnEnd {
                     turn_number,
-                    assistant_message: oxi_ai::Message::User(oxi_ai::UserMessage::new(
-                        final_response_text.chars().take(200).collect::<String>()
-                    )), // placeholder
+                    assistant_message: turn_assistant,
                     tool_results: tool_result_messages,
                 }).await;
 
@@ -845,70 +868,6 @@ impl Agent {
     pub fn set_hooks(&self, hooks: crate::config::AgentHooks) {
         let mut h = self.hooks.write();
         *h = hooks;
-    }
-
-    /// Execute a tool with progress streaming
-    async fn execute_tool(
-        &self,
-        tools: &Arc<ToolRegistry>,
-        tool_call: &ToolCall,
-        tx: mpsc::Sender<AgentEvent>,
-    ) -> oxi_ai::ToolResult {
-        let tool_call_id = tool_call.id.clone();
-        let tool_name = tool_call.name.clone();
-
-        let tool = match tools.get(&tool_name) {
-            Some(t) => t,
-            None => {
-                return oxi_ai::ToolResult {
-                    tool_call_id: tool_call_id.clone(),
-                    content: format!("Error: Unknown tool '{}'", tool_name),
-                    status: "error".to_string(),
-                };
-            }
-        };
-
-        // Set up progress callback that emits to the channel
-        let tool_call_id_clone = tool_call_id.clone();
-        let tx_clone = tx.clone();
-        let progress_cb = progress_callback(move |msg: String| {
-            let tx = tx_clone.clone();
-            let tool_call_id = tool_call_id_clone.clone();
-            tokio::spawn(async move {
-                let _ = tx
-                    .send(AgentEvent::ToolProgress {
-                        tool_call_id,
-                        message: msg,
-                    })
-                    .await;
-            });
-        });
-
-        // Set the callback on the tool
-        tool.on_progress(progress_cb);
-
-        // tool_call.arguments is already JsonValue, use it directly
-        let params = tool_call.arguments.clone();
-
-        // Execute the tool
-        match tool.execute(&tool_call_id, params, None).await {
-            Ok(AgentToolResult {
-                success, output, ..
-            }) => oxi_ai::ToolResult {
-                tool_call_id: tool_call_id.clone(),
-                content: output,
-                status: if success {
-                    "success".to_string()
-                } else {
-                    "error".to_string()
-                },
-            },
-            Err(e) => oxi_ai::ToolResult {
-                tool_call_id: tool_call_id.clone(),
-                content: e,
-                status: "error".to_string(),
-            },
-        }
     }
 
     /// Run the agent, invoking `on_event` for each [`AgentEvent`] produced.
