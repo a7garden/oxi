@@ -8,10 +8,7 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{
-        Block, BorderType, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap,
-    },
+    widgets::StatefulWidget,
 };
 use crate::{Event, KeyCode, KeyEvent, Theme};
 use crate::fuzzy::fuzzy_match;
@@ -300,76 +297,111 @@ impl StatefulWidget for CommandPalette<'_> {
         let x = area.x + (area.width.saturating_sub(palette_w)) / 2;
         let y = area.y + 2; // slight offset from top
 
-        let popup_area = Rect {
-            x,
-            y,
-            width: palette_w,
-            height: total_height,
+        // -- dim backdrop --
+        let backdrop = Style::default().bg(Color::Rgb(20, 20, 30));
+        for row in area.y..area.y + area.height {
+            for col in area.x..area.x + area.width {
+                buf[(col, row)].set_style(backdrop);
+            }
+        }
+
+        // Helper: check a coordinate is within the buffer.
+        let in_bounds = |col: u16, row: u16| -> bool {
+            col < area.x + area.width && row < area.y + area.height
         };
 
-        // -- dim backdrop (full screen) --
-        Clear.render(area, buf);
-        let backdrop = Block::default().style(Style::default().bg(Color::Rgb(20, 20, 30)));
-        backdrop.render(area, buf);
+        let bottom_y = y + total_height - 1;
 
-        // -- outer rounded border --
-        let border_block = Block::default()
-            .border_type(BorderType::Rounded)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(overlay_bg));
-        let inner = border_block.inner(popup_area);
-        border_block.render(popup_area, buf);
+        // -- rounded border --
+        let border_style = Style::default().fg(border_color).bg(overlay_bg);
+        // corners
+        if in_bounds(x, y) {
+            buf[(x, y)].set_char('┌').set_style(border_style);
+        }
+        if in_bounds(x + palette_w - 1, y) {
+            buf[(x + palette_w - 1, y)].set_char('┐').set_style(border_style);
+        }
+        if in_bounds(x, bottom_y) {
+            buf[(x, bottom_y)].set_char('└').set_style(border_style);
+        }
+        if in_bounds(x + palette_w - 1, bottom_y) {
+            buf[(x + palette_w - 1, bottom_y)].set_char('┘').set_style(border_style);
+        }
+        // top & bottom edges
+        for col in (x + 1)..(x + palette_w - 1) {
+            if in_bounds(col, y) {
+                buf[(col, y)].set_char('─').set_style(border_style);
+            }
+            if in_bounds(col, bottom_y) {
+                buf[(col, bottom_y)].set_char('─').set_style(border_style);
+            }
+        }
+        // left & right edges
+        for row in (y + 1)..bottom_y {
+            if in_bounds(x, row) {
+                buf[(x, row)].set_char('│').set_style(border_style);
+            }
+            if in_bounds(x + palette_w - 1, row) {
+                buf[(x + palette_w - 1, row)].set_char('│').set_style(border_style);
+            }
+        }
 
-        // inner dimensions
-        let inner_x = inner.x;
-        let inner_w = inner.width as usize;
-        let input_y = inner.y;
-        let sep_y = input_y + 1;
-        let list_start_y = sep_y + 1;
+        // -- separator after input row --
+        let sep_y = y + 2; // border-top(1) + input(1) = separator row
+        for col in (x + 1)..(x + palette_w - 1) {
+            if in_bounds(col, sep_y) {
+                buf[(col, sep_y)].set_char('─').set_style(border_style);
+            }
+        }
+
+        // -- fill interior background --
+        let inner_bg = Style::default().bg(overlay_bg);
+        for row in (y + 1)..bottom_y {
+            for col in (x + 1)..(x + palette_w - 1) {
+                if in_bounds(col, row) {
+                    buf[(col, row)].set_char(' ').set_style(inner_bg);
+                }
+            }
+        }
 
         // -- input row --
-        let prompt_style = Style::default().fg(primary).bg(overlay_bg);
-        let query_style = Style::default().fg(fg).bg(overlay_bg);
+        let input_y = y + 1;
+        let inner_x = x + 1;
+        let inner_w = (palette_w as usize).saturating_sub(2);
 
-        let input_line = Line::from(vec![
-            Span::styled("> ", prompt_style),
-            Span::styled(&state.query, query_style),
-        ]);
-        let input_area = Rect {
-            x: inner_x,
-            y: input_y,
-            width: inner.width,
-            height: 1,
-        };
-        Paragraph::new(input_line)
-            .style(Style::default().bg(overlay_bg))
-            .render(input_area, buf);
+        // "> " prompt
+        let prompt = "> ";
+        let prompt_chars: Vec<char> = prompt.chars().collect();
+        for (i, &c) in prompt_chars.iter().enumerate() {
+            let col = inner_x + i as u16;
+            if (i as usize) < inner_w && in_bounds(col, input_y) {
+                buf[(col, input_y)].set_char(c)
+                    .set_style(Style::default().fg(primary).bg(overlay_bg));
+            }
+        }
 
-        // cursor block highlight (manual — only 1–2 cells)
-        let prompt_len = 2; // "> " is 2 chars
-        let cursor_col = inner_x + prompt_len + state.query.len() as u16;
-        if (prompt_len as usize + state.query.len()) < inner_w {
-            buf[(cursor_col, input_y)]
-                .set_char(' ')
+        // query text
+        let prompt_len = prompt_chars.len();
+        for (i, c) in state.query.chars().enumerate() {
+            let col = inner_x + prompt_len as u16 + i as u16;
+            if (prompt_len + i) < inner_w && in_bounds(col, input_y) {
+                buf[(col, input_y)].set_char(c)
+                    .set_style(Style::default().fg(fg).bg(overlay_bg));
+            }
+        }
+
+        // cursor block
+        let cursor_col = inner_x + prompt_len as u16 + state.query.len() as u16;
+        if (prompt_len + state.query.len()) < inner_w && in_bounds(cursor_col, input_y) {
+            buf[(cursor_col, input_y)].set_char(' ')
                 .set_style(Style::default().fg(Color::Black).bg(primary));
         }
 
-        // -- separator line --
-        let separator = Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(border_color).bg(overlay_bg))
-            .style(Style::default().bg(overlay_bg));
-        let sep_area = Rect {
-            x: inner_x,
-            y: sep_y,
-            width: inner.width,
-            height: 1,
-        };
-        separator.render(sep_area, buf);
-
-        // -- scroll clamp --
+        // -- command list --
+        let list_start_y = sep_y + 1;
         let visible_count = list_height as usize;
+
+        // Adjust scroll offset so selected stays in view.
         if state.selected < state.scroll_offset {
             state.scroll_offset = state.selected;
         }
@@ -377,109 +409,91 @@ impl StatefulWidget for CommandPalette<'_> {
             state.scroll_offset = state.selected - visible_count + 1;
         }
 
-        // -- command list --
-        let list_area = Rect {
-            x: inner_x,
-            y: list_start_y,
-            width: inner.width,
-            height: list_height,
-        };
-
         if state.filtered_indices.is_empty() {
-            let msg = Paragraph::new(Line::from(Span::styled(
-                "No matches",
-                Style::default().fg(muted).bg(overlay_bg),
-            )))
-            .style(Style::default().bg(overlay_bg));
-            msg.render(list_area, buf);
+            // "No matches" message
+            let msg = "No matches";
+            for (i, c) in msg.chars().enumerate() {
+                let col = inner_x + i as u16;
+                if i < inner_w && in_bounds(col, list_start_y) {
+                    buf[(col, list_start_y)].set_char(c)
+                        .set_style(Style::default().fg(muted).bg(overlay_bg));
+                }
+            }
             return;
         }
 
         let start = state.scroll_offset;
         let end = (start + visible_count).min(state.filtered_indices.len());
 
-        let lines: Vec<Line> = (start..end)
-            .map(|vi| {
-                let cmd_idx = state.filtered_indices[vi];
-                let cmd = &state.commands[cmd_idx];
-                let is_selected = vi == state.selected;
+        for vi in start..end {
+            let row = list_start_y + (vi - start) as u16;
+            if !in_bounds(inner_x, row) {
+                break;
+            }
+            let cmd_idx = state.filtered_indices[vi];
+            let cmd = &state.commands[cmd_idx];
+            let is_selected = vi == state.selected;
 
-                let (item_fg, item_bg) = if is_selected {
-                    (Color::Black, primary)
-                } else {
-                    (fg, overlay_bg)
-                };
-                let item_style = Style::default().fg(item_fg).bg(item_bg);
+            let (item_fg, item_bg) = if is_selected {
+                (Color::Black, primary)
+            } else {
+                (fg, overlay_bg)
+            };
+            let item_style = Style::default().fg(item_fg).bg(item_bg);
 
-                // Build the left side: optional category prefix + command name
-                let mut spans: Vec<Span> = Vec::new();
-
-                if let Some(ref cat) = cmd.category {
-                    let cat_style = if is_selected {
-                        Style::default().fg(Color::Black).bg(primary)
-                    } else {
-                        Style::default().fg(muted).bg(overlay_bg)
-                    };
-                    spans.push(Span::styled(format!("{}: ", cat), cat_style));
+            // Category dimmed prefix
+            let mut col_offset: usize = 0;
+            if let Some(ref cat) = cmd.category {
+                let cat_str = format!("{}: ", cat);
+                for (i, c) in cat_str.chars().enumerate() {
+                    let col = inner_x + i as u16;
+                    if col_offset + i < inner_w && in_bounds(col, row) {
+                        buf[(col, row)].set_char(c)
+                            .set_style(if is_selected {
+                                Style::default().fg(Color::Black).bg(primary)
+                            } else {
+                                Style::default().fg(muted).bg(overlay_bg)
+                            });
+                    }
                 }
+                col_offset = cat_str.chars().count();
+            }
 
-                // Truncate name to fit (reserve ~12 chars for shortcut column)
-                let cat_len = cmd
-                    .category
-                    .as_ref()
-                    .map(|c| c.chars().count() + 2)
-                    .unwrap_or(0);
-                let max_name = inner_w.saturating_sub(12);
-                let name_str: String = cmd.name.chars().take(max_name.saturating_sub(cat_len)).collect();
-                spans.push(Span::styled(name_str, item_style));
-
-                // Pad to fill width, leaving room for right-aligned shortcut
-                let current_len: usize = spans.iter().map(|s| s.width()).sum();
-                let shortcut_col = if cmd.shortcut.is_some() {
-                    inner_w.saturating_sub(12)
-                } else {
-                    inner_w
-                };
-                let padding = shortcut_col.saturating_sub(current_len);
-                if padding > 0 {
-                    spans.push(Span::styled(" ".repeat(padding), item_style));
+            // Command name
+            let max_name = inner_w.saturating_sub(12); // reserve space for shortcut
+            let name_str: String = cmd.name.chars().take(max_name).collect();
+            for (i, c) in name_str.chars().enumerate() {
+                let col = inner_x + (col_offset + i) as u16;
+                if col_offset + i < inner_w && in_bounds(col, row) {
+                    buf[(col, row)].set_char(c).set_style(item_style);
                 }
+            }
+            col_offset += name_str.chars().count();
 
-                // Right-aligned shortcut
-                if let Some(ref shortcut) = cmd.shortcut {
-                    let sc_style = if is_selected {
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(primary)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(muted).bg(overlay_bg)
-                    };
-                    spans.push(Span::styled(format!("{:>width$}", shortcut, width = 12.min(inner_w.saturating_sub(shortcut_col))), sc_style));
+            // Clear remainder to end of shortcut area
+            for i in col_offset..inner_w.saturating_sub(0) {
+                let col = inner_x + i as u16;
+                if in_bounds(col, row) {
+                    buf[(col, row)].set_char(' ').set_style(item_style);
                 }
+            }
 
-                Line::from(spans)
-            })
-            .collect();
-
-        let list = Paragraph::new(lines)
-            .style(Style::default().bg(overlay_bg))
-            .wrap(Wrap { trim: false });
-        list.render(list_area, buf);
-
-        // -- selected row highlight (fill bg for the entire row) --
-        // The Paragraph widget renders text but may not fill the full row bg.
-        // Apply inverted bg to the selected row cells manually.
-        if state.selected >= start && state.selected < end {
-            let row = list_start_y + (state.selected - start) as u16;
-            let highlight_style = Style::default().fg(Color::Black).bg(primary);
-            for col in inner_x..inner_x + inner.width {
-                if col < area.x + area.width && row < area.y + area.height {
-                    let cell = &mut buf[(col, row)];
-                    // Only override bg for cells that aren't already styled by
-                    // the paragraph (empty space at end of row).
-                    if cell.symbol() == " " {
-                        cell.set_style(highlight_style);
+            // Shortcut (right-aligned)
+            if let Some(ref shortcut) = cmd.shortcut {
+                let sc_len = shortcut.chars().count();
+                let sc_start = inner_w.saturating_sub(sc_len + 1); // 1 padding
+                for (i, c) in shortcut.chars().enumerate() {
+                    let col = inner_x + (sc_start + i) as u16;
+                    if sc_start + i < inner_w && in_bounds(col, row) {
+                        buf[(col, row)].set_char(c)
+                            .set_style(if is_selected {
+                                Style::default()
+                                    .fg(Color::Black)
+                                    .bg(primary)
+                                    .add_modifier(Modifier::BOLD)
+                            } else {
+                                Style::default().fg(muted).bg(overlay_bg)
+                            });
                     }
                 }
             }

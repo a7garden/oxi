@@ -1,10 +1,11 @@
 //! Footer widget — 2줄 상태바: 모델/토큰/시간 + 경로/git
 
 use ratatui::{
-    widgets::{StatefulWidget, Widget},
     buffer::Buffer,
-    layout::Rect,
-    style::{Modifier, Style},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::Style,
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 use crate::Theme;
 
@@ -123,196 +124,153 @@ impl StatefulWidget for Footer<'_> {
         }
 
         let styles = self.theme.to_styles();
-        let max_w = area.width as usize;
         let d = &state.data;
 
-        // Top separator line
-        let row0 = area.y;
-        for col in 0..max_w {
-            buf[(area.x + col as u16, row0)].set_char('─').set_style(styles.border);
-        }
+        // ── Split into 3 rows: separator, line 1, line 2 ──
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(1), // separator
+                Constraint::Length(1), // line 1: tokens/duration + model
+                Constraint::Length(1), // line 2: path/git + version
+            ])
+            .split(area);
 
-        // Line 1 row starts at y+1
-        let row1 = area.y + 1;
-        let row2 = area.y + 2;
+        // Row 0: separator line using Block with top border
+        let separator = Block::default()
+            .borders(Borders::TOP)
+            .border_style(styles.border);
+        separator.render(rows[0], buf);
 
-        // Build left-side content: tokens + duration
-        let mut left_parts: Vec<String> = Vec::new();
+        // ═══════════════════════════════════════════════════════
+        // Row 1: left (tokens + duration) ... right (● model_name)
+        // ═══════════════════════════════════════════════════════
+        {
+            // Build left-side content: tokens + duration
+            let mut left_parts: Vec<String> = Vec::new();
 
-        // Token display: context usage percentage / max (like pi-agent)
-        if d.input_tokens > 0 || d.output_tokens > 0 {
-            let total = d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_tokens;
-            if total > 0 && d.context_window_max > 0 {
-                let pct = (total as f32 / d.context_window_max as f32) * 100.0;
-                let max = FooterData::fmt_count(d.context_window_max);
-                left_parts.push(format!("{:.1}% / {}", pct, max));
+            if d.input_tokens > 0 || d.output_tokens > 0 {
+                let total = d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_tokens;
+                if total > 0 && d.context_window_max > 0 {
+                    let pct = (total as f32 / d.context_window_max as f32) * 100.0;
+                    let max = FooterData::fmt_count(d.context_window_max);
+                    left_parts.push(format!("{:.1}% / {}", pct, max));
+                }
             }
-        }
 
-        // Duration
-        if d.session_duration_secs > 0 {
-            left_parts.push(FooterData::format_duration(d.session_duration_secs));
-        }
+            if d.session_duration_secs > 0 {
+                left_parts.push(FooterData::format_duration(d.session_duration_secs));
+            }
 
-        let left_text = left_parts.join("  ");
+            let left_text = left_parts.join("  ");
 
-        // Build right-side content: ● model_name
-        let model_short = if d.model_name.is_empty() {
-            "[no model]".to_string()
-        } else {
-            d.model_name.split('/').last().unwrap_or(&d.model_name).to_string()
-        };
-
-        // Status indicator color
-        let indicator_color = if d.is_busy {
-            self.theme.colors.accent.to_ratatui()
-        } else {
-            self.theme.colors.success.to_ratatui()
-        };
-
-        let model_display = format!("● {}", model_short);
-        let model_width = model_display.chars().count();
-
-        // Left-aligned content (tokens, duration) — muted
-        // Side padding: 1 char on each side
-        let side_pad = 1;
-        let mut col: usize = side_pad;
-        // Leading space
-        if col < max_w {
-            buf[(area.x + col as u16, row1)].set_char(' ').set_style(styles.muted);
-            col += 1;
-        }
-        for c in left_text.chars() {
-            if col >= max_w { break; }
-            buf[(area.x + col as u16, row1)].set_char(c).set_style(styles.muted);
-            col += 1;
-        }
-
-        // Fill gap between left and right
-        let right_start = max_w.saturating_sub(model_width + 1); // +1 for trailing space
-        while col < right_start {
-            if col >= max_w { break; }
-            buf[(area.x + col as u16, row1)].set_char(' ').set_style(styles.normal);
-            col += 1;
-        }
-
-        // Right-aligned: ● model_name (primary, bold)
-        for (i, c) in model_display.chars().enumerate() {
-            if col >= max_w { break; }
-            let style = if i == 0 {
-                // ● indicator
-                Style::default()
-                    .fg(indicator_color)
-                    .bg(self.theme.colors.background.to_ratatui())
-            } else if i == 1 {
-                // space after ●
-                Style::default()
-                    .fg(self.theme.colors.primary.to_ratatui())
-                    .bg(self.theme.colors.background.to_ratatui())
-                    .add_modifier(Modifier::BOLD)
+            // Build right-side content: ● model_name
+            let model_short = if d.model_name.is_empty() {
+                "[no model]".to_string()
             } else {
-                // model name chars
-                Style::default()
-                    .fg(self.theme.colors.primary.to_ratatui())
-                    .bg(self.theme.colors.background.to_ratatui())
-                    .add_modifier(Modifier::BOLD)
+                d.model_name.split('/').last().unwrap_or(&d.model_name).to_string()
             };
-            buf[(area.x + col as u16, row1)].set_char(c).set_style(style);
-            col += 1;
-        }
 
-        // ═══════════════════════════════════════════════════════
-        // Line 2: path (branch)  (left-aligned, muted)
-        // ═══════════════════════════════════════════════════════
-        col = 0;
-
-        // Indent
-        if col < max_w {
-            buf[(area.x + col as u16, row2)].set_char(' ').set_style(styles.muted);
-            col += 1;
-        }
-
-        // Full path
-        let home = std::env::var("HOME").unwrap_or_default();
-        let pwd_display = if let Some(ref pwd) = d.pwd {
-            if !home.is_empty() && pwd.starts_with(&home) {
-                format!("~{}", &pwd[home.len()..])
+            let indicator_color = if d.is_busy {
+                self.theme.colors.accent.to_ratatui()
             } else {
-                pwd.clone()
-            }
-        } else {
-            String::new()
-        };
-        for c in pwd_display.chars() {
-            if col >= max_w { break; }
-            buf[(area.x + col as u16, row2)].set_char(c).set_style(styles.muted);
-            col += 1;
+                self.theme.colors.success.to_ratatui()
+            };
+
+            // Render left and right using a horizontal split
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Min(1),  // left side
+                    Constraint::Min(1),  // right side
+                ])
+                .split(rows[1]);
+
+            // Left: tokens + duration (muted)
+            let left_paragraph = Paragraph::new(Line::from(Span::styled(
+                format!(" {}", left_text),
+                styles.muted,
+            )));
+            left_paragraph.render(cols[0], buf);
+
+            // Right: ● model_name (right-aligned)
+            let model_line = Line::from(vec![
+                Span::styled("●", Style::default().fg(indicator_color)),
+                Span::styled(
+                    format!(" {}", model_short),
+                    Style::default()
+                        .fg(self.theme.colors.primary.to_ratatui())
+                        .add_modifier(ratatui::style::Modifier::BOLD),
+                ),
+            ]);
+            let right_paragraph = Paragraph::new(model_line).alignment(Alignment::Right);
+            right_paragraph.render(cols[1], buf);
         }
 
-        // Git branch (accent)
-        if let Some(ref branch) = d.git_branch {
-            if !branch.is_empty() {
-                let dirty_marker = if d.git_dirty { "*" } else { "" };
-                let git_str = format!(" ({}){}", branch, dirty_marker);
-                for c in git_str.chars() {
-                    if col >= max_w { break; }
-                    buf[(area.x + col as u16, row2)].set_char(c).set_style(
-                        Style::default()
-                            .fg(self.theme.colors.accent.to_ratatui())
-                            .bg(self.theme.colors.background.to_ratatui())
-                    );
-                    col += 1;
-                }
+        // ═══════════════════════════════════════════════════════
+        // Row 2: left (path + git branch + status) ... right (version)
+        // ═══════════════════════════════════════════════════════
+        {
+            let mut left_spans: Vec<Span> = Vec::new();
 
-                // ✓ or ✗ for clean/dirty
-                let status_char = if d.git_dirty { " ✗" } else { " ✓" };
-                let status_style = if d.git_dirty {
-                    Style::default().fg(self.theme.colors.error.to_ratatui())
+            // Path display: replace $HOME with ~
+            let home = std::env::var("HOME").unwrap_or_default();
+            let pwd_display = if let Some(ref pwd) = d.pwd {
+                if !home.is_empty() && pwd.starts_with(&home) {
+                    format!(" ~{}", &pwd[home.len()..])
                 } else {
-                    Style::default().fg(self.theme.colors.success.to_ratatui())
-                };
-                for c in status_char.chars() {
-                    if col >= max_w { break; }
-                    buf[(area.x + col as u16, row2)].set_char(c).set_style(
-                        status_style.bg(self.theme.colors.background.to_ratatui())
-                    );
-                    col += 1;
+                    format!(" {}", pwd)
+                }
+            } else {
+                String::new()
+            };
+            left_spans.push(Span::styled(pwd_display, styles.muted));
+
+            // Git branch (accent), dirty marker, ✓/✗ status
+            if let Some(ref branch) = d.git_branch {
+                if !branch.is_empty() {
+                    let dirty_marker = if d.git_dirty { "*" } else { "" };
+                    left_spans.push(Span::styled(
+                        format!(" ({}){}", branch, dirty_marker),
+                        Style::default()
+                            .fg(self.theme.colors.accent.to_ratatui()),
+                    ));
+
+                    let (status_char, status_style) = if d.git_dirty {
+                        (" ✗", Style::default().fg(self.theme.colors.error.to_ratatui()))
+                    } else {
+                        (" ✓", Style::default().fg(self.theme.colors.success.to_ratatui()))
+                    };
+                    left_spans.push(Span::styled(status_char, status_style));
                 }
             }
-        }
 
-        // Version tag (right-aligned on row2)
-        let version_tag = if !d.version.is_empty() {
-            format!(" v{}", d.version)
-        } else {
-            String::new()
-        };
-        let version_width = version_tag.chars().count();
-        let version_start = max_w.saturating_sub(version_width + 1);
+            // Version tag (muted, right-aligned)
+            let version_tag = if !d.version.is_empty() {
+                format!(" v{} ", d.version)
+            } else {
+                String::new()
+            };
 
-        // Clear gap and overwrite with version
-        if version_start > col {
-            // Clear gap between current col and version start
-            while col < version_start {
-                if col >= max_w { break; }
-                buf[(area.x + col as u16, row2)].set_char(' ').set_style(styles.muted);
-                col += 1;
-            }
-            // Write version
-            for c in version_tag.chars() {
-                if col >= max_w { break; }
-                buf[(area.x + col as u16, row2)].set_char(c).set_style(
-                    Style::default().fg(self.theme.colors.muted.to_ratatui())
-                        .bg(self.theme.colors.background.to_ratatui())
-                );
-                col += 1;
-            }
-        }
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Min(1),  // left side
+                    Constraint::Min(1),  // right side
+                ])
+                .split(rows[2]);
 
-        // Clear remainder
-        while col < max_w {
-            buf[(area.x + col as u16, row2)].set_char(' ').set_style(styles.muted);
-            col += 1;
+            // Left: path + git
+            let left_paragraph = Paragraph::new(Line::from(left_spans));
+            left_paragraph.render(cols[0], buf);
+
+            // Right: version (muted)
+            let right_paragraph = Paragraph::new(Line::from(Span::styled(
+                version_tag,
+                Style::default().fg(self.theme.colors.muted.to_ratatui()),
+            )))
+            .alignment(Alignment::Right);
+            right_paragraph.render(cols[1], buf);
         }
     }
 }
