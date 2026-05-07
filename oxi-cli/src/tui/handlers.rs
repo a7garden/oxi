@@ -50,11 +50,9 @@ pub async fn handle_input(
             if state.overlay.is_some() {
                 // 오버레이 활성 시 Paste를 overlay handler로 전달
                 handle_overlay_paste(&text, state)
-            } else if !state.is_agent_busy {
+            } else {
                 state.input.insert_str(&text);
                 state.update_slash_completions();
-                None
-            } else {
                 None
             }
         }
@@ -77,32 +75,47 @@ async fn handle_key(
 
     match key.code {
         KeyCode::Enter => {
-            if !state.is_agent_busy {
-                // 슬래시 명령 팝업이 활성 상태면 선택된 명령 바로 실행
-                if state.slash_completion_active {
-                    let cmd = state.selected_slash_command().map(|c| c.name.clone());
-                    state.clear_slash_completions();
-                    state.input_clear();
-                    if let Some(cmd) = cmd {
-                        return Some(Action::ExecuteSlashCommand(cmd));
-                    }
+            let value = state.input_value().to_string();
+            if value.is_empty() {
+                return None;
+            }
+
+            // Slash command popup
+            if state.slash_completion_active {
+                let cmd = state.selected_slash_command().map(|c| c.name.clone());
+                state.clear_slash_completions();
+                state.input_clear();
+                if let Some(cmd) = cmd {
+                    return Some(Action::ExecuteSlashCommand(cmd));
+                }
+                return None;
+            }
+
+            // Slash command in input
+            if value.starts_with('/') {
+                let handled = slash::handle_slash_command(
+                    &value, session, state, running,
+                );
+                state.input_clear();
+                if handled {
                     return None;
                 }
-                let value = state.input_value().to_string();
-                if !value.is_empty() {
-                    if value.starts_with('/') {
-                        let handled = slash::handle_slash_command(
-                            &value, session, state, running,
-                        );
-                        state.input_clear();
-                        if handled {
-                            return None;
-                        }
-                    }
-                    return Some(Action::SendPrompt(value));
-                }
             }
-            None
+
+            let value = value; // re-bind after slash check
+            if state.is_agent_busy {
+                // Agent busy — queue as steering message
+                state.add_system_message(format!("Queued: {}", value.chars().take(50).collect::<String>()));
+                state.input_history.insert(0, value.clone());
+                if state.input_history.len() > 100 { state.input_history.pop(); }
+                state.history_index = 0;
+                let _ = session.steer(value);
+                state.input_clear();
+                return None;
+            }
+
+            // Not busy — send directly
+            return Some(Action::SendPrompt(value));
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if state.is_agent_busy {
