@@ -315,32 +315,45 @@ impl App {
     /// Create a new App instance
     pub async fn new(settings: Settings) -> Result<Self> {
         let model_id = settings.effective_model(None)
-            .ok_or_else(|| anyhow::anyhow!(
-                "No model configured. Run 'oxi setup' or set a model:\n\
-                 oxi config set default_model <provider/model>\n\
-                 예: oxi config set default_model anthropic/claude-sonnet-4"
-            ))?;
+            .unwrap_or_default();
         let provider_name = settings.effective_provider(None)
             .unwrap_or_else(|| {
-                // provider/model 포맷에서 provider 추출
-                model_id.split('/').next().unwrap_or("anthropic").to_string()
+                model_id.split('/').next().unwrap_or("").to_string()
             });
 
+        // If no model configured, use a placeholder — TUI will show setup wizard
+        if model_id.is_empty() {
+            // Return App with empty state — TUI handles the setup flow
+            // We'll create a minimal session
+        }
+
         // Parse model ID to get provider and model
-        let parts: Vec<&str> = model_id.split('/').collect();
-        let (provider_name, model_name) = if parts.len() >= 2 {
+        let (provider_name, model_name) = if model_id.contains('/') {
+            let parts: Vec<&str> = model_id.split('/').collect();
             (parts[0].to_string(), parts[1..].join("/"))
-        } else {
+        } else if !model_id.is_empty() {
             (provider_name.clone(), model_id.clone())
+        } else {
+            (String::new(), String::new())
         };
 
         // Get the model
-        let _model = get_model(&provider_name, &model_name)
-            .ok_or_else(|| Error::msg(format!("Model '{}' not found", model_id)))?;
+        let _model = if !provider_name.is_empty() && !model_name.is_empty() {
+            get_model(&provider_name, &model_name)
+        } else {
+            None
+        };
 
         // Create a provider for this model
-        let provider = get_provider(&provider_name)
-            .ok_or_else(|| Error::msg(format!("Provider '{}' not found", provider_name)))?;
+        let provider = if !provider_name.is_empty() {
+            get_provider(&provider_name)
+                .ok_or_else(|| Error::msg(format!("Provider '{}' not found", provider_name)))?
+        } else {
+            // No provider configured — use anthropic as placeholder so App can be created
+            // TUI will detect this and show setup wizard
+            get_provider("anthropic")
+                .ok_or_else(|| Error::msg("No provider available"))?
+        };
 
         // Load skills
         let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {

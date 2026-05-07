@@ -23,6 +23,32 @@ use std::io;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+/// No model configured — show setup guidance inside TUI
+fn format_no_model_welcome() -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    format!(
+        " oxi v{}\n\
+         \n\
+         No model configured. Set up a provider to get started:\n\
+         \n\
+         /login <provider> <api-key>\n\
+         \n\
+         Providers: anthropic, openai, google, deepseek, groq, mistral, xai, minimax, zai\n\
+         \n\
+         Example:\n\
+           /login anthropic sk-ant-api03-...\n\
+           /login minimax eyJhbG...\n\
+         \n\
+         Or set a model first:\n\
+           /model anthropic/claude-sonnet-4\n\
+         \n\
+         After login, set your default model:\n\
+           /model openai/gpt-4o\n\
+         ",
+        version
+    )
+}
+
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture,
@@ -401,7 +427,15 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     state.footer_state.data.pwd = Some(cwd.clone());
     state.footer_state.data.model_name = model_id.clone();
     state.footer_state.data.git_branch = git_branch.clone();
-    state.add_system_message(welcome::format_welcome(&session_id, &model_id));
+
+    // Check if model is configured
+    let has_model = !model_id.is_empty() && model_id.contains('/');
+    if has_model {
+        state.add_system_message(welcome::format_welcome(&session_id, &model_id));
+    } else {
+        // No model configured — show setup guidance in TUI
+        state.add_system_message(format_no_model_welcome());
+    }
 
     let mut running = true;
     let mut last_spinner_tick = std::time::Instant::now();
