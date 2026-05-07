@@ -120,9 +120,6 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
             Some(Box::new(bedrock::BedrockProvider::new()))
         }
         "cloudflare" | "workers-ai" => Some(Box::new(cloudflare::CloudflareProvider::new())),
-        "zai" => Some(Box::new(openai::OpenAiProvider::with_base_url(
-            "https://api.z.ai/api/coding/paas/v4",
-        ))),
         "copilot" | "github-copilot" => Some(Box::new(copilot::CopilotProvider::new())),
         "openai-responses" => Some(Box::new(openai_responses::OpenAiResponsesProvider::new())),
         "openai-completions" | "completions" => Some(Box::new(openai_completions::OpenAICompletionsProvider::new())),

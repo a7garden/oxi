@@ -27,27 +27,7 @@ use ratatui::{
 use std::io;
 use std::path::PathBuf;
 
-// ── Preset providers ────────────────────────────────────────────────────────
-
-/// Preset provider definitions shown in the wizard.
-struct PresetProvider {
-    name: &'static str,
-    env_key: &'static str,
-    base_url: Option<&'static str>,
-}
-
-const PRESET_PROVIDERS: &[PresetProvider] = &[
-    PresetProvider { name: "anthropic", env_key: "ANTHROPIC_API_KEY", base_url: None },
-    PresetProvider { name: "openai", env_key: "OPENAI_API_KEY", base_url: None },
-    PresetProvider { name: "google", env_key: "GOOGLE_API_KEY", base_url: None },
-    PresetProvider { name: "deepseek", env_key: "DEEPSEEK_API_KEY", base_url: None },
-    PresetProvider { name: "groq", env_key: "GROQ_API_KEY", base_url: None },
-    PresetProvider { name: "openrouter", env_key: "OPENROUTER_API_KEY", base_url: None },
-    PresetProvider { name: "mistral", env_key: "MISTRAL_API_KEY", base_url: None },
-    PresetProvider { name: "xai", env_key: "XAI_API_KEY", base_url: None },
-    PresetProvider { name: "minimax", env_key: "MINIMAX_API_KEY", base_url: Some("https://api.minimax.chat/v1") },
-    PresetProvider { name: "zai", env_key: "ZAI_API_KEY", base_url: Some("https://open.bigmodel.cn/api/paas/v4") },
-];
+// ── Provider entry (runtime state) ──────────────────────────────────────────
 
 // ── Provider entry (runtime state) ──────────────────────────────────────────
 
@@ -135,32 +115,32 @@ fn mask_key(key: &str) -> String {
 
 // ── Load provider state ─────────────────────────────────────────────────────
 
-/// Build the initial provider list from presets + stored keys + custom providers.
+/// Build the initial provider list from builtins + stored keys + custom providers.
 fn load_providers(auth_store: &crate::auth_storage::AuthStorage) -> Vec<ProviderEntry> {
     let mut entries = Vec::new();
 
-    for preset in PRESET_PROVIDERS {
-        let key = auth_store.get_api_key(preset.name);
+    for builtin in oxi_ai::register_builtins::get_builtin_providers() {
+        let key = auth_store.get_api_key(builtin.name);
 
         let (has_key, key_masked) = match &key {
             Some(k) => (true, mask_key(k)),
             None => (false, String::new()),
         };
 
+        let base_url = builtin.base_url;
         entries.push(ProviderEntry {
-            name: preset.name.to_string(),
+            name: builtin.name.to_string(),
             has_key,
             key_masked,
-            is_custom: preset.base_url.is_some(),
-            base_url: preset.base_url.map(|s| s.to_string()),
+            is_custom: false,
+            base_url: if base_url.is_empty() { None } else { Some(base_url.to_string()) },
         });
     }
 
-    // Add custom providers from settings that aren't already in presets
+    // Add custom providers from settings that aren't already in builtins
     if let Ok(settings) = crate::settings::Settings::load() {
-        let preset_names: Vec<&str> = PRESET_PROVIDERS.iter().map(|p| p.name).collect();
         for cp in &settings.custom_providers {
-            if preset_names.contains(&cp.name.as_str()) {
+            if oxi_ai::register_builtins::is_builtin_provider(&cp.name) {
                 continue;
             }
             let actual_key = auth_store.get_api_key(&cp.name);
