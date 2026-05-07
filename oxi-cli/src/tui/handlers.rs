@@ -474,9 +474,9 @@ async fn handle_overlay_key(
             handle_setup_step_key(key, state).await
         }
 
-        // ── Login wizard (same steps as setup) ──
-        Some(AppOverlay::LoginProvider(_)) => {
-            handle_login_step_key(key, state).await
+        // ── Provider config wizard (same steps as setup) ──
+        Some(AppOverlay::ProviderConfig(_)) => {
+            handle_provider_step_key(key, state).await
         }
 
         // ── Model selector ──
@@ -689,13 +689,13 @@ async fn handle_setup_step_key(
     None
 }
 
-async fn handle_login_step_key(
+async fn handle_provider_step_key(
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
 ) -> Option<Action> {
     // Clone the overlay to determine which step we're on without holding a borrow
     let step_kind = match &state.overlay {
-        Some(AppOverlay::LoginProvider(s)) => match s {
+        Some(AppOverlay::ProviderConfig(s)) => match s {
             SetupStep::SelectProvider { .. } => 0,
             SetupStep::EnterApiKey { provider, .. } => 1,
             SetupStep::SelectModel { .. } => 2,
@@ -708,21 +708,21 @@ async fn handle_login_step_key(
         0 => { // SelectProvider
             match key.code {
                 KeyCode::Up => {
-                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
                         let new_sel = if *selected == 0 { providers.len() - 1 } else { *selected - 1 };
-                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel }));
+                        state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel }));
                     }
                 }
                 KeyCode::Down => {
-                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
                         let new_sel = (*selected + 1) % providers.len();
-                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel }));
+                        state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel }));
                     }
                 }
                 KeyCode::Enter => {
-                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
                         if let Some((name, _)) = providers.get(*selected).cloned() {
-                            state.overlay = Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey {
+                            state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey {
                                 provider: name,
                                 key: String::new(),
                                 masked_cursor: 0,
@@ -739,22 +739,22 @@ async fn handle_login_step_key(
 
         1 => { // EnterApiKey
             let provider = match &state.overlay {
-                Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { provider, .. })) => provider.clone(),
+                Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { provider, .. })) => provider.clone(),
                 _ => return None,
             };
             match key.code {
                 KeyCode::Char(c) => {
-                    if let Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { key, .. })) = &mut state.overlay {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { key, .. })) = &mut state.overlay {
                         key.push(c);
                     }
                 }
                 KeyCode::Backspace => {
-                    if let Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { key, .. })) = &mut state.overlay {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { key, .. })) = &mut state.overlay {
                         key.pop();
                     }
                 }
                 KeyCode::Enter => {
-                    let key_val = if let Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { key, .. })) = &state.overlay {
+                    let key_val = if let Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { key, .. })) = &state.overlay {
                         key.clone()
                     } else { String::new() };
 
@@ -775,7 +775,7 @@ async fn handle_login_step_key(
                             state.overlay = None;
                         } else {
                             // Show model selection
-                            state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectModel {
+                            state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectModel {
                                 provider,
                                 models,
                                 selected: 0,
@@ -792,7 +792,7 @@ async fn handle_login_step_key(
                             let has_key = auth.has_auth(builtin.name);
                             (builtin.name.to_string(), has_key)
                         }).collect();
-                    state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider {
+                    state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider {
                         providers: provider_list,
                         selected: 0,
                     }));
@@ -804,19 +804,19 @@ async fn handle_login_step_key(
         2 => { // SelectModel
             match key.code {
                 KeyCode::Up => {
-                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
                         let new_sel = if *selected == 0 { models.len().saturating_sub(1) } else { *selected - 1 };
-                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel }));
+                        state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel }));
                     }
                 }
                 KeyCode::Down => {
-                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
                         let new_sel = if models.is_empty() { 0 } else { (*selected + 1).min(models.len() - 1) };
-                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel }));
+                        state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel }));
                     }
                 }
                 KeyCode::Enter => {
-                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
                         if let Some(model_id) = models.get(*selected) {
                             let model = format!("{}/{}", provider, model_id);
                             state.add_system_message(format!("{} API key saved.", provider));
@@ -826,8 +826,8 @@ async fn handle_login_step_key(
                 }
                 KeyCode::Esc => {
                     // Go back to EnterApiKey
-                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider, .. })) = &state.overlay {
-                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectModel { provider, .. })) = &state.overlay {
+                        state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey {
                             provider: provider.clone(),
                             key: String::new(),
                             masked_cursor: 0,
@@ -958,11 +958,11 @@ fn handle_overlay_paste(text: &str, state: &mut AppState) -> Option<Action> {
     match &state.overlay {
         // Setup/Login EnterApiKey step — paste into key field
         Some(AppOverlay::Setup(SetupStep::EnterApiKey { .. })) |
-        Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { .. })) => {
+        Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { .. })) => {
             // Paste text into the key field
             let key_field = match &mut state.overlay {
                 Some(AppOverlay::Setup(SetupStep::EnterApiKey { key, .. })) => key as &mut String,
-                Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { key, .. })) => key as &mut String,
+                Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { key, .. })) => key as &mut String,
                 _ => return None,
             };
             key_field.push_str(text);

@@ -53,7 +53,7 @@ pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
     BuiltinSlashCommand { name: "fork", description: "Create a new fork from a previous user message" },
     BuiltinSlashCommand { name: "clone", description: "Duplicate the current session at the current position" },
     BuiltinSlashCommand { name: "tree", description: "Navigate session tree (switch branches)" },
-    BuiltinSlashCommand { name: "login", description: "Configure provider authentication" },
+    BuiltinSlashCommand { name: "provider", description: "Configure API key for a provider" },
     BuiltinSlashCommand { name: "logout", description: "Remove provider authentication" },
     BuiltinSlashCommand { name: "new", description: "Start a new session" },
     BuiltinSlashCommand { name: "compact", description: "Manually compact the session context" },

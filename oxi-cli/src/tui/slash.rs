@@ -277,22 +277,22 @@ pub(crate) fn handle_slash_command(
             );
             true
         }
-        "/login" => {
+        "/provider" => {
             if let Some(provider) = arg {
                 let parts: Vec<&str> = provider.splitn(2, ' ').collect();
                 if parts.len() == 2 {
-                    // /login <provider> <key> — direct save (backward compatible)
-                    try_login_with_key(parts[0], parts[1], state);
+                    // /provider <provider> <key> — direct save (backward compatible)
+                    try_provider_with_key(parts[0], parts[1], state);
                 } else {
-                    // /login <provider> — show EnterApiKey overlay for that provider
-                    state.overlay = Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey {
+                    // /provider <provider> — show EnterApiKey overlay for that provider
+                    state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey {
                         provider: parts[0].to_string(),
                         key: String::new(),
                         masked_cursor: 0,
                     }));
                 }
             } else {
-                // /login — show provider selection overlay
+                // /provider — show provider selection overlay
                 let auth = AuthStorage::new();
                 let provider_list: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
                     .iter()
@@ -300,7 +300,7 @@ pub(crate) fn handle_slash_command(
                         let has_key = auth.has_auth(builtin.name);
                         (builtin.name.to_string(), has_key)
                     }).collect();
-                state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider {
+                state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider {
                     providers: provider_list,
                     selected: 0,
                 }));
@@ -444,7 +444,7 @@ fn format_help() -> String {
     /copy             Copy code block / last reply
 
   Auth
-    /login <provider> Set API key
+    /provider <provider> Configure API key
     /logout <provider> Remove key
 
   Info
@@ -490,8 +490,8 @@ fn format_hotkeys() -> String {
 
 /// Preset provider list (deprecated — use register_builtins)
 
-/// /login — show provider list with auth status
-fn interactive_login_select(state: &mut AppState) {
+/// /provider — show provider list with auth status
+fn interactive_provider_select(state: &mut AppState) {
     let mut msg = "Select a provider:\n\n".to_string();
     let auth = AuthStorage::new();
 
@@ -501,13 +501,13 @@ fn interactive_login_select(state: &mut AppState) {
         msg.push_str(&format!("  {} {}\n", status, builtin.name));
     }
 
-    msg.push_str("\nUse /login <provider> <key> to set an API key.");
-    msg.push_str("\nExample: /login minimax");
+    msg.push_str("\nUse /provider <provider> <key> to set an API key.");
+    msg.push_str("\nExample: /provider minimax");
     state.add_system_message(msg);
 }
 
-/// /login <provider> — show current key status + instructions
-fn interactive_login(provider: &str, state: &mut AppState) {
+/// /provider <provider> — show current key status + instructions
+fn interactive_provider(provider: &str, state: &mut AppState) {
     let provider = provider.to_lowercase();
 
     let auth = AuthStorage::new();
@@ -519,13 +519,13 @@ fn interactive_login(provider: &str, state: &mut AppState) {
         .unwrap_or_else(|| "not set".to_string());
 
     state.add_system_message(format!(
-        "API key for {}\n\nCurrent: {}\n\nUse /login {} <your-api-key> to set the key.",
+        "API key for {}\n\nCurrent: {}\n\nUse /provider {} <your-api-key> to set the key.",
         provider, masked, provider
     ));
 }
 
-/// /login <provider> <key> — save the key directly
-fn try_login_with_key(provider: &str, key: &str, state: &mut AppState) -> bool {
+/// /provider <provider> <key> — save the key directly
+fn try_provider_with_key(provider: &str, key: &str, state: &mut AppState) -> bool {
     if key.is_empty() {
         return false;
     }
