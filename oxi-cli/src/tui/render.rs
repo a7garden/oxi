@@ -94,23 +94,13 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
 // ── Busy input (spinner) ─────────────────────────────────────────────────
 
 fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let prompt = format!("{} ", SPINNER[state.spinner_frame]);
-    let display = if state.input_value().is_empty() {
-        "waiting for response…"
-    } else {
-        state.input_value()
-    };
-    let text_fg = if state.input_value().is_empty() {
-        theme.colors.muted.to_ratatui()
-    } else {
-        theme.colors.foreground.to_ratatui()
-    };
-
-    let spans = vec![
-        Span::styled(prompt, Style::default().fg(theme.colors.accent.to_ratatui())),
-        Span::styled(display.to_string(), Style::default().fg(text_fg)),
-    ];
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    // Show spinner on a separate line above the input, not in the same line
+    // This avoids the spinner being flush against the input text
+    let spinner_line = format!("  {} waiting for response…", SPINNER[state.spinner_frame]);
+    f.render_widget(
+        Paragraph::new(Span::styled(spinner_line, Style::default().fg(theme.colors.muted.to_ratatui()))),
+        area,
+    );
 }
 
 // ── Slash popup (Pi-style vertical list overlay) ─────────────────────────
