@@ -50,6 +50,7 @@ pub(crate) fn handle_slash_command(
                     Ok(()) => {
                         state.add_system_message(format!("→ model: {}", model_id));
                         state.footer_state.data.model_name = model_id.to_string();
+                        crate::settings::Settings::save_last_used(model_id);
                     }
                     Err(e) => {
                         state.add_system_message(format!("✗ {}", e));
