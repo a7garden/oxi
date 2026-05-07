@@ -173,7 +173,11 @@ impl StatefulWidget for Footer<'_> {
         }
 
         // Model name (primary, bold)
-        let model_short = d.model_name.split('/').last().unwrap_or(&d.model_name);
+        let model_short = if d.model_name.is_empty() {
+            "[no model]".to_string()
+        } else {
+            d.model_name.split('/').last().unwrap_or(&d.model_name).to_string()
+        };
         for c in model_short.chars() {
             if col >= max_w { break; }
             buf[(area.x + col as u16, row1)].set_char(c).set_style(
@@ -201,9 +205,8 @@ impl StatefulWidget for Footer<'_> {
         }
 
         // ═══════════════════════════════════════════════════════
-        // Line 2: path (branch ✓)  (left-aligned, muted)
+        // Line 2: path (branch)  (left-aligned, muted)
         // ═══════════════════════════════════════════════════════
-        let row2 = area.y + 1;
         col = 0;
 
         // Indent

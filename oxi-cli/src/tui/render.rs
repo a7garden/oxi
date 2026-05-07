@@ -384,6 +384,70 @@ fn render_setup_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
                 Rect { x: area.x + 2, y: msg_y + 3, width: area.width.saturating_sub(4), height: 1 },
             );
         }
+
+        SetupStep::SelectModel { provider, models, selected } => {
+            // Title
+            let title = format!(" Select a model for {}", provider);
+            let title_y = area.y + 2;
+            for (i, c) in title.chars().enumerate() {
+                if i < max_w {
+                    f.render_widget(
+                        Paragraph::new(Span::styled(
+                            c.to_string(),
+                            Style::default()
+                                .fg(theme.colors.primary.to_ratatui())
+                                .bg(theme.colors.background.to_ratatui())
+                                .add_modifier(Modifier::BOLD),
+                        )),
+                        Rect { x: area.x + (i as u16).min(area.width - 1), y: title_y, width: 1, height: 1 },
+                    );
+                }
+            }
+
+            // Model list
+            let list_y = title_y + 2;
+            let max_show = (area.height as usize).saturating_sub(6).min(models.len());
+            let window_start = if *selected >= max_show {
+                selected.saturating_sub(max_show - 1)
+            } else {
+                0
+            };
+
+            for i in 0..max_show {
+                let idx = window_start + i;
+                if idx >= models.len() { break; }
+
+                let row = Rect { x: area.x, y: list_y + i as u16, width: area.width, height: 1 };
+                if row.y >= area.y + area.height { break; }
+
+                let is_sel = idx == *selected;
+                let pointer = if is_sel { "→" } else { " " };
+                let model_id = &models[idx];
+
+                let line_str = format!(" {} {}", pointer, model_id);
+
+                let style = if is_sel {
+                    Style::default()
+                        .fg(theme.colors.background.to_ratatui())
+                        .bg(theme.colors.primary.to_ratatui())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    styles.normal
+                };
+
+                f.render_widget(Paragraph::new(Span::styled(line_str, style)), row);
+            }
+
+            // Footer hint
+            let hint_y = list_y + max_show as u16 + 1;
+            if hint_y < area.y + area.height {
+                let hint = format!(" ↑/↓ select · Enter confirm · Esc back ({})", models.len());
+                f.render_widget(
+                    Paragraph::new(Span::styled(hint, styles.muted)),
+                    Rect { x: area.x, y: hint_y, width: area.width, height: 1 },
+                );
+            }
+        }
     }
 }
 
@@ -491,6 +555,68 @@ fn render_login_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
                         styles.muted,
                     )),
                     Rect { x: area.x + 2, y: hint_y, width: area.width.saturating_sub(4), height: 1 },
+                );
+            }
+        }
+
+        SetupStep::SelectModel { provider, models, selected } => {
+            // Same UI as setup wizard
+            let title = format!(" Select a model for {}", provider);
+            let title_y = area.y + 2;
+            for (i, c) in title.chars().enumerate() {
+                if i < max_w {
+                    f.render_widget(
+                        Paragraph::new(Span::styled(
+                            c.to_string(),
+                            Style::default()
+                                .fg(theme.colors.primary.to_ratatui())
+                                .bg(theme.colors.background.to_ratatui())
+                                .add_modifier(Modifier::BOLD),
+                        )),
+                        Rect { x: area.x + (i as u16).min(area.width - 1), y: title_y, width: 1, height: 1 },
+                    );
+                }
+            }
+
+            let list_y = title_y + 2;
+            let max_show = (area.height as usize).saturating_sub(6).min(models.len());
+            let window_start = if *selected >= max_show {
+                selected.saturating_sub(max_show - 1)
+            } else {
+                0
+            };
+
+            for i in 0..max_show {
+                let idx = window_start + i;
+                if idx >= models.len() { break; }
+
+                let row = Rect { x: area.x, y: list_y + i as u16, width: area.width, height: 1 };
+                if row.y >= area.y + area.height { break; }
+
+                let is_sel = idx == *selected;
+                let pointer = if is_sel { "→" } else { " " };
+                let model_id = &models[idx];
+
+                let line_str = format!(" {} {}", pointer, model_id);
+
+                let style = if is_sel {
+                    Style::default()
+                        .fg(theme.colors.background.to_ratatui())
+                        .bg(theme.colors.primary.to_ratatui())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    styles.normal
+                };
+
+                f.render_widget(Paragraph::new(Span::styled(line_str, style)), row);
+            }
+
+            let hint_y = list_y + max_show as u16 + 1;
+            if hint_y < area.y + area.height {
+                let hint = format!(" ↑/↓ select · Enter confirm · Esc back ({})", models.len());
+                f.render_widget(
+                    Paragraph::new(Span::styled(hint, styles.muted)),
+                    Rect { x: area.x, y: hint_y, width: area.width, height: 1 },
                 );
             }
         }

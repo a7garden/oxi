@@ -502,7 +502,8 @@ async fn handle_setup_step_key(
         Some(AppOverlay::Setup(s)) => match s {
             SetupStep::SelectProvider { .. } => 0,
             SetupStep::EnterApiKey { provider, .. } => 1,
-            SetupStep::Done { .. } => 2,
+            SetupStep::SelectModel { .. } => 2,
+            SetupStep::Done { .. } => 3,
         },
         _ => return None,
     };
@@ -566,22 +567,39 @@ async fn handle_setup_step_key(
                         let auth = crate::auth_storage::AuthStorage::new();
                         auth.set_api_key(&provider, key_val);
 
-                        // Persist model to settings so it survives restart
-                        if let Ok(mut settings) = crate::settings::Settings::load() {
-                            settings.default_model = Some(format!("{}/default", provider));
-                            settings.default_provider = Some(provider.clone());
+                        // Get models for this provider from the model database
+                        let models: Vec<String> = oxi_ai::model_db::get_all_models()
+                            .into_iter()
+                            .filter(|e| e.provider == provider)
+                            .map(|e| e.id.to_string())
+                            .collect();
 
-                            let _ = settings.save();
+                        if models.is_empty() {
+                            // No models in DB for this provider, use default model
+                            let model = format!("{}/default", provider);
+                            
+                            // Persist model to settings
+                            if let Ok(mut settings) = crate::settings::Settings::load() {
+                                settings.default_model = Some(model.clone());
+                                settings.default_provider = Some(provider.clone());
+                                let _ = settings.save();
+                            }
+
+                            state.footer_state.data.model_name = model.clone();
+                            state.footer_state.data.provider_name = provider.clone();
+
+                            state.overlay = Some(AppOverlay::Setup(SetupStep::Done {
+                                provider: provider.clone(),
+                                model,
+                            }));
+                        } else {
+                            // Show model selection
+                            state.overlay = Some(AppOverlay::Setup(SetupStep::SelectModel {
+                                provider,
+                                models,
+                                selected: 0,
+                            }));
                         }
-
-                        let model = format!("{}/default", provider);
-                        state.footer_state.data.model_name = model.clone();
-                        state.footer_state.data.provider_name = provider.clone();
-
-                        state.overlay = Some(AppOverlay::Setup(SetupStep::Done {
-                            provider: provider.clone(),
-                            model,
-                        }));
                     }
                 }
                 KeyCode::Esc => {
@@ -598,7 +616,57 @@ async fn handle_setup_step_key(
             }
         }
 
-        2 => { // Done
+        2 => { // SelectModel
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                        let new_sel = if *selected == 0 { models.len().saturating_sub(1) } else { *selected - 1 };
+                        state.overlay = Some(AppOverlay::Setup(SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel }));
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                        let new_sel = if models.is_empty() { 0 } else { (*selected + 1).min(models.len() - 1) };
+                        state.overlay = Some(AppOverlay::Setup(SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel }));
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                        if let Some(model_id) = models.get(*selected) {
+                            let model = format!("{}/{}", provider, model_id);
+                            
+                            // Persist model to settings
+                            if let Ok(mut settings) = crate::settings::Settings::load() {
+                                settings.default_model = Some(model.clone());
+                                settings.default_provider = Some(provider.clone());
+                                let _ = settings.save();
+                            }
+
+                            state.footer_state.data.model_name = model.clone();
+                            state.footer_state.data.provider_name = provider.clone();
+
+                            state.overlay = Some(AppOverlay::Setup(SetupStep::Done {
+                                provider: provider.clone(),
+                                model,
+                            }));
+                        }
+                    }
+                }
+                KeyCode::Esc => {
+                    // Go back to EnterApiKey, clear the key
+                    if let Some(AppOverlay::Setup(SetupStep::SelectModel { provider, .. })) = &state.overlay {
+                        state.overlay = Some(AppOverlay::Setup(SetupStep::EnterApiKey {
+                            provider: provider.clone(),
+                            key: String::new(),
+                            masked_cursor: 0,
+                        }));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        3 => { // Done
             if key.code == KeyCode::Enter {
                 state.overlay = None;
                 state.add_system_message(" Ready to chat. Type a message to start.".to_string());
@@ -620,7 +688,8 @@ async fn handle_login_step_key(
         Some(AppOverlay::LoginProvider(s)) => match s {
             SetupStep::SelectProvider { .. } => 0,
             SetupStep::EnterApiKey { provider, .. } => 1,
-            SetupStep::Done { .. } => 2,
+            SetupStep::SelectModel { .. } => 2,
+            SetupStep::Done { .. } => 3,
         },
         _ => return None,
     };
@@ -683,17 +752,25 @@ async fn handle_login_step_key(
                         let auth = crate::auth_storage::AuthStorage::new();
                         auth.set_api_key(&provider, key_val);
 
-                        // Update settings if no default model yet
-                        if let Ok(mut settings) = crate::settings::Settings::load() {
-                            if settings.default_model.is_none() {
-                                settings.default_model = Some(format!("{}/default", provider));
-                                settings.default_provider = Some(provider.clone());
-                                let _ = settings.save();
-                            }
-                        }
+                        // Get models for this provider
+                        let models: Vec<String> = oxi_ai::model_db::get_all_models()
+                            .into_iter()
+                            .filter(|e| e.provider == provider)
+                            .map(|e| e.id.to_string())
+                            .collect();
 
-                        state.add_system_message(format!("{} API key saved.", provider));
-                        state.overlay = None;
+                        if models.is_empty() {
+                            // No models in DB, close overlay
+                            state.add_system_message(format!("{} API key saved.", provider));
+                            state.overlay = None;
+                        } else {
+                            // Show model selection
+                            state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectModel {
+                                provider,
+                                models,
+                                selected: 0,
+                            }));
+                        }
                     }
                 }
                 KeyCode::Esc => {
@@ -714,7 +791,44 @@ async fn handle_login_step_key(
             }
         }
 
-        2 | _ => {
+        2 => { // SelectModel
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                        let new_sel = if *selected == 0 { models.len().saturating_sub(1) } else { *selected - 1 };
+                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel }));
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                        let new_sel = if models.is_empty() { 0 } else { (*selected + 1).min(models.len() - 1) };
+                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel }));
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
+                        if let Some(model_id) = models.get(*selected) {
+                            let model = format!("{}/{}", provider, model_id);
+                            state.add_system_message(format!("{} API key saved.", provider));
+                            state.overlay = None;
+                        }
+                    }
+                }
+                KeyCode::Esc => {
+                    // Go back to EnterApiKey
+                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectModel { provider, .. })) = &state.overlay {
+                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey {
+                            provider: provider.clone(),
+                            key: String::new(),
+                            masked_cursor: 0,
+                        }));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        3 | _ => {
             // Done or unexpected — close overlay
             state.overlay = None;
         }

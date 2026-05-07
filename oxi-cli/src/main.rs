@@ -16,9 +16,13 @@ use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
+    // Initialize logging — show info by default, can be overridden with RUST_LOG
+    let log_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_filter)))
+        .with_target(true)
+        .with_thread_ids(true)
         .init();
 
     // Parse arguments (using unified CliArgs from cli module)

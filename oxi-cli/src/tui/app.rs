@@ -114,6 +114,12 @@ pub(crate) enum SetupStep {
         key: String,
         masked_cursor: usize,
     },
+    /// Select a model from the provider's available models
+    SelectModel {
+        provider: String,
+        models: Vec<String>,
+        selected: usize,
+    },
     /// Done — show success
     Done {
         provider: String,
@@ -486,8 +492,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     // Check if model is configured
     let has_model = !model_id.is_empty() && model_id.contains('/');
     if has_model {
+        tracing::info!("TUI: model_id={}, footer will show: {}", model_id, model_id);
+        state.footer_state.data.model_name = model_id.clone();
+        state.footer_state.data.provider_name = model_id.split('/').next().unwrap_or("").to_string();
         state.add_system_message(welcome::format_welcome(&session_id, &model_id));
     } else {
+        tracing::warn!("TUI: No model configured (model_id='{}'), launching setup wizard", model_id);
         // No model configured — launch setup wizard
         let auth = crate::auth_storage::AuthStorage::new();
         let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
@@ -517,7 +527,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         }
 
         // Render
-        terminal.draw(|f| render::draw(f, &mut state, &theme))?;
+        let model_debug = state.footer_state.data.model_name.clone();
+        tracing::debug!("draw() called, footer.model_name='{}', is_busy={}", model_debug, state.is_agent_busy);
+        terminal.draw(|f| {
+            tracing::debug!("render::draw about to render footer with model_name='{}'", state.footer_state.data.model_name);
+            render::draw(f, &mut state, &theme)
+        })?;
 
         // Poll input events
         if event::poll(poll_timeout)? {
