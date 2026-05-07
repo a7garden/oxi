@@ -329,9 +329,9 @@ impl StatefulWidget for ChatView<'_> {
             let row = area.y + vi as u16;
 
             let prefix_char = match role {
-                MessageRole::User => " ▌",
-                MessageRole::Assistant => " ▐",
-                MessageRole::System => " · ",
+                MessageRole::User => " ",
+                MessageRole::Assistant => " ",
+                MessageRole::System => " ",
             };
             let prefix_style = match role {
                 MessageRole::User => styles.primary,

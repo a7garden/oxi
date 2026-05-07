@@ -1,11 +1,10 @@
 //! Welcome banner formatting.
 
+/// Format a clean startup message like Pi.
 pub(crate) fn format_welcome(session_id: &str, model_id: &str) -> String {
-    let line = "─".repeat(33);
+    let version = env!("CARGO_PKG_VERSION");
     format!(
-        "  ╭{line}╮\n  │  ◈ oxi — AI Coding Assistant   │\n  ╰{line}╯\n\n  Session  {session_id}\n  Model    {model_id}\n\n  /help for commands · Enter to send",
-        line = line,
-        session_id = session_id,
-        model_id = model_id,
+        " oxi v{}\n\n escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash\n\n",
+        version
     )
 }

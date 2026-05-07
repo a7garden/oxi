@@ -359,8 +359,8 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
             println!("oxi configuration:");
             println!("  Settings file: {}", Settings::settings_path()?.display());
             println!();
-            println!("  Model: {}", settings.effective_model(None));
-            println!("  Provider: {}", settings.effective_provider(None));
+            println!("  Model: {}", settings.effective_model(None).unwrap_or_else(|| "(not set)".to_string()));
+            println!("  Provider: {}", settings.effective_provider(None).unwrap_or_else(|| "(not set)".to_string()));
             println!("  Theme: {}", settings.theme);
             println!("  Thinking: {:?}", settings.thinking_level);
             println!("  Extensions enabled: {}", settings.extensions_enabled);
