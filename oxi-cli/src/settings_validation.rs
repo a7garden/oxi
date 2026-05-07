@@ -113,18 +113,8 @@ impl Settings {
         //    하지만 env 등을 통해 우회 입력된 값도 있으니 안전망으로 확인.
         //    (ThinkingLevel은 이미 enum이므로 유효하지 않은 값은 역직렬화에서 거부됨)
 
-        // 5. default_model — 슬래시(/) 미포함 시 경고
-        if let Some(ref model) = self.default_model {
-            if !model.contains('/') {
-                report.warnings.push(ValidationWarning {
-                    field: "default_model".to_string(),
-                    message: format!(
-                        "Model ID has no slash (/). Recommended format: 'provider/model' (current: \"{}\")",
-                        model
-                    ),
-                });
-            }
-        }
+        // 5. default_model — model name only (no provider prefix expected)
+        // No validation needed: model name may or may not contain '/' depending on user input.
 
         // 6. session_history_size — 최소 1
         if self.session_history_size == 0 {
@@ -274,23 +264,14 @@ mod tests {
         assert!(settings.validate().is_valid());
     }
 
-    // ── default_model ────────────────────────────────────────────────
+    // ── default_model (now model-only, no slash validation) ──────
 
     #[test]
-    fn test_model_without_slash_warns() {
+    fn test_model_without_slash_is_ok() {
         let mut settings = Settings::default();
         settings.default_model = Some("claude-3".to_string());
         let report = settings.validate();
-        assert!(report.is_valid(), "warning only");
-        assert_eq!(report.warnings.len(), 1);
-        assert_eq!(report.warnings[0].field, "default_model");
-    }
-
-    #[test]
-    fn test_model_with_slash_is_ok() {
-        let mut settings = Settings::default();
-        settings.default_model = Some("anthropic/claude-3".to_string());
-        let report = settings.validate();
+        assert!(report.is_valid());
         assert!(report.warnings.is_empty());
     }
 
@@ -333,8 +314,8 @@ mod tests {
         assert!(!report.is_valid());
         // 3 errors: temperature, tool_timeout, session_history_size
         assert_eq!(report.errors.len(), 3);
-        // 1 warning: default_model
-        assert_eq!(report.warnings.len(), 1);
+        // No warnings (default_model no longer warns for missing slash)
+        assert_eq!(report.warnings.len(), 0);
     }
 
     // ── ValidationReport helpers ─────────────────────────────────────
