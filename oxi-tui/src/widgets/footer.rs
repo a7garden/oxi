@@ -166,7 +166,12 @@ impl StatefulWidget for Footer<'_> {
         );
         col += 1;
 
-        // space
+        // space between indicator and model name
+        if col < max_w {
+            buf[(area.x + col as u16, row1)].set_char(' ').set_style(styles.normal);
+            col += 1;
+        }
+        // Second space
         if col < max_w {
             buf[(area.x + col as u16, row1)].set_char(' ').set_style(styles.normal);
             col += 1;

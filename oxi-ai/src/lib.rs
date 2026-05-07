@@ -45,7 +45,7 @@ pub use messages::*;
 pub use providers::CacheRetention;
 pub use providers::{get_provider, register_provider, unregister_provider, custom_provider_names, Provider, ProviderEvent, StreamOptions};
 pub use providers::OpenAiProvider;
-pub use providers::model_fetch::fetch_models_blocking;
+pub use providers::model_fetch::{fetch_models_async, fetch_models_blocking};
 pub use providers::OpenAiResponsesProvider;
 pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ValidationError};
 pub use types::*;

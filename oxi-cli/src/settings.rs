@@ -11,12 +11,13 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Current settings format version.
-const SETTINGS_VERSION: u32 = 2;
+const SETTINGS_VERSION: u32 = 3;
 
 /// Environment variable prefix for oxi settings.
 /// Keep: reserved for future env-based config loading (e.g. OXI_API_KEY).
@@ -149,6 +150,13 @@ pub struct Settings {
     /// Registered custom providers (loaded from `[[custom_provider]]` TOML sections).
     #[serde(default)]
     pub custom_providers: Vec<CustomProvider>,
+
+    // ── Dynamic model cache ─────────────────────────────────────────────
+    /// Cached model lists fetched from provider `/models` endpoints.
+    /// Key is the provider name, value is a list of model IDs.
+    /// Updated when API keys are entered in setup wizard or on demand.
+    #[serde(default)]
+    pub dynamic_models: HashMap<String, Vec<String>>,
 }
 
 fn default_theme() -> String {
@@ -192,6 +200,7 @@ impl Default for Settings {
             prompts: Vec::new(),
             themes: Vec::new(),
             custom_providers: Vec::new(),
+            dynamic_models: HashMap::new(),
         }
     }
 }
@@ -691,6 +700,16 @@ impl Settings {
                 settings.version = SETTINGS_VERSION;
 
                 tracing::info!("Migrated settings from version 0 to {}", SETTINGS_VERSION);
+            }
+            1 | 2 => {
+                // Version 1/2 → 3: dynamic_models field added.
+                // HashMap::new() is already the serde default, so no action needed
+                // beyond bumping the version.
+                settings.version = SETTINGS_VERSION;
+                tracing::info!(
+                    "Migrated settings from version {} to {}",
+                    settings.version, SETTINGS_VERSION
+                );
             }
             v if v > SETTINGS_VERSION => {
                 // Future version — we don't know how to downgrade.

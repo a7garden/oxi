@@ -165,17 +165,133 @@ fn load_providers(auth_store: &crate::auth_storage::AuthStorage) -> Vec<Provider
 
 // ── Load model list ────────────────────────────────────────────────────────
 
-/// Build the model list from the static model database.
+/// Build the model list from the static model database + dynamic cache.
 fn load_models() -> Vec<ModelEntry> {
     let mut models = Vec::new();
-    for entry in oxi_ai::model_db::get_all_models() {
-        models.push(ModelEntry {
-            id: entry.id.to_string(),
-            provider: entry.provider.to_string(),
-            context_window: entry.context_window,
-        });
+    let mut seen = std::collections::HashSet::new();
+
+    // 1. Dynamic models from settings cache (fetched from /models endpoints)
+    if let Ok(settings) = crate::settings::Settings::load() {
+        for (provider, model_ids) in &settings.dynamic_models {
+            for id in model_ids {
+                let key = format!("{}/{}", provider, id);
+                if seen.insert(key.clone()) {
+                    // Try to get context_window from model_db, default 128_000
+                    let ctx = oxi_ai::model_db::get_model_entry(provider, id)
+                        .map(|e| e.context_window)
+                        .unwrap_or(128_000);
+                    models.push(ModelEntry {
+                        id: id.clone(),
+                        provider: provider.clone(),
+                        context_window: ctx,
+                    });
+                }
+            }
+        }
     }
+
+    // 2. Static models from model_db
+    for entry in oxi_ai::model_db::get_all_models() {
+        let key = format!("{}/{}", entry.provider, entry.id);
+        if seen.insert(key) {
+            models.push(ModelEntry {
+                id: entry.id.to_string(),
+                provider: entry.provider.to_string(),
+                context_window: entry.context_window,
+            });
+        }
+    }
+
     models
+}
+
+// ── Fetch and cache dynamic models ─────────────────────────────────────────
+
+/// Try to fetch models from a provider's `/models` endpoint and cache them in settings.
+///
+/// Only works for OpenAI-compatible providers that have a `base_url`.
+/// Non-OpenAI-compatible providers are silently skipped.
+/// On failure, logs a warning and keeps the existing cache (if any).
+fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
+    // Resolve base_url for this provider
+    let base_url = providers
+        .iter()
+        .find(|p| p.name == provider_name)
+        .and_then(|p| p.base_url.clone())
+        .or_else(|| {
+            oxi_ai::register_builtins::get_provider_base_url(provider_name)
+                .map(|s| s.to_string())
+        });
+
+    let base_url = match base_url {
+        Some(url) if !url.is_empty() => url,
+        _ => {
+            tracing::debug!(
+                "Skipping dynamic model fetch for '{}': no base_url",
+                provider_name
+            );
+            return;
+        }
+    };
+
+    // Get the API key from auth storage
+    let auth_store = crate::auth_storage::AuthStorage::new();
+    let api_key = match auth_store.get_api_key(provider_name) {
+        Some(key) => key,
+        None => {
+            tracing::debug!(
+                "Skipping dynamic model fetch for '{}': no API key",
+                provider_name
+            );
+            return;
+        }
+    };
+
+    // Only fetch for OpenAI-compatible providers (api = openai-completions or openai-responses)
+    let api_type = oxi_ai::register_builtins::get_provider_api(provider_name);
+    let is_openai_compatible = api_type.map_or(true, |api| {
+        matches!(
+            api,
+            oxi_ai::Api::OpenAiCompletions | oxi_ai::Api::OpenAiResponses
+        )
+    });
+
+    if !is_openai_compatible {
+        tracing::debug!(
+            "Skipping dynamic model fetch for '{}': not OpenAI-compatible",
+            provider_name
+        );
+        return;
+    }
+
+    tracing::info!("Fetching models from {}/models for provider '{}'...", base_url, provider_name);
+
+    match oxi_ai::fetch_models_blocking(&base_url, &api_key) {
+        Ok(model_ids) => {
+            tracing::info!(
+                "Fetched {} models from provider '{}'",
+                model_ids.len(),
+                provider_name
+            );
+
+            // Update settings cache
+            if let Ok(mut settings) = crate::settings::Settings::load() {
+                settings
+                    .dynamic_models
+                    .insert(provider_name.to_string(), model_ids);
+                if let Err(e) = settings.save() {
+                    tracing::warn!("Failed to save dynamic models cache: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Failed to fetch models from provider '{}': {}. \
+                 Falling back to static model list.",
+                provider_name, e
+            );
+        }
+    }
 }
 
 // ── Load theme list ─────────────────────────────────────────────────────────
@@ -688,6 +804,12 @@ fn handle_provider_event(
                                 entry.has_key = true;
                                 entry.key_masked = mask_key(field_text);
                             }
+
+                            // Try to fetch models dynamically from the provider's /models endpoint
+                            fetch_and_cache_models(&provider_name, &state.providers);
+
+                            // Refresh the model list to include newly fetched models
+                            state.models = load_models();
                         }
                         state.input_mode = InputMode::Normal;
                     }
@@ -738,6 +860,12 @@ fn handle_provider_event(
                                 is_custom: true,
                                 base_url: Some(base_url),
                             });
+
+                            // Try to fetch models from this custom provider
+                            if !api_key.is_empty() {
+                                fetch_and_cache_models(&name, &state.providers);
+                                state.models = load_models();
+                            }
 
                             // Move back to normal
                             state.input_mode = InputMode::Normal;
