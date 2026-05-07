@@ -457,7 +457,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         // Auto-scroll
         let chat_visible_height = {
             let size = terminal.size()?;
-            size.height.saturating_sub(4) // TitleBar(1) + Input(2) + StatusBar(1)
+            size.height.saturating_sub(5) // Input(2) + StatusBar(3)
         };
         state.ensure_auto_scroll(chat_visible_height);
     }
