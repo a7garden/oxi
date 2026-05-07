@@ -387,12 +387,46 @@ impl Agent {
                 let mut thinking_text = String::new();
                 let mut stream_done = false;
                 let mut stop_reason = StopReason::Stop;
+                let mut message_started = false;
 
                 while let Some(event) = stream.next().await {
                     match event {
+                        ProviderEvent::Start { .. } => {
+                            // Emit MessageStart at the beginning of the stream
+                            let start_msg = oxi_ai::Message::Assistant(
+                                oxi_ai::AssistantMessage::new(
+                                    oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
+                                )
+                            );
+                            let _ = tx.send(AgentEvent::MessageStart {
+                                message: start_msg.clone(),
+                            }).await;
+                            message_started = true;
+                        }
                         ProviderEvent::TextDelta { delta, .. } => {
+                            if !message_started {
+                                // Emit MessageStart if we missed the Start event
+                                let start_msg = oxi_ai::Message::Assistant(
+                                    oxi_ai::AssistantMessage::new(
+                                        oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
+                                    )
+                                );
+                                let _ = tx.send(AgentEvent::MessageStart {
+                                    message: start_msg,
+                                }).await;
+                                message_started = true;
+                            }
                             iteration_text.push_str(&delta);
-                            let _ = tx.send(AgentEvent::TextChunk { text: delta }).await;
+                            let _ = tx.send(AgentEvent::TextChunk { text: delta.clone() }).await;
+                            // Emit MessageUpdate for live rendering
+                            let mut update_msg = oxi_ai::AssistantMessage::new(
+                                oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
+                            );
+                            update_msg.content = vec![ContentBlock::Text(TextContent::new(iteration_text.clone()))];
+                            let _ = tx.send(AgentEvent::MessageUpdate {
+                                message: oxi_ai::Message::Assistant(update_msg),
+                                delta: Some(delta),
+                            }).await;
                         }
                         ProviderEvent::ThinkingDelta { delta, .. } => {
                             thinking_text.push_str(&delta);
@@ -403,7 +437,14 @@ impl Agent {
                             pending_tool_calls.push(tool_call);
                         }
 
-                        ProviderEvent::Done { reason, message: _ } => {
+                        ProviderEvent::Done { reason, message: ref done_msg } => {
+                            // Emit MessageEnd with final assistant message
+                            if message_started {
+                                let _ = tx.send(AgentEvent::MessageEnd {
+                                    message: oxi_ai::Message::Assistant(done_msg.clone()),
+                                }).await;
+                            }
+
                             stop_reason = match reason {
                                 oxi_ai::StopReason::Stop => StopReason::Stop,
                                 oxi_ai::StopReason::Length => StopReason::Length,
