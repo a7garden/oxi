@@ -14,6 +14,7 @@ pub mod print_mode;
 pub mod session;
 pub(crate) mod session_navigation;
 pub mod settings;
+pub mod setup_wizard;
 pub(crate) mod settings_validation;
 pub mod skills;
 pub(crate) mod templates;
