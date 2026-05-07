@@ -469,6 +469,51 @@ impl Agent {
                 break;
             }
 
+            // Drain steering messages from queue (injected by TUI during busy)
+            // TODO: when AgentSession exposes drain, poll from there
+            // For now, steering is handled via agent.state.add_user_message in steer()
+
+            // Compaction check at each iteration
+            let state_msgs = self.state.get_state().messages.clone();
+            let context_text = serde_json::to_string(&state_msgs).unwrap_or_default();
+            let context_tokens = oxi_ai::estimate_tokens(&context_text);
+            let iteration = self.state.get_state().iteration;
+            if self.compaction_manager.should_compact(context_tokens, iteration) {
+                let _ = tx_clone.send(AgentEvent::Compaction {
+                    event: crate::compaction::CompactionEvent::Triggered {
+                        context_tokens,
+                        iteration,
+                    },
+                }).await;
+                match self.compaction_manager.compact_if_needed(
+                    &state_msgs,
+                    None,
+                    context_tokens,
+                    iteration,
+                ).await {
+                    Ok(Some(compacted)) => {
+                        let _ = tx_clone.send(AgentEvent::Compaction {
+                            event: crate::compaction::CompactionEvent::Started {
+                                message_count: compacted.compacted_count,
+                            },
+                        }).await;
+                        self.state.update(|s| {
+                            s.messages = compacted.kept_messages.clone();
+                        });
+                        let _ = tx_clone.send(AgentEvent::Compaction {
+                            event: crate::compaction::CompactionEvent::Completed {
+                                result: crate::compaction::CompactedContext::from(compacted),
+                                duration_ms: 0,
+                            },
+                        }).await;
+                    }
+                    Ok(None) => {} // No compaction needed
+                    Err(e) => {
+                        tracing::warn!("Compaction failed: {}", e);
+                    }
+                }
+            }
+
             // Rebuild context from state messages for each iteration
             let state_messages = self.state.get_state().messages.clone();
             let mut iter_context = Context::new();
