@@ -1,34 +1,36 @@
 //! Input widget — text input field with cursor, placeholder, and completion.
 //!
-//! Supports full Unicode including CJK double-width characters (Korean, Chinese, Japanese).
+//! Supports full Unicode including CJK double-width characters.
 
 use ratatui::{
-    widgets::StatefulWidget,
+    widgets::{StatefulWidget, Paragraph},
     buffer::Buffer,
     layout::Rect,
-    style::{Style, Modifier},
+    style::{Modifier, Style},
+    text::{Line, Span},
 };
+use ratatui::widgets::Widget;
 use crate::Theme;
-use unicode_width::UnicodeWidthStr;
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-/// Completion entry.
+// ---------------------------------------------------------------------------
+// Completion
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone)]
 pub struct Completion {
-    /// Completion text to insert.
     pub text: String,
-    /// Display text for the popup.
     pub display: String,
 }
 
-/// State for the Input widget.
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Default)]
 pub struct InputState {
-    /// Current input text.
     pub text: String,
-    /// Cursor position (character index).
     pub cursor: usize,
-    /// Placeholder shown when input is empty.
     pub placeholder: Option<String>,
     completions: Vec<Completion>,
     completion_index: usize,
@@ -36,27 +38,23 @@ pub struct InputState {
 }
 
 impl InputState {
-    /// Clear the input.
     pub fn clear(&mut self) {
         self.text.clear();
         self.cursor = 0;
     }
 
-    /// Insert a character at cursor.
     pub fn insert_char(&mut self, c: char) {
         let byte_pos = self.char_to_byte(self.cursor);
         self.text.insert(byte_pos, c);
         self.cursor += 1;
     }
 
-    /// Insert a string at cursor (for IME composition and paste).
     pub fn insert_str(&mut self, s: &str) {
         let byte_pos = self.char_to_byte(self.cursor);
         self.text.insert_str(byte_pos, s);
         self.cursor += s.chars().count();
     }
 
-    /// Delete character before cursor.
     pub fn backspace(&mut self) {
         if self.cursor > 0 {
             self.cursor -= 1;
@@ -65,7 +63,6 @@ impl InputState {
         }
     }
 
-    /// Delete character after cursor.
     pub fn delete(&mut self) {
         if self.cursor < self.text.chars().count() {
             let byte_pos = self.char_to_byte(self.cursor);
@@ -73,23 +70,19 @@ impl InputState {
         }
     }
 
-    /// Move cursor left.
     pub fn move_left(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
     }
 
-    /// Move cursor right.
     pub fn move_right(&mut self) {
         let max = self.text.chars().count();
         self.cursor = (self.cursor + 1).min(max);
     }
 
-    /// Move to line start.
     pub fn move_home(&mut self) {
         self.cursor = 0;
     }
 
-    /// Move to line end.
     pub fn move_end(&mut self) {
         self.cursor = self.text.chars().count();
     }
@@ -98,19 +91,16 @@ impl InputState {
         self.text.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(self.text.len())
     }
 
-    /// Calculate the display width (in terminal columns) of text up to char index.
     fn display_width_up_to(&self, char_idx: usize) -> usize {
         let s: String = self.text.chars().take(char_idx).collect();
         UnicodeWidthStr::width(s.as_str())
     }
 
-    /// Accept current completion if active.
     pub fn accept_completion(&mut self) -> bool {
         if !self.completion_active || self.completions.is_empty() {
             return false;
         }
         let completion = &self.completions[self.completion_index];
-        // Find trigger position (first non-space char going backward from cursor)
         let chars: Vec<char> = self.text.chars().collect();
         let mut trigger_pos = self.cursor;
         while trigger_pos > 0 {
@@ -119,7 +109,6 @@ impl InputState {
                 _ => break,
             }
         }
-        // Reconstruct: prefix + completion
         let prefix: String = chars[..trigger_pos].iter().collect();
         self.text = format!("{}{}", prefix, completion.text);
         self.cursor = self.text.chars().count();
@@ -127,14 +116,12 @@ impl InputState {
         true
     }
 
-    /// Move to next completion.
     pub fn next_completion(&mut self) {
         if !self.completions.is_empty() {
             self.completion_index = (self.completion_index + 1) % self.completions.len();
         }
     }
 
-    /// Move to previous completion.
     pub fn prev_completion(&mut self) {
         if !self.completions.is_empty() {
             self.completion_index = self.completion_index.saturating_sub(1);
@@ -142,7 +129,10 @@ impl InputState {
     }
 }
 
-/// Input widget.
+// ---------------------------------------------------------------------------
+// Widget
+// ---------------------------------------------------------------------------
+
 pub struct Input<'a> {
     theme: &'a Theme,
     placeholder: Option<&'a str>,
@@ -150,28 +140,20 @@ pub struct Input<'a> {
 }
 
 impl<'a> Input<'a> {
-    /// Create a new Input widget with the given theme.
     pub fn new(theme: &'a Theme) -> Self {
-        Self {
-            theme,
-            placeholder: None,
-            prompt_char: '❯',
-        }
+        Self { theme, placeholder: None, prompt_char: '❯' }
     }
 
-    /// Replace the theme.
     pub fn with_theme(mut self, theme: &'a Theme) -> Self {
         self.theme = theme;
         self
     }
 
-    /// Set the placeholder text.
     pub fn with_placeholder(mut self, placeholder: &'a str) -> Self {
         self.placeholder = Some(placeholder);
         self
     }
 
-    /// Set the prompt character.
     pub fn with_prompt_char(mut self, c: char) -> Self {
         self.prompt_char = c;
         self
@@ -189,129 +171,166 @@ impl StatefulWidget for Input<'_> {
         let styles = self.theme.to_styles();
         let y = area.y;
 
-        // Prompt (❯ is double-width, takes 2 cells)
+        // ── Prompt (manual buf — 2 cells max, not worth Paragraph) ──
         let prompt_width = self.prompt_char.width().unwrap_or(1) as u16;
-        buf[(area.x, y)].set_char(self.prompt_char)
+        buf[(area.x, y)]
+            .set_char(self.prompt_char)
             .set_style(styles.primary);
-        // Fill continuation cell if prompt is wide
         if prompt_width > 1 {
-            buf[(area.x + 1, y)].set_char(' ')
+            buf[(area.x + 1, y)]
+                .set_char(' ')
                 .set_style(styles.primary);
         }
-        let content_start = area.x + prompt_width + 1; // prompt + space
-        buf[(area.x + prompt_width, y)].set_char(' ')
+        let content_start = area.x + prompt_width + 1;
+        buf[(content_start - 1, y)]
+            .set_char(' ')
             .set_style(styles.normal);
 
-        // Determine what to display
-        let display_text = if state.text.is_empty() {
-            self.placeholder.unwrap_or("")
-        } else {
-            &state.text
-        };
-
+        // ── Display text ──
         let text_fg = if state.text.is_empty() {
             styles.muted
         } else {
             styles.normal
         };
 
-        // Calculate display widths using Unicode-aware width
-        let max_cols = (area.width - prompt_width - 2) as usize; // available column width
-        let _text_display_width = UnicodeWidthStr::width(display_text);
-
-        // Calculate cursor column position
+        let max_cols = (area.width - prompt_width - 2) as usize;
         let cursor_col = if state.text.is_empty() {
             0
         } else {
             state.display_width_up_to(state.cursor)
         };
-
-        // Horizontal scrolling: ensure cursor is visible within the viewport
         let scroll_col = if cursor_col >= max_cols {
-            // Scroll so cursor is near the right edge
             cursor_col - max_cols + 1
         } else {
             0
         };
 
-        // Render characters using column-based positioning
-        let mut col = 0u16; // current column offset from content_start
-        let mut char_iter = display_text.chars().enumerate().peekable();
-        let mut chars_before_cursor = 0usize;
-        let mut cursor_rendered = false;
+        // ── Build text area ──
+        let text_area = Rect {
+            x: content_start,
+            y,
+            width: max_cols as u16,
+            height: 1,
+        };
 
-        // Skip characters that are scrolled off
-        let mut skipped_width = 0usize;
-        while let Some((char_idx, c)) = char_iter.peek().cloned() {
+        if state.text.is_empty() {
+            let display_text = self.placeholder.unwrap_or("");
+            let visible: String = display_text.chars().take(max_cols).collect();
+            let line = Line::from(Span::styled(visible, text_fg));
+            Paragraph::new(line).render(text_area, buf);
+
+            // Empty cursor block at content_start
+            buf[(content_start, y)]
+                .set_char(' ')
+                .set_style(
+                    Style::default()
+                        .fg(self.theme.colors.cursor_fg.to_ratatui())
+                        .bg(self.theme.colors.cursor_bg.to_ratatui())
+                        .add_modifier(Modifier::BOLD),
+                );
+            return;
+        }
+
+        // ── Find cursor position in visible string ──
+        let total_chars = state.text.chars().count();
+        let mut visible_chars: Vec<char> = Vec::new();
+        let mut cursor_in_visible: Option<usize> = None;
+        let mut cursor_width: u16 = 0;
+        let mut col_acc = 0usize;
+
+        // Skip scrolled-off chars
+        for (ci, c) in state.text.chars().enumerate() {
             let cw = c.width().unwrap_or(0);
-            if skipped_width + cw <= scroll_col {
-                skipped_width += cw;
-                chars_before_cursor = char_idx + 1;
-                char_iter.next();
+            if col_acc < scroll_col {
+                col_acc += cw;
             } else {
                 break;
             }
         }
 
-        // Render visible characters
-        for (char_idx, c) in char_iter {
-            let cw = c.width().unwrap_or(1) as u16;
-            let screen_col = content_start + col;
+        // Collect visible chars, track cursor
+        for ci in col_acc..total_chars {
+            let c = state.text.chars().nth(ci).unwrap();
+            let cw = c.width().unwrap_or(1);
+            let screen_col = col_acc.saturating_sub(scroll_col);
 
-            if screen_col + cw > area.x + area.width - 1 {
-                break; // No more room
+            if screen_col + cw > max_cols {
+                break;
             }
 
-            let is_cursor = state.cursor == char_idx && !state.text.is_empty();
-
-            if is_cursor {
-                buf[(screen_col, y)].set_char(c)
-                    .set_style(Style::default()
-                        .fg(self.theme.colors.cursor_fg.to_ratatui())
-                        .bg(self.theme.colors.cursor_bg.to_ratatui())
-                        .add_modifier(Modifier::BOLD));
-                // For wide chars, set continuation cell
-                if cw > 1 {
-                    buf[(screen_col + 1, y)].set_char(' ')
-                        .set_style(Style::default()
-                            .fg(self.theme.colors.cursor_fg.to_ratatui())
-                            .bg(self.theme.colors.cursor_bg.to_ratatui()));
-                }
-                cursor_rendered = true;
-            } else {
-                buf[(screen_col, y)].set_char(c).set_style(text_fg);
-                // Wide char continuation is handled by ratatui's set_char
+            if state.cursor == ci {
+                cursor_in_visible = Some(visible_chars.len());
+                cursor_width = cw as u16;
             }
 
-            col += cw;
+            visible_chars.push(c);
+            if cw > 1 {
+                visible_chars.push('\u{0}');
+            }
+            col_acc += cw;
         }
 
-        // Cursor at end of text (empty cursor)
-        let end_col = content_start + col;
-        if state.cursor >= state.text.chars().count() && end_col < area.x + area.width - 1 {
-            let cursor_col_pos = if state.text.is_empty() && self.placeholder.is_some() {
-                content_start
+        // Cursor at end
+        if state.cursor >= total_chars && cursor_in_visible.is_none() {
+            let end_screen_col = col_acc.saturating_sub(scroll_col);
+            if end_screen_col <= max_cols {
+                cursor_in_visible = Some(visible_chars.len());
+                cursor_width = 1;
+            }
+        }
+
+        let visible_str: String = visible_chars.iter().collect();
+
+        // Build Line: pre-cursor + cursor-char + post-cursor
+        if let Some(civ) = cursor_in_visible {
+            let pre: String = visible_chars[..civ].iter().collect();
+            let cursor_ch: String = if civ < visible_chars.len() {
+                visible_chars[civ].to_string()
             } else {
-                end_col
+                " ".to_string()
             };
-            buf[(cursor_col_pos, y)].set_char(' ')
-                .set_style(Style::default()
-                    .fg(self.theme.colors.cursor_fg.to_ratatui())
-                    .bg(self.theme.colors.cursor_bg.to_ratatui()));
-        }
+            let post: String = if civ + 1 < visible_chars.len() {
+                visible_chars[civ + 1..].iter().collect()
+            } else {
+                String::new()
+            };
 
-        // Clear remainder
-        let clear_from = if state.text.is_empty() {
-            let ph_width = UnicodeWidthStr::width(self.placeholder.unwrap_or(""));
-            content_start + (ph_width as u16).min(area.width - prompt_width - 2)
+            let line = Line::from(vec![
+                Span::styled(&pre, text_fg),
+                Span::styled(&cursor_ch, text_fg),
+                Span::styled(&post, text_fg),
+            ]);
+            Paragraph::new(line).render(text_area, buf);
+
+            // ── Manual buf: cursor highlight (justified: fg/bg invert) ──
+            let cursor_style = Style::default()
+                .fg(self.theme.colors.cursor_fg.to_ratatui())
+                .bg(self.theme.colors.cursor_bg.to_ratatui())
+                .add_modifier(Modifier::BOLD);
+
+            // Find screen column of cursor char
+            let mut screen_offset = 0usize;
+            for i in 0..civ {
+                screen_offset += visible_chars[i].width().unwrap_or(1);
+            }
+            let screen_col = content_start + screen_offset as u16;
+
+            if screen_col < area.x + area.width {
+                buf[(screen_col, y)].set_char(cursor_ch.chars().next().unwrap_or(' ')).set_style(cursor_style);
+                if cursor_width > 1 && screen_col + 1 < area.x + area.width {
+                    buf[(screen_col + 1, y)].set_char(' ').set_style(cursor_style);
+                }
+            }
         } else {
-            end_col + 1
-        };
-        for c in clear_from..area.x + area.width {
-            buf[(c, y)].set_char(' ').set_style(text_fg);
+            let line = Line::from(Span::styled(visible_str, text_fg));
+            Paragraph::new(line).render(text_area, buf);
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -333,7 +352,7 @@ mod tests {
         assert_eq!(state.text, "ab");
         state.insert_char('한');
         assert_eq!(state.text, "ab한");
-        assert_eq!(state.cursor, 3); // a + b + 한 = 3 chars
+        assert_eq!(state.cursor, 3);
     }
 
     #[test]
@@ -385,9 +404,9 @@ mod tests {
         state.text = "ab한글".to_string();
         // a(1) + b(1) + 한(2) + 글(2) = 6 columns
         assert_eq!(state.display_width_up_to(0), 0);
-        assert_eq!(state.display_width_up_to(1), 1); // "a"
-        assert_eq!(state.display_width_up_to(2), 2); // "ab"
-        assert_eq!(state.display_width_up_to(3), 4); // "ab한"
-        assert_eq!(state.display_width_up_to(4), 6); // "ab한글"
+        assert_eq!(state.display_width_up_to(1), 1);
+        assert_eq!(state.display_width_up_to(2), 2);
+        assert_eq!(state.display_width_up_to(3), 4);
+        assert_eq!(state.display_width_up_to(4), 6);
     }
 }

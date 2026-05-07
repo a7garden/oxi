@@ -3,10 +3,11 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
+    widgets::{Block, Borders, Paragraph, StatefulWidget},
 };
+use ratatui::widgets::Widget;
 use crate::Theme;
 
 /// Footer data — shared state for token counts and session info.
@@ -136,7 +137,7 @@ impl StatefulWidget for Footer<'_> {
             ])
             .split(area);
 
-        // Row 0: separator line using Block with top border
+        // Row 0: separator line
         let separator = Block::default()
             .borders(Borders::TOP)
             .border_style(styles.border);
@@ -150,7 +151,8 @@ impl StatefulWidget for Footer<'_> {
             let mut left_parts: Vec<String> = Vec::new();
 
             if d.input_tokens > 0 || d.output_tokens > 0 {
-                let total = d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_tokens;
+                let total = d.input_tokens + d.output_tokens
+                    + d.cache_read_tokens + d.cache_write_tokens;
                 if total > 0 && d.context_window_max > 0 {
                     let pct = (total as f32 / d.context_window_max as f32) * 100.0;
                     let max = FooterData::fmt_count(d.context_window_max);
@@ -164,7 +166,7 @@ impl StatefulWidget for Footer<'_> {
 
             let left_text = left_parts.join("  ");
 
-            // Build right-side content: ● model_name
+            // Build right-side: ● model_name
             let model_short = if d.model_name.is_empty() {
                 "[no model]".to_string()
             } else {
@@ -177,40 +179,40 @@ impl StatefulWidget for Footer<'_> {
                 self.theme.colors.success.to_ratatui()
             };
 
-            // Render left and right using a horizontal split
-            let cols = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Min(1),  // left side
-                    Constraint::Min(1),  // right side
-                ])
-                .split(rows[1]);
-
-            // Left: tokens + duration (muted)
-            let left_paragraph = Paragraph::new(Line::from(Span::styled(
-                format!(" {}", left_text),
-                styles.muted,
-            )));
-            left_paragraph.render(cols[0], buf);
-
-            // Right: ● model_name (right-aligned)
-            let model_line = Line::from(vec![
+            let right_span = Line::from(vec![
                 Span::styled("●", Style::default().fg(indicator_color)),
                 Span::styled(
                     format!(" {}", model_short),
                     Style::default()
                         .fg(self.theme.colors.primary.to_ratatui())
-                        .add_modifier(ratatui::style::Modifier::BOLD),
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]);
-            let right_paragraph = Paragraph::new(model_line).alignment(Alignment::Right);
-            right_paragraph.render(cols[1], buf);
+
+            // Horizontal split for left/right
+            let cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Min(1), Constraint::Min(1)])
+                .split(rows[1]);
+
+            // Left: tokens + duration (muted, left-aligned)
+            let left_para = Paragraph::new(Line::from(Span::styled(
+                format!(" {}", left_text),
+                styles.muted,
+            )))
+            .alignment(Alignment::Left);
+            left_para.render(cols[0], buf);
+
+            // Right: ● model_name (right-aligned)
+            let right_para = Paragraph::new(right_span).alignment(Alignment::Right);
+            right_para.render(cols[1], buf);
         }
 
         // ═══════════════════════════════════════════════════════
         // Row 2: left (path + git branch + status) ... right (version)
         // ═══════════════════════════════════════════════════════
         {
+            // Build left spans: path + git branch + status
             let mut left_spans: Vec<Span> = Vec::new();
 
             // Path display: replace $HOME with ~
@@ -232,8 +234,7 @@ impl StatefulWidget for Footer<'_> {
                     let dirty_marker = if d.git_dirty { "*" } else { "" };
                     left_spans.push(Span::styled(
                         format!(" ({}){}", branch, dirty_marker),
-                        Style::default()
-                            .fg(self.theme.colors.accent.to_ratatui()),
+                        Style::default().fg(self.theme.colors.accent.to_ratatui()),
                     ));
 
                     let (status_char, status_style) = if d.git_dirty {
@@ -254,23 +255,21 @@ impl StatefulWidget for Footer<'_> {
 
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Min(1),  // left side
-                    Constraint::Min(1),  // right side
-                ])
+                .constraints([Constraint::Min(1), Constraint::Min(1)])
                 .split(rows[2]);
 
             // Left: path + git
-            let left_paragraph = Paragraph::new(Line::from(left_spans));
-            left_paragraph.render(cols[0], buf);
+            let left_para = Paragraph::new(Line::from(left_spans))
+                .alignment(Alignment::Left);
+            left_para.render(cols[0], buf);
 
-            // Right: version (muted)
-            let right_paragraph = Paragraph::new(Line::from(Span::styled(
+            // Right: version
+            let right_para = Paragraph::new(Line::from(Span::styled(
                 version_tag,
                 Style::default().fg(self.theme.colors.muted.to_ratatui()),
             )))
             .alignment(Alignment::Right);
-            right_paragraph.render(cols[1], buf);
+            right_para.render(cols[1], buf);
         }
     }
 }
