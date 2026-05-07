@@ -38,10 +38,10 @@ async fn main() -> Result<()> {
     // Validate settings
     let report = settings.validate();
     for warn in &report.warnings {
-        tracing::warn!("설정 경고: {} - {}", warn.field, warn.message);
+        tracing::warn!("Settings warning: {} - {}", warn.field, warn.message);
     }
     if !report.is_valid() {
-        eprintln!("❌ 설정 오류 {}건:", report.errors.len());
+        eprintln!("Configuration error ({}):", report.errors.len());
         for err in &report.errors {
             eprintln!("   • {}: {}", err.field, err.message);
         }
@@ -847,10 +847,10 @@ async fn show_tree(manager: &SessionManager, session_id: &str) -> Result<()> {
     // Show tree structure
     for node in &tree {
         let role_marker = match &node.entry.message {
-            AgentMessage::User { .. } => "👤",
-            AgentMessage::Assistant { .. } => "🤖",
-            AgentMessage::System { .. } => "⚙️",
-            _ => "•",
+            AgentMessage::User { .. } => "U",
+            AgentMessage::Assistant { .. } => "A",
+            AgentMessage::System { .. } => "S",
+            _ => "-",
         };
 
         let content_preview = truncate(&node.entry.content(), 60);

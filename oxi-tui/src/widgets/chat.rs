@@ -486,7 +486,7 @@ impl StatefulWidget for ChatView<'_> {
                         all_lines.push((msg.role, "└─".to_string(), LineKind::Normal));
                     }
                     ContentBlock::Error { title, message, retryable } => {
-                        all_lines.push((msg.role, format!("┌─ ⚠ {} ───", title), LineKind::Normal));
+                        all_lines.push((msg.role, format!("[!] {}", title), LineKind::Normal));
                         for line in message.lines().take(6) {
                             all_lines.push((msg.role, format!("│ {}", line), LineKind::Normal));
                         }
