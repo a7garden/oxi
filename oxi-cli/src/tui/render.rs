@@ -1,6 +1,6 @@
 //! Rendering functions for the TUI.
 
-use super::app::{AppState, SPINNER};
+use super::app::{AppState, SetupStep, SPINNER};
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{
     chat::ChatView,
@@ -16,10 +16,14 @@ use ratatui::{
 };
 
 /// Main draw function — renders the full TUI frame.
-///
-/// Layout: Chat(Min) | Input(2) | Status bar(1)
 pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     let size = f.area();
+
+    // Setup wizard takes over the entire screen
+    if state.setup_step.is_some() {
+        render_setup(f, size, state, theme);
+        return;
+    }
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -232,5 +236,155 @@ fn render_slash_popup_overlay(
             )),
             indicator_area,
         );
+    }
+}
+
+// ── Setup wizard ─────────────────────────────────────────────────────────
+
+fn render_setup(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
+    let styles = theme.to_styles();
+    let max_w = area.width as usize;
+
+    match &state.setup_step {
+        Some(SetupStep::SelectProvider { providers, selected }) => {
+            // Title
+            let title = " Select a provider to get started ";
+            let title_y = area.y + 2;
+            for (i, c) in title.chars().enumerate() {
+                if i < max_w {
+                    f.render_widget(
+                        Paragraph::new(Span::styled(
+                            c.to_string(),
+                            Style::default()
+                                .fg(theme.colors.primary.to_ratatui())
+                                .bg(theme.colors.background.to_ratatui())
+                                .add_modifier(Modifier::BOLD),
+                        )),
+                        Rect { x: area.x + (i as u16).min(area.width - 1), y: title_y, width: 1, height: 1 },
+                    );
+                }
+            }
+
+            // Provider list
+            let list_y = title_y + 2;
+            for (i, (name, has_key)) in providers.iter().enumerate() {
+                let row = Rect { x: area.x, y: list_y + i as u16, width: area.width, height: 1 };
+                if row.y >= area.y + area.height { break; }
+
+                let is_sel = i == *selected;
+                let status = if *has_key { "✓" } else { " " };
+                let pointer = if is_sel { "→" } else { " " };
+
+                let line_str = format!(" {} {} {}", pointer, status, name);
+
+                let style = if is_sel {
+                    Style::default()
+                        .fg(theme.colors.background.to_ratatui())
+                        .bg(theme.colors.primary.to_ratatui())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    styles.normal
+                };
+
+                f.render_widget(Paragraph::new(Span::styled(line_str, style)), row);
+            }
+
+            // Footer hint
+            let hint_y = list_y + providers.len() as u16 + 1;
+            if hint_y < area.y + area.height {
+                let hint = " ↑/↓ select · Enter confirm · q quit";
+                f.render_widget(
+                    Paragraph::new(Span::styled(hint, styles.muted)),
+                    Rect { x: area.x, y: hint_y, width: area.width, height: 1 },
+                );
+            }
+        }
+
+        Some(SetupStep::EnterApiKey { provider, key, .. }) => {
+            let title = format!(" Enter API key for {}", provider);
+            let title_y = area.y + 3;
+
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    title,
+                    Style::default()
+                        .fg(theme.colors.primary.to_ratatui())
+                        .bg(theme.colors.background.to_ratatui())
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Rect { x: area.x + 2, y: title_y, width: area.width.saturating_sub(4), height: 1 },
+            );
+
+            // Input field with masking
+            let input_y = title_y + 2;
+            let masked = if key.is_empty() {
+                "  ".to_string()
+            } else if key.len() <= 8 {
+                "****".to_string()
+            } else {
+                format!("{}****{}", &key[..4], &key[key.len()-4..])
+            };
+
+            let input_line = format!(" API Key: {}", masked);
+            f.render_widget(
+                Paragraph::new(Span::styled(input_line, styles.normal)),
+                Rect { x: area.x + 2, y: input_y, width: area.width.saturating_sub(4), height: 1 },
+            );
+
+            // Cursor blink
+            let cursor_col = 11u16 + masked.len().min(max_w - 14) as u16;
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    " ",
+                    Style::default()
+                        .fg(theme.colors.cursor_fg.to_ratatui())
+                        .bg(theme.colors.cursor_bg.to_ratatui()),
+                )),
+                Rect { x: area.x + cursor_col, y: input_y, width: 1, height: 1 },
+            );
+
+            let hint_y = input_y + 2;
+            if hint_y < area.y + area.height {
+                f.render_widget(
+                    Paragraph::new(Span::styled(
+                        " Type your key · Enter save · Esc back",
+                        styles.muted,
+                    )),
+                    Rect { x: area.x + 2, y: hint_y, width: area.width.saturating_sub(4), height: 1 },
+                );
+            }
+        }
+
+        Some(SetupStep::Done { provider, model }) => {
+            let msg = format!(" {} is ready!", provider);
+            let msg_y = area.y + 4;
+
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    msg,
+                    Style::default()
+                        .fg(theme.colors.success.to_ratatui())
+                        .bg(theme.colors.background.to_ratatui())
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Rect { x: area.x + 2, y: msg_y, width: area.width.saturating_sub(4), height: 1 },
+            );
+
+            let model_line = format!(" Model: {}", model);
+            f.render_widget(
+                Paragraph::new(Span::styled(model_line, styles.normal)),
+                Rect { x: area.x + 2, y: msg_y + 1, width: area.width.saturating_sub(4), height: 1 },
+            );
+
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    " Press Enter to start chatting",
+                    styles.muted,
+                )),
+                Rect { x: area.x + 2, y: msg_y + 3, width: area.width.saturating_sub(4), height: 1 },
+            );
+        }
+
+        None => {}
     }
 }

@@ -1,6 +1,6 @@
 //! Event handlers for the TUI.
 
-use super::app::{AppState, UiEvent};
+use super::app::{AppState, SetupStep, UiEvent};
 use super::slash;
 use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
 use oxi_agent::AgentEvent;
@@ -28,7 +28,13 @@ pub async fn handle_input(
     running: &mut bool,
 ) -> Option<Action> {
     match event {
-        CEvent::Key(key) => handle_key(key, state, session, ui_tx, running).await,
+        CEvent::Key(key) => {
+            if state.setup_step.is_some() {
+                handle_setup_key(key, state).await
+            } else {
+                handle_key(key, state, session, ui_tx, running).await
+            }
+        }
         CEvent::Mouse(mouse) => {
             match mouse.kind {
                 MouseEventKind::ScrollUp => state.scroll_up(3),
@@ -381,4 +387,115 @@ pub async fn handle_session_event(
             _ => {}
         },
     }
+}
+
+// ── Setup wizard key handling ────────────────────────────────────────────
+
+async fn handle_setup_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+) -> Option<Action> {
+    if key.kind != KeyEventKind::Press {
+        return None;
+    }
+
+    match &state.setup_step {
+        Some(SetupStep::SelectProvider { .. }) => {
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(SetupStep::SelectProvider { providers, selected }) = &state.setup_step {
+                        let new_sel = if *selected == 0 { providers.len() - 1 } else { *selected - 1 };
+                        state.setup_step = Some(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel });
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(SetupStep::SelectProvider { providers, selected }) = &state.setup_step {
+                        let new_sel = (*selected + 1) % providers.len();
+                        state.setup_step = Some(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel });
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(SetupStep::SelectProvider { providers, selected }) = &state.setup_step {
+                        if let Some((name, _)) = providers.get(*selected).cloned() {
+                            state.setup_step = Some(SetupStep::EnterApiKey {
+                                provider: name,
+                                key: String::new(),
+                                masked_cursor: 0,
+                            });
+                        }
+                    }
+                }
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    state.setup_step = None;
+                }
+                _ => {}
+            }
+        }
+
+        Some(SetupStep::EnterApiKey { provider, .. }) => {
+            let provider = provider.clone();
+            match key.code {
+                KeyCode::Char(c) => {
+                    if let Some(SetupStep::EnterApiKey { key, .. }) = &mut state.setup_step {
+                        key.push(c);
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(SetupStep::EnterApiKey { key, .. }) = &mut state.setup_step {
+                        key.pop();
+                    }
+                }
+                KeyCode::Enter => {
+                    let key_val = if let Some(SetupStep::EnterApiKey { key, .. }) = &state.setup_step {
+                        key.clone()
+                    } else { String::new() };
+
+                    if !key_val.is_empty() {
+                        // Save the API key
+                        let auth = crate::auth_storage::AuthStorage::new();
+                        auth.set_api_key(&provider, key_val);
+
+                        // Also register as custom provider if it's a known non-built-in
+                        let model = format!("{}/default", provider);
+                        state.footer_state.data.model_name = model.clone();
+                        state.footer_state.data.provider_name = provider.clone();
+
+                        state.setup_step = Some(SetupStep::Done {
+                            provider: provider.clone(),
+                            model,
+                        });
+                    }
+                }
+                KeyCode::Esc => {
+                    // Go back to provider selection
+                    let providers = vec![
+                        ("anthropic".to_string(), false),
+                        ("openai".to_string(), false),
+                        ("google".to_string(), false),
+                        ("deepseek".to_string(), false),
+                        ("groq".to_string(), false),
+                        ("openrouter".to_string(), false),
+                        ("mistral".to_string(), false),
+                        ("xai".to_string(), false),
+                        ("minimax".to_string(), false),
+                        ("zai".to_string(), false),
+                    ];
+                    state.setup_step = Some(SetupStep::SelectProvider { providers, selected: 0 });
+                }
+                _ => {}
+            }
+        }
+
+        Some(SetupStep::Done { .. }) => {
+            if key.code == KeyCode::Enter {
+                // Exit setup wizard, go to normal chat
+                state.setup_step = None;
+                state.add_system_message(" Ready to chat. Type a message to start.".to_string());
+            }
+        }
+
+        None => {}
+    }
+
+    None
 }
