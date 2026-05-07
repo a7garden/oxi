@@ -36,9 +36,10 @@ pub(crate) async fn stream_assistant_response(
         context.set_tools(oxi_tools);
     }
 
-    let stream_options = StreamOptions {
+    let mut stream_options = StreamOptions {
         temperature: Some(loop_ref.config.temperature as f64),
         max_tokens: Some(loop_ref.config.max_tokens as usize),
+        api_key: loop_ref.config.api_key.clone(),
         ..Default::default()
     };
 

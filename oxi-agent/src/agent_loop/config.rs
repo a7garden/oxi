@@ -44,6 +44,11 @@ pub struct AgentLoopConfig {
     pub auto_retry_max_attempts: usize,
     /// Base delay in milliseconds for auto-retry exponential back-off.
     pub auto_retry_base_delay_ms: u64,
+    /// API key override for the provider.
+    ///
+    /// When set, this is injected into [`oxi_ai::StreamOptions`] so the
+    /// provider uses it instead of an environment variable.
+    pub api_key: Option<String>,
 }
 
 /// Controls whether tool calls execute concurrently or one at a time.

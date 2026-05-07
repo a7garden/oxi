@@ -374,6 +374,10 @@ impl App {
         } else {
             oxi_ai::CompactionStrategy::Disabled
         };
+        // Resolve API key from auth storage
+        let auth = crate::auth_storage::AuthStorage::new();
+        let api_key = auth.get_api_key(&provider_name);
+
         let config = AgentConfig {
             name: "oxi".to_string(),
             description: Some("oxi CLI agent".to_string()),
@@ -386,6 +390,7 @@ impl App {
             compaction_strategy,
             compaction_instruction: None,
             context_window: 128_000,
+            api_key,
         };
 
         let agent = Arc::new(Agent::new(Arc::from(provider), config));
