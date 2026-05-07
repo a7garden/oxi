@@ -130,6 +130,8 @@ pub struct ChatViewState {
     /// Pending images collected from messages, newest last.
     /// Each tuple is (base64_data, mime_type).
     pub pending_images: Vec<(String, String)>,
+    /// Spinner animation frame index.
+    pub spinner_frame: usize,
 }
 
 impl ChatViewState {
@@ -523,8 +525,10 @@ impl StatefulWidget for ChatView<'_> {
                     _ => {}
                 }
             }
-            // Streaming indicator
-            all_lines.push((MessageRole::Assistant, "  ⠋ thinking…".to_string(), LineKind::Normal));
+            // Streaming indicator — uses spinner_frame for animation
+            let spinner_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let ch = spinner_chars[state.spinner_frame % spinner_chars.len()];
+            all_lines.push((MessageRole::Assistant, format!("  {} thinking…", ch), LineKind::Normal));
         }
 
         // ------------------------------------------------------------------

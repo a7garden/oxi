@@ -42,6 +42,17 @@ impl OpenAiProvider {
         }
     }
 
+    /// Create with a custom base URL (API key resolved from auth storage).
+    ///
+    /// Used for built-in OpenAI-compatible providers like ZAI.
+    pub fn with_base_url(base_url: &str) -> Self {
+        Self {
+            client: shared_client(),
+            api_key: None,
+            base_url: Some(base_url.to_string()),
+        }
+    }
+
     /// Create with a custom base URL and optional API key.
     ///
     /// Used for registering custom OpenAI-compatible providers (Minimax, ZAI, etc.).

@@ -523,6 +523,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         let now = std::time::Instant::now();
         if now.duration_since(last_spinner_tick).as_millis() >= 80 {
             state.spinner_frame = (state.spinner_frame + 1) % SPINNER.len();
+            state.chat.spinner_frame = state.spinner_frame;
             last_spinner_tick = now;
         }
 
