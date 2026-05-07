@@ -71,22 +71,22 @@ impl Default for ColorScheme {
 }
 
 impl ColorScheme {
-    /// Default dark color scheme (Tokyo Night inspired).
+    /// Default dark color scheme (true black).
     pub fn dark() -> Self {
         Self {
             foreground: Color::Rgb(205, 214, 244), // #cdd6f4
-            background: Color::Rgb(26, 27, 38),    // #1a1b26
+            background: Color::Rgb(0, 0, 0),       // #000000 true black
             primary: Color::Rgb(122, 162, 247),    // #7aa2f7
             secondary: Color::Rgb(158, 206, 106),  // #9ece6a
             error: Color::Rgb(247, 118, 142),      // #f7768e
             warning: Color::Rgb(224, 175, 104),    // #e0af68
             success: Color::Rgb(158, 206, 106),    // #9ece6a
-            muted: Color::Rgb(88, 91, 112),        // #585b70
+            muted: Color::Rgb(80, 80, 100),        // #505064
             accent: Color::Rgb(187, 154, 247),     // #bb9af7
-            border: Color::Rgb(55, 58, 82),        // #373a52
-            cursor_fg: Color::Rgb(26, 27, 38),     // #1a1b26
+            border: Color::Rgb(30, 30, 30),        // #1e1e1e
+            cursor_fg: Color::Rgb(0, 0, 0),        // #000000
             cursor_bg: Color::Rgb(205, 214, 244),  // #cdd6f4
-            selection_bg: Color::Rgb(55, 58, 82),  // #373a52
+            selection_bg: Color::Rgb(40, 40, 60),  // #28283c
         }
     }
 
