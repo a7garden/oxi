@@ -7,6 +7,112 @@ fn default_context_window() -> usize {
     128_000
 }
 
+
+/// Hook context for `shouldStopAfterTurn`.
+#[derive(Debug, Clone)]
+pub struct ShouldStopAfterTurnContext {
+    /// The assistant message that completed the turn.
+    pub message: oxi_ai::AssistantMessage,
+    /// Tool result messages from this turn.
+    pub tool_results: Vec<oxi_ai::ToolResultMessage>,
+    /// Current iteration number.
+    pub iteration: usize,
+}
+
+/// Result of `beforeToolCall` hook.
+#[derive(Debug, Clone)]
+pub struct BeforeToolCallResult {
+    /// If `true`, the tool call is blocked and an error result is returned.
+    pub block: bool,
+    /// Human-readable reason for blocking.
+    pub reason: Option<String>,
+}
+
+impl Default for BeforeToolCallResult {
+    fn default() -> Self {
+        Self { block: false, reason: None }
+    }
+}
+
+/// Result of `afterToolCall` hook.
+#[derive(Debug, Clone)]
+pub struct AfterToolCallResult {
+    /// Override content for the tool result.
+    pub content: Option<String>,
+    /// Override error status.
+    pub is_error: Option<bool>,
+    /// Signal that the agent should stop after this batch.
+    pub terminate: Option<bool>,
+}
+
+impl Default for AfterToolCallResult {
+    fn default() -> Self {
+        Self { content: None, is_error: None, terminate: None }
+    }
+}
+
+/// Hook context for `beforeToolCall`.
+#[derive(Debug, Clone)]
+pub struct BeforeToolCallContext {
+    /// The tool call being made.
+    pub tool_call_id: String,
+    /// Tool name.
+    pub tool_name: String,
+    /// Validated arguments.
+    pub args: serde_json::Value,
+}
+
+/// Hook context for `afterToolCall`.
+#[derive(Debug, Clone)]
+pub struct AfterToolCallContext {
+    /// The tool call that was made.
+    pub tool_call_id: String,
+    /// Tool name.
+    pub tool_name: String,
+    /// The tool result content.
+    pub result: String,
+    /// Whether the result is an error.
+    pub is_error: bool,
+}
+
+/// Callback hooks for the agent loop.
+///
+/// These mirror pi-mono's `AgentLoopConfig` hooks, allowing callers to
+/// inject custom logic at key points in the agentic loop.
+#[derive(Default)]
+pub struct AgentHooks {
+    /// Called after each turn completes. Return `true` to stop the agent loop.
+    pub should_stop_after_turn: Option<Box<dyn Fn(&ShouldStopAfterTurnContext) -> bool + Send + Sync>>,
+
+    /// Called before a tool is executed. Return a `BeforeToolCallResult` with
+    /// `block: true` to prevent execution.
+    pub before_tool_call: Option<Box<dyn Fn(&BeforeToolCallContext) -> BeforeToolCallResult + Send + Sync>>,
+
+    /// Called after a tool execution completes. Can override the result.
+    pub after_tool_call: Option<Box<dyn Fn(&AfterToolCallContext) -> AfterToolCallResult + Send + Sync>>,
+
+    /// Returns steering messages to inject mid-run. Called after each turn
+    /// (unless stopped).
+    pub get_steering_messages: Option<Box<dyn Fn() -> Vec<String> + Send + Sync>>,
+
+    /// Returns follow-up messages to process after the agent would stop.
+    /// Called when the agent has no more tool calls and no steering messages.
+    pub get_follow_up_messages: Option<Box<dyn Fn() -> Vec<String> + Send + Sync>>,
+
+    /// Tool execution mode.
+    pub tool_execution: ToolExecutionMode,
+}
+
+/// How tool calls are executed within a single assistant turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolExecutionMode {
+    /// Execute tool calls sequentially, one at a time.
+    Sequential,
+    /// Execute tool calls concurrently (in parallel).
+    #[default]
+    Parallel,
+}
+
 /// Agent runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
