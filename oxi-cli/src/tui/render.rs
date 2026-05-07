@@ -11,7 +11,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::Paragraph,
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -38,6 +38,11 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
 
     // Input area
     render_input_area(f, chunks[2], state, theme);
+
+    // Slash popup — overlay above the input area (drawn last so it's on top)
+    if state.slash_completion_active {
+        render_slash_popup_overlay(f, chunks[1], chunks[2], state, theme);
+    }
 
     // Status bar
     f.render_stateful_widget(Footer::new(theme), chunks[3], &mut state.footer_state);
@@ -78,10 +83,8 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
         );
     }
 
-    // Hint / popup row
-    if state.slash_completion_active {
-        render_slash_popup(f, hint_row, state, theme);
-    } else if state.is_agent_busy {
+    // Hint row (only when no slash popup)
+    if state.is_agent_busy {
         f.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "  Ctrl+C to interrupt",
@@ -133,22 +136,49 @@ fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-// ── Slash popup ──────────────────────────────────────────────────────────
+// ── Slash popup (Pi-style vertical list overlay) ─────────────────────────
 
-fn render_slash_popup(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+/// Render the slash command popup as a vertical list overlaying the chat area,
+/// positioned just above the separator/input rows — matching Pi's `/` UI.
+fn render_slash_popup_overlay(
+    f: &mut Frame,
+    separator_area: Rect,
+    input_area: Rect,
+    state: &AppState,
+    theme: &Theme,
+) {
     if state.slash_completions.is_empty() {
         return;
     }
     let selected = state.slash_completion_index;
-    let max_show = 6usize;
+    let total = state.slash_completions.len();
+    let max_show = 8usize.min(total);
+
+    // Scroll window so the selected item is always visible
     let window_start = if selected >= max_show {
         selected - max_show + 1
     } else {
         0
     };
 
-    let mut spans: Vec<Span> = vec![Span::styled("  ", Style::default())];
+    // Popup dimensions: full width, positioned above the separator
+    let popup_width = separator_area.width;
+    let popup_height = max_show as u16 + 2; // +2 for top/bottom borders
+    let popup_x = separator_area.x;
+    let popup_y = separator_area.y.saturating_sub(popup_height);
 
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    // Clear the area behind the popup
+    f.render_widget(Clear, popup_area);
+
+    // Build vertical list lines
+    let mut lines: Vec<Line> = Vec::with_capacity(max_show);
     let visible: Vec<_> = state
         .slash_completions
         .iter()
@@ -157,39 +187,91 @@ fn render_slash_popup(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme
         .take(max_show)
         .collect();
 
+    let name_width = state
+        .slash_completions
+        .iter()
+        .map(|c| c.name.chars().count())
+        .max()
+        .unwrap_or(10)
+        .max(10);
+
     for (i, comp) in &visible {
-        if *i == selected {
-            spans.push(Span::styled(
-                format!(" {} ", comp.name),
-                Style::default()
-                    .fg(theme.colors.background.to_ratatui())
-                    .bg(theme.colors.primary.to_ratatui())
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(" ", Style::default()));
+        let is_selected = *i == selected;
+        let pointer = if is_selected { "→" } else { " " };
+        let name_padded = format!("{:<width$}", comp.name, width = name_width);
+
+        // Truncate description to fit
+        let desc_space = (popup_width as usize).saturating_sub(name_width + 8);
+        let desc: String = comp
+            .description
+            .chars()
+            .take(desc_space)
+            .collect();
+
+        if is_selected {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!(" {} ", pointer),
+                    Style::default().fg(theme.colors.accent.to_ratatui()),
+                ),
+                Span::styled(
+                    format!(" {}  ", name_padded),
+                    Style::default()
+                        .fg(theme.colors.background.to_ratatui())
+                        .bg(theme.colors.primary.to_ratatui())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    desc,
+                    Style::default().fg(theme.colors.muted.to_ratatui()),
+                ),
+            ]));
         } else {
-            spans.push(Span::styled(
-                format!(" {} ", comp.name),
-                Style::default().fg(theme.colors.muted.to_ratatui()),
-            ));
-            spans.push(Span::styled(" ", Style::default()));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!(" {} ", pointer),
+                    Style::default(),
+                ),
+                Span::styled(
+                    format!(" {}  ", name_padded),
+                    Style::default().fg(theme.colors.foreground.to_ratatui()),
+                ),
+                Span::styled(
+                    desc,
+                    Style::default().fg(theme.colors.muted.to_ratatui()),
+                ),
+            ]));
         }
     }
 
-    if let Some(comp) = state.slash_completions.get(selected) {
-        let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
-        let remaining = area.width as usize;
-        let desc_max = remaining.saturating_sub(used + 4);
-        if desc_max > 5 {
-            let desc: String = comp.description.chars().take(desc_max).collect();
-            spans.push(Span::styled(
-                format!("— {}", desc),
-                Style::default().fg(theme.colors.muted.to_ratatui()),
-            ));
-        }
-    }
+    // Render with a bordered block
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
 
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+    let popup_inner = block.inner(popup_area);
+    f.render_widget(block, popup_area);
+    f.render_widget(Paragraph::new(lines), popup_inner);
+
+    // Page indicator at bottom-right of popup
+    let page = window_start / max_show + 1;
+    let total_pages = (total + max_show - 1) / max_show;
+    if total_pages > 1 {
+        let indicator = format!("({}/{})", page, total_pages);
+        let indicator_area = Rect {
+            x: popup_area.x + popup_area.width.saturating_sub(indicator.chars().count() as u16 + 2),
+            y: popup_area.y + popup_area.height.saturating_sub(1),
+            width: indicator.chars().count() as u16 + 2,
+            height: 1,
+        };
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                indicator,
+                Style::default().fg(theme.colors.muted.to_ratatui()),
+            )),
+            indicator_area,
+        );
+    }
 }
 
 // ── Separator ────────────────────────────────────────────────────────────
