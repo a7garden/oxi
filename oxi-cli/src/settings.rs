@@ -599,19 +599,19 @@ impl Settings {
     }
 
     /// Get the effective model ID (provider/model format).
-    pub fn effective_model(&self, cli_model: Option<&str>) -> String {
+    /// Returns None if no model is configured.
+    pub fn effective_model(&self, cli_model: Option<&str>) -> Option<String> {
         cli_model
             .map(String::from)
             .or_else(|| self.default_model.clone())
-            .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string())
     }
 
     /// Get the effective provider.
-    pub fn effective_provider(&self, cli_provider: Option<&str>) -> String {
+    /// Returns None if no provider is configured.
+    pub fn effective_provider(&self, cli_provider: Option<&str>) -> Option<String> {
         cli_provider
             .map(String::from)
             .or_else(|| self.default_provider.clone())
-            .unwrap_or_else(|| "anthropic".to_string())
     }
 
     /// Get the effective temperature, preferring `default_temperature` (f64)
