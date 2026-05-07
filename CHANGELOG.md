@@ -5,6 +5,45 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-05-06
+
+### Added — oxi-agent
+
+- **2-level agentic loop** matching pi-mono architecture: outer loop (follow-up messages), inner loop (tool calls + steering)
+- **turn_start / turn_end events** emitted each iteration for lifecycle tracking
+- **Steering messages**: inject user messages mid-run via `session.steer()`, polled after each turn
+- **Follow-up messages**: queue messages during agent execution, processed when agent would stop via `session.follow_up()`
+- **beforeToolCall / afterToolCall hooks** for tool execution pipeline customization
+- **shouldStopAfterTurn hook** for graceful early termination
+- **ToolExecutionMode** (Sequential / Parallel) config on AgentHooks
+- **Terminate flag propagation**: batch terminates only when every tool result sets `terminate: true`
+- **Streaming message lifecycle events**: `MessageStart` → `MessageUpdate` (per delta) → `MessageEnd`
+- **ThinkingDelta forwarding** to TUI for real-time reasoning display
+- **AgentHooks** struct with all hook types (get_steering_messages, get_follow_up_messages, etc.)
+- **ToolBatchResult** for batch tool execution results
+- **Compaction per iteration**: context window check at each iteration, not just once
+
+### Added — oxi-cli
+
+- **Tool snippets in system prompt**: Available tools now show descriptions instead of "(none)"
+- **AgentSession queue → Agent hooks connection**: steering/follow-up queues wired to agent loop
+- **Input unlock during agent busy**: typing, paste, and Enter allowed while agent is streaming
+- **Enter while busy → queue as steering message** instead of being ignored
+
+### Fixed
+
+- **TurnEnd event**: real assistant message instead of placeholder UserMessage
+- **Fallback model logic restored** on stream error
+- **turn_number**: incremented before use (was starting at 0)
+- **web_search.rs** compilation error simplified
+- **Removed dead code**: old `execute_tool()` method, unused imports, Korean comments → English
+- **ToolExecutionMode default**: Sequential (parallel was fallback to sequential anyway)
+
+### Changed
+
+- System prompt tool descriptions now populated from `tool_snippets` HashMap
+- Agent loop restructured from single loop to pi-mono 2-level loop architecture
+
 ## [0.5.0] - 2026-05-05
 
 ### Fixed — oxi-ai
