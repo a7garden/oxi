@@ -437,7 +437,10 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                         content: error.clone(),
                                         is_error: true,
                                     },
-                                    AgentEvent::Complete { .. } => UiEvent::Complete,
+                                    AgentEvent::Complete { .. } => {
+                                        // DEBUG: Complete
+                                        UiEvent::Complete
+                                    }
                                     AgentEvent::Error { message, .. } => UiEvent::Error(message),
                                     AgentEvent::MessageUpdate { ref message, .. } => {
                                         // Extract image blocks from the message
@@ -460,7 +463,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                         continue;
                                     }
                                     AgentEvent::MessageEnd { ref message } => {
-                                        // Extract image blocks from the message
+                                                                                // Extract image blocks from the message
                                         let content_blocks: &[oxi_ai::ContentBlock] = match message {
                                             oxi_ai::Message::Assistant(a) => &a.content,
                                             oxi_ai::Message::User(u) => match &u.content {
@@ -504,7 +507,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                         continue;
                                     }
                                     AgentEvent::Usage { input_tokens, output_tokens } => {
-                                        let _ = ui_fwd.send(UiEvent::TokenUsage {
+                                                                                let _ = ui_fwd.send(UiEvent::TokenUsage {
                                             input_tokens: input_tokens as u32,
                                             output_tokens: output_tokens as u32,
                                             cache_read_tokens: 0,

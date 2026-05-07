@@ -136,26 +136,14 @@ impl StatefulWidget for Footer<'_> {
         // Build left-side content: tokens + duration
         let mut left_parts: Vec<String> = Vec::new();
 
-        // Token display: in/out/cache + context usage
+        // Token display: context usage percentage / max (like pi-agent)
         if d.input_tokens > 0 || d.output_tokens > 0 {
-            let mut token_parts: Vec<String> = Vec::new();
-            if d.input_tokens > 0 {
-                token_parts.push(format!("in:{}", FooterData::fmt_count(d.input_tokens)));
+            let total = d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_tokens;
+            if total > 0 && d.context_window_max > 0 {
+                let pct = (total as f32 / d.context_window_max as f32) * 100.0;
+                let max = FooterData::fmt_count(d.context_window_max);
+                left_parts.push(format!("{:.1}% / {}", pct, max));
             }
-            if d.output_tokens > 0 {
-                token_parts.push(format!("out:{}", FooterData::fmt_count(d.output_tokens)));
-            }
-            if d.cache_read_tokens > 0 {
-                token_parts.push(format!("cache:{}", FooterData::fmt_count(d.cache_read_tokens)));
-            }
-            left_parts.push(token_parts.join("  "));
-        }
-
-        // Context window usage
-        if d.context_tokens > 0 && d.context_window_max > 0 {
-            let max = FooterData::fmt_count(d.context_window_max);
-            let pct = d.context_window_pct;
-            left_parts.push(format!("{} ({:.1}%)", max, pct));
         }
 
         // Duration

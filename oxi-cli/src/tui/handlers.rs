@@ -360,6 +360,7 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             state.footer_state.data.cache_write_tokens = cache_write_tokens;
             state.footer_state.data.context_window_pct = context_window_pct;
             state.footer_state.data.total_cost = total_cost;
+            state.footer_state.data.context_tokens = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens;
         }
     }
 }
