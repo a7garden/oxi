@@ -271,17 +271,21 @@ impl ChatViewState {
                 self.code_block_active = false;
             } else {
                 // Opening fence — skip the ``` and optional language tag
-                let after = &delta[abs_idx + 3..];
-                let skip = after.find('\n').map(|i| i + 1).unwrap_or(after.len());
+                let after_fence = &delta[abs_idx + 3..];
+                let skip_to = after_fence.find('\n').map(|i| i + 1).unwrap_or(after_fence.len());
                 self.code_block_buf.clear();
-                if skip < after.len() {
-                    self.code_block_buf.push_str(&after[skip..]);
+                // Content after the opening ``` line
+                if skip_to < after_fence.len() {
+                    self.code_block_buf.push_str(&after_fence[skip_to..]);
                 }
                 self.code_block_active = true;
+                // Advance pos past the fence + language tag line
+                pos = abs_idx + 3 + skip_to;
+                continue;
             }
             pos = abs_idx + 3;
         }
-        // If in a code block, append remaining text
+        // If in a code block, append remaining text after the last fence
         if self.code_block_active && pos < delta.len() {
             self.code_block_buf.push_str(&delta[pos..]);
         }
