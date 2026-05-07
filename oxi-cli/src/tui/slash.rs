@@ -57,7 +57,10 @@ pub(crate) fn handle_slash_command(
                 }
             } else {
                 // Show interactive model selector overlay
+                // Only show models from providers that have API keys configured
+                let auth = crate::auth_storage::AuthStorage::new();
                 let all_models: Vec<String> = oxi_ai::model_db::get_all_models()
+                    .filter(|entry| auth.get_api_key(&entry.provider).is_some())
                     .map(|entry| format!("{}/{}", entry.provider, entry.id))
                     .collect();
                 if all_models.is_empty() {
