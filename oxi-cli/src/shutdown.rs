@@ -17,7 +17,8 @@ const FORCED: u8 = 2;
 pub enum ShutdownSignal {
     /// Graceful. Finish pending work, then exit.
     Graceful,
-    /// Force.
+    /// Force exit immediately.
+    Force,
 }
 
 /// Graceful shutdown coordinator.
