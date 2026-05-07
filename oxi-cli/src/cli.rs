@@ -112,6 +112,12 @@ pub enum Commands {
         #[arg(long)]
         provider: Option<String>,
     },
+    /// Run the interactive setup wizard
+    Setup {
+        /// Reset all settings to defaults
+        #[arg(long)]
+        reset: bool,
+    },
 }
 
 // ── Package subcommands ────────────────────────────────────────────
@@ -557,6 +563,28 @@ mod tests {
                 assert_eq!(provider, Some("minimax".to_string()));
             }
             _ => panic!("Expected Models command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_setup_command() {
+        let args = parse_args_from(["oxi", "setup"]).unwrap();
+        match args.command {
+            Some(Commands::Setup { reset }) => {
+                assert!(!reset);
+            }
+            _ => panic!("Expected Setup command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_setup_reset() {
+        let args = parse_args_from(["oxi", "setup", "--reset"]).unwrap();
+        match args.command {
+            Some(Commands::Setup { reset }) => {
+                assert!(reset);
+            }
+            _ => panic!("Expected Setup command with reset"),
         }
     }
 }

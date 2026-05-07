@@ -236,6 +236,9 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         Commands::Models { provider } => {
             handle_models_command(provider)?;
         }
+        Commands::Setup { reset } => {
+            handle_setup_command(*reset)?;
+        }
     }
 
     Ok(())
@@ -686,6 +689,28 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Handle `oxi setup [--reset]`
+fn handle_setup_command(reset: bool) -> Result<()> {
+    if reset {
+        let settings_path = oxi::settings::Settings::settings_path()?;
+        if settings_path.exists() {
+            std::fs::remove_file(&settings_path)?;
+            println!("Removed settings: {}", settings_path.display());
+        }
+        // Reset auth file
+        let auth_path = dirs::config_dir()
+            .unwrap_or_default()
+            .join("oxi")
+            .join("auth.json");
+        if auth_path.exists() {
+            std::fs::remove_file(&auth_path)?;
+            println!("Removed auth: {}", auth_path.display());
+        }
+        println!("Settings reset to defaults.");
+    }
+    oxi::setup_wizard::run()
 }
 
 /// Handle `oxi models [--provider <name>]`
