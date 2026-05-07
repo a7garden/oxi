@@ -6,7 +6,11 @@ use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
 use oxi_agent::AgentEvent;
 use tokio::sync::mpsc;
 
-use crossterm::event::{Event as CEvent, KeyCode, KeyModifiers, MouseEventKind};
+use crossterm::event::{
+    Event as CEvent, KeyCode, KeyModifiers, MouseEventKind,
+    KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    KeyEventKind,
+};
 
 /// Actions returned from input handling that need async work in the main loop.
 pub(crate) enum Action {
@@ -32,6 +36,14 @@ pub async fn handle_input(
             }
             None
         }
+        // IME 조합 완료 텍스트나 클립보드 붙여넣기 처리
+        CEvent::Paste(text) => {
+            if !state.is_agent_busy {
+                state.input.insert_str(&text);
+                state.update_slash_completions();
+            }
+            None
+        }
         _ => None,
     }
 }
@@ -43,6 +55,12 @@ async fn handle_key(
     _ui_tx: &mpsc::Sender<UiEvent>,
     running: &mut bool,
 ) -> Option<Action> {
+    // 키보드 이벤트 타입이 지원되는 경우 Press만 처리
+    // (Repeat/Release 무시 — IME 조합 중 Repeat 이벤트 방지)
+    if key.kind != KeyEventKind::Press {
+        return None;
+    }
+
     match key.code {
         KeyCode::Enter => {
             if !state.is_agent_busy {
