@@ -103,6 +103,11 @@ pub(super) const SPINNER: &[&str] = &[("⠋"), ("⠙"), ("⠹"), ("⠸"), ("⠼"
 /// Setup wizard state
 #[derive(Debug, Clone)]
 pub(crate) enum SetupStep {
+    /// First step: OAuth or API Key
+    SelectAuthType {
+        auth_type: Option<String>, // "oauth" or "apikey"
+        selected: usize,
+    },
     /// Select provider from list
     SelectProvider {
         providers: Vec<(String, bool)>, // (name, has_key)

@@ -292,16 +292,9 @@ pub(crate) fn handle_slash_command(
                     }));
                 }
             } else {
-                // /provider — show provider selection overlay
-                let auth = AuthStorage::new();
-                let provider_list: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
-                    .iter()
-                    .map(|builtin| {
-                        let has_key = auth.has_auth(builtin.name);
-                        (builtin.name.to_string(), has_key)
-                    }).collect();
-                state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider {
-                    providers: provider_list,
+                // /provider — start with auth type selection
+                state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectAuthType {
+                    auth_type: None,
                     selected: 0,
                 }));
             }
