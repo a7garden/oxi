@@ -629,13 +629,14 @@ async fn handle_setup_step_key(
 
                         if models.is_empty() {
                             // No models in DB for this provider, use default model
-                            let model = format!("{}/default", provider);
+                            let model_id = "default".to_string();
+                            let full_model = format!("{}/{}", provider, model_id);
                             
-                            // Persist model to settings
+                            // Persist model to settings (model-only, provider separately)
                             if let Ok(mut settings) = crate::settings::Settings::load() {
-                                settings.default_model = Some(model.clone());
+                                settings.default_model = Some(model_id.clone());
                                 settings.default_provider = Some(provider.clone());
-                                eprintln!("[DEBUG] Saving model: {}", model);
+                                eprintln!("[DEBUG] Saving model: {}/{}", provider, model_id);
                                 if let Err(e) = settings.save() {
                                     eprintln!("[DEBUG] Save failed: {}", e);
                                 }
@@ -643,12 +644,12 @@ async fn handle_setup_step_key(
                                 eprintln!("[DEBUG] Failed to load settings");
                             }
 
-                            state.footer_state.data.model_name = model.clone();
+                            state.footer_state.data.model_name = full_model.clone();
                             state.footer_state.data.provider_name = provider.clone();
 
                             state.overlay = Some(AppOverlay::Setup(SetupStep::Done {
                                 provider: provider.clone(),
-                                model,
+                                model: full_model,
                             }));
                         } else {
                             // Show model selection
@@ -691,13 +692,13 @@ async fn handle_setup_step_key(
                 KeyCode::Enter => {
                     if let Some(AppOverlay::Setup(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
                         if let Some(model_id) = models.get(*selected) {
-                            let model = format!("{}/{}", provider, model_id);
+                            let full_model = format!("{}/{}", provider, model_id);
                             
-                            // Persist model to settings
+                            // Persist model to settings (model-only, provider separately)
                             if let Ok(mut settings) = crate::settings::Settings::load() {
-                                settings.default_model = Some(model.clone());
+                                settings.default_model = Some(model_id.to_string());
                                 settings.default_provider = Some(provider.clone());
-                                eprintln!("[DEBUG] Saving model: {}", model);
+                                eprintln!("[DEBUG] Saving model: {}", full_model);
                                 if let Err(e) = settings.save() {
                                     eprintln!("[DEBUG] Save failed: {}", e);
                                 }
@@ -705,12 +706,12 @@ async fn handle_setup_step_key(
                                 eprintln!("[DEBUG] Failed to load settings");
                             }
 
-                            state.footer_state.data.model_name = model.clone();
+                            state.footer_state.data.model_name = full_model.clone();
                             state.footer_state.data.provider_name = provider.clone();
 
                             state.overlay = Some(AppOverlay::Setup(SetupStep::Done {
                                 provider: provider.clone(),
-                                model,
+                                model: full_model,
                             }));
                         }
                     }
@@ -924,8 +925,18 @@ async fn handle_provider_step_key(
                 KeyCode::Enter => {
                     if let Some(AppOverlay::ProviderConfig(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
                         if let Some(model_id) = models.get(*selected) {
-                            let model = format!("{}/{}", provider, model_id);
-                            state.add_system_message(format!("{} API key saved.", provider));
+                            let full_model = format!("{}/{}", provider, model_id);
+                            
+                            // Persist model to settings (model-only, provider separately)
+                            if let Ok(mut settings) = crate::settings::Settings::load() {
+                                settings.default_model = Some(model_id.to_string());
+                                settings.default_provider = Some(provider.clone());
+                                let _ = settings.save();
+                            }
+                            
+                            state.footer_state.data.model_name = full_model.clone();
+                            state.footer_state.data.provider_name = provider.clone();
+                            state.add_system_message(format!("Model set to {}", full_model));
                             state.overlay = None;
                         }
                     }

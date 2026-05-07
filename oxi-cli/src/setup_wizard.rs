@@ -316,8 +316,13 @@ fn load_themes() -> Vec<String> {
 fn save_settings(model_id: &str, theme_name: &str, custom_base_urls: &[(String, String)]) -> Result<()> {
     let mut settings = crate::settings::Settings::load().unwrap_or_default();
 
-    // Set model and theme
-    settings.default_model = Some(model_id.to_string());
+    // Split "provider/model" into separate fields
+    if let Some((provider, model_name)) = model_id.split_once('/') {
+        settings.default_provider = Some(provider.to_string());
+        settings.default_model = Some(model_name.to_string());
+    } else {
+        settings.default_model = Some(model_id.to_string());
+    }
     settings.theme = theme_name.to_string();
 
     // Ensure custom providers with base_url are registered
