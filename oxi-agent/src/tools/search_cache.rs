@@ -170,19 +170,39 @@ impl AgentTool for GetSearchResultsTool {
 // ── rand helper (no external crate needed) ────────────────────────
 
 mod rand {
+    use std::cell::Cell;
     use std::time::SystemTime;
+
+    thread_local! {
+        static SEED: Cell<u64> = Cell::new(0);
+    }
 
     /// Simple xorshift pseudo-random number generator.
     pub fn random() -> u32 {
-        let seed = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as u64;
-        let mut x = seed;
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        (x & 0xFFFFFFFF) as u32
+        SEED.with(|s| {
+            let mut x = if s.get() == 0 {
+                // Initialise from system time on first use per thread
+                let ns = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as u64;
+                // Mix with thread id for extra entropy
+                ns ^ (thread_id() as u64)
+            } else {
+                s.get()
+            };
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            s.set(x);
+            (x & 0xFFFFFFFF) as u32
+        })
+    }
+
+    fn thread_id() -> usize {
+        // Use the address of a thread-local as a cheap thread id
+        thread_local! { static ANCHOR: () = (); }
+        ANCHOR.with(|_| &ANCHOR as *const _ as usize)
     }
 }
 

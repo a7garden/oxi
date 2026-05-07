@@ -31,7 +31,7 @@ use crate::extensions::{ExtensionContext, ExtensionContextBuilder, ExtensionRunn
 use crate::session::{AgentMessage, SessionManager};
 use crate::settings::{Settings, ThinkingLevel};
 use anyhow::{Context, Result};
-use oxi_agent::{Agent, AgentEvent, AgentState};
+use oxi_agent::{Agent, AgentEvent, AgentState, AgentHooks};
 use oxi_ai::Message;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
@@ -523,6 +523,22 @@ impl AgentSession {
         if model_id.is_empty() {
             anyhow::bail!("No model selected");
         }
+
+        // Set agent hooks to poll steering/follow-up queues.
+        // Clone the Arc<> queue references so closures are 'static.
+        let steering_q = self.steering_messages.clone();
+        let follow_up_q = self.follow_up_messages.clone();
+        let hooks = oxi_agent::AgentHooks {
+            get_steering_messages: Some(Box::new(move || {
+                steering_q.write().drain(..).collect::<Vec<String>>()
+            })),
+            get_follow_up_messages: Some(Box::new(move || {
+                follow_up_q.write().drain(..).collect::<Vec<String>>()
+            })),
+            tool_execution: oxi_agent::ToolExecutionMode::Sequential,
+            ..Default::default()
+        };
+        self.agent.set_hooks(hooks);
 
         // Run the agent and collect events
         let (_response, events) = self.agent.run(text.clone()).await?;
