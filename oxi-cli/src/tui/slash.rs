@@ -477,6 +477,7 @@ fn format_hotkeys() -> String {
 
   Session
     Ctrl+C             Interrupt / Quit
+    Ctrl+Y             Copy last code block
     Ctrl+P             Cycle models
     Shift+Ctrl+P       Cycle models (reverse)
 "#

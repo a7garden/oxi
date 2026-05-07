@@ -405,7 +405,7 @@ impl StatefulWidget for ChatView<'_> {
         let mut all_lines: Vec<(MessageRole, String, LineKind)> = Vec::new();
 
         // Helper: process Text content block with markdown line-type detection.
-        let mut process_text = |role: MessageRole, content: &str, lines: &mut Vec<(MessageRole, String, LineKind)>| {
+        let process_text = |role: MessageRole, content: &str, lines: &mut Vec<(MessageRole, String, LineKind)>| {
             let mut in_code_block = false;
             for line in content.lines() {
                 let lt = markdown::detect_line_type(line);
@@ -542,7 +542,7 @@ impl StatefulWidget for ChatView<'_> {
             let (role, text, kind) = line_entry;
             let row = area.y + vi as u16;
 
-            let prefix_char = " ";
+            let _prefix_char = " ";
             let prefix_style = match role {
                 MessageRole::User => styles.primary,
                 MessageRole::Assistant => styles.accent,
@@ -691,5 +691,54 @@ mod tests {
         state.clear();
         assert_eq!(state.message_count(), 0);
         assert!(!state.is_streaming());
+    }
+
+    #[test]
+    fn extract_code_block_simple() {
+        let text = "Some text\n```rust\nfn main() {}\n```\nMore text";
+        assert_eq!(extract_last_code_block(text), Some("fn main() {}".to_string()));
+    }
+
+    #[test]
+    fn extract_code_block_multiple() {
+        let text = "```\nfirst\n```\n```python\nsecond\n```";
+        assert_eq!(extract_last_code_block(text), Some("second".to_string()));
+    }
+
+    #[test]
+    fn extract_code_block_none() {
+        let text = "No code blocks here";
+        assert_eq!(extract_last_code_block(text), None);
+    }
+
+    #[test]
+    fn extract_code_block_empty() {
+        let text = "```\n```";
+        assert_eq!(extract_last_code_block(text), None);
+    }
+
+    #[test]
+    fn streaming_code_block_tracking() {
+        let mut state = ChatViewState::default();
+        state.start_streaming();
+        state.stream_text_delta("Here is code:\n");
+        state.stream_text_delta("```rust\n");
+        state.stream_text_delta("let x = 42;\n");
+        state.stream_text_delta("```");
+        assert_eq!(state.last_code_block, Some("let x = 42;".to_string()));
+    }
+
+    #[test]
+    fn refresh_code_block_from_messages() {
+        let mut state = ChatViewState::default();
+        state.add_message(ChatMessage {
+            role: MessageRole::Assistant,
+            content_blocks: vec![ContentBlock::Text {
+                content: "```js\nconsole.log('hi');\n```".to_string(),
+            }],
+            timestamp: 0,
+        });
+        state.refresh_last_code_block();
+        assert_eq!(state.last_code_block, Some("console.log('hi');".to_string()));
     }
 }

@@ -216,7 +216,7 @@ pub fn code_block_style(base: Style) -> Style {
 }
 
 /// Compute left-indent for a heading based on its level (smaller level → no indent).
-pub fn heading_text(line: &str, level: u8) -> String {
+pub fn heading_text(line: &str, _level: u8) -> String {
     line.trim_start_matches('#').trim().to_string()
 }
 
