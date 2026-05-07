@@ -234,10 +234,16 @@ pub fn create_agent_session_from_services(
         .model_id
         .or_else(|| settings.effective_model(None))
     {
-        Some(id) if !id.is_empty() => id,
-        _ => {
-            // No model configured — return empty, TUI will handle
-            String::new()
+        Some(id) if !id.is_empty() => {
+            tracing::info!("Model resolved: {} (default_model={:?}, last_used={:?})", id, settings.default_model, settings.last_used_model);
+            id
+        }
+        other => {
+            tracing::warn!("No model configured: effective_model={:?}", settings.effective_model(None));
+            match other {
+                Some(id) => id,
+                None => String::new(),
+            }
         }
     };
 
