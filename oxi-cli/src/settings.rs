@@ -82,6 +82,14 @@ pub struct Settings {
     /// Default provider to use (e.g., "anthropic", "openai")
     pub default_provider: Option<String>,
 
+    /// Last used model (automatically updated when user selects a model)
+    #[serde(default)]
+    pub last_used_model: Option<String>,
+
+    /// Last used provider (automatically updated when user selects a model)
+    #[serde(default)]
+    pub last_used_provider: Option<String>,
+
     /// Max tokens for responses
     pub max_tokens: Option<u32>,
 
@@ -167,6 +175,8 @@ impl Default for Settings {
             theme: default_theme(),
             default_model: None,
             default_provider: None,
+            last_used_model: None,
+            last_used_provider: None,
             max_tokens: None,
             temperature: None,
             default_temperature: None,
@@ -604,6 +614,7 @@ impl Settings {
         cli_model
             .map(String::from)
             .or_else(|| self.default_model.clone())
+            .or_else(|| self.last_used_model.clone())
     }
 
     /// Get the effective provider.
@@ -612,6 +623,7 @@ impl Settings {
         cli_provider
             .map(String::from)
             .or_else(|| self.default_provider.clone())
+            .or_else(|| self.last_used_provider.clone())
     }
 
     /// Get the effective temperature, preferring `default_temperature` (f64)
@@ -629,6 +641,16 @@ impl Settings {
     }
 
     // ── Theme persistence ─────────────────────────────────────────────
+
+    /// Save the last used model/provider and persist to disk.
+    pub fn save_last_used(model_id: &str) {
+        if let Ok(mut settings) = Self::load() {
+            let parts: Vec<&str> = model_id.splitn(2, '/').collect();
+            settings.last_used_model = Some(model_id.to_string());
+            settings.last_used_provider = parts.first().map(|s| s.to_string());
+            let _ = settings.save();
+        }
+    }
 
 
     /// Save the current theme to settings and persist to disk.
