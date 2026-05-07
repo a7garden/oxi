@@ -2,8 +2,7 @@
 //!
 //! Provides secure storage and retrieval of authentication credentials,
 //! with OS keyring integration and fallback to encrypted file storage.
-//! Supports multi-provider auth, credential validation, session tokens,
-//! and environment variable discovery.
+//! Supports multi-provider auth, credential validation, and session tokens.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -211,56 +210,6 @@ pub enum AuthError {
 }
 
 // ============================================================================
-// Environment Variable Key Discovery
-// ============================================================================
-
-/// Known provider environment variable mappings
-static PROVIDER_ENV_KEYS: &[(&str, &[&str])] = &[
-    ("anthropic", &["ANTHROPIC_API_KEY"]),
-    ("openai", &["OPENAI_API_KEY"]),
-    ("google", &["GOOGLE_API_KEY", "GEMINI_API_KEY"]),
-    ("groq", &["GROQ_API_KEY"]),
-    ("mistral", &["MISTRAL_API_KEY"]),
-    ("deepseek", &["DEEPSEEK_API_KEY"]),
-    ("xai", &["XAI_API_KEY"]),
-    ("cohere", &["COHERE_API_KEY", "CO_API_KEY"]),
-    ("perplexity", &["PERPLEXITY_API_KEY"]),
-];
-
-/// Find environment variable keys for a provider
-pub fn find_env_keys(provider: &str) -> Vec<String> {
-    let normalized = provider.to_lowercase().replace('-', "_");
-
-    // Check known mappings first
-    for (name, keys) in PROVIDER_ENV_KEYS {
-        if *name == normalized {
-            let found: Vec<String> = keys
-                .iter()
-                .filter(|k| std::env::var(k).is_ok())
-                .map(|k| k.to_string())
-                .collect();
-            if !found.is_empty() {
-                return found;
-            }
-        }
-    }
-
-    // Try generic pattern: {PROVIDER}_API_KEY
-    let generic_key = format!("{}_API_KEY", normalized.to_uppercase());
-    if std::env::var(&generic_key).is_ok() {
-        return vec![generic_key];
-    }
-
-    Vec::new()
-}
-
-/// Get API key from environment variable for a provider
-pub fn get_env_api_key(provider: &str) -> Option<String> {
-    let keys = find_env_keys(provider);
-    keys.first().and_then(|k| std::env::var(k).ok())
-}
-
-// ============================================================================
 // Storage Backend Trait
 // ============================================================================
 
@@ -353,41 +302,6 @@ impl AuthStorageBackend for FileAuthStorage {
             std::fs::remove_file(&self.path).map_err(|e| AuthError::WriteError(e.to_string()))?;
         }
         *self.cache.write() = None;
-        Ok(())
-    }
-}
-
-// ============================================================================
-// Environment Variable Backend
-// ============================================================================
-
-/// Environment variable backend (read-only)
-pub struct EnvAuthStorage {
-    provider_prefix: String,
-}
-
-impl EnvAuthStorage {
-    /// Create a new environment-based auth storage
-    pub fn new(provider: &str) -> Self {
-        Self {
-            provider_prefix: format!("{}_API_KEY", provider.to_uppercase().replace('-', "_")),
-        }
-    }
-}
-
-impl AuthStorageBackend for EnvAuthStorage {
-    fn read(&self) -> AuthResult<Option<String>> {
-        Ok(std::env::var(&self.provider_prefix).ok())
-    }
-
-    fn write(&self, _data: &str) -> AuthResult<()> {
-        Err(AuthError::WriteError(
-            "Cannot write to environment variables".to_string(),
-        ))
-    }
-
-    fn delete(&self) -> AuthResult<()> {
-        std::env::remove_var(&self.provider_prefix);
         Ok(())
     }
 }
@@ -590,9 +504,6 @@ impl AuthStorage {
         if self.credentials.read().contains_key(provider) {
             return true;
         }
-        if get_env_api_key(provider).is_some() {
-            return true;
-        }
         if let Some(ref resolver) = *self.fallback_resolver.read() {
             if resolver.resolve(provider).is_some() {
                 return true;
@@ -616,15 +527,6 @@ impl AuthStorage {
                 configured: true,
                 source: Some("stored".to_string()),
                 label: Some(cred.type_name().to_string()),
-            };
-        }
-
-        let env_keys = find_env_keys(provider);
-        if let Some(first_key) = env_keys.first() {
-            return AuthStatus {
-                configured: false,
-                source: Some("environment".to_string()),
-                label: Some(first_key.clone()),
             };
         }
 
@@ -652,8 +554,7 @@ impl AuthStorage {
     /// 2. Stored API key from auth.json
     /// 3. OAuth token from auth.json (auto-refreshed)
     /// 4. Session token from auth.json
-    /// 5. Environment variable
-    /// 6. Fallback resolver
+    /// 5. Fallback resolver
     pub fn get_api_key(&self, provider: &str) -> Option<String> {
         self.get_api_key_with_options(provider, true)
     }
