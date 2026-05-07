@@ -23,31 +23,7 @@ use std::io;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-/// No model configured — show setup guidance inside TUI
-fn format_no_model_welcome() -> String {
-    let version = env!("CARGO_PKG_VERSION");
-    format!(
-        " oxi v{}\n\
-         \n\
-         No model configured. Set up a provider to get started:\n\
-         \n\
-         /login <provider> <api-key>\n\
-         \n\
-         Providers: anthropic, openai, google, deepseek, groq, mistral, xai, minimax, zai\n\
-         \n\
-         Example:\n\
-           /login anthropic sk-ant-api03-...\n\
-           /login minimax eyJhbG...\n\
-         \n\
-         Or set a model first:\n\
-           /model anthropic/claude-sonnet-4\n\
-         \n\
-         After login, set your default model:\n\
-           /model openai/gpt-4o\n\
-         ",
-        version
-    )
-}
+
 
 use crossterm::{
     event::{
@@ -116,6 +92,27 @@ pub(super) const SPINNER: &[&str] = &[("⠋"), ("⠙"), ("⠹"), ("⠸"), ("⠼"
 // ── App State ────────────────────────────────────────────────────────────
 
 /// Unified application state holding all widget states.
+/// Setup wizard state
+#[derive(Debug, Clone)]
+pub(crate) enum SetupStep {
+    /// Select provider from list
+    SelectProvider {
+        providers: Vec<(String, bool)>, // (name, has_key)
+        selected: usize,
+    },
+    /// Enter API key for selected provider
+    EnterApiKey {
+        provider: String,
+        key: String,
+        masked_cursor: usize,
+    },
+    /// Done — show success
+    Done {
+        provider: String,
+        model: String,
+    },
+}
+
 pub(crate) struct AppState {
     pub chat: ChatViewState,
     pub input: InputState,
@@ -130,6 +127,8 @@ pub(crate) struct AppState {
     pub slash_completion_index: usize,
     pub slash_completion_active: bool,
     pub message_count: usize,
+    /// Setup wizard active state (None = normal mode)
+    pub setup_step: Option<SetupStep>,
 }
 
 impl AppState {
@@ -148,6 +147,7 @@ impl AppState {
             slash_completion_index: 0,
             slash_completion_active: false,
             message_count: 0,
+            setup_step: None,
         }
     }
 
@@ -433,8 +433,31 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     if has_model {
         state.add_system_message(welcome::format_welcome(&session_id, &model_id));
     } else {
-        // No model configured — show setup guidance in TUI
-        state.add_system_message(format_no_model_welcome());
+        // No model configured — launch setup wizard
+        let providers = vec![
+            ("anthropic".to_string(), false),
+            ("openai".to_string(), false),
+            ("google".to_string(), false),
+            ("deepseek".to_string(), false),
+            ("groq".to_string(), false),
+            ("openrouter".to_string(), false),
+            ("mistral".to_string(), false),
+            ("xai".to_string(), false),
+            ("minimax".to_string(), false),
+            ("zai".to_string(), false),
+        ];
+        // Check which providers already have keys
+        let auth = crate::auth_storage::AuthStorage::new();
+        let providers: Vec<(String, bool)> = providers.into_iter().map(|(name, _)| {
+            let env_key = format!("{}_API_KEY", name.to_uppercase());
+            let has_key = std::env::var(&env_key).ok().is_some() || auth.get_api_key(&name).is_some();
+            (name, has_key)
+        }).collect();
+
+        state.setup_step = Some(SetupStep::SelectProvider {
+            providers,
+            selected: 0,
+        });
     }
 
     let mut running = true;
