@@ -19,7 +19,7 @@ use tokio::sync::oneshot;
 pub struct SearchCache {
     /// Map of search_id → (query, results).
     entries: Mutex<HashMap<String, CachedSearch>>,
-    /// Maximum number of cached searches (LRU eviction).
+    /// Maximum number of cached searches. Oldest arbitrary entry is evicted when full.
     max_entries: usize,
 }
 
