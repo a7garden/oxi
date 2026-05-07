@@ -1,35 +1,26 @@
-# Progress
+# Chat Refactor Progress
 
-## Status
-In Progress
+## Status: ✅ Complete
 
-## Tasks
-- [x] Refactor oxi-tui/src/widgets/input.rs to minimize manual buffer rendering
+### Changes made to `oxi-tui/src/widgets/chat.rs`
 
-## Files Changed
-- `oxi-tui/src/widgets/input.rs` — refactored (output at `/tmp/input_refactor.rs`)
+1. **Replaced manual `buf[()]` rendering with `Paragraph` widget**
+   - Built `Vec<Line<'static>>` from collected message metadata
+   - Each line composed of `Span`s: role prefix + h_pad + content
+   - Used `Paragraph::new(lines).block(Block::default().style(styles.normal)).scroll((offset, 0))`
 
-## Notes
-### input.rs Refactor Summary
+2. **Removed `put_char` helper** — ratatui handles wide chars via `Line`/`Span` automatically
 
-**Before:** 8 manual `buf[()]` call sites including character-by-character text rendering loop and remainder clearing loop (O(N) manual writes).
+3. **Kept manual buffer rendering ONLY for scrollbar** (█ chars on right edge)
 
-**After:** 7 manual `buf[()]` call sites, all justified and fixed-count:
-1. Prompt char (1 cell)
-2. Prompt wide-char continuation (1 cell, conditional)
-3. Space separator (1 cell)
-4. Empty-input cursor block (1 cell)
-5. End-of-text cursor block (1 cell)
-6. Cursor-on-char highlight (1 cell)
-7. Wide char continuation under cursor (1 cell, conditional)
+4. **Code block background fill** — padded content to full row width so code-block style covers the row
 
-**Approach:**
-- Text content rendered via `Paragraph` with `Line`/`Span` — handles character-by-character rendering and remainder clearing automatically
-- Pre-cursor, cursor-char, and post-cursor split into separate `Span`s within a single `Line`
-- Placeholder text rendered via `Paragraph` with muted style
-- Manual buffer writes ONLY for cursor highlight (fg/bg inversion) and CJK wide-char continuation
-- All struct definitions, state methods, and tests identical
+5. **All struct definitions, state methods, and tests unchanged** — 11/11 tests pass
 
-**Verification:**
-- Compiles cleanly (no new warnings)
-- All 78 tests pass
+### Before: 7 manual `buf[()]` calls + `put_char` helper
+### After: 1 `Paragraph::render()` + 1 manual `buf[()]` for scrollbar only
+
+### Line building approach
+- `LineKind::CodeBlock` → single padded `Span` with `code_block_style` (fills row for bg)
+- `LineKind::HorizontalRule | RoleLabel` → single `Span` with uniform style
+- `LineKind::Normal | Heading | ListItem` → multiple `Span`s from `markdown::parse_inline()`
