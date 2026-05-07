@@ -300,11 +300,19 @@ impl StatefulWidget for CommandPalette<'_> {
         let x = area.x + (area.width.saturating_sub(palette_w)) / 2;
         let y = area.y + 2; // slight offset from top
 
+        // Clamp popup to buffer bounds
+        let max_h = area.height.saturating_sub(y.saturating_sub(area.y));
+        let clamped_h = total_height.min(max_h);
+        if clamped_h < 3 || palette_w < 3 {
+            // Too small to render anything meaningful.
+            return;
+        }
+
         let popup_area = Rect {
             x,
             y,
             width: palette_w,
-            height: total_height,
+            height: clamped_h,
         };
 
         // -- dim backdrop (full screen) --
@@ -325,8 +333,8 @@ impl StatefulWidget for CommandPalette<'_> {
         let inner_x = inner.x;
         let inner_w = inner.width as usize;
         let input_y = inner.y;
-        let sep_y = input_y + 1;
-        let list_start_y = sep_y + 1;
+        let sep_y = input_y.saturating_add(1);
+        let list_start_y = sep_y.saturating_add(1);
 
         // -- input row --
         let prompt_style = Style::default().fg(primary).bg(overlay_bg);
@@ -355,21 +363,24 @@ impl StatefulWidget for CommandPalette<'_> {
                 .set_style(Style::default().fg(Color::Black).bg(primary));
         }
 
-        // -- separator line --
-        let separator = Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(border_color).bg(overlay_bg))
-            .style(Style::default().bg(overlay_bg));
-        let sep_area = Rect {
-            x: inner_x,
-            y: sep_y,
-            width: inner.width,
-            height: 1,
-        };
-        separator.render(sep_area, buf);
+        // -- separator line (only if fits inside popup) --
+        if sep_y < inner.y + inner.height {
+            let separator = Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(border_color).bg(overlay_bg))
+                .style(Style::default().bg(overlay_bg));
+            let sep_area = Rect {
+                x: inner_x,
+                y: sep_y,
+                width: inner.width,
+                height: 1,
+            };
+            separator.render(sep_area, buf);
+        }
 
         // -- scroll clamp --
-        let visible_count = list_height as usize;
+        let available_list_h = inner.height.saturating_sub(2) as usize; // subtract input + separator rows
+        let visible_count = available_list_h.max(1);
         if state.selected < state.scroll_offset {
             state.scroll_offset = state.selected;
         }
@@ -377,12 +388,18 @@ impl StatefulWidget for CommandPalette<'_> {
             state.scroll_offset = state.selected - visible_count + 1;
         }
 
-        // -- command list --
+        // -- command list (only if fits) --
+        if list_start_y >= inner.y + inner.height {
+            return;
+        }
+        let actual_list_h = inner
+            .height
+            .saturating_sub((list_start_y - inner.y) as u16);
         let list_area = Rect {
             x: inner_x,
             y: list_start_y,
             width: inner.width,
-            height: list_height,
+            height: actual_list_h,
         };
 
         if state.filtered_indices.is_empty() {

@@ -1,20 +1,35 @@
 # Progress
 
 ## Status
-Completed
+In Progress
 
 ## Tasks
-- [x] Refactor footer.rs to use idiomatic ratatui widgets
+- [x] Refactor oxi-tui/src/widgets/input.rs to minimize manual buffer rendering
 
 ## Files Changed
-- oxi-tui/src/widgets/footer.rs — Replaced 12 manual `buf[(col, row)].set_char().set_style()` calls with ratatui high-level widgets
+- `oxi-tui/src/widgets/input.rs` — refactored (output at `/tmp/input_refactor.rs`)
 
 ## Notes
-- Used `Layout` (Vertical + Horizontal) to split area into rows and columns
-- Used `Block::default().borders(Borders::TOP)` for separator line (replacing manual `─` loop)
-- Used `Paragraph::new(Line::from(Span::styled(...)))` for left/right aligned text on rows 1 and 2
-- Used `Alignment::Right` for right-aligned model name and version tag
-- All struct definitions (FooterData, FooterState, Footer) and methods kept identical
-- All 3 tests pass
-- No new compilation errors or warnings introduced
-- Pre-existing errors in command_palette.rs are unrelated
+### input.rs Refactor Summary
+
+**Before:** 8 manual `buf[()]` call sites including character-by-character text rendering loop and remainder clearing loop (O(N) manual writes).
+
+**After:** 7 manual `buf[()]` call sites, all justified and fixed-count:
+1. Prompt char (1 cell)
+2. Prompt wide-char continuation (1 cell, conditional)
+3. Space separator (1 cell)
+4. Empty-input cursor block (1 cell)
+5. End-of-text cursor block (1 cell)
+6. Cursor-on-char highlight (1 cell)
+7. Wide char continuation under cursor (1 cell, conditional)
+
+**Approach:**
+- Text content rendered via `Paragraph` with `Line`/`Span` — handles character-by-character rendering and remainder clearing automatically
+- Pre-cursor, cursor-char, and post-cursor split into separate `Span`s within a single `Line`
+- Placeholder text rendered via `Paragraph` with muted style
+- Manual buffer writes ONLY for cursor highlight (fg/bg inversion) and CJK wide-char continuation
+- All struct definitions, state methods, and tests identical
+
+**Verification:**
+- Compiles cleanly (no new warnings)
+- All 78 tests pass
