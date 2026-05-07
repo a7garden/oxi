@@ -85,6 +85,13 @@ pub(crate) enum UiEvent {
     QueueUpdate {
         pending: usize,
     },
+    /// An image block was received from the agent.
+    ImageBlock {
+        /// MIME type of the image.
+        mime_type: String,
+        /// Base64-encoded image data.
+        base64_data: String,
+    },
 }
 
 // ── Spinner ──────────────────────────────────────────────────────────────
@@ -280,12 +287,18 @@ impl AppState {
         self.chat.stream_text_delta(delta);
     }
 
+    pub fn stream_image(&mut self, mime_type: String, base64_data: String) {
+        self.chat.stream_image(mime_type, base64_data);
+    }
+
     pub fn finish_streaming(&mut self) {
         let was_streaming = self.chat.is_streaming();
         self.chat.finish_streaming();
         self.is_agent_busy = false;
         if was_streaming {
             self.message_count += 1;
+            // Refresh last code block from completed message
+            self.chat.refresh_last_code_block();
         }
     }
 
@@ -406,6 +419,27 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                     },
                                     AgentEvent::Complete { .. } => UiEvent::Complete,
                                     AgentEvent::Error { message, .. } => UiEvent::Error(message),
+                                    AgentEvent::MessageUpdate { ref message, .. }
+                                    | AgentEvent::MessageEnd { ref message, .. } => {
+                                        // Extract image blocks from the message
+                                        let content_blocks: &[oxi_ai::ContentBlock] = match message {
+                                            oxi_ai::Message::Assistant(a) => &a.content,
+                                            oxi_ai::Message::User(u) => match &u.content {
+                                                oxi_ai::MessageContent::Blocks(blocks) => blocks,
+                                                _ => &[],
+                                            },
+                                            oxi_ai::Message::ToolResult(t) => &t.content,
+                                        };
+                                        for block in content_blocks {
+                                            if let oxi_ai::ContentBlock::Image(ref img) = block {
+                                                let _ = ui_fwd.send(UiEvent::ImageBlock {
+                                                    mime_type: img.mime_type.clone(),
+                                                    base64_data: img.data.clone(),
+                                                }).await;
+                                            }
+                                        }
+                                        continue;
+                                    }
                                     _ => continue,
                                 };
                                 if ui_fwd.send(ui_event).await.is_err() {

@@ -4,8 +4,10 @@ use ratatui::{
     widgets::StatefulWidget,
     buffer::Buffer,
     layout::Rect,
+    style::Style,
 };
 use crate::Theme;
+use super::markdown;
 
 /// ChatView message role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +62,13 @@ pub enum ContentBlock {
         /// Whether the user can retry.
         retryable: bool,
     },
+    /// An image content block (base64-encoded).
+    Image {
+        /// MIME type (e.g. "image/png").
+        mime_type: String,
+        /// Base64-encoded image data.
+        base64_data: String,
+    },
 }
 
 /// Display representation of a chat message.
@@ -82,6 +91,25 @@ pub struct StreamingState {
     pub active_content_index: usize,
 }
 
+// ---------------------------------------------------------------------------
+// Per-line markdown metadata
+// ---------------------------------------------------------------------------
+
+/// Kind of a collected line, used to pick the right render style.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LineKind {
+    /// Normal text — inline markdown will be parsed at render time.
+    Normal,
+    /// Inside a fenced code block.
+    CodeBlock,
+    /// ATX heading (stores level 1–6).
+    Heading(u8),
+    /// List item (extra indent already applied).
+    ListItem,
+    /// Horizontal rule.
+    HorizontalRule,
+}
+
 /// State for the ChatView widget.
 #[derive(Debug, Default)]
 pub struct ChatViewState {
@@ -93,6 +121,15 @@ pub struct ChatViewState {
     pub scroll_offset: u16,
     /// Content height in rows.
     content_height: u16,
+    /// 마지막 코드 블록 내용 (Ctrl+Y 복사용).
+    pub last_code_block: Option<String>,
+    /// Internal: currently inside a ``` fence (for streaming tracking).
+    code_block_active: bool,
+    /// Internal: buffer accumulating code block content during streaming.
+    code_block_buf: String,
+    /// Pending images collected from messages, newest last.
+    /// Each tuple is (base64_data, mime_type).
+    pub pending_images: Vec<(String, String)>,
 }
 
 impl ChatViewState {
@@ -118,6 +155,7 @@ impl ChatViewState {
     }
 
     /// Append text delta to streaming message.
+    /// Also tracks the last code block for Ctrl+Y copy.
     pub fn stream_text_delta(&mut self, delta: &str) {
         if let Some(ref mut state) = self.streaming {
             if let Some(ContentBlock::Text { ref mut content }) = state.message.content_blocks.last_mut() {
@@ -128,6 +166,8 @@ impl ChatViewState {
                 });
             }
         }
+        // Track code blocks from the streamed text
+        self.update_last_code_block(delta);
     }
 
     /// Append a tool call content block to the streaming message.
@@ -153,6 +193,17 @@ impl ChatViewState {
         if let Some(ref mut state) = self.streaming {
             state.message.content_blocks.push(ContentBlock::Error {
                 title, message, retryable,
+            });
+        }
+    }
+
+    /// Append an image content block to the streaming message.
+    pub fn stream_image(&mut self, mime_type: String, base64_data: String) {
+        self.pending_images.push((base64_data.clone(), mime_type.clone()));
+        if let Some(ref mut state) = self.streaming {
+            state.message.content_blocks.push(ContentBlock::Image {
+                mime_type,
+                base64_data,
             });
         }
     }
@@ -186,6 +237,10 @@ impl ChatViewState {
         self.streaming = None;
         self.scroll_offset = 0;
         self.content_height = 0;
+        self.pending_images.clear();
+        self.last_code_block = None;
+        self.code_block_active = false;
+        self.code_block_buf.clear();
     }
 
     /// Get message count.
@@ -197,6 +252,87 @@ impl ChatViewState {
     pub fn is_streaming(&self) -> bool {
         self.streaming.is_some()
     }
+
+    /// Update `last_code_block` by scanning the delta for ``` fences.
+    /// Tracks partial fences across multiple deltas.
+    fn update_last_code_block(&mut self, delta: &str) {
+        let mut pos = 0;
+        while let Some(idx) = delta[pos..].find("```") {
+            let abs_idx = pos + idx;
+            if self.code_block_active {
+                // Closing fence — everything before is code
+                let before = &delta[pos..abs_idx];
+                self.code_block_buf.push_str(before);
+                let content = self.code_block_buf.trim().to_string();
+                if !content.is_empty() {
+                    self.last_code_block = Some(content);
+                }
+                self.code_block_buf.clear();
+                self.code_block_active = false;
+            } else {
+                // Opening fence — skip the ``` and optional language tag
+                let after = &delta[abs_idx + 3..];
+                let skip = after.find('\n').map(|i| i + 1).unwrap_or(after.len());
+                self.code_block_buf.clear();
+                if skip < after.len() {
+                    self.code_block_buf.push_str(&after[skip..]);
+                }
+                self.code_block_active = true;
+            }
+            pos = abs_idx + 3;
+        }
+        // If in a code block, append remaining text
+        if self.code_block_active && pos < delta.len() {
+            self.code_block_buf.push_str(&delta[pos..]);
+        }
+    }
+
+    /// Extract the last code block from all completed messages (used after
+    /// streaming finishes to ensure accuracy).
+    pub fn refresh_last_code_block(&mut self) {
+        for msg in self.messages.iter().rev() {
+            for block in msg.content_blocks.iter().rev() {
+                if let ContentBlock::Text { content } = block {
+                    if let Some(code) = extract_last_code_block(content) {
+                        self.last_code_block = Some(code);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Extract the last fenced code block from text.
+/// Returns the code content (without fence markers and language tag).
+fn extract_last_code_block(text: &str) -> Option<String> {
+    let mut result: Option<String> = None;
+    let mut in_block = false;
+    let mut block_content = String::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            if in_block {
+                let content = block_content.trim().to_string();
+                if !content.is_empty() {
+                    result = Some(content);
+                }
+                block_content.clear();
+                in_block = false;
+            } else {
+                block_content.clear();
+                in_block = true;
+            }
+        } else if in_block {
+            if !block_content.is_empty() {
+                block_content.push('\n');
+            }
+            block_content.push_str(line);
+        }
+    }
+
+    result
 }
 
 /// ChatView widget.
@@ -216,6 +352,26 @@ impl<'a> ChatView<'a> {
         self.scrollbar = show;
         self
     }
+}
+
+/// Render a single character into the buffer with the given style, respecting
+/// wide-char continuation cells.  Returns the number of terminal columns used.
+fn put_char(buf: &mut Buffer, col: u16, row: u16, c: char, style: Style, max_col: u16) -> u16 {
+    if col >= max_col {
+        return 0;
+    }
+    let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16;
+    buf[(col, row)].set_char(c).set_style(style);
+    // Mark continuation cells for wide chars.
+    if cw > 1 {
+        for w in 1..cw {
+            let cont = col + w;
+            if cont < max_col {
+                buf[(cont, row)].set_char('\u{0}').set_style(style);
+            }
+        }
+    }
+    cw
 }
 
 impl StatefulWidget for ChatView<'_> {
@@ -242,58 +398,115 @@ impl StatefulWidget for ChatView<'_> {
             }
         }
 
-        // Collect all lines
-        let mut all_lines: Vec<(MessageRole, String, bool)> = Vec::new();
-        // (role, text, is_timestamp_row)
+        // ------------------------------------------------------------------
+        // Collect all lines with markdown metadata
+        // ------------------------------------------------------------------
+        // Each entry: (role, display_text, kind)
+        let mut all_lines: Vec<(MessageRole, String, LineKind)> = Vec::new();
+
+        // Helper: process Text content block with markdown line-type detection.
+        let mut process_text = |role: MessageRole, content: &str, lines: &mut Vec<(MessageRole, String, LineKind)>| {
+            let mut in_code_block = false;
+            for line in content.lines() {
+                let lt = markdown::detect_line_type(line);
+                match lt {
+                    markdown::LineType::Heading(level) => {
+                        if in_code_block {
+                            // treat as code block content if inside fence
+                            lines.push((role, line.to_string(), LineKind::CodeBlock));
+                        } else {
+                            let text = markdown::heading_text(line, level);
+                            lines.push((role, text, LineKind::Heading(level)));
+                        }
+                    }
+                    markdown::LineType::CodeFence { .. } => {
+                        in_code_block = !in_code_block;
+                        // Don't render the fence markers themselves.
+                    }
+                    markdown::LineType::ListItem => {
+                        if in_code_block {
+                            lines.push((role, line.to_string(), LineKind::CodeBlock));
+                        } else {
+                            lines.push((role, format!("  {}", line), LineKind::ListItem));
+                        }
+                    }
+                    markdown::LineType::HorizontalRule => {
+                        if in_code_block {
+                            lines.push((role, line.to_string(), LineKind::CodeBlock));
+                        } else {
+                            lines.push((role, "──────────────────────".to_string(), LineKind::HorizontalRule));
+                        }
+                    }
+                    markdown::LineType::Normal => {
+                        let kind = if in_code_block {
+                            LineKind::CodeBlock
+                        } else {
+                            LineKind::Normal
+                        };
+                        lines.push((role, line.to_string(), kind));
+                    }
+                }
+            }
+        };
 
         for msg in &state.messages {
             for block in &msg.content_blocks {
                 match block {
                     ContentBlock::Text { content } => {
-                        for line in content.lines() {
-                            all_lines.push((msg.role, line.to_string(), false));
-                        }
+                        process_text(msg.role, content, &mut all_lines);
                     }
                     ContentBlock::Thinking { content, collapsed } => {
                         let indicator = if *collapsed { "▸" } else { "▾" };
-                        all_lines.push((msg.role, format!("{} Thinking…", indicator), false));
+                        all_lines.push((msg.role, format!("{} Thinking…", indicator), LineKind::Normal));
                         if !*collapsed {
                             for line in content.lines() {
-                                all_lines.push((msg.role, format!("  {}", line), false));
+                                all_lines.push((msg.role, format!("  {}", line), LineKind::Normal));
                             }
                         } else if let Some(first) = content.lines().next() {
-                            all_lines.push((msg.role, format!("  {}", first), false));
+                            all_lines.push((msg.role, format!("  {}", first), LineKind::Normal));
                         }
                     }
                     ContentBlock::ToolCall { name, arguments, .. } => {
-                        all_lines.push((msg.role, format!("┌─ tool: {} ───", name), false));
+                        all_lines.push((msg.role, format!("┌─ tool: {} ───", name), LineKind::Normal));
                         for line in arguments.lines().take(8) {
-                            all_lines.push((msg.role, format!("│ {}", line), false));
+                            all_lines.push((msg.role, format!("│ {}", line), LineKind::Normal));
                         }
-                        all_lines.push((msg.role, "└─".to_string(), false));
+                        all_lines.push((msg.role, "└─".to_string(), LineKind::Normal));
                     }
                     ContentBlock::ToolResult { tool_name, content, is_error } => {
                         let prefix = if *is_error { "✗" } else { "✓" };
-                        all_lines.push((msg.role, format!("┌─ {}: {} ───", prefix, tool_name), false));
+                        all_lines.push((msg.role, format!("┌─ {}: {} ───", prefix, tool_name), LineKind::Normal));
                         for line in content.lines().take(3) {
-                            all_lines.push((msg.role, format!("│ {}", line), false));
+                            all_lines.push((msg.role, format!("│ {}", line), LineKind::Normal));
                         }
-                        all_lines.push((msg.role, "└─".to_string(), false));
+                        all_lines.push((msg.role, "└─".to_string(), LineKind::Normal));
                     }
                     ContentBlock::Error { title, message, retryable } => {
-                        all_lines.push((msg.role, format!("┌─ ⚠ {} ───", title), false));
+                        all_lines.push((msg.role, format!("┌─ ⚠ {} ───", title), LineKind::Normal));
                         for line in message.lines().take(6) {
-                            all_lines.push((msg.role, format!("│ {}", line), false));
+                            all_lines.push((msg.role, format!("│ {}", line), LineKind::Normal));
                         }
                         if *retryable {
-                            all_lines.push((msg.role, "│ ↻ This error may be temporary".to_string(), false));
+                            all_lines.push((msg.role, "│ ↻ This error may be temporary".to_string(), LineKind::Normal));
                         }
-                        all_lines.push((msg.role, "└─".to_string(), false));
+                        all_lines.push((msg.role, "└─".to_string(), LineKind::Normal));
+                    }
+                    ContentBlock::Image { mime_type, base64_data } => {
+                        let size_bytes = base64_data.len() * 3 / 4;
+                        let size_str = if size_bytes >= 1_048_576 {
+                            format!("{:.1} MB", size_bytes as f64 / 1_048_576.0)
+                        } else if size_bytes >= 1024 {
+                            format!("{:.1} KB", size_bytes as f64 / 1024.0)
+                        } else {
+                            format!("{} B", size_bytes)
+                        };
+                        all_lines.push((msg.role, format!("📷 [image: {}, {}]", mime_type, size_str), LineKind::Normal));
+                        all_lines.push((msg.role, "  Ctrl+I → open in viewer".to_string(), LineKind::Normal));
                     }
                 }
             }
             // Blank separator after each message
-            all_lines.push((msg.role, String::new(), false));
+            all_lines.push((msg.role, String::new(), LineKind::Normal));
         }
 
         // Add streaming message
@@ -301,38 +514,35 @@ impl StatefulWidget for ChatView<'_> {
             for block in &streaming.message.content_blocks {
                 match block {
                     ContentBlock::Text { content } => {
-                        for line in content.lines() {
-                            all_lines.push((MessageRole::Assistant, line.to_string(), false));
-                        }
+                        process_text(MessageRole::Assistant, content, &mut all_lines);
                     }
                     _ => {}
                 }
             }
             // Streaming indicator
-            all_lines.push((MessageRole::Assistant, "  ⠋ thinking…".to_string(), false));
+            all_lines.push((MessageRole::Assistant, "  ⠋ thinking…".to_string(), LineKind::Normal));
         }
 
-        // Compute content height
+        // ------------------------------------------------------------------
+        // Compute content height & visible range
+        // ------------------------------------------------------------------
         state.content_height = all_lines.len() as u16;
 
-        // Calculate visible range
         let visible_height = area.height as usize;
         let max_scroll = state.content_height.saturating_sub(visible_height as u16);
         let clamped_offset = state.scroll_offset.min(max_scroll);
 
+        // ------------------------------------------------------------------
         // Render visible lines
+        // ------------------------------------------------------------------
         let start = clamped_offset as usize;
-        let _end = (start + visible_height).min(all_lines.len());
+        let max_col = area.x + area.width;
 
-        for (vi, line_tuple) in all_lines.iter().skip(start).take(visible_height).enumerate() {
-            let (role, text, _timestamp) = line_tuple;
+        for (vi, line_entry) in all_lines.iter().skip(start).take(visible_height).enumerate() {
+            let (role, text, kind) = line_entry;
             let row = area.y + vi as u16;
 
-            let prefix_char = match role {
-                MessageRole::User => " ",
-                MessageRole::Assistant => " ",
-                MessageRole::System => " ",
-            };
+            let prefix_char = " ";
             let prefix_style = match role {
                 MessageRole::User => styles.primary,
                 MessageRole::Assistant => styles.accent,
@@ -340,40 +550,77 @@ impl StatefulWidget for ChatView<'_> {
             };
 
             // Write prefix
-            let mut col = area.x;
-            for c in prefix_char.chars() {
-                buf[(col, row)].set_char(c).set_style(prefix_style);
-                col += 1;
+            buf[(area.x, row)].set_char(' ').set_style(prefix_style);
+
+            // Margin after prefix
+            let margin: u16 = 1;
+            let text_area_start = area.x + margin;
+            let max_text_cols = area.width.saturating_sub(margin) as usize;
+
+            // Determine the base style for this line.
+            let line_base_style: Style = match kind {
+                LineKind::Normal => styles.normal,
+                LineKind::CodeBlock => markdown::code_block_style(styles.normal),
+                LineKind::Heading(level) => markdown::heading_style(styles.normal, *level),
+                LineKind::ListItem => styles.normal,
+                LineKind::HorizontalRule => styles.muted,
+            };
+
+            // For code-block and horizontal-rule lines, skip inline parsing
+            // and render the whole line with the line style.
+            if *kind == LineKind::CodeBlock || *kind == LineKind::HorizontalRule {
+                let mut col = text_area_start;
+                let mut chars_used = 0usize;
+                for c in text.chars() {
+                    if chars_used >= max_text_cols { break; }
+                    let cw = put_char(buf, col, row, c, line_base_style, max_col);
+                    col += cw;
+                    chars_used += cw as usize;
+                }
+                // Clear remainder
+                for cl in col..max_col {
+                    buf[(cl, row)].set_char(' ').set_style(line_base_style);
+                }
+                continue;
             }
 
-            // Write text
-            let margin = prefix_char.chars().count() as u16;
-            let max_text = (area.width.saturating_sub(margin)) as usize;
-            for (i, c) in text.chars().take(max_text).enumerate() {
-                let cell_col = area.x + margin + i as u16;
-                if cell_col < area.x + area.width {
-                    let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16;
-                    buf[(cell_col, row)].set_char(c).set_style(styles.normal);
-                    // Mark continuation cells for wide chars
-                    if char_width > 1 {
-                        for w in 1..char_width {
-                            let cont_col = cell_col + w;
-                            if cont_col < area.x + area.width {
-                                buf[(cont_col, row)].set_char('\u{0}').set_style(styles.normal);
-                            }
-                        }
-                    }
+            // For Normal / Heading / ListItem lines, parse inline markdown.
+            let segments = markdown::parse_inline(text);
+            let mut col = text_area_start;
+            let mut chars_used = 0usize;
+
+            for seg in &segments {
+                let seg_style = match seg {
+                    markdown::Segment::Normal(_) => line_base_style,
+                    markdown::Segment::Bold(_) => markdown::bold_style(line_base_style),
+                    markdown::Segment::Italic(_) => line_base_style, // no italic in terminals typically
+                    markdown::Segment::Code(_) => markdown::code_style(line_base_style),
+                    markdown::Segment::Link { .. } => markdown::link_style(line_base_style),
+                };
+                let s = match seg {
+                    markdown::Segment::Normal(s) => s,
+                    markdown::Segment::Bold(s) => s,
+                    markdown::Segment::Italic(s) => s,
+                    markdown::Segment::Code(s) => s,
+                    markdown::Segment::Link { text, .. } => text,
+                };
+                for c in s.chars() {
+                    if chars_used >= max_text_cols { break; }
+                    let cw = put_char(buf, col, row, c, seg_style, max_col);
+                    col += cw;
+                    chars_used += cw as usize;
                 }
             }
 
             // Clear remainder of row
-            let text_end = area.x + margin + text.chars().count() as u16;
-            for cl in text_end..area.x + area.width {
-                buf[(cl, row)].set_char(' ').set_style(styles.normal);
+            for cl in col..max_col {
+                buf[(cl, row)].set_char(' ').set_style(line_base_style);
             }
         }
 
-        // Scrollbar (simple right-edge indicator)
+        // ------------------------------------------------------------------
+        // Scrollbar
+        // ------------------------------------------------------------------
         if self.scrollbar && max_scroll > 0 {
             let thumb_pos = (clamped_offset as f32 / max_scroll as f32 * visible_height as f32) as u16;
             let thumb_size = ((visible_height as f32 * visible_height as f32)

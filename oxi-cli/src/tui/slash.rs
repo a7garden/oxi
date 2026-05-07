@@ -118,27 +118,35 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/copy" => {
-            let last = state
-                .messages()
-                .iter()
-                .rev()
-                .find(|m| m.role == MessageRole::Assistant);
-            if let Some(msg) = last {
-                let content: String = msg
-                    .content_blocks
-                    .iter()
-                    .filter_map(|b| match b {
-                        ContentBlock::Text { content } => Some(content.as_str()),
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                match clipboard_write::copy_to_clipboard(&content) {
-                    Ok(()) => state.add_system_message("✓ Copied to clipboard".to_string()),
+            // Prefer last code block if available, otherwise full last reply
+            if let Some(ref code) = state.chat.last_code_block {
+                match clipboard_write::copy_to_clipboard(code) {
+                    Ok(()) => state.add_system_message("✓ Code block copied to clipboard".to_string()),
                     Err(e) => state.add_system_message(format!("✗ Copy failed: {}", e)),
                 }
             } else {
-                state.add_system_message("No assistant message".to_string());
+                let last = state
+                    .messages()
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == MessageRole::Assistant);
+                if let Some(msg) = last {
+                    let content: String = msg
+                        .content_blocks
+                        .iter()
+                        .filter_map(|b| match b {
+                            ContentBlock::Text { content } => Some(content.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    match clipboard_write::copy_to_clipboard(&content) {
+                        Ok(()) => state.add_system_message("✓ Copied to clipboard".to_string()),
+                        Err(e) => state.add_system_message(format!("✗ Copy failed: {}", e)),
+                    }
+                } else {
+                    state.add_system_message("No assistant message".to_string());
+                }
             }
             true
         }
@@ -431,7 +439,7 @@ fn format_help() -> String {
   Export
     /export [path]    Export to HTML
     /import <path>    Import from JSONL
-    /copy             Copy last reply
+    /copy             Copy code block / last reply
 
   Auth
     /login <provider> Set API key
