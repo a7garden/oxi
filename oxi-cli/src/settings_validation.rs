@@ -47,7 +47,7 @@ impl Settings {
                 report.errors.push(ValidationError {
                     field: "default_temperature".to_string(),
                     message: format!(
-                        "온도값은 0.0~2.0 범위여야 합니다 (현재값: {})",
+                        "Temperature must be between 0.0 and 2.0 (current: {})",
                         temp
                     ),
                 });
@@ -59,7 +59,7 @@ impl Settings {
                 report.errors.push(ValidationError {
                     field: "temperature".to_string(),
                     message: format!(
-                        "온도값은 0.0~2.0 범위여야 합니다 (현재값: {})",
+                        "Temperature must be between 0.0 and 2.0 (current: {})",
                         temp
                     ),
                 });
@@ -71,13 +71,13 @@ impl Settings {
             if tokens == 0 {
                 report.errors.push(ValidationError {
                     field: "max_response_tokens".to_string(),
-                    message: "최소 1 이상이어야 합니다 (현재값: 0)".to_string(),
+                    message: "Must be at least 1 (current: 0)".to_string(),
                 });
             } else if tokens > 128_000 {
                 report.warnings.push(ValidationWarning {
                     field: "max_response_tokens".to_string(),
                     message: format!(
-                        "값이 128,000을 초과합니다. 대부분의 모델에서 지원하지 않을 수 있습니다 (현재값: {})",
+                        "Value exceeds 128,000. Most models may not support this (current: {})",
                         tokens
                     ),
                 });
@@ -88,13 +88,13 @@ impl Settings {
             if tokens == 0 {
                 report.errors.push(ValidationError {
                     field: "max_tokens".to_string(),
-                    message: "최소 1 이상이어야 합니다 (현재값: 0)".to_string(),
+                    message: "Must be at least 1 (current: 0)".to_string(),
                 });
             } else if tokens as usize > 128_000 {
                 report.warnings.push(ValidationWarning {
                     field: "max_tokens".to_string(),
                     message: format!(
-                        "값이 128,000을 초과합니다. 대부분의 모델에서 지원하지 않을 수 있습니다 (현재값: {})",
+                        "Value exceeds 128,000. Most models may not support this (current: {})",
                         tokens
                     ),
                 });
@@ -105,7 +105,7 @@ impl Settings {
         if self.tool_timeout_seconds == 0 {
             report.errors.push(ValidationError {
                 field: "tool_timeout_seconds".to_string(),
-                message: "최소 1초 이상이어야 합니다 (현재값: 0)".to_string(),
+                message: "Must be at least 1 second (current: 0)".to_string(),
             });
         }
 
@@ -119,7 +119,7 @@ impl Settings {
                 report.warnings.push(ValidationWarning {
                     field: "default_model".to_string(),
                     message: format!(
-                        "모델 ID에 슬래시(/)가 없습니다. 'provider/model' 형식을 권장합니다 (현재값: \"{}\")",
+                        "Model ID has no slash (/). Recommended format: 'provider/model' (current: \"{}\")",
                         model
                     ),
                 });
@@ -130,7 +130,7 @@ impl Settings {
         if self.session_history_size == 0 {
             report.errors.push(ValidationError {
                 field: "session_history_size".to_string(),
-                message: "최소 1 이상이어야 합니다 (현재값: 0)".to_string(),
+                message: "Must be at least 1 (current: 0)".to_string(),
             });
         }
 

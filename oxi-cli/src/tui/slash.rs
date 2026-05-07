@@ -486,72 +486,56 @@ fn format_hotkeys() -> String {
 
 // ── Interactive login ────────────────────────────────────────────────────
 
-/// 프리셋 프로바이더 목록
-const LOGIN_PROVIDERS: &[(&str, &str)] = &[
-    ("anthropic", "ANTHROPIC_API_KEY"),
-    ("openai", "OPENAI_API_KEY"),
-    ("google", "GOOGLE_API_KEY"),
-    ("deepseek", "DEEPSEEK_API_KEY"),
-    ("groq", "GROQ_API_KEY"),
-    ("openrouter", "OPENROUTER_API_KEY"),
-    ("mistral", "MISTRAL_API_KEY"),
-    ("xai", "XAI_API_KEY"),
-    ("fireworks", "FIREWORKS_API_KEY"),
-    ("minimax", "MINIMAX_API_KEY"),
-    ("zai", "ZAI_API_KEY"),
+/// Preset provider list
+const LOGIN_PROVIDERS: &[&str] = &[
+    "anthropic",
+    "openai",
+    "google",
+    "deepseek",
+    "groq",
+    "openrouter",
+    "mistral",
+    "xai",
+    "fireworks",
+    "minimax",
+    "zai",
 ];
 
-/// /login — 프로바이더 목록 표시 후 안내
+/// /login — show provider list with auth status
 fn interactive_login_select(state: &mut AppState) {
-    let mut msg = "🔑 프로바이더를 선택하세요:\n\n".to_string();
+    let mut msg = "Select a provider:\n\n".to_string();
     let auth = AuthStorage::new();
 
-    for (_i, (name, env_key)) in LOGIN_PROVIDERS.iter().enumerate() {
-        let has_key = std::env::var(env_key).ok().is_some()
-            || auth.get_api_key(name).is_some();
-        let status = if has_key { "✅" } else { "☐" };
+    for name in LOGIN_PROVIDERS {
+        let has_key = auth.get_api_key(name).is_some();
+        let status = if has_key { "[x]" } else { "[ ]" };
         msg.push_str(&format!("  {} {}\n", status, name));
     }
 
-    msg.push_str("\n/login <provider> 로 API 키를 입력하세요.");
-    msg.push_str("\n예: /login minimax");
+    msg.push_str("\nUse /login <provider> <key> to set an API key.");
+    msg.push_str("\nExample: /login minimax");
     state.add_system_message(msg);
 }
 
-/// /login <provider> — 현재 키 상태 표시 + 안내
+/// /login <provider> — show current key status + instructions
 fn interactive_login(provider: &str, state: &mut AppState) {
     let provider = provider.to_lowercase();
 
-    // 이미 키가 있는지 확인
-    let env_key = LOGIN_PROVIDERS
-        .iter()
-        .find(|(name, _)| *name == provider)
-        .map(|(_, key)| *key)
-        .unwrap_or_else(|| {
-            // 커스텀 프로바이더 — 환경변수 이름 추측
-            let guessed = format!("{}_API_KEY", provider.to_uppercase());
-            // Return a static str from LOGIN_PROVIDERS or leak the String
-            // This is only called once at login time
-            Box::leak(guessed.into_boxed_str())
-        });
-
     let auth = AuthStorage::new();
-    let existing = std::env::var(&env_key)
-        .ok()
-        .or_else(|| auth.get_api_key(&provider));
+    let existing = auth.get_api_key(&provider);
 
     let masked = existing
         .as_ref()
         .map(|k| mask_key(k))
-        .unwrap_or_else(|| "없음".to_string());
+        .unwrap_or_else(|| "not set".to_string());
 
     state.add_system_message(format!(
-        "🔑 {} API 키\n\n현재: {}\n환경변수: {}\n\n아래에 API 키를 입력하세요:\n/login {} <your-api-key>",
-        provider, masked, env_key, provider
+        "API key for {}\n\nCurrent: {}\n\nUse /login {} <your-api-key> to set the key.",
+        provider, masked, provider
     ));
 }
 
-/// /login <provider> <key> — 키 직접 입력 시 저장
+/// /login <provider> <key> — save the key directly
 fn try_login_with_key(provider: &str, key: &str, state: &mut AppState) -> bool {
     if key.is_empty() {
         return false;
@@ -559,13 +543,13 @@ fn try_login_with_key(provider: &str, key: &str, state: &mut AppState) -> bool {
     let auth = AuthStorage::new();
     auth.set_api_key(provider, key.to_string());
     state.add_system_message(format!(
-        "✅ {} API 키가 저장되었습니다.",
+        "API key for {} saved.",
         provider
     ));
     true
 }
 
-/// API 키 마스킹 (앞 6글자 + ... + 뒤 4글자)
+/// API key masking (first 6 chars + ... + last 4 chars)
 fn mask_key(key: &str) -> String {
     if key.len() <= 12 {
         return "***".to_string();

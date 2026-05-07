@@ -322,9 +322,9 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             error_message,
         } => {
             let msg = if let Some(err) = error_message {
-                format!("⚠ Compaction failed: {}", err)
+                format!("Compaction failed: {}", err)
             } else {
-                "✅ Compaction complete".to_string()
+                "Compaction complete".to_string()
             };
             state.add_system_message(msg);
         }
@@ -334,16 +334,16 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             error_message,
         } => {
             state.add_system_message(format!(
-                "🔄 Retry ({}/{}): {}",
+                "Retry ({}/{}): {}",
                 attempt, max_attempts, error_message
             ));
         }
         UiEvent::ModelChanged { model_id } => {
-            state.add_system_message(format!("🤖 → {}", model_id));
+            state.add_system_message(format!("Model: {}", model_id));
             state.footer_state.data.model_name = model_id;
         }
         UiEvent::ThinkingLevelChanged { level } => {
-            state.add_system_message(format!("💭 Thinking: {}", level));
+            state.add_system_message(format!("Thinking: {}", level));
         }
         UiEvent::QueueUpdate { pending } => {
             if pending > 0 {
@@ -439,19 +439,19 @@ fn open_last_image(state: &mut AppState) {
                         { std::process::Command::new("xdg-open").arg(&path).spawn().ok(); }
                         #[cfg(target_os = "windows")]
                         { std::process::Command::new("cmd").args(["/c", "start"]).arg(&path).spawn().ok(); }
-                        state.add_system_message(format!("📷 Opened image in viewer"));
+                        state.add_system_message(format!("Opened image in viewer"));
                     }
                     Err(e) => {
-                        state.add_system_message(format!("⚠ Failed to write image: {}", e));
+                        state.add_system_message(format!("Failed to write image: {}", e));
                     }
                 }
             }
             Err(e) => {
-                state.add_system_message(format!("⚠ Failed to decode image: {}", e));
+                state.add_system_message(format!("Failed to decode image: {}", e));
             }
         }
     } else {
-        state.add_system_message("📷 No images to display".to_string());
+        state.add_system_message("No images to display".to_string());
     }
 }
 
@@ -679,7 +679,7 @@ async fn handle_login_step_key(
                     if !key_val.is_empty() {
                         let auth = crate::auth_storage::AuthStorage::new();
                         auth.set_api_key(&provider, key_val);
-                        state.add_system_message(format!("✅ {} API key saved.", provider));
+                        state.add_system_message(format!("{} API key saved.", provider));
                         state.overlay = None;
                     }
                 }
