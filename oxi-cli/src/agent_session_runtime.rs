@@ -232,7 +232,8 @@ pub fn create_agent_session_from_services(
     // Resolve model
     let model_id = options
         .model_id
-        .unwrap_or_else(|| settings.effective_model(None));
+        .or_else(|| settings.effective_model(None))
+        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
 
     // Resolve thinking level
     let thinking_level = options.thinking_level.unwrap_or(settings.thinking_level);

@@ -314,8 +314,17 @@ fn build_system_prompt(thinking_level: ThinkingLevel, skill_contents: &[String])
 impl App {
     /// Create a new App instance
     pub async fn new(settings: Settings) -> Result<Self> {
-        let model_id = settings.effective_model(None);
-        let provider_name = settings.effective_provider(None);
+        let model_id = settings.effective_model(None)
+            .ok_or_else(|| anyhow::anyhow!(
+                "No model configured. Run 'oxi setup' or set a model:\n\
+                 oxi config set default_model <provider/model>\n\
+                 예: oxi config set default_model anthropic/claude-sonnet-4"
+            ))?;
+        let provider_name = settings.effective_provider(None)
+            .unwrap_or_else(|| {
+                // provider/model 포맷에서 provider 추출
+                model_id.split('/').next().unwrap_or("anthropic").to_string()
+            });
 
         // Parse model ID to get provider and model
         let parts: Vec<&str> = model_id.split('/').collect();
