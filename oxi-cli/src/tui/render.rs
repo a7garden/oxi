@@ -243,11 +243,70 @@ fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme
     }
 }
 
+fn render_select_auth_type(f: &mut Frame, area: Rect, theme: &Theme, styles: &oxi_tui::theme::ThemeStyles, selected: usize) {
+    let max_w = area.width as usize;
+    let title = " How would you like to authenticate? ";
+    let title_y = area.y + 2;
+    for (i, c) in title.chars().enumerate() {
+        if i < max_w {
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    c.to_string(),
+                    Style::default()
+                        .fg(theme.colors.primary.to_ratatui())
+                        .bg(theme.colors.background.to_ratatui())
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Rect { x: area.x + (i as u16).min(area.width - 1), y: title_y, width: 1, height: 1 },
+            );
+        }
+    }
+
+    // Auth type options
+    let list_y = title_y + 2;
+    let options = [("\u{1F511} OAuth", "Sign in with your account (coming soon)"), ("\u{1F511} API Key", "Enter an API key manually")];
+
+    for (i, (name, desc)) in options.iter().enumerate() {
+        let row = Rect { x: area.x, y: list_y + i as u16, width: area.width, height: 1 };
+        if row.y >= area.y + area.height { break; }
+
+        let is_sel = i == selected;
+        let pointer = if is_sel { "\u{2192}" } else { " " };
+
+        let line_str = format!(" {}  {:<14} {}", pointer, name, desc);
+
+        let style = if is_sel {
+            Style::default()
+                .fg(theme.colors.background.to_ratatui())
+                .bg(theme.colors.primary.to_ratatui())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            styles.normal
+        };
+
+        f.render_widget(Paragraph::new(Span::styled(line_str, style)), row);
+    }
+
+    // Footer hint
+    let hint_y = list_y + options.len() as u16 + 1;
+    if hint_y < area.y + area.height {
+        let hint = " \u{2191}/\u{2193} select \u{00b7} Enter confirm \u{00b7} Esc cancel";
+        f.render_widget(
+            Paragraph::new(Span::styled(hint, styles.muted)),
+            Rect { x: area.x, y: hint_y, width: area.width, height: 1 },
+        );
+    }
+}
+
 fn render_setup_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme, step: &SetupStep) {
     let styles = theme.to_styles();
     let max_w = area.width as usize;
 
     match step {
+        SetupStep::SelectAuthType { selected, .. } => {
+            render_select_auth_type(f, area, theme, &styles, *selected);
+        }
+
         SetupStep::SelectProvider { providers, selected } => {
             // Title
             let title = " Select a provider to get started ";
@@ -456,6 +515,10 @@ fn render_provider_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
     let max_w = area.width as usize;
 
     match step {
+        SetupStep::SelectAuthType { selected, .. } => {
+            render_select_auth_type(f, area, theme, &styles, *selected);
+        }
+
         SetupStep::SelectProvider { providers, selected } => {
             let title = " Select a provider to configure ";
             let title_y = area.y + 2;

@@ -500,16 +500,69 @@ async fn handle_setup_step_key(
     // Clone the overlay to determine which step we're on without holding a borrow
     let step_kind = match &state.overlay {
         Some(AppOverlay::Setup(s)) => match s {
-            SetupStep::SelectProvider { .. } => 0,
-            SetupStep::EnterApiKey { provider, .. } => 1,
-            SetupStep::SelectModel { .. } => 2,
-            SetupStep::Done { .. } => 3,
+            SetupStep::SelectAuthType { .. } => 0,
+            SetupStep::SelectProvider { .. } => 1,
+            SetupStep::EnterApiKey { .. } => 2,
+            SetupStep::SelectModel { .. } => 3,
+            SetupStep::Done { .. } => 4,
         },
         _ => return None,
     };
 
     match step_kind {
-        0 => { // SelectProvider
+        0 => { // SelectAuthType
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectAuthType { auth_type, selected })) = &state.overlay {
+                        let new_sel = if *selected == 0 { 1 } else { 0 };
+                        state.overlay = Some(AppOverlay::Setup(SetupStep::SelectAuthType {
+                            auth_type: auth_type.clone(),
+                            selected: new_sel,
+                        }));
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectAuthType { auth_type, selected })) = &state.overlay {
+                        let new_sel = if *selected == 0 { 1 } else { 0 };
+                        state.overlay = Some(AppOverlay::Setup(SetupStep::SelectAuthType {
+                            auth_type: auth_type.clone(),
+                            selected: new_sel,
+                        }));
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectAuthType { selected, .. })) = &state.overlay {
+                        match *selected {
+                            0 => {
+                                // OAuth selected — not yet implemented
+                                // Stay on this screen (future: launch OAuth flow)
+                            }
+                            1 => {
+                                // API Key selected — go to SelectProvider
+                                let auth = crate::auth_storage::AuthStorage::new();
+                                let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
+                                    .iter()
+                                    .map(|builtin| {
+                                        let has_key = auth.get_api_key(builtin.name).is_some();
+                                        (builtin.name.to_string(), has_key)
+                                    }).collect();
+                                state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider {
+                                    providers,
+                                    selected: 0,
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                KeyCode::Char('q') | KeyCode::Esc => {
+                    state.overlay = None;
+                }
+                _ => {}
+            }
+        }
+
+        1 => { // SelectProvider
             match key.code {
                 KeyCode::Up => {
                     if let Some(AppOverlay::Setup(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
@@ -541,7 +594,7 @@ async fn handle_setup_step_key(
             }
         }
 
-        1 => { // EnterApiKey
+        2 => { // EnterApiKey
             // Get provider name from overlay
             let provider = match &state.overlay {
                 Some(AppOverlay::Setup(SetupStep::EnterApiKey { provider, .. })) => provider.clone(),
@@ -621,7 +674,7 @@ async fn handle_setup_step_key(
             }
         }
 
-        2 => { // SelectModel
+        3 => { // SelectModel
             match key.code {
                 KeyCode::Up => {
                     if let Some(AppOverlay::Setup(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
@@ -676,7 +729,7 @@ async fn handle_setup_step_key(
             }
         }
 
-        3 => { // Done
+        4 => { // Done
             if key.code == KeyCode::Enter {
                 state.overlay = None;
                 state.add_system_message(" Ready to chat. Type a message to start.".to_string());
@@ -696,16 +749,69 @@ async fn handle_provider_step_key(
     // Clone the overlay to determine which step we're on without holding a borrow
     let step_kind = match &state.overlay {
         Some(AppOverlay::ProviderConfig(s)) => match s {
-            SetupStep::SelectProvider { .. } => 0,
-            SetupStep::EnterApiKey { provider, .. } => 1,
-            SetupStep::SelectModel { .. } => 2,
-            SetupStep::Done { .. } => 3,
+            SetupStep::SelectAuthType { .. } => 0,
+            SetupStep::SelectProvider { .. } => 1,
+            SetupStep::EnterApiKey { .. } => 2,
+            SetupStep::SelectModel { .. } => 3,
+            SetupStep::Done { .. } => 4,
         },
         _ => return None,
     };
 
     match step_kind {
-        0 => { // SelectProvider
+        0 => { // SelectAuthType
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectAuthType { auth_type, selected })) = &state.overlay {
+                        let new_sel = if *selected == 0 { 1 } else { 0 };
+                        state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectAuthType {
+                            auth_type: auth_type.clone(),
+                            selected: new_sel,
+                        }));
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectAuthType { auth_type, selected })) = &state.overlay {
+                        let new_sel = if *selected == 0 { 1 } else { 0 };
+                        state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectAuthType {
+                            auth_type: auth_type.clone(),
+                            selected: new_sel,
+                        }));
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(AppOverlay::ProviderConfig(SetupStep::SelectAuthType { selected, .. })) = &state.overlay {
+                        match *selected {
+                            0 => {
+                                // OAuth selected — not yet implemented
+                                // Stay on this screen (future: launch OAuth flow)
+                            }
+                            1 => {
+                                // API Key selected — go to SelectProvider
+                                let auth = crate::auth_storage::AuthStorage::new();
+                                let provider_list: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
+                                    .iter()
+                                    .map(|builtin| {
+                                        let has_key = auth.has_auth(builtin.name);
+                                        (builtin.name.to_string(), has_key)
+                                    }).collect();
+                                state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider {
+                                    providers: provider_list,
+                                    selected: 0,
+                                }));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                KeyCode::Esc => {
+                    state.overlay = None;
+                }
+                _ => {}
+            }
+        }
+
+        1 => { // SelectProvider
             match key.code {
                 KeyCode::Up => {
                     if let Some(AppOverlay::ProviderConfig(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
@@ -737,7 +843,7 @@ async fn handle_provider_step_key(
             }
         }
 
-        1 => { // EnterApiKey
+        2 => { // EnterApiKey
             let provider = match &state.overlay {
                 Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { provider, .. })) => provider.clone(),
                 _ => return None,
@@ -801,7 +907,7 @@ async fn handle_provider_step_key(
             }
         }
 
-        2 => { // SelectModel
+        3 => { // SelectModel
             match key.code {
                 KeyCode::Up => {
                     if let Some(AppOverlay::ProviderConfig(SetupStep::SelectModel { provider, models, selected })) = &state.overlay {
@@ -838,7 +944,7 @@ async fn handle_provider_step_key(
             }
         }
 
-        3 | _ => {
+        4 | _ => {
             // Done or unexpected — close overlay
             state.overlay = None;
         }
