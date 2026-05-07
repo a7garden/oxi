@@ -1,4 +1,4 @@
-//! Footer widget — 싱글 상태바: 모델 · 경로 · 토큰 · 시간
+//! Footer widget — 2줄 상태바: 모델/토큰/시간 + 경로/git
 
 use ratatui::{
     widgets::{StatefulWidget, Widget},
@@ -66,7 +66,7 @@ impl Default for FooterData {
 }
 
 impl FooterData {
-    fn fmt_count(count: u32) -> String {
+    pub fn fmt_count(count: u32) -> String {
         if count < 1000 {
             count.to_string()
         } else if count < 1_000_000 {
@@ -76,7 +76,6 @@ impl FooterData {
         }
     }
 
-    /// Format duration as compact string.
     pub fn format_duration(secs: u64) -> String {
         if secs < 60 {
             format!("{}s", secs)
@@ -88,20 +87,18 @@ impl FooterData {
     }
 }
 
-/// Footer state — wraps FooterData for stateful rendering.
+/// Footer state.
 #[derive(Debug, Default)]
 pub struct FooterState {
-    /// The footer data.
     pub data: FooterData,
 }
 
-/// Footer widget — renders single-line status bar.
+/// Footer widget — 2줄 상태바.
 pub struct Footer<'a> {
     theme: &'a Theme,
 }
 
 impl<'a> Footer<'a> {
-    /// Create with a theme reference.
     pub fn new(theme: &'a Theme) -> Self {
         Self { theme }
     }
@@ -118,26 +115,104 @@ impl StatefulWidget for Footer<'_> {
     type State = FooterState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        if area.width < 4 {
+        if area.height < 2 || area.width < 4 {
             return;
         }
 
         let styles = self.theme.to_styles();
-        let y = area.y;
         let max_w = area.width as usize;
         let d = &state.data;
 
-        // ── Build segments ──
+        // Top separator line
+        let row0 = area.y;
+        for col in 0..max_w {
+            buf[(area.x + col as u16, row0)].set_char('─').set_style(styles.border);
+        }
 
-        // 1. Status indicator + model
+        // Line 1 row starts at y+1
+        let row1 = area.y + 1;
+        let row2 = area.y + 2;
+
+        // Build right-side content first (for right-alignment)
+        let mut right_parts: Vec<String> = Vec::new();
+
+        // Duration
+        if d.session_duration_secs > 0 {
+            right_parts.push(FooterData::format_duration(d.session_duration_secs));
+        }
+
+        // Token usage: cur/max (pct)
+        if d.context_tokens > 0 && d.context_window_max > 0 {
+            let cur = FooterData::fmt_count(d.context_tokens);
+            let max = FooterData::fmt_count(d.context_window_max);
+            let pct = d.context_window_pct;
+            right_parts.push(format!("{}/{} ({:.1}%)", cur, max, pct));
+        }
+
+        let right_text = right_parts.join("  ");
+
+        // Status indicator
         let indicator_color = if d.is_busy {
             self.theme.colors.accent.to_ratatui()
         } else {
             self.theme.colors.success.to_ratatui()
         };
-        let model_short = d.model_name.split('/').last().unwrap_or(&d.model_name);
 
-        // 2. Full path + git branch + dirty
+        let mut col: usize = 0;
+
+        // ●
+        buf[(area.x, row1)].set_char('●').set_style(
+            Style::default().fg(indicator_color).bg(self.theme.colors.background.to_ratatui())
+        );
+        col += 1;
+
+        // space
+        if col < max_w {
+            buf[(area.x + col as u16, row1)].set_char(' ').set_style(styles.normal);
+            col += 1;
+        }
+
+        // Model name (primary, bold)
+        let model_short = d.model_name.split('/').last().unwrap_or(&d.model_name);
+        for c in model_short.chars() {
+            if col >= max_w { break; }
+            buf[(area.x + col as u16, row1)].set_char(c).set_style(
+                Style::default()
+                    .fg(self.theme.colors.primary.to_ratatui())
+                    .bg(self.theme.colors.background.to_ratatui())
+                    .add_modifier(Modifier::BOLD)
+            );
+            col += 1;
+        }
+
+        // Fill gap
+        let right_start = max_w.saturating_sub(right_text.chars().count());
+        while col < right_start {
+            if col >= max_w { break; }
+            buf[(area.x + col as u16, row1)].set_char(' ').set_style(styles.normal);
+            col += 1;
+        }
+
+        // Right-aligned content (muted)
+        for c in right_text.chars() {
+            if col >= max_w { break; }
+            buf[(area.x + col as u16, row1)].set_char(c).set_style(styles.muted);
+            col += 1;
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // Line 2: path (branch ✓)  (left-aligned, muted)
+        // ═══════════════════════════════════════════════════════
+        let row2 = area.y + 1;
+        col = 0;
+
+        // Indent
+        if col < max_w {
+            buf[(area.x + col as u16, row2)].set_char(' ').set_style(styles.muted);
+            col += 1;
+        }
+
+        // Full path
         let home = std::env::var("HOME").unwrap_or_default();
         let pwd_display = if let Some(ref pwd) = d.pwd {
             if !home.is_empty() && pwd.starts_with(&home) {
@@ -148,96 +223,47 @@ impl StatefulWidget for Footer<'_> {
         } else {
             String::new()
         };
-        let git_str = match (&d.git_branch, d.git_dirty) {
-            (Some(b), true) if !b.is_empty() => format!(" {}* ", b),
-            (Some(b), false) if !b.is_empty() => format!(" {} ✓", b),
-            _ => String::new(),
-        };
-
-        // 3. Token usage: cur/max (pct)
-        let token_str = if d.context_tokens > 0 && d.context_window_max > 0 {
-            let cur = FooterData::fmt_count(d.context_tokens);
-            let max = FooterData::fmt_count(d.context_window_max);
-            let pct = d.context_window_pct;
-            format!(" {}/{} ({:.1}%)", cur, max, pct)
-        } else {
-            String::new()
-        };
-
-        // 4. Duration
-        let dur_str = if d.session_duration_secs > 0 {
-            format!(" {}", FooterData::format_duration(d.session_duration_secs))
-        } else {
-            String::new()
-        };
-
-        // ── Render left side: ● model  path (branch) ──
-        let mut col: usize = 0;
-
-        // Indicator ●
-        if col < max_w {
-            buf[(area.x, y)].set_char('●').set_style(
-                Style::default().fg(indicator_color).bg(self.theme.colors.background.to_ratatui())
-            );
-            col += 1;
-        }
-
-        // Space
-        if col < max_w {
-            buf[(area.x + col as u16, y)].set_char(' ').set_style(styles.normal);
-            col += 1;
-        }
-
-        // Model name (primary color, bold)
-        for c in model_short.chars() {
-            if col >= max_w { break; }
-            buf[(area.x + col as u16, y)].set_char(c).set_style(
-                Style::default()
-                    .fg(self.theme.colors.primary.to_ratatui())
-                    .bg(self.theme.colors.background.to_ratatui())
-                    .add_modifier(Modifier::BOLD)
-            );
-            col += 1;
-        }
-
-        // Separator space
-        if col < max_w {
-            buf[(area.x + col as u16, y)].set_char(' ').set_style(styles.normal);
-            col += 1;
-        }
-
-        // Path (muted)
         for c in pwd_display.chars() {
             if col >= max_w { break; }
-            buf[(area.x + col as u16, y)].set_char(c).set_style(styles.muted);
+            buf[(area.x + col as u16, row2)].set_char(c).set_style(styles.muted);
             col += 1;
         }
 
         // Git branch (accent)
-        for c in git_str.chars() {
-            if col >= max_w { break; }
-            buf[(area.x + col as u16, y)].set_char(c).set_style(
-                Style::default().fg(self.theme.colors.accent.to_ratatui()).bg(self.theme.colors.background.to_ratatui())
-            );
-            col += 1;
+        if let Some(ref branch) = d.git_branch {
+            if !branch.is_empty() {
+                let dirty_marker = if d.git_dirty { "*" } else { "" };
+                let git_str = format!(" ({}){}", branch, dirty_marker);
+                for c in git_str.chars() {
+                    if col >= max_w { break; }
+                    buf[(area.x + col as u16, row2)].set_char(c).set_style(
+                        Style::default()
+                            .fg(self.theme.colors.accent.to_ratatui())
+                            .bg(self.theme.colors.background.to_ratatui())
+                    );
+                    col += 1;
+                }
+
+                // ✓ or ✗ for clean/dirty
+                let status_char = if d.git_dirty { " ✗" } else { " ✓" };
+                let status_style = if d.git_dirty {
+                    Style::default().fg(self.theme.colors.error.to_ratatui())
+                } else {
+                    Style::default().fg(self.theme.colors.success.to_ratatui())
+                };
+                for c in status_char.chars() {
+                    if col >= max_w { break; }
+                    buf[(area.x + col as u16, row2)].set_char(c).set_style(
+                        status_style.bg(self.theme.colors.background.to_ratatui())
+                    );
+                    col += 1;
+                }
+            }
         }
 
-        // ── Render right side: tokens (duration) — right-aligned ──
-        let right_content = format!("{}{}", token_str, dur_str);
-        let right_len = right_content.chars().count();
-
-        // Fill gap with spaces
-        let right_start = max_w.saturating_sub(right_len);
-        while col < right_start {
-            if col >= max_w { break; }
-            buf[(area.x + col as u16, y)].set_char(' ').set_style(styles.normal);
-            col += 1;
-        }
-
-        // Write right content
-        for c in right_content.chars() {
-            if col >= max_w { break; }
-            buf[(area.x + col as u16, y)].set_char(c).set_style(styles.muted);
+        // Clear remainder
+        while col < max_w {
+            buf[(area.x + col as u16, row2)].set_char(' ').set_style(styles.muted);
             col += 1;
         }
     }
@@ -259,5 +285,12 @@ mod tests {
         assert_eq!(FooterData::format_duration(30), "30s");
         assert_eq!(FooterData::format_duration(90), "1m");
         assert_eq!(FooterData::format_duration(3661), "1h1m");
+    }
+
+    #[test]
+    fn footer_data_fmt_count() {
+        assert_eq!(FooterData::fmt_count(500), "500");
+        assert_eq!(FooterData::fmt_count(1500), "1.5k");
+        assert_eq!(FooterData::fmt_count(1_500_000), "1.5M");
     }
 }

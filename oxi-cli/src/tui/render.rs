@@ -25,8 +25,8 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(3),   // Chat
-            Constraint::Length(2), // Input + thin separator
-            Constraint::Length(1), // Status bar
+            Constraint::Length(2), // Input (separator + input)
+            Constraint::Length(3), // Status bar (separator + 2 lines)
         ])
         .split(size);
 
@@ -52,8 +52,8 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
         return;
     }
 
-    // Top row: thin separator line
-    let separator_row = Rect {
+    // Top separator line
+    let top_row = Rect {
         x: area.x,
         y: area.y,
         width: area.width,
@@ -65,7 +65,7 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
             line,
             Style::default().fg(theme.colors.border.to_ratatui()),
         )),
-        separator_row,
+        top_row,
     );
 
     // Input row
@@ -80,7 +80,7 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
         render_busy_input(f, input_row, state, theme);
     } else {
         f.render_stateful_widget(
-            Input::new(theme).with_placeholder("Type a message… (enter / for commands)"),
+            Input::new(theme),
             input_row,
             &mut state.input,
         );
