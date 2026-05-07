@@ -444,101 +444,188 @@ impl Agent {
             }
         };
 
-        let mut response_text = String::new();
         let tx_clone = tx.clone();
-
-        // Clone tools for async task
         let tools = self.tools.clone();
+        let max_iterations = {
+            let inner = self.config();
+            inner.config.max_iterations
+        };
 
-        while let Some(event) = stream.next().await {
-            match event {
-                ProviderEvent::TextDelta { delta, .. } => {
-                    response_text.push_str(&delta);
-                    let _ = tx_clone.send(AgentEvent::TextChunk { text: delta }).await;
+        // Agentic loop (based on pi-mono agent-loop.ts):
+        // Outer loop: each iteration = one LLM call
+        // Inner loop: process events from one stream
+        // ToolUse -> execute tools -> add results -> continue
+        // Stop/Length -> return response
+        let mut final_response_text = String::new();
+        let mut pending_tool_calls: Vec<oxi_ai::ToolCall> = Vec::new();
+
+        loop {
+            let current_iteration = self.state.get_state().iteration;
+            if current_iteration >= max_iterations {
+                let _ = tx_clone.send(AgentEvent::Error {
+                    session_id: None,
+                    message: format!("Max iterations ({}) reached", max_iterations),
+                }).await;
+                break;
+            }
+
+            // Rebuild context from state messages for each iteration
+            let state_messages = self.state.get_state().messages.clone();
+            let mut iter_context = Context::new();
+            if let Some(ref prompt) = {
+                let inner = self.config();
+                inner.config.system_prompt.clone()
+            } {
+                iter_context.set_system_prompt(prompt);
+            }
+            for msg in &state_messages {
+                iter_context.add_message(msg.clone());
+            }
+            if !tools.names().is_empty() {
+                let tool_defs = tools.definitions();
+                let mut oxi_tools = Vec::new();
+                for def in &tool_defs {
+                    let schema = serde_json::to_value(&def.input_schema)
+                        .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
+                    oxi_tools.push(oxi_ai::Tool::new(&def.name, &def.description, schema));
                 }
-                ProviderEvent::ToolCallStart {
-                    content_index,
-                    tool_call_id: _,
-                    partial,
-                    ..
-                } => {
-                    // Track tool start - extract info from partial message if available
-                    // Note: content_index is not directly accessible as tool_call_id
-                    // In a full implementation, we'd track this differently
-                    let _ = content_index; // Suppress unused warning
-                    let _ = partial; // Suppress unused warning
-                                     // Tool call will be tracked when ToolCallEnd arrives
+                iter_context.set_tools(oxi_tools);
+            }
+
+            let iter_stream_options = StreamOptions {
+                temperature: {
+                    let inner = self.config();
+                    inner.config.temperature
+                },
+                max_tokens: {
+                    let inner = self.config();
+                    inner.config.max_tokens
+                },
+                api_key: {
+                    let inner = self.config();
+                    inner.config.api_key.clone()
+                },
+                ..Default::default()
+            };
+
+            let provider: Arc<dyn Provider> = {
+                let inner = self.config();
+                Arc::clone(&inner.provider)
+            };
+
+            let mut stream = match Self::stream_with_retry(
+                provider.as_ref(),
+                &model,
+                &iter_context,
+                Some(iter_stream_options),
+                &tx_clone,
+            ).await {
+                Ok(s) => s,
+                Err(e) => {
+                    let msg = e.user_friendly();
+                    let _ = tx_clone.send(AgentEvent::Error {
+                        session_id: None,
+                        message: format!("Stream error: {}", msg),
+                    }).await;
+                    break;
                 }
-                ProviderEvent::ToolCallEnd { tool_call, .. } => {
-                    // Execute the tool and send results
-                    let _tool_call_id = tool_call.id.clone();
-                    let tool_name = tool_call.name.clone();
+            };
 
-                    // Execute tool with progress callback
-                    let tool_result = self
-                        .execute_tool(&tools, &tool_call, tx_clone.clone())
-                        .await;
+            // Inner loop: process events from this stream
+            let mut iteration_text = String::new();
+            pending_tool_calls.clear();
 
-                    // Send result
-                    let _ = tx_clone
-                        .send(AgentEvent::ToolComplete {
-                            result: tool_result.clone(),
-                        })
-                        .await;
+            while let Some(event) = stream.next().await {
+                match event {
+                    ProviderEvent::TextDelta { delta, .. } => {
+                        iteration_text.push_str(&delta);
+                        final_response_text.push_str(&delta);
+                        let _ = tx_clone.send(AgentEvent::TextChunk { text: delta }).await;
+                    }
+                    ProviderEvent::ToolCallStart { .. } => {}
+                    ProviderEvent::ToolCallEnd { tool_call, .. } => {
+                        pending_tool_calls.push(tool_call);
+                    }
+                    ProviderEvent::Done { reason, message: _ } => {
+                        self.state.update(|s| {
+                            s.add_assistant_message(iteration_text.clone());
+                        });
 
-                    // Add tool result to context for next turn
-                    context.add_message(Message::User(oxi_ai::UserMessage::new(format!(
-                        "Tool {} returned: {}",
-                        tool_name, tool_result.content
-                    ))));
+                        // Convert provider stop reason to our StopReason
+                        let stop_reason = match reason {
+                            oxi_ai::StopReason::Stop => StopReason::Stop,
+                            oxi_ai::StopReason::Length => StopReason::Length,
+                            oxi_ai::StopReason::ToolUse => StopReason::ToolUse,
+                            oxi_ai::StopReason::Error => StopReason::Error,
+                            _ => StopReason::Stop,
+                        };
 
-                    // Continue streaming for the next response
-                    // Note: This is a simplified loop - a real implementation would handle
-                    // continuing the conversation after tool results
-                }
-                ProviderEvent::Done { message, .. } => {
-                    let content = message.text_content();
-                    let _ = tx_clone
-                        .send(AgentEvent::Complete {
-                            content: content.clone(),
-                            stop_reason: format!("{:?}", message.stop_reason),
-                        })
-                        .await;
-                    self.state.update(|s| {
-                        s.add_assistant_message(content.clone());
-                        s.increment_iteration();
-                    });
-                    let _ = tx_clone
-                        .send(AgentEvent::Iteration {
-                            number: self.state.get_state().iteration,
-                        })
-                        .await;
-                    return Ok(Response {
-                        content,
-                        stop_reason: StopReason::Stop,
-                    });
-                }
-                ProviderEvent::Error { error, .. } => {
-                    let raw_msg = error.text_content();
-                    let friendly = if raw_msg.is_empty() {
-                        "Unknown provider error".to_string()
-                    } else {
-                        raw_msg
-                    };
-                    let _ = tx_clone
-                        .send(AgentEvent::Error {
+                        if !pending_tool_calls.is_empty() && matches!(stop_reason, StopReason::ToolUse) {
+                            for tool_call in pending_tool_calls.drain(..) {
+                                let tool_name = tool_call.name.clone();
+                                let tool_call_id = tool_call.id.clone();
+
+                                let _ = tx_clone.send(AgentEvent::ToolStart {
+                                    tool_call_id: tool_call_id.clone(),
+                                    tool_name: tool_name.clone(),
+                                }).await;
+
+                                let tool_result = self
+                                    .execute_tool(&tools, &tool_call, tx_clone.clone())
+                                    .await;
+
+                                let _ = tx_clone.send(AgentEvent::ToolComplete {
+                                    result: tool_result.clone(),
+                                }).await;
+
+                                self.state.update(|s| {
+                                    s.messages.push(Message::tool_result(
+                                        tool_call_id,
+                                        tool_name,
+                                        vec![oxi_ai::ContentBlock::Text(
+                                            oxi_ai::TextContent::new(tool_result.content.clone())
+                                        )],
+                                    ));
+                                });
+                            }
+
+                            self.state.update(|s| { s.increment_iteration(); });
+                            let _ = tx_clone.send(AgentEvent::Iteration {
+                                number: self.state.get_state().iteration,
+                            }).await;
+                            break;
+                        }
+
+                        let _ = tx_clone.send(AgentEvent::Complete {
+                            content: iteration_text.clone(),
+                            stop_reason: format!("{:?}", reason),
+                        }).await;
+                        self.state.update(|s| { s.increment_iteration(); });
+                        return Ok(Response {
+                            content: final_response_text,
+                            stop_reason,
+                        });
+                    }
+                    ProviderEvent::Error { error, .. } => {
+                        let friendly = error.text_content();
+                        let friendly = if friendly.is_empty() { "Unknown provider error".to_string() } else { friendly };
+                        let _ = tx_clone.send(AgentEvent::Error {
                             session_id: None,
-                            message: format!("⚠ {}", friendly),
-                        })
-                        .await;
-                    return Err(Error::msg(friendly));
+                            message: friendly.clone(),
+                        }).await;
+                        return Err(Error::msg(friendly));
+                    }
+                    _ => {}
                 }
-                _ => {}
+            }
+
+            if pending_tool_calls.is_empty() {
+                break;
             }
         }
 
         Ok(Response {
-            content: response_text,
+            content: final_response_text,
             stop_reason: StopReason::Stop,
         })
     }
