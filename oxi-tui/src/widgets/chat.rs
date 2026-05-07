@@ -1,10 +1,11 @@
 //! ChatView widget — scrollable message list with streaming support.
 
 use ratatui::{
-    widgets::StatefulWidget,
     buffer::Buffer,
     layout::Rect,
-    style::Style,
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Paragraph, StatefulWidget, Widget},
 };
 use crate::Theme;
 use super::markdown;
@@ -362,26 +363,6 @@ impl<'a> ChatView<'a> {
     }
 }
 
-/// Render a single character into the buffer with the given style, respecting
-/// wide-char continuation cells.  Returns the number of terminal columns used.
-fn put_char(buf: &mut Buffer, col: u16, row: u16, c: char, style: Style, max_col: u16) -> u16 {
-    if col >= max_col {
-        return 0;
-    }
-    let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16;
-    buf[(col, row)].set_char(c).set_style(style);
-    // Mark continuation cells for wide chars.
-    if cw > 1 {
-        for w in 1..cw {
-            let cont = col + w;
-            if cont < max_col {
-                buf[(cont, row)].set_char('\u{0}').set_style(style);
-            }
-        }
-    }
-    cw
-}
-
 impl StatefulWidget for ChatView<'_> {
     type State = ChatViewState;
 
@@ -397,14 +378,6 @@ impl StatefulWidget for ChatView<'_> {
 
         // Base styles from theme
         let styles = self.theme.to_styles();
-
-        // Fill background
-        for row in area.y..area.y + area.height {
-            for col in area.x..area.x + area.width {
-                buf[(col, row)].set_char(' ')
-                    .set_style(styles.normal);
-            }
-        }
 
         // ------------------------------------------------------------------
         // Collect all lines with markdown metadata
@@ -548,103 +521,94 @@ impl StatefulWidget for ChatView<'_> {
         }
 
         // ------------------------------------------------------------------
-        // Compute content height & visible range
+        // Build ratatui Lines from collected metadata
         // ------------------------------------------------------------------
-        state.content_height = all_lines.len() as u16;
+        let h_pad: usize = 2;
+        // Width available for text content after prefix char and left padding.
+        let content_fill = area.width as usize - 1 - h_pad;
 
-        let visible_height = area.height as usize;
-        let max_scroll = state.content_height.saturating_sub(visible_height as u16);
-        let clamped_offset = state.scroll_offset.min(max_scroll);
+        let mut ratatui_lines: Vec<Line<'static>> = Vec::new();
 
-        // ------------------------------------------------------------------
-        // Render visible lines
-        // ------------------------------------------------------------------
-        let start = clamped_offset as usize;
-        let max_col = area.x + area.width;
-
-        for (vi, line_entry) in all_lines.iter().skip(start).take(visible_height).enumerate() {
-            let (role, text, kind) = line_entry;
-            let row = area.y + vi as u16;
-
-            let _prefix_char = " ";
+        for (role, text, kind) in &all_lines {
             let prefix_style = match role {
                 MessageRole::User => styles.primary,
                 MessageRole::Assistant => styles.accent,
                 MessageRole::System => styles.muted,
             };
 
-            // Write prefix
-            buf[(area.x, row)].set_char(' ').set_style(prefix_style);
-
-            // Message horizontal padding (left + right)
-            let h_pad: u16 = 2;
-            let text_area_start = area.x + 1 + h_pad;
-            let max_text_cols = area.width.saturating_sub(1 + h_pad * 2) as usize;
-
-            // Determine the base style for this line.
             let line_base_style: Style = match kind {
                 LineKind::Normal => styles.normal,
                 LineKind::CodeBlock => markdown::code_block_style(styles.normal),
                 LineKind::Heading(level) => markdown::heading_style(styles.normal, *level),
                 LineKind::ListItem => styles.normal,
                 LineKind::HorizontalRule => styles.muted,
-                LineKind::RoleLabel => styles.primary.add_modifier(ratatui::style::Modifier::BOLD),
+                LineKind::RoleLabel => styles.primary.add_modifier(Modifier::BOLD),
             };
 
-            // For code-block, horizontal-rule, and role-label lines, skip inline parsing
-            // and render the whole line with the line style.
-            if *kind == LineKind::CodeBlock || *kind == LineKind::HorizontalRule || *kind == LineKind::RoleLabel {
-                let mut col = text_area_start;
-                let mut chars_used = 0usize;
-                for c in text.chars() {
-                    if chars_used >= max_text_cols { break; }
-                    let cw = put_char(buf, col, row, c, line_base_style, max_col);
-                    col += cw;
-                    chars_used += cw as usize;
-                }
-                // Clear remainder
-                for cl in col..max_col {
-                    buf[(cl, row)].set_char(' ').set_style(line_base_style);
-                }
-                continue;
-            }
+            let mut spans: Vec<Span<'static>> = Vec::new();
 
-            // For Normal / Heading / ListItem lines, parse inline markdown.
-            let segments = markdown::parse_inline(text);
-            let mut col = text_area_start;
-            let mut chars_used = 0usize;
+            // Role prefix (1 char with role-specific color)
+            spans.push(Span::styled(String::from(" "), prefix_style));
 
-            for seg in &segments {
-                let seg_style = match seg {
-                    markdown::Segment::Normal(_) => line_base_style,
-                    markdown::Segment::Bold(_) => markdown::bold_style(line_base_style),
-                    markdown::Segment::Italic(_) => line_base_style, // no italic in terminals typically
-                    markdown::Segment::Code(_) => markdown::code_style(line_base_style),
-                    markdown::Segment::Link { .. } => markdown::link_style(line_base_style),
-                };
-                let s = match seg {
-                    markdown::Segment::Normal(s) => s,
-                    markdown::Segment::Bold(s) => s,
-                    markdown::Segment::Italic(s) => s,
-                    markdown::Segment::Code(s) => s,
-                    markdown::Segment::Link { text, .. } => text,
-                };
-                for c in s.chars() {
-                    if chars_used >= max_text_cols { break; }
-                    let cw = put_char(buf, col, row, c, seg_style, max_col);
-                    col += cw;
-                    chars_used += cw as usize;
+            // Horizontal padding (left)
+            spans.push(Span::styled(" ".repeat(h_pad), line_base_style));
+
+            // Content spans depend on line kind
+            match kind {
+                LineKind::CodeBlock => {
+                    // Pad to fill area width so the code-block background covers the full row
+                    let padded = format!("{:<width$}", text, width = content_fill);
+                    spans.push(Span::styled(padded, line_base_style));
+                }
+                LineKind::HorizontalRule | LineKind::RoleLabel => {
+                    // Uniform style, no inline parsing
+                    spans.push(Span::styled(text.clone(), line_base_style));
+                }
+                _ => {
+                    // Normal / Heading / ListItem — parse inline markdown into styled Spans
+                    let segments = markdown::parse_inline(text);
+                    for seg in &segments {
+                        let seg_style = match seg {
+                            markdown::Segment::Normal(_) => line_base_style,
+                            markdown::Segment::Bold(_) => markdown::bold_style(line_base_style),
+                            markdown::Segment::Italic(_) => line_base_style,
+                            markdown::Segment::Code(_) => markdown::code_style(line_base_style),
+                            markdown::Segment::Link { .. } => markdown::link_style(line_base_style),
+                        };
+                        let s: &str = match seg {
+                            markdown::Segment::Normal(s) => s,
+                            markdown::Segment::Bold(s) => s,
+                            markdown::Segment::Italic(s) => s,
+                            markdown::Segment::Code(s) => s,
+                            markdown::Segment::Link { text, .. } => text,
+                        };
+                        spans.push(Span::styled(s.to_string(), seg_style));
+                    }
                 }
             }
 
-            // Clear remainder of row
-            for cl in col..max_col {
-                buf[(cl, row)].set_char(' ').set_style(line_base_style);
-            }
+            ratatui_lines.push(Line::from(spans));
         }
 
         // ------------------------------------------------------------------
-        // Scrollbar
+        // Compute content height & visible range
+        // ------------------------------------------------------------------
+        state.content_height = ratatui_lines.len() as u16;
+
+        let visible_height = area.height as usize;
+        let max_scroll = state.content_height.saturating_sub(visible_height as u16);
+        let clamped_offset = state.scroll_offset.min(max_scroll);
+
+        // ------------------------------------------------------------------
+        // Render via Paragraph (handles scrolling + background fill)
+        // ------------------------------------------------------------------
+        let paragraph = Paragraph::new(ratatui_lines)
+            .block(Block::default().style(styles.normal))
+            .scroll((clamped_offset, 0));
+        paragraph.render(area, buf);
+
+        // ------------------------------------------------------------------
+        // Scrollbar (manual buffer access — justified for █ overlay)
         // ------------------------------------------------------------------
         if self.scrollbar && max_scroll > 0 {
             let thumb_pos = (clamped_offset as f32 / max_scroll as f32 * visible_height as f32) as u16;
