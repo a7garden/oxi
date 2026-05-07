@@ -37,59 +37,9 @@ use ratatui::{
     Terminal,
 };
 
-// ── IME-friendly raw mode ───────────────────────────────────────────────
-// crossterm의 enable_raw_mode()는 cfmakeraw()를 호출하여 ICANON, ECHO, ISIG,
-// IEXTEN 등을 모두 끕니다. 이렇게 하면 터미널 에뮬레이터의 IME(한국어, 일본어,
-// 중국어 입력기)가 비활성화됩니다.
-//
-// 대신 ICANON과 ECHO만 끄고 나머지 플래그는 유지하면:
-// - IME가 정상 동작 (터미널 에뮬레이터가 조합된 문자를 전달)
-// - 비동기 입력 (read가 블록되지 않음)
-// - 특수키(방향키, Enter 등)는 escape sequence로 전달
 
-use std::os::fd::AsRawFd;
+// ── UI Events (agent → TUI) ──────────────────────────────────────────────
 
-/// IME 친화적 부분 raw mode 활성화.
-/// ICANON(라인 버퍼링)과 ECHO(화면 반향)만 끄고, IEXTEN/ISIG 등은 유지합니다.
-fn enable_ime_friendly_raw_mode() -> io::Result<()> {
-    use std::mem;
-    // crossterm의 enable_raw_mode가 이미 호출되었는지 확인
-    // 이미 활성화되어 있으면 아무것도 하지 않음
-    if crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
-        return Ok(());
-    }
-
-    // crossterm 내부의 original mode 저장 메커니즘을 우회하기 위해
-    // crossterm의 enable_raw_mode를 먼저 호출하고, 그 다음 IME 친화적으로 덮어씁니다.
-    enable_raw_mode()?;
-
-    // 이제 IME 친화적으로 termios를 조정
-    unsafe {
-        let mut termios: libc::termios = mem::zeroed();
-        if libc::tcgetattr(0, &mut termios) == 0 {
-            // ICANON과 ECHO만 끄기 (OPOST는 켜둠 — 출력 처리 유지)
-            termios.c_iflag &= !(libc::IGNBRK | libc::BRKINT | libc::PARMRK
-                | libc::ISTRIP | libc::INLCR | libc::IGNCR | libc::ICRNL);
-            // cfmakeraw는 IEXTEN도 끄지만, 우리는 IEXTEN을 유지 (IME에 필요)
-            termios.c_oflag |= libc::OPOST; // 출력 처리 유지
-            termios.c_lflag &= !(libc::ICANON | libc::ECHO);
-            // ISIG 유지 (Ctrl+C 등 시그널 처리)
-            // IEXTEN 유지 (IME 입력 처리)
-
-            termios.c_cc[libc::VMIN] = 1;
-            termios.c_cc[libc::VTIME] = 0;
-
-            libc::tcsetattr(0, libc::TCSANOW, &termios);
-        }
-    }
-    Ok(())
-}
-
-/// IME 친화적 raw mode 비활성화.
-fn disable_ime_friendly_raw_mode() -> io::Result<()> {
-    // crossterm의 disable_raw_mode가 original mode를 복원
-    disable_raw_mode()
-}
 pub(crate) enum UiEvent {
     Start,
     Thinking,
@@ -227,6 +177,14 @@ impl AppState {
         self.input_set_text(completion.name.clone());
         self.clear_slash_completions();
         true
+    }
+
+    /// Get the currently selected slash command (for direct execution).
+    pub fn selected_slash_command(&self) -> Option<&slash::SlashCompletion> {
+        if !self.slash_completion_active || self.slash_completions.is_empty() {
+            return None;
+        }
+        self.slash_completions.get(self.slash_completion_index)
     }
 
     pub fn next_slash_completion(&mut self) {
@@ -418,10 +376,8 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         });
     });
 
-    // Setup terminal — IME 친화적 부분 raw mode
-    // crossterm의 enable_raw_mode()는 cfmakeraw()를 호출하여 IME를 완전히 비활성화합니다.
-    // 대신 ICANON만 끄고 나머지는 유지하는 부분 raw mode를 사용합니다.
-    enable_ime_friendly_raw_mode()?;
+    // Setup terminal
+    enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(
         stdout,
@@ -479,7 +435,11 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         let _ = prompt_tx.send(value).await;
                         state.input_clear();
                     }
-                    // no action
+                    handlers::Action::ExecuteSlashCommand(cmd) => {
+                        slash::handle_slash_command(
+                            &cmd, &agent_session, &mut state, &mut running,
+                        );
+                    }
                 }
             }
         }
@@ -504,7 +464,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
     // Cleanup
     drop(prompt_tx);
-    disable_ime_friendly_raw_mode()?;
+    disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),
         PopKeyboardEnhancementFlags,
