@@ -1,6 +1,6 @@
 //! Slash command handling.
 
-use super::app::AppState;
+use super::app::{AppOverlay, AppState, SetupStep};
 use crate::agent_session::{AgentSession, ScopedModel};
 use crate::auth_storage::AuthStorage;
 use crate::clipboard_write;
@@ -45,6 +45,7 @@ pub(crate) fn handle_slash_command(
         }
         "/model" => {
             if let Some(model_id) = arg {
+                // Direct model switch (backward compatible)
                 match session.set_model(model_id) {
                     Ok(()) => {
                         state.add_system_message(format!("→ model: {}", model_id));
@@ -55,10 +56,22 @@ pub(crate) fn handle_slash_command(
                     }
                 }
             } else {
-                state.add_system_message(format!(
-                    "Model: {}\n/model <provider/model> to switch",
-                    session.model_id()
-                ));
+                // Show interactive model selector overlay
+                let all_models: Vec<String> = oxi_ai::model_db::get_all_models()
+                    .map(|entry| format!("{}/{}", entry.provider, entry.id))
+                    .collect();
+                if all_models.is_empty() {
+                    state.add_system_message(format!(
+                        "Model: {}\n/model <provider/model> to switch",
+                        session.model_id()
+                    ));
+                } else {
+                    state.overlay = Some(AppOverlay::ModelSelect {
+                        models: all_models,
+                        filter: String::new(),
+                        selected: 0,
+                    });
+                }
             }
             true
         }
@@ -256,24 +269,51 @@ pub(crate) fn handle_slash_command(
             if let Some(provider) = arg {
                 let parts: Vec<&str> = provider.splitn(2, ' ').collect();
                 if parts.len() == 2 {
-                    // /login <provider> <key>
+                    // /login <provider> <key> — direct save (backward compatible)
                     try_login_with_key(parts[0], parts[1], state);
                 } else {
-                    // /login <provider> — 상태 표시
-                    interactive_login(provider, state);
+                    // /login <provider> — show EnterApiKey overlay for that provider
+                    state.overlay = Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey {
+                        provider: parts[0].to_string(),
+                        key: String::new(),
+                        masked_cursor: 0,
+                    }));
                 }
             } else {
-                // /login — 프로바이더 목록
-                interactive_login_select(state);
+                // /login — show provider selection overlay
+                let auth = AuthStorage::new();
+                let providers = vec![
+                    "anthropic", "openai", "google", "deepseek", "groq",
+                    "openrouter", "mistral", "xai", "minimax", "zai",
+                ];
+                let provider_list: Vec<(String, bool)> = providers.iter().map(|name| {
+                    let has_key = auth.has_auth(name);
+                    (name.to_string(), has_key)
+                }).collect();
+                state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider {
+                    providers: provider_list,
+                    selected: 0,
+                }));
             }
             true
         }
         "/logout" => {
             if let Some(provider) = arg {
+                // Direct logout (backward compatible)
                 AuthStorage::new().remove(provider);
                 state.add_system_message(format!("✓ Removed {}", provider));
             } else {
-                state.add_system_message("/logout <provider>".to_string());
+                // Show provider selection overlay for logout
+                let auth = AuthStorage::new();
+                let providers = auth.configured_providers();
+                if providers.is_empty() {
+                    state.add_system_message("No providers configured.".to_string());
+                } else {
+                    state.overlay = Some(AppOverlay::LogoutSelect {
+                        providers,
+                        selected: 0,
+                    });
+                }
             }
             true
         }
