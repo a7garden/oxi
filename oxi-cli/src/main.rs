@@ -722,7 +722,8 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
     if let Some(ref provider_name) = *provider {
         let settings = Settings::load().unwrap_or_default();
         if let Some(cp) = settings.custom_providers.iter().find(|cp| cp.name == *provider_name) {
-            let api_key = auth_storage.get_api_key(&cp.name);
+            let auth = oxi::auth_storage::AuthStorage::new();
+            let api_key = auth.get_api_key(&cp.name);
             if let Some(ref key) = api_key {
                 match oxi_ai::fetch_models_blocking(&cp.base_url, key) {
                     Ok(model_ids) => {
