@@ -566,6 +566,13 @@ async fn handle_setup_step_key(
                         let auth = crate::auth_storage::AuthStorage::new();
                         auth.set_api_key(&provider, key_val);
 
+                        // Persist model to settings so it survives restart
+                        if let Ok(mut settings) = crate::settings::Settings::load() {
+                            settings.default_model = Some(format!("{}/default", provider));
+                            settings.default_provider = Some(provider.clone());
+                            let _ = settings.save();
+                        }
+
                         let model = format!("{}/default", provider);
                         state.footer_state.data.model_name = model.clone();
                         state.footer_state.data.provider_name = provider.clone();
@@ -679,6 +686,16 @@ async fn handle_login_step_key(
                     if !key_val.is_empty() {
                         let auth = crate::auth_storage::AuthStorage::new();
                         auth.set_api_key(&provider, key_val);
+
+                        // Update settings if no default model yet
+                        if let Ok(mut settings) = crate::settings::Settings::load() {
+                            if settings.default_model.is_none() {
+                                settings.default_model = Some(format!("{}/default", provider));
+                                settings.default_provider = Some(provider.clone());
+                                let _ = settings.save();
+                            }
+                        }
+
                         state.add_system_message(format!("{} API key saved.", provider));
                         state.overlay = None;
                     }
