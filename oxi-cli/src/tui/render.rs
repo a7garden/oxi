@@ -34,15 +34,8 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         ])
         .split(size);
 
-    // Chat with side padding (2 chars on each side)
-    let chat_pad = 2;
-    let chat_area = Rect {
-        x: chunks[0].x + chat_pad,
-        y: chunks[0].y,
-        width: chunks[0].width.saturating_sub(chat_pad * 2),
-        height: chunks[0].height,
-    };
-    f.render_stateful_widget(ChatView::new(theme), chat_area, &mut state.chat);
+    // Chat (padding is handled inside ChatView via h_pad)
+    f.render_stateful_widget(ChatView::new(theme), chunks[0], &mut state.chat);
 
     // Input area
     render_input_area(f, chunks[1], state, theme);

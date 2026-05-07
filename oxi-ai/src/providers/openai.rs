@@ -100,6 +100,7 @@ impl Provider for OpenAiProvider {
             "model": model.id,
             "messages": messages,
             "stream": true,
+            "stream_options": { "include_usage": true },
         });
 
         // Add optional parameters
@@ -159,7 +160,9 @@ impl Provider for OpenAiProvider {
         let stream = response.bytes_stream().flat_map(
             move |chunk: Result<Bytes, reqwest::Error>| match chunk {
                 Ok(bytes) => {
-                    let text = String::from_utf8_lossy(&bytes).to_string();
+                    // Find last valid UTF-8 boundary to avoid splitting
+                    // multi-byte characters across chunks.
+                    let text = find_valid_utf8_prefix(&bytes);
                     futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
                 }
                 Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
@@ -283,6 +286,21 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
         .collect();
 
     Ok(serde_json::json!(items))
+}
+
+/// Extract the longest valid UTF-8 prefix from a byte slice.
+///
+/// If the trailing bytes form an incomplete UTF-8 sequence (the chunk was
+/// split mid-character), those bytes are dropped. The next chunk from the
+/// network will carry the remainder and complete the character.
+fn find_valid_utf8_prefix(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            let valid = &bytes[..e.valid_up_to()];
+            String::from_utf8_lossy(valid).to_string()
+        }
+    }
 }
 
 /// Parse SSE event stream from a byte buffer.

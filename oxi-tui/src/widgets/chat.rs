@@ -108,6 +108,8 @@ enum LineKind {
     ListItem,
     /// Horizontal rule.
     HorizontalRule,
+    /// Role label (e.g. "You") rendered bold with primary color.
+    RoleLabel,
 }
 
 /// State for the ChatView widget.
@@ -456,6 +458,11 @@ impl StatefulWidget for ChatView<'_> {
         };
 
         for msg in &state.messages {
+            // Add role label for User messages
+            if msg.role == MessageRole::User {
+                all_lines.push((msg.role, "You".to_string(), LineKind::RoleLabel));
+            }
+
             for block in &msg.content_blocks {
                 match block {
                     ContentBlock::Text { content } => {
@@ -581,11 +588,12 @@ impl StatefulWidget for ChatView<'_> {
                 LineKind::Heading(level) => markdown::heading_style(styles.normal, *level),
                 LineKind::ListItem => styles.normal,
                 LineKind::HorizontalRule => styles.muted,
+                LineKind::RoleLabel => styles.primary.add_modifier(ratatui::style::Modifier::BOLD),
             };
 
-            // For code-block and horizontal-rule lines, skip inline parsing
+            // For code-block, horizontal-rule, and role-label lines, skip inline parsing
             // and render the whole line with the line style.
-            if *kind == LineKind::CodeBlock || *kind == LineKind::HorizontalRule {
+            if *kind == LineKind::CodeBlock || *kind == LineKind::HorizontalRule || *kind == LineKind::RoleLabel {
                 let mut col = text_area_start;
                 let mut chars_used = 0usize;
                 for c in text.chars() {
