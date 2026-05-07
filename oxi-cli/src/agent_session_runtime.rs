@@ -229,16 +229,52 @@ pub fn create_agent_session_from_services(
     let settings = services.settings.as_ref();
     let cwd = services.cwd.to_string_lossy().to_string();
 
-    // Resolve model
-    let model_id = options
+    // Resolve model — no hardcoded default, must be configured
+    let model_id = match options
         .model_id
         .or_else(|| settings.effective_model(None))
-        .unwrap_or_else(|| "anthropic/claude-sonnet-4-20250514".to_string());
+    {
+        Some(id) if !id.is_empty() => id,
+        _ => {
+            // No model configured — return empty, TUI will handle
+            String::new()
+        }
+    };
 
     // Resolve thinking level
     let thinking_level = options.thinking_level.unwrap_or(settings.thinking_level);
 
     // Get provider and model
+    if model_id.is_empty() {
+        // No model — return minimal session, TUI setup wizard will handle configuration
+        let config = oxi_agent::AgentConfig {
+            name: "oxi".to_string(),
+            description: Some("oxi CLI agent".to_string()),
+            model_id: String::new(),
+            system_prompt: Some(build_system_prompt(thinking_level)),
+            max_iterations: 10,
+            timeout_seconds: settings.tool_timeout_seconds,
+            temperature: settings.effective_temperature(),
+            max_tokens: settings.effective_max_tokens(),
+            compaction_strategy: if settings.auto_compaction {
+                oxi_ai::CompactionStrategy::Threshold(0.8)
+            } else {
+                oxi_ai::CompactionStrategy::Disabled
+            },
+            compaction_instruction: None,
+            context_window: 128_000,
+        };
+        // Use anthropic as a placeholder provider so the session can be created
+        let provider = oxi_ai::get_provider("anthropic")
+            .ok_or_else(|| anyhow::anyhow!("No provider available"))?;
+        let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config));
+        let session = AgentSession::new(agent, settings.clone(), options.session_manager, cwd);
+        return Ok(CreateAgentSessionResult {
+            session,
+            model_fallback_message: None,
+        });
+    }
+
     let (provider_name, _model_name) = parse_model_id(&model_id);
 
     let provider = oxi_ai::get_provider(&provider_name)
