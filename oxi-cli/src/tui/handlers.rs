@@ -1,6 +1,6 @@
 //! Event handlers for the TUI.
 
-use super::app::{AppState, SetupStep, UiEvent};
+use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
 use super::slash;
 use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
 use oxi_agent::AgentEvent;
@@ -29,8 +29,8 @@ pub async fn handle_input(
 ) -> Option<Action> {
     match event {
         CEvent::Key(key) => {
-            if state.setup_step.is_some() {
-                handle_setup_key(key, state).await
+            if state.overlay.is_some() {
+                handle_overlay_key(key, state, session).await
             } else {
                 handle_key(key, state, session, ui_tx, running).await
             }
@@ -389,85 +389,128 @@ pub async fn handle_session_event(
     }
 }
 
-// ── Setup wizard key handling ────────────────────────────────────────────
+// ── Overlay key handling ─────────────────────────────────────────────────
 
-async fn handle_setup_key(
+async fn handle_overlay_key(
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
+    session: &AgentSession,
 ) -> Option<Action> {
     if key.kind != KeyEventKind::Press {
         return None;
     }
 
-    match &state.setup_step {
-        Some(SetupStep::SelectProvider { .. }) => {
+    // Clone overlay variant to avoid borrow conflicts
+    let overlay = state.overlay.clone();
+    match &overlay {
+        // ── Setup wizard ──
+        Some(AppOverlay::Setup(_)) => {
+            handle_setup_step_key(key, state).await
+        }
+
+        // ── Login wizard (same steps as setup) ──
+        Some(AppOverlay::LoginProvider(_)) => {
+            handle_login_step_key(key, state).await
+        }
+
+        // ── Model selector ──
+        Some(AppOverlay::ModelSelect { .. }) => {
+            handle_model_select_key(key, state, session).await
+        }
+
+        // ── Logout selector ──
+        Some(AppOverlay::LogoutSelect { .. }) => {
+            handle_logout_select_key(key, state).await
+        }
+
+        None => None,
+    }
+}
+
+async fn handle_setup_step_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+) -> Option<Action> {
+    // Clone the overlay to determine which step we're on without holding a borrow
+    let step_kind = match &state.overlay {
+        Some(AppOverlay::Setup(s)) => match s {
+            SetupStep::SelectProvider { .. } => 0,
+            SetupStep::EnterApiKey { provider, .. } => 1,
+            SetupStep::Done { .. } => 2,
+        },
+        _ => return None,
+    };
+
+    match step_kind {
+        0 => { // SelectProvider
             match key.code {
                 KeyCode::Up => {
-                    if let Some(SetupStep::SelectProvider { providers, selected }) = &state.setup_step {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
                         let new_sel = if *selected == 0 { providers.len() - 1 } else { *selected - 1 };
-                        state.setup_step = Some(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel });
+                        state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel }));
                     }
                 }
                 KeyCode::Down => {
-                    if let Some(SetupStep::SelectProvider { providers, selected }) = &state.setup_step {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
                         let new_sel = (*selected + 1) % providers.len();
-                        state.setup_step = Some(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel });
+                        state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel }));
                     }
                 }
                 KeyCode::Enter => {
-                    if let Some(SetupStep::SelectProvider { providers, selected }) = &state.setup_step {
+                    if let Some(AppOverlay::Setup(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
                         if let Some((name, _)) = providers.get(*selected).cloned() {
-                            state.setup_step = Some(SetupStep::EnterApiKey {
+                            state.overlay = Some(AppOverlay::Setup(SetupStep::EnterApiKey {
                                 provider: name,
                                 key: String::new(),
                                 masked_cursor: 0,
-                            });
+                            }));
                         }
                     }
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
-                    state.setup_step = None;
+                    state.overlay = None;
                 }
                 _ => {}
             }
         }
 
-        Some(SetupStep::EnterApiKey { provider, .. }) => {
-            let provider = provider.clone();
+        1 => { // EnterApiKey
+            // Get provider name from overlay
+            let provider = match &state.overlay {
+                Some(AppOverlay::Setup(SetupStep::EnterApiKey { provider, .. })) => provider.clone(),
+                _ => return None,
+            };
             match key.code {
                 KeyCode::Char(c) => {
-                    if let Some(SetupStep::EnterApiKey { key, .. }) = &mut state.setup_step {
+                    if let Some(AppOverlay::Setup(SetupStep::EnterApiKey { key, .. })) = &mut state.overlay {
                         key.push(c);
                     }
                 }
                 KeyCode::Backspace => {
-                    if let Some(SetupStep::EnterApiKey { key, .. }) = &mut state.setup_step {
+                    if let Some(AppOverlay::Setup(SetupStep::EnterApiKey { key, .. })) = &mut state.overlay {
                         key.pop();
                     }
                 }
                 KeyCode::Enter => {
-                    let key_val = if let Some(SetupStep::EnterApiKey { key, .. }) = &state.setup_step {
+                    let key_val = if let Some(AppOverlay::Setup(SetupStep::EnterApiKey { key, .. })) = &state.overlay {
                         key.clone()
                     } else { String::new() };
 
                     if !key_val.is_empty() {
-                        // Save the API key
                         let auth = crate::auth_storage::AuthStorage::new();
                         auth.set_api_key(&provider, key_val);
 
-                        // Also register as custom provider if it's a known non-built-in
                         let model = format!("{}/default", provider);
                         state.footer_state.data.model_name = model.clone();
                         state.footer_state.data.provider_name = provider.clone();
 
-                        state.setup_step = Some(SetupStep::Done {
+                        state.overlay = Some(AppOverlay::Setup(SetupStep::Done {
                             provider: provider.clone(),
                             model,
-                        });
+                        }));
                     }
                 }
                 KeyCode::Esc => {
-                    // Go back to provider selection
                     let providers = vec![
                         ("anthropic".to_string(), false),
                         ("openai".to_string(), false),
@@ -480,21 +523,228 @@ async fn handle_setup_key(
                         ("minimax".to_string(), false),
                         ("zai".to_string(), false),
                     ];
-                    state.setup_step = Some(SetupStep::SelectProvider { providers, selected: 0 });
+                    state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider { providers, selected: 0 }));
                 }
                 _ => {}
             }
         }
 
-        Some(SetupStep::Done { .. }) => {
+        2 => { // Done
             if key.code == KeyCode::Enter {
-                // Exit setup wizard, go to normal chat
-                state.setup_step = None;
+                state.overlay = None;
                 state.add_system_message(" Ready to chat. Type a message to start.".to_string());
             }
         }
 
-        None => {}
+        _ => {}
+    }
+
+    None
+}
+
+async fn handle_login_step_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+) -> Option<Action> {
+    // Clone the overlay to determine which step we're on without holding a borrow
+    let step_kind = match &state.overlay {
+        Some(AppOverlay::LoginProvider(s)) => match s {
+            SetupStep::SelectProvider { .. } => 0,
+            SetupStep::EnterApiKey { provider, .. } => 1,
+            SetupStep::Done { .. } => 2,
+        },
+        _ => return None,
+    };
+
+    match step_kind {
+        0 => { // SelectProvider
+            match key.code {
+                KeyCode::Up => {
+                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
+                        let new_sel = if *selected == 0 { providers.len() - 1 } else { *selected - 1 };
+                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel }));
+                    }
+                }
+                KeyCode::Down => {
+                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
+                        let new_sel = (*selected + 1) % providers.len();
+                        state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel }));
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(AppOverlay::LoginProvider(SetupStep::SelectProvider { providers, selected })) = &state.overlay {
+                        if let Some((name, _)) = providers.get(*selected).cloned() {
+                            state.overlay = Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey {
+                                provider: name,
+                                key: String::new(),
+                                masked_cursor: 0,
+                            }));
+                        }
+                    }
+                }
+                KeyCode::Esc => {
+                    state.overlay = None;
+                }
+                _ => {}
+            }
+        }
+
+        1 => { // EnterApiKey
+            let provider = match &state.overlay {
+                Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { provider, .. })) => provider.clone(),
+                _ => return None,
+            };
+            match key.code {
+                KeyCode::Char(c) => {
+                    if let Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { key, .. })) = &mut state.overlay {
+                        key.push(c);
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { key, .. })) = &mut state.overlay {
+                        key.pop();
+                    }
+                }
+                KeyCode::Enter => {
+                    let key_val = if let Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { key, .. })) = &state.overlay {
+                        key.clone()
+                    } else { String::new() };
+
+                    if !key_val.is_empty() {
+                        let auth = crate::auth_storage::AuthStorage::new();
+                        auth.set_api_key(&provider, key_val);
+                        state.add_system_message(format!("✅ {} API key saved.", provider));
+                        state.overlay = None;
+                    }
+                }
+                KeyCode::Esc => {
+                    // Go back to provider selection
+                    let auth = crate::auth_storage::AuthStorage::new();
+                    let providers = vec![
+                        "anthropic", "openai", "google", "deepseek", "groq",
+                        "openrouter", "mistral", "xai", "minimax", "zai",
+                    ];
+                    let provider_list: Vec<(String, bool)> = providers.iter().map(|name| {
+                        let has_key = auth.has_auth(name);
+                        (name.to_string(), has_key)
+                    }).collect();
+                    state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider {
+                        providers: provider_list,
+                        selected: 0,
+                    }));
+                }
+                _ => {}
+            }
+        }
+
+        2 | _ => {
+            // Done or unexpected — close overlay
+            state.overlay = None;
+        }
+    }
+
+    None
+}
+
+async fn handle_model_select_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    session: &AgentSession,
+) -> Option<Action> {
+    let (models, filter, selected) = match &state.overlay {
+        Some(AppOverlay::ModelSelect { models, filter, selected }) => (models.clone(), filter.clone(), *selected),
+        _ => return None,
+    };
+
+    // Compute filtered view
+    let filtered: Vec<(usize, &String)> = if filter.is_empty() {
+        models.iter().enumerate().collect()
+    } else {
+        let lower = filter.to_lowercase();
+        models.iter().enumerate().filter(|(_, m)| m.to_lowercase().contains(&lower)).collect()
+    };
+
+    match key.code {
+        KeyCode::Up => {
+            let new_sel = if selected == 0 { filtered.len().saturating_sub(1) } else { selected.saturating_sub(1) };
+            state.overlay = Some(AppOverlay::ModelSelect { models, filter, selected: new_sel });
+        }
+        KeyCode::Down => {
+            let new_sel = if filtered.is_empty() { 0 } else { (selected + 1).min(filtered.len() - 1) };
+            state.overlay = Some(AppOverlay::ModelSelect { models, filter, selected: new_sel });
+        }
+        KeyCode::Enter => {
+            if let Some((_idx, model_id)) = filtered.get(selected) {
+                let model_id = (*model_id).clone();
+                match session.set_model(&model_id) {
+                    Ok(()) => {
+                        state.add_system_message(format!("→ model: {}", model_id));
+                        state.footer_state.data.model_name = model_id;
+                    }
+                    Err(e) => {
+                        state.add_system_message(format!("✗ {}", e));
+                    }
+                }
+            }
+            state.overlay = None;
+        }
+        KeyCode::Esc => {
+            state.overlay = None;
+        }
+        KeyCode::Backspace => {
+            let mut new_filter = filter;
+            new_filter.pop();
+            state.overlay = Some(AppOverlay::ModelSelect {
+                models,
+                filter: new_filter,
+                selected: 0,
+            });
+        }
+        KeyCode::Char(c) => {
+            let mut new_filter = filter;
+            new_filter.push(c);
+            state.overlay = Some(AppOverlay::ModelSelect {
+                models,
+                filter: new_filter,
+                selected: 0,
+            });
+        }
+        _ => {}
+    }
+
+    None
+}
+
+async fn handle_logout_select_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+) -> Option<Action> {
+    let (providers, selected) = match &state.overlay {
+        Some(AppOverlay::LogoutSelect { providers, selected }) => (providers.clone(), *selected),
+        _ => return None,
+    };
+
+    match key.code {
+        KeyCode::Up => {
+            let new_sel = if selected == 0 { providers.len().saturating_sub(1) } else { selected - 1 };
+            state.overlay = Some(AppOverlay::LogoutSelect { providers, selected: new_sel });
+        }
+        KeyCode::Down => {
+            let new_sel = if providers.is_empty() { 0 } else { (selected + 1).min(providers.len() - 1) };
+            state.overlay = Some(AppOverlay::LogoutSelect { providers, selected: new_sel });
+        }
+        KeyCode::Enter => {
+            if let Some(provider) = providers.get(selected) {
+                let auth = crate::auth_storage::AuthStorage::new();
+                auth.remove(provider);
+                state.add_system_message(format!("✓ Removed {}", provider));
+            }
+            state.overlay = None;
+        }
+        KeyCode::Esc => {
+            state.overlay = None;
+        }
+        _ => {}
     }
 
     None

@@ -9,10 +9,12 @@ use crate::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
 };
+use crate::auth_storage::AuthStorage;
 use crate::session::SessionManager;
 use crate::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
+use oxi_ai::model_db;
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{
     chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},
@@ -91,7 +93,6 @@ pub(super) const SPINNER: &[&str] = &[("⠋"), ("⠙"), ("⠹"), ("⠸"), ("⠼"
 
 // ── App State ────────────────────────────────────────────────────────────
 
-/// Unified application state holding all widget states.
 /// Setup wizard state
 #[derive(Debug, Clone)]
 pub(crate) enum SetupStep {
@@ -113,6 +114,26 @@ pub(crate) enum SetupStep {
     },
 }
 
+/// Overlay types for interactive TUI dialogs.
+#[derive(Debug, Clone)]
+pub(crate) enum AppOverlay {
+    /// Initial setup wizard
+    Setup(SetupStep),
+    /// Model selector overlay
+    ModelSelect {
+        models: Vec<String>,
+        filter: String,
+        selected: usize,
+    },
+    /// Login wizard (reuses SetupStep)
+    LoginProvider(SetupStep),
+    /// Logout provider selector
+    LogoutSelect {
+        providers: Vec<String>,
+        selected: usize,
+    },
+}
+
 pub(crate) struct AppState {
     pub chat: ChatViewState,
     pub input: InputState,
@@ -127,8 +148,8 @@ pub(crate) struct AppState {
     pub slash_completion_index: usize,
     pub slash_completion_active: bool,
     pub message_count: usize,
-    /// Setup wizard active state (None = normal mode)
-    pub setup_step: Option<SetupStep>,
+    /// Active overlay (None = normal chat mode)
+    pub overlay: Option<AppOverlay>,
 }
 
 impl AppState {
@@ -147,7 +168,7 @@ impl AppState {
             slash_completion_index: 0,
             slash_completion_active: false,
             message_count: 0,
-            setup_step: None,
+            overlay: None,
         }
     }
 
@@ -454,10 +475,10 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             (name, has_key)
         }).collect();
 
-        state.setup_step = Some(SetupStep::SelectProvider {
+        state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider {
             providers,
             selected: 0,
-        });
+        }));
     }
 
     let mut running = true;
