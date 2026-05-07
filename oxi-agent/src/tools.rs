@@ -171,11 +171,13 @@ pub mod path_security;
 pub mod read;
 /// Rendering utilities for tool output.
 pub mod render_utils;
+/// Search result cache and get_search_results tool.
+pub mod search_cache;
 /// Tool definition wrapper helpers.
 pub mod tool_definition_wrapper;
 /// Output truncation helpers.
 pub mod truncate;
-/// Web search tool.
+/// Multi-engine web search tool (a3s-search + DuckDuckGo fallback).
 pub mod web_search;
 /// Sub-agent delegation tool.
 pub mod subagent;
@@ -189,6 +191,7 @@ pub use find::FindTool;
 pub use grep::GrepTool;
 pub use ls::LsTool;
 pub use read::ReadTool;
+pub use search_cache::{GetSearchResultsTool, SearchCache};
 pub use web_search::WebSearchTool;
 pub use subagent::SubagentTool;
 pub use write::WriteTool;
@@ -269,6 +272,7 @@ impl ToolRegistry {
     /// Create a registry with all built-in tools, using the given cwd.
     pub fn with_builtins_cwd(cwd: PathBuf) -> Self {
         let registry = Self::new();
+        let search_cache = Arc::new(SearchCache::new());
         registry.register(ReadTool::new());
         registry.register(WriteTool::new());
         registry.register(EditTool::new());
@@ -276,7 +280,8 @@ impl ToolRegistry {
         registry.register(GrepTool::new());
         registry.register(FindTool::new());
         registry.register(LsTool::new());
-        registry.register(WebSearchTool::new());
+        registry.register(WebSearchTool::new(search_cache.clone()));
+        registry.register(GetSearchResultsTool::new(search_cache));
         registry.register(SubagentTool::new(cwd));
         registry
     }
