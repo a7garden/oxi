@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     }
 
     // Register custom OpenAI-compatible providers from settings
-    let auth_storage = crate::auth_storage::AuthStorage::new();
+    let auth_storage = oxi::auth_storage::AuthStorage::new();
     for cp in &settings.custom_providers {
         let api_key = auth_storage.get_api_key(&cp.name);
         let api = cp.api.to_lowercase();
@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
 
         // Auto-fetch models from /v1/models endpoint
         if let Some(ref key) = api_key {
-            match oxi_ai::fetch_models_blocking(&cp.base_url, key) {
+            match oxi_ai::fetch_models_blocking(&cp.base_url, key.as_str()) {
                 Ok(model_ids) => {
                     let count = model_ids.len();
                     for model_id in &model_ids {
