@@ -504,7 +504,7 @@ impl StatefulWidget for ChatView<'_> {
                         } else {
                             format!("{} B", size_bytes)
                         };
-                        all_lines.push((msg.role, format!("📷 [image: {}, {}]", mime_type, size_str), LineKind::Normal));
+                        all_lines.push((msg.role, format!("[image: {}, {}]", mime_type, size_str), LineKind::Normal));
                         all_lines.push((msg.role, "  Ctrl+I → open in viewer".to_string(), LineKind::Normal));
                     }
                 }

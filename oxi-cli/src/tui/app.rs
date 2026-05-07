@@ -501,11 +501,10 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
             ("minimax".to_string(), false),
             ("zai".to_string(), false),
         ];
-        // Check which providers already have keys
+        // Check which providers already have keys (auth.json only)
         let auth = crate::auth_storage::AuthStorage::new();
         let providers: Vec<(String, bool)> = providers.into_iter().map(|(name, _)| {
-            let env_key = format!("{}_API_KEY", name.to_uppercase());
-            let has_key = std::env::var(&env_key).ok().is_some() || auth.get_api_key(&name).is_some();
+            let has_key = auth.get_api_key(&name).is_some();
             (name, has_key)
         }).collect();
 

@@ -687,12 +687,7 @@ impl AuthStorage {
             };
         }
 
-        // 5. Environment variable
-        if let Some(key) = get_env_api_key(provider) {
-            return Some(key);
-        }
-
-        // 6. Fallback resolver
+        // 5. Fallback resolver
         if include_fallback {
             if let Some(ref resolver) = *self.fallback_resolver.read() {
                 return resolver.resolve(provider);

@@ -140,9 +140,7 @@ fn load_providers(auth_store: &crate::auth_storage::AuthStorage) -> Vec<Provider
     let mut entries = Vec::new();
 
     for preset in PRESET_PROVIDERS {
-        let stored_key = auth_store.get_api_key(preset.name);
-        let env_key = std::env::var(preset.env_key).ok();
-        let key = stored_key.or(env_key);
+        let key = auth_store.get_api_key(preset.name);
 
         let (has_key, key_masked) = match &key {
             Some(k) => (true, mask_key(k)),
@@ -165,9 +163,7 @@ fn load_providers(auth_store: &crate::auth_storage::AuthStorage) -> Vec<Provider
             if preset_names.contains(&cp.name.as_str()) {
                 continue;
             }
-            let key = auth_store.get_api_key(&cp.name);
-            let env_key = std::env::var(&cp.api_key_env).ok();
-            let actual_key = key.or(env_key);
+            let actual_key = auth_store.get_api_key(&cp.name);
 
             let (has_key, key_masked) = match &actual_key {
                 Some(k) => (true, mask_key(k)),
@@ -267,7 +263,7 @@ fn draw_wizard(
         // Title bar
         let title = Paragraph::new(Line::from(vec![
             Span::styled(" 🦊 ", Style::default().fg(Color::Rgb(255, 165, 0))),
-            Span::styled("oxi 설정 마법사", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled("oxi Setup Wizard", Style::default().add_modifier(Modifier::BOLD)),
         ]))
         .block(Block::default().borders(Borders::TOP));
         f.render_widget(title, chunks[0]);
@@ -284,19 +280,19 @@ fn draw_wizard(
         // Footer
         let footer_text = match state.step {
             0 => match &state.input_mode {
-                InputMode::Normal => "  ↑/↓ 이동 · Enter: API 키 입력/변경 · d: 삭제 · →: 다음 · q: 종료".to_string(),
-                InputMode::EditingApiKey { .. } => "  Enter: 저장 · Esc: 취소".to_string(),
-                InputMode::AddingCustom { .. } => "  Tab: 다음 필드 · Enter: 저장 · Esc: 취소".to_string(),
+                InputMode::Normal => "  ↑/↓ navigate · Enter: enter/change API key · d: delete · →: next · q: quit".to_string(),
+                InputMode::EditingApiKey { .. } => "  Enter: save · Esc: cancel".to_string(),
+                InputMode::AddingCustom { .. } => "  Tab: next field · Enter: save · Esc: cancel".to_string(),
             },
             1 => {
                 if state.model_searching {
-                    "  입력: 검색 · Esc: 검색 종료 · Enter: 선택 · ←: 이전".to_string()
+                    "  Type: search · Esc: close search · Enter: select · ←: previous".to_string()
                 } else {
-                    "  ↑/↓ 이동 · /: 검색 · Enter: 선택 · ←: 이전".to_string()
+                    "  ↑/↓ navigate · /: search · Enter: select · ←: previous".to_string()
                 }
             },
-            2 => "  ↑/↓ 이동 · Enter: 선택 · ←: 이전".to_string(),
-            3 => "  Enter: 종료".to_string(),
+            2 => "  ↑/↓ navigate · Enter: select · ←: previous".to_string(),
+            3 => "  Enter: quit".to_string(),
             _ => String::new(),
         };
         let footer = Paragraph::new(Line::from(Span::styled(
@@ -336,13 +332,13 @@ fn draw_provider_list(
         .providers
         .iter()
         .map(|p| {
-            let check = if p.has_key { "✅" } else { "☐" };
+            let check = if p.has_key { "[x]" } else { "[ ]" };
             let key_info = if p.has_key {
-                format!("API 키: {}", p.key_masked)
+                format!("API key: {}", p.key_masked)
             } else {
-                "API 키 없음".to_string()
+                "No API key".to_string()
             };
-            let custom_tag = if p.is_custom { " ← 커스텀" } else { "" };
+            let custom_tag = if p.is_custom { " (custom)" } else { "" };
 
             let line = Line::from(vec![
                 Span::styled(format!(" {} ", check), Style::default().fg(
@@ -359,7 +355,7 @@ fn draw_provider_list(
     // Add custom provider entry
     let add_custom = ListItem::new(Line::from(vec![
         Span::styled("   + ", Style::default().fg(Color::Cyan)),
-        Span::styled("커스텀 프로바이더 추가...", Style::default().fg(Color::Cyan)),
+        Span::styled("Add custom provider...", Style::default().fg(Color::Cyan)),
     ]));
 
     let mut all_items = items;
@@ -413,7 +409,7 @@ fn draw_api_key_dialog(
             Span::styled("  API Key: ", Style::default().add_modifier(Modifier::BOLD)),
             Span::styled(format!("[{:<width$}]", display_text, width = 30), Style::default()),
             if field_text.is_empty() {
-                Span::styled("API 키를 입력하세요", Style::default().fg(Color::DarkGray))
+                Span::styled("Enter your API key", Style::default().fg(Color::DarkGray))
             } else {
                 Span::raw("")
             },
@@ -422,7 +418,7 @@ fn draw_api_key_dialog(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" {} API 키 입력 ", provider_name));
+        .title(format!(" {} API Key ", provider_name));
 
     let para = Paragraph::new(paragraphs).block(block);
     f.render_widget(para, dialog_area);
@@ -446,7 +442,7 @@ fn draw_custom_provider_dialog(
         dialog_height,
     );
 
-    let field_labels = ["이름", "Base URL", "API 키"];
+    let field_labels = ["Name", "Base URL", "API Key"];
     let lines: Vec<Line> = std::iter::once(Line::from(""))
         .chain(
             field_labels.iter().enumerate().map(|(i, label)| {
@@ -465,7 +461,7 @@ fn draw_custom_provider_dialog(
                     Span::styled(format!("  {:<10}", format!("{}:", label)), style),
                     Span::styled(format!("[{:<width$}]", display, width = 35), style),
                     if is_active && fields[i].is_empty() {
-                        Span::styled("← 입력하세요", Style::default().fg(Color::DarkGray))
+                        Span::styled("<enter>", Style::default().fg(Color::DarkGray))
                     } else {
                         Span::raw("")
                     },
@@ -476,7 +472,7 @@ fn draw_custom_provider_dialog(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" 커스텀 프로바이더 추가 ");
+        .title(" Add Custom Provider ");
 
     let para = Paragraph::new(lines).block(block);
     f.render_widget(para, dialog_area);
@@ -508,7 +504,7 @@ fn draw_model_step(
 
     if state.model_searching {
         lines.push(Line::from(vec![
-            Span::styled("  검색: ", Style::default().fg(Color::Yellow)),
+            Span::styled("  Search: ", Style::default().fg(Color::Yellow)),
             Span::styled(&state.model_filter, Style::default().add_modifier(Modifier::BOLD)),
             Span::raw("_"),
         ]));
@@ -578,21 +574,21 @@ fn draw_done_step(
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
-            "  ✅ 설정이 저장되었습니다!",
+            "  Settings saved!",
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            format!("  설정 파일: {}", settings_path_display),
+            format!("  Settings file: {}", settings_path_display),
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
-            format!("  인증 파일: {}", auth_path_display),
+            format!("  Auth file: {}", auth_path_display),
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  이제 'oxi'를 실행하세요.",
+            "  Run 'oxi' to start.",
             Style::default().add_modifier(Modifier::BOLD)),
         ),
     ];
@@ -604,10 +600,10 @@ fn draw_done_step(
 
 fn build_step_indicator(current_step: usize) -> Line<'static> {
     let steps = [
-        ("1. 프로바이더 설정", 0),
-        ("2. 기본 모델 선택", 1),
-        ("3. 테마 선택", 2),
-        ("4. 완료", 3),
+        ("1. Provider Setup", 0),
+        ("2. Default Model", 1),
+        ("3. Theme", 2),
+        ("4. Done", 3),
     ];
 
     let spans: Vec<Span> = steps
