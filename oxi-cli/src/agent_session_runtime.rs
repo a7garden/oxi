@@ -743,11 +743,26 @@ fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
         ),
     };
 
+    let mut tool_snippets = std::collections::HashMap::new();
+    tool_snippets.insert("read".into(), "Read file contents (text or image)".into());
+    tool_snippets.insert("bash".into(), "Execute bash commands".into());
+    tool_snippets.insert("edit".into(), "Edit files with exact text replacement".into());
+    tool_snippets.insert("write".into(), "Write content to files".into());
+    tool_snippets.insert("grep".into(), "Search file contents with regex".into());
+    tool_snippets.insert("find".into(), "Find files by name/pattern".into());
+    tool_snippets.insert("ls".into(), "List directory contents".into());
+    tool_snippets.insert("web_search".into(), "Search the web (DuckDuckGo, Wikipedia, Bing, Brave)".into());
+
     let options = crate::system_prompt::BuildSystemPromptOptions {
         custom_prompt,
         cwd: std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
+        selected_tools: vec![
+            "read".into(), "bash".into(), "edit".into(), "write".into(),
+            "grep".into(), "find".into(), "ls".into(), "web_search".into(),
+        ],
+        tool_snippets,
         ..Default::default()
     };
 
