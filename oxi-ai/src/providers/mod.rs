@@ -27,6 +27,7 @@ use futures::Stream;
 use std::pin::Pin;
 
 use crate::error::ProviderError;
+pub use crate::Api;
 pub use crate::CacheRetention;
 pub use crate::Context;
 pub use crate::Model;
@@ -105,26 +106,27 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         }
     }
 
-    // 2. Built-in providers
-    match name {
-        "openai" | "groq" | "cerebras" | "xai" | "openrouter" | "fireworks" | "huggingface" => {
-            Some(Box::new(openai::OpenAiProvider::new()))
+    // 2. Built-in providers: look up metadata from registry
+    let builtin = register_builtins::get_builtin_provider(name)?;
+
+    match builtin.api {
+        Api::AnthropicMessages => Some(Box::new(anthropic::AnthropicProvider::new())),
+        Api::GoogleGenerativeAi => Some(Box::new(google::GoogleProvider::new())),
+        Api::GoogleVertex => Some(Box::new(vertex::VertexProvider::new())),
+        Api::MistralConversations => Some(Box::new(mistral::MistralProvider::new())),
+        Api::AzureOpenAiResponses => Some(Box::new(azure::AzureProvider::new())),
+        Api::BedrockConverseStream => Some(Box::new(bedrock::BedrockProvider::new())),
+        Api::OpenAiCompletions => {
+            // All OpenAI-compatible providers use OpenAiProvider with a custom base_url
+            if builtin.base_url.is_empty() {
+                Some(Box::new(openai::OpenAiProvider::new()))
+            } else {
+                Some(Box::new(openai::OpenAiProvider::with_base_url(
+                    builtin.base_url,
+                )))
+            }
         }
-        "azure" | "azure-openai" => Some(Box::new(azure::AzureProvider::new())),
-        "anthropic" => Some(Box::new(anthropic::AnthropicProvider::new())),
-        "google" => Some(Box::new(google::GoogleProvider::new())),
-        "vertex" | "google-vertex" => Some(Box::new(vertex::VertexProvider::new())),
-        "deepseek" => Some(Box::new(deepseek::DeepSeekProvider::new())),
-        "mistral" => Some(Box::new(mistral::MistralProvider::new())),
-        "bedrock" | "amazon-bedrock" | "aws-bedrock" => {
-            Some(Box::new(bedrock::BedrockProvider::new()))
-        }
-        "cloudflare" | "workers-ai" => Some(Box::new(cloudflare::CloudflareProvider::new())),
-        "copilot" | "github-copilot" => Some(Box::new(copilot::CopilotProvider::new())),
-        "openai-responses" => Some(Box::new(openai_responses::OpenAiResponsesProvider::new())),
-        "openai-completions" | "completions" => Some(Box::new(openai_completions::OpenAICompletionsProvider::new())),
-        "codex" | "github-codex" | "copilot-codex" => Some(Box::new(codex::CodexProvider::new())),
-        _ => None,
+        Api::OpenAiResponses => Some(Box::new(openai_responses::OpenAiResponsesProvider::new())),
     }
 }
 
