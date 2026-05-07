@@ -327,24 +327,22 @@ fn render_setup_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
                 Rect { x: area.x + 2, y: title_y, width: area.width.saturating_sub(4), height: 1 },
             );
 
-            // Input field with masking
+            // Input field — plain text
             let input_y = title_y + 2;
-            let masked = if key.is_empty() {
-                "  ".to_string()
-            } else if key.len() <= 8 {
-                "****".to_string()
+            let display = if key.is_empty() {
+                " ".to_string()
             } else {
-                format!("{}****{}", &key[..4], &key[key.len()-4..])
+                key.clone()
             };
 
-            let input_line = format!(" API Key: {}", masked);
+            let input_line = format!(" API Key: {}", display);
             f.render_widget(
                 Paragraph::new(Span::styled(input_line, styles.normal)),
                 Rect { x: area.x + 2, y: input_y, width: area.width.saturating_sub(4), height: 1 },
             );
 
-            // Cursor blink
-            let cursor_col = 11u16 + masked.len().min(max_w - 14) as u16;
+            // Cursor
+            let cursor_col = 11u16 + display.len().min(max_w.saturating_sub(14) as usize) as u16;
             f.render_widget(
                 Paragraph::new(Span::styled(
                     " ",
@@ -472,21 +470,19 @@ fn render_login_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
             );
 
             let input_y = title_y + 2;
-            let masked = if key.is_empty() {
-                "  ".to_string()
-            } else if key.len() <= 8 {
-                "****".to_string()
+            let display = if key.is_empty() {
+                " ".to_string()
             } else {
-                format!("{}****{}", &key[..4], &key[key.len()-4..])
+                key.clone()
             };
 
-            let input_line = format!(" API Key: {}", masked);
+            let input_line = format!(" API Key: {}", display);
             f.render_widget(
                 Paragraph::new(Span::styled(input_line, styles.normal)),
                 Rect { x: area.x + 2, y: input_y, width: area.width.saturating_sub(4), height: 1 },
             );
 
-            let cursor_col = 11u16 + masked.len().min(max_w - 14) as u16;
+            let cursor_col = 11u16 + display.len().min(max_w.saturating_sub(14) as usize) as u16;
             f.render_widget(
                 Paragraph::new(Span::styled(
                     " ",
