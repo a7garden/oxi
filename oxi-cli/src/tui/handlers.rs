@@ -15,6 +15,7 @@ use crossterm::event::{
 /// Actions returned from input handling that need async work in the main loop.
 pub(crate) enum Action {
     SendPrompt(String),
+    ExecuteSlashCommand(String),
 }
 
 /// Handle a crossterm input event. Returns an action if the main loop needs to do async work.
@@ -64,8 +65,14 @@ async fn handle_key(
     match key.code {
         KeyCode::Enter => {
             if !state.is_agent_busy {
+                // 슬래시 명령 팝업이 활성 상태면 선택된 명령 바로 실행
                 if state.slash_completion_active {
-                    state.accept_slash_completion();
+                    let cmd = state.selected_slash_command().map(|c| c.name.clone());
+                    state.clear_slash_completions();
+                    state.input_clear();
+                    if let Some(cmd) = cmd {
+                        return Some(Action::ExecuteSlashCommand(cmd));
+                    }
                     return None;
                 }
                 let value = state.input_value().to_string();
@@ -174,7 +181,12 @@ async fn handle_key(
         }
         KeyCode::Tab => {
             if !state.is_agent_busy && state.slash_completion_active {
-                state.accept_slash_completion();
+                let cmd = state.selected_slash_command().map(|c| c.name.clone());
+                state.clear_slash_completions();
+                state.input_clear();
+                if let Some(cmd) = cmd {
+                    return Some(Action::ExecuteSlashCommand(cmd));
+                }
             }
             None
         }

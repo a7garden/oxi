@@ -1,4 +1,6 @@
 //! Input widget — text input field with cursor, placeholder, and completion.
+//!
+//! Supports full Unicode including CJK double-width characters (Korean, Chinese, Japanese).
 
 use ratatui::{
     widgets::StatefulWidget,
@@ -7,6 +9,8 @@ use ratatui::{
     style::{Style, Modifier},
 };
 use crate::Theme;
+use unicode_width::UnicodeWidthStr;
+use unicode_width::UnicodeWidthChar;
 
 /// Completion entry.
 #[derive(Debug, Clone)]
@@ -94,6 +98,12 @@ impl InputState {
         self.text.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(self.text.len())
     }
 
+    /// Calculate the display width (in terminal columns) of text up to char index.
+    fn display_width_up_to(&self, char_idx: usize) -> usize {
+        let s: String = self.text.chars().take(char_idx).collect();
+        UnicodeWidthStr::width(s.as_str())
+    }
+
     /// Accept current completion if active.
     pub fn accept_completion(&mut self) -> bool {
         if !self.completion_active || self.completions.is_empty() {
@@ -168,8 +178,6 @@ impl<'a> Input<'a> {
     }
 }
 
-// Note: No Default impl because Input requires a Theme reference.
-
 impl StatefulWidget for Input<'_> {
     type State = InputState;
 
@@ -181,10 +189,17 @@ impl StatefulWidget for Input<'_> {
         let styles = self.theme.to_styles();
         let y = area.y;
 
-        // Prompt
+        // Prompt (❯ is double-width, takes 2 cells)
+        let prompt_width = self.prompt_char.width().unwrap_or(1) as u16;
         buf[(area.x, y)].set_char(self.prompt_char)
             .set_style(styles.primary);
-        buf[(area.x + 1, y)].set_char(' ')
+        // Fill continuation cell if prompt is wide
+        if prompt_width > 1 {
+            buf[(area.x + 1, y)].set_char(' ')
+                .set_style(styles.primary);
+        }
+        let content_start = area.x + prompt_width + 1; // prompt + space
+        buf[(area.x + prompt_width, y)].set_char(' ')
             .set_style(styles.normal);
 
         // Determine what to display
@@ -200,50 +215,86 @@ impl StatefulWidget for Input<'_> {
             styles.normal
         };
 
-        // Horizontal scrolling
-        let content_start = area.x + 2;
-        let max_visible = (area.width - 3) as usize;
-        let display_len = display_text.chars().count();
+        // Calculate display widths using Unicode-aware width
+        let max_cols = (area.width - prompt_width - 2) as usize; // available column width
+        let _text_display_width = UnicodeWidthStr::width(display_text);
 
-        let scroll = if state.cursor >= max_visible {
-            state.cursor - max_visible + 1
+        // Calculate cursor column position
+        let cursor_col = if state.text.is_empty() {
+            0
+        } else {
+            state.display_width_up_to(state.cursor)
+        };
+
+        // Horizontal scrolling: ensure cursor is visible within the viewport
+        let scroll_col = if cursor_col >= max_cols {
+            // Scroll so cursor is near the right edge
+            cursor_col - max_cols + 1
         } else {
             0
         };
 
-        // Write visible characters
-        let visible: String = display_text.chars().skip(scroll).take(max_visible).collect();
-        for (i, c) in visible.chars().enumerate() {
-            let col = content_start + i as u16;
-            if col < area.x + area.width - 1 {
-                // Check if cursor
-                let char_idx = scroll + i;
-                if state.cursor == char_idx && !state.text.is_empty() {
-                    buf[(col, y)].set_char(c)
-                        .set_style(Style::default()
-                            .fg(self.theme.colors.cursor_fg.to_ratatui())
-                            .bg(self.theme.colors.cursor_bg.to_ratatui())
-                            .add_modifier(Modifier::BOLD));
-                } else {
-                    buf[(col, y)].set_char(c).set_style(text_fg);
-                }
+        // Render characters using column-based positioning
+        let mut col = 0u16; // current column offset from content_start
+        let mut char_iter = display_text.chars().enumerate().peekable();
+        let mut chars_before_cursor = 0usize;
+        let mut cursor_rendered = false;
+
+        // Skip characters that are scrolled off
+        let mut skipped_width = 0usize;
+        while let Some((char_idx, c)) = char_iter.peek().cloned() {
+            let cw = c.width().unwrap_or(0);
+            if skipped_width + cw <= scroll_col {
+                skipped_width += cw;
+                chars_before_cursor = char_idx + 1;
+                char_iter.next();
+            } else {
+                break;
             }
         }
 
-        // Cursor at end of text
-        let cursor_screen_pos = if state.cursor >= display_len {
-            content_start + visible.len() as u16
-        } else {
-            content_start + (state.cursor - scroll) as u16
-        };
+        // Render visible characters
+        for (char_idx, c) in char_iter {
+            let cw = c.width().unwrap_or(1) as u16;
+            let screen_col = content_start + col;
 
-        if state.cursor >= display_len && cursor_screen_pos < area.x + area.width - 1 {
-            let cursor_col = if state.text.is_empty() && self.placeholder.is_some() {
+            if screen_col + cw > area.x + area.width - 1 {
+                break; // No more room
+            }
+
+            let is_cursor = state.cursor == char_idx && !state.text.is_empty();
+
+            if is_cursor {
+                buf[(screen_col, y)].set_char(c)
+                    .set_style(Style::default()
+                        .fg(self.theme.colors.cursor_fg.to_ratatui())
+                        .bg(self.theme.colors.cursor_bg.to_ratatui())
+                        .add_modifier(Modifier::BOLD));
+                // For wide chars, set continuation cell
+                if cw > 1 {
+                    buf[(screen_col + 1, y)].set_char(' ')
+                        .set_style(Style::default()
+                            .fg(self.theme.colors.cursor_fg.to_ratatui())
+                            .bg(self.theme.colors.cursor_bg.to_ratatui()));
+                }
+                cursor_rendered = true;
+            } else {
+                buf[(screen_col, y)].set_char(c).set_style(text_fg);
+                // Wide char continuation is handled by ratatui's set_char
+            }
+
+            col += cw;
+        }
+
+        // Cursor at end of text (empty cursor)
+        let end_col = content_start + col;
+        if state.cursor >= state.text.chars().count() && end_col < area.x + area.width - 1 {
+            let cursor_col_pos = if state.text.is_empty() && self.placeholder.is_some() {
                 content_start
             } else {
-                cursor_screen_pos
+                end_col
             };
-            buf[(cursor_col, y)].set_char(' ')
+            buf[(cursor_col_pos, y)].set_char(' ')
                 .set_style(Style::default()
                     .fg(self.theme.colors.cursor_fg.to_ratatui())
                     .bg(self.theme.colors.cursor_bg.to_ratatui()));
@@ -251,12 +302,13 @@ impl StatefulWidget for Input<'_> {
 
         // Clear remainder
         let clear_from = if state.text.is_empty() {
-            content_start + (self.placeholder.unwrap_or("").len() as u16).min(area.width - 3)
+            let ph_width = UnicodeWidthStr::width(self.placeholder.unwrap_or(""));
+            content_start + (ph_width as u16).min(area.width - prompt_width - 2)
         } else {
-            cursor_screen_pos + 1
+            end_col + 1
         };
-        for col in clear_from..area.x + area.width {
-            buf[(col, y)].set_char(' ').set_style(text_fg);
+        for c in clear_from..area.x + area.width {
+            buf[(c, y)].set_char(' ').set_style(text_fg);
         }
     }
 }
@@ -285,6 +337,14 @@ mod tests {
     }
 
     #[test]
+    fn input_state_insert_str() {
+        let mut state = InputState::default();
+        state.insert_str("안녕하세요");
+        assert_eq!(state.text, "안녕하세요");
+        assert_eq!(state.cursor, 5);
+    }
+
+    #[test]
     fn input_state_backspace() {
         let mut state = InputState::default();
         state.text = "ab한".to_string();
@@ -292,6 +352,16 @@ mod tests {
         state.backspace();
         assert_eq!(state.text, "ab");
         assert_eq!(state.cursor, 2);
+    }
+
+    #[test]
+    fn input_state_backspace_korean() {
+        let mut state = InputState::default();
+        state.text = "안녕하세요".to_string();
+        state.cursor = 5;
+        state.backspace();
+        assert_eq!(state.text, "안녕하세");
+        assert_eq!(state.cursor, 4);
     }
 
     #[test]
@@ -307,5 +377,17 @@ mod tests {
         assert_eq!(state.cursor, 0);
         state.move_end();
         assert_eq!(state.cursor, 5);
+    }
+
+    #[test]
+    fn input_state_display_width() {
+        let mut state = InputState::default();
+        state.text = "ab한글".to_string();
+        // a(1) + b(1) + 한(2) + 글(2) = 6 columns
+        assert_eq!(state.display_width_up_to(0), 0);
+        assert_eq!(state.display_width_up_to(1), 1); // "a"
+        assert_eq!(state.display_width_up_to(2), 2); // "ab"
+        assert_eq!(state.display_width_up_to(3), 4); // "ab한"
+        assert_eq!(state.display_width_up_to(4), 6); // "ab한글"
     }
 }

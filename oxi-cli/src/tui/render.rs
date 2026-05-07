@@ -143,7 +143,7 @@ fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
 fn render_slash_popup_overlay(
     f: &mut Frame,
     separator_area: Rect,
-    input_area: Rect,
+    _input_area: Rect,
     state: &AppState,
     theme: &Theme,
 ) {
