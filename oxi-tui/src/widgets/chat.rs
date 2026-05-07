@@ -560,10 +560,10 @@ impl StatefulWidget for ChatView<'_> {
             // Write prefix
             buf[(area.x, row)].set_char(' ').set_style(prefix_style);
 
-            // Margin after prefix
-            let margin: u16 = 1;
-            let text_area_start = area.x + margin;
-            let max_text_cols = area.width.saturating_sub(margin) as usize;
+            // Message horizontal padding (left + right)
+            let h_pad: u16 = 2;
+            let text_area_start = area.x + 1 + h_pad;
+            let max_text_cols = area.width.saturating_sub(1 + h_pad * 2) as usize;
 
             // Determine the base style for this line.
             let line_base_style: Style = match kind {
