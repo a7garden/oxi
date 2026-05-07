@@ -138,8 +138,8 @@ pub(crate) enum AppOverlay {
         filter: String,
         selected: usize,
     },
-    /// Login wizard (reuses SetupStep)
-    LoginProvider(SetupStep),
+    /// Provider config wizard (reuses SetupStep)
+    ProviderConfig(SetupStep),
     /// Logout provider selector
     LogoutSelect {
         providers: Vec<String>,

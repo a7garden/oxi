@@ -236,7 +236,7 @@ fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme
     let overlay = state.overlay.clone();
     match &overlay {
         Some(AppOverlay::Setup(step)) => render_setup_step(f, area, state, theme, step),
-        Some(AppOverlay::LoginProvider(step)) => render_login_step(f, area, state, theme, step),
+        Some(AppOverlay::ProviderConfig(step)) => render_provider_step(f, area, state, theme, step),
         Some(AppOverlay::ModelSelect { .. }) => render_model_select(f, area, state, theme),
         Some(AppOverlay::LogoutSelect { .. }) => render_logout_select(f, area, state, theme),
         None => {}
@@ -451,7 +451,7 @@ fn render_setup_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
     }
 }
 
-fn render_login_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme, step: &SetupStep) {
+fn render_provider_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme, step: &SetupStep) {
     let styles = theme.to_styles();
     let max_w = area.width as usize;
 
