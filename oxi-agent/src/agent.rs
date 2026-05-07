@@ -11,7 +11,8 @@ use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
     progress_callback, transform_for_provider, CompactionManager, CompactionStrategy,
-    Context, LlmCompactor, Message, Provider, ProviderEvent, StreamOptions, ToolCall,
+    ContentBlock, Context, LlmCompactor, Message, Provider, ProviderEvent, StreamOptions,
+    TextContent, ToolCall,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -547,8 +548,17 @@ impl Agent {
                         pending_tool_calls.push(tool_call);
                     }
                     ProviderEvent::Done { reason, message: _ } => {
+                        // Build assistant message with tool calls if any
+                        let mut content_blocks = vec![ContentBlock::Text(TextContent::new(iteration_text.clone()))];
+                        for tc in &pending_tool_calls {
+                            content_blocks.push(ContentBlock::ToolCall(tc.clone()));
+                        }
+                        let mut assistant_msg = oxi_ai::AssistantMessage::new(
+                            oxi_ai::Api::OpenAiCompletions, "agent", "agent-model"
+                        );
+                        assistant_msg.content = content_blocks;
                         self.state.update(|s| {
-                            s.add_assistant_message(iteration_text.clone());
+                            s.messages.push(Message::Assistant(assistant_msg));
                         });
 
                         // Convert provider stop reason to our StopReason
