@@ -35,6 +35,12 @@ pub struct AgentConfig {
     /// Model context window size (used for threshold-based compaction)
     #[serde(default = "default_context_window")]
     pub context_window: usize,
+    /// API key override for the provider.
+    ///
+    /// When set, this is injected into [`oxi_ai::StreamOptions`] so the
+    /// provider uses it instead of an environment variable.
+    #[serde(default)]
+    pub api_key: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -51,6 +57,7 @@ impl Default for AgentConfig {
             compaction_strategy: CompactionStrategy::default(),
             compaction_instruction: None,
             context_window: 128_000,
+            api_key: None,
         }
     }
 }

@@ -776,6 +776,7 @@ async fn test_multi_turn_tool_use_loop() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
+        api_key: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1158,6 +1159,7 @@ async fn test_steering_messages_injected_into_loop() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
+        api_key: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1228,6 +1230,7 @@ async fn test_multiple_steering_messages() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
+        api_key: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1289,6 +1292,7 @@ fn test_follow_up_queue_api() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
+        api_key: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1362,6 +1366,7 @@ async fn test_follow_up_processed_in_tool_use_loop() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
+        api_key: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1441,6 +1446,7 @@ async fn test_follow_up_via_continue_loop() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
+        api_key: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1508,6 +1514,7 @@ async fn test_follow_up_queue_cleared() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
+        api_key: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1577,6 +1584,7 @@ fn test_follow_up_and_steering_queue_independent() {
         auto_retry_enabled: false,
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
+        api_key: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());

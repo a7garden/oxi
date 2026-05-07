@@ -269,6 +269,7 @@ pub fn create_agent_session_from_services(
             },
             compaction_instruction: None,
             context_window: 128_000,
+            api_key: None,
         };
         // Use anthropic as a placeholder provider so the session can be created
         let provider = oxi_ai::get_provider("anthropic")
@@ -294,6 +295,9 @@ pub fn create_agent_session_from_services(
         oxi_ai::CompactionStrategy::Disabled
     };
 
+    // Resolve API key from auth storage for the provider
+    let api_key = services.auth_storage.get_api_key(&provider_name);
+
     let config = oxi_agent::AgentConfig {
         name: "oxi".to_string(),
         description: Some("oxi CLI agent".to_string()),
@@ -306,6 +310,7 @@ pub fn create_agent_session_from_services(
         compaction_strategy,
         compaction_instruction: None,
         context_window: 128_000,
+        api_key,
     };
 
     let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config));

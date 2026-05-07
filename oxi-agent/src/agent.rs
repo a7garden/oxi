@@ -374,6 +374,10 @@ impl Agent {
                 let inner = self.config();
                 inner.config.max_tokens
             },
+            api_key: {
+                let inner = self.config();
+                inner.config.api_key.clone()
+            },
             ..Default::default()
         };
 
@@ -411,6 +415,7 @@ impl Agent {
                     StreamOptions {
                         temperature: inner2.config.temperature,
                         max_tokens: inner2.config.max_tokens,
+                        api_key: inner2.config.api_key.clone(),
                         ..Default::default()
                     }
                 };
