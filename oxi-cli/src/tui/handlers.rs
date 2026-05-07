@@ -47,11 +47,16 @@ pub async fn handle_input(
         }
         // IME 조합 완료 텍스트나 클립보드 붙여넣기 처리
         CEvent::Paste(text) => {
-            if !state.is_agent_busy {
+            if state.overlay.is_some() {
+                // 오버레이 활성 시 Paste를 overlay handler로 전달
+                handle_overlay_paste(&text, state)
+            } else if !state.is_agent_busy {
                 state.input.insert_str(&text);
                 state.update_slash_completions();
+                None
+            } else {
+                None
             }
-            None
         }
         _ => None,
     }
@@ -808,5 +813,31 @@ async fn handle_logout_select_key(
         _ => {}
     }
 
+    None
+}
+
+// ── Overlay paste handler ────────────────────────────────────────────────
+
+fn handle_overlay_paste(text: &str, state: &mut AppState) -> Option<Action> {
+    match &state.overlay {
+        // Setup/Login EnterApiKey step — paste into key field
+        Some(AppOverlay::Setup(SetupStep::EnterApiKey { .. })) |
+        Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { .. })) => {
+            // Paste text into the key field
+            let key_field = match &mut state.overlay {
+                Some(AppOverlay::Setup(SetupStep::EnterApiKey { key, .. })) => key as &mut String,
+                Some(AppOverlay::LoginProvider(SetupStep::EnterApiKey { key, .. })) => key as &mut String,
+                _ => return None,
+            };
+            key_field.push_str(text);
+        }
+        // ModelSelect — paste into filter
+        Some(AppOverlay::ModelSelect { .. }) => {
+            if let Some(AppOverlay::ModelSelect { filter, .. }) = &mut state.overlay {
+                filter.push_str(text);
+            }
+        }
+        _ => {}
+    }
     None
 }

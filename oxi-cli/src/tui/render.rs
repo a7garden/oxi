@@ -284,7 +284,7 @@ fn render_setup_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
                 if row.y >= area.y + area.height { break; }
 
                 let is_sel = i == *selected;
-                let status = if *has_key { "✓" } else { " " };
+                let status = if *has_key { "●" } else { "○" };
                 let pointer = if is_sel { "→" } else { " " };
 
                 let line_str = format!(" {} {} {}", pointer, status, name);
@@ -428,7 +428,7 @@ fn render_login_step(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
                 if row.y >= area.y + area.height { break; }
 
                 let is_sel = i == *selected;
-                let status = if *has_key { "✓" } else { " " };
+                let status = if *has_key { "●" } else { "○" };
                 let pointer = if is_sel { "→" } else { " " };
 
                 let line_str = format!(" {} {} {}", pointer, status, name);
