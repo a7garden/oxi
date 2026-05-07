@@ -16,59 +16,64 @@ use ratatui::{
 };
 
 /// Main draw function — renders the full TUI frame.
+///
+/// Layout: Chat(Min) | Input(2) | Status bar(1)
 pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     let size = f.area();
 
-    // Layout: TitleBar(1) | Chat(Min) | Input(2) | Status bar(1)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Title bar
-            Constraint::Min(3),    // Chat
-            Constraint::Length(2), // Input (input + hint)
+            Constraint::Min(3),   // Chat
+            Constraint::Length(2), // Input + thin separator
             Constraint::Length(1), // Status bar
         ])
         .split(size);
 
-    // Title bar
-    render_title_bar(f, chunks[0], state, theme);
-
     // Chat
-    f.render_stateful_widget(ChatView::new(theme), chunks[1], &mut state.chat);
+    f.render_stateful_widget(ChatView::new(theme), chunks[0], &mut state.chat);
 
     // Input area
-    render_input_area(f, chunks[2], state, theme);
+    render_input_area(f, chunks[1], state, theme);
 
-    // Slash popup — overlay above the input area (drawn last so it's on top)
+    // Slash popup — overlay above the input area
     if state.slash_completion_active {
-        render_slash_popup_overlay(f, chunks[2], state, theme);
+        render_slash_popup_overlay(f, chunks[1], state, theme);
     }
 
     // Status bar
-    f.render_stateful_widget(Footer::new(theme), chunks[3], &mut state.footer_state);
+    f.render_stateful_widget(Footer::new(theme), chunks[2], &mut state.footer_state);
 }
 
 // ── Input area ───────────────────────────────────────────────────────────
 
 fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
-    if area.height < 1 {
+    if area.height < 2 {
         return;
     }
-    let input_row = Rect {
+
+    // Top row: thin separator line
+    let separator_row = Rect {
         x: area.x,
         y: area.y,
         width: area.width,
         height: 1,
     };
-    let hint_row = if area.height >= 2 {
-        Some(Rect {
-            x: area.x,
-            y: area.y + 1,
-            width: area.width,
-            height: 1,
-        })
-    } else {
-        None
+    let line = "─".repeat(area.width as usize);
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            line,
+            Style::default().fg(theme.colors.border.to_ratatui()),
+        )),
+        separator_row,
+    );
+
+    // Input row
+    let input_row = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: 1,
     };
 
     if state.is_agent_busy {
@@ -79,36 +84,6 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
             input_row,
             &mut state.input,
         );
-    }
-
-    // Hint row (only when no slash popup)
-    if let Some(hint) = hint_row {
-        if state.is_agent_busy {
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    "  Ctrl+C to interrupt",
-                    Style::default().fg(theme.colors.muted.to_ratatui()),
-                ))),
-                hint,
-            );
-        } else if state.input_value().is_empty() {
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    "  Enter · / commands · ↑ history · Esc cancel",
-                    Style::default().fg(theme.colors.muted.to_ratatui()),
-                ))),
-                hint,
-            );
-        } else {
-            let count = state.input.text.chars().count();
-            f.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!("  {} chars", count),
-                    Style::default().fg(theme.colors.muted.to_ratatui()),
-                ))),
-                hint,
-            );
-        }
     }
 }
 
@@ -136,8 +111,6 @@ fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
 
 // ── Slash popup (Pi-style vertical list overlay) ─────────────────────────
 
-/// Render the slash command popup as a vertical list overlaying the chat area,
-/// positioned just above the input rows — matching Pi's `/` UI.
 fn render_slash_popup_overlay(
     f: &mut Frame,
     input_area: Rect,
@@ -151,16 +124,15 @@ fn render_slash_popup_overlay(
     let total = state.slash_completions.len();
     let max_show = 8usize.min(total);
 
-    // Scroll window so the selected item is always visible
     let window_start = if selected >= max_show {
         selected - max_show + 1
     } else {
         0
     };
 
-    // Popup dimensions: full width, positioned above the input area
+    // Popup positioned above the input area
     let popup_width = input_area.width;
-    let popup_height = max_show as u16 + 2; // +2 for top/bottom borders
+    let popup_height = max_show as u16 + 2;
     let popup_x = input_area.x;
     let popup_y = input_area.y.saturating_sub(popup_height);
 
@@ -171,10 +143,8 @@ fn render_slash_popup_overlay(
         height: popup_height,
     };
 
-    // Clear the area behind the popup
     f.render_widget(Clear, popup_area);
 
-    // Build vertical list lines
     let mut lines: Vec<Line> = Vec::with_capacity(max_show);
     let visible: Vec<_> = state
         .slash_completions
@@ -197,13 +167,8 @@ fn render_slash_popup_overlay(
         let pointer = if is_selected { "→" } else { " " };
         let name_padded = format!("{:<width$}", comp.name, width = name_width);
 
-        // Truncate description to fit
         let desc_space = (popup_width as usize).saturating_sub(name_width + 8);
-        let desc: String = comp
-            .description
-            .chars()
-            .take(desc_space)
-            .collect();
+        let desc: String = comp.description.chars().take(desc_space).collect();
 
         if is_selected {
             lines.push(Line::from(vec![
@@ -241,7 +206,6 @@ fn render_slash_popup_overlay(
         }
     }
 
-    // Render with a bordered block
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
@@ -250,7 +214,7 @@ fn render_slash_popup_overlay(
     f.render_widget(block, popup_area);
     f.render_widget(Paragraph::new(lines), popup_inner);
 
-    // Page indicator at bottom-right of popup
+    // Page indicator
     let page = window_start / max_show + 1;
     let total_pages = (total + max_show - 1) / max_show;
     if total_pages > 1 {
@@ -269,67 +233,4 @@ fn render_slash_popup_overlay(
             indicator_area,
         );
     }
-}
-
-// ── Title bar ──────────────────────────────────────────────────────────
-
-fn render_title_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let title_bg = theme.colors.primary.to_ratatui();
-    let title_fg = ratatui::style::Color::White;
-
-    // Extract project name from pwd
-    let project = state
-        .footer_state
-        .data
-        .pwd
-        .as_ref()
-        .and_then(|p| {
-            std::path::Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-        })
-        .unwrap_or_else(|| "oxi".to_string());
-
-    let branch = state
-        .footer_state
-        .data
-        .git_branch
-        .as_ref()
-        .map(|b| format!("({})", b))
-        .unwrap_or_default();
-
-    let model = &state.footer_state.data.model_name;
-    // Show just the model short name (after last /)
-    let model_short = model.split('/').last().unwrap_or(model);
-
-    let title = format!(" oxi │ {} {} │ {} ", project, branch, model_short);
-
-    // Fill entire row with background color
-    let fill = " ".repeat(area.width as usize);
-    f.render_widget(
-        Paragraph::new(Span::styled(fill.clone(), Style::default().fg(title_fg).bg(title_bg))),
-        area,
-    );
-
-    // Render title text
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            title,
-            Style::default().fg(title_fg).bg(title_bg).add_modifier(Modifier::BOLD),
-        )),
-        area,
-    );
-}
-
-// ── Separator ────────────────────────────────────────────────────────────
-
-pub(crate) fn render_separator(f: &mut Frame, area: Rect, theme: &Theme) {
-    let line = "─".repeat(area.width as usize);
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            line,
-            Style::default().fg(theme.colors.border.to_ratatui()),
-        )),
-        area,
-    );
 }
