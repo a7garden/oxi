@@ -92,6 +92,15 @@ pub(crate) enum UiEvent {
         /// Base64-encoded image data.
         base64_data: String,
     },
+    /// Token usage updated.
+    TokenUsage {
+        input_tokens: u32,
+        output_tokens: u32,
+        cache_read_tokens: u32,
+        cache_write_tokens: u32,
+        context_window_pct: f32,
+        total_cost: f64,
+    },
 }
 
 // ── Spinner ──────────────────────────────────────────────────────────────
@@ -430,8 +439,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                     },
                                     AgentEvent::Complete { .. } => UiEvent::Complete,
                                     AgentEvent::Error { message, .. } => UiEvent::Error(message),
-                                    AgentEvent::MessageUpdate { ref message, .. }
-                                    | AgentEvent::MessageEnd { ref message, .. } => {
+                                    AgentEvent::MessageUpdate { ref message, .. } => {
                                         // Extract image blocks from the message
                                         let content_blocks: &[oxi_ai::ContentBlock] = match message {
                                             oxi_ai::Message::Assistant(a) => &a.content,
@@ -449,6 +457,61 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                                 }).await;
                                             }
                                         }
+                                        continue;
+                                    }
+                                    AgentEvent::MessageEnd { ref message } => {
+                                        // Extract image blocks from the message
+                                        let content_blocks: &[oxi_ai::ContentBlock] = match message {
+                                            oxi_ai::Message::Assistant(a) => &a.content,
+                                            oxi_ai::Message::User(u) => match &u.content {
+                                                oxi_ai::MessageContent::Blocks(blocks) => blocks,
+                                                _ => &[],
+                                            },
+                                            oxi_ai::Message::ToolResult(t) => &t.content,
+                                        };
+                                        for block in content_blocks {
+                                            if let oxi_ai::ContentBlock::Image(ref img) = block {
+                                                let _ = ui_fwd.send(UiEvent::ImageBlock {
+                                                    mime_type: img.mime_type.clone(),
+                                                    base64_data: img.data.clone(),
+                                                }).await;
+                                            }
+                                        }
+                                        // Extract token usage from assistant message
+                                        if let oxi_ai::Message::Assistant(ref a) = message {
+                                            let usage = &a.usage;
+                                            let input_tokens = usage.input as u32;
+                                            let output_tokens = usage.output as u32;
+                                            let cache_read_tokens = usage.cache_read as u32;
+                                            let cache_write_tokens = usage.cache_write as u32;
+                                            let total_cost = usage.cost.total();
+                                            // Estimate context window percentage
+                                            let context_window_pct = if usage.total_tokens > 0 {
+                                                // Rough estimate based on total tokens
+                                                (usage.total_tokens as f32 / 200_000.0) * 100.0
+                                            } else {
+                                                0.0
+                                            };
+                                            let _ = ui_fwd.send(UiEvent::TokenUsage {
+                                                input_tokens,
+                                                output_tokens,
+                                                cache_read_tokens,
+                                                cache_write_tokens,
+                                                context_window_pct,
+                                                total_cost,
+                                            }).await;
+                                        }
+                                        continue;
+                                    }
+                                    AgentEvent::Usage { input_tokens, output_tokens } => {
+                                        let _ = ui_fwd.send(UiEvent::TokenUsage {
+                                            input_tokens: input_tokens as u32,
+                                            output_tokens: output_tokens as u32,
+                                            cache_read_tokens: 0,
+                                            cache_write_tokens: 0,
+                                            context_window_pct: 0.0,
+                                            total_cost: 0.0,
+                                        }).await;
                                         continue;
                                     }
                                     _ => continue,

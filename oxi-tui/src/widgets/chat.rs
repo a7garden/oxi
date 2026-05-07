@@ -522,6 +522,15 @@ impl StatefulWidget for ChatView<'_> {
                     ContentBlock::Text { content } => {
                         process_text(MessageRole::Assistant, content, &mut all_lines);
                     }
+                    ContentBlock::Thinking { content, collapsed } => {
+                        let indicator = if *collapsed { "▸" } else { "▾" };
+                        all_lines.push((MessageRole::Assistant, format!("  {} Thinking…", indicator), LineKind::Normal));
+                        if !*collapsed {
+                            for line in content.lines() {
+                                all_lines.push((MessageRole::Assistant, format!("    {}", line), LineKind::Normal));
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }

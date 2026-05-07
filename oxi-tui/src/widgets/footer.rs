@@ -183,7 +183,9 @@ impl StatefulWidget for Footer<'_> {
         let model_width = model_display.chars().count();
 
         // Left-aligned content (tokens, duration) — muted
-        let mut col: usize = 0;
+        // Side padding: 1 char on each side
+        let side_pad = 1;
+        let mut col: usize = side_pad;
         // Leading space
         if col < max_w {
             buf[(area.x + col as u16, row1)].set_char(' ').set_style(styles.muted);
