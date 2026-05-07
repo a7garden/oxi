@@ -31,7 +31,7 @@ pub(crate) mod image_resize;
 pub(crate) mod file_processor;
 
 // Utility modules
-pub(crate) mod auth_storage;
+pub mod auth_storage;
 pub(crate) mod auto_compaction;
 pub(crate) mod branch_summarization;
 pub(crate) mod bash_executor;
