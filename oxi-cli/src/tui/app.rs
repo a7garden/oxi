@@ -3,7 +3,6 @@
 use super::handlers;
 use super::render;
 use super::slash;
-use super::welcome;
 use crate::agent_session::{CompactionReason, SessionEvent};
 use crate::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
@@ -573,7 +572,8 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         tracing::info!("TUI: model_id={}, footer will show: {}", model_id, model_id);
         state.footer_state.data.model_name = model_id.clone();
         state.footer_state.data.provider_name = model_id.split('/').next().unwrap_or("").to_string();
-        state.add_system_message(welcome::format_welcome(&session_id, &model_id));
+        // Version in footer
+        state.footer_state.data.version = env!("CARGO_PKG_VERSION").to_string();
     } else {
         tracing::warn!("TUI: No model configured (model_id='{}'), launching setup wizard", model_id);
         // No model configured — launch setup wizard

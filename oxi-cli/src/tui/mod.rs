@@ -6,6 +6,5 @@ mod app;
 mod handlers;
 mod render;
 mod slash;
-mod welcome;
 
 pub use app::run_tui_interactive;

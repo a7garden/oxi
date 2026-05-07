@@ -41,6 +41,8 @@ pub struct FooterData {
     pub session_duration_secs: u64,
     /// Agent busy (streaming).
     pub is_busy: bool,
+    /// Application version string.
+    pub version: String,
 }
 
 impl Default for FooterData {
@@ -61,6 +63,7 @@ impl Default for FooterData {
             total_cost: 0.0,
             session_duration_secs: 0,
             is_busy: false,
+            version: String::new(),
         }
     }
 }
@@ -275,6 +278,34 @@ impl StatefulWidget for Footer<'_> {
                     );
                     col += 1;
                 }
+            }
+        }
+
+        // Version tag (right-aligned on row2)
+        let version_tag = if !d.version.is_empty() {
+            format!(" v{}", d.version)
+        } else {
+            String::new()
+        };
+        let version_width = version_tag.chars().count();
+        let version_start = max_w.saturating_sub(version_width + 1);
+
+        // Clear gap and overwrite with version
+        if version_start > col {
+            // Clear gap between current col and version start
+            while col < version_start {
+                if col >= max_w { break; }
+                buf[(area.x + col as u16, row2)].set_char(' ').set_style(styles.muted);
+                col += 1;
+            }
+            // Write version
+            for c in version_tag.chars() {
+                if col >= max_w { break; }
+                buf[(area.x + col as u16, row2)].set_char(c).set_style(
+                    Style::default().fg(self.theme.colors.muted.to_ratatui())
+                        .bg(self.theme.colors.background.to_ratatui())
+                );
+                col += 1;
             }
         }
 
