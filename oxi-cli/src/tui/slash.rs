@@ -294,14 +294,12 @@ pub(crate) fn handle_slash_command(
             } else {
                 // /login — show provider selection overlay
                 let auth = AuthStorage::new();
-                let providers = vec![
-                    "anthropic", "openai", "google", "deepseek", "groq",
-                    "openrouter", "mistral", "xai", "minimax", "zai",
-                ];
-                let provider_list: Vec<(String, bool)> = providers.iter().map(|name| {
-                    let has_key = auth.has_auth(name);
-                    (name.to_string(), has_key)
-                }).collect();
+                let provider_list: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
+                    .iter()
+                    .map(|builtin| {
+                        let has_key = auth.has_auth(builtin.name);
+                        (builtin.name.to_string(), has_key)
+                    }).collect();
                 state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider {
                     providers: provider_list,
                     selected: 0,
@@ -490,30 +488,17 @@ fn format_hotkeys() -> String {
 
 // ── Interactive login ────────────────────────────────────────────────────
 
-/// Preset provider list
-const LOGIN_PROVIDERS: &[&str] = &[
-    "anthropic",
-    "openai",
-    "google",
-    "deepseek",
-    "groq",
-    "openrouter",
-    "mistral",
-    "xai",
-    "fireworks",
-    "minimax",
-    "zai",
-];
+/// Preset provider list (deprecated — use register_builtins)
 
 /// /login — show provider list with auth status
 fn interactive_login_select(state: &mut AppState) {
     let mut msg = "Select a provider:\n\n".to_string();
     let auth = AuthStorage::new();
 
-    for name in LOGIN_PROVIDERS {
-        let has_key = auth.get_api_key(name).is_some();
+    for builtin in oxi_ai::register_builtins::get_builtin_providers() {
+        let has_key = auth.get_api_key(builtin.name).is_some();
         let status = if has_key { "[x]" } else { "[ ]" };
-        msg.push_str(&format!("  {} {}\n", status, name));
+        msg.push_str(&format!("  {} {}\n", status, builtin.name));
     }
 
     msg.push_str("\nUse /login <provider> <key> to set an API key.");

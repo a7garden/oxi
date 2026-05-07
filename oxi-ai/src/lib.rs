@@ -17,6 +17,7 @@ mod messages;
 pub mod oauth;
 pub mod provider_registry;
 mod providers;
+pub use providers::register_builtins;
 pub mod secret;
 mod tools;
 mod transform;

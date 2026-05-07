@@ -49,8 +49,9 @@ async fn main() -> Result<()> {
     }
 
     // Register custom OpenAI-compatible providers from settings
+    let auth_storage = crate::auth_storage::AuthStorage::new();
     for cp in &settings.custom_providers {
-        let api_key = std::env::var(&cp.api_key_env).ok();
+        let api_key = auth_storage.get_api_key(&cp.name);
         let api = cp.api.to_lowercase();
 
         match api.as_str() {

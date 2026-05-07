@@ -489,24 +489,13 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         state.add_system_message(welcome::format_welcome(&session_id, &model_id));
     } else {
         // No model configured — launch setup wizard
-        let providers = vec![
-            ("anthropic".to_string(), false),
-            ("openai".to_string(), false),
-            ("google".to_string(), false),
-            ("deepseek".to_string(), false),
-            ("groq".to_string(), false),
-            ("openrouter".to_string(), false),
-            ("mistral".to_string(), false),
-            ("xai".to_string(), false),
-            ("minimax".to_string(), false),
-            ("zai".to_string(), false),
-        ];
-        // Check which providers already have keys (auth.json only)
         let auth = crate::auth_storage::AuthStorage::new();
-        let providers: Vec<(String, bool)> = providers.into_iter().map(|(name, _)| {
-            let has_key = auth.get_api_key(&name).is_some();
-            (name, has_key)
-        }).collect();
+        let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
+            .iter()
+            .map(|builtin| {
+                let has_key = auth.get_api_key(builtin.name).is_some();
+                (builtin.name.to_string(), has_key)
+            }).collect();
 
         state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider {
             providers,

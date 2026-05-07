@@ -570,6 +570,7 @@ async fn handle_setup_step_key(
                         if let Ok(mut settings) = crate::settings::Settings::load() {
                             settings.default_model = Some(format!("{}/default", provider));
                             settings.default_provider = Some(provider.clone());
+
                             let _ = settings.save();
                         }
 
@@ -584,18 +585,13 @@ async fn handle_setup_step_key(
                     }
                 }
                 KeyCode::Esc => {
-                    let providers = vec![
-                        ("anthropic".to_string(), false),
-                        ("openai".to_string(), false),
-                        ("google".to_string(), false),
-                        ("deepseek".to_string(), false),
-                        ("groq".to_string(), false),
-                        ("openrouter".to_string(), false),
-                        ("mistral".to_string(), false),
-                        ("xai".to_string(), false),
-                        ("minimax".to_string(), false),
-                        ("zai".to_string(), false),
-                    ];
+                    let auth = crate::auth_storage::AuthStorage::new();
+                    let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
+                        .iter()
+                        .map(|builtin| {
+                            let has_key = auth.get_api_key(builtin.name).is_some();
+                            (builtin.name.to_string(), has_key)
+                        }).collect();
                     state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider { providers, selected: 0 }));
                 }
                 _ => {}
@@ -703,14 +699,12 @@ async fn handle_login_step_key(
                 KeyCode::Esc => {
                     // Go back to provider selection
                     let auth = crate::auth_storage::AuthStorage::new();
-                    let providers = vec![
-                        "anthropic", "openai", "google", "deepseek", "groq",
-                        "openrouter", "mistral", "xai", "minimax", "zai",
-                    ];
-                    let provider_list: Vec<(String, bool)> = providers.iter().map(|name| {
-                        let has_key = auth.has_auth(name);
-                        (name.to_string(), has_key)
-                    }).collect();
+                    let provider_list: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
+                        .iter()
+                        .map(|builtin| {
+                            let has_key = auth.has_auth(builtin.name);
+                            (builtin.name.to_string(), has_key)
+                        }).collect();
                     state.overlay = Some(AppOverlay::LoginProvider(SetupStep::SelectProvider {
                         providers: provider_list,
                         selected: 0,

@@ -221,6 +221,26 @@ static BUILTIN_PROVIDERS: &[BuiltinProvider] = &[
         base_url: "https://api.githubcopilot.com",
         default_enabled: true,
     },
+    BuiltinProvider {
+        name: "minimax",
+        display_name: "MiniMax",
+        aliases: &["minimax"],
+        api: Api::OpenAiCompletions,
+        env_key: "MINIMAX_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.minimax.chat/v1",
+        default_enabled: true,
+    },
+    BuiltinProvider {
+        name: "zai",
+        display_name: "ZAI",
+        aliases: &["zai"],
+        api: Api::OpenAiCompletions,
+        env_key: "ZAI_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.z.ai/api/coding/paas/v4",
+        default_enabled: true,
+    },
 ];
 
 // ---------------------------------------------------------------------------
