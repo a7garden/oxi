@@ -10,8 +10,8 @@
 //! - Provides model filtering by provider, capability, and modality
 
 use crate::auth_storage::{AuthStorage, AuthStatus};
-use crate::provider_display_names::BUILT_IN_PROVIDER_DISPLAY_NAMES;
 use oxi_ai::model_db;
+use oxi_ai::register_builtins::get_builtin_provider;
 use oxi_ai::{Api, CompatSettings, Cost, InputModality, Model};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -540,9 +540,8 @@ impl ModelRegistry {
         // Check registered providers for a custom name
         // Note: dynamic names are handled by get_provider_display_name_owned()
 
-        BUILT_IN_PROVIDER_DISPLAY_NAMES
-            .get(provider)
-            .copied()
+        get_builtin_provider(provider)
+            .map(|p| p.display_name)
             .unwrap_or(provider)
             .to_string()
     }
@@ -556,9 +555,8 @@ impl ModelRegistry {
             }
         }
 
-        BUILT_IN_PROVIDER_DISPLAY_NAMES
-            .get(provider)
-            .copied()
+        get_builtin_provider(provider)
+            .map(|p| p.display_name)
             .unwrap_or(provider)
             .to_string()
     }
