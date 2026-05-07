@@ -20,3 +20,4 @@ pub mod chat;
 pub mod command_palette;
 pub mod footer;
 pub mod input;
+pub mod markdown;

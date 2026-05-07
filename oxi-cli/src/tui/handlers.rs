@@ -3,8 +3,10 @@
 use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
 use super::slash;
 use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
+use crate::clipboard_write;
 use oxi_agent::AgentEvent;
 use tokio::sync::mpsc;
+use base64::Engine;
 
 use crossterm::event::{
     Event as CEvent, KeyCode, KeyModifiers, MouseEventKind,
@@ -108,12 +110,28 @@ async fn handle_key(
             }
             None
         }
+        KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            open_last_image(state);
+            None
+        }
         KeyCode::PageUp => {
             state.scroll_up(10);
             None
         }
         KeyCode::PageDown => {
             state.scroll_down(10);
+            None
+        }
+        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            // Ctrl+Y: copy last code block to clipboard
+            if let Some(ref code) = state.chat.last_code_block {
+                match clipboard_write::copy_to_clipboard(code) {
+                    Ok(()) => state.add_system_message("\u{2713} Code block copied".to_string()),
+                    Err(e) => state.add_system_message(format!("\u{2717} Copy failed: {}", e)),
+                }
+            } else {
+                state.add_system_message("No code block to copy".to_string());
+            }
             None
         }
         KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -327,6 +345,9 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
                 tracing::debug!("Queue: {} pending", pending);
             }
         }
+        UiEvent::ImageBlock { mime_type, base64_data } => {
+            state.stream_image(mime_type, base64_data);
+        }
     }
 }
 
@@ -386,6 +407,46 @@ pub async fn handle_session_event(
             AgentEvent::Compaction { .. } => {}
             _ => {}
         },
+    }
+}
+
+// ── Image viewer ────────────────────────────────────────────────────────
+
+/// Open the last received image in the system viewer.
+fn open_last_image(state: &mut AppState) {
+    if let Some((base64_data, mime_type)) = state.chat.pending_images.last().cloned() {
+        match base64::engine::general_purpose::STANDARD.decode(&base64_data) {
+            Ok(bytes) => {
+                let ext = match mime_type.as_str() {
+                    "image/png" => "png",
+                    "image/jpeg" | "image/jpg" => "jpg",
+                    "image/gif" => "gif",
+                    "image/webp" => "webp",
+                    "image/bmp" => "bmp",
+                    _ => "bin",
+                };
+                let path = std::env::temp_dir().join(format!("oxi_image.{}", ext));
+                match std::fs::write(&path, &bytes) {
+                    Ok(()) => {
+                        #[cfg(target_os = "macos")]
+                        { std::process::Command::new("open").arg(&path).spawn().ok(); }
+                        #[cfg(target_os = "linux")]
+                        { std::process::Command::new("xdg-open").arg(&path).spawn().ok(); }
+                        #[cfg(target_os = "windows")]
+                        { std::process::Command::new("cmd").args(["/c", "start"]).arg(&path).spawn().ok(); }
+                        state.add_system_message(format!("📷 Opened image in viewer"));
+                    }
+                    Err(e) => {
+                        state.add_system_message(format!("⚠ Failed to write image: {}", e));
+                    }
+                }
+            }
+            Err(e) => {
+                state.add_system_message(format!("⚠ Failed to decode image: {}", e));
+            }
+        }
+    } else {
+        state.add_system_message("📷 No images to display".to_string());
     }
 }
 
