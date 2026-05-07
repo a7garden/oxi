@@ -582,7 +582,12 @@ async fn handle_setup_step_key(
                             if let Ok(mut settings) = crate::settings::Settings::load() {
                                 settings.default_model = Some(model.clone());
                                 settings.default_provider = Some(provider.clone());
-                                let _ = settings.save();
+                                eprintln!("[DEBUG] Saving model: {}", model);
+                                if let Err(e) = settings.save() {
+                                    eprintln!("[DEBUG] Save failed: {}", e);
+                                }
+                            } else {
+                                eprintln!("[DEBUG] Failed to load settings");
                             }
 
                             state.footer_state.data.model_name = model.clone();
@@ -639,7 +644,12 @@ async fn handle_setup_step_key(
                             if let Ok(mut settings) = crate::settings::Settings::load() {
                                 settings.default_model = Some(model.clone());
                                 settings.default_provider = Some(provider.clone());
-                                let _ = settings.save();
+                                eprintln!("[DEBUG] Saving model: {}", model);
+                                if let Err(e) = settings.save() {
+                                    eprintln!("[DEBUG] Save failed: {}", e);
+                                }
+                            } else {
+                                eprintln!("[DEBUG] Failed to load settings");
                             }
 
                             state.footer_state.data.model_name = model.clone();

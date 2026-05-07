@@ -463,21 +463,28 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         });
     });
 
-    // Setup terminal
-    enable_raw_mode()?;
+    // Setup terminal — gracefully handle TTY unavailable (e.g. Warp)
+    let tty_ok = match enable_raw_mode() {
+        Ok(()) => true,
+        Err(_) => false,
+    };
     let mut stdout = io::stdout();
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        EnableBracketedPaste,
-        PushKeyboardEnhancementFlags(
-            KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-        )
-    )?;
+    if tty_ok {
+        let _ = execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            EnableBracketedPaste,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            )
+        );
+    }
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-    terminal.clear()?;
+    if tty_ok {
+        let _ = terminal.clear();
+    }
 
     let theme = Theme::dark();
     let mut state = AppState::new();

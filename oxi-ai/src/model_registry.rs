@@ -49,6 +49,9 @@ static MODELS: Lazy<HashMap<String, Model>> = Lazy::new(|| {
     // Azure OpenAI models
     add_azure_models(&mut map);
 
+    // ZAI models
+    add_zai_models(&mut map);
+
     map
 });
 
@@ -722,6 +725,41 @@ pub fn get_providers() -> Vec<&'static str> {
 /// Get all models from a provider
 pub fn get_models(provider: &str) -> Vec<&'static Model> {
     ModelRegistry::get_by_provider(provider)
+}
+
+fn add_zai_models(map: &mut HashMap<String, Model>) {
+    let models = [
+        ("zai/glm-4.7", "GLM-4.7", true, 0.0, 0.0),
+        ("zai/glm-5-turbo", "GLM-5-Turbo", true, 0.0, 0.0),
+        ("zai/glm-5.1", "GLM-5.1", true, 0.0, 0.0),
+        ("zai/glm-5v-turbo", "GLM-5V-Turbo", true, 0.0, 0.0),
+        ("zai/glm-4.5-air", "GLM-4.5-Air", true, 0.0, 0.0),
+    ];
+
+    for (id, name, reasoning, input_cost, output_cost) in models {
+        map.insert(
+            id.to_string(),
+            Model {
+                id: extract_model_name(id).to_string(),
+                name: name.to_string(),
+                api: Api::OpenAiCompletions,
+                provider: "zai".to_string(),
+                base_url: "https://api.z.ai/api/coding/paas/v4".to_string(),
+                reasoning,
+                input: vec![InputModality::Text],
+                cost: Cost {
+                    input: input_cost,
+                    output: output_cost,
+                    cache_read: 0.0,
+                    cache_write: 0.0,
+                },
+                context_window: 200_000,
+                max_tokens: 131_072,
+                headers: Default::default(),
+                compat: None,
+            },
+        );
+    }
 }
 
 #[cfg(test)]
