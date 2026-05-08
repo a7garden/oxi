@@ -272,31 +272,16 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         UiEvent::TextDelta(text) => {
             state.stream_text_delta(&text);
         }
-        UiEvent::ToolCall { name, .. } => {
-            state.stream_text_delta(&format!("\n⚙ {}\n", name));
-        }
+        UiEvent::ToolCall { .. } => {}
         UiEvent::ToolStart { tool_name } => {
-            state.stream_text_delta(&format!("\n▶ {}...\n", tool_name));
+            state.chat.stream_tool_call(String::new(), tool_name, String::new());
         }
         UiEvent::ToolResult {
             tool_name,
             content,
             is_error,
         } => {
-            let label = if tool_name.is_empty() {
-                "tool"
-            } else {
-                &tool_name
-            };
-            if is_error {
-                let preview: String = content.chars().take(200).collect();
-                state.stream_text_delta(&format!("  ✗ {}: {}\n", label, preview));
-            } else {
-                let preview: String = content.lines().take(3).collect::<Vec<_>>().join("\n  ");
-                if !preview.is_empty() {
-                    state.stream_text_delta(&format!("  ✓ {}\n", preview));
-                }
-            }
+            state.chat.stream_tool_result(tool_name, content, is_error);
         }
         UiEvent::Complete => {
             state.finish_streaming();
