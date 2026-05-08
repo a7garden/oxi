@@ -47,12 +47,8 @@ pub use oxi_ai::{CompactionManager, CompactionStrategy};
 pub use tools::{
     AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
     LsTool, ReadTool, ToolRegistry, WriteTool,
-    search_cache::SearchCache,
-    web_search::WebSearchTool,
-    search_cache::GetSearchResultsTool,
-    github_search::GitHubSearchTool,
-    subagent::SubagentTool,
 };
+pub use tools::subagent::SubagentTool;
 
 /// Standard imports for oxi-agent usage.
 pub mod prelude {
@@ -65,12 +61,8 @@ pub mod prelude {
     pub use crate::tools::{
         AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
         LsTool, ReadTool, ToolRegistry, WriteTool,
-        search_cache::SearchCache,
-        web_search::WebSearchTool,
-        search_cache::GetSearchResultsTool,
-        github_search::GitHubSearchTool,
-        subagent::SubagentTool,
     };
+    pub use crate::tools::subagent::SubagentTool;
 }
 
 #[cfg(test)]

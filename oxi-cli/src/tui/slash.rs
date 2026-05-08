@@ -600,6 +600,10 @@ fn handle_tool_command(
     if registry.get(&tool_name).is_some() {
         // Tool exists — unregister (disable)
         registry.unregister(&tool_name);
+        // web_search and get_search_results share a cache — disable both
+        if tool_name == "web_search" {
+            registry.unregister("get_search_results");
+        }
         state.add_system_message(format!("✓ Tool disabled: {}", tool_name));
     } else {
         // Tool is disabled — re-register
@@ -627,23 +631,9 @@ fn try_re_register_tool(name: &str, registry: &std::sync::Arc<oxi_agent::ToolReg
         "grep" => registry.register(oxi_agent::GrepTool::new()),
         "find" => registry.register(oxi_agent::FindTool::new()),
         "ls" => registry.register(oxi_agent::LsTool::new()),
-        "web_search" => {
-            let cache = Arc::new(oxi_agent::SearchCache::new());
-            registry.register(oxi_agent::WebSearchTool::new(cache.clone()));
-            registry.register(oxi_agent::GetSearchResultsTool::new(cache));
-        }
-        "get_search_results" => {
-            // get_search_results shares cache with web_search
-            // If web_search is active, it's already registered
-            if registry.get("web_search").is_some() {
-                return false;
-            }
-            let cache = Arc::new(oxi_agent::SearchCache::new());
-            registry.register(oxi_agent::GetSearchResultsTool::new(cache));
-        }
-        "github_search" => {
-            let cache = Arc::new(oxi_agent::SearchCache::new());
-            registry.register(oxi_agent::GitHubSearchTool::new(cache));
+        // web_search, get_search_results, github_search disabled (broken modules)
+        "web_search" | "get_search_results" | "github_search" => {
+            return false;
         }
         "subagent" => registry.register(oxi_agent::SubagentTool::new(
             std::path::PathBuf::from("."),
