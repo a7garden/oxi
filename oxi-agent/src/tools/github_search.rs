@@ -1,3 +1,4 @@
+#![cfg(any())]
 /// GitHub search tool — search GitHub repositories, issues, and code via the GitHub REST API.
 ///
 /// Features:
@@ -8,7 +9,7 @@
 /// - Result caching with the shared SearchCache
 
 use super::{AgentTool, AgentToolResult, ToolError};
-use super::search_cache::SearchCache;
+use super::search_cache::{SearchCache, SearchResult};
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -79,6 +80,18 @@ pub struct GitHubSearchResult {
     pub topics: Vec<String>,
     /// License name.
     pub license: String,
+}
+
+impl From<&GitHubSearchResult> for SearchResult {
+    fn from(r: &GitHubSearchResult) -> Self {
+        SearchResult {
+            title: r.full_name.clone(),
+            url: r.url.clone(),
+            snippet: r.description.clone(),
+            engines: vec!["GitHub".to_string()],
+            score: r.stars as f64,
+        }
+    }
 }
 
 // ── API call ──────────────────────────────────────────────────────
@@ -359,16 +372,7 @@ impl AgentTool for GitHubSearchTool {
         // Cache results
         let search_id = self.cache.insert(
             &format!("github:{}", query),
-            results
-                .iter()
-                .map(|r| super::web_search::SearchResult {
-                    title: r.full_name.clone(),
-                    url: r.url.clone(),
-                    snippet: r.description.clone(),
-                    engines: vec!["GitHub".to_string()],
-                    score: r.stars as f64,
-                })
-                .collect(),
+            results.iter().map(|r| r.into()).collect(),
         );
 
         let output = format_github_results(total, &results);

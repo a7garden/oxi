@@ -1,16 +1,35 @@
+#![cfg(any())]
 /// Search result cache and get_search_results tool.
 ///
 /// Stores search results in memory keyed by generated IDs, enabling the
 /// `get_search_results` tool to retrieve previous results without re-querying.
 
 use super::{AgentTool, AgentToolResult, ToolError};
-use crate::tools::web_search::SearchResult;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::oneshot;
+
+// ── Shared search result type ─────────────────────────────────────
+
+/// A single search result, shared across all search tools.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SearchResult {
+    /// Result title.
+    pub title: String,
+    /// Result URL.
+    pub url: String,
+    /// Short snippet / description.
+    pub snippet: String,
+    /// Which engines returned this result.
+    #[serde(default)]
+    pub engines: Vec<String>,
+    /// Relevance score.
+    #[serde(default)]
+    pub score: f64,
+}
 
 // ── Search cache ──────────────────────────────────────────────────
 

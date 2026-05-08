@@ -45,8 +45,8 @@ pub use state::{AgentState, SharedState};
 pub use compaction::{CompactedContext, CompactionEvent};
 pub use oxi_ai::{CompactionManager, CompactionStrategy};
 pub use tools::{
-    AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GetSearchResultsTool, GrepTool,
-    LsTool, ReadTool, SearchCache, ToolRegistry, WebSearchTool, WriteTool,
+    AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
+    LsTool, ReadTool, ToolRegistry, WriteTool,
 };
 
 /// Standard imports for oxi-agent usage.
@@ -58,8 +58,8 @@ pub mod prelude {
     pub use crate::events::AgentEvent;
     pub use crate::state::{AgentState, SharedState};
     pub use crate::tools::{
-        AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GetSearchResultsTool, GrepTool,
-        LsTool, ReadTool, SearchCache, ToolRegistry, WebSearchTool, WriteTool,
+        AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
+        LsTool, ReadTool, ToolRegistry, WriteTool,
     };
 }
 
