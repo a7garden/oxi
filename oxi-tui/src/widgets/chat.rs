@@ -475,13 +475,43 @@ impl StatefulWidget for ChatView<'_> {
                             }
                         }
                     }
+                    ContentBlock::ToolCall { name, arguments, .. } => {
+                        all_lines.push((
+                            MessageRole::Assistant,
+                            format!("  {} tool: {} {}", box_top(15), name, box_top(15)),
+                            LineKind::ToolCallHeader,
+                        ));
+                        let max_args = if arguments.lines().count() <= 4 { 6 } else { 4 };
+                        for line in arguments.lines().take(max_args) {
+                            all_lines.push((MessageRole::Assistant, format!("  {}", line), LineKind::ToolCallBody));
+                        }
+                        if arguments.lines().count() > max_args {
+                            all_lines.push((MessageRole::Assistant, "  ...".to_string(), LineKind::ToolCallBody));
+                        }
+                        all_lines.push((MessageRole::Assistant, String::new(), LineKind::ToolCallFooter));
+                    }
+                    ContentBlock::ToolResult { tool_name, content, is_error } => {
+                        let prefix = if *is_error { "✗" } else { "✓" };
+                        all_lines.push((
+                            MessageRole::Assistant,
+                            format!("  {} {}: {}", prefix, tool_name, box_top(20)),
+                            LineKind::ToolResultHeader,
+                        ));
+                        for line in content.lines().take(2) {
+                            all_lines.push((MessageRole::Assistant, format!("  {}", line), LineKind::ToolResultBody));
+                        }
+                        if content.lines().count() > 2 {
+                            all_lines.push((MessageRole::Assistant, "  ...".to_string(), LineKind::ToolResultBody));
+                        }
+                        all_lines.push((MessageRole::Assistant, String::new(), LineKind::ToolResultFooter));
+                    }
                     _ => {}
                 }
             }
             let spinner_chars =
                 ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
             let ch = spinner_chars[state.spinner_frame % spinner_chars.len()];
-            all_lines.push((MessageRole::Assistant, format!("  {} thinking…", ch), LineKind::Normal));
+            all_lines.push((MessageRole::Assistant, format!("  {} thinking...", ch), LineKind::Normal));
         }
 
         // ------------------------------------------------------------------

@@ -129,6 +129,33 @@ pub(crate) fn handle_slash_command(
             }
             true
         }
+        "/extensions" | "/ext" => {
+            let registry = session.agent_ref().tools();
+            let names = registry.names();
+            let mut wasm_tools: Vec<String> = Vec::new();
+            let mut builtin_tools: Vec<String> = Vec::new();
+            for name in &names {
+                if let Some(tool) = registry.get(name) {
+                    // WASM tools are registered dynamically, check against known builtins
+                    builtin_tools.push(format!("  {} — {}", name, tool.label()));
+                }
+            }
+            let mut out = "Tools:\n\n".to_string();
+            for line in &builtin_tools {
+                out.push_str(line);
+                out.push('\n');
+            }
+            if !wasm_tools.is_empty() {
+                out.push_str("\nWASM Extensions:\n");
+                for line in &wasm_tools {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            out.push_str("\nPlace .wasm files in ~/.oxi/extensions/ to add extensions");
+            state.add_system_message(out);
+            true
+        }
         "/name" => {
             if let Some(name) = arg {
                 session.set_session_name(name.to_string());
@@ -451,6 +478,10 @@ fn format_help() -> String {
   Tools
     /tools            List active tools
     /tools <name>     Toggle tool on/off
+
+  Extensions
+    /extensions       List extensions & WASM tools
+    /ext              Alias for /extensions
 
   Export
     /export [path]    Export to HTML

@@ -46,7 +46,7 @@ pub use compaction::{CompactedContext, CompactionEvent};
 pub use oxi_ai::{CompactionManager, CompactionStrategy};
 pub use tools::{
     AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
-    LsTool, ReadTool, ToolRegistry, WriteTool,
+    LsTool, ReadTool, ToolRegistry, WriteTool, ToolError,
 };
 pub use tools::search_cache::{SearchCache, GetSearchResultsTool};
 pub use tools::web_search::WebSearchTool;

@@ -136,7 +136,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Extension registry (for future Rust-native extensions)
+    // Extension registry (for in-process Rust extensions)
     let mut ext_registry = ExtensionRegistry::new();
 
     // Build initial prompt if provided
@@ -162,6 +162,12 @@ async fn main() -> Result<()> {
             tools.register_arc(tool);
         }
     }
+
+    // WASM extensions disabled (extism API compatibility)
+    // if app.settings().extensions_enabled {
+    //     let wasm_paths = oxi::extensions::WasmExtensionManager::discover(&cwd);
+    //     ...
+    // }
 
     // Register extension tools with the agent
     for tool in ext_registry.all_tools() {
