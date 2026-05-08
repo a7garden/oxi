@@ -122,7 +122,7 @@ async fn handle_key(
                 let sh = session.clone_handle();
                 tokio::spawn(async move { sh.abort().await });
                 state.cancel_streaming();
-                state.add_system_message("⏹ Interrupted".to_string());
+                state.add_system_message("Interrupted".to_string());
             } else {
                 *running = false;
             }
@@ -296,7 +296,7 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
                 CompactionReason::Threshold => "auto",
                 CompactionReason::Overflow => "overflow",
             };
-            state.add_system_message(format!("📦 Compacting ({})...", reason_str));
+            state.add_system_message(format!("Compacting ({})...", reason_str));
         }
         UiEvent::CompactionEnd {
             _reason,
@@ -991,7 +991,7 @@ async fn handle_model_select_key(
                         crate::settings::Settings::save_last_used(&model_id);
                     }
                     Err(e) => {
-                        state.add_system_message(format!("✗ {}", e));
+                        state.add_system_message(format!("Error: {}", e));
                     }
                 }
             }
@@ -1046,7 +1046,7 @@ async fn handle_logout_select_key(
             if let Some(provider) = providers.get(selected) {
                 let auth = crate::auth_storage::AuthStorage::new();
                 auth.remove(provider);
-                state.add_system_message(format!("✓ Removed {}", provider));
+                state.add_system_message(format!("Removed {}", provider));
             }
             state.overlay = None;
         }

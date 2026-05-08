@@ -48,12 +48,12 @@ pub(crate) fn handle_slash_command(
                 // Direct model switch (backward compatible)
                 match session.set_model(model_id) {
                     Ok(()) => {
-                        state.add_system_message(format!("→ model: {}", model_id));
+                        state.add_system_message(format!("Model: {}", model_id));
                         state.footer_state.data.model_name = model_id.to_string();
                         crate::settings::Settings::save_last_used(model_id);
                     }
                     Err(e) => {
-                        state.add_system_message(format!("✗ {}", e));
+                        state.add_system_message(format!("Error: {}", e));
                     }
                 }
             } else {
@@ -159,7 +159,7 @@ pub(crate) fn handle_slash_command(
         "/name" => {
             if let Some(name) = arg {
                 session.set_session_name(name.to_string());
-                state.add_system_message(format!("Session → {}", name));
+                state.add_system_message(format!("Session: {}", name));
             } else {
                 state.add_system_message("/name <name>".to_string());
             }
@@ -169,8 +169,8 @@ pub(crate) fn handle_slash_command(
             // Prefer last code block if available, otherwise full last reply
             if let Some(ref code) = state.chat.last_code_block {
                 match clipboard_write::copy_to_clipboard(code) {
-                    Ok(()) => state.add_system_message("✓ Code block copied to clipboard".to_string()),
-                    Err(e) => state.add_system_message(format!("✗ Copy failed: {}", e)),
+                    Ok(()) => state.add_system_message("OK: Code block copied to clipboard".to_string()),
+                    Err(e) => state.add_system_message(format!("Error: Copy failed: {}", e)),
                 }
             } else {
                 let last = state
@@ -189,8 +189,8 @@ pub(crate) fn handle_slash_command(
                         .collect::<Vec<_>>()
                         .join("\n");
                     match clipboard_write::copy_to_clipboard(&content) {
-                        Ok(()) => state.add_system_message("✓ Copied to clipboard".to_string()),
-                        Err(e) => state.add_system_message(format!("✗ Copy failed: {}", e)),
+                        Ok(()) => state.add_system_message("OK: Copied to clipboard".to_string()),
+                        Err(e) => state.add_system_message(format!("Error: Copy failed: {}", e)),
                     }
                 } else {
                     state.add_system_message("No assistant message".to_string());
@@ -222,7 +222,7 @@ pub(crate) fn handle_slash_command(
                             .last()
                             .map(|(i, c)| i + c.len_utf8())
                             .unwrap_or(0);
-                        format!("{}…", &entry.content[..end])
+                        format!("{}...", &entry.content[..end])
                     } else {
                         entry.content.clone()
                     };
@@ -272,10 +272,10 @@ pub(crate) fn handle_slash_command(
                     if let Some(path) = export_path {
                         match std::fs::write(&path, &html) {
                             Ok(()) => {
-                                state.add_system_message(format!("✓ Exported: {}", path.display()))
+                                state.add_system_message(format!("OK: Exported: {}", path.display()))
                             }
                             Err(e) => {
-                                state.add_system_message(format!("✗ Write failed: {}", e))
+                                state.add_system_message(format!("Error: Write failed: {}", e))
                             }
                         }
                     } else {
@@ -285,7 +285,7 @@ pub(crate) fn handle_slash_command(
                         ));
                     }
                 }
-                Err(e) => state.add_system_message(format!("✗ Export failed: {}", e)),
+                Err(e) => state.add_system_message(format!("Error: Export failed: {}", e)),
             }
             true
         }
@@ -348,7 +348,7 @@ pub(crate) fn handle_slash_command(
             if let Some(provider) = arg {
                 // Direct logout (backward compatible)
                 AuthStorage::new().remove(provider);
-                state.add_system_message(format!("✓ Removed {}", provider));
+                state.add_system_message(format!("OK: Removed {}", provider));
             } else {
                 // Show provider selection overlay for logout
                 let auth = AuthStorage::new();
@@ -365,7 +365,7 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/new" => {
-            state.add_system_message("Starting new session…".to_string());
+            state.add_system_message("Starting new session...".to_string());
             session.reset();
             state.chat.clear();
             true
@@ -399,7 +399,7 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/reload" => {
-            state.add_system_message("✓ Configuration reloaded".to_string());
+            state.add_system_message("OK: Configuration reloaded".to_string());
             true
         }
         "/scoped-models" | "/models" => {
@@ -635,12 +635,12 @@ fn handle_tool_command(
         if tool_name == "web_search" {
             registry.unregister("get_search_results");
         }
-        state.add_system_message(format!("✓ Tool disabled: {}", tool_name));
+        state.add_system_message(format!("OK: Tool disabled: {}", tool_name));
     } else {
         // Tool is disabled — re-register
         let re_registered = try_re_register_tool(&tool_name, registry);
         if re_registered {
-            state.add_system_message(format!("✓ Tool enabled: {}", tool_name));
+            state.add_system_message(format!("OK: Tool enabled: {}", tool_name));
         } else {
             state.add_system_message(format!(
                 "Cannot re-enable {}. Restart oxi to restore all tools.",

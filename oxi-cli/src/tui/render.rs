@@ -96,7 +96,7 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
 fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     // Show spinner on a separate line above the input, not in the same line
     // This avoids the spinner being flush against the input text
-    let spinner_line = format!("  {} waiting for response…", SPINNER[state.spinner_frame]);
+    let spinner_line = format!("  {} waiting for response...", SPINNER[state.spinner_frame]);
     f.render_widget(
         Paragraph::new(Span::styled(spinner_line, Style::default().fg(theme.colors.muted.to_ratatui()))),
         area,

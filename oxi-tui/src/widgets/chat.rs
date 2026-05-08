@@ -300,6 +300,10 @@ impl StatefulWidget for ChatView<'_> {
             "─".repeat(n)
         }
 
+        fn box_header(label: &str) -> String {
+            format!("── {} {}", label, "─".repeat(20))
+        }
+
         // Helper: left-border stripe spans for user messages (▌ + tinted space)
         fn user_stripe(styles: &ThemeStyles) -> Vec<Span> {
             vec![
@@ -375,7 +379,7 @@ impl StatefulWidget for ChatView<'_> {
                         let indicator = if *collapsed { "▸" } else { "▾" };
                         all_lines.push((
                             msg.role,
-                            format!("{} Thinking…", indicator),
+                            format!("{} Thinking...", indicator),
                             LineKind::Normal,
                         ));
                         if !*collapsed {
@@ -425,7 +429,7 @@ impl StatefulWidget for ChatView<'_> {
                         if *retryable {
                             all_lines.push((
                                 msg.role,
-                                "  ↻ This error may be temporary".to_string(),
+                                "  retry: this error may be temporary".to_string(),
                                 LineKind::ErrorBody,
                             ));
                         }
@@ -466,7 +470,7 @@ impl StatefulWidget for ChatView<'_> {
                         let indicator = if *collapsed { "▸" } else { "▾" };
                         all_lines.push((
                             MessageRole::Assistant,
-                            format!("  {} Thinking…", indicator),
+                            format!("  {} Thinking...", indicator),
                             LineKind::Normal,
                         ));
                         if !*collapsed {

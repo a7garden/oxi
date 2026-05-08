@@ -107,17 +107,15 @@ impl WasmExtensionManager {
         let wasm_bytes = std::fs::read(path)
             .with_context(|| format!("Failed to read extension: {}", path_display))?;
 
-        let manifest = extism::Manifest::new([extism::Wasm::data(wasm_bytes.clone())]);
+        let manifest = extism::Manifest::new([extism::Wasm::data(wasm_bytes)]);
         let mut plugin = extism::Plugin::new(&manifest, [], true)
             .with_context(|| format!("Failed to create Extism plugin from {}", path_display))?;
 
         // Call init()
-        let info: ExtensionInfo = match plugin.call("init", "{}") {
+        let info: ExtensionInfo = match plugin.call::<&str, &str>("init", "{}") {
             Ok(output) => {
-                let json_str = std::str::from_utf8(output)
-                    .with_context(|| "init() returned non-UTF-8")?;
-                serde_json::from_str(json_str)
-                    .with_context(|| format!("init() returned invalid JSON: {}", json_str))?
+                serde_json::from_str(output)
+                    .with_context(|| format!("init() returned invalid JSON: {}", output))?
             }
             Err(_) => {
                 // No init function — derive name from filename
@@ -134,12 +132,10 @@ impl WasmExtensionManager {
         };
 
         // Call register_tools()
-        let tools: Vec<WasmToolDef> = match plugin.call("register_tools", "{}") {
+        let tools: Vec<WasmToolDef> = match plugin.call::<&str, &str>("register_tools", "{}") {
             Ok(output) => {
-                let json_str = std::str::from_utf8(output)
-                    .with_context(|| "register_tools() returned non-UTF-8")?;
-                let resp: Value = serde_json::from_str(json_str)
-                    .with_context(|| format!("register_tools() invalid JSON: {}", json_str))?;
+                let resp: Value = serde_json::from_str(output)
+                    .with_context(|| format!("register_tools() invalid JSON: {}", output))?;
                 resp.get("tools")
                     .cloned()
                     .unwrap_or(Value::Array(vec![]))
@@ -212,15 +208,13 @@ impl WasmExtensionManager {
             "tool": tool_name,
             "params": params,
         });
-        let input_bytes = serde_json::to_vec(&input)?;
+        let input_str = serde_json::to_string(&input)?;
 
-        let output = plugin.call("execute_tool", &input_bytes)
+        let output: &str = plugin.call("execute_tool", &input_str)
             .with_context(|| format!("execute_tool('{}') failed in '{}'", tool_name, ext_name))?;
 
-        let json_str = std::str::from_utf8(output)
-            .with_context(|| "execute_tool() returned non-UTF-8")?;
-        let result: Value = serde_json::from_str(json_str)
-            .with_context(|| format!("execute_tool() returned invalid JSON: {}", json_str))?;
+        let result: Value = serde_json::from_str(output)
+            .with_context(|| format!("execute_tool() returned invalid JSON: {}", output))?;
 
         Ok(result)
     }
