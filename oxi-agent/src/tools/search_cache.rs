@@ -1,4 +1,3 @@
-#![cfg(any())]
 /// Search result cache and get_search_results tool.
 ///
 /// Stores search results in memory keyed by generated IDs, enabling the

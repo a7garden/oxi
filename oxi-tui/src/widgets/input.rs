@@ -35,15 +35,55 @@ pub struct InputState {
     completions: Vec<Completion>,
     completion_index: usize,
     completion_active: bool,
+    /// IME composition state: tracks the last character position that
+    /// was part of an IME composition sequence (Korean, Japanese, Chinese).
+    /// When a new char arrives and the cursor is at composing_pos + 1,
+    /// the previous composing character is replaced instead of appended.
+    composing_pos: Option<usize>,
 }
 
 impl InputState {
     pub fn clear(&mut self) {
         self.text.clear();
         self.cursor = 0;
+        self.composing_pos = None;
     }
 
     pub fn insert_char(&mut self, c: char) {
+        // IME composition handling: if the cursor is right after a composing
+        // character, replace it instead of inserting a new one.
+        // This handles Korean/Japanese/Chinese IME where 'ㅎ' → '하' → '한'
+        // are sent as sequential Char events that should replace each other.
+        let is_ime_candidate = (c as u32 >= 0x1100 && c as u32 <= 0x11FF) // Hangul Jamo
+            || (c as u32 >= 0xAC00 && c as u32 <= 0xD7AF) // Hangul Syllables
+            || (c as u32 >= 0x3040 && c as u32 <= 0x309F) // Hiragana
+            || (c as u32 >= 0x30A0 && c as u32 <= 0x30FF) // Katakana
+            || (c as u32 >= 0x4E00 && c as u32 <= 0x9FFF) // CJK Unified Ideographs
+            || (c as u32 >= 0x3400 && c as u32 <= 0x4DBF) // CJK Extension A
+            || (c as u32 >= 0xFF00 && c as u32 <= 0xFFEF) // Fullwidth forms
+            || (c as u32 >= 0x3130 && c as u32 <= 0x318F); // Hangul Compatibility Jamo
+
+        if is_ime_candidate {
+            if let Some(cp) = self.composing_pos {
+                if self.cursor == cp + 1 {
+                    // Replace the composing character at cp
+                    let byte_pos = self.char_to_byte(cp);
+                    let char_len = self.text[byte_pos..].chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+                    self.text.replace_range(byte_pos..byte_pos + char_len, &c.to_string());
+                    // composing_pos stays the same — still composing
+                    return;
+                }
+            }
+            // New IME composition start
+            let byte_pos = self.char_to_byte(self.cursor);
+            self.text.insert(byte_pos, c);
+            self.cursor += 1;
+            self.composing_pos = Some(self.cursor - 1);
+            return;
+        }
+
+        // Non-IME character — clear composing state
+        self.composing_pos = None;
         let byte_pos = self.char_to_byte(self.cursor);
         self.text.insert(byte_pos, c);
         self.cursor += 1;
@@ -53,6 +93,7 @@ impl InputState {
         let byte_pos = self.char_to_byte(self.cursor);
         self.text.insert_str(byte_pos, s);
         self.cursor += s.chars().count();
+        self.composing_pos = None; // Paste clears composition
     }
 
     pub fn backspace(&mut self) {
@@ -61,6 +102,7 @@ impl InputState {
             let byte_pos = self.char_to_byte(self.cursor);
             self.text.remove(byte_pos);
         }
+        self.composing_pos = None; // Backspace clears composition
     }
 
     pub fn delete(&mut self) {
@@ -68,23 +110,28 @@ impl InputState {
             let byte_pos = self.char_to_byte(self.cursor);
             self.text.remove(byte_pos);
         }
+        self.composing_pos = None;
     }
 
     pub fn move_left(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
+        self.composing_pos = None; // Cursor movement clears composition
     }
 
     pub fn move_right(&mut self) {
         let max = self.text.chars().count();
         self.cursor = (self.cursor + 1).min(max);
+        self.composing_pos = None;
     }
 
     pub fn move_home(&mut self) {
         self.cursor = 0;
+        self.composing_pos = None;
     }
 
     pub fn move_end(&mut self) {
         self.cursor = self.text.chars().count();
+        self.composing_pos = None;
     }
 
     fn char_to_byte(&self, char_idx: usize) -> usize {

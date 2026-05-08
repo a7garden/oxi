@@ -172,7 +172,7 @@ pub mod read;
 /// Rendering utilities for tool output.
 pub mod render_utils;
 /// Search result cache and get_search_results tool.
-// pub mod search_cache;
+pub mod search_cache;
 /// Tool definition wrapper helpers.
 pub mod tool_definition_wrapper;
 /// Output truncation helpers.
