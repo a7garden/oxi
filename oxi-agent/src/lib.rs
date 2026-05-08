@@ -48,6 +48,9 @@ pub use tools::{
     AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
     LsTool, ReadTool, ToolRegistry, WriteTool,
 };
+pub use tools::search_cache::{SearchCache, GetSearchResultsTool};
+pub use tools::web_search::WebSearchTool;
+pub use tools::github_search::GitHubSearchTool;
 pub use tools::subagent::SubagentTool;
 
 /// Standard imports for oxi-agent usage.
@@ -62,6 +65,9 @@ pub mod prelude {
         AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
         LsTool, ReadTool, ToolRegistry, WriteTool,
     };
+    pub use crate::tools::search_cache::{SearchCache, GetSearchResultsTool};
+    pub use crate::tools::web_search::WebSearchTool;
+    pub use crate::tools::github_search::GitHubSearchTool;
     pub use crate::tools::subagent::SubagentTool;
 }
 
