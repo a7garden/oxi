@@ -112,6 +112,23 @@ pub(crate) fn handle_slash_command(
             ));
             true
         }
+        "/tools" => {
+            let registry = session.agent_ref().tools();
+            let names = registry.names();
+            if let Some(action) = arg {
+                handle_tool_command(action, &registry, state);
+            } else {
+                let mut out = "Tools:\n\n".to_string();
+                for name in &names {
+                    if let Some(tool) = registry.get(name) {
+                        out.push_str(&format!("  {} — {}\n", name, tool.label()));
+                    }
+                }
+                out.push_str("\n/tools <name>        Toggle tool on/off");
+                state.add_system_message(out);
+            }
+            true
+        }
         "/name" => {
             if let Some(name) = arg {
                 session.set_session_name(name.to_string());
@@ -431,6 +448,10 @@ fn format_help() -> String {
     /compact [instr]  Compact context
     /clear            Clear history
 
+  Tools
+    /tools            List active tools
+    /tools <name>     Toggle tool on/off
+
   Export
     /export [path]    Export to HTML
     /import <path>    Import from JSONL
@@ -537,4 +558,97 @@ fn mask_key(key: &str) -> String {
         return "***".to_string();
     }
     format!("{}...{}", &key[..6], &key[key.len()-4..])
+}
+
+// ── Tool toggle ─────────────────────────────────────────────────────────
+
+/// Built-in tool definitions (name) for toggle validation.
+const BUILTIN_TOOL_NAMES: &[&str] = &[
+    "read",
+    "write",
+    "edit",
+    "bash",
+    "grep",
+    "find",
+    "ls",
+    "web_search",
+    "get_search_results",
+    "github_search",
+    "subagent",
+];
+
+/// Handle `/tools <name>` — toggle a tool on/off.
+fn handle_tool_command(
+    action: &str,
+    registry: &std::sync::Arc<oxi_agent::ToolRegistry>,
+    state: &mut AppState,
+) {
+    let tool_name = action.trim().to_lowercase();
+
+    // Check if the tool name is known
+    let is_known = BUILTIN_TOOL_NAMES.contains(&tool_name.as_str())
+        || registry.get(&tool_name).is_some();
+
+    if !is_known {
+        state.add_system_message(format!(
+            "Unknown tool: {}\nUse /tools to see available tools.",
+            tool_name
+        ));
+        return;
+    }
+
+    if registry.get(&tool_name).is_some() {
+        // Tool exists — unregister (disable)
+        registry.unregister(&tool_name);
+        state.add_system_message(format!("✓ Tool disabled: {}", tool_name));
+    } else {
+        // Tool is disabled — re-register
+        let re_registered = try_re_register_tool(&tool_name, registry);
+        if re_registered {
+            state.add_system_message(format!("✓ Tool enabled: {}", tool_name));
+        } else {
+            state.add_system_message(format!(
+                "Cannot re-enable {}. Restart oxi to restore all tools.",
+                tool_name
+            ));
+        }
+    }
+}
+
+/// Try to re-register a previously disabled built-in tool.
+fn try_re_register_tool(name: &str, registry: &std::sync::Arc<oxi_agent::ToolRegistry>) -> bool {
+    use std::sync::Arc;
+
+    match name {
+        "read" => registry.register(oxi_agent::ReadTool::new()),
+        "write" => registry.register(oxi_agent::WriteTool::new()),
+        "edit" => registry.register(oxi_agent::EditTool::new()),
+        "bash" => registry.register(oxi_agent::BashTool::new()),
+        "grep" => registry.register(oxi_agent::GrepTool::new()),
+        "find" => registry.register(oxi_agent::FindTool::new()),
+        "ls" => registry.register(oxi_agent::LsTool::new()),
+        "web_search" => {
+            let cache = Arc::new(oxi_agent::SearchCache::new());
+            registry.register(oxi_agent::WebSearchTool::new(cache.clone()));
+            registry.register(oxi_agent::GetSearchResultsTool::new(cache));
+        }
+        "get_search_results" => {
+            // get_search_results shares cache with web_search
+            // If web_search is active, it's already registered
+            if registry.get("web_search").is_some() {
+                return false;
+            }
+            let cache = Arc::new(oxi_agent::SearchCache::new());
+            registry.register(oxi_agent::GetSearchResultsTool::new(cache));
+        }
+        "github_search" => {
+            let cache = Arc::new(oxi_agent::SearchCache::new());
+            registry.register(oxi_agent::GitHubSearchTool::new(cache));
+        }
+        "subagent" => registry.register(oxi_agent::SubagentTool::new(
+            std::path::PathBuf::from("."),
+        )),
+        _ => return false,
+    }
+    true
 }

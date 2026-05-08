@@ -236,6 +236,12 @@ impl ToolRegistry {
         self.tools.read().get(name).cloned()
     }
 
+    /// Unregister a tool by name.
+    /// Returns `true` if the tool was present and removed.
+    pub fn unregister(&self, name: &str) -> bool {
+        self.tools.write().remove(name).is_some()
+    }
+
     /// List all registered tool names
     pub fn names(&self) -> Vec<String> {
         self.tools.read().keys().cloned().collect()
