@@ -525,6 +525,23 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                         });
                         let sh = session_handle.clone_handle();
                         let agent = sh.agent_ref();
+
+                        // Wire steering/follow-up queues to agent hooks
+                        // so the agentic loop can poll queued messages
+                        let steering_q = sh.steering_queue();
+                        let follow_up_q = sh.follow_up_queue();
+                        let hooks = oxi_agent::AgentHooks {
+                            get_steering_messages: Some(Box::new(move || {
+                                steering_q.write().drain(..).collect::<Vec<String>>()
+                            })),
+                            get_follow_up_messages: Some(Box::new(move || {
+                                follow_up_q.write().drain(..).collect::<Vec<String>>()
+                            })),
+                            tool_execution: oxi_agent::ToolExecutionMode::Sequential,
+                            ..Default::default()
+                        };
+                        agent.set_hooks(hooks);
+
                         let _ = agent.run_with_channel(prompt, event_tx).await;
                         let _ = event_forwarder.await;
                     }

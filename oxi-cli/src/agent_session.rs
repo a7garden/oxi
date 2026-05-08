@@ -426,6 +426,16 @@ impl AgentSession {
         self.follow_up_messages.read().iter().cloned().collect()
     }
 
+    /// Get a reference to the steering message queue (for hook wiring).
+    pub fn steering_queue(&self) -> Arc<RwLock<std::collections::VecDeque<String>>> {
+        self.steering_messages.clone()
+    }
+
+    /// Get a reference to the follow-up message queue (for hook wiring).
+    pub fn follow_up_queue(&self) -> Arc<RwLock<std::collections::VecDeque<String>>> {
+        self.follow_up_messages.clone()
+    }
+
     /// Current working directory.
     pub fn cwd(&self) -> &str {
         &self.cwd
