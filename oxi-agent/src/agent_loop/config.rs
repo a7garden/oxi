@@ -51,20 +51,8 @@ pub struct AgentLoopConfig {
     pub api_key: Option<String>,
 }
 
-/// Controls whether tool calls execute concurrently or one at a time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolExecutionMode {
-    /// Execute all tool calls concurrently.
-    Parallel,
-    /// Execute tool calls one at a time, in order.
-    Sequential,
-}
-
-impl Default for ToolExecutionMode {
-    fn default() -> Self {
-        ToolExecutionMode::Parallel
-    }
-}
+// Re-export ToolExecutionMode from crate::config to avoid duplicate definitions.
+pub use crate::config::ToolExecutionMode;
 
 use std::sync::Arc;
 use std::future::Future;

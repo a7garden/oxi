@@ -77,6 +77,8 @@ pub enum ProviderEvent {
         /// The tool call ID from the provider, if available at start time.
         /// Providers that only surface the ID later (in deltas/end) leave this `None`.
         tool_call_id: Option<String>,
+        /// The tool name, if available at start time.
+        tool_name: Option<String>,
         /// Partial assistant message state.
         partial: AssistantMessage,
     },

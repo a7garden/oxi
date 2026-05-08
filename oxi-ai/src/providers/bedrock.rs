@@ -573,6 +573,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: event.index.unwrap_or(0),
                                 tool_call_id: block.id.clone(),
+                                tool_name: None,
                                 partial: partial_message.clone(),
                             });
                         }

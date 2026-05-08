@@ -371,6 +371,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: output_item.index,
                                 tool_call_id: output_item.id.clone(),
+                                tool_name: None,
                                 partial: partial_message.clone(),
                             });
                             current_tool_call_index = Some(output_item.index);
@@ -379,6 +380,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: output_item.index,
                                 tool_call_id: output_item.id.clone(),
+                                tool_name: None,
                                 partial: partial_message.clone(),
                             });
                             current_tool_call_index = Some(output_item.index);
@@ -405,6 +407,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: content_part.index,
                                 tool_call_id: None,
+                                tool_name: None,
                                 partial: partial_message.clone(),
                             });
                             current_tool_call_index = Some(content_part.index);

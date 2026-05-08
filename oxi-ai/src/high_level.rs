@@ -120,6 +120,7 @@ pub async fn complete(
                 content_index,
                 tool_call_id,
                 partial,
+                ..
             } => {
                 if final_message.is_none() {
                     final_message = Some(partial);

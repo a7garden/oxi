@@ -317,6 +317,7 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: idx,
                                 tool_call_id: block.id.clone(),
+                                tool_name: None,
                                 partial: partial_message.clone(),
                             });
                         }

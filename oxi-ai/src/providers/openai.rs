@@ -157,20 +157,93 @@ impl Provider for OpenAiProvider {
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
 
-        let stream = response.bytes_stream().flat_map(
-            move |chunk: Result<Bytes, reqwest::Error>| match chunk {
-                Ok(bytes) => {
-                    // Find last valid UTF-8 boundary to avoid splitting
-                    // multi-byte characters across chunks.
-                    let text = find_valid_utf8_prefix(&bytes);
-                    futures::stream::iter(parse_sse_events(&text, &provider_name, &model_id))
-                }
-                Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                    reason: StopReason::Error,
-                    error: create_error_message(&e.to_string(), &provider_name, &model_id),
-                }]),
+        // Stateful stream parser that accumulates tool calls across chunks.
+        // OpenAI sends tool calls as multiple deltas (id, name, arguments fragments)
+        // that must be reassembled before emitting ToolCallEnd.
+        let stream = response.bytes_stream().scan(
+            // State: accumulated tool calls keyed by index
+            std::collections::HashMap::<usize, (String, String, String)>::new(),
+            move |pending_tc, chunk: Result<Bytes, reqwest::Error>| {
+                let events = match chunk {
+                    Ok(bytes) => {
+                        let text = find_valid_utf8_prefix(&bytes);
+                        let raw_events = parse_sse_events(&text, &provider_name, &model_id);
+
+                        // Post-process: accumulate tool call deltas and emit ToolCallEnd
+                        let mut processed = Vec::new();
+                        for event in raw_events {
+                            match &event {
+                                ProviderEvent::ToolCallDelta { content_index, delta, .. } => {
+                                    let entry = pending_tc.entry(*content_index).or_insert_with(|| (
+                                        String::new(),
+                                        String::new(),
+                                        String::new(),
+                                    ));
+                                    entry.2.push_str(delta);
+                                    processed.push(event);
+                                }
+                                ProviderEvent::ToolCallStart { content_index, tool_call_id, tool_name, .. } => {
+                                    let entry = pending_tc.entry(*content_index).or_insert_with(|| (
+                                        String::new(),
+                                        String::new(),
+                                        String::new(),
+                                    ));
+                                    if let Some(ref id) = tool_call_id {
+                                        if !id.is_empty() { entry.0 = id.clone(); }
+                                    }
+                                    if let Some(ref name) = tool_name {
+                                        if !name.is_empty() { entry.1 = name.clone(); }
+                                    }
+                                    processed.push(event);
+                                }
+                                ProviderEvent::ToolCallEnd { .. } => {
+                                    // Already a ToolCallEnd from parse_sse_events
+                                    processed.push(event);
+                                }
+                                ProviderEvent::Done { reason, .. } => {
+                                    // Before Done, emit ToolCallEnd for all accumulated tool calls
+                                    if matches!(reason, StopReason::ToolUse) {
+                                        let mut indices: Vec<usize> = pending_tc.keys().copied().collect();
+                                        indices.sort();
+                                        for idx in indices {
+                                            let (id, name, arguments) = &pending_tc[&idx];
+                                            let args_value = serde_json::from_str::<serde_json::Value>(arguments)
+                                                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                                            processed.push(ProviderEvent::ToolCallEnd {
+                                                content_index: idx,
+                                                tool_call: crate::ToolCall {
+                                                    content_type: crate::messages::ToolCallType::ToolCall,
+                                                    id: id.clone(),
+                                                    name: name.clone(),
+                                                    arguments: args_value,
+                                                    thought_signature: None,
+                                                },
+                                                partial: AssistantMessage::new(
+                                                    Api::OpenAiCompletions, &provider_name, &model_id,
+                                                ),
+                                            });
+                                        }
+                                    }
+                                    processed.push(event);
+                                }
+                                _ => {
+                                    processed.push(event);
+                                }
+                            }
+                        }
+                        processed
+                    }
+                    Err(e) => {
+                        vec![ProviderEvent::Error {
+                            reason: StopReason::Error,
+                            error: create_error_message(&e.to_string(), &provider_name, &model_id),
+                        }]
+                    }
+                };
+                // Return Some to continue, wrap events in an iterator
+                async move { Some(futures::stream::iter(events)) }
             },
-        );
+        ).flatten();
 
         Ok(Box::pin(stream))
     }
@@ -366,9 +439,22 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
 
                 if let Some(tool_calls) = &delta.tool_calls {
                     for tc in tool_calls {
+                        let tc_index = tc.index.unwrap_or(choice.index);
+
+                        // Emit ToolCallStart when id or name is present (first delta)
+                        if tc.id.is_some() || tc.function.as_ref().and_then(|f| f.name.as_ref()).is_some() {
+                            events.push(ProviderEvent::ToolCallStart {
+                                content_index: tc_index,
+                                tool_call_id: tc.id.clone(),
+                                tool_name: tc.function.as_ref().and_then(|f| f.name.clone()),
+                                partial: partial_message.clone(),
+                            });
+                        }
+
+                        // Emit ToolCallDelta for arguments
                         if let Some(func) = &tc.function {
                             events.push(ProviderEvent::ToolCallDelta {
-                                content_index: choice.index,
+                                content_index: tc_index,
                                 delta: func.arguments.clone().unwrap_or_default(),
                                 partial: partial_message.clone(),
                             });
