@@ -285,7 +285,7 @@ async fn handle_key(
 /// Handle an agent UI event.
 pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
     match event {
-        UiEvent::Start | UiEvent::Thinking => {}
+        UiEvent::Start | UiEvent::Thinking | UiEvent::ThinkingDelta(_) => {}
         UiEvent::TextDelta(text) => {
             state.stream_text_delta(&text);
         }

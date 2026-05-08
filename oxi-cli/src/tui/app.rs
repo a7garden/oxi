@@ -443,7 +443,11 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                         UiEvent::Complete
                                     }
                                     AgentEvent::Error { message, .. } => UiEvent::Error(message),
-                                    AgentEvent::MessageUpdate { ref message, .. } => {
+                                    AgentEvent::MessageUpdate { ref message, delta } => {
+                                        // Forward text delta if present
+                                        if let Some(text) = delta {
+                                            let _ = ui_fwd.send(UiEvent::TextDelta(text)).await;
+                                        }
                                         // Extract image blocks from the message
                                         let content_blocks: &[oxi_ai::ContentBlock] = match message {
                                             oxi_ai::Message::Assistant(a) => &a.content,
