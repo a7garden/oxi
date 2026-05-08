@@ -139,6 +139,8 @@ impl ColorScheme {
             cursor_fg: Style::default().fg(self.cursor_fg.to_ratatui()),
             cursor_bg: Style::default().fg(self.cursor_bg.to_ratatui()),
             selection_bg: Style::default().bg(self.selection_bg.to_ratatui()),
+            user_border: Style::default().fg(self.user_border.to_ratatui()),
+            user_bg: Style::default().bg(self.user_bg.to_ratatui()),
         }
     }
 }
@@ -158,7 +160,7 @@ pub struct ThemeStyles {
     pub warning: Style,
     /// Success / green style.
     pub success: Style,
-    /// Muted / dimmed style.
+    /// Muted / dimmed style (tool headers, borders).
     pub muted: Style,
     /// Accent / highlight style.
     pub accent: Style,
@@ -170,6 +172,10 @@ pub struct ThemeStyles {
     pub cursor_bg: Style,
     /// Selection background style.
     pub selection_bg: Style,
+    /// User message left-border accent (bright primary).
+    pub user_border: Style,
+    /// User message background (subtle tint).
+    pub user_bg: Style,
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +320,10 @@ pub struct ThemeFileColors {
     pub accent: Option<String>,
     /// Border / separator color.
     pub border: Option<String>,
+    /// User message left-border accent.
+    pub user_border: Option<String>,
+    /// User message background (subtle tint).
+    pub user_bg: Option<String>,
     /// Cursor foreground color.
     pub cursor_fg: Option<String>,
     /// Cursor background color.
@@ -431,6 +441,18 @@ impl ThemeFile {
                 .as_deref()
                 .and_then(parse_color)
                 .unwrap_or(defaults.selection_bg),
+            user_border: self
+                .colors
+                .user_border
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.user_border),
+            user_bg: self
+                .colors
+                .user_bg
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.user_bg),
         };
         Theme {
             name: if self.name.is_empty() {
