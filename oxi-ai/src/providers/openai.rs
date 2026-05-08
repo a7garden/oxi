@@ -160,13 +160,23 @@ impl Provider for OpenAiProvider {
         // Stateful stream parser that accumulates tool calls across chunks.
         // OpenAI sends tool calls as multiple deltas (id, name, arguments fragments)
         // that must be reassembled before emitting ToolCallEnd.
+        //
+        // State: (pending_bytes, accumulated tool calls keyed by index)
         let stream = response.bytes_stream().scan(
-            // State: accumulated tool calls keyed by index
-            std::collections::HashMap::<usize, (String, String, String)>::new(),
-            move |pending_tc, chunk: Result<Bytes, reqwest::Error>| {
+            (Vec::new(), std::collections::HashMap::<usize, (String, String, String)>::new()),
+            move |(pending_bytes, pending_tc), chunk: Result<Bytes, reqwest::Error>| {
                 let events = match chunk {
                     Ok(bytes) => {
-                        let text = find_valid_utf8_prefix(&bytes);
+                        // Prepend any incomplete UTF-8 bytes from previous chunk
+                        let mut combined = Vec::with_capacity(pending_bytes.len() + bytes.len());
+                        combined.extend_from_slice(pending_bytes);
+                        combined.extend_from_slice(&bytes);
+
+                        // Extract valid UTF-8 and save trailing incomplete bytes for next chunk
+                        let (text, trailing) = find_valid_utf8_prefix(&combined);
+                        *pending_bytes = trailing;
+
+
                         let raw_events = parse_sse_events(&text, &provider_name, &model_id);
 
                         // Post-process: accumulate tool call deltas and emit ToolCallEnd
@@ -363,15 +373,16 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
 
 /// Extract the longest valid UTF-8 prefix from a byte slice.
 ///
-/// If the trailing bytes form an incomplete UTF-8 sequence (the chunk was
-/// split mid-character), those bytes are dropped. The next chunk from the
-/// network will carry the remainder and complete the character.
-fn find_valid_utf8_prefix(bytes: &[u8]) -> String {
+/// Returns the valid string and the trailing bytes that form an incomplete UTF-8
+/// sequence. These trailing bytes should be prepended to the next chunk to
+/// ensure no characters are lost at HTTP chunk boundaries.
+fn find_valid_utf8_prefix(bytes: &[u8]) -> (String, Vec<u8>) {
     match std::str::from_utf8(bytes) {
-        Ok(s) => s.to_string(),
+        Ok(s) => (s.to_string(), Vec::new()),
         Err(e) => {
             let valid = &bytes[..e.valid_up_to()];
-            String::from_utf8_lossy(valid).to_string()
+            let trailing = bytes[e.valid_up_to()..].to_vec();
+            (String::from_utf8_lossy(valid).to_string(), trailing)
         }
     }
 }

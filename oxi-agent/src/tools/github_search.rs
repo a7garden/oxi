@@ -1,4 +1,3 @@
-#![cfg(any())]
 /// GitHub search tool — search GitHub repositories, issues, and code via the GitHub REST API.
 ///
 /// Features:
@@ -228,14 +227,15 @@ fn format_github_results(total: u64, results: &[GitHubSearchResult]) -> String {
             r.stars.to_string()
         };
 
-        let desc = if r.description.len() > 150 {
-            format!("{}...", &r.description[..150])
+        let desc = if r.description.chars().count() > 150 {
+            let truncated: String = r.description.chars().take(150).collect();
+            format!("{}...", truncated)
         } else {
             r.description.clone()
         };
 
         output.push_str(&format!(
-            "{}. **{}** ⭐{}\n   {}\n   📝 {} | 🔀 {} forks | 📦 {} issues\n   Updated: {}\n",
+            "{}. **{}** ⭐{}\n   {}\n   {} {} | 🔀 {} forks | 📦 {} issues\n   Updated: {}\n",
             i + 1,
             r.full_name,
             stars,

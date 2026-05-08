@@ -46,6 +46,7 @@ use ratatui::{
 pub(crate) enum UiEvent {
     Start,
     Thinking,
+    ThinkingDelta(String),
     TextDelta(String),
     #[allow(dead_code)]
     ToolCall {
@@ -417,6 +418,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
                                 let ui_event = match event {
                                     AgentEvent::Start { .. } => UiEvent::Start,
                                     AgentEvent::Thinking => UiEvent::Thinking,
+                                    AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
                                     AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
                                     AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
                                         id: tool_call.id,

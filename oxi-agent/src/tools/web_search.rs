@@ -1,4 +1,3 @@
-#![cfg(any())]
 /// Web search tool — searches via a3s-search library (DuckDuckGo, Wikipedia, Bing, Brave).
 ///
 /// Uses a3s-search as a Rust library (not CLI), so no external binary is needed.
