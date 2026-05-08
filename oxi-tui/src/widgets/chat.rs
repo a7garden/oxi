@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Paragraph, StatefulWidget},
 };
 use ratatui::widgets::Widget;
-use crate::Theme;
+use crate::{Theme, ThemeStyles};
 use super::markdown;
 
 /// ChatView message role.
@@ -63,6 +63,24 @@ enum LineKind {
     ListItem,
     HorizontalRule,
     RoleLabel,
+    /// Tool call header: ┌─ ─ ─ tool: name ─ ─ ─┐
+    ToolCallHeader,
+    /// Tool call body lines (arguments)
+    ToolCallBody,
+    /// Tool call footer (blank separator)
+    ToolCallFooter,
+    /// Tool result header: ┌─ ✓/✗ tool_name ─ ─┐
+    ToolResultHeader,
+    /// Tool result body lines (content preview)
+    ToolResultBody,
+    /// Tool result footer (blank separator)
+    ToolResultFooter,
+    /// Error header line
+    ErrorHeader,
+    /// Error body lines
+    ErrorBody,
+    /// Error footer (blank separator)
+    ErrorFooter,
 }
 
 /// State for the ChatView widget.
@@ -276,7 +294,20 @@ impl StatefulWidget for ChatView<'_> {
         }
 
         let styles = self.theme.to_styles();
-        let h_pad: usize = 2;
+
+        // Helper: symmetric box-drawing top border filler (n × "─ ")
+        fn box_top(n: usize) -> String {
+            "─".repeat(n)
+        }
+
+        // Helper: left-border stripe spans for user messages (▌ + tinted space)
+        fn user_stripe(styles: &ThemeStyles) -> Vec<Span> {
+            vec![
+                Span::styled("▌", styles.user_border),
+                Span::styled(" ", styles.user_bg),
+            ]
+        }
+
 
         // ------------------------------------------------------------------
         // Collect all lines
@@ -358,39 +389,47 @@ impl StatefulWidget for ChatView<'_> {
                     ContentBlock::ToolCall { name, arguments, .. } => {
                         all_lines.push((
                             msg.role,
-                            format!("┌─ tool: {} ───", name),
-                            LineKind::Normal,
+                            format!("  {} tool: {} {}", box_top(15), name, box_top(15)),
+                            LineKind::ToolCallHeader,
                         ));
-                        for line in arguments.lines().take(8) {
-                            all_lines.push((msg.role, format!("│ {}", line), LineKind::Normal));
+                        // Truncate long argument blocks (4 lines if >4 lines, else 6)
+                        let max_args = if arguments.lines().count() <= 4 { 6 } else { 4 };
+                        for line in arguments.lines().take(max_args) {
+                            all_lines.push((msg.role, format!("  {}", line), LineKind::ToolCallBody));
                         }
-                        all_lines.push((msg.role, "└─".to_string(), LineKind::Normal));
+                        if arguments.lines().count() > max_args {
+                            all_lines.push((msg.role, "  ...".to_string(), LineKind::ToolCallBody));
+                        }
+                        all_lines.push((msg.role, String::new(), LineKind::ToolCallFooter));
                     }
                     ContentBlock::ToolResult { tool_name, content, is_error } => {
                         let prefix = if *is_error { "✗" } else { "✓" };
                         all_lines.push((
                             msg.role,
-                            format!("┌─ {}: {} ───", prefix, tool_name),
-                            LineKind::Normal,
+                            format!("  {} {}: {}", box_top(26), prefix, tool_name),
+                            LineKind::ToolResultHeader,
                         ));
-                        for line in content.lines().take(3) {
-                            all_lines.push((msg.role, format!("│ {}", line), LineKind::Normal));
+                        for line in content.lines().take(2) {
+                            all_lines.push((msg.role, format!("  {}", line), LineKind::ToolResultBody));
                         }
-                        all_lines.push((msg.role, "└─".to_string(), LineKind::Normal));
+                        if content.lines().count() > 2 {
+                            all_lines.push((msg.role, "  ...".to_string(), LineKind::ToolResultBody));
+                        }
+                        all_lines.push((msg.role, String::new(), LineKind::ToolResultFooter));
                     }
                     ContentBlock::Error { title, message, retryable } => {
-                        all_lines.push((msg.role, format!("[!] {}", title), LineKind::Normal));
-                        for line in message.lines().take(6) {
-                            all_lines.push((msg.role, format!("│ {}", line), LineKind::Normal));
+                        all_lines.push((msg.role, format!("  [!] {}", title), LineKind::ErrorHeader));
+                        for line in message.lines().take(4) {
+                            all_lines.push((msg.role, format!("  {}", line), LineKind::ErrorBody));
                         }
                         if *retryable {
                             all_lines.push((
                                 msg.role,
-                                "│ ↻ This error may be temporary".to_string(),
-                                LineKind::Normal,
+                                "  ↻ This error may be temporary".to_string(),
+                                LineKind::ErrorBody,
                             ));
                         }
-                        all_lines.push((msg.role, "└─".to_string(), LineKind::Normal));
+                        all_lines.push((msg.role, String::new(), LineKind::ErrorFooter));
                     }
                     ContentBlock::Image { mime_type, base64_data } => {
                         let size_bytes = base64_data.len() * 3 / 4;
@@ -456,7 +495,6 @@ impl StatefulWidget for ChatView<'_> {
                 MessageRole::Assistant => styles.accent,
                 MessageRole::System => styles.muted,
             };
-
             let line_base_style: Style = match kind {
                 LineKind::Normal => styles.normal,
                 LineKind::CodeBlock => markdown::code_block_style(styles.normal),
@@ -464,23 +502,31 @@ impl StatefulWidget for ChatView<'_> {
                 LineKind::ListItem => styles.normal,
                 LineKind::HorizontalRule => styles.muted,
                 LineKind::RoleLabel => styles.primary.add_modifier(Modifier::BOLD),
+                // Tool call / result lines — muted foreground keeps them visually subordinate
+                LineKind::ToolCallHeader
+                | LineKind::ToolCallBody
+                | LineKind::ToolCallFooter
+                | LineKind::ToolResultHeader
+                | LineKind::ToolResultBody
+                | LineKind::ToolResultFooter => styles.muted,
+                // Error lines — bright error color
+                LineKind::ErrorHeader | LineKind::ErrorBody | LineKind::ErrorFooter => styles.error,
             };
-
             let mut spans: Vec<Span> = Vec::new();
-
-            // Role prefix
-            spans.push(Span::styled(" ", prefix_style));
-
-            // Padding
-            spans.push(Span::styled(" ".repeat(h_pad), line_base_style));
+            // User messages: left-border stripe (no role prefix)
+            if *role == MessageRole::User {
+                spans.extend(user_stripe(&styles));
+            } else {
+                spans.push(Span::styled(" ", prefix_style));
+                spans.push(Span::styled(" ", line_base_style));
+            }
+            spans.push(Span::styled(" ", line_base_style));
 
             match kind {
                 LineKind::CodeBlock | LineKind::HorizontalRule | LineKind::RoleLabel => {
-                    // No inline markdown parsing needed
                     spans.push(Span::styled(text.clone(), line_base_style));
                 }
                 _ => {
-                    // Normal / Heading / ListItem — parse inline
                     let segments = markdown::parse_inline(text);
                     for seg in &segments {
                         let seg_style = match seg {

@@ -277,7 +277,8 @@ impl ToolRegistry {
     /// (e.g. `["web_search", "github_search"]` for a minimal setup).
     pub fn with_builtins_cwd(cwd: PathBuf, disabled_tools: &[String]) -> Self {
         let registry = Self::new();
-        let disabled: std::collections::HashSet<_> = disabled_tools.iter().collect();
+        let disabled: std::collections::HashSet<&str> =
+            disabled_tools.iter().map(|s| s.as_str()).collect();
 
         registry.register(ReadTool::new());
         registry.register(WriteTool::new());
@@ -288,14 +289,14 @@ impl ToolRegistry {
         registry.register(LsTool::new());
 
         if !disabled.contains("web_search") {
-            let cache = Arc::new(super::search_cache::SearchCache::new());
-            registry.register(super::web_search::WebSearchTool::new(cache.clone()));
-            registry.register(super::search_cache::GetSearchResultsTool::new(cache.clone()));
+            let cache = Arc::new(search_cache::SearchCache::new());
+            registry.register(web_search::WebSearchTool::new(cache.clone()));
+            registry.register(search_cache::GetSearchResultsTool::new(cache.clone()));
         }
 
         if !disabled.contains("github_search") {
-            let cache = Arc::new(super::search_cache::SearchCache::new());
-            registry.register(super::github_search::GitHubSearchTool::new(cache));
+            let cache = Arc::new(search_cache::SearchCache::new());
+            registry.register(github_search::GitHubSearchTool::new(cache));
         }
 
         registry.register(SubagentTool::new(cwd));

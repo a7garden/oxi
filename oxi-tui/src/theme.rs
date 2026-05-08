@@ -40,7 +40,7 @@ pub struct ColorScheme {
     pub foreground: Color,
     /// Default background color.
     pub background: Color,
-    /// Primary accent color (UI elements, labels).
+    /// Primary accent color (UI elements, labels, user "You").
     pub primary: Color,
     /// Secondary color (alternative accents).
     pub secondary: Color,
@@ -50,12 +50,16 @@ pub struct ColorScheme {
     pub warning: Color,
     /// Success / confirmation color.
     pub success: Color,
-    /// Muted / dimmed text (e.g. placeholders).
+    /// Muted / dimmed text (e.g. placeholders, tool headers).
     pub muted: Color,
     /// Accent highlight color.
     pub accent: Color,
     /// Border / separator color.
     pub border: Color,
+    /// User message left-border accent (subtle).
+    pub user_border: Color,
+    /// User message background (subtle tint).
+    pub user_bg: Color,
     /// Cursor foreground.
     pub cursor_fg: Color,
     /// Cursor background.
@@ -84,6 +88,8 @@ impl ColorScheme {
             muted: Color::Rgb(80, 80, 100),        // #505064
             accent: Color::Rgb(187, 154, 247),     // #bb9af7
             border: Color::Rgb(30, 30, 30),        // #1e1e1e
+            user_border: Color::Rgb(122, 162, 247), // #7aa2f7 (matches primary)
+            user_bg: Color::Rgb(18, 22, 38),        // #121626 subtle indigo tint
             cursor_fg: Color::Rgb(0, 0, 0),        // #000000
             cursor_bg: Color::Rgb(205, 214, 244),  // #cdd6f4
             selection_bg: Color::Rgb(40, 40, 60),  // #28283c
@@ -96,13 +102,15 @@ impl ColorScheme {
             foreground: Color::Rgb(76, 79, 105),   // #4c4f69
             background: Color::Rgb(239, 241, 245), // #eff1f5
             primary: Color::Rgb(30, 102, 240),     // #1e66f0
-            secondary: Color::Rgb(64, 160, 43),    // #40a02b
+            secondary: Color::Rgb(64, 160, 43),   // #40a02b
             error: Color::Rgb(210, 15, 57),        // #d20f39
-            warning: Color::Rgb(223, 142, 29),     // #df8e1d
-            success: Color::Rgb(64, 160, 43),      // #40a02b
+            warning: Color::Rgb(223, 142, 29),    // #df8e1d
+            success: Color::Rgb(64, 160, 43),    // #40a02b
             muted: Color::Indexed(8),
-            accent: Color::Rgb(136, 57, 239), // #8839ef
+            accent: Color::Rgb(136, 57, 239),     // #8839ef
             border: Color::Indexed(7),
+            user_border: Color::Rgb(30, 102, 240), // #1e66f0 (matches primary)
+            user_bg: Color::Rgb(225, 236, 255),   // #e1ecff subtle blue tint
             cursor_fg: Color::Rgb(239, 241, 245),
             cursor_bg: Color::Rgb(76, 79, 105),
             selection_bg: Color::Rgb(204, 208, 218),
