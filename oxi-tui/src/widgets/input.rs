@@ -35,55 +35,15 @@ pub struct InputState {
     completions: Vec<Completion>,
     completion_index: usize,
     completion_active: bool,
-    /// IME composition state: tracks the last character position that
-    /// was part of an IME composition sequence (Korean, Japanese, Chinese).
-    /// When a new char arrives and the cursor is at composing_pos + 1,
-    /// the previous composing character is replaced instead of appended.
-    composing_pos: Option<usize>,
 }
 
 impl InputState {
     pub fn clear(&mut self) {
         self.text.clear();
         self.cursor = 0;
-        self.composing_pos = None;
     }
 
     pub fn insert_char(&mut self, c: char) {
-        // IME composition handling: if the cursor is right after a composing
-        // character, replace it instead of inserting a new one.
-        // This handles Korean/Japanese/Chinese IME where 'ㅎ' → '하' → '한'
-        // are sent as sequential Char events that should replace each other.
-        let is_ime_candidate = (c as u32 >= 0x1100 && c as u32 <= 0x11FF) // Hangul Jamo
-            || (c as u32 >= 0xAC00 && c as u32 <= 0xD7AF) // Hangul Syllables
-            || (c as u32 >= 0x3040 && c as u32 <= 0x309F) // Hiragana
-            || (c as u32 >= 0x30A0 && c as u32 <= 0x30FF) // Katakana
-            || (c as u32 >= 0x4E00 && c as u32 <= 0x9FFF) // CJK Unified Ideographs
-            || (c as u32 >= 0x3400 && c as u32 <= 0x4DBF) // CJK Extension A
-            || (c as u32 >= 0xFF00 && c as u32 <= 0xFFEF) // Fullwidth forms
-            || (c as u32 >= 0x3130 && c as u32 <= 0x318F); // Hangul Compatibility Jamo
-
-        if is_ime_candidate {
-            if let Some(cp) = self.composing_pos {
-                if self.cursor == cp + 1 {
-                    // Replace the composing character at cp
-                    let byte_pos = self.char_to_byte(cp);
-                    let char_len = self.text[byte_pos..].chars().next().map(|c| c.len_utf8()).unwrap_or(0);
-                    self.text.replace_range(byte_pos..byte_pos + char_len, &c.to_string());
-                    // composing_pos stays the same — still composing
-                    return;
-                }
-            }
-            // New IME composition start
-            let byte_pos = self.char_to_byte(self.cursor);
-            self.text.insert(byte_pos, c);
-            self.cursor += 1;
-            self.composing_pos = Some(self.cursor - 1);
-            return;
-        }
-
-        // Non-IME character — clear composing state
-        self.composing_pos = None;
         let byte_pos = self.char_to_byte(self.cursor);
         self.text.insert(byte_pos, c);
         self.cursor += 1;
@@ -93,7 +53,6 @@ impl InputState {
         let byte_pos = self.char_to_byte(self.cursor);
         self.text.insert_str(byte_pos, s);
         self.cursor += s.chars().count();
-        self.composing_pos = None; // Paste clears composition
     }
 
     pub fn backspace(&mut self) {
@@ -102,7 +61,6 @@ impl InputState {
             let byte_pos = self.char_to_byte(self.cursor);
             self.text.remove(byte_pos);
         }
-        self.composing_pos = None; // Backspace clears composition
     }
 
     pub fn delete(&mut self) {
@@ -110,28 +68,23 @@ impl InputState {
             let byte_pos = self.char_to_byte(self.cursor);
             self.text.remove(byte_pos);
         }
-        self.composing_pos = None;
     }
 
     pub fn move_left(&mut self) {
         self.cursor = self.cursor.saturating_sub(1);
-        self.composing_pos = None; // Cursor movement clears composition
     }
 
     pub fn move_right(&mut self) {
         let max = self.text.chars().count();
         self.cursor = (self.cursor + 1).min(max);
-        self.composing_pos = None;
     }
 
     pub fn move_home(&mut self) {
         self.cursor = 0;
-        self.composing_pos = None;
     }
 
     pub fn move_end(&mut self) {
         self.cursor = self.text.chars().count();
-        self.composing_pos = None;
     }
 
     fn char_to_byte(&self, char_idx: usize) -> usize {
@@ -278,99 +231,80 @@ impl StatefulWidget for Input<'_> {
             return;
         }
 
-        // ── Find cursor position in visible string ──
-        let total_chars = state.text.chars().count();
-        let mut visible_chars: Vec<char> = Vec::new();
-        let mut cursor_in_visible: Option<usize> = None;
-        let mut cursor_width: u16 = 0;
-        let mut col_acc = 0usize;
+        // ── Find visible portion and cursor position ──
+        // All calculations use display widths, not char indices.
+        let chars: Vec<char> = state.text.chars().collect();
+        let total_chars = chars.len();
 
-        // Skip scrolled-off chars
-        for (ci, c) in state.text.chars().enumerate() {
-            let cw = c.width().unwrap_or(0);
-            if col_acc < scroll_col {
-                col_acc += cw;
-            } else {
-                break;
-            }
+        // Compute display width of each character
+        let char_widths: Vec<usize> = chars.iter().map(|c| c.width().unwrap_or(1)).collect();
+        // Display width up to each char position (exclusive prefix)
+        let mut prefix_width: Vec<usize> = vec![0; total_chars + 1];
+        for i in 0..total_chars {
+            prefix_width[i + 1] = prefix_width[i] + char_widths[i];
         }
 
-        // Collect visible chars, track cursor
-        for ci in col_acc..total_chars {
-            let c = state.text.chars().nth(ci).unwrap();
-            let cw = c.width().unwrap_or(1);
-            let screen_col = col_acc.saturating_sub(scroll_col);
+        // Find the first visible char index (skip scrolled-off chars)
+        let mut start_ci = 0;
+        for i in 0..total_chars {
+            if prefix_width[i + 1] > scroll_col {
+                start_ci = i;
+                break;
+            }
+            start_ci = i + 1;
+        }
 
-            if screen_col + cw > max_cols {
+        // Collect visible characters and find cursor
+        let mut visible_str = String::new();
+        let mut cursor_screen_col: Option<usize> = None; // display column within visible area
+        let mut cursor_char = ' ';
+        let mut cursor_w: u16 = 1;
+
+        for ci in start_ci..total_chars {
+            let cw = char_widths[ci];
+            let disp_col = prefix_width[ci].saturating_sub(scroll_col);
+
+            if disp_col + cw > max_cols {
                 break;
             }
 
             if state.cursor == ci {
-                cursor_in_visible = Some(visible_chars.len());
-                cursor_width = cw as u16;
+                cursor_screen_col = Some(disp_col);
+                cursor_char = chars[ci];
+                cursor_w = cw as u16;
             }
 
-            visible_chars.push(c);
-            if cw > 1 {
-                visible_chars.push('\u{0}');
-            }
-            col_acc += cw;
+            visible_str.push(chars[ci]);
         }
 
-        // Cursor at end
-        if state.cursor >= total_chars && cursor_in_visible.is_none() {
-            let end_screen_col = col_acc.saturating_sub(scroll_col);
-            if end_screen_col <= max_cols {
-                cursor_in_visible = Some(visible_chars.len());
-                cursor_width = 1;
+        // Cursor at end of text
+        if state.cursor >= total_chars {
+            let end_col = prefix_width[total_chars].saturating_sub(scroll_col);
+            if end_col <= max_cols {
+                cursor_screen_col = Some(end_col);
+                cursor_char = ' ';
+                cursor_w = 1;
             }
         }
 
-        let visible_str: String = visible_chars.iter().collect();
+        // Render the visible text
+        let line = Line::from(Span::styled(&visible_str, text_fg));
+        Paragraph::new(line).render(text_area, buf);
 
-        // Build Line: pre-cursor + cursor-char + post-cursor
-        if let Some(civ) = cursor_in_visible {
-            let pre: String = visible_chars[..civ].iter().collect();
-            let cursor_ch: String = if civ < visible_chars.len() {
-                visible_chars[civ].to_string()
-            } else {
-                " ".to_string()
-            };
-            let post: String = if civ + 1 < visible_chars.len() {
-                visible_chars[civ + 1..].iter().collect()
-            } else {
-                String::new()
-            };
-
-            let line = Line::from(vec![
-                Span::styled(&pre, text_fg),
-                Span::styled(&cursor_ch, text_fg),
-                Span::styled(&post, text_fg),
-            ]);
-            Paragraph::new(line).render(text_area, buf);
-
-            // ── Manual buf: cursor highlight (justified: fg/bg invert) ──
+        // ── Draw cursor highlight ──
+        if let Some(col) = cursor_screen_col {
             let cursor_style = Style::default()
                 .fg(self.theme.colors.cursor_fg.to_ratatui())
                 .bg(self.theme.colors.cursor_bg.to_ratatui())
                 .add_modifier(Modifier::BOLD);
 
-            // Find screen column of cursor char
-            let mut screen_offset = 0usize;
-            for i in 0..civ {
-                screen_offset += visible_chars[i].width().unwrap_or(1);
-            }
-            let screen_col = content_start + screen_offset as u16;
-
-            if screen_col < area.x + area.width {
-                buf[(screen_col, y)].set_char(cursor_ch.chars().next().unwrap_or(' ')).set_style(cursor_style);
-                if cursor_width > 1 && screen_col + 1 < area.x + area.width {
-                    buf[(screen_col + 1, y)].set_char(' ').set_style(cursor_style);
+            let screen_x = content_start + col as u16;
+            if screen_x < area.x + area.width {
+                buf[(screen_x, y)].set_char(cursor_char).set_style(cursor_style);
+                if cursor_w > 1 && screen_x + 1 < area.x + area.width {
+                    buf[(screen_x + 1, y)].set_char(' ').set_style(cursor_style);
                 }
             }
-        } else {
-            let line = Line::from(Span::styled(visible_str, text_fg));
-            Paragraph::new(line).render(text_area, buf);
         }
     }
 }

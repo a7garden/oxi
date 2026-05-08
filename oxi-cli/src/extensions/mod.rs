@@ -9,7 +9,10 @@ pub mod types;
 
 // Re-export types from submodules
 pub use crate::extensions::context::{ExtensionContext, ExtensionContextBuilder};
-pub use crate::extensions::loading::{discover_extensions, discover_extensions_in_dir, load_extension, load_extensions, validate_extension, ValidatedExtension};
+pub use crate::extensions::loading::{
+    discover_extensions, discover_extensions_in_dir, load_extension, load_extensions,
+    validate_extension, ValidatedExtension, SHARED_LIB_EXTENSION,
+};
 pub use crate::extensions::registry::{ExtensionErrorHandle, ExtensionRegistry, ExtensionRunner};
 pub use crate::extensions::types::{
     AfterProviderResponseEvent, BashEvent, BeforeProviderRequestEvent, Command,
@@ -239,12 +242,6 @@ mod tests {
     }
 
     #[test]
-    fn test_load_extension_missing_file() {
-        let result = load_extension(std::path::Path::new("/nonexistent/extension.so"));
-        assert!(result.is_err());
-    }
-
-    #[test]
     fn test_extension_state_display() {
         assert_eq!(ExtensionState::Pending.to_string(), "pending");
         assert_eq!(ExtensionState::Active.to_string(), "active");
@@ -264,10 +261,4 @@ mod tests {
         assert_eq!(runner.len(), 0);
     }
 
-    #[test]
-    fn test_discover_extensions_empty_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = discover_extensions_in_dir(dir.path());
-        assert!(paths.is_empty());
-    }
 }

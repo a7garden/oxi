@@ -1,4 +1,8 @@
 //! Extension registry and runner.
+//!
+//! Manages in-process extensions: registration, lifecycle hooks, and event dispatch.
+//! Extensions implement the `Extension` trait and are registered via
+//! `ExtensionRegistry::register()` at compile time or runtime.
 
 #![allow(unused)]
 
@@ -18,16 +22,12 @@ use crate::extensions::Extension;
 use crate::CompactionContext;
 use crate::settings::Settings;
 
-use anyhow::{bail, Context, Result};
-use libloading::Library;
 use parking_lot::RwLock;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use async_trait::async_trait;
 
 type ToolType = dyn oxi_agent::AgentTool;
 type ToolArc = Arc<ToolType>;
@@ -39,15 +39,12 @@ type ToolArc = Arc<ToolType>;
 struct LoadedExtension {
     extension: Arc<dyn Extension>,
     enabled: bool,
-    source_path: Option<PathBuf>,
 }
 
 /// pub.
 pub struct ExtensionRegistry {
     entries: HashMap<String, LoadedExtension>,
     errors: Arc<RwLock<Vec<ExtensionErrorRecord>>>,
-    #[allow(dead_code)]
-    libraries: Vec<Library>,
 }
 
 impl Default for ExtensionRegistry {
@@ -60,26 +57,17 @@ impl ExtensionRegistry {
         Self {
             entries: HashMap::new(),
             errors: Arc::new(RwLock::new(Vec::new())),
-            libraries: Vec::new(),
         }
     }
 
-/// TODO: document.
+    /// Register an extension.
     pub fn register(&mut self, ext: Arc<dyn Extension>) {
         let name = ext.name().to_string();
         tracing::info!(name = %name, "extension registered");
-        self.entries.insert(name, LoadedExtension { extension: ext, enabled: true, source_path: None });
+        self.entries.insert(name, LoadedExtension { extension: ext, enabled: true });
     }
 
-/// TODO: document.
-    pub fn register_with_library(&mut self, ext: Arc<dyn Extension>, source_path: PathBuf, library: Library) {
-        let name = ext.name().to_string();
-        tracing::info!(name = %name, path = %source_path.display(), "extension registered (dynamic)");
-        self.libraries.push(library);
-        self.entries.insert(name, LoadedExtension { extension: ext, enabled: true, source_path: Some(source_path) });
-    }
-
-/// TODO: document.
+    /// Unregister an extension by name.
     pub fn unregister(&mut self, name: &str) -> bool {
         if let Some(entry) = self.entries.remove(name) {
             self.call_hook_safe(name, "on_unload", || { entry.extension.on_unload(); });
@@ -90,7 +78,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Disable an extension (keeps it registered but inactive).
     pub fn disable(&mut self, name: &str) -> Result<(), ExtensionError> {
         let ext = {
             let entry = self.entries.get_mut(name).ok_or_else(|| ExtensionError::NotFound { name: name.to_string() })?;
@@ -103,7 +91,7 @@ impl ExtensionRegistry {
         Ok(())
     }
 
-/// TODO: document.
+    /// Enable a previously disabled extension.
     pub fn enable(&mut self, name: &str, ctx: &ExtensionContext) -> Result<(), ExtensionError> {
         let ext = {
             let entry = self.entries.get_mut(name).ok_or_else(|| ExtensionError::NotFound { name: name.to_string() })?;
@@ -116,38 +104,22 @@ impl ExtensionRegistry {
         Ok(())
     }
 
-/// TODO: document.
+    /// Check if an extension is enabled.
     pub fn is_enabled(&self, name: &str) -> bool {
         self.entries.get(name).map(|e| e.enabled).unwrap_or(false)
     }
 
-/// TODO: document.
-    pub fn hot_reload(&mut self, name: &str, ctx: &ExtensionContext) -> Result<(), ExtensionError> {
-        let source_path = {
-            let entry = self.entries.get(name).ok_or_else(|| ExtensionError::NotFound { name: name.to_string() })?;
-            entry.source_path.clone()
-        }.ok_or_else(|| ExtensionError::HotReloadFailed { name: name.to_string(), reason: "no source path recorded".to_string() })?;
-
-        self.unregister(name);
-        let new_ext = crate::extensions::loading::load_extension(&source_path).map_err(|e| ExtensionError::HotReloadFailed { name: name.to_string(), reason: e.to_string() })?;
-        let library = unsafe { Library::new(&source_path).map_err(|e| ExtensionError::HotReloadFailed { name: name.to_string(), reason: format!("Failed to re-open library: {}", e) })? };
-        self.call_hook_safe(name, "on_load", || { new_ext.on_load(ctx); });
-        self.register_with_library(new_ext, source_path, library);
-        tracing::info!(name = %name, "extension hot-reloaded");
-        Ok(())
-    }
-
-/// TODO: document.
+    /// Collect all tools from all enabled extensions.
     pub fn all_tools(&self) -> Vec<ToolArc> {
         self.entries.values().filter(|e| e.enabled).flat_map(|e| e.extension.register_tools()).collect()
     }
 
-/// TODO: document.
+    /// Collect all commands from all enabled extensions.
     pub fn all_commands(&self) -> Vec<Command> {
         self.entries.values().filter(|e| e.enabled).flat_map(|e| e.extension.register_commands()).collect()
     }
 
-/// TODO: document.
+    /// Emit on_load to all enabled extensions.
     pub fn emit_load(&self, ctx: &ExtensionContext) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -155,7 +127,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_unload to all enabled extensions.
     pub fn emit_unload(&self) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -163,7 +135,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_message_sent to all enabled extensions.
     pub fn emit_message_sent(&self, msg: &str) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -171,7 +143,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_message_received to all enabled extensions.
     pub fn emit_message_received(&self, msg: &str) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -179,7 +151,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_tool_call to all enabled extensions.
     pub fn emit_tool_call(&self, tool: &str, params: &Value) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -187,7 +159,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_tool_result to all enabled extensions.
     pub fn emit_tool_result(&self, tool: &str, result: &AgentToolResult) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -195,7 +167,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_session_start to all enabled extensions.
     pub fn emit_session_start(&self, session_id: &str) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -203,7 +175,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_session_end to all enabled extensions.
     pub fn emit_session_end(&self, session_id: &str) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -211,7 +183,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_settings_changed to all enabled extensions.
     pub fn emit_settings_changed(&self, settings: &Settings) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -219,7 +191,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_event to all enabled extensions.
     pub fn emit_event(&self, event: &AgentEvent) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -227,7 +199,7 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Emit on_error to all enabled extensions.
     pub fn emit_error(&self, error: &anyhow::Error) -> Vec<(String, anyhow::Error)> {
         let mut errors = Vec::new();
         for entry in self.entries.values().filter(|e| e.enabled) {
@@ -240,7 +212,7 @@ impl ExtensionRegistry {
         errors
     }
 
-/// TODO: document.
+    /// Emit session_shutdown to all enabled extensions.
     pub fn emit_session_shutdown(&self, event: &SessionShutdownEvent) {
         for entry in self.entries.values().filter(|e| e.enabled) {
             let name = entry.extension.name();
@@ -248,33 +220,33 @@ impl ExtensionRegistry {
         }
     }
 
-/// TODO: document.
+    /// Get an extension by name.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Extension>> {
         self.entries.get(name).map(|e| Arc::clone(&e.extension))
     }
 
-/// TODO: document.
+    /// Get all extension names.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.entries.keys().map(|s| s.as_str())
     }
 
-/// TODO: document.
+    /// Iterate over all extensions.
     pub fn extensions(&self) -> impl Iterator<Item = &Arc<dyn Extension>> {
         self.entries.values().map(|e| &e.extension)
     }
 
-/// TODO: document.
+    /// Get manifest for an extension.
     pub fn manifest(&self, name: &str) -> Option<ExtensionManifest> {
         self.entries.get(name).map(|e| e.extension.manifest())
     }
 
-/// TODO: document.
+    /// Number of registered extensions.
     pub fn len(&self) -> usize { self.entries.len() }
-/// TODO: document.
+    /// Whether any extensions are registered.
     pub fn is_empty(&self) -> bool { self.entries.is_empty() }
-/// TODO: document.
+    /// Get all recorded errors.
     pub fn errors(&self) -> Vec<ExtensionErrorRecord> { self.errors.read().clone() }
-/// TODO: document.
+    /// Clear recorded errors.
     pub fn clear_errors(&self) { self.errors.write().clear(); }
 
     fn call_hook_safe<F>(&self, ext_name: &str, hook: &str, f: F) where F: FnOnce() {
@@ -299,14 +271,13 @@ impl fmt::Debug for ExtensionRegistry {
 // Extension Runner
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// pub.
+/// Orchestrates extension lifecycle and event dispatch.
 pub struct ExtensionRunner {
     registry: ExtensionRegistry,
     states: HashMap<String, ExtensionState>,
     order: Vec<String>,
     error_listeners: Vec<Arc<ExtensionErrorListener>>,
     cwd: PathBuf,
-    load_errors: Vec<(PathBuf, String)>,
 }
 
 impl Default for ExtensionRunner {
@@ -316,7 +287,7 @@ impl Default for ExtensionRunner {
 impl ExtensionRunner {
     /// Create a new extension runner for the given working directory.
     pub fn new(cwd: PathBuf) -> Self {
-        Self { registry: ExtensionRegistry::new(), states: HashMap::new(), order: Vec::new(), error_listeners: Vec::new(), cwd, load_errors: Vec::new() }
+        Self { registry: ExtensionRegistry::new(), states: HashMap::new(), order: Vec::new(), error_listeners: Vec::new(), cwd }
     }
 
     /// Register an error listener and return a handle for unregistering.
@@ -326,7 +297,7 @@ impl ExtensionRunner {
         ExtensionErrorHandle { listener: Some(arc) }
     }
 
-/// TODO: document.
+    /// Emit an error record to all listeners.
     pub fn emit_error_record(&self, record: ExtensionErrorRecord) {
         for listener in &self.error_listeners {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { listener(&record); }));
@@ -334,56 +305,17 @@ impl ExtensionRunner {
         self.registry.errors.write().push(record);
     }
 
-/// TODO: document.
-    pub fn load_extension(&mut self, path: &Path, ctx: &ExtensionContext) -> Result<(), ExtensionError> {
-        let path_display = path.display().to_string();
-
-        // Pre-load validation (existence, size, extension, checksum)
-        let validated = crate::extensions::loading::validate_extension(path)?;
-        tracing::debug!(
-            path = %path_display,
-            checksum = %validated.checksum,
-            "extension binary validated"
-        );
-
-        let ext_os = path.extension().and_then(OsStr::to_str).unwrap_or("");
-        if !matches!(ext_os, "so" | "dylib" | "dll") {
-            return Err(ExtensionError::LoadFailed { name: path_display, reason: format!("Unsupported extension file format: .{}", ext_os) });
-        }
-
-        let library = unsafe { Library::new(path).map_err(|e| { let r = format!("Failed to load library: {}", e); self.load_errors.push((path.to_path_buf(), r.clone())); ExtensionError::LoadFailed { name: path_display.clone(), reason: r } })? };
-
-        const ENTRY_SYMBOL: &[u8] = b"oxi_extension_create\0";
-        type CreateFn = unsafe fn() -> *mut dyn Extension;
-        let create: libloading::Symbol<CreateFn> = unsafe { library.get(ENTRY_SYMBOL).map_err(|e| { let r = format!("Symbol not found: {}", e); self.load_errors.push((path.to_path_buf(), r.clone())); ExtensionError::LoadFailed { name: path_display.clone(), reason: r } })? };
-
-        let raw_ptr = unsafe { create() };
-        if raw_ptr.is_null() {
-            let r = "oxi_extension_create returned null".to_string();
-            self.load_errors.push((path.to_path_buf(), r.clone()));
-            return Err(ExtensionError::LoadFailed { name: path_display, reason: r });
-        }
-
-        let boxed: Box<dyn Extension> = unsafe { Box::from_raw(raw_ptr) };
-        let ext: Arc<dyn Extension> = Arc::from(boxed);
+    /// Register an extension into the runner.
+    pub fn register(&mut self, ext: Arc<dyn Extension>, ctx: &ExtensionContext) {
         let name = ext.name().to_string();
-
-        self.registry.register_with_library(ext, path.to_path_buf(), library);
+        self.registry.register(ext);
         self.set_state(&name, ExtensionState::Active);
-        self.registry.call_hook_safe(&name, "on_load", || { if let Some(e) = self.registry.get(&name) { e.on_load(ctx); } });
-
-        tracing::info!(name = %name, path = %path_display, "extension loaded");
-        Ok(())
+        self.registry.call_hook_safe(&name, "on_load", || {
+            if let Some(e) = self.registry.get(&name) { e.on_load(ctx); }
+        });
     }
 
-/// TODO: document.
-    pub fn load_extensions_from_paths(&mut self, paths: &[PathBuf], ctx: &ExtensionContext) -> Vec<anyhow::Error> {
-        let mut errors = Vec::new();
-        for path in paths { if let Err(e) = self.load_extension(path, ctx) { errors.push(anyhow::anyhow!("{}", e)); } }
-        errors
-    }
-
-/// TODO: document.
+    /// Unregister an extension by name.
     pub fn unload_extension(&mut self, name: &str) -> bool {
         let had = self.registry.unregister(name);
         if had { self.set_state(name, ExtensionState::Unloaded); tracing::info!(name = %name, "extension unloaded"); }
@@ -396,28 +328,26 @@ impl ExtensionRunner {
         if state == ExtensionState::Unloaded { self.order.retain(|n| n != name); }
     }
 
-/// TODO: document.
+    /// Get the state of an extension.
     pub fn state(&self, name: &str) -> ExtensionState { self.states.get(name).copied().unwrap_or(ExtensionState::Unloaded) }
-/// TODO: document.
+    /// Get all extension states.
     pub fn states(&self) -> &HashMap<String, ExtensionState> { &self.states }
-/// TODO: document.
+    /// Get the extension execution order.
     pub fn extension_order(&self) -> &[String] { &self.order }
-/// TODO: document.
-    pub fn load_errors(&self) -> &[(PathBuf, String)] { &self.load_errors }
 
-/// TODO: document.
+    /// Disable an extension.
     pub fn disable(&mut self, name: &str) -> Result<(), ExtensionError> { self.registry.disable(name)?; self.set_state(name, ExtensionState::Disabled); Ok(()) }
-/// TODO: document.
+    /// Enable an extension.
     pub fn enable(&mut self, name: &str, ctx: &ExtensionContext) -> Result<(), ExtensionError> { self.registry.enable(name, ctx)?; self.set_state(name, ExtensionState::Active); Ok(()) }
-/// TODO: document.
+    /// Check if an extension is enabled.
     pub fn is_enabled(&self, name: &str) -> bool { self.registry.is_enabled(name) }
 
-/// TODO: document.
+    /// Whether any handlers exist for an event type.
     pub fn has_handlers(&self, _event_type: &str) -> bool { self.has_enabled_extensions() }
-/// TODO: document.
+    /// Whether any extensions are enabled.
     pub fn has_enabled_extensions(&self) -> bool { self.registry.extensions().any(|_| true) && self.order.iter().any(|name| self.state(name) == ExtensionState::Active) }
 
-/// TODO: document.
+    /// Collect all tools from enabled extensions.
     pub fn all_tools(&self) -> Vec<ToolArc> {
         let mut tools = Vec::new();
         for name in &self.order {
@@ -427,7 +357,7 @@ impl ExtensionRunner {
         tools
     }
 
-/// TODO: document.
+    /// Collect all commands from enabled extensions.
     pub fn all_commands(&self) -> Vec<Command> {
         let mut commands = Vec::new();
         for name in &self.order {
@@ -437,15 +367,15 @@ impl ExtensionRunner {
         commands
     }
 
-/// TODO: document.
+    /// Wrap a tool with extension error handling.
     pub fn wrap_tool(&self, tool: ToolArc) -> ToolArc {
         Arc::new(WrappedTool { inner: tool, runner_state: Arc::new(RwLock::new(RunnerState { errors: self.registry.errors.clone(), error_listeners: self.error_listeners.clone() })) })
     }
 
-/// TODO: document.
+    /// Wrap multiple tools with extension error handling.
     pub fn wrap_tools(&self, tools: Vec<ToolArc>) -> Vec<ToolArc> { tools.into_iter().map(|t| self.wrap_tool(t)).collect() }
 
-/// TODO: document.
+    /// Emit before_tool_call and on_tool_call events.
     pub fn emit_tool_call(&self, tool_name: &str, params: &Value) -> ToolCallEmitResult {
         let mut result = ToolCallEmitResult::default();
         for name in &self.order {
@@ -462,7 +392,7 @@ impl ExtensionRunner {
         result
     }
 
-/// TODO: document.
+    /// Emit after_tool_call and on_tool_result events.
     pub fn emit_tool_result_event(&self, tool_name: &str, tool_result: &AgentToolResult) -> ToolResultEmitResult {
         let mut result = ToolResultEmitResult::default();
         for name in &self.order {
@@ -477,7 +407,7 @@ impl ExtensionRunner {
         result
     }
 
-/// TODO: document.
+    /// Emit input event through extensions.
     pub fn emit_input_event(&self, event: &mut InputEvent) -> InputEventResult {
         let mut final_result = InputEventResult::Continue;
         for name in &self.order {
@@ -500,7 +430,7 @@ impl ExtensionRunner {
         final_result
     }
 
-/// TODO: document.
+    /// Emit context event (message modification).
     pub fn emit_context_event(&self, messages: Vec<oxi_ai::Message>) -> ContextEmitResult {
         let mut current_messages = messages;
         let mut errors = Vec::new();
@@ -521,7 +451,7 @@ impl ExtensionRunner {
         ContextEmitResult { modified, messages: current_messages, errors }
     }
 
-/// TODO: document.
+    /// Emit before_provider_request event.
     pub fn emit_before_provider_request_event(&self, payload: Value) -> ProviderRequestEmitResult {
         let mut current_payload = payload;
         let mut modified = false;
@@ -541,7 +471,7 @@ impl ExtensionRunner {
         ProviderRequestEmitResult { modified, payload: current_payload, errors }
     }
 
-/// TODO: document.
+    /// Emit session_before_switch event.
     pub fn emit_session_before_switch_event(&self, event: &SessionBeforeSwitchEvent) -> SessionBeforeEmitResult {
         let mut result = SessionBeforeEmitResult::default();
         for name in &self.order {
@@ -558,7 +488,7 @@ impl ExtensionRunner {
         result
     }
 
-/// TODO: document.
+    /// Emit session_before_fork event.
     pub fn emit_session_before_fork_event(&self, event: &SessionBeforeForkEvent) -> SessionBeforeEmitResult {
         let mut result = SessionBeforeEmitResult::default();
         for name in &self.order {
@@ -575,7 +505,7 @@ impl ExtensionRunner {
         result
     }
 
-/// TODO: document.
+    /// Emit session_before_compact event.
     pub fn emit_session_before_compact_event(&self, event: &SessionBeforeCompactEvent) -> SessionBeforeEmitResult {
         let mut result = SessionBeforeEmitResult::default();
         for name in &self.order {
@@ -592,7 +522,7 @@ impl ExtensionRunner {
         result
     }
 
-/// TODO: document.
+    /// Emit session_before_tree event.
     pub fn emit_session_before_tree_event(&self, event: &SessionBeforeTreeEvent) -> SessionBeforeEmitResult {
         let mut result = SessionBeforeEmitResult::default();
         for name in &self.order {
@@ -609,31 +539,31 @@ impl ExtensionRunner {
         result
     }
 
-/// TODO: document.
+    /// Emit session_shutdown event.
     pub fn emit_session_shutdown_event(&self, event: &SessionShutdownEvent) -> bool {
         if !self.has_enabled_extensions() { return false; }
         self.registry.emit_session_shutdown(event);
         true
     }
 
-/// TODO: document.
+    /// Emit a generic agent event.
     pub fn emit_event(&self, event: &AgentEvent) { self.registry.emit_event(event); }
 
-/// TODO: document.
+    /// Access the underlying registry.
     pub fn registry(&self) -> &ExtensionRegistry { &self.registry }
-/// TODO: document.
+    /// Access the underlying registry mutably.
     pub fn registry_mut(&mut self) -> &mut ExtensionRegistry { &mut self.registry }
-/// TODO: document.
+    /// Get an extension by name.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Extension>> { self.registry.get(name) }
-/// TODO: document.
+    /// Get all extension names in execution order.
     pub fn names(&self) -> impl Iterator<Item = &str> { self.order.iter().map(|s| s.as_str()) }
-/// TODO: document.
+    /// Number of extensions.
     pub fn len(&self) -> usize { self.order.len() }
-/// TODO: document.
+    /// Whether any extensions exist.
     pub fn is_empty(&self) -> bool { self.order.is_empty() }
-/// TODO: document.
+    /// Get all recorded errors.
     pub fn errors(&self) -> Vec<ExtensionErrorRecord> { self.registry.errors() }
-/// TODO: document.
+    /// Clear recorded errors.
     pub fn clear_errors(&self) { self.registry.clear_errors(); }
 }
 

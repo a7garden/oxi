@@ -136,21 +136,8 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Load extensions
+    // Extension registry (for future Rust-native extensions)
     let mut ext_registry = ExtensionRegistry::new();
-    if !args.extensions.is_empty() {
-        let paths: Vec<&Path> = args.extensions.iter().map(|p| p.as_path()).collect();
-        let (loaded, errors) = oxi::extensions::load_extensions(&paths);
-        for ext in loaded {
-            ext_registry.register(ext);
-        }
-        for err in &errors {
-            tracing::warn!("{}", err);
-        }
-        if !errors.is_empty() {
-            anyhow::bail!("{} extension(s) failed to load", errors.len());
-        }
-    }
 
     // Build initial prompt if provided
     let prompt = args.prompt.join(" ");
