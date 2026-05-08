@@ -438,6 +438,7 @@ impl Settings {
     /// | `OXI_EXTENSIONS_ENABLED`  | `extensions_enabled`   |
     /// | `OXI_AUTO_COMPACTION`     | `auto_compaction`      |
     /// | `OXI_TOOL_TIMEOUT`        | `tool_timeout_seconds` |
+    /// | `OXI_DISABLED_TOOLS`      | `disabled_tools`       |
     pub fn apply_env(&mut self) {
         if let Ok(v) = env::var("OXI_MODEL") {
             self.default_model = Some(v);
@@ -485,6 +486,9 @@ impl Settings {
             if let Ok(n) = v.parse::<u64>() {
                 self.tool_timeout_seconds = n;
             }
+        }
+        if let Ok(v) = env::var("OXI_DISABLED_TOOLS") {
+            self.disabled_tools = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         }
     }
 

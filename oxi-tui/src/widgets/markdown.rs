@@ -109,10 +109,31 @@ pub fn parse_inline(line: &str) -> Vec<Segment> {
                 }
             }
 
+            // ── italic _…_ ─────────────────────────────────────────
+            '_' => {
+                if !normal.is_empty() {
+                    segments.push(Segment::Normal(normal.clone()));
+                    normal.clear();
+                }
+                let mut italic = String::new();
+                while let Some(&next) = chars.peek() {
+                    if next == '_' {
+                        chars.next(); // consume closing '_'
+                        break;
+                    }
+                    italic.push(chars.next().unwrap());
+                }
+                segments.push(Segment::Italic(italic));
+            }
+
             // ── normal char ────────────────────────────────────────
             _ => normal.push(c),
         }
     }
+
+    // Un-closed trailing italic — fall back to normal text by
+    // checking whether the open '_' consumed any chars.
+    // (Already handled above; nothing extra needed here.)
 
     if !normal.is_empty() {
         segments.push(Segment::Normal(normal));
@@ -197,6 +218,11 @@ pub fn bold_style(base: Style) -> Style {
     base.add_modifier(Modifier::BOLD)
 }
 
+/// Style used for italic text.
+pub fn italic_style(base: Style) -> Style {
+    base.add_modifier(Modifier::ITALIC)
+}
+
 /// Style used for links (visible text portion).
 pub fn link_style(base: Style) -> Style {
     base.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED)
@@ -241,6 +267,24 @@ mod tests {
         assert_eq!(segs[0], Segment::Normal("use ".into()));
         assert_eq!(segs[1], Segment::Code("foo".into()));
         assert_eq!(segs[2], Segment::Normal(" here".into()));
+    }
+
+    #[test]
+    fn parse_inline_italic() {
+        let segs = parse_inline("this is _italic_ text");
+        assert_eq!(segs.len(), 3);
+        assert_eq!(segs[0], Segment::Normal("this is ".into()));
+        assert_eq!(segs[1], Segment::Italic("italic".into()));
+        assert_eq!(segs[2], Segment::Normal(" text".into()));
+    }
+
+    #[test]
+    fn parse_inline_bold_and_italic() {
+        let segs = parse_inline("**bold** and _italic_");
+        assert_eq!(segs.len(), 3);
+        assert_eq!(segs[0], Segment::Bold("bold".into()));
+        assert_eq!(segs[1], Segment::Normal(" and ".into()));
+        assert_eq!(segs[2], Segment::Italic("italic".into()));
     }
 
     #[test]

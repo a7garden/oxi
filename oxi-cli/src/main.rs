@@ -165,7 +165,10 @@ async fn main() -> Result<()> {
         let names: Vec<&str> = tools_str.split(',').map(|s| s.trim()).collect();
         oxi_agent::ToolRegistry::with_selected_tools(cwd.clone(), &names)
     } else {
-        oxi_agent::ToolRegistry::with_builtins_cwd(cwd.clone())
+        oxi_agent::ToolRegistry::with_builtins_cwd(
+            cwd.clone(),
+            &app.settings().disabled_tools,
+        )
     };
     for name in builtin_registry.names() {
         if let Some(tool) = builtin_registry.get(&name) {

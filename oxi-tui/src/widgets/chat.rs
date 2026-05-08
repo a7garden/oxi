@@ -486,7 +486,7 @@ impl StatefulWidget for ChatView<'_> {
                         let seg_style = match seg {
                             markdown::Segment::Normal(_) => line_base_style,
                             markdown::Segment::Bold(_) => markdown::bold_style(line_base_style),
-                            markdown::Segment::Italic(_) => line_base_style,
+                            markdown::Segment::Italic(_) => markdown::italic_style(line_base_style),
                             markdown::Segment::Code(_) => markdown::code_style(line_base_style),
                             markdown::Segment::Link { .. } => markdown::link_style(line_base_style),
                         };

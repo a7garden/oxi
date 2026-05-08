@@ -318,7 +318,8 @@ pub fn create_agent_session_from_services(
     // Register tools: use provided registry or fallback to builtins
     let registry = options.tool_registry.unwrap_or_else(|| {
         Arc::new(oxi_agent::ToolRegistry::with_builtins_cwd(
-            PathBuf::from(&cwd)
+            PathBuf::from(&cwd),
+            &services.settings.disabled_tools,
         ))
     });
     let agent_tools = agent.tools();
