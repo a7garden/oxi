@@ -268,13 +268,17 @@ impl ToolRegistry {
     /// assert!(tools.contains(&"bash".to_string()));
     /// ```
     pub fn with_builtins() -> Self {
-        Self::with_builtins_cwd(PathBuf::from("."))
+        Self::with_builtins_cwd(PathBuf::from("."), &[])
     }
 
     /// Create a registry with all built-in tools, using the given cwd.
-    pub fn with_builtins_cwd(cwd: PathBuf) -> Self {
+    ///
+    /// Pass `disabled_tools` to selectively disable built-in tools
+    /// (e.g. `["web_search", "github_search"]` for a minimal setup).
+    pub fn with_builtins_cwd(cwd: PathBuf, disabled_tools: &[String]) -> Self {
         let registry = Self::new();
-        // search tools disabled
+        let disabled: std::collections::HashSet<_> = disabled_tools.iter().collect();
+
         registry.register(ReadTool::new());
         registry.register(WriteTool::new());
         registry.register(EditTool::new());
@@ -282,16 +286,25 @@ impl ToolRegistry {
         registry.register(GrepTool::new());
         registry.register(FindTool::new());
         registry.register(LsTool::new());
-        // registry.register(WebSearchTool::new(search_cache.clone()));
-        // registry.register(GetSearchResultsTool::new(search_cache.clone()));
-        // registry.register(GitHubSearchTool::new(search_cache));
+
+        if !disabled.contains("web_search") {
+            let cache = Arc::new(super::search_cache::SearchCache::new());
+            registry.register(super::web_search::WebSearchTool::new(cache.clone()));
+            registry.register(super::search_cache::GetSearchResultsTool::new(cache.clone()));
+        }
+
+        if !disabled.contains("github_search") {
+            let cache = Arc::new(super::search_cache::SearchCache::new());
+            registry.register(super::github_search::GitHubSearchTool::new(cache));
+        }
+
         registry.register(SubagentTool::new(cwd));
         registry
     }
 
     /// Create registry with selected builtins only.
     pub fn with_selected_tools(cwd: PathBuf, names: &[&str]) -> Self {
-        let full = Self::with_builtins_cwd(cwd);
+        let full = Self::with_builtins_cwd(cwd, &[]);
         let registry = Self::new();
         let set: std::collections::HashSet<&str> = names.iter().copied().collect();
         for name in full.names() {

@@ -124,6 +124,11 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub auto_compaction: bool,
 
+    /// Built-in tools to disable (by name, e.g. `["web_search", "github_search"]`).
+    /// All tools are enabled by default; list tools here to turn them off.
+    #[serde(default)]
+    pub disabled_tools: Vec<String>,
+
     // ── Timeouts ─────────────────────────────────────────────────────
     /// Timeout in seconds for tool execution
     #[serde(default = "default_tool_timeout")]
@@ -194,6 +199,7 @@ impl Default for Settings {
             stream_responses: true,
             extensions_enabled: true,
             auto_compaction: true,
+            disabled_tools: Vec::new(),
             tool_timeout_seconds: default_tool_timeout(),
             extensions: Vec::new(),
             skills: Vec::new(),

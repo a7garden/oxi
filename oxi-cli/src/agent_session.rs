@@ -897,12 +897,13 @@ impl AgentSession {
         let context_window = 128_000;
 
         // Check threshold
-        let threshold = config.threshold as usize;
-        if estimated_tokens > (context_window * threshold / 100) {
+        let ratio = estimated_tokens as f32 / context_window as f32;
+        if ratio >= config.threshold {
             tracing::info!(
-                "Auto-compaction triggered: {} tokens > {}% of {}",
+                "Auto-compaction triggered: {} tokens ({:.0}%) >= {:.0}% of {}",
                 estimated_tokens,
-                threshold,
+                ratio * 100.0,
+                config.threshold * 100.0,
                 context_window,
             );
 

@@ -153,76 +153,62 @@ async fn handle_key(
             None
         }
         KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if !state.is_agent_busy {
-                state.input.insert_char(c);
-                state.update_slash_completions();
-            }
+            state.input.insert_char(c);
+            state.update_slash_completions();
             None
         }
         KeyCode::Backspace => {
-            if !state.is_agent_busy {
-                state.input.backspace();
-                state.update_slash_completions();
-            }
+            state.input.backspace();
+            state.update_slash_completions();
             None
         }
         KeyCode::Delete => {
-            if !state.is_agent_busy {
-                state.input.delete();
-                state.update_slash_completions();
-            }
+            state.input.delete();
+            state.update_slash_completions();
             None
         }
         KeyCode::Left => {
-            if !state.is_agent_busy {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    let text: Vec<char> = state.input.text.chars().collect();
-                    let mut pos = state.input.cursor;
-                    while pos > 0 && text[pos - 1].is_whitespace() {
-                        pos -= 1;
-                    }
-                    while pos > 0 && !text[pos - 1].is_whitespace() {
-                        pos -= 1;
-                    }
-                    state.input.cursor = pos;
-                } else {
-                    state.input.move_left();
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                let text: Vec<char> = state.input.text.chars().collect();
+                let mut pos = state.input.cursor;
+                while pos > 0 && text[pos - 1].is_whitespace() {
+                    pos -= 1;
                 }
+                while pos > 0 && !text[pos - 1].is_whitespace() {
+                    pos -= 1;
+                }
+                state.input.cursor = pos;
+            } else {
+                state.input.move_left();
             }
             None
         }
         KeyCode::Right => {
-            if !state.is_agent_busy {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    let text: Vec<char> = state.input.text.chars().collect();
-                    let mut pos = state.input.cursor;
-                    while pos < text.len() && !text[pos].is_whitespace() {
-                        pos += 1;
-                    }
-                    while pos < text.len() && text[pos].is_whitespace() {
-                        pos += 1;
-                    }
-                    state.input.cursor = pos;
-                } else {
-                    state.input.move_right();
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                let text: Vec<char> = state.input.text.chars().collect();
+                let mut pos = state.input.cursor;
+                while pos < text.len() && !text[pos].is_whitespace() {
+                    pos += 1;
                 }
+                while pos < text.len() && text[pos].is_whitespace() {
+                    pos += 1;
+                }
+                state.input.cursor = pos;
+            } else {
+                state.input.move_right();
             }
             None
         }
         KeyCode::Home => {
-            if !state.is_agent_busy {
-                state.input.move_home();
-            }
+            state.input.move_home();
             None
         }
         KeyCode::End => {
-            if !state.is_agent_busy {
-                state.input.move_end();
-            }
+            state.input.move_end();
             None
         }
         KeyCode::Tab => {
-            if !state.is_agent_busy && state.slash_completion_active {
+            if state.slash_completion_active {
                 let cmd = state.selected_slash_command().map(|c| c.name.clone());
                 state.clear_slash_completions();
                 state.input_clear();
@@ -233,12 +219,9 @@ async fn handle_key(
             None
         }
         KeyCode::Up => {
-            if !state.is_agent_busy && state.slash_completion_active {
+            if state.slash_completion_active {
                 state.prev_slash_completion();
-            } else if !state.is_agent_busy
-                && state.input.text.is_empty()
-                && !state.input_history.is_empty()
-            {
+            } else if state.input.text.is_empty() && !state.input_history.is_empty() {
                 if state.history_index == 0 {
                     state.saved_input = state.input.text.clone();
                 }
@@ -255,9 +238,9 @@ async fn handle_key(
             None
         }
         KeyCode::Down => {
-            if !state.is_agent_busy && state.slash_completion_active {
+            if state.slash_completion_active {
                 state.next_slash_completion();
-            } else if !state.is_agent_busy && state.history_index > 0 {
+            } else if state.history_index > 0 {
                 state.history_index -= 1;
                 if state.history_index == 0 {
                     state.input_set_text(state.saved_input.clone());
