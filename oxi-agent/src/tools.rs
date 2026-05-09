@@ -98,6 +98,13 @@ pub trait AgentTool: Send + Sync {
     /// JSON Schema for parameters
     fn parameters_schema(&self) -> Value;
 
+    /// Whether this tool is essential (cannot be disabled).
+    /// Essential tools: read, write, edit, bash, grep, find, ls
+    /// Optional tools: web_search, github, subagent, etc.
+    fn essential(&self) -> bool {
+        false
+    }
+
     /// Execute the tool with the given tool call ID and parameters.
     ///
     /// # Examples
@@ -288,31 +295,34 @@ impl ToolRegistry {
         let disabled: std::collections::HashSet<&str> =
             disabled_tools.iter().map(|s| s.as_str()).collect();
 
-        // Essential tools — always enabled, cannot be disabled
-        registry.register(ReadTool::new());
-        registry.register(WriteTool::new());
-        registry.register(EditTool::new());
-        registry.register(BashTool::new());
-        registry.register(GrepTool::new());
-        registry.register(FindTool::new());
-        registry.register(LsTool::new());
+        // Helper to create shared cache on demand
+        let cache_once: std::cell::OnceCell<Arc<search_cache::SearchCache>> = std::cell::OnceCell::new();
 
-        // Optional tools — can be disabled via settings, env, or /tools command
+        // Register all builtin tools — essential ones ignore disabled list
+        let all_tools: Vec<Box<dyn AgentTool>> = vec![
+            Box::new(ReadTool::new()),
+            Box::new(WriteTool::new()),
+            Box::new(EditTool::new()),
+            Box::new(BashTool::new()),
+            Box::new(GrepTool::new()),
+            Box::new(FindTool::new()),
+            Box::new(LsTool::new()),
+            Box::new(web_search::WebSearchTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
+            Box::new(search_cache::GetSearchResultsTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
+            Box::new(github::GitHubTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
+            Box::new(SubagentTool::new(cwd)),
+        ];
 
-        if !disabled.contains("web_search") {
-            let cache = Arc::new(search_cache::SearchCache::new());
-            registry.register(web_search::WebSearchTool::new(cache.clone()));
-            registry.register(search_cache::GetSearchResultsTool::new(cache.clone()));
+        for tool in all_tools {
+            if tool.essential() || !disabled.contains(tool.name()) {
+                // web_search ↔ get_search_results coupling
+                if tool.name() == "get_search_results" && disabled.contains("web_search") {
+                    continue;
+                }
+                registry.register_arc(Arc::from(tool));
+            }
         }
 
-        if !disabled.contains("github") && !disabled.contains("github_search") {
-            let cache = Arc::new(search_cache::SearchCache::new());
-            registry.register(github::GitHubTool::new(cache));
-        }
-
-        if !disabled.contains("subagent") {
-            registry.register(SubagentTool::new(cwd));
-        }
         registry
     }
 

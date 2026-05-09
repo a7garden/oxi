@@ -206,9 +206,11 @@ impl AgentTool for EditTool {
     }
 
     fn label(&self) -> &str {
+
         "Edit File"
     }
 
+    fn essential(&self) -> bool { true }
     fn description(&self) -> &str {
         "Make targeted edits to a file. Supports both single edit (old_text/new_text) and multiple edits (edits[] array). \
          Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. \

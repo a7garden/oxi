@@ -135,24 +135,29 @@ pub(crate) fn handle_slash_command(
             // let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd);
             let registry = session.agent_ref().tools();
             let names = registry.names();
+            let mut essential_lines = Vec::new();
+            let mut optional_lines = Vec::new();
+            let mut wasm_lines = Vec::new();
             let builtin_names: std::collections::HashSet<&str> = [
                 "read", "write", "edit", "bash", "grep", "find", "ls",
                 "web_search", "get_search_results", "github", "subagent",
             ].into_iter().collect();
-            let mut builtin_lines = Vec::new();
-            let mut wasm_lines = Vec::new();
             for name in &names {
                 if let Some(tool) = registry.get(name) {
                     let line = format!("  {} — {}", name, tool.label());
-                    if builtin_names.contains(name.as_str()) {
-                        builtin_lines.push(line);
+                    if tool.essential() {
+                        essential_lines.push(format!("{} [essential]", line));
+                    } else if builtin_names.contains(name.as_str()) {
+                        optional_lines.push(format!("{} [toggle]", line));
                     } else {
-                        wasm_lines.push(line);
+                        wasm_lines.push(format!("{} [wasm]", line));
                     }
                 }
             }
-            let mut out = "Built-in Tools:\n\n".to_string();
-            for line in &builtin_lines { out.push_str(line); out.push('\n'); }
+            let mut out = "Essential (always on):\n\n".to_string();
+            for line in &essential_lines { out.push_str(line); out.push('\n'); }
+            out.push_str("\nOptional (toggle with /tools <name>):\n\n");
+            for line in &optional_lines { out.push_str(line); out.push('\n'); }
             if !wasm_lines.is_empty() {
                 out.push_str("\nWASM Extensions:\n\n");
                 for line in &wasm_lines { out.push_str(line); out.push('\n'); }
@@ -637,6 +642,16 @@ fn handle_tool_command(
     }
 
     if registry.get(&tool_name).is_some() {
+        // Check if essential — cannot disable
+        if let Some(tool) = registry.get(&tool_name) {
+            if tool.essential() {
+                state.add_system_message(format!(
+                    "Cannot disable essential tool: {}",
+                    tool_name
+                ));
+                return;
+            }
+        }
         // Tool exists — unregister (disable)
         registry.unregister(&tool_name);
         // web_search and get_search_results share a cache — disable both

@@ -201,9 +201,11 @@ impl AgentTool for LsTool {
     }
 
     fn label(&self) -> &str {
+
         "Ls"
     }
 
+    fn essential(&self) -> bool { true }
     fn description(&self) -> &str {
         "List directory contents. Shows files and subdirectories with optional details."
     }

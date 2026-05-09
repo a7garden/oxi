@@ -288,9 +288,11 @@ impl AgentTool for FindTool {
     }
 
     fn label(&self) -> &str {
+
         "Find"
     }
 
+    fn essential(&self) -> bool { true }
     fn description(&self) -> &str {
         "Find files and directories by name pattern and type. Searches recursively from the given path."
     }

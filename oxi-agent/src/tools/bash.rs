@@ -303,9 +303,11 @@ impl AgentTool for BashTool {
     }
 
     fn label(&self) -> &str {
+
         "Bash"
     }
 
+    fn essential(&self) -> bool { true }
     fn description(&self) -> &str {
         "Execute a bash command in a shell. Returns stdout and stderr. \
          Output is truncated to 2000 lines or 50KB (whichever is hit first). \

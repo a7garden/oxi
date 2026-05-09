@@ -164,9 +164,11 @@ impl AgentTool for WriteTool {
     }
 
     fn label(&self) -> &str {
+
         "Write File"
     }
 
+    fn essential(&self) -> bool { true }
     fn description(&self) -> &str {
         "Write content to a file, creating parent directories as needed. Existing files will be overwritten. Use append=true to append to existing files."
     }

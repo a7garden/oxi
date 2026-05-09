@@ -298,9 +298,11 @@ impl AgentTool for GrepTool {
     }
 
     fn label(&self) -> &str {
+
         "Grep"
     }
 
+    fn essential(&self) -> bool { true }
     fn description(&self) -> &str {
         "Search files for a pattern. Returns matching lines with file paths and line numbers. Use literal=true to treat pattern as a literal string. Use context=n to show n lines before and after matches. Long lines are truncated to 500 chars."
     }
