@@ -4,9 +4,10 @@
 //! `.oxi/extensions/`. Each extension exports well-known functions (`init`,
 //! `register_tools`, `execute_tool`) called via Extism's JSON-in/JSON-out
 //! protocol. Extensions run inside a WASM sandbox with zero host access by
-//! default.
+//! default — HTTP access is granted via the `oxi_http_request` host function.
 
 use anyhow::{Context, Result};
+use extism::{CurrentPlugin, Function, UserData, Val, ValType, PTR};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -41,6 +42,101 @@ pub struct LoadedWasmExtension {
     pub source_path: PathBuf,
 }
 
+// ── Host Functions ────────────────────────────────────────────────────
+
+/// Host function: `oxi_http_request(request_json) -> response_json`
+///
+/// Request JSON: `{"url": "...", "method": "GET", "headers": {...}, "body": "..."}`
+/// Response JSON: `{"status": 200, "headers": {...}, "body": "..."}`
+fn host_oxi_http_request(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    outputs: &mut [Val],
+    user_data: UserData<Arc<reqwest::blocking::Client>>,
+) -> Result<(), extism::Error> {
+    // We use anyhow internally, then convert at the boundary
+    let result: anyhow::Result<()> = (|| {
+        let input_json: String = plugin.memory_get_val(&inputs[0])?;
+
+        #[derive(Deserialize)]
+        struct HttpReq {
+            url: String,
+            #[serde(default)]
+            method: String,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            #[serde(default)]
+            body: Option<String>,
+        }
+
+        let req: HttpReq = serde_json::from_str(&input_json)
+            .context("oxi_http_request: invalid request JSON")?;
+
+        let method = if req.method.is_empty() { "GET" } else { &req.method };
+
+        // UserData::get() returns Arc<Mutex<T>>
+        let client_arc = user_data.get()?;
+        let client = client_arc.lock().unwrap();
+
+        let method = match method.to_uppercase().as_str() {
+            "GET" => reqwest::Method::GET,
+            "POST" => reqwest::Method::POST,
+            "PUT" => reqwest::Method::PUT,
+            "DELETE" => reqwest::Method::DELETE,
+            "PATCH" => reqwest::Method::PATCH,
+            "HEAD" => reqwest::Method::HEAD,
+            other => anyhow::bail!("oxi_http_request: unsupported method '{}'", other),
+        };
+
+        let mut rb = client.request(method, &req.url);
+        for (k, v) in &req.headers {
+            rb = rb.header(k, v);
+        }
+        if let Some(body) = &req.body {
+            rb = rb.body(body.clone());
+        }
+
+        // Execute HTTP request (blocking — called from spawn_blocking in wasm_tool.rs)
+        let resp = rb.send().map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
+        let status = resp.status().as_u16();
+        let resp_headers: HashMap<String, String> = resp
+            .headers()
+            .iter()
+            .map(|(k, v)| {
+                (k.to_string(), v.to_str().unwrap_or("").to_string())
+            })
+            .collect();
+        let resp_body = resp.text().map_err(|e| anyhow::anyhow!("Failed to read response body: {}", e))?;
+
+        let response = serde_json::json!({
+            "status": status,
+            "headers": resp_headers,
+            "body": resp_body,
+        });
+
+        let output = serde_json::to_string(&response)?;
+        let handle = plugin.memory_new(&output)?;
+        if !outputs.is_empty() {
+            outputs[0] = plugin.memory_to_val(handle);
+        }
+        Ok(())
+    })();
+
+    result.map_err(|e| extism::Error::from(e))
+}
+
+/// Host function: `oxi_log(message)` — logs a debug message from WASM.
+fn host_oxi_log(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    _outputs: &mut [Val],
+    _user_data: UserData<()>,
+) -> Result<(), extism::Error> {
+    let message: String = plugin.memory_get_val(&inputs[0])?;
+    tracing::debug!("[WASM] {}", message);
+    Ok(())
+}
+
 // ── Manager ──────────────────────────────────────────────────────────
 
 /// Manages WASM extensions: discovery, loading, and tool execution.
@@ -50,6 +146,8 @@ pub struct WasmExtensionManager {
     plugins: Arc<RwLock<HashMap<String, extism::Plugin>>>,
     /// Maps tool name → extension name.
     tool_to_ext: HashMap<String, String>,
+    /// HTTP client shared by all extensions for oxi_http_request.
+    http_client: Arc<reqwest::blocking::Client>,
 }
 
 impl WasmExtensionManager {
@@ -59,6 +157,17 @@ impl WasmExtensionManager {
             extensions: HashMap::new(),
             plugins: Arc::new(RwLock::new(HashMap::new())),
             tool_to_ext: HashMap::new(),
+            http_client: Arc::new(reqwest::blocking::Client::new()),
+        }
+    }
+
+    /// Create with a custom HTTP client (useful for testing with a mock client).
+    pub fn with_http_client(client: reqwest::blocking::Client) -> Self {
+        Self {
+            extensions: HashMap::new(),
+            plugins: Arc::new(RwLock::new(HashMap::new())),
+            tool_to_ext: HashMap::new(),
+            http_client: Arc::new(client),
         }
     }
 
@@ -99,6 +208,27 @@ impl WasmExtensionManager {
 
     // ── Loading ────────────────────────────────────────────────────
 
+    /// Build the host functions available to all WASM extensions.
+    fn host_functions(http_client: &Arc<reqwest::blocking::Client>) -> Vec<Function> {
+        let http_fn = Function::new(
+            "oxi_http_request",
+            [PTR],
+            [PTR],
+            UserData::new(http_client.clone()),
+            host_oxi_http_request,
+        );
+
+        let log_fn = Function::new(
+            "oxi_log",
+            [PTR],
+            [],
+            UserData::new(()),
+            host_oxi_log,
+        );
+
+        vec![http_fn, log_fn]
+    }
+
     /// Load a single `.wasm` extension.
     pub fn load(&mut self, path: &Path) -> Result<ExtensionInfo> {
         let path_display = path.display().to_string();
@@ -108,7 +238,10 @@ impl WasmExtensionManager {
             .with_context(|| format!("Failed to read extension: {}", path_display))?;
 
         let manifest = extism::Manifest::new([extism::Wasm::data(wasm_bytes)]);
-        let mut plugin = extism::Plugin::new(&manifest, [], true)
+        let mut plugin = extism::PluginBuilder::new(manifest)
+            .with_wasi(true)
+            .with_functions(Self::host_functions(&self.http_client))
+            .build()
             .with_context(|| format!("Failed to create Extism plugin from {}", path_display))?;
 
         // Call init()
@@ -119,7 +252,8 @@ impl WasmExtensionManager {
             }
             Err(_) => {
                 // No init function — derive name from filename
-                let name = path.file_stem()
+                let name = path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown")
                     .to_string();
