@@ -678,13 +678,8 @@ fn try_re_register_tool(name: &str, registry: &std::sync::Arc<oxi_agent::ToolReg
     use std::sync::Arc;
 
     match name {
-        "read" => registry.register(oxi_agent::ReadTool::new()),
-        "write" => registry.register(oxi_agent::WriteTool::new()),
-        "edit" => registry.register(oxi_agent::EditTool::new()),
-        "bash" => registry.register(oxi_agent::BashTool::new()),
-        "grep" => registry.register(oxi_agent::GrepTool::new()),
-        "find" => registry.register(oxi_agent::FindTool::new()),
-        "ls" => registry.register(oxi_agent::LsTool::new()),
+        // Essential tools cannot be disabled, so never need re-registering
+        "read" | "write" | "edit" | "bash" | "grep" | "find" | "ls" => return false,
         "web_search" => {
             let cache = Arc::new(oxi_agent::SearchCache::new());
             registry.register(oxi_agent::WebSearchTool::new(cache.clone()));

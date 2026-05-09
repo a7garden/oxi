@@ -74,6 +74,11 @@ fn host_oxi_http_request(
 
         let method = if req.method.is_empty() { "GET" } else { &req.method };
 
+        // SSRF protection: block internal/private network addresses
+        if let Err(e) = validate_url(&req.url) {
+            anyhow::bail!("oxi_http_request: {}", e);
+        }
+
         // UserData::get() returns Arc<Mutex<T>>
         let client_arc = user_data.get()?;
         let client = client_arc.lock().unwrap();
@@ -137,6 +142,52 @@ fn host_oxi_log(
     Ok(())
 }
 
+// ── SSRF Protection ─────────────────────────────────────────────────
+
+/// Validate that a URL does not target internal/private network addresses.
+fn validate_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("Invalid URL: {}", e))?;
+    let host = parsed.host_str().unwrap_or("").to_lowercase();
+
+    // Block private IPs, localhost, link-local, and internal hostnames
+    let blocked = [
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "::1",
+        "[::1]",
+        "169.254.169.254", // cloud metadata
+        "metadata.google.internal",
+    ];
+    for &b in &blocked {
+        if host == b || host.starts_with(b) {
+            return Err(format!("Blocked internal address: {}", host));
+        }
+    }
+
+    // Block private IP ranges (10.x, 172.16-31.x, 192.168.x)
+    if host.starts_with("10.")
+        || host.starts_with("192.168.")
+        || is_172_private(&host)
+    {
+        return Err(format!("Blocked private address: {}", host));
+    }
+
+    Ok(())
+}
+
+/// Check if host is in 172.16.0.0/12 range.
+fn is_172_private(host: &str) -> bool {
+    if !host.starts_with("172.") { return false; }
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.len() < 2 { return false; }
+    if let Ok(second) = parts[1].parse::<u8>() {
+        (16..=31).contains(&second)
+    } else {
+        false
+    }
+}
+
 // ── Manager ──────────────────────────────────────────────────────────
 
 /// Manages WASM extensions: discovery, loading, and tool execution.
@@ -157,7 +208,14 @@ impl WasmExtensionManager {
             extensions: HashMap::new(),
             plugins: Arc::new(RwLock::new(HashMap::new())),
             tool_to_ext: HashMap::new(),
-            http_client: Arc::new(reqwest::blocking::Client::new()),
+            http_client: Arc::new(
+                reqwest::blocking::Client::builder()
+                    .timeout(std::time::Duration::from_secs(30))
+                    .connect_timeout(std::time::Duration::from_secs(10))
+                    .no_proxy() // Prevent proxy-based SSRF
+                    .build()
+                    .expect("Failed to build HTTP client")
+            ),
         }
     }
 
@@ -458,5 +516,33 @@ mod tests {
         let json = r#"{"name":"test","version":"0.1"}"#;
         let info: ExtensionInfo = serde_json::from_str(json).unwrap();
         assert_eq!(info.description, "");
+    }
+
+    #[test]
+    fn test_ssrf_blocks_localhost() {
+        assert!(validate_url("http://localhost/admin").is_err());
+        assert!(validate_url("http://127.0.0.1/secret").is_err());
+        assert!(validate_url("http://10.0.0.1/internal").is_err());
+        assert!(validate_url("http://192.168.1.1/router").is_err());
+        assert!(validate_url("http://172.16.0.1/corp").is_err());
+        assert!(validate_url("http://169.254.169.254/metadata").is_err());
+        assert!(validate_url("http://[::1]/ipv6").is_err());
+        // Also test without brackets (parsed hostname)
+        assert!(validate_url("http://0.0.0.0/admin").is_err());
+    }
+
+    #[test]
+    fn test_ssrf_allows_public() {
+        assert!(validate_url("https://api.github.com/repos/test").is_ok());
+        assert!(validate_url("https://example.com/api").is_ok());
+        assert!(validate_url("https://search.brave.com/api/search?q=test").is_ok());
+    }
+
+    #[test]
+    fn test_ssrf_172_range() {
+        assert!(validate_url("http://172.16.0.1/test").is_err());
+        assert!(validate_url("http://172.31.255.255/test").is_err());
+        assert!(validate_url("http://172.15.0.1/test").is_ok());
+        assert!(validate_url("http://172.32.0.1/test").is_ok());
     }
 }
