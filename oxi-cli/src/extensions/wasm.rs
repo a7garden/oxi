@@ -329,43 +329,54 @@ fn host_oxi_exec(
         let req: ExecReq = serde_json::from_str(&input_json)
             .context("oxi_exec: invalid request JSON")?;
 
-        // Block dangerous commands — deny-list
-        let blocked_patterns = [
-            "rm -rf /", "rm -rf /*", "mkfs", "dd if=", "format ",
-            ":(){ :|:& };:", "chmod 777 /", "chown root",
-            "> /etc/", "> /boot/", "> /dev/",
-            "dd of=/dev/", "mv / /", "wget.*-O /", "curl.*-o /",
-        ];
-        for blocked in &blocked_patterns {
-            if req.command.contains(blocked) {
-                anyhow::bail!("oxi_exec: blocked dangerous command pattern");
-            }
-        }
 
-        // Also block obvious privilege escalation
-        let cmd_lower = req.command.to_lowercase();
-        if cmd_lower.starts_with("sudo ") || cmd_lower.starts_with("su ") || cmd_lower.starts_with("doas ") {
-            anyhow::bail!("oxi_exec: privilege escalation commands are blocked");
-        }
 
         let cwd = req.cwd.as_deref().unwrap_or(".");
         let timeout_secs = req.timeout.min(120); // Cap at 2 min
 
-        // Spawn command with timeout via thread + wait_with_output
-        let child = std::process::Command::new(&req.command)
+        // Build full command string for deny-list checking (command + args)
+        let full_cmd = if req.args.is_empty() {
+            req.command.clone()
+        } else {
+            format!("{} {}", req.command, req.args.join(" "))
+        };
+
+        // Block dangerous commands — deny-list (checks combined command+args)
+        let blocked_patterns = [
+            "rm -rf /", "rm -rf /*", "mkfs", "dd if=", "format ",
+            ":(){ :|:& };:", "chmod 777 /", "chown root",
+            "> /etc/", "> /boot/", "> /dev/",
+            "dd of=/dev/", "mv / /",
+        ];
+        for blocked in &blocked_patterns {
+            if full_cmd.contains(blocked) {
+                anyhow::bail!("oxi_exec: blocked dangerous command pattern");
+            }
+        }
+
+        // Block obvious privilege escalation
+        let cmd_lower = req.command.to_lowercase();
+        if cmd_lower == "sudo" || cmd_lower == "su" || cmd_lower == "doas"
+            || cmd_lower.starts_with("sudo ") || cmd_lower.starts_with("su ") || cmd_lower.starts_with("doas ")
+        {
+            anyhow::bail!("oxi_exec: privilege escalation commands are blocked");
+        }
+
+        // Spawn command and wait for output
+        // Note: true timeout enforcement requires async or kill-on-timeout logic.
+        // The timeout field is informational for now — commands run until completion.
+        let output = match std::process::Command::new(&req.command)
             .args(&req.args)
             .current_dir(cwd)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| anyhow::anyhow!("Failed to spawn '{}': {}", req.command, e))?;
-
-        let output = match child.wait_with_output() {
+            .output()
+        {
             Ok(o) => o,
             Err(e) => {
                 let response = serde_json::json!({
                     "success": false,
-                    "error": format!("Command failed: {}", e),
+                    "error": format!("Failed to execute: {}", e),
                     "exit_code": -1,
                 });
                 let out = serde_json::to_string(&response)?;
@@ -374,10 +385,7 @@ fn host_oxi_exec(
                 return Ok(());
             }
         };
-
-        // Check if timed out (killed by signal → exit code none on unix)
-        let killed = output.status.code().is_none();
-        let timed_out = killed; // Best approximation without async
+        let timed_out = false; // No async kill mechanism available in sync context
 
         // Truncate large outputs
         let max_output = 50 * 1024; // 50KB
@@ -534,13 +542,17 @@ fn kv_store_set(key: &str, value: &str) {
     KV_STORE.write().insert(key.to_string(), value.to_string());
 }
 
-/// Namespaced KV access — extensions should use "ext_name:key" format.
-/// This helper prevents cross-extension key collision.
+/// Namespaced KV access — extensions use "ext_name:key" format to
+/// prevent cross-extension key collision. Currently not wired into host
+/// functions because host functions don't have extension identity in UserData.
+/// Will be used when per-extension context is passed to host functions.
+#[allow(dead_code)]
 fn kv_namespaced_get(extension: &str, key: &str) -> Option<String> {
     let namespaced = format!("{}:{}", extension, key);
     kv_store_get(&namespaced)
 }
 
+#[allow(dead_code)]
 fn kv_namespaced_set(extension: &str, key: &str, value: &str) {
     let namespaced = format!("{}:{}", extension, key);
     kv_store_set(&namespaced, value);
