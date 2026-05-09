@@ -177,6 +177,8 @@ pub(crate) struct AppState {
     pub message_count: usize,
     /// Active overlay (None = normal chat mode)
     pub overlay: Option<AppOverlay>,
+    /// WASM extension manager for dynamic commands
+    pub wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
 }
 
 impl AppState {
@@ -196,6 +198,7 @@ impl AppState {
             slash_completion_active: false,
             message_count: 0,
             overlay: None,
+            wasm_ext: None,
         }
     }
 
@@ -585,6 +588,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     state.footer_state.data.pwd = Some(cwd.clone());
     state.footer_state.data.model_name = model_id.clone();
     state.footer_state.data.git_branch = git_branch.clone();
+
+    // Pass WASM extension manager to state for dynamic commands
+    state.wasm_ext = app.wasm_ext().cloned();
 
     // Check if model is configured
     let has_model = !model_id.is_empty() && model_id.contains('/');

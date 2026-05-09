@@ -136,6 +136,7 @@ pub struct App {
     settings: Settings,
     skills: RwLock<SkillManager>,
     active_skills: RwLock<Vec<String>>,
+    wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
 }
 
 /// Chat message for display
@@ -400,12 +401,23 @@ impl App {
             settings,
             skills: RwLock::new(skills),
             active_skills: RwLock::new(Vec::new()),
+            wasm_ext: None,
         })
     }
 
     /// Get the current settings
     pub fn settings(&self) -> &Settings {
         &self.settings
+    }
+
+    /// Set the WASM extension manager
+    pub fn set_wasm_ext(&mut self, ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>) {
+        self.wasm_ext = ext;
+    }
+
+    /// Get the WASM extension manager
+    pub fn wasm_ext(&self) -> Option<&std::sync::Arc<crate::extensions::WasmExtensionManager>> {
+        self.wasm_ext.as_ref()
     }
 
     /// Get a reference to the underlying agent.

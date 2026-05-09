@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
     let prompt = args.prompt.join(" ");
 
     // Create app
-    let app = oxi::App::new(settings).await?;
+    let mut app = oxi::App::new(settings).await?;
 
     // Register builtin tools, respecting --tools filter
     let tools = app.agent_tools();
@@ -163,13 +163,47 @@ async fn main() -> Result<()> {
         }
     }
 
-    // WASM extensions disabled
-    // if app.settings().extensions_enabled { ... }
+    // Discover and load WASM extensions
+    let wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>> = if app.settings().extensions_enabled {
+        let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd);
+        if !wasm_paths.is_empty() {
+            let mut wasm_mgr = crate::extensions::WasmExtensionManager::new();
+            let (loaded, errors) = wasm_mgr.load_all(&wasm_paths);
+            for info in &loaded {
+                tracing::info!("WASM extension loaded: {} v{}", info.name, info.version);
+            }
+            for err in &errors {
+                tracing::warn!("WASM extension error: {}", err);
+            }
+            if !wasm_mgr.is_empty() {
+                let mgr = Arc::new(wasm_mgr);
+                for tool_def in mgr.all_tool_defs() {
+                    let wasm_tool = crate::extensions::WasmTool::new(
+                        mgr.clone(),
+                        tool_def.name.clone(),
+                        tool_def.description.clone(),
+                        tool_def.schema.clone(),
+                    );
+                    tools.register(wasm_tool);
+                }
+                Some(mgr)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
     // Register extension tools with the agent
     for tool in ext_registry.all_tools() {
         tools.register_arc(tool);
     }
+
+    // Pass WASM manager to app for command dispatch
+    app.set_wasm_ext(wasm_ext);
 
     // Handle --append-system-prompt
     if let Some(ref prompt_path) = args.append_system_prompt {

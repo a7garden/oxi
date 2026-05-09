@@ -38,11 +38,19 @@ pub struct WasmToolDef {
     pub schema: Value,
 }
 
+/// A command definition returned by `register_commands()`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WasmCommandDef {
+    pub name: String,
+    pub description: String,
+}
+
 /// Result of loading a WASM extension.
 #[derive(Debug)]
 pub struct LoadedWasmExtension {
     pub info: ExtensionInfo,
     pub tools: Vec<WasmToolDef>,
+    pub commands: Vec<WasmCommandDef>,
     pub source_path: PathBuf,
 }
 
@@ -789,6 +797,25 @@ impl WasmExtensionManager {
             Err(_) => vec![], // No tools — event-only extension
         };
 
+        // Call register_commands() — optional
+        let commands: Vec<WasmCommandDef> = match plugin.call::<&str, &str>("register_commands", "{}") {
+            Ok(output) => {
+                let resp: Value = serde_json::from_str(output)
+                    .with_context(|| format!("register_commands() invalid JSON: {}", output))?;
+                resp.get("commands")
+                    .cloned()
+                    .unwrap_or(Value::Array(vec![]))
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+            Err(_) => vec![], // No commands
+        };
+
         let ext_name = info.name.clone();
 
         // Warn on name collision
@@ -808,6 +835,7 @@ impl WasmExtensionManager {
         let loaded = LoadedWasmExtension {
             info: info.clone(),
             tools,
+            commands,
             source_path: path.to_path_buf(),
         };
 
@@ -900,6 +928,51 @@ impl WasmExtensionManager {
     /// Whether any extensions are loaded.
     pub fn is_empty(&self) -> bool {
         self.extensions.is_empty()
+    }
+
+    // ── Commands ──────────────────────────────────────────────────
+
+    /// Get all command definitions from all loaded extensions.
+    pub fn all_command_defs(&self) -> Vec<(&str, &WasmCommandDef)> {
+        let mut cmds = Vec::new();
+        for ext in self.extensions.values() {
+            for cmd in &ext.commands {
+                cmds.push((ext.info.name.as_str(), cmd));
+            }
+        }
+        cmds
+    }
+
+    /// Execute a command via the WASM extension.
+    /// Returns the output text to display to the user.
+    pub fn execute_command(&self, command_name: &str, args: &str) -> Result<String> {
+        // Find which extension owns this command
+        let ext_name = self.extensions.iter()
+            .find(|(_, ext)| ext.commands.iter().any(|c| c.name == command_name))
+            .map(|(name, _)| name.clone())
+            .with_context(|| format!("No extension registered for command: /{}", command_name))?;
+
+        let mut plugins = self.plugins.write();
+        let plugin = plugins.get_mut(&ext_name)
+            .with_context(|| format!("Extension '{}' not loaded", ext_name))?;
+
+        let input = serde_json::json!({
+            "command": command_name,
+            "args": args,
+        });
+        let input_str = serde_json::to_string(&input)?;
+
+        let output: &str = plugin.call("execute_command", &input_str)
+            .with_context(|| format!("execute_command('/{}') failed in '{}'", command_name, ext_name))?;
+
+        // Parse response — extension returns {"output": "..."} or plain string
+        let result: Value = serde_json::from_str(output)
+            .unwrap_or_else(|_| serde_json::json!({"output": output}));
+
+        Ok(result.get("output")
+            .and_then(|v| v.as_str())
+            .unwrap_or(output)
+            .to_string())
     }
 }
 

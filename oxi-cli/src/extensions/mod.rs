@@ -17,7 +17,7 @@ pub use crate::extensions::loading::{
     validate_extension, ValidatedExtension, SHARED_LIB_EXTENSION,
 };
 pub use crate::extensions::registry::{ExtensionErrorHandle, ExtensionRegistry, ExtensionRunner};
-pub use crate::extensions::wasm::{WasmExtensionManager, ExtensionInfo, WasmToolDef};
+pub use crate::extensions::wasm::{WasmExtensionManager, ExtensionInfo, WasmToolDef, WasmCommandDef};
 pub use crate::extensions::wasm_tool::WasmTool;
 pub use crate::extensions::types::{
     AfterProviderResponseEvent, BashEvent, BeforeProviderRequestEvent, Command,
