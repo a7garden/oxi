@@ -130,29 +130,37 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/extensions" | "/ext" => {
+            // Re-discover to show what's available
+            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            // let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd);
             let registry = session.agent_ref().tools();
             let names = registry.names();
-            let mut wasm_tools: Vec<String> = Vec::new();
-            let mut builtin_tools: Vec<String> = Vec::new();
+            let builtin_names: std::collections::HashSet<&str> = [
+                "read", "write", "edit", "bash", "grep", "find", "ls",
+                "web_search", "get_search_results", "github_search", "subagent",
+            ].into_iter().collect();
+            let mut builtin_lines = Vec::new();
+            let mut wasm_lines = Vec::new();
             for name in &names {
                 if let Some(tool) = registry.get(name) {
-                    // WASM tools are registered dynamically, check against known builtins
-                    builtin_tools.push(format!("  {} — {}", name, tool.label()));
+                    let line = format!("  {} — {}", name, tool.label());
+                    if builtin_names.contains(name.as_str()) {
+                        builtin_lines.push(line);
+                    } else {
+                        wasm_lines.push(line);
+                    }
                 }
             }
-            let mut out = "Tools:\n\n".to_string();
-            for line in &builtin_tools {
-                out.push_str(line);
-                out.push('\n');
+            let mut out = "Built-in Tools:\n\n".to_string();
+            for line in &builtin_lines { out.push_str(line); out.push('\n'); }
+            if !wasm_lines.is_empty() {
+                out.push_str("\nWASM Extensions:\n\n");
+                for line in &wasm_lines { out.push_str(line); out.push('\n'); }
             }
-            if !wasm_tools.is_empty() {
-                out.push_str("\nWASM Extensions:\n");
-                for line in &wasm_tools {
-                    out.push_str(line);
-                    out.push('\n');
-                }
-            }
-            out.push_str("\nPlace .wasm files in ~/.oxi/extensions/ to add extensions");
+            // if !wasm_paths.is_empty() {
+            //     out.push_str(&format!("\nDiscovered .wasm files: {}", wasm_paths.len()));
+            // }
+            out.push_str("\n\nPlace .wasm files in ~/.oxi/extensions/ to add extensions");
             state.add_system_message(out);
             true
         }

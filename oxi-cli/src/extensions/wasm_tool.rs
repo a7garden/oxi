@@ -45,7 +45,6 @@ impl AgentTool for WasmTool {
     }
 
     fn label(&self) -> &str {
-        // Prefix with "WASM" to distinguish from built-in tools
         &self.description
     }
 

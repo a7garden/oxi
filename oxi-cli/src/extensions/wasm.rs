@@ -150,8 +150,18 @@ impl WasmExtensionManager {
             Err(_) => vec![], // No tools — event-only extension
         };
 
-        // Register tool → extension mapping
         let ext_name = info.name.clone();
+
+        // Warn on name collision
+        if self.extensions.contains_key(&ext_name) {
+            tracing::warn!(
+                "Extension '{}' already loaded, replacing with '{}'",
+                ext_name, path_display
+            );
+            // Remove old tool mappings
+            self.tool_to_ext.retain(|_, v| v != &ext_name);
+        }
+
         for tool in &tools {
             self.tool_to_ext.insert(tool.name.clone(), ext_name.clone());
         }

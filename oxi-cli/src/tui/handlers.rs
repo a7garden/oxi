@@ -986,7 +986,7 @@ async fn handle_model_select_key(
                 let model_id = (*model_id).clone();
                 match session.set_model(&model_id) {
                     Ok(()) => {
-                        state.add_system_message(format!("→ model: {}", model_id));
+                        state.add_system_message(format!("Model: {}", model_id));
                         state.footer_state.data.model_name = model_id.clone();
                         crate::settings::Settings::save_last_used(&model_id);
                     }
