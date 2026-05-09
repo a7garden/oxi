@@ -34,8 +34,14 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         ])
         .split(size);
 
-    // Chat (padding is handled inside ChatView via h_pad)
-    f.render_stateful_widget(ChatView::new(theme), chunks[0], &mut state.chat);
+    // Chat area with horizontal padding (2 cols each side)
+    let chat_area = Rect {
+        x: chunks[0].x + 2,
+        y: chunks[0].y,
+        width: chunks[0].width.saturating_sub(4),
+        height: chunks[0].height,
+    };
+    f.render_stateful_widget(ChatView::new(theme), chat_area, &mut state.chat);
 
     // Input area
     render_input_area(f, chunks[1], state, theme);
@@ -96,7 +102,9 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
 fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     // Show spinner on a separate line above the input, not in the same line
     // This avoids the spinner being flush against the input text
-    let spinner_line = format!("  {} waiting for response...", SPINNER[state.spinner_frame]);
+    let dots = ["", ".", "..", "..."];
+    let d = dots[state.spinner_frame % dots.len()];
+    let spinner_line = format!("  Waiting{}", d);
     f.render_widget(
         Paragraph::new(Span::styled(spinner_line, Style::default().fg(theme.colors.muted.to_ratatui()))),
         area,

@@ -288,6 +288,7 @@ impl ToolRegistry {
         let disabled: std::collections::HashSet<&str> =
             disabled_tools.iter().map(|s| s.as_str()).collect();
 
+        // Essential tools — always enabled, cannot be disabled
         registry.register(ReadTool::new());
         registry.register(WriteTool::new());
         registry.register(EditTool::new());
@@ -295,6 +296,8 @@ impl ToolRegistry {
         registry.register(GrepTool::new());
         registry.register(FindTool::new());
         registry.register(LsTool::new());
+
+        // Optional tools — can be disabled via settings, env, or /tools command
 
         if !disabled.contains("web_search") {
             let cache = Arc::new(search_cache::SearchCache::new());
@@ -307,7 +310,9 @@ impl ToolRegistry {
             registry.register(github::GitHubTool::new(cache));
         }
 
-        registry.register(SubagentTool::new(cwd));
+        if !disabled.contains("subagent") {
+            registry.register(SubagentTool::new(cwd));
+        }
         registry
     }
 

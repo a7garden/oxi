@@ -3,7 +3,7 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Paragraph, StatefulWidget},
 };
@@ -486,7 +486,8 @@ impl StatefulWidget for ChatView<'_> {
                     }
                 }
             }
-            all_lines.push((msg.role, String::new(), LineKind::Normal));
+            // Message separator: thin line between messages
+            all_lines.push((msg.role, "\u{2500}".repeat(40), LineKind::HorizontalRule));
         }
 
         if let Some(ref streaming) = state.streaming {
@@ -546,10 +547,9 @@ impl StatefulWidget for ChatView<'_> {
                     _ => {}
                 }
             }
-            let spinner_chars =
-                ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let ch = spinner_chars[state.spinner_frame % spinner_chars.len()];
-            all_lines.push((MessageRole::Assistant, format!("  {} thinking...", ch), LineKind::Normal));
+            let dots = ["", ".", "..", "..."];
+            let ch = dots[state.spinner_frame % dots.len()];
+            all_lines.push((MessageRole::Assistant, format!("  Thinking{}", ch), LineKind::Normal));
         }
 
         // ------------------------------------------------------------------
@@ -576,13 +576,9 @@ impl StatefulWidget for ChatView<'_> {
                 | LineKind::ToolCallFooter
                 | LineKind::ToolResultHeader
                 | LineKind::ToolResultBody
-                | LineKind::ToolResultFooter => Style::default()
-                    .fg(self.theme.colors.muted.to_ratatui())
-                    .bg(Color::Indexed(234)),
+                | LineKind::ToolResultFooter => styles.muted.bg(Color::Indexed(234)),
                 // Error lines — error foreground + dark red background
-                LineKind::ErrorHeader | LineKind::ErrorBody | LineKind::ErrorFooter => Style::default()
-                    .fg(self.theme.colors.error.to_ratatui())
-                    .bg(Color::Rgb(60, 20, 30)),
+                LineKind::ErrorHeader | LineKind::ErrorBody | LineKind::ErrorFooter => styles.error.bg(Color::Rgb(60, 20, 30)),
                 LineKind::TableBorder => markdown::table_border_style(styles.normal),
                 LineKind::TableHeader => markdown::table_header_style(styles.normal),
                 LineKind::TableRow => styles.normal,
