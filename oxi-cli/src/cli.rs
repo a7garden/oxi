@@ -106,6 +106,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: ConfigCommands,
     },
+    /// Extension management — install, update, remove WASM extensions
+    Ext {
+/// action.
+        #[command(subcommand)]
+        action: ExtCommands,
+    },
     /// List available models
     Models {
         /// Filter by provider name (e.g., openai, anthropic, minimax)
@@ -141,6 +147,38 @@ pub enum PkgCommands {
     Update {
         /// Package name to update (updates all if omitted)
         name: Option<String>,
+    },
+}
+
+// ── Extension subcommands ──────────────────────────────────────────────
+
+/// Extension management subcommands
+#[derive(Debug, Clone, Subcommand)]
+pub enum ExtCommands {
+    /// Install a WASM extension from a GitHub repo (owner/repo or owner/repo@version)
+    Install {
+        /// Extension source: owner/repo or owner/repo@version
+        source: String,
+        /// Include pre-release versions
+        #[arg(long)]
+        prerelease: bool,
+    },
+    /// List installed extensions
+    List,
+    /// Remove an installed extension
+    Remove {
+        /// Extension name to remove
+        name: String,
+    },
+    /// Update extension(s) to latest version
+    Update {
+        /// Extension name to update (updates all if omitted)
+        name: Option<String>,
+    },
+    /// Show info about a remote extension (without installing)
+    Info {
+        /// Extension source: owner/repo
+        source: String,
     },
 }
 

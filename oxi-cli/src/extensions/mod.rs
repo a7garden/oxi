@@ -3,6 +3,7 @@
 //! Extensions allow custom tools, commands, and event hooks to be loaded dynamically at runtime.
 
 pub mod context;
+pub mod ext_cli;
 pub mod loading;
 pub mod registry;
 pub mod types;

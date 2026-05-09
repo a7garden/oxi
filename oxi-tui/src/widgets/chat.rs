@@ -547,9 +547,9 @@ impl StatefulWidget for ChatView<'_> {
                     _ => {}
                 }
             }
-            let dots = ["", ".", "..", "..."];
-            let ch = dots[state.spinner_frame % dots.len()];
-            all_lines.push((MessageRole::Assistant, format!("  Thinking{}", ch), LineKind::Normal));
+            let spinner = ["\u{25D0}", "\u{25D3}", "\u{25D1}", "\u{25D2}"]; // ◐◓◑◒
+            let ch = spinner[state.spinner_frame % spinner.len()];
+            all_lines.push((MessageRole::Assistant, format!("  {} Working", ch), LineKind::Normal));
         }
 
         // ------------------------------------------------------------------

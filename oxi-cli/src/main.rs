@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use clap::Parser;
-use oxi::cli::{CliArgs, Commands, ConfigCommands, PkgCommands};
+use oxi::cli::{CliArgs, Commands, ConfigCommands, ExtCommands, PkgCommands};
 use oxi::extensions::ExtensionRegistry;
 use oxi::packages::{PackageManager, ResourceKind};
 use oxi::session::{AgentMessage, SessionManager};
@@ -231,6 +231,9 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         Commands::Config { action } => {
             handle_config_command(action)?;
         }
+        Commands::Ext { action } => {
+            handle_ext_command(action).await?;
+        }
         Commands::Models { provider } => {
             handle_models_command(provider)?;
         }
@@ -348,6 +351,52 @@ fn parse_config_bool(s: &str) -> Result<bool> {
             s
         ),
     }
+}
+
+async fn handle_ext_command(action: &crate::cli::ExtCommands) -> Result<()> {
+    use crate::cli::ExtCommands;
+    use crate::extensions::ext_cli;
+
+    match action {
+        ExtCommands::Install { source, prerelease } => {
+            let result = ext_cli::install_extension(source, *prerelease).await?;
+            println!(
+                "Installed {} v{} from {}",
+                result.name, result.version, result.source
+            );
+        }
+        ExtCommands::List => {
+            let entries = ext_cli::list_extensions()?;
+            if entries.is_empty() {
+                println!("No extensions installed.");
+                println!("Install with: oxi ext install owner/repo");
+            } else {
+                println!("Installed extensions:\n");
+                for (name, entry) in &entries {
+                    println!("  {} v{} — {} ({})", name, entry.version, entry.source, entry.installed_at.split('T').next().unwrap_or("?"));
+                }
+                println!("\n{} extension(s)", entries.len());
+            }
+        }
+        ExtCommands::Remove { name } => {
+            ext_cli::remove_extension(name)?;
+            println!("Removed extension: {}", name);
+        }
+        ExtCommands::Update { name } => {
+            let results = ext_cli::update_extension(name.as_deref()).await?;
+            if results.is_empty() {
+                println!("Nothing to update.");
+            } else {
+                for r in &results {
+                    println!("Updated {} to {}", r.name, r.version);
+                }
+            }
+        }
+        ExtCommands::Info { source } => {
+            ext_cli::info_extension(source).await?;
+        }
+    }
+    Ok(())
 }
 
 fn handle_config_command(action: &ConfigCommands) -> Result<()> {
