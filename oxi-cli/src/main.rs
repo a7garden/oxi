@@ -353,9 +353,9 @@ fn parse_config_bool(s: &str) -> Result<bool> {
     }
 }
 
-async fn handle_ext_command(action: &crate::cli::ExtCommands) -> Result<()> {
-    use crate::cli::ExtCommands;
-    use crate::extensions::ext_cli;
+async fn handle_ext_command(action: &oxi::cli::ExtCommands) -> Result<()> {
+    use oxi::cli::ExtCommands;
+    use oxi::extensions::ext_cli;
 
     match action {
         ExtCommands::Install { source, prerelease } => {

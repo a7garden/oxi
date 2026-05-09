@@ -486,8 +486,10 @@ impl StatefulWidget for ChatView<'_> {
                     }
                 }
             }
-            // Message separator: thin line between messages
-            all_lines.push((msg.role, "\u{2500}".repeat(40), LineKind::HorizontalRule));
+            // Separator: only after Assistant messages (not User, not last message)
+            if msg.role == MessageRole::Assistant {
+                all_lines.push((msg.role, "\u{2500}".repeat(40), LineKind::HorizontalRule));
+            }
         }
 
         if let Some(ref streaming) = state.streaming {

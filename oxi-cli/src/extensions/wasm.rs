@@ -24,6 +24,10 @@ pub struct ExtensionInfo {
     pub version: String,
     #[serde(default)]
     pub description: String,
+    /// Permissions requested by the extension.
+    /// Supported: "fs_read", "fs_write", "exec", "env", "network"
+    #[serde(default)]
+    pub permissions: Vec<String>,
 }
 
 /// A tool definition returned by `register_tools()`.
