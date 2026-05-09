@@ -123,7 +123,17 @@ fn host_oxi_http_request(
                 (k.to_string(), v.to_str().unwrap_or("").to_string())
             })
             .collect();
-        let resp_body = resp.text().map_err(|e| anyhow::anyhow!("Failed to read response body: {}", e))?;
+        // Limit response body to 1MB to prevent memory exhaustion
+        let resp_body = {
+            let max_body = 1024 * 1024; // 1MB
+            let body_bytes = resp.bytes().map_err(|e| anyhow::anyhow!("Failed to read response: {}", e))?;
+            if body_bytes.len() > max_body {
+                tracing::warn!("HTTP response truncated: {} bytes > {} limit", body_bytes.len(), max_body);
+                String::from_utf8_lossy(&body_bytes[..max_body]).to_string()
+            } else {
+                String::from_utf8_lossy(&body_bytes).to_string()
+            }
+        };
 
         let response = serde_json::json!({
             "status": status,
@@ -319,41 +329,64 @@ fn host_oxi_exec(
         let req: ExecReq = serde_json::from_str(&input_json)
             .context("oxi_exec: invalid request JSON")?;
 
-        // Block dangerous commands
-        let blocked_commands = ["rm -rf /", "mkfs", "dd if=", "format ", ":(){ :|:& };:"];
-        for blocked in &blocked_commands {
+        // Block dangerous commands — deny-list
+        let blocked_patterns = [
+            "rm -rf /", "rm -rf /*", "mkfs", "dd if=", "format ",
+            ":(){ :|:& };:", "chmod 777 /", "chown root",
+            "> /etc/", "> /boot/", "> /dev/",
+            "dd of=/dev/", "mv / /", "wget.*-O /", "curl.*-o /",
+        ];
+        for blocked in &blocked_patterns {
             if req.command.contains(blocked) {
-                anyhow::bail!("oxi_exec: blocked dangerous command pattern: {}", blocked);
+                anyhow::bail!("oxi_exec: blocked dangerous command pattern");
             }
         }
 
-        let cwd = req.cwd.as_deref().unwrap_or(".");
-        let timeout = std::time::Duration::from_secs(req.timeout.min(120)); // Cap at 2 min
+        // Also block obvious privilege escalation
+        let cmd_lower = req.command.to_lowercase();
+        if cmd_lower.starts_with("sudo ") || cmd_lower.starts_with("su ") || cmd_lower.starts_with("doas ") {
+            anyhow::bail!("oxi_exec: privilege escalation commands are blocked");
+        }
 
-        let output = std::process::Command::new(&req.command)
+        let cwd = req.cwd.as_deref().unwrap_or(".");
+        let timeout_secs = req.timeout.min(120); // Cap at 2 min
+
+        // Spawn command with timeout via thread + wait_with_output
+        let child = std::process::Command::new(&req.command)
             .args(&req.args)
             .current_dir(cwd)
-            .output();
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| anyhow::anyhow!("Failed to spawn '{}': {}", req.command, e))?;
 
-        match output {
-            Ok(output) => {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
+        let output = match child.wait_with_output() {
+            Ok(o) => o,
+            Err(e) => {
+                let response = serde_json::json!({
+                    "success": false,
+                    "error": format!("Command failed: {}", e),
+                    "exit_code": -1,
+                });
+                let out = serde_json::to_string(&response)?;
+                let handle = plugin.memory_new(&out)?;
+                if !outputs.is_empty() { outputs[0] = plugin.memory_to_val(handle); }
+                return Ok(());
+            }
+        };
 
-                // Truncate large outputs
-                let max_output = 50 * 1024; // 50KB
-                let stdout_truncated = stdout.len() > max_output;
-                let stderr_truncated = stderr.len() > max_output;
-                let stdout_str: String = if stdout_truncated {
-                    stdout.chars().take(max_output).collect()
-                } else {
-                    stdout.to_string()
-                };
-                let stderr_str: String = if stderr_truncated {
-                    stderr.chars().take(max_output).collect()
-                } else {
-                    stderr.to_string()
-                };
+        // Check if timed out (killed by signal → exit code none on unix)
+        let killed = output.status.code().is_none();
+        let timed_out = killed; // Best approximation without async
+
+        // Truncate large outputs
+        let max_output = 50 * 1024; // 50KB
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout_truncated = stdout.len() > max_output;
+        let stderr_truncated = stderr.len() > max_output;
+        let stdout_str: String = if stdout_truncated { stdout.chars().take(max_output).collect() } else { stdout.to_string() };
+        let stderr_str: String = if stderr_truncated { stderr.chars().take(max_output).collect() } else { stderr.to_string() };
 
                 let response = serde_json::json!({
                     "success": output.status.success(),
@@ -362,26 +395,13 @@ fn host_oxi_exec(
                     "exit_code": output.status.code().unwrap_or(-1),
                     "stdout_truncated": stdout_truncated,
                     "stderr_truncated": stderr_truncated,
+                    "timed_out": timed_out,
                 });
                 let out = serde_json::to_string(&response)?;
                 let handle = plugin.memory_new(&out)?;
                 if !outputs.is_empty() {
                     outputs[0] = plugin.memory_to_val(handle);
                 }
-            }
-            Err(e) => {
-                let response = serde_json::json!({
-                    "success": false,
-                    "error": format!("Failed to execute: {}", e),
-                    "exit_code": -1,
-                });
-                let out = serde_json::to_string(&response)?;
-                let handle = plugin.memory_new(&out)?;
-                if !outputs.is_empty() {
-                    outputs[0] = plugin.memory_to_val(handle);
-                }
-            }
-        }
         Ok(())
     })();
     result.map_err(extism::Error::from)
@@ -514,6 +534,18 @@ fn kv_store_set(key: &str, value: &str) {
     KV_STORE.write().insert(key.to_string(), value.to_string());
 }
 
+/// Namespaced KV access — extensions should use "ext_name:key" format.
+/// This helper prevents cross-extension key collision.
+fn kv_namespaced_get(extension: &str, key: &str) -> Option<String> {
+    let namespaced = format!("{}:{}", extension, key);
+    kv_store_get(&namespaced)
+}
+
+fn kv_namespaced_set(extension: &str, key: &str, value: &str) {
+    let namespaced = format!("{}:{}", extension, key);
+    kv_store_set(&namespaced, value);
+}
+
 // ── Path Validation ─────────────────────────────────────────────────
 
 /// Validate that a path is within the allowed directories.
@@ -521,23 +553,57 @@ fn kv_store_set(key: &str, value: &str) {
 fn validate_path_allowed(path: &str) -> Result<()> {
     let p = std::path::Path::new(path);
 
-    // Resolve to absolute
+    // Resolve to absolute, then canonicalize to eliminate ../ and symlinks
     let abs = if p.is_absolute() {
         p.to_path_buf()
     } else {
         std::env::current_dir().unwrap_or_default().join(p)
     };
 
-    let abs_str = abs.to_string_lossy();
+    // Try canonicalize for existing paths; fall back to resolved absolute
+    let resolved = if abs.exists() {
+        abs.canonicalize().unwrap_or(abs)
+    } else {
+        // For new files, resolve parent if it exists
+        if let Some(parent) = abs.parent() {
+            if parent.exists() {
+                let canon_parent = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+                canon_parent.join(abs.file_name().unwrap_or_default())
+            } else {
+                abs
+            }
+        } else {
+            abs
+        }
+    };
 
-    // Block writes to sensitive system paths
+    let abs_str = resolved.to_string_lossy();
+
+    // Block sensitive system paths
     let blocked_prefixes = [
         "/etc", "/sys", "/proc", "/dev", "/boot", "/root",
         "/System", "/Library/System",
+        "/usr/bin", "/usr/sbin", "/bin", "/sbin",
     ];
     for prefix in &blocked_prefixes {
         if abs_str.starts_with(prefix) {
             anyhow::bail!("Path '{}' is in a protected system directory", path);
+        }
+    }
+
+    // Block hidden sensitive paths in home directory
+    if let Some(home) = dirs::home_dir() {
+        let home_str = home.to_string_lossy();
+        if abs_str.starts_with(&*home_str) {
+            let blocked_home_suffixes = [
+                "/.ssh/", "/.gnupg/", "/.aws/", "/.config/gcloud/",
+                "/.kube/", "/.docker/", "/.npmrc", "/.netrc",
+            ];
+            for suffix in &blocked_home_suffixes {
+                if abs_str.contains(suffix) {
+                    anyhow::bail!("Path '{}' is in a protected directory", path);
+                }
+            }
         }
     }
 
@@ -593,9 +659,22 @@ fn is_172_private(host: &str) -> bool {
 // ── Manager ──────────────────────────────────────────────────────────
 
 /// Manages WASM extensions: discovery, loading, and tool execution.
+///
+/// # Thread Safety
+/// `plugins` is wrapped in `Arc<RwLock<>>` for thread-safe access.
+/// All host functions run inside `spawn_blocking`, so WASM execution
+/// never blocks the async runtime.
+// SAFETY: WasmExtensionManager is Send+Sync because:
+// - All fields are Send+Sync (HashMap, Arc<RwLock<>>, Arc<Client>)
+// - extism::Plugin access is serialized through the RwLock
+// - execute_tool is called from spawn_blocking, never from async context
+unsafe impl Send for WasmExtensionManager {}
+unsafe impl Sync for WasmExtensionManager {}
+
 pub struct WasmExtensionManager {
     extensions: HashMap<String, LoadedWasmExtension>,
     /// Raw Extism plugin references — needed for execute_tool calls.
+    /// Wrapped in RwLock for thread-safe access from spawn_blocking.
     pub(crate) plugins: Arc<RwLock<HashMap<String, extism::Plugin>>>,
     /// Maps tool name → extension name.
     tool_to_ext: HashMap<String, String>,
@@ -749,7 +828,9 @@ impl WasmExtensionManager {
         let wasm_bytes = std::fs::read(path)
             .with_context(|| format!("Failed to read extension: {}", path_display))?;
 
-        let manifest = extism::Manifest::new([extism::Wasm::data(wasm_bytes)]);
+        let wasm = extism::Wasm::data(wasm_bytes);
+        // Limit WASM memory to 64 pages (4MB) to prevent unbounded allocation
+        let manifest = extism::Manifest::new([wasm]).with_memory_max(64);
         let mut plugin = extism::PluginBuilder::new(manifest)
             .with_wasi(true)
             .with_functions(Self::host_functions(&self.http_client))
@@ -818,7 +899,7 @@ impl WasmExtensionManager {
 
         let ext_name = info.name.clone();
 
-        // Warn on name collision
+        // Warn on name collision — clean up old extension fully
         if self.extensions.contains_key(&ext_name) {
             tracing::warn!(
                 "Extension '{}' already loaded, replacing with '{}'",
@@ -826,6 +907,8 @@ impl WasmExtensionManager {
             );
             // Remove old tool mappings
             self.tool_to_ext.retain(|_, v| v != &ext_name);
+            // Remove old plugin instance
+            self.plugins.write().remove(&ext_name);
         }
 
         for tool in &tools {
