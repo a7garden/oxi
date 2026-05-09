@@ -127,7 +127,7 @@ impl ColorScheme {
     /// Convert to ratatui Style with all semantic colors.
     pub fn to_styles(&self) -> ThemeStyles {
         ThemeStyles {
-            normal: Style::default().fg(self.foreground.to_ratatui()).bg(self.background.to_ratatui()),
+            normal: Style::default().fg(self.foreground.to_ratatui()),
             primary: Style::default().fg(self.primary.to_ratatui()),
             secondary: Style::default().fg(self.secondary.to_ratatui()),
             error: Style::default().fg(self.error.to_ratatui()),
