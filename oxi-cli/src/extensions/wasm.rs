@@ -196,12 +196,12 @@ impl WasmExtensionManager {
     // ── Execution ──────────────────────────────────────────────────
 
     /// Execute a tool via the WASM extension.
-    pub fn execute_tool(&mut self, tool_name: &str, params: Value) -> Result<Value> {
+    pub fn execute_tool(&self, tool_name: &str, params: Value) -> Result<Value> {
         let ext_name = self.tool_to_ext.get(tool_name)
             .with_context(|| format!("No extension registered for tool: {}", tool_name))?;
 
-        let plugins = self.plugins.read();
-        let plugin = plugins.get(ext_name)
+        let mut plugins = self.plugins.write();
+        let plugin = plugins.get_mut(ext_name)
             .with_context(|| format!("Extension '{}' not loaded", ext_name))?;
 
         let input = serde_json::json!({

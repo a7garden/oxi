@@ -6,8 +6,8 @@ pub mod context;
 pub mod loading;
 pub mod registry;
 pub mod types;
-// pub mod wasm; // TODO: fix extism API compatibility
-// pub mod wasm_tool;
+pub mod wasm;
+pub mod wasm_tool;
 
 // Re-export types from submodules
 pub use crate::extensions::context::{ExtensionContext, ExtensionContextBuilder};

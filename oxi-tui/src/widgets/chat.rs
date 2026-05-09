@@ -408,9 +408,14 @@ impl StatefulWidget for ChatView<'_> {
                     }
                     ContentBlock::ToolResult { tool_name, content, is_error } => {
                         let prefix = if *is_error { "✗" } else { "✓" };
+                        let header = if tool_name.is_empty() {
+                            format!("  {} {}", prefix, box_top(30))
+                        } else {
+                            format!("  {} {} {}", prefix, tool_name, box_top(20))
+                        };
                         all_lines.push((
                             msg.role,
-                            format!("  {} {}: {}", box_top(26), prefix, tool_name),
+                            header,
                             LineKind::ToolResultHeader,
                         ));
                         for line in content.lines().take(2) {
@@ -496,9 +501,14 @@ impl StatefulWidget for ChatView<'_> {
                     }
                     ContentBlock::ToolResult { tool_name, content, is_error } => {
                         let prefix = if *is_error { "✗" } else { "✓" };
+                        let header = if tool_name.is_empty() {
+                            format!("  {} {}", prefix, box_top(30))
+                        } else {
+                            format!("  {} {} {}", prefix, tool_name, box_top(20))
+                        };
                         all_lines.push((
                             MessageRole::Assistant,
-                            format!("  {} {}: {}", prefix, tool_name, box_top(20)),
+                            header,
                             LineKind::ToolResultHeader,
                         ));
                         for line in content.lines().take(2) {

@@ -66,7 +66,8 @@ impl AgentTool for WasmTool {
         let manager = self.manager.clone();
         let tool_name = self.tool_name.clone();
 
-        // Extism calls are synchronous — run on a blocking thread
+        // Extism calls need &mut Plugin, which is behind our RwLock.
+        // manager.execute_tool takes &self and acquires a write lock internally.
         let result = tokio::task::spawn_blocking(move || {
             manager.execute_tool(&tool_name, params)
         })
