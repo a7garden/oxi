@@ -464,17 +464,7 @@ pub(crate) fn handle_slash_command(
             true
         }
         _ => {
-            // Check WASM extension commands
-            if let Some(ref wasm_ext) = state.wasm_ext {
-                let commands = wasm_ext.all_command_defs();
-                let name = cmd_lower.strip_prefix('/').unwrap_or(&cmd_lower);
-                if let Some((ext_name, _cmd)) = commands.iter().find(|(_, c)| c.name == name) {
-                    let output = wasm_ext.execute_command(name, arg.unwrap_or(""))
-                        .unwrap_or_else(|e| format!("Error: {}", e));
-                    state.add_system_message(format!("[{}] {}", ext_name, output));
-                    return true;
-                }
-            }
+            // WASM extension commands disabled
             state.add_system_message(format!(
                 "Unknown command: {}\nType /help for available commands.",
                 cmd

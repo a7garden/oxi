@@ -390,7 +390,13 @@ impl StatefulWidget for ChatView<'_> {
             }
         };
 
-        for msg in &state.messages {
+        let sep_width = area.width.saturating_sub(4) as usize;
+
+        for (i, msg) in state.messages.iter().enumerate() {
+            // Full-width separator before User messages (except the very first)
+            if msg.role == MessageRole::User && i > 0 {
+                all_lines.push((msg.role, "\u{2500}".repeat(sep_width), LineKind::HorizontalRule));
+            }
             if msg.role == MessageRole::User {
                 all_lines.push((msg.role, "You".to_string(), LineKind::RoleLabel));
             }
@@ -486,10 +492,7 @@ impl StatefulWidget for ChatView<'_> {
                     }
                 }
             }
-            // Separator: only after Assistant messages (not User, not last message)
-            if msg.role == MessageRole::Assistant {
-                all_lines.push((msg.role, "\u{2500}".repeat(40), LineKind::HorizontalRule));
-            }
+            // No separator after messages
         }
 
         if let Some(ref streaming) = state.streaming {

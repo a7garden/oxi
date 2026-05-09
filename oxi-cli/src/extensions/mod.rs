@@ -9,6 +9,7 @@ pub mod registry;
 pub mod types;
 pub mod wasm;
 pub mod wasm_tool;
+pub mod wasm_hooks;
 
 // Re-export types from submodules
 pub use crate::extensions::context::{ExtensionContext, ExtensionContextBuilder};
@@ -267,3 +268,4 @@ mod tests {
     }
 
 }
+

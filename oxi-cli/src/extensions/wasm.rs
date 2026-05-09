@@ -596,7 +596,7 @@ fn is_172_private(host: &str) -> bool {
 pub struct WasmExtensionManager {
     extensions: HashMap<String, LoadedWasmExtension>,
     /// Raw Extism plugin references — needed for execute_tool calls.
-    plugins: Arc<RwLock<HashMap<String, extism::Plugin>>>,
+    pub(crate) plugins: Arc<RwLock<HashMap<String, extism::Plugin>>>,
     /// Maps tool name → extension name.
     tool_to_ext: HashMap<String, String>,
     /// HTTP client shared by all extensions for oxi_http_request.
