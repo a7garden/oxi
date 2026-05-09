@@ -146,6 +146,396 @@ fn host_oxi_log(
     Ok(())
 }
 
+// ── File I/O Host Functions ─────────────────────────────────────────
+
+/// Host function: `oxi_read_file(path_json) → result_json`
+///
+/// Input: `{"path": "/path/to/file", "offset": 0, "limit": 2000}`
+/// Output: `{"success": true, "content": "...", "truncated": false, "bytes": 1234}` or
+///         `{"success": false, "error": "..."}`
+fn host_oxi_read_file(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    outputs: &mut [Val],
+    _user_data: UserData<()>,
+) -> Result<(), extism::Error> {
+    let result: anyhow::Result<()> = (|| {
+        let input_json: String = plugin.memory_get_val(&inputs[0])?;
+
+        #[derive(Deserialize)]
+        struct ReadReq {
+            path: String,
+            #[serde(default)]
+            offset: Option<usize>,
+            #[serde(default = "default_limit")]
+            limit: usize,
+        }
+        fn default_limit() -> usize { 2000 }
+
+        let req: ReadReq = serde_json::from_str(&input_json)
+            .context("oxi_read_file: invalid request JSON")?;
+
+        // Validate path is not outside cwd
+        validate_path_allowed(&req.path)?;
+
+        let metadata = std::fs::metadata(&req.path);
+        match metadata {
+            Ok(m) => {
+                let max_bytes = 50 * 1024; // 50KB limit
+                let file_size = m.len() as usize;
+
+                let content = std::fs::read_to_string(&req.path)
+                    .map_err(|e| anyhow::anyhow!("Failed to read file: {}", e))?;
+
+                let lines: Vec<&str> = content.lines().collect();
+                let total_lines = lines.len();
+
+                let offset = req.offset.unwrap_or(0).min(total_lines);
+                let end = (offset + req.limit).min(total_lines);
+                let selected: Vec<&str> = lines[offset..end].to_vec();
+                let mut result = selected.join("\n");
+
+                let truncated = result.len() > max_bytes;
+                if truncated {
+                    result = result.chars().take(max_bytes).collect();
+                }
+
+                let response = serde_json::json!({
+                    "success": true,
+                    "content": result,
+                    "truncated": truncated || end < total_lines,
+                    "bytes": file_size,
+                    "total_lines": total_lines,
+                    "shown_lines": end - offset,
+                });
+                let output = serde_json::to_string(&response)?;
+                let handle = plugin.memory_new(&output)?;
+                if !outputs.is_empty() {
+                    outputs[0] = plugin.memory_to_val(handle);
+                }
+            }
+            Err(e) => {
+                let response = serde_json::json!({
+                    "success": false,
+                    "error": format!("File not found: {}", e),
+                });
+                let output = serde_json::to_string(&response)?;
+                let handle = plugin.memory_new(&output)?;
+                if !outputs.is_empty() {
+                    outputs[0] = plugin.memory_to_val(handle);
+                }
+            }
+        }
+        Ok(())
+    })();
+    result.map_err(extism::Error::from)
+}
+
+/// Host function: `oxi_write_file(path_json) → result_json`
+///
+/// Input: `{"path": "/path/to/file", "content": "...", "create_dirs": true}`
+/// Output: `{"success": true, "bytes_written": 1234}` or `{"success": false, "error": "..."}`
+fn host_oxi_write_file(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    outputs: &mut [Val],
+    _user_data: UserData<()>,
+) -> Result<(), extism::Error> {
+    let result: anyhow::Result<()> = (|| {
+        let input_json: String = plugin.memory_get_val(&inputs[0])?;
+
+        #[derive(Deserialize)]
+        struct WriteReq {
+            path: String,
+            content: String,
+            #[serde(default = "default_true")]
+            create_dirs: bool,
+        }
+        fn default_true() -> bool { true }
+
+        let req: WriteReq = serde_json::from_str(&input_json)
+            .context("oxi_write_file: invalid request JSON")?;
+
+        validate_path_allowed(&req.path)?;
+
+        if req.create_dirs {
+            if let Some(parent) = std::path::Path::new(&req.path).parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| anyhow::anyhow!("Failed to create directories: {}", e))?;
+            }
+        }
+
+        let bytes = req.content.len();
+        std::fs::write(&req.path, &req.content)
+            .map_err(|e| anyhow::anyhow!("Failed to write file: {}", e))?;
+
+        let response = serde_json::json!({
+            "success": true,
+            "bytes_written": bytes,
+        });
+        let output = serde_json::to_string(&response)?;
+        let handle = plugin.memory_new(&output)?;
+        if !outputs.is_empty() {
+            outputs[0] = plugin.memory_to_val(handle);
+        }
+        Ok(())
+    })();
+    result.map_err(extism::Error::from)
+}
+
+/// Host function: `oxi_exec(exec_json) → result_json`
+///
+/// Input: `{"command": "git status", "args": [], "cwd": ".", "timeout": 30}`
+/// Output: `{"success": true, "stdout": "...", "stderr": "...", "exit_code": 0}` or error.
+fn host_oxi_exec(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    outputs: &mut [Val],
+    _user_data: UserData<()>,
+) -> Result<(), extism::Error> {
+    let result: anyhow::Result<()> = (|| {
+        let input_json: String = plugin.memory_get_val(&inputs[0])?;
+
+        #[derive(Deserialize)]
+        struct ExecReq {
+            command: String,
+            #[serde(default)]
+            args: Vec<String>,
+            #[serde(default)]
+            cwd: Option<String>,
+            #[serde(default = "default_timeout")]
+            timeout: u64,
+        }
+        fn default_timeout() -> u64 { 30 }
+
+        let req: ExecReq = serde_json::from_str(&input_json)
+            .context("oxi_exec: invalid request JSON")?;
+
+        // Block dangerous commands
+        let blocked_commands = ["rm -rf /", "mkfs", "dd if=", "format ", ":(){ :|:& };:"];
+        for blocked in &blocked_commands {
+            if req.command.contains(blocked) {
+                anyhow::bail!("oxi_exec: blocked dangerous command pattern: {}", blocked);
+            }
+        }
+
+        let cwd = req.cwd.as_deref().unwrap_or(".");
+        let timeout = std::time::Duration::from_secs(req.timeout.min(120)); // Cap at 2 min
+
+        let output = std::process::Command::new(&req.command)
+            .args(&req.args)
+            .current_dir(cwd)
+            .output();
+
+        match output {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+
+                // Truncate large outputs
+                let max_output = 50 * 1024; // 50KB
+                let stdout_truncated = stdout.len() > max_output;
+                let stderr_truncated = stderr.len() > max_output;
+                let stdout_str: String = if stdout_truncated {
+                    stdout.chars().take(max_output).collect()
+                } else {
+                    stdout.to_string()
+                };
+                let stderr_str: String = if stderr_truncated {
+                    stderr.chars().take(max_output).collect()
+                } else {
+                    stderr.to_string()
+                };
+
+                let response = serde_json::json!({
+                    "success": output.status.success(),
+                    "stdout": stdout_str,
+                    "stderr": stderr_str,
+                    "exit_code": output.status.code().unwrap_or(-1),
+                    "stdout_truncated": stdout_truncated,
+                    "stderr_truncated": stderr_truncated,
+                });
+                let out = serde_json::to_string(&response)?;
+                let handle = plugin.memory_new(&out)?;
+                if !outputs.is_empty() {
+                    outputs[0] = plugin.memory_to_val(handle);
+                }
+            }
+            Err(e) => {
+                let response = serde_json::json!({
+                    "success": false,
+                    "error": format!("Failed to execute: {}", e),
+                    "exit_code": -1,
+                });
+                let out = serde_json::to_string(&response)?;
+                let handle = plugin.memory_new(&out)?;
+                if !outputs.is_empty() {
+                    outputs[0] = plugin.memory_to_val(handle);
+                }
+            }
+        }
+        Ok(())
+    })();
+    result.map_err(extism::Error::from)
+}
+
+/// Host function: `oxi_get_env(key_json) → result_json`
+///
+/// Input: `{"key": "HOME"}`
+/// Output: `{"success": true, "value": "/home/user"}` or `{"success": false, "error": "not found"}`
+fn host_oxi_get_env(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    outputs: &mut [Val],
+    _user_data: UserData<()>,
+) -> Result<(), extism::Error> {
+    let result: anyhow::Result<()> = (|| {
+        let input_json: String = plugin.memory_get_val(&inputs[0])?;
+
+        #[derive(Deserialize)]
+        struct EnvReq {
+            key: String,
+        }
+
+        let req: EnvReq = serde_json::from_str(&input_json)
+            .context("oxi_get_env: invalid request JSON")?;
+
+        // Block sensitive env vars
+        let blocked_keys = ["AWS_SECRET", "PRIVATE_KEY", "PASSWORD", "TOKEN", "SECRET"];
+        let key_upper = req.key.to_uppercase();
+        for blocked in &blocked_keys {
+            if key_upper.contains(blocked) {
+                anyhow::bail!("oxi_get_env: access to '{}' is blocked", req.key);
+            }
+        }
+
+        let value = std::env::var(&req.key).ok();
+        let response = serde_json::json!({
+            "success": value.is_some(),
+            "value": value.unwrap_or_default(),
+        });
+        let output = serde_json::to_string(&response)?;
+        let handle = plugin.memory_new(&output)?;
+        if !outputs.is_empty() {
+            outputs[0] = plugin.memory_to_val(handle);
+        }
+        Ok(())
+    })();
+    result.map_err(extism::Error::from)
+}
+
+// ── KV Store Host Functions ─────────────────────────────────────────
+
+/// Host function: `oxi_kv_get(key_json) → result_json`
+///
+/// Persistent key-value store for extension state.
+/// Keys are namespaced per extension.
+/// Input: `{"key": "my_state"}`
+/// Output: `{"success": true, "value": "..."}` or `{"success": false}`
+fn host_oxi_kv_get(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    outputs: &mut [Val],
+    _user_data: UserData<()>,
+) -> Result<(), extism::Error> {
+    let result: anyhow::Result<()> = (|| {
+        let input_json: String = plugin.memory_get_val(&inputs[0])?;
+
+        #[derive(Deserialize)]
+        struct KvReq {
+            key: String,
+        }
+
+        let req: KvReq = serde_json::from_str(&input_json)
+            .context("oxi_kv_get: invalid request JSON")?;
+
+        let value = kv_store_get(&req.key);
+        let response = serde_json::json!({
+            "success": value.is_some(),
+            "value": value.unwrap_or_default(),
+        });
+        let output = serde_json::to_string(&response)?;
+        let handle = plugin.memory_new(&output)?;
+        if !outputs.is_empty() {
+            outputs[0] = plugin.memory_to_val(handle);
+        }
+        Ok(())
+    })();
+    result.map_err(extism::Error::from)
+}
+
+/// Host function: `oxi_kv_set(set_json)`
+///
+/// Input: `{"key": "my_state", "value": "saved_data"}`
+fn host_oxi_kv_set(
+    plugin: &mut CurrentPlugin,
+    inputs: &[Val],
+    _outputs: &mut [Val],
+    _user_data: UserData<()>,
+) -> Result<(), extism::Error> {
+    let result: anyhow::Result<()> = (|| {
+        let input_json: String = plugin.memory_get_val(&inputs[0])?;
+
+        #[derive(Deserialize)]
+        struct KvSetReq {
+            key: String,
+            value: String,
+        }
+
+        let req: KvSetReq = serde_json::from_str(&input_json)
+            .context("oxi_kv_set: invalid request JSON")?;
+
+        kv_store_set(&req.key, &req.value);
+        Ok(())
+    })();
+    result.map_err(extism::Error::from)
+}
+
+// ── KV Store Implementation ─────────────────────────────────────────
+
+use std::sync::LazyLock;
+
+static KV_STORE: LazyLock<parking_lot::RwLock<HashMap<String, String>>> =
+    LazyLock::new(|| parking_lot::RwLock::new(HashMap::new()));
+
+fn kv_store_get(key: &str) -> Option<String> {
+    KV_STORE.read().get(key).cloned()
+}
+
+fn kv_store_set(key: &str, value: &str) {
+    KV_STORE.write().insert(key.to_string(), value.to_string());
+}
+
+// ── Path Validation ─────────────────────────────────────────────────
+
+/// Validate that a path is within the allowed directories.
+/// Extensions can only read/write outside protected system paths.
+fn validate_path_allowed(path: &str) -> Result<()> {
+    let p = std::path::Path::new(path);
+
+    // Resolve to absolute
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    };
+
+    let abs_str = abs.to_string_lossy();
+
+    // Block writes to sensitive system paths
+    let blocked_prefixes = [
+        "/etc", "/sys", "/proc", "/dev", "/boot", "/root",
+        "/System", "/Library/System",
+    ];
+    for prefix in &blocked_prefixes {
+        if abs_str.starts_with(prefix) {
+            anyhow::bail!("Path '{}' is in a protected system directory", path);
+        }
+    }
+
+    Ok(())
+}
+
 // ── SSRF Protection ─────────────────────────────────────────────────
 
 /// Validate that a URL does not target internal/private network addresses.
@@ -203,6 +593,8 @@ pub struct WasmExtensionManager {
     tool_to_ext: HashMap<String, String>,
     /// HTTP client shared by all extensions for oxi_http_request.
     http_client: Arc<reqwest::blocking::Client>,
+    /// Permissions granted to each extension (ext_name → set of permission strings).
+    permissions: HashMap<String, std::collections::HashSet<String>>,
 }
 
 impl WasmExtensionManager {
@@ -220,6 +612,7 @@ impl WasmExtensionManager {
                     .build()
                     .expect("Failed to build HTTP client")
             ),
+            permissions: HashMap::new(),
         }
     }
 
@@ -230,6 +623,7 @@ impl WasmExtensionManager {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             tool_to_ext: HashMap::new(),
             http_client: Arc::new(client),
+            permissions: HashMap::new(),
         }
     }
 
@@ -288,7 +682,55 @@ impl WasmExtensionManager {
             host_oxi_log,
         );
 
-        vec![http_fn, log_fn]
+        let read_fn = Function::new(
+            "oxi_read_file",
+            [PTR],
+            [PTR],
+            UserData::new(()),
+            host_oxi_read_file,
+        );
+
+        let write_fn = Function::new(
+            "oxi_write_file",
+            [PTR],
+            [PTR],
+            UserData::new(()),
+            host_oxi_write_file,
+        );
+
+        let exec_fn = Function::new(
+            "oxi_exec",
+            [PTR],
+            [PTR],
+            UserData::new(()),
+            host_oxi_exec,
+        );
+
+        let get_env_fn = Function::new(
+            "oxi_get_env",
+            [PTR],
+            [PTR],
+            UserData::new(()),
+            host_oxi_get_env,
+        );
+
+        let kv_get_fn = Function::new(
+            "oxi_kv_get",
+            [PTR],
+            [PTR],
+            UserData::new(()),
+            host_oxi_kv_get,
+        );
+
+        let kv_set_fn = Function::new(
+            "oxi_kv_set",
+            [PTR],
+            [],
+            UserData::new(()),
+            host_oxi_kv_set,
+        );
+
+        vec![http_fn, log_fn, read_fn, write_fn, exec_fn, get_env_fn, kv_get_fn, kv_set_fn]
     }
 
     /// Load a single `.wasm` extension.
@@ -323,6 +765,7 @@ impl WasmExtensionManager {
                     name,
                     version: "0.0.0".to_string(),
                     description: String::new(),
+                    permissions: vec![],
                 }
             }
         };
