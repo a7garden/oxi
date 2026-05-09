@@ -163,12 +163,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    // WASM extensions disabled (extism API compatibility)
     // Discover and load WASM extensions
     // if app.settings().extensions_enabled {
-    // let wasm_paths = oxi::extensions::WasmExtensionManager::discover(&cwd);
+    // let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd);
     // if !wasm_paths.is_empty() {
-    // let mut wasm_mgr = oxi::extensions::WasmExtensionManager::new();
+    // let mut wasm_mgr = crate::extensions::WasmExtensionManager::new();
     // let (loaded, errors) = wasm_mgr.load_all(&wasm_paths);
     // for info in &loaded {
     // tracing::info!("WASM extension loaded: {} v{}", info.name, info.version);
@@ -180,7 +179,7 @@ async fn main() -> Result<()> {
     // if !wasm_mgr.is_empty() {
     // let wasm_mgr = Arc::new(wasm_mgr);
     // for tool_def in wasm_mgr.all_tool_defs() {
-    // let wasm_tool = oxi::extensions::WasmTool::new(
+    // let wasm_tool = crate::extensions::WasmTool::new(
     // wasm_mgr.clone(),
     // tool_def.name.clone(),
     // tool_def.description.clone(),

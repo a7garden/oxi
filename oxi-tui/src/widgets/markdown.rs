@@ -158,6 +158,10 @@ pub enum LineType {
     ListItem,
     /// Horizontal rule (`---`, `***`, `___`).
     HorizontalRule,
+    /// Table separator line (e.g. `| --- | --- |`).
+    TableSeparator { widths: Vec<usize> },
+    /// Table data row (e.g. `| cell1 | cell2 |`).
+    TableRow { cells: Vec<String> },
 }
 
 /// Detect the structural type of a line.
@@ -201,12 +205,42 @@ pub fn detect_line_type(line: &str) -> LineType {
         }
     }
 
+    // Markdown table: must start and end with '|', have at least one internal '|'
+    if trimmed.starts_with('|') && trimmed.ends_with('|') && trimmed.len() >= 3 {
+        let cells: Vec<&str> = trimmed.split('|').filter(|s| !s.is_empty()).collect();
+        if cells.len() >= 2 {
+            // Check if this is a separator line (all dashes/colons/spaces)
+            let is_sep = cells.iter().all(|c| {
+                let c = c.trim();
+                c.chars().all(|ch| ch == '-' || ch == ':' || ch == ' ')
+                    && c.contains('-')
+            });
+            if is_sep {
+                let widths: Vec<usize> = cells.iter().map(|c| c.trim().len().max(3)).collect();
+                return LineType::TableSeparator { widths };
+            }
+            // Regular table row
+            let cell_strings: Vec<String> = cells.iter().map(|c| c.trim().to_string()).collect();
+            return LineType::TableRow { cells: cell_strings };
+        }
+    }
+
     LineType::Normal
 }
 
 // ---------------------------------------------------------------------------
 // Rendering helpers
 // ---------------------------------------------------------------------------
+
+/// Style used for table borders.
+pub fn table_border_style(base: Style) -> Style {
+    base.fg(Color::Indexed(242))
+}
+
+/// Style used for table header cells.
+pub fn table_header_style(base: Style) -> Style {
+    base.add_modifier(Modifier::BOLD)
+}
 
 /// Style used for inline code spans.
 pub fn code_style(base: Style) -> Style {

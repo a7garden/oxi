@@ -81,6 +81,12 @@ enum LineKind {
     ErrorBody,
     /// Error footer (blank separator)
     ErrorFooter,
+    /// Table border/separator line
+    TableBorder,
+    /// Table header row
+    TableHeader,
+    /// Table data row
+    TableRow,
 }
 
 /// State for the ChatView widget.
@@ -354,6 +360,24 @@ impl StatefulWidget for ChatView<'_> {
                             ));
                         }
                     }
+                    markdown::LineType::TableSeparator { widths } => {
+                        if in_code_block {
+                            lines.push((role, line.to_string(), LineKind::CodeBlock));
+                        } else {
+                            // Draw border: ───┼───┼───
+                            let border: Vec<String> = widths.iter().map(|w| "─".repeat(*w)).collect();
+                            lines.push((role, format!(" {} ", border.join("┼")), LineKind::TableBorder));
+                        }
+                    }
+                    markdown::LineType::TableRow { cells } => {
+                        if in_code_block {
+                            lines.push((role, line.to_string(), LineKind::CodeBlock));
+                        } else {
+                            // Format: " cell1 | cell2 | cell3 "
+                            let formatted = format!(" {} ", cells.join(" | "));
+                            lines.push((role, formatted, LineKind::TableRow));
+                        }
+                    }
                     markdown::LineType::Normal => {
                         let kind = if in_code_block {
                             LineKind::CodeBlock
@@ -555,6 +579,9 @@ impl StatefulWidget for ChatView<'_> {
                 | LineKind::ToolResultFooter => styles.muted,
                 // Error lines — bright error color
                 LineKind::ErrorHeader | LineKind::ErrorBody | LineKind::ErrorFooter => styles.error,
+                LineKind::TableBorder => markdown::table_border_style(styles.normal),
+                LineKind::TableHeader => markdown::table_header_style(styles.normal),
+                LineKind::TableRow => styles.normal,
             };
             let mut spans: Vec<Span> = Vec::new();
             // User messages: left-border stripe (no role prefix)
@@ -567,7 +594,8 @@ impl StatefulWidget for ChatView<'_> {
             spans.push(Span::styled(" ", line_base_style));
 
             match kind {
-                LineKind::CodeBlock | LineKind::HorizontalRule | LineKind::RoleLabel => {
+                LineKind::CodeBlock | LineKind::HorizontalRule | LineKind::RoleLabel
+                | LineKind::TableBorder | LineKind::TableHeader => {
                     spans.push(Span::styled(text.clone(), line_base_style));
                 }
                 _ => {
