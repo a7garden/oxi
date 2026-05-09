@@ -175,7 +175,6 @@ async fn main() -> Result<()> {
             for err in &errors {
                 tracing::warn!("WASM extension error: {}", err);
             }
-
             if !wasm_mgr.is_empty() {
                 let wasm_mgr = Arc::new(wasm_mgr);
                 for tool_def in wasm_mgr.all_tool_defs() {
