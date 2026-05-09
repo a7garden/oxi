@@ -50,6 +50,7 @@ pub use tools::{
 };
 pub use tools::search_cache::{SearchCache, GetSearchResultsTool};
 pub use tools::web_search::WebSearchTool;
+pub use tools::github::GitHubTool;
 pub use tools::github_search::GitHubSearchTool;
 pub use tools::subagent::SubagentTool;
 
@@ -67,6 +68,7 @@ pub mod prelude {
     };
     pub use crate::tools::search_cache::{SearchCache, GetSearchResultsTool};
     pub use crate::tools::web_search::WebSearchTool;
+    pub use crate::tools::github::GitHubTool;
     pub use crate::tools::github_search::GitHubSearchTool;
     pub use crate::tools::subagent::SubagentTool;
 }

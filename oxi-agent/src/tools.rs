@@ -179,7 +179,9 @@ pub mod tool_definition_wrapper;
 pub mod truncate;
 /// Multi-engine web search tool (a3s-search library + DuckDuckGo fallback).
 pub mod web_search;
-/// GitHub repository search tool.
+/// GitHub integration tool (gh CLI-based).
+pub mod github;
+/// GitHub repository search tool (legacy REST API).
 pub mod github_search;
 /// Sub-agent delegation tool.
 pub mod subagent;
@@ -300,9 +302,9 @@ impl ToolRegistry {
             registry.register(search_cache::GetSearchResultsTool::new(cache.clone()));
         }
 
-        if !disabled.contains("github_search") {
+        if !disabled.contains("github") && !disabled.contains("github_search") {
             let cache = Arc::new(search_cache::SearchCache::new());
-            registry.register(github_search::GitHubSearchTool::new(cache));
+            registry.register(github::GitHubTool::new(cache));
         }
 
         registry.register(SubagentTool::new(cwd));

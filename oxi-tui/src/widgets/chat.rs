@@ -451,14 +451,14 @@ impl StatefulWidget for ChatView<'_> {
                         all_lines.push((msg.role, String::new(), LineKind::ToolResultFooter));
                     }
                     ContentBlock::Error { title, message, retryable } => {
-                        all_lines.push((msg.role, format!("  [!] {}", title), LineKind::ErrorHeader));
+                        all_lines.push((msg.role, format!("\u{258c} {}", title), LineKind::ErrorHeader));
                         for line in message.lines().take(4) {
-                            all_lines.push((msg.role, format!("  {}", line), LineKind::ErrorBody));
+                            all_lines.push((msg.role, format!("\u{258c} {}", line), LineKind::ErrorBody));
                         }
                         if *retryable {
                             all_lines.push((
                                 msg.role,
-                                "  retry: this error may be temporary".to_string(),
+                                "\u{258c} retry: this error may be temporary".to_string(),
                                 LineKind::ErrorBody,
                             ));
                         }
@@ -570,15 +570,19 @@ impl StatefulWidget for ChatView<'_> {
                 LineKind::ListItem => styles.normal,
                 LineKind::HorizontalRule => styles.muted,
                 LineKind::RoleLabel => styles.primary.add_modifier(Modifier::BOLD),
-                // Tool call / result lines — muted foreground keeps them visually subordinate
+                // Tool call / result lines — muted foreground + dark background
                 LineKind::ToolCallHeader
                 | LineKind::ToolCallBody
                 | LineKind::ToolCallFooter
                 | LineKind::ToolResultHeader
                 | LineKind::ToolResultBody
-                | LineKind::ToolResultFooter => styles.muted,
-                // Error lines — bright error color
-                LineKind::ErrorHeader | LineKind::ErrorBody | LineKind::ErrorFooter => styles.error,
+                | LineKind::ToolResultFooter => Style::default()
+                    .fg(self.theme.colors.muted.to_ratatui())
+                    .bg(Color::Indexed(234)),
+                // Error lines — error foreground + dark red background
+                LineKind::ErrorHeader | LineKind::ErrorBody | LineKind::ErrorFooter => Style::default()
+                    .fg(self.theme.colors.error.to_ratatui())
+                    .bg(Color::Rgb(60, 20, 30)),
                 LineKind::TableBorder => markdown::table_border_style(styles.normal),
                 LineKind::TableHeader => markdown::table_header_style(styles.normal),
                 LineKind::TableRow => styles.normal,

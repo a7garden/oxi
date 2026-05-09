@@ -137,7 +137,7 @@ pub(crate) fn handle_slash_command(
             let names = registry.names();
             let builtin_names: std::collections::HashSet<&str> = [
                 "read", "write", "edit", "bash", "grep", "find", "ls",
-                "web_search", "get_search_results", "github_search", "subagent",
+                "web_search", "get_search_results", "github", "subagent",
             ].into_iter().collect();
             let mut builtin_lines = Vec::new();
             let mut wasm_lines = Vec::new();
@@ -612,7 +612,7 @@ const BUILTIN_TOOL_NAMES: &[&str] = &[
     "ls",
     "web_search",
     "get_search_results",
-    "github_search",
+    "github",
     "subagent",
 ];
 
@@ -683,9 +683,9 @@ fn try_re_register_tool(name: &str, registry: &std::sync::Arc<oxi_agent::ToolReg
             let cache = Arc::new(oxi_agent::SearchCache::new());
             registry.register(oxi_agent::GetSearchResultsTool::new(cache));
         }
-        "github_search" => {
+        "github" | "github_search" => {
             let cache = Arc::new(oxi_agent::SearchCache::new());
-            registry.register(oxi_agent::GitHubSearchTool::new(cache));
+            registry.register(oxi_agent::GitHubTool::new(cache));
         }
         "subagent" => registry.register(oxi_agent::SubagentTool::new(
             std::path::PathBuf::from("."),
