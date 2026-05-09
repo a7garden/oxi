@@ -280,8 +280,10 @@ impl StatefulWidget for Input<'_> {
         // Cursor at end of text
         if state.cursor >= total_chars {
             let end_col = prefix_width[total_chars].saturating_sub(scroll_col);
-            if end_col <= max_cols {
-                cursor_screen_col = Some(end_col);
+            // Show cursor even if slightly beyond max_cols — the cursor
+            // highlight only takes 1 cell at end position
+            if end_col <= max_cols + 1 {
+                cursor_screen_col = Some(end_col.min(max_cols));
                 cursor_char = ' ';
                 cursor_w = 1;
             }
