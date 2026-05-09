@@ -163,9 +163,8 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Discover and load WASM extensions
-    if app.settings().extensions_enabled {
-    // WASM disabled
+    // WASM extensions disabled
+    // if app.settings().extensions_enabled { ... }
 
     // Register extension tools with the agent
     for tool in ext_registry.all_tools() {
