@@ -3289,7 +3289,6 @@ dependencies = [
  "anyhow",
  "parking_lot",
  "ratatui",
- "ratatui-widgets",
  "serde",
  "serde_json",
  "toml 0.8.23",

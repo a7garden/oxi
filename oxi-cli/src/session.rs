@@ -2101,6 +2101,12 @@ fn is_valid_session_file(file_path: &str) -> bool {
 }
 
 /// Find the most recent session in a directory
+/// Find the path of the most recent session for the given working directory.
+pub fn find_recent_session_path(cwd: &str) -> Option<String> {
+    let dir = get_default_session_dir(cwd);
+    find_most_recent_session(&dir)
+}
+
 fn find_most_recent_session(session_dir: &str) -> Option<String> {
     if !Path::new(session_dir).exists() {
         return None;

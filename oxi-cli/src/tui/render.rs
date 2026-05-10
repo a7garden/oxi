@@ -8,7 +8,7 @@ use oxi_tui::widgets::{
     input::Input,
 };
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
@@ -106,7 +106,7 @@ fn render_selectable_list(
                 Style::default()
                     .fg(theme.colors.background.to_ratatui())
                     .bg(hl)
-                    .add_modifier(Modifier::BOLD)
+                    .bold()
             } else {
                 styles.normal
             };
@@ -190,13 +190,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         ])
         .split(size);
 
-    // Chat area with horizontal padding (2 cols each side)
-    let chat_area = Rect {
-        x: chunks[0].x + 2,
-        y: chunks[0].y,
-        width: chunks[0].width.saturating_sub(4),
-        height: chunks[0].height,
-    };
+    let chat_area = chunks[0].inner(Margin::new(2, 0));
     f.render_stateful_widget(ChatView::new(theme), chat_area, &mut state.chat);
 
     // Input area
@@ -323,7 +317,7 @@ fn render_slash_popup_overlay(
                         Style::default()
                             .fg(theme.colors.background.to_ratatui())
                             .bg(theme.colors.primary.to_ratatui())
-                            .add_modifier(Modifier::BOLD),
+                            .bold(),
                     ),
                     Span::styled(desc, Style::default().fg(theme.colors.muted.to_ratatui())),
                 ]))
@@ -431,7 +425,7 @@ fn render_setup_step(f: &mut Frame, area: Rect, _state: &mut AppState, theme: &T
             f.render_widget(
                 Paragraph::new(Span::styled(
                     msg,
-                    Style::default().fg(theme.colors.success.to_ratatui()).bg(bg).add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme.colors.success.to_ratatui()).bg(bg).bold(),
                 )),
                 Rect { x: area.x + 2, y: msg_y, width: area.width.saturating_sub(4), height: 1 },
             );

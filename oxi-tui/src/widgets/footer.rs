@@ -3,12 +3,10 @@
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, StatefulWidget},
+    widgets::{Block, Borders, LineGauge, Paragraph, StatefulWidget, Widget},
 };
-use ratatui::widgets::Widget;
-use ratatui_widgets::gauge::{Gauge, LineGauge};
 use crate::Theme;
 
 /// Footer data — shared state for token counts and session info.
@@ -110,13 +108,6 @@ impl<'a> Footer<'a> {
     }
 }
 
-impl Widget for Footer<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let mut state = FooterState::default();
-        StatefulWidget::render(self, area, buf, &mut state);
-    }
-}
-
 impl StatefulWidget for Footer<'_> {
     type State = FooterState;
 
@@ -187,7 +178,7 @@ impl StatefulWidget for Footer<'_> {
                     format!(" {}", model_short),
                     Style::default()
                         .fg(self.theme.colors.primary.to_ratatui())
-                        .add_modifier(Modifier::BOLD),
+                        .bold(),
                 ),
             ]);
 

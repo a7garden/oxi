@@ -1050,7 +1050,9 @@ async fn handle_resume_select_key(
         }
         KeyCode::Enter => {
             if let Some(session_info) = sessions.get(selected) {
-                state.add_system_message(format!("Session switching requires runtime integration. Session: {}", session_info.id));
+                // Trigger session switch via TuiNextAction
+                state.next_action = Some(super::app::TuiNextAction::SwitchSession(session_info.path.clone()));
+                state.add_system_message(format!("Switching to session: {}", session_info.path));
             }
             state.overlay = None;
         }

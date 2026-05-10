@@ -307,21 +307,9 @@ pub(crate) fn handle_slash_command(
                 if !std::path::Path::new(path).exists() {
                     state.add_system_message(format!("File not found: {}", path));
                 } else {
+                    // Trigger session switch to the imported file
+                    state.next_action = Some(super::app::TuiNextAction::SwitchSession(path.to_string()));
                     state.add_system_message(format!("Importing session from {}...", path));
-                    // The actual switch needs runtime integration
-                    // For now, show the file was found
-                    let cwd = std::env::current_dir()
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_else(|_| ".".to_string());
-                    match crate::session::SessionManager::open(path, None, Some(&cwd)) {
-                        _mgr => {
-                            let entries = _mgr.get_entries();
-                            state.add_system_message(format!(
-                                "Loaded {} entries. Session switching requires runtime integration.",
-                                entries.len()
-                            ));
-                        }
-                    }
                 }
             } else {
                 state.add_system_message("/import <path-to-jsonl>".to_string());
@@ -330,26 +318,95 @@ pub(crate) fn handle_slash_command(
         }
         "/share" => {
             state.add_system_message(
-                "GitHub gist sharing coming soon. Use /export for HTML.".to_string(),
+                "/share has been removed. Use /export <path> to export as HTML.".to_string(),
             );
             true
         }
         "/fork" => {
-            state.add_system_message(
-                "Use /tree to view branches. Fork via session navigation.".to_string(),
-            );
+            // Show user messages to fork from
+            if let Some(ref path) = state.session_file_path {
+                let sm = crate::session::SessionManager::open(path, None, None);
+                let branch = sm.get_branch(None);
+                let user_entries: Vec<_> = branch.iter()
+                    .filter(|e| e.message.is_user())
+                    .enumerate()
+                    .collect();
+                if user_entries.is_empty() {
+                    state.add_system_message("No user messages to fork from.".to_string());
+                } else {
+                    let mut out = "Fork from which message?\n\n".to_string();
+                    for (i, entry) in user_entries.iter() {
+                        let preview: String = entry.content().chars().take(60).collect();
+                        let short_id = &entry.id[..8.min(entry.id.len())];
+                        out.push_str(&format!("  {}. [{}] {}\n", i + 1, short_id, preview));
+                    }
+                    out.push_str("\n/fork <entry-id> to fork from a specific message");
+                    state.add_system_message(out);
+                }
+            } else {
+                state.add_system_message("No session file available.".to_string());
+            }
             true
         }
         "/clone" => {
-            state.add_system_message(
-                "Run oxi --continue in a new terminal to clone.".to_string(),
-            );
+            if let Some(ref path) = state.session_file_path {
+                let cwd: String = std::env::current_dir()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| ".".to_string());
+                match crate::session::SessionManager::fork_from(path, &cwd, None) {
+                    Ok(new_sm) => {
+                        if let Some(new_path) = new_sm.get_session_file() {
+                            state.add_system_message(format!("Cloned session: {}", new_path));
+                        } else {
+                            state.add_system_message("Session cloned.".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        state.add_system_message(format!("Error cloning session: {}", e));
+                    }
+                }
+            } else {
+                state.add_system_message("No active session to clone.".to_string());
+            }
             true
         }
         "/tree" => {
-            state.add_system_message(
-                "Linear session. Use /fork to branch from a previous message.".to_string(),
-            );
+            if let Some(ref path) = state.session_file_path {
+                let sm = crate::session::SessionManager::open(path, None, None);
+                match sm.get_tree(uuid::Uuid::nil()) {
+                    Ok(roots) => {
+                        if roots.is_empty() {
+                            state.add_system_message("Empty session.".to_string());
+                        } else {
+                            let mut out = "Session tree:\n\n".to_string();
+                            fn render_node(node: &crate::session::SessionTreeNode, depth: usize, out: &mut String) {
+                                let indent = "  ".repeat(depth);
+                                let role = match &node.entry.message {
+                                    crate::session::AgentMessage::User { .. } => "U",
+                                    crate::session::AgentMessage::Assistant { .. } => "A",
+                                    _ => "-",
+                                };
+                                let preview: String = node.entry.content().chars().take(50).collect();
+                                let label = node.label.as_ref().map(|l| format!(" [{}]", l)).unwrap_or_default();
+                                let short_id = &node.entry.id[..8.min(node.entry.id.len())];
+                                out.push_str(&format!("{}{} [{}] {}{}\n", indent, role, short_id, preview, label));
+                                for child in &node.children {
+                                    render_node(child, depth + 1, out);
+                                }
+                            }
+                            for root in &roots {
+                                render_node(root, 0, &mut out);
+                            }
+                            state.add_system_message(out);
+                        }
+                    }
+                    Err(e) => {
+                        state.add_system_message(format!("Error reading tree: {}", e));
+                    }
+                }
+            } else {
+                state.add_system_message("No session file available.".to_string());
+            }
             true
         }
         "/provider" => {
@@ -396,9 +453,8 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/new" => {
+            state.next_action = Some(super::app::TuiNextAction::NewSession);
             state.add_system_message("Starting new session...".to_string());
-            session.reset();
-            state.chat.clear();
             true
         }
         "/resume" => {
@@ -424,7 +480,19 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/reload" => {
-            state.add_system_message("OK: Configuration reloaded".to_string());
+            let reloaded = crate::settings::Settings::load().unwrap_or_default();
+            let model_name = reloaded.effective_model(None).unwrap_or_default();
+            let provider = reloaded.effective_provider(None).unwrap_or_default();
+            let theme_name = reloaded.theme.clone();
+            session.set_thinking_level(reloaded.thinking_level);
+            if !model_name.is_empty() {
+                state.footer_state.data.model_name = model_name.clone();
+            }
+            state.add_system_message(format!(
+                "OK: Reloaded configuration\n  Model: {}\n  Provider: {}\n  Theme: {}\n  Thinking: {:?}\n  Extensions: {}\n  Stream: {}\n  Auto-compact: {}",
+                model_name, provider, theme_name, reloaded.thinking_level,
+                reloaded.extensions_enabled, reloaded.stream_responses, reloaded.auto_compaction,
+            ));
             true
         }
         "/scoped-models" | "/models" => {
@@ -503,11 +571,14 @@ fn format_help() -> String {
   Session
     /new              Start a new session
     /clone            Duplicate current session
-    /resume           List recent sessions
+    /resume           Resume a previous session
+    /import <path>    Import session from JSONL
     /tree             Show session tree
-    /fork             Fork from a previous message
+    /fork             List messages to fork from
+    /fork <id>        Fork from a specific message
     /session          Show session info
     /name <name>      Set session name
+    /clear            Clear chat history
 
   Model
     /model [id]       Switch or show model
@@ -515,24 +586,20 @@ fn format_help() -> String {
 
   Context
     /compact [instr]  Compact context
-    /clear            Clear history
 
   Tools
     /tools            List active tools
     /tools <name>     Toggle tool on/off
-
-  Extensions
     /extensions       List extensions & WASM tools
     /ext              Alias for /extensions
 
   Export
     /export [path]    Export to HTML
-    /import <path>    Import from JSONL
     /copy             Copy code block / last reply
 
   Auth
-    /provider <provider> Configure API key
-    /logout <provider> Remove key
+    /provider [name]  Configure API key
+    /logout [name]    Remove key
 
   Info
     /help             This help
@@ -574,42 +641,6 @@ fn format_hotkeys() -> String {
 }
 
 // ── Interactive login ────────────────────────────────────────────────────
-
-/// Preset provider list (deprecated — use register_builtins)
-
-/// /provider — show provider list with auth status
-fn interactive_provider_select(state: &mut AppState) {
-    let mut msg = "Select a provider:\n\n".to_string();
-    let auth = AuthStorage::new();
-
-    for builtin in oxi_ai::register_builtins::get_builtin_providers() {
-        let has_key = auth.get_api_key(builtin.name).is_some();
-        let status = if has_key { "[x]" } else { "[ ]" };
-        msg.push_str(&format!("  {} {}\n", status, builtin.name));
-    }
-
-    msg.push_str("\nUse /provider <provider> <key> to set an API key.");
-    msg.push_str("\nExample: /provider minimax");
-    state.add_system_message(msg);
-}
-
-/// /provider <provider> — show current key status + instructions
-fn interactive_provider(provider: &str, state: &mut AppState) {
-    let provider = provider.to_lowercase();
-
-    let auth = AuthStorage::new();
-    let existing = auth.get_api_key(&provider);
-
-    let masked = existing
-        .as_ref()
-        .map(|k| mask_key(k))
-        .unwrap_or_else(|| "not set".to_string());
-
-    state.add_system_message(format!(
-        "API key for {}\n\nCurrent: {}\n\nUse /provider {} <your-api-key> to set the key.",
-        provider, masked, provider
-    ));
-}
 
 /// /provider <provider> <key> — save the key directly
 fn try_provider_with_key(provider: &str, key: &str, state: &mut AppState) -> bool {

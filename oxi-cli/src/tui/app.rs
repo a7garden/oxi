@@ -257,6 +257,17 @@ pub(crate) enum AppOverlay {
     },
 }
 
+// ── Session Switch Action ──────────────────────────────────────────────
+
+/// Action requested by a slash command or overlay to switch sessions.
+#[derive(Debug, Clone)]
+pub(crate) enum TuiNextAction {
+    /// Switch to an existing session file.
+    SwitchSession(String),
+    /// Start a fresh session.
+    NewSession,
+}
+
 pub(crate) struct AppState {
     pub chat: ChatViewState,
     pub input: InputState,
@@ -275,6 +286,10 @@ pub(crate) struct AppState {
     pub overlay: Option<AppOverlay>,
     /// WASM extension manager for dynamic commands
     pub wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
+    /// Session file path for the current session
+    pub session_file_path: Option<String>,
+    /// Requested session switch action (checked by outer loop)
+    pub next_action: Option<TuiNextAction>,
 }
 
 impl AppState {
@@ -295,6 +310,8 @@ impl AppState {
             message_count: 0,
             overlay: None,
             wasm_ext: None,
+            session_file_path: None,
+            next_action: None,
         }
     }
 
@@ -469,342 +486,328 @@ pub async fn run_tui_interactive_with_continue(app: crate::App, resume_last: boo
 }
 
 async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<()> {
+    // ── Extract resources from App (needed for session switching loop) ──
     let settings = app.settings().clone();
-    let cwd = std::env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
+    let model_id = app.model_id();
+    let tools = app.agent().tools();
+    let wasm_ext = app.wasm_ext().cloned();
+    let cwd: String = std::env::current_dir()
+        .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
+    let cwd_path = std::env::current_dir().unwrap_or_default();
+    let git_branch = crate::git_utils::get_current_branch(&cwd_path);
 
-    let session_manager = if resume_last {
-        SessionManager::continue_recent(&cwd, None)
-    } else {
-        SessionManager::create(&cwd, None)
-    };
-    let session_id = session_manager.get_session_id();
-    let session_manager_for_restore = if resume_last {
-        Some(session_manager.clone())
+    // ── Determine initial session ──
+    let mut session_target: Option<String> = if resume_last {
+        crate::session::find_recent_session_path(&cwd)
     } else {
         None
     };
 
-    let services = create_agent_session_services(
-        CreateAgentSessionServicesOptions::new(std::env::current_dir().unwrap_or_default()),
-    )?;
-    let services = Arc::new(services);
-
-    let create_result = create_agent_session_from_services(
-        CreateAgentSessionFromServicesOptions {
-            services: services.clone(),
-            session_manager,
-            model_id: Some(app.model_id()),
-            thinking_level: Some(settings.thinking_level),
-            scoped_models: Vec::new(),
-            tool_registry: Some(app.agent().tools()),
-        },
-    )?;
-
-    let agent_session = create_result.session;
-    if let Some(msg) = create_result.model_fallback_message {
-        tracing::warn!("Model fallback: {}", msg);
-    }
-
-    let (session_event_tx, mut session_event_rx) = mpsc::unbounded_channel::<SessionEvent>();
-    agent_session.subscribe(Box::new(move |event| {
-        let _ = session_event_tx.send(event.clone());
-    }));
-
-    let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
-    let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
-
-    // Agent worker thread
-    let session_handle = agent_session.clone_handle();
-    let ui_tx_for_thread = ui_tx.clone();
-    let agent_handle = std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to build agent runtime");
-        rt.block_on(async {
-            let local = tokio::task::LocalSet::new();
-            local
-                .run_until(async {
-                    while let Some(prompt) = prompt_rx.recv().await {
-                        let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
-                        let ui_fwd = ui_tx_for_thread.clone();
-                        let event_forwarder = tokio::task::spawn_local(async move {
-                            while let Some(event) = event_rx.recv().await {
-                                let ui_event = match event {
-                                    AgentEvent::Start { .. } => UiEvent::Start,
-                                    AgentEvent::Thinking => UiEvent::Thinking,
-                                    AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
-                                    AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
-                                    AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
-                                        id: tool_call.id,
-                                        name: tool_call.name,
-                                        arguments: tool_call.arguments.to_string(),
-                                    },
-                                    AgentEvent::ToolStart { tool_name, .. } => {
-                                        UiEvent::ToolStart { tool_name }
-                                    }
-                                    AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
-                                        tool_name: String::new(),
-                                        content: result.content.chars().take(500).collect(),
-                                        is_error: false,
-                                    },
-                                    AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
-                                        tool_name: String::new(),
-                                        content: error.clone(),
-                                        is_error: true,
-                                    },
-                                    AgentEvent::Complete { .. } => {
-                                        // DEBUG: Complete
-                                        UiEvent::Complete
-                                    }
-                                    AgentEvent::Error { message, .. } => UiEvent::Error(message),
-                                    AgentEvent::MessageUpdate { ref message, delta: _ } => {
-                                        // DO NOT forward delta — TextChunk already sends the same text
-                                        // Only extract image blocks from the message
-                                        let content_blocks: &[oxi_ai::ContentBlock] = match message {
-                                            oxi_ai::Message::Assistant(a) => &a.content,
-                                            oxi_ai::Message::User(u) => match &u.content {
-                                                oxi_ai::MessageContent::Blocks(blocks) => blocks,
-                                                _ => &[],
-                                            },
-                                            oxi_ai::Message::ToolResult(t) => &t.content,
-                                        };
-                                        for block in content_blocks {
-                                            if let oxi_ai::ContentBlock::Image(ref img) = block {
-                                                let _ = ui_fwd.send(UiEvent::ImageBlock {
-                                                    mime_type: img.mime_type.clone(),
-                                                    base64_data: img.data.clone(),
-                                                }).await;
-                                            }
-                                        }
-                                        continue;
-                                    }
-                                    AgentEvent::MessageEnd { ref message } => {
-                                                                                // Extract image blocks from the message
-                                        let content_blocks: &[oxi_ai::ContentBlock] = match message {
-                                            oxi_ai::Message::Assistant(a) => &a.content,
-                                            oxi_ai::Message::User(u) => match &u.content {
-                                                oxi_ai::MessageContent::Blocks(blocks) => blocks,
-                                                _ => &[],
-                                            },
-                                            oxi_ai::Message::ToolResult(t) => &t.content,
-                                        };
-                                        for block in content_blocks {
-                                            if let oxi_ai::ContentBlock::Image(ref img) = block {
-                                                let _ = ui_fwd.send(UiEvent::ImageBlock {
-                                                    mime_type: img.mime_type.clone(),
-                                                    base64_data: img.data.clone(),
-                                                }).await;
-                                            }
-                                        }
-                                        // Extract token usage from assistant message
-                                        if let oxi_ai::Message::Assistant(ref a) = message {
-                                            let usage = &a.usage;
-                                            let input_tokens = usage.input as u32;
-                                            let output_tokens = usage.output as u32;
-                                            let cache_read_tokens = usage.cache_read as u32;
-                                            let cache_write_tokens = usage.cache_write as u32;
-                                            let total_cost = usage.cost.total();
-                                            // Estimate context window percentage
-                                            let context_window_pct = if usage.total_tokens > 0 {
-                                                // Rough estimate based on total tokens
-                                                (usage.total_tokens as f32 / 200_000.0) * 100.0
-                                            } else {
-                                                0.0
-                                            };
-                                            let _ = ui_fwd.send(UiEvent::TokenUsage {
-                                                input_tokens,
-                                                output_tokens,
-                                                cache_read_tokens,
-                                                cache_write_tokens,
-                                                context_window_pct,
-                                                total_cost,
-                                            }).await;
-                                        }
-                                        continue;
-                                    }
-                                    AgentEvent::Usage { input_tokens, output_tokens } => {
-                                                                                let _ = ui_fwd.send(UiEvent::TokenUsage {
-                                            input_tokens: input_tokens as u32,
-                                            output_tokens: output_tokens as u32,
-                                            cache_read_tokens: 0,
-                                            cache_write_tokens: 0,
-                                            context_window_pct: 0.0,
-                                            total_cost: 0.0,
-                                        }).await;
-                                        continue;
-                                    }
-                                    _ => continue,
-                                };
-                                if ui_fwd.send(ui_event).await.is_err() {
-                                    break;
-                                }
-                            }
-                        });
-                        let sh = session_handle.clone_handle();
-                        let agent = sh.agent_ref();
-
-                        // Wire steering/follow-up queues to agent hooks
-                        // so the agentic loop can poll queued messages
-                        let steering_q = sh.steering_queue();
-                        let follow_up_q = sh.follow_up_queue();
-                        let hooks = oxi_agent::AgentHooks {
-                            get_steering_messages: Some(Box::new(move || {
-                                steering_q.write().drain(..).collect::<Vec<String>>()
-                            })),
-                            get_follow_up_messages: Some(Box::new(move || {
-                                follow_up_q.write().drain(..).collect::<Vec<String>>()
-                            })),
-                            tool_execution: oxi_agent::ToolExecutionMode::Sequential,
-                            ..Default::default()
-                        };
-                        agent.set_hooks(hooks);
-
-                        let _ = agent.run_with_channel(prompt, event_tx).await;
-                        let _ = event_forwarder.await;
-                    }
-                })
-                .await;
-        });
-    });
-
-    // Setup terminal (Tui handles raw mode, alternate screen, mouse, panic hook)
+    // ── Enter terminal ONCE ──
     let mut tui = Tui::enter()?;
-
     let theme = Theme::dark();
-    let mut state = AppState::new();
 
-    // Restore previous messages if resuming a session
-    if let Some(ref sm) = session_manager_for_restore {
-        let branch = sm.get_branch(None);
-        for entry in &branch {
-            match &entry.message {
-                crate::session::AgentMessage::User { content } => {
-                    state.add_user_message(content.as_str().to_string());
-                }
-                crate::session::AgentMessage::Assistant { content, .. } => {
-                    let text: String = content.iter()
-                        .filter_map(|b| match b {
-                            crate::session::AssistantContentBlock::Text { text } => Some(text.as_str()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("");
-                    if !text.is_empty() {
-                        state.add_system_message(text);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
+    // ── Session switching loop ──
+    loop {
+        let is_resuming = session_target.is_some();
 
-    let model_id = agent_session.model_id();
-    let git_branch =
-        crate::git_utils::get_current_branch(&std::env::current_dir().unwrap_or_default());
-
-    state.footer_state.data.pwd = Some(cwd.clone());
-    state.footer_state.data.model_name = model_id.clone();
-    state.footer_state.data.git_branch = git_branch.clone();
-
-    // Pass WASM extension manager to state for dynamic commands
-    state.wasm_ext = app.wasm_ext().cloned();
-
-    // Check if model is configured
-    let has_model = !model_id.is_empty() && model_id.contains('/');
-    if has_model {
-        tracing::info!("TUI: model_id={}, footer will show: {}", model_id, model_id);
-        state.footer_state.data.model_name = model_id.clone();
-        state.footer_state.data.provider_name = model_id.split('/').next().unwrap_or("").to_string();
-        // Version in footer
-        state.footer_state.data.version = env!("CARGO_PKG_VERSION").to_string();
-    } else {
-        tracing::warn!("TUI: No model configured (model_id='{}'), launching setup wizard", model_id);
-        // No model configured — launch setup wizard
-        let auth = crate::auth_storage::AuthStorage::new();
-        let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
-            .iter()
-            .map(|builtin| {
-                let has_key = auth.get_api_key(builtin.name).is_some();
-                (builtin.name.to_string(), has_key)
-            }).collect();
-
-        state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider {
-            providers,
-            selected: 0,
-        }));
-    }
-
-    let mut running = true;
-    let mut last_spinner_tick = std::time::Instant::now();
-    let poll_timeout = std::time::Duration::from_millis(50);
-
-    while running {
-        // Advance spinner
-        let now = std::time::Instant::now();
-        if now.duration_since(last_spinner_tick).as_millis() >= 80 {
-            state.spinner_frame = (state.spinner_frame + 1) % SPINNER.len();
-            state.chat.spinner_frame = state.spinner_frame;
-            last_spinner_tick = now;
-        }
-
-        // Render
-        let model_debug = state.footer_state.data.model_name.clone();
-        tracing::debug!("draw() called, footer.model_name='{}', is_busy={}", model_debug, state.is_agent_busy);
-        tui.draw(|f| {
-            tracing::debug!("render::draw about to render footer with model_name='{}'", state.footer_state.data.model_name);
-            render::draw(f, &mut state, &theme)
-        })?;
-
-        // Poll input events
-        if event::poll(poll_timeout)? {
-            if let Some(action) =
-                handlers::handle_input(event::read()?, &mut state, &agent_session, &ui_tx, &prompt_tx, &mut running).await
-            {
-                match action {
-                    handlers::Action::SendPrompt(value) => {
-                        state.add_user_message(value.clone());
-                        state.input_history.insert(0, value.clone());
-                        if state.input_history.len() > 100 {
-                            state.input_history.pop();
-                        }
-                        state.history_index = 0;
-                        state.start_streaming();
-                        let _ = prompt_tx.send(value).await;
-                        state.input_clear();
-                    }
-                    handlers::Action::ExecuteSlashCommand(cmd) => {
-                        slash::handle_slash_command(
-                            &cmd, &agent_session, &mut state, &mut running,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Drain agent events
-        while let Ok(ui_event) = ui_rx.try_recv() {
-            handlers::handle_ui_event(ui_event, &mut state);
-        }
-
-        // Drain session events
-        while let Ok(session_event) = session_event_rx.try_recv() {
-            handlers::handle_session_event(session_event, &ui_tx).await;
-        }
-
-        // Auto-scroll
-        let chat_visible_height = {
-            let size = tui.size()?;
-            size.height.saturating_sub(5) // Input(2) + StatusBar(3)
+        let session_manager = match &session_target {
+            Some(path) => SessionManager::open(path, None, Some(&cwd)),
+            None => SessionManager::create(&cwd, None),
         };
-        state.ensure_auto_scroll(chat_visible_height);
+
+        let services = create_agent_session_services(
+            CreateAgentSessionServicesOptions::new(cwd_path.clone()),
+        )?;
+        let services = Arc::new(services);
+
+        let create_result = create_agent_session_from_services(
+            CreateAgentSessionFromServicesOptions {
+                services: services.clone(),
+                session_manager,
+                model_id: Some(model_id.clone()),
+                thinking_level: Some(settings.thinking_level),
+                scoped_models: Vec::new(),
+                tool_registry: Some(tools.clone()),
+            },
+        )?;
+
+        let agent_session = create_result.session;
+        if let Some(msg) = create_result.model_fallback_message {
+            tracing::warn!("Model fallback: {}", msg);
+        }
+
+        let (session_event_tx, mut session_event_rx) = mpsc::unbounded_channel::<SessionEvent>();
+        agent_session.subscribe(Box::new(move |event| {
+            let _ = session_event_tx.send(event.clone());
+        }));
+
+        let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
+        let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
+
+        // Agent worker thread
+        let session_handle = agent_session.clone_handle();
+        let ui_tx_for_thread = ui_tx.clone();
+        let agent_handle = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to build agent runtime");
+            rt.block_on(async {
+                let local = tokio::task::LocalSet::new();
+                local
+                    .run_until(async {
+                        while let Some(prompt) = prompt_rx.recv().await {
+                            let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
+                            let ui_fwd = ui_tx_for_thread.clone();
+                            let event_forwarder = tokio::task::spawn_local(async move {
+                                while let Some(event) = event_rx.recv().await {
+                                    let ui_event = match event {
+                                        AgentEvent::Start { .. } => UiEvent::Start,
+                                        AgentEvent::Thinking => UiEvent::Thinking,
+                                        AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
+                                        AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
+                                        AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
+                                            id: tool_call.id,
+                                            name: tool_call.name,
+                                            arguments: tool_call.arguments.to_string(),
+                                        },
+                                        AgentEvent::ToolStart { tool_name, .. } => {
+                                            UiEvent::ToolStart { tool_name }
+                                        }
+                                        AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
+                                            tool_name: String::new(),
+                                            content: result.content.chars().take(500).collect(),
+                                            is_error: false,
+                                        },
+                                        AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
+                                            tool_name: String::new(),
+                                            content: error.clone(),
+                                            is_error: true,
+                                        },
+                                        AgentEvent::Complete { .. } => UiEvent::Complete,
+                                        AgentEvent::Error { message, .. } => UiEvent::Error(message),
+                                        AgentEvent::MessageUpdate { ref message, delta: _ } => {
+                                            let content_blocks: &[oxi_ai::ContentBlock] = match message {
+                                                oxi_ai::Message::Assistant(a) => &a.content,
+                                                oxi_ai::Message::User(u) => match &u.content {
+                                                    oxi_ai::MessageContent::Blocks(blocks) => blocks,
+                                                    _ => &[],
+                                                },
+                                                oxi_ai::Message::ToolResult(t) => &t.content,
+                                            };
+                                            for block in content_blocks {
+                                                if let oxi_ai::ContentBlock::Image(ref img) = block {
+                                                    let _ = ui_fwd.send(UiEvent::ImageBlock {
+                                                        mime_type: img.mime_type.clone(),
+                                                        base64_data: img.data.clone(),
+                                                    }).await;
+                                                }
+                                            }
+                                            continue;
+                                        }
+                                        AgentEvent::MessageEnd { ref message } => {
+                                            let content_blocks: &[oxi_ai::ContentBlock] = match message {
+                                                oxi_ai::Message::Assistant(a) => &a.content,
+                                                oxi_ai::Message::User(u) => match &u.content {
+                                                    oxi_ai::MessageContent::Blocks(blocks) => blocks,
+                                                    _ => &[],
+                                                },
+                                                oxi_ai::Message::ToolResult(t) => &t.content,
+                                            };
+                                            for block in content_blocks {
+                                                if let oxi_ai::ContentBlock::Image(ref img) = block {
+                                                    let _ = ui_fwd.send(UiEvent::ImageBlock {
+                                                        mime_type: img.mime_type.clone(),
+                                                        base64_data: img.data.clone(),
+                                                    }).await;
+                                                }
+                                            }
+                                            if let oxi_ai::Message::Assistant(ref a) = message {
+                                                let usage = &a.usage;
+                                                let context_window_pct = if usage.total_tokens > 0 {
+                                                    (usage.total_tokens as f32 / 200_000.0) * 100.0
+                                                } else { 0.0 };
+                                                let _ = ui_fwd.send(UiEvent::TokenUsage {
+                                                    input_tokens: usage.input as u32,
+                                                    output_tokens: usage.output as u32,
+                                                    cache_read_tokens: usage.cache_read as u32,
+                                                    cache_write_tokens: usage.cache_write as u32,
+                                                    context_window_pct,
+                                                    total_cost: usage.cost.total(),
+                                                }).await;
+                                            }
+                                            continue;
+                                        }
+                                        AgentEvent::Usage { input_tokens, output_tokens } => {
+                                            let _ = ui_fwd.send(UiEvent::TokenUsage {
+                                                input_tokens: input_tokens as u32,
+                                                output_tokens: output_tokens as u32,
+                                                cache_read_tokens: 0,
+                                                cache_write_tokens: 0,
+                                                context_window_pct: 0.0,
+                                                total_cost: 0.0,
+                                            }).await;
+                                            continue;
+                                        }
+                                        _ => continue,
+                                    };
+                                    if ui_fwd.send(ui_event).await.is_err() { break; }
+                                }
+                            });
+                            let sh = session_handle.clone_handle();
+                            let agent = sh.agent_ref();
+                            let steering_q = sh.steering_queue();
+                            let follow_up_q = sh.follow_up_queue();
+                            let hooks = oxi_agent::AgentHooks {
+                                get_steering_messages: Some(Box::new(move || {
+                                    steering_q.write().drain(..).collect::<Vec<String>>()
+                                })),
+                                get_follow_up_messages: Some(Box::new(move || {
+                                    follow_up_q.write().drain(..).collect::<Vec<String>>()
+                                })),
+                                tool_execution: oxi_agent::ToolExecutionMode::Sequential,
+                                ..Default::default()
+                            };
+                            agent.set_hooks(hooks);
+                            let _ = agent.run_with_channel(prompt, event_tx).await;
+                            let _ = event_forwarder.await;
+                        }
+                    })
+                    .await;
+            });
+        });
+
+        // ── Create state ──
+        let mut state = AppState::new();
+        state.session_file_path = session_target.clone();
+
+        // Restore previous messages if resuming
+        if is_resuming {
+            if let Some(ref path) = session_target {
+                let sm = crate::session::SessionManager::open(path, None, Some(&cwd));
+                let branch = sm.get_branch(None);
+                for entry in &branch {
+                    match &entry.message {
+                        crate::session::AgentMessage::User { content } => {
+                            state.add_user_message(content.as_str().to_string());
+                        }
+                        crate::session::AgentMessage::Assistant { content, .. } => {
+                            let text: String = content.iter()
+                                .filter_map(|b| match b {
+                                    crate::session::AssistantContentBlock::Text { text } => Some(text.as_str()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                                .join("");
+                            if !text.is_empty() {
+                                state.add_system_message(text);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        // Footer
+        state.footer_state.data.pwd = Some(cwd.clone());
+        state.footer_state.data.model_name = model_id.clone();
+        state.footer_state.data.git_branch = git_branch.clone();
+        state.footer_state.data.provider_name = model_id.split('/').next().unwrap_or("").to_string();
+        state.footer_state.data.version = env!("CARGO_PKG_VERSION").to_string();
+        state.wasm_ext = wasm_ext.clone();
+
+        // Check if model is configured
+        let has_model = !model_id.is_empty() && model_id.contains('/');
+        if !has_model {
+            let auth = crate::auth_storage::AuthStorage::new();
+            let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
+                .iter()
+                .map(|builtin| {
+                    (builtin.name.to_string(), auth.get_api_key(builtin.name).is_some())
+                }).collect();
+            state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider { providers, selected: 0 }));
+        }
+
+        // ── Inner TUI loop ──
+        let mut running = true;
+        let mut last_spinner_tick = std::time::Instant::now();
+        let poll_timeout = std::time::Duration::from_millis(50);
+
+        while running {
+            let now = std::time::Instant::now();
+            if now.duration_since(last_spinner_tick).as_millis() >= 80 {
+                state.spinner_frame = (state.spinner_frame + 1) % SPINNER.len();
+                state.chat.spinner_frame = state.spinner_frame;
+                last_spinner_tick = now;
+            }
+
+            tui.draw(|f| render::draw(f, &mut state, &theme))?;
+
+            if event::poll(poll_timeout)? {
+                if let Some(action) =
+                    handlers::handle_input(event::read()?, &mut state, &agent_session, &ui_tx, &prompt_tx, &mut running).await
+                {
+                    match action {
+                        handlers::Action::SendPrompt(value) => {
+                            state.add_user_message(value.clone());
+                            state.input_history.insert(0, value.clone());
+                            if state.input_history.len() > 100 { state.input_history.pop(); }
+                            state.history_index = 0;
+                            state.start_streaming();
+                            let _ = prompt_tx.send(value).await;
+                            state.input_clear();
+                        }
+                        handlers::Action::ExecuteSlashCommand(cmd) => {
+                            slash::handle_slash_command(
+                                &cmd, &agent_session, &mut state, &mut running,
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Check if session switch was requested by a slash command
+            if state.next_action.is_some() {
+                running = false;
+            }
+
+            while let Ok(ui_event) = ui_rx.try_recv() {
+                handlers::handle_ui_event(ui_event, &mut state);
+            }
+            while let Ok(session_event) = session_event_rx.try_recv() {
+                handlers::handle_session_event(session_event, &ui_tx).await;
+            }
+
+            let chat_visible_height = {
+                let size = tui.size()?;
+                size.height.saturating_sub(5)
+            };
+            state.ensure_auto_scroll(chat_visible_height);
+        }
+
+        // ── Cleanup this iteration ──
+        let next_action = state.next_action.take();
+        drop(prompt_tx);
+        let _ = agent_handle.join();
+
+        match next_action {
+            Some(TuiNextAction::SwitchSession(path)) => {
+                tracing::info!("Switching to session: {}", path);
+                session_target = Some(path);
+                continue;
+            }
+            Some(TuiNextAction::NewSession) => {
+                tracing::info!("Starting new session");
+                session_target = None;
+                continue;
+            }
+            None => break,
+        }
     }
 
-    // Cleanup — Tui::exit() handles mouse, bracketed paste, alternate screen, raw mode
-    drop(prompt_tx);
     tui.exit()?;
-    let _ = agent_handle.join();
     Ok(())
 }

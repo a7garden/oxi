@@ -3,13 +3,12 @@
 //! Supports full Unicode including CJK double-width characters.
 
 use ratatui::{
-    widgets::{StatefulWidget, Paragraph},
+    widgets::{StatefulWidget, Paragraph, Widget},
     buffer::Buffer,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
 };
-use ratatui::widgets::Widget;
 use crate::Theme;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 

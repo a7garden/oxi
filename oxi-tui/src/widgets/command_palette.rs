@@ -7,11 +7,10 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::Line,
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, StatefulWidget, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
-use ratatui::widgets::Widget;
 use crate::{Event, KeyCode, KeyEvent, Theme};
 use crate::fuzzy::fuzzy_match;
 
@@ -330,7 +329,7 @@ impl StatefulWidget for CommandPalette<'_> {
                 };
 
                 let sc_style = if is_selected {
-                    Style::default().fg(Color::Black).bg(primary).add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::Black).bg(primary).bold()
                 } else {
                     Style::default().fg(muted).bg(overlay_bg)
                 };

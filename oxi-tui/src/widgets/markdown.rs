@@ -195,22 +195,22 @@ pub fn code_style(base: Style) -> Style {
 
 /// Style used for bold text.
 pub fn bold_style(base: Style) -> Style {
-    base.add_modifier(Modifier::BOLD)
+    base.bold()
 }
 
 /// Style used for italic text.
 pub fn italic_style(base: Style) -> Style {
-    base.add_modifier(Modifier::ITALIC)
+    base.italic()
 }
 
 /// Style used for links (visible text portion).
 pub fn link_style(base: Style) -> Style {
-    base.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED)
+    base.fg(Color::Cyan).underlined()
 }
 
 /// Style used for heading text.
 pub fn heading_style(base: Style, level: u8) -> Style {
-    let s = base.add_modifier(Modifier::BOLD);
+    let s = base.bold();
     // Optionally differentiate by level — for now all bold.
     let _ = level; // avoid unused warning
     s

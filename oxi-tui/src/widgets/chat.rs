@@ -7,10 +7,10 @@
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Margin, Rect},
-    style::{Color, Modifier, Style},
+    layout::Rect,
+    style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 use tui_markdown;
 
@@ -320,7 +320,7 @@ fn structural_style(kind: LineKind, styles: &ThemeStyles) -> Style {
         LineKind::Heading(lvl) => markdown::heading_style(styles.normal, lvl),
         LineKind::ListItem => styles.normal,
         LineKind::HorizontalRule => styles.muted,
-        LineKind::RoleLabel => styles.primary.add_modifier(Modifier::BOLD),
+        LineKind::RoleLabel => styles.primary.bold(),
         LineKind::ToolCallHeader | LineKind::ToolCallBody | LineKind::ToolCallFooter
         | LineKind::ToolResultHeader | LineKind::ToolResultBody | LineKind::ToolResultFooter => {
             styles.muted.bg(Color::Indexed(234))
@@ -464,8 +464,7 @@ impl StatefulWidget for ChatView<'_> {
             let para = Paragraph::new(lines)
                 .block(Block::default().style(styles.normal))
                 .scroll((off, 0));
-            use ratatui::widgets::Widget;
-            Widget::render(para, area, buf);
+            para.render(area, buf);
         }
 
         // ── Scrollbar ──
@@ -537,7 +536,7 @@ fn push_blocks(
             ContentBlock::ToolCall { name, arguments, .. } => {
                 let border = styles.muted;
                 let body = styles.normal;
-                let label = Style::default().fg(styles.primary.fg.unwrap_or(Color::White)).add_modifier(Modifier::BOLD);
+                let label = Style::default().fg(styles.primary.fg.unwrap_or(Color::White)).bold();
                 lines.push(block_header_line(&format!("tool: {}", name), 50, border, label));
                 let max = if arguments.lines().count() <= 4 { 6 } else { 4 };
                 for l in arguments.lines().take(max) {
@@ -556,9 +555,9 @@ fn push_blocks(
                 };
                 let label = if tool_name.is_empty() { check.to_string() } else { format!("{} {}", check, tool_name) };
                 let label_style = if *is_error {
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::White).bold()
                 } else {
-                    Style::default().fg(styles.success.fg.unwrap_or(Color::Green)).add_modifier(Modifier::BOLD)
+                    Style::default().fg(styles.success.fg.unwrap_or(Color::Green)).bold()
                 };
                 lines.push(block_header_line(&label, 50, border, label_style));
                 for l in content.lines().take(4) {
@@ -572,7 +571,7 @@ fn push_blocks(
             ContentBlock::Error { title, message, retryable } => {
                 let border = styles.error;
                 let body = styles.normal;
-                let label = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+                let label = Style::default().fg(Color::White).bold();
                 lines.push(block_header_line(&format!("error: {}", title), 50, border, label));
                 for l in message.lines().take(4) {
                     lines.push(block_body_line(l, border, body));

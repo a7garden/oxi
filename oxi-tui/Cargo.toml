@@ -13,8 +13,7 @@ exclude = ["target/"]
 
 [dependencies]
 # Terminal UI
-ratatui = "0.30"
-ratatui-widgets = "0.3"
+ratatui = { version = "0.30", features = ["unstable-widget-ref"] }
 tui-markdown = "0.3"
 
 # Serialization (for theme file loading)
