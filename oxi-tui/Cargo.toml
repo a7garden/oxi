@@ -14,6 +14,7 @@ exclude = ["target/"]
 [dependencies]
 # Terminal UI
 ratatui = "0.30"
+ratatui-widgets = "0.3"
 tui-markdown = "0.3"
 
 # Serialization (for theme file loading)

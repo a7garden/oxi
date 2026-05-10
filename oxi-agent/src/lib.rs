@@ -32,6 +32,8 @@ pub mod tools;
 pub mod types;
 /// Shared streaming retry logic.
 pub mod stream_retry;
+/// MCP (Model Context Protocol) integration.
+pub mod mcp;
 
 pub use agent::Agent;
 pub use agent_loop::{AgentLoop, AgentLoopConfig};
@@ -53,6 +55,7 @@ pub use tools::web_search::WebSearchTool;
 pub use tools::github::GitHubTool;
 pub use tools::github_search::GitHubSearchTool;
 pub use tools::subagent::SubagentTool;
+pub use mcp::{McpTool, McpManager, McpConfig};
 
 /// Standard imports for oxi-agent usage.
 pub mod prelude {
@@ -71,6 +74,7 @@ pub mod prelude {
     pub use crate::tools::github::GitHubTool;
     pub use crate::tools::github_search::GitHubSearchTool;
     pub use crate::tools::subagent::SubagentTool;
+    pub use crate::mcp::{McpTool, McpManager, McpConfig};
 }
 
 #[cfg(test)]

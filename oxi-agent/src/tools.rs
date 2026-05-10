@@ -206,6 +206,7 @@ pub use read::ReadTool;
 
 pub use subagent::SubagentTool;
 pub use write::WriteTool;
+pub use crate::mcp::McpTool;
 
 /// Tool registry for managing available tools
 #[derive(Clone)]
@@ -311,6 +312,7 @@ impl ToolRegistry {
             Box::new(search_cache::GetSearchResultsTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
             Box::new(github::GitHubTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
             Box::new(SubagentTool::new(cwd)),
+            Box::new(crate::mcp::McpTool::new(std::sync::Arc::new(crate::mcp::McpManager::new()))),
         ];
 
         for tool in all_tools {

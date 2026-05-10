@@ -2,10 +2,10 @@
 
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Margin, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, StatefulWidget},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget},
 };
 use ratatui::widgets::Widget;
 use tui_markdown;
@@ -750,24 +750,21 @@ impl StatefulWidget for ChatView<'_> {
         paragraph.render(area, buf);
 
         // ------------------------------------------------------------------
-        // Scrollbar — manual buffer (justified for █ thumb)
+        // Scrollbar — ratatui Scrollbar widget
         // ------------------------------------------------------------------
         if self.scrollbar && max_scroll > 0 {
-            let thumb_pos =
-                (clamped_offset as f32 / max_scroll as f32 * visible_height as f32) as u16;
-            let thumb_size = ((visible_height as f32 * visible_height as f32)
-                / (state.content_height as f32))
-                .max(1.0) as u16;
+            let mut scrollbar_state = ScrollbarState::new(state.content_height as usize)
+                .position(clamped_offset as usize)
+                .viewport_content_length(visible_height);
 
-            for i in 0..thumb_size.min(visible_height as u16) {
-                let sb_row = area.y
-                    + thumb_pos
-                        .saturating_add(i)
-                        .min(area.y + area.height - 1);
-                buf[(area.x + area.width - 1, sb_row)]
-                    .set_char('█')
-                    .set_style(styles.muted);
-            }
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_symbol(None)
+                .thumb_symbol("\u{2588}"); // █
+
+            let sb_area = area.inner(Margin { vertical: 0, horizontal: 0 });
+            scrollbar.render(sb_area, buf, &mut scrollbar_state);
         }
     }
 }

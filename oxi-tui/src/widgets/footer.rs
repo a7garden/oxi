@@ -8,6 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, StatefulWidget},
 };
 use ratatui::widgets::Widget;
+use ratatui_widgets::gauge::{Gauge, LineGauge};
 use crate::Theme;
 
 /// Footer data — shared state for token counts and session info.
@@ -144,43 +145,44 @@ impl StatefulWidget for Footer<'_> {
         separator.render(rows[0], buf);
 
         // ═══════════════════════════════════════════════════════
-        // Row 1: left (tokens + duration) ... right (● model_name)
+        // Row 1: left (tokens + gauge) ... right (● model_name)
         // ═══════════════════════════════════════════════════════
         {
-            // Build left-side content: tokens + duration
+            // Compute token usage
+            let total_tokens = d.input_tokens + d.output_tokens
+                + d.cache_read_tokens + d.cache_write_tokens;
+            let pct = if d.context_window_max > 0 {
+                (total_tokens as f64 / d.context_window_max as f64).min(1.0)
+            } else {
+                0.0
+            };
+            let pct_display = (pct * 100.0) as f32;
+            let has_tokens = total_tokens > 0;
+
+            // Build left-side text
             let mut left_parts: Vec<String> = Vec::new();
-
-            if d.input_tokens > 0 || d.output_tokens > 0 {
-                let total = d.input_tokens + d.output_tokens
-                    + d.cache_read_tokens + d.cache_write_tokens;
-                if total > 0 && d.context_window_max > 0 {
-                    let pct = (total as f32 / d.context_window_max as f32) * 100.0;
-                    let max = FooterData::fmt_count(d.context_window_max);
-                    left_parts.push(format!("{:.1}% / {}", pct, max));
-                }
+            if has_tokens {
+                let max = FooterData::fmt_count(d.context_window_max);
+                left_parts.push(format!("{:.1}% / {}", pct_display, max));
             }
-
             if d.session_duration_secs > 0 {
                 left_parts.push(FooterData::format_duration(d.session_duration_secs));
             }
-
             let left_text = left_parts.join("  ");
 
-            // Build right-side: ● model_name
+            // Right-side: ● model_name
             let model_short = if d.model_name.is_empty() {
                 "[no model]".to_string()
             } else {
                 d.model_name.split('/').last().unwrap_or(&d.model_name).to_string()
             };
-
             let indicator_color = if d.is_busy {
                 self.theme.colors.accent.to_ratatui()
             } else {
                 self.theme.colors.success.to_ratatui()
             };
-
             let right_span = Line::from(vec![
-                Span::styled("●", Style::default().fg(indicator_color)),
+                Span::styled("\u{25cf}", Style::default().fg(indicator_color)), // ●
                 Span::styled(
                     format!(" {}", model_short),
                     Style::default()
@@ -189,23 +191,51 @@ impl StatefulWidget for Footer<'_> {
                 ),
             ]);
 
-            // Horizontal split for left/right
+            // Layout: [text] [gauge] [model]
+            let text_w = left_text.len() as u16 + 2; // + padding
+            let model_w = model_short.len() as u16 + 4; // ● + space + padding
+            let gauge_w = rows[1].width.saturating_sub(text_w).saturating_sub(model_w);
+
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(1), Constraint::Min(1)])
+                .constraints([
+                    Constraint::Length(text_w.min(rows[1].width)),
+                    Constraint::Length(gauge_w),
+                    Constraint::Min(model_w),
+                ])
                 .split(rows[1]);
 
-            // Left: tokens + duration (muted, left-aligned)
-            let left_para = Paragraph::new(Line::from(Span::styled(
+            // Left: token text
+            Paragraph::new(Line::from(Span::styled(
                 format!(" {}", left_text),
                 styles.muted,
             )))
-            .alignment(Alignment::Left);
-            left_para.render(cols[0], buf);
+            .alignment(Alignment::Left)
+            .render(cols[0], buf);
 
-            // Right: ● model_name (right-aligned)
-            let right_para = Paragraph::new(right_span).alignment(Alignment::Right);
-            right_para.render(cols[1], buf);
+            // Middle: LineGauge for token usage
+            if has_tokens && gauge_w > 4 {
+                let label = format!("{:.0}%", pct_display);
+                let gauge_color = if pct < 0.7 {
+                    self.theme.colors.success.to_ratatui()
+                } else if pct < 0.9 {
+                    self.theme.colors.warning.to_ratatui()
+                } else {
+                    self.theme.colors.error.to_ratatui()
+                };
+                LineGauge::default()
+                    .ratio(pct)
+                    .label(label)
+                    .style(Style::default().fg(gauge_color).bg(self.theme.colors.background.to_ratatui()))
+                    .render(cols[1], buf);
+            } else if gauge_w > 0 {
+                // No tokens yet — empty area
+            }
+
+            // Right: model name
+            Paragraph::new(right_span)
+                .alignment(Alignment::Right)
+                .render(cols[2], buf);
         }
 
         // ═══════════════════════════════════════════════════════
