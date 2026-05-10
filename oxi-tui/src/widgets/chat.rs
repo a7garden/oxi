@@ -464,12 +464,12 @@ impl StatefulWidget for ChatView<'_> {
             if msg.role == MessageRole::User {
                 push(&mut lines, msg.role, "You", LineKind::RoleLabel);
             }
-            push_blocks(&mut lines, msg.role, &msg.content_blocks, &styles);
+            push_blocks(&mut lines, msg.role, &msg.content_blocks, &styles, area.width);
         }
 
         // ── Streaming message ──
         if let Some(ref streaming) = state.streaming {
-            push_blocks(&mut lines, MessageRole::Assistant, &streaming.message.content_blocks, &styles);
+            push_blocks(&mut lines, MessageRole::Assistant, &streaming.message.content_blocks, &styles, area.width);
             if !streaming.line_buffer.is_empty() {
                 let txt = streaming.line_buffer.trim_end().to_string();
                 if !txt.is_empty() {
@@ -517,6 +517,7 @@ fn push_blocks(
     blocks: &[ContentBlock],
     styles: &ThemeStyles,
 ) {
+    let box_width = area_width;
     let push = |lines: &mut Vec<Line>, role, text: &str, kind: LineKind| {
         let base = structural_style(kind, styles);
         match kind {
@@ -567,14 +568,14 @@ fn push_blocks(
                 let border = styles.muted;
                 let body = styles.normal;
                 let label = Style::default().fg(styles.primary.fg.unwrap_or(Color::White)).bold();
-                lines.push(block_header_line(&format!("tool: {}", name), 50, border, label));
+                lines.push(block_header_line(&format!("tool: {}", name), box_width, border, label));
                 // Arguments (the call input)
                 let max_args = if arguments.lines().count() <= 3 { 5 } else { 3 };
                 for l in arguments.lines().take(max_args) {
-                    lines.push(block_body_line(l, 50, border, body));
+                    lines.push(block_body_line(l, box_width, border, body));
                 }
                 if arguments.lines().count() > max_args {
-                    lines.push(block_truncate_line(50, border, body));
+                    lines.push(block_truncate_line(box_width, border, body));
                 }
                 // Result (if available) — shown inside same box
                 if let Some((result_content, is_error)) = result {
@@ -583,15 +584,15 @@ fn push_blocks(
                     } else {
                         ("─", styles.success, styles.normal)
                     };
-                    lines.push(block_divider_line(50, res_border, sep));
+                    lines.push(block_divider_line(box_width, res_border, sep));
                     for l in result_content.lines().take(6) {
-                        lines.push(block_body_line(l, 50, res_border, res_body));
+                        lines.push(block_body_line(l, box_width, res_border, res_body));
                     }
                     if result_content.lines().count() > 6 {
-                        lines.push(block_truncate_line(50, res_border, res_body));
+                        lines.push(block_truncate_line(box_width, res_border, res_body));
                     }
                 }
-                lines.push(block_footer_line(50, border));
+                lines.push(block_footer_line(box_width, border));
             }
             // ToolResult shown only when NOT merged into ToolCall (standalone result)
             ContentBlock::ToolResult { tool_name, content, is_error } => {
@@ -606,27 +607,27 @@ fn push_blocks(
                 } else {
                     Style::default().fg(styles.success.fg.unwrap_or(Color::Green)).bold()
                 };
-                lines.push(block_header_line(&label, 50, border, label_style));
+                lines.push(block_header_line(&label, box_width, border, label_style));
                 for l in content.lines().take(4) {
-                    lines.push(block_body_line(l, 50, border, body));
+                    lines.push(block_body_line(l, box_width, border, body));
                 }
                 if content.lines().count() > 4 {
-                    lines.push(block_truncate_line(50, border, body));
+                    lines.push(block_truncate_line(box_width, border, body));
                 }
-                lines.push(block_footer_line(50, border));
+                lines.push(block_footer_line(box_width, border));
             }
             ContentBlock::Error { title, message, retryable } => {
                 let border = styles.error;
                 let body = styles.normal;
                 let label = Style::default().fg(Color::White).bold();
-                lines.push(block_header_line(&format!("error: {}", title), 50, border, label));
+                lines.push(block_header_line(&format!("error: {}", title), box_width, border, label));
                 for l in message.lines().take(4) {
-                    lines.push(block_body_line(l, 50, border, body));
+                    lines.push(block_body_line(l, box_width, border, body));
                 }
                 if *retryable {
-                    lines.push(block_body_line("retry: this error may be temporary", 50, border, styles.muted));
+                    lines.push(block_body_line("retry: this error may be temporary", box_width, border, styles.muted));
                 }
-                lines.push(block_footer_line(50, border));
+                lines.push(block_footer_line(box_width, border));
             }
             ContentBlock::Image { mime_type, base64_data } => {
                 let sz = base64_data.len() * 3 / 4;
