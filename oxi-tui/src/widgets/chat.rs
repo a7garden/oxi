@@ -65,6 +65,8 @@ pub struct ChatViewState {
     pub last_code_block: Option<String>,
     code_block_active: bool,
     code_block_buf: String,
+    /// Pending images awaiting user action
+    pub pending_images: Vec<(String, String)>,
 }
 
 impl ChatViewState {
@@ -95,9 +97,25 @@ impl ChatViewState {
 
     /// Alias for streaming text update.
     pub fn stream_text_delta(&mut self, delta: &str) {
-        self.stream_text(delta);
+        self.append_text(delta);
         self.update_last_code_block(delta);
         self.last_code_block = None;
+    }
+
+    /// Alias used by app.rs for the same operation.
+    pub fn stream_text(&mut self, text: &str) {
+        self.append_text(text);
+    }
+
+    /// Core text append to the active streaming content block.
+    fn append_text(&mut self, text: &str) {
+        if let Some(ref mut s) = self.streaming {
+            if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
+                content.push_str(text);
+            } else {
+                s.message.content_blocks.insert(0, ContentBlock::Text { content: text.to_string() });
+            }
+        }
     }
 
     /// Returns true when a streaming message is in progress.
@@ -165,6 +183,14 @@ impl ChatViewState {
 
     pub fn cancel_streaming(&mut self) { self.streaming = None; }
 
+    pub fn clear(&mut self) {
+        self.messages.clear();
+        self.streaming = None;
+        self.scroll_offset = 0;
+        self.last_code_block = None;
+        self.pending_images.clear();
+    }
+
     pub fn push_message(&mut self, msg: ChatMessage) { self.messages.push(msg); }
 
     pub fn add_message(&mut self, msg: ChatMessage) {
@@ -186,11 +212,16 @@ impl ChatViewState {
     }
 
     pub fn flush_streaming_line(&mut self) {
-        if let Some(ref mut s) = self.streaming {
-            if !s.line_buffer.is_empty() {
-                self.stream_text(&s.line_buffer);
+        if self.streaming.is_none() { return; }
+        let (buf, is_empty) = {
+            let s = self.streaming.as_mut().unwrap();
+            (s.line_buffer.trim_end().to_string(), s.line_buffer.is_empty())
+        };
+        if !is_empty {
+            if let Some(ref mut s) = self.streaming {
                 s.line_buffer.clear();
             }
+            self.append_text(&buf);
         }
     }
 }
@@ -214,8 +245,7 @@ fn extract_last_code_block(text: &str) -> Option<String> {
                 in_block = true;
             }
         } else if in_block {
-            if !block_content.is_empty() { block_content.push('
-'); }
+            if !block_content.is_empty() { block_content.push('\n'); }
             block_content.push_str(line);
         }
     }
@@ -402,10 +432,13 @@ impl StatefulWidget for ChatView<'_> {
         let off = state.scroll_offset.min(max);
 
         // ── Render ──
-        Paragraph::new(lines)
-            .block(Block::default().style(styles.normal))
-            .scroll((off, 0))
-            .render(area, buf);
+        {
+            let para = Paragraph::new(lines)
+                .block(Block::default().style(styles.normal))
+                .scroll((off, 0));
+            use ratatui::widgets::Widget;
+            Widget::render(para, area, buf);
+        }
 
         // ── Scrollbar ──
         if self.scrollbar && max > 0 {
