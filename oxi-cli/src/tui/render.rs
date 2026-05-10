@@ -190,7 +190,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         ])
         .split(size);
 
-    let chat_area = chunks[0].inner(Margin::new(2, 0));
+    let chat_area = chunks[0].inner(Margin::new(1, 0));
     f.render_stateful_widget(ChatView::new(theme), chat_area, &mut state.chat);
 
     // Input area

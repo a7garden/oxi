@@ -569,13 +569,18 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                         AgentEvent::Thinking => UiEvent::Thinking,
                                         AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
                                         AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
-                                        AgentEvent::ToolCall { tool_call } => UiEvent::ToolCall {
-                                            id: tool_call.id,
-                                            name: tool_call.name,
-                                            arguments: tool_call.arguments.to_string(),
-                                        },
-                                        AgentEvent::ToolStart { tool_name, .. } => {
-                                            UiEvent::ToolStart { tool_name }
+                                        // ── ToolCall from streaming (ProviderEvent::ToolCallEnd) ──
+                                        // IGNORED: we only use ToolExecutionStart/End for UI.
+                                        // The streaming ToolCall arrives before execution starts,
+                                        // causing duplicate boxes. ToolExecutionStart is the real
+                                        // "tool is now running" signal.
+                                        AgentEvent::ToolCall { .. } => {
+                                            continue;
+                                        }
+                                        // ── ToolStart (legacy) ──
+                                        // IGNORED: superseded by ToolExecutionStart.
+                                        AgentEvent::ToolStart { .. } => {
+                                            continue;
                                         }
                                         AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
                                             tool_call_id: Some(result.tool_call_id.clone()),
@@ -589,13 +594,17 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             content: error.clone(),
                                             is_error: true,
                                         },
+                                        // ── Primary tool lifecycle events ──
                                         AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => {
-                                            tracing::info!("[APP] ToolExecutionStart -> UiEvent::ToolCall: tool_call_id={:?}, tool_name={:?}", tool_call_id, tool_name);
                                             UiEvent::ToolCall { id: tool_call_id, name: tool_name, arguments: args.to_string() }
                                         }
                                         AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
-                                            tracing::info!("[APP] ToolExecutionEnd -> UiEvent::ToolResult: tool_call_id={:?}, tool_name={:?}, is_error={}", tool_call_id, tool_name, is_error);
-                                            UiEvent::ToolResult { tool_call_id: Some(tool_call_id), tool_name, content: result.content.chars().take(500).collect(), is_error }
+                                            UiEvent::ToolResult {
+                                                tool_call_id: Some(tool_call_id),
+                                                tool_name,
+                                                content: result.content.chars().take(500).collect(),
+                                                is_error,
+                                            }
                                         }
                                         AgentEvent::Complete { .. } => UiEvent::Complete,
                                         AgentEvent::Error { message, .. } => UiEvent::Error(message),

@@ -5,6 +5,8 @@
 //! - Structural elements (separators, role labels, tool boxes) → manually styled `Line`s
 //! - Both are pushed in order → correct interleaving → correct scroll
 
+use std::collections::HashMap;
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -13,12 +15,24 @@ use ratatui::{
     widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget, Wrap},
 };
 use tui_markdown;
+use unicode_width::UnicodeWidthChar;
 
 use crate::Theme;
 use crate::theme::ThemeStyles;
 use super::markdown;
 
 // ── Types ──────────────────────────────────────────────────────────────
+
+/// Status of a tool call — tracks lifecycle from request to completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolCallStatus {
+    /// LLM requested the tool; execution has not started yet.
+    Requested,
+    /// Tool is currently executing.
+    Executing,
+    /// Tool finished (result field is populated).
+    Done,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageRole {
@@ -31,7 +45,7 @@ pub enum MessageRole {
 pub enum ContentBlock {
     Text { content: String },
     Thinking { content: String, collapsed: bool },
-    ToolCall { id: String, name: String, arguments: String, result: Option<(String, bool)> },
+    ToolCall { id: String, name: String, arguments: String, result: Option<(String, bool)>, status: ToolCallStatus },
     ToolResult { tool_name: String, content: String, is_error: bool },
     Error { title: String, message: String, retryable: bool },
     Image { mime_type: String, base64_data: String },
@@ -67,6 +81,15 @@ pub struct ChatViewState {
     code_block_buf: String,
     /// Pending images awaiting user action
     pub pending_images: Vec<(String, String)>,
+    /// Map of active tool call IDs to their content_blocks index.
+    /// Used for ID-based result matching instead of position-based.
+    active_tool_calls: HashMap<String, usize>,
+    /// Cached markdown parse: (text_len, simple_hash) → rendered lines.
+    cached_md_len: usize,
+    cached_md_hash: u64,
+    cached_md_lines: Vec<Line<'static>>,
+    /// Flag: set when streaming text changed, requiring markdown re-cache.
+    md_cache_dirty: bool,
 }
 
 impl ChatViewState {
@@ -93,6 +116,11 @@ impl ChatViewState {
             active_content_index: 0,
             line_buffer: String::new(),
         });
+        self.active_tool_calls.clear();
+        self.cached_md_len = 0;
+        self.cached_md_hash = 0;
+        self.cached_md_lines.clear();
+        self.md_cache_dirty = false;
     }
 
     /// Alias for streaming text update.
@@ -100,6 +128,7 @@ impl ChatViewState {
         self.append_text(delta);
         self.update_last_code_block(delta);
         self.last_code_block = None;
+        self.md_cache_dirty = true;
     }
 
     /// Alias used by app.rs for the same operation.
@@ -116,6 +145,41 @@ impl ChatViewState {
                 s.message.content_blocks.insert(0, ContentBlock::Text { content: text.to_string() });
             }
         }
+    }
+
+    /// Invalidate the markdown cache — call when text content changes.
+    fn invalidate_md_cache(&mut self) {
+        self.cached_md_len = 0;
+        self.cached_md_hash = 0;
+        self.cached_md_lines.clear();
+        self.md_cache_dirty = false;
+    }
+
+    /// Simple non-cryptographic hash for cache invalidation.
+    fn simple_hash(s: &str) -> u64 {
+        let mut h: u64 = 0;
+        for chunk in s.as_bytes().chunks(64) {
+            h = h.wrapping_mul(31).wrapping_add(chunk.iter().fold(0u64, |acc, &b| acc.wrapping_add(b as u64)));
+        }
+        h
+    }
+
+    /// Parse and cache markdown, or return cached result if text hasn't changed.
+    /// Only re-parses when `md_cache_dirty` is set AND text has actually changed.
+    fn get_or_parse_markdown(&mut self, content: &str) -> &[Line<'static>] {
+        let len = content.len();
+        let hash = Self::simple_hash(content);
+
+        if !self.md_cache_dirty && len == self.cached_md_len && hash == self.cached_md_hash {
+            return &self.cached_md_lines;
+        }
+
+        let parsed = markdown_lines_internal(content);
+        self.cached_md_len = len;
+        self.cached_md_hash = hash;
+        self.cached_md_lines = parsed;
+        self.md_cache_dirty = false;
+        &self.cached_md_lines
     }
 
     /// Returns true when a streaming message is in progress.
@@ -145,33 +209,81 @@ impl ChatViewState {
         }
     }
 
-    pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String) {
-        tracing::info!("[TUI] stream_tool_call: name={:?}, streaming={}", name, self.streaming.is_some());
+    /// Update status of a tool call by ID. No-op if ID not found.
+    pub fn set_tool_status(&mut self, id: &str, status: ToolCallStatus) {
         if let Some(ref mut s) = self.streaming {
-            s.message.content_blocks.push(ContentBlock::ToolCall { id, name, arguments, result: None });
-            tracing::info!("[TUI] ToolCall pushed, blocks count={}", s.message.content_blocks.len());
-        }
-    }
-
-    pub fn stream_tool_result(&mut self, tool_name: String, content: String, is_error: bool) {
-        tracing::info!("[TUI] stream_tool_result: tool_name={:?}, streaming={}", tool_name, self.streaming.is_some());
-        if let Some(ref mut s) = self.streaming {
-            let last_is_toolcall = s.message.content_blocks.last()
-                .map_or(false, |b| matches!(b, ContentBlock::ToolCall { .. }));
-            tracing::info!("[TUI] blocks count={}, last_is_toolcall={}",
-                s.message.content_blocks.len(), last_is_toolcall);
-            // Find last ToolCall and fill in its result — merges call + result into one block
-            if let Some(last) = s.message.content_blocks.last_mut() {
-                if matches!(last, ContentBlock::ToolCall { .. }) {
-                    if let ContentBlock::ToolCall { ref mut result, .. } = last {
-                        *result = Some((content, is_error));
-                        tracing::info!("[TUI] MERGED result into ToolCall");
+            if let Some(&idx) = self.active_tool_calls.get(id) {
+                if let Some(block) = s.message.content_blocks.get_mut(idx) {
+                    if let ContentBlock::ToolCall { status: ref mut curr_status, .. } = block {
+                        *curr_status = status;
                         return;
                     }
                 }
             }
-            // Fallback: push as separate result block
-            tracing::warn!("[TUI] FALLBACK: pushing standalone ToolResult (last block was not ToolCall)");
+        }
+    }
+
+    pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String, status: ToolCallStatus) {
+        tracing::info!("[TUI] stream_tool_call: id={:?}, name={:?}, status={:?}, streaming={}",
+            id, name, status, self.streaming.is_some());
+        if let Some(ref mut s) = self.streaming {
+            // Guard against duplicate IDs (e.g. double ToolCall events from agent)
+            if self.active_tool_calls.contains_key(&id) {
+                tracing::warn!("[TUI] Duplicate ToolCall ID {:?} — ignoring", id);
+                return;
+            }
+            let idx = s.message.content_blocks.len();
+            s.message.content_blocks.push(ContentBlock::ToolCall {
+                id: id.clone(),
+                name,
+                arguments,
+                result: None,
+                status,
+            });
+            self.active_tool_calls.insert(id, idx);
+            tracing::info!("[TUI] ToolCall pushed at idx={}, blocks count={}",
+                idx, s.message.content_blocks.len());
+        }
+    }
+
+    pub fn stream_tool_result(&mut self, tool_call_id: Option<String>, tool_name: String, content: String, is_error: bool) {
+        tracing::info!("[TUI] stream_tool_result: tool_call_id={:?}, tool_name={:?}, streaming={}",
+            tool_call_id, tool_name, self.streaming.is_some());
+        if let Some(ref mut s) = self.streaming {
+            // ── Try ID-based matching first ──
+            if let Some(ref id) = tool_call_id {
+                if let Some(&idx) = self.active_tool_calls.get(id) {
+                    if let Some(block) = s.message.content_blocks.get_mut(idx) {
+                        if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = block {
+                            *result = Some((content, is_error));
+                            *status = ToolCallStatus::Done;
+                            self.active_tool_calls.remove(id);
+                            tracing::info!("[TUI] ID-matched result merged into ToolCall at idx={}", idx);
+                            return;
+                        }
+                    }
+                } else {
+                    tracing::warn!("[TUI] ToolResult for unknown ID {:?} — falling back", id);
+                }
+            }
+
+            // ── Fallback: last block is ToolCall → merge ──
+            if let Some(last) = s.message.content_blocks.last_mut() {
+                if matches!(last, ContentBlock::ToolCall { .. }) {
+                    if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = last {
+                        *result = Some((content, is_error));
+                        *status = ToolCallStatus::Done;
+                        // Remove from active_tool_calls (by value search)
+                        if let Some(ref id) = tool_call_id {
+                            self.active_tool_calls.remove(id);
+                        }
+                        tracing::info!("[TUI] Fallback merge result into last ToolCall");
+                        return;
+                    }
+                }
+            }
+            // ── Final fallback: push as standalone result ──
+            tracing::warn!("[TUI] PUSHING standalone ToolResult");
             s.message.content_blocks.push(ContentBlock::ToolResult { tool_name, content, is_error });
         } else {
             tracing::warn!("[TUI] FALLBACK: streaming is None, ToolResult discarded");
@@ -210,6 +322,11 @@ impl ChatViewState {
         self.scroll_offset = 0;
         self.last_code_block = None;
         self.pending_images.clear();
+        self.active_tool_calls.clear();
+        self.cached_md_len = 0;
+        self.cached_md_hash = 0;
+        self.cached_md_lines.clear();
+        self.md_cache_dirty = false;
     }
 
     pub fn push_message(&mut self, msg: ChatMessage) { self.messages.push(msg); }
@@ -250,22 +367,59 @@ impl ChatViewState {
 // ── Code block extraction ────────────────────────────────────────────
 
 /// Fix bare code fences (``` without a language) → ```text.
-/// tui_markdown's SYNTAX_SET has no entry for empty-string language
-/// and emits `warn!("Could not find syntax for code block: \"\"")` each time.
+/// Also normalizes unknown/bare language tokens to "text".
+///
+/// Handles:
+/// - ```        (bare, immediate newline)
+/// - ```        (bare, followed by space/tab before newline)
+/// - ```        (bare, at end-of-string / EOF)
+/// - ```
+/// (empty language is the most common culprit of
+/// `Could not find syntax for code block: ""` warnings)
+///
+/// Also maps tui-markdown unsupported languages to "text" so syntect
+/// can at least render them without warnings.
 fn fix_bare_code_fences(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
-    let mut i = 0;
     let bytes = content.as_bytes();
-    while i < bytes.len() {
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
         // Look for ```
-        if bytes[i] == b'`' && i + 2 < bytes.len() && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
-            // Check if this is a bare fence (not followed by a non-newline char that isn't `)
+        if bytes[i] == b'`' && i + 2 < len && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
             let after = &bytes[i + 3..];
-            let is_bare = after.first().map_or(true, |&c| c == b'\n' || c == b'\r');
+            // "Bare" = next non-whitespace char is \n, \r, or nothing (EOF)
+            let is_bare = after.first().map_or(true, |&c| c == b'\n' || c == b'\r' || c == b'\t' || c == b' ');
+
             if is_bare {
                 result.push_str("```text");
                 i += 3;
+                // Skip any trailing whitespace before the newline
+                while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
+                    i += 1;
+                }
+                // Don't consume the newline — fix_bare_code_fences is just a
+                // pre-pass; the actual ``` line will be emitted by the parser.
                 continue;
+            }
+
+            // Has a language token — check if it's a known unsupported pattern
+            // that we want to remap (e.g. ```
+            let lang_end = after.iter().position(|&c| c == b'\n' || c == b'\r').unwrap_or(after.len());
+            let lang = &after[..lang_end];
+
+            // Map unknown / empty-ish tokens to "text"
+            let lang_str = String::from_utf8_lossy(lang).trim().to_lowercase();
+            let needs_remap = lang_str.is_empty()
+                || lang_str == "text"
+                || lang_str == "plaintext"
+                || lang_str == "plain"
+                || lang_str == "none";
+
+            if needs_remap && !lang_str.is_empty() {
+                // Replace with ```text but keep the newline if present
+                result.push_str("```text");
             }
         }
         result.push(bytes[i] as char);
@@ -300,59 +454,107 @@ fn extract_last_code_block(text: &str) -> Option<String> {
 
 // ── Block-style tool/error boxes ──────────────────────────────────────
 
+/// Truncate text to fit within `max_width` display columns, adding "…".
+fn truncate_to_width(text: &str, max_width: usize) -> (String, String) {
+    let mut width = 0;
+    let mut result = String::new();
+    for ch in text.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(1);
+        // Reserve 1 for the ellipsis character
+        if width + cw > max_width.saturating_sub(1) {
+            if !result.is_empty() {
+                result.push('…');
+                width += 1;
+            }
+            break;
+        }
+        result.push(ch);
+        width += cw;
+    }
+    let fill = " ".repeat(max_width.saturating_sub(width));
+    (result, fill)
+}
+
+/// Compute terminal display width of a string.
+fn unicode_display_width(s: &str) -> usize {
+    s.chars().map(|c| UnicodeWidthChar::width(c).unwrap_or(1)).sum()
+}
+
+// ── Block-style tool/error boxes (right-bordereed) ────────────────────
+
 /// Build a header line: ┌─ label ──────┐
 fn block_header_line(label: &str, box_width: u16, border_style: Style, label_style: Style) -> Line<'static> {
-    let label_width = label.chars().count();
-    let inner_width = (box_width as usize).saturating_sub(2); // subtract ┌ and ┐
-    let right_dashes = inner_width.saturating_sub(label_width + 4); // ┌─ ─┐
+    let label_display_w = unicode_display_width(label);
+    let total_inner = (box_width as usize).saturating_sub(2); // ┌ + ┐
+    // layout: ──(2) + space(1) + label + space(1) + ──(remaining)
+    let right_dashes = total_inner.saturating_sub(label_display_w + 4);
     vec![
-        Span::styled("\u{250c}", border_style),            // ┌
-        Span::styled("\u{2500}".repeat(2), border_style),  // ──
-        Span::styled(format!(" {} ", label), label_style),  //  label 
-        Span::styled("\u{2500}".repeat(right_dashes.max(1).max(0)), border_style), // ──
-        Span::styled("\u{2510}", border_style),            // ┐
+        Span::styled("\u{250c}", border_style),                          // ┌
+        Span::styled("\u{2500}".repeat(2), border_style),               // ──
+        Span::styled(format!(" {} ", label), label_style),               //  label
+        Span::styled("\u{2500}".repeat(right_dashes.max(1)), border_style), // ──
+        Span::styled("\u{2510}", border_style),                          // ┐
     ].into()
 }
 
-/// Build a body line: │  content
+/// Build a body line: │ content... │
 fn block_body_line(text: &str, box_width: u16, border_style: Style, body_style: Style) -> Line<'static> {
-    let inner_width = (box_width as usize).saturating_sub(2); // ┌ + ┐
-    let text_display_width = text.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1)).sum::<usize>();
-    let padding = inner_width.saturating_sub(text_display_width + 1); // │ + space + text
-    let fill = if padding > 0 { " ".repeat(padding) } else { String::new() };
-    vec![
-        Span::styled("\u{2502}", border_style),  // │
-        Span::styled(format!(" {}{}", text, fill), body_style),
-    ].into()
+    let total_inner = (box_width as usize).saturating_sub(2); // │(left) + │(right)
+    let content_max = total_inner.saturating_sub(1); // space prefix
+    let text_w = unicode_display_width(text);
+    if text_w + 1 <= content_max {
+        let fill = " ".repeat(content_max.saturating_sub(text_w + 1));
+        vec![
+            Span::styled("\u{2502}", border_style),                        // │
+            Span::styled(format!(" {}{}", text, fill), body_style),         // text + pad
+            Span::styled("\u{2502}", border_style),                        // │
+        ].into()
+    } else {
+        // Truncate
+        let (truncated, fill) = truncate_to_width(text, content_max.saturating_sub(1));
+        vec![
+            Span::styled("\u{2502}", border_style),
+            Span::styled(format!(" {}{}", truncated, fill), body_style),
+            Span::styled("\u{2502}", border_style),
+        ].into()
+    }
 }
 
-/// Build a divider line inside a box: │────── (separates call from result)
+/// Build a divider line inside a box: │ ─────── │
 fn block_divider_line(box_width: u16, border_style: Style, symbol: &str) -> Line<'static> {
-    let inner_width = (box_width as usize).saturating_sub(2);
-    let repeats = inner_width.saturating_sub(2); // ┌ + ┐ + 1 space
+    let total_inner = (box_width as usize).saturating_sub(2); // │ + │
+    let dashes = total_inner.saturating_sub(1); // space prefix + dashes
     vec![
-        Span::styled("\u{2502}", border_style),
-        Span::styled(" ", border_style),
-        Span::styled(symbol.repeat(repeats.max(1)), border_style),
+        Span::styled("\u{2502}", border_style),                              // │
+        Span::styled(format!(" {}", symbol.repeat(dashes.max(1))), border_style), // ──────
+        Span::styled("\u{2502}", border_style),                              // │
     ].into()
 }
 
-/// Build a truncated body line: │  ...
+/// Build a truncated body line: │ ... ── │
 fn block_truncate_line(box_width: u16, border_style: Style, body_style: Style) -> Line<'static> {
-    let inner_width = (box_width as usize).saturating_sub(2);
-    let dashes = inner_width.saturating_sub(4); // " ..."
+    let total_inner = (box_width as usize).saturating_sub(2); // │ + │
+    let content_max = total_inner.saturating_sub(1); // space prefix
+    // " ..." + remaining filled with ─
+    let dots_w = 4; // " ..."
+    let remaining = content_max.saturating_sub(dots_w);
+    let dash = " \u{2500}".repeat(remaining.max(0));
+    let fill = if remaining > 0 { "" } else { "" };
+    let _ = (fill, body_style); // suppress unused
     vec![
         Span::styled("\u{2502}", border_style),
-        Span::styled(format!(" ...{}", " \u{2500}".repeat(dashes.max(0))), border_style),
+        Span::styled(format!(" ...{}", dash), border_style),
+        Span::styled("\u{2502}", border_style),
     ].into()
 }
 
-/// Build a footer line: └────────────┘
+/// Build a footer line: └──────────────┘
 fn block_footer_line(box_width: u16, border_style: Style) -> Line<'static> {
+    let inner = (box_width as usize).saturating_sub(2);
     vec![
-        Span::styled("\u{2514}", border_style),                                              // └
-        Span::styled("\u{2500}".repeat((box_width as usize).saturating_sub(2).max(1)), border_style), // ──
-        Span::styled("\u{2518}", border_style),                                              // ┘
+        Span::styled("\u{2514}", border_style),                              // └
+        Span::styled("\u{2500}".repeat(inner.max(1)), border_style),         // ──
+        Span::styled("\u{2518}", border_style),                              // ┘
     ].into()
 }
 
@@ -365,9 +567,12 @@ fn user_stripe(styles: &ThemeStyles) -> Vec<Span<'static>> {
 }
 
 /// Render markdown content via tui-markdown, converting to owned Lines.
-/// Pre-processes empty-language code fences to avoid spurious
-/// "Could not find syntax for code block: \"\"" warnings from tui_markdown.
-fn markdown_lines(content: &str) -> Vec<Line<'static>> {
+/// Pre-processes empty/bare code fences to suppress spurious
+/// "Could not find syntax for code block: """ warnings from tui_markdown.
+///
+/// This is the internal parser — callers should use `get_or_parse_markdown`
+/// on `ChatViewState` which adds caching and change-detection.
+fn markdown_lines_internal(content: &str) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
     let text: ratatui::text::Text = tui_markdown::from_str(&preprocessed);
     text.lines.into_iter().map(|l| {
@@ -590,8 +795,9 @@ fn push_blocks(
     for block in blocks {
         match block {
             ContentBlock::Text { content } => {
-                // tui-markdown: push pre-styled lines directly
-                lines.extend(markdown_lines(content));
+                // Streaming: use cached markdown lines. Completed messages:
+                // still go through get_or_parse_markdown for safety.
+                lines.extend(markdown_lines_internal(content));
             }
             ContentBlock::Thinking { content, collapsed } => {
                 let ind = if *collapsed { "\u{25b8}" } else { "\u{25be}" };
@@ -604,11 +810,27 @@ fn push_blocks(
                     push(lines, role, &format!("  {}", first), LineKind::Normal);
                 }
             }
-            ContentBlock::ToolCall { id: _, name, arguments, result } => {
+            ContentBlock::ToolCall { id: _, name, arguments, result, status } => {
                 let border = styles.muted;
                 let body = styles.normal;
-                let label = Style::default().fg(styles.primary.fg.unwrap_or(Color::White)).bold();
-                lines.push(block_header_line(&format!("tool: {}", name), box_width, border, label));
+                // ── Status-aware header ──
+                let (label_prefix, label_style) = match status {
+                    ToolCallStatus::Requested => (
+                        "⏳",
+                        Style::default().fg(styles.muted.fg.unwrap_or(Color::White)),
+                    ),
+                    ToolCallStatus::Executing => (
+                        "⚙",
+                        Style::default().fg(styles.warning.fg.unwrap_or(Color::Yellow)),
+                    ),
+                    ToolCallStatus::Done => (
+                        "✓",
+                        Style::default().fg(styles.success.fg.unwrap_or(Color::Green)),
+                    ),
+                };
+                let label = format!("{} tool: {}", label_prefix, name);
+                let full_label_style = label_style.bold();
+                lines.push(block_header_line(&label, box_width, border, full_label_style));
                 // Arguments (the call input)
                 let max_args = if arguments.lines().count() <= 3 { 5 } else { 3 };
                 for l in arguments.lines().take(max_args) {
