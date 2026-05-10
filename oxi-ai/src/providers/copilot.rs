@@ -22,9 +22,11 @@ use super::ProviderError;
 /// GitHub Copilot provider
 ///
 /// Supports authentication via:
-/// - GITHUB_TOKEN environment variable
-/// - GITHUB_COPILOT_TOKEN environment variable
-/// - Explicit API key via StreamOptions
+/// Copilot provider
+///
+/// API keys are resolved at request time from:
+/// - auth.json (stored via `oxi setup` or `/login`)
+/// - StreamOptions (request-time override)
 #[derive(Clone)]
 pub struct CopilotProvider {
     client: &'static Client,
@@ -32,16 +34,13 @@ pub struct CopilotProvider {
 }
 
 impl CopilotProvider {
-    /// Create a new Copilot provider
+    /// Create a new Copilot provider without an API key.
+    ///
+    /// API keys are resolved at request time via auth.json or StreamOptions.
     pub fn new() -> Self {
-        // Check for GITHUB_COPILOT_TOKEN first, then GITHUB_TOKEN
-        let api_key = std::env::var("GITHUB_COPILOT_TOKEN")
-            .ok()
-            .or_else(|| std::env::var("GITHUB_TOKEN").ok());
-
         Self {
             client: shared_client(),
-            api_key,
+            api_key: None,
         }
     }
 

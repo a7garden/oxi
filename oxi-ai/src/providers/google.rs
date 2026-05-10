@@ -21,10 +21,13 @@ pub struct GoogleProvider {
 }
 
 impl GoogleProvider {
+    /// Create a new Google provider without an API key.
+    ///
+    /// API keys are resolved at request time via auth.json or StreamOptions.
     pub fn new() -> Self {
         Self {
             client: shared_client(),
-            api_key: std::env::var("GOOGLE_API_KEY").ok(),
+            api_key: None,
         }
     }
 

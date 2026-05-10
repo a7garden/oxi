@@ -25,12 +25,14 @@ pub struct CloudflareProvider {
 }
 
 impl CloudflareProvider {
-    /// Create a new Cloudflare provider using environment variables
+    /// Create a new Cloudflare provider without credentials.
+    ///
+    /// Credentials are resolved at request time via auth.json or StreamOptions.
     pub fn new() -> Self {
         Self {
             client: shared_client(),
-            api_token: std::env::var("CLOUDFLARE_API_TOKEN").ok(),
-            account_id: std::env::var("CLOUDFLARE_ACCOUNT_ID").ok(),
+            api_token: None,
+            account_id: None,
         }
     }
 

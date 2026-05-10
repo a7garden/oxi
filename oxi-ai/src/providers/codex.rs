@@ -44,9 +44,7 @@ impl Default for CodexConfig {
         Self {
             // GitHub Copilot's codex endpoint
             base_url: "https://api.githubcopilot.com".to_string(),
-            api_key: std::env::var("GITHUB_COPILOT_TOKEN")
-                .ok()
-                .or_else(|| std::env::var("GITHUB_TOKEN").ok()),
+            api_key: None,
             model: "codex-davinci-002".to_string(),
             temperature: Some(0.2), // Lower temp for more deterministic code
             max_tokens: Some(2048),
@@ -56,10 +54,7 @@ impl Default for CodexConfig {
 
 /// GitHub Codex provider
 ///
-/// Uses the codex engine for code-related tasks. Supports:
-/// - Authentication via GITHUB_COPILOT_TOKEN or GITHUB_TOKEN env vars
-/// - Codex-optimized temperature settings (lower = more focused)
-/// - Both completions and chat-style interactions
+/// API keys are resolved at request time from auth.json or StreamOptions.
 #[derive(Clone)]
 pub struct CodexProvider {
     client: &'static Client,

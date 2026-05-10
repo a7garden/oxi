@@ -23,11 +23,14 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
-    /// Create a new OpenAI provider using environment variables.
+    /// Create a new OpenAI provider without an API key.
+    ///
+    /// API keys are resolved at request time via auth.json or StreamOptions.
+    /// Use `with_api_key()` for explicit key injection.
     pub fn new() -> Self {
         Self {
             client: shared_client(),
-            api_key: std::env::var("OPENAI_API_KEY").ok(),
+            api_key: None,
             base_url: None,
         }
     }

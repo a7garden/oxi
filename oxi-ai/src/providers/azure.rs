@@ -22,8 +22,12 @@ use super::shared_client;
 ///
 /// Supports the following environment variables:
 /// - AZURE_OPENAI_API_KEY: API key for authentication
-/// - AZURE_OPENAI_RESOURCE_NAME: Azure resource name (e.g., "my-resource")
-/// - AZURE_OPENAI_DEPLOYMENT_NAME: Deployment name (e.g., "gpt-4o")
+/// Azure OpenAI provider
+///
+/// Configuration is resolved at runtime from:
+/// - auth.json (for api_key)
+/// - settings.toml (for resource_name, deployment_name via custom_provider)
+/// - StreamOptions (for request-time override)
 #[derive(Clone)]
 pub struct AzureProvider {
     client: &'static Client,
@@ -33,13 +37,15 @@ pub struct AzureProvider {
 }
 
 impl AzureProvider {
-    /// Create a new Azure provider, reading configuration from environment variables
+    /// Create a new Azure provider without configuration.
+    ///
+    /// Configuration is resolved at request time via auth.json or StreamOptions.
     pub fn new() -> Self {
         Self {
             client: shared_client(),
-            api_key: std::env::var("AZURE_OPENAI_API_KEY").ok(),
-            resource_name: std::env::var("AZURE_OPENAI_RESOURCE_NAME").ok(),
-            deployment_name: std::env::var("AZURE_OPENAI_DEPLOYMENT_NAME").ok(),
+            api_key: None,
+            resource_name: None,
+            deployment_name: None,
         }
     }
 

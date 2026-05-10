@@ -22,10 +22,13 @@ pub struct DeepSeekProvider {
 }
 
 impl DeepSeekProvider {
+    /// Create a new DeepSeek provider without an API key.
+    ///
+    /// API keys are resolved at request time via auth.json or StreamOptions.
     pub fn new() -> Self {
         Self {
             client: shared_client(),
-            api_key: std::env::var("DEEPSEEK_API_KEY").ok(),
+            api_key: None,
         }
     }
 

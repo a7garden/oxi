@@ -31,11 +31,13 @@ pub struct OpenAiResponsesProvider {
 }
 
 impl OpenAiResponsesProvider {
-    /// Create a new provider using the OPENAI_API_KEY environment variable
+    /// Create a new provider without an API key.
+    ///
+    /// API keys are resolved at request time via auth.json or StreamOptions.
     pub fn new() -> Self {
         Self {
             client: shared_client(),
-            api_key: std::env::var("OPENAI_API_KEY").ok(),
+            api_key: None,
             base_url: None,
         }
     }

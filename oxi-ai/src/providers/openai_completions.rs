@@ -72,7 +72,7 @@ impl Default for OpenAICompletionsConfig {
     fn default() -> Self {
         Self {
             base_url: "https://api.openai.com/v1".to_string(),
-            api_key: std::env::var("OPENAI_API_KEY").ok(),
+            api_key: None,
             model: "text-davinci-003".to_string(),
             options: CompletionsOptions::default(),
         }

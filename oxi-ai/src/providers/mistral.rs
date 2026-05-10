@@ -33,11 +33,13 @@ const MISTRAL_API_URL: &str = "https://api.mistral.ai/v1";
 const MISTRAL_TOOL_CALL_ID_LENGTH: usize = 9;
 
 impl MistralProvider {
-    /// Create a new Mistral provider using MISTRAL_API_KEY env var
+    /// Create a new Mistral provider without an API key.
+    ///
+    /// API keys are resolved at request time via auth.json or StreamOptions.
     pub fn new() -> Self {
         Self {
             client: shared_client(),
-            api_key: std::env::var("MISTRAL_API_KEY").ok(),
+            api_key: None,
         }
     }
 
