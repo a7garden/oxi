@@ -141,6 +141,9 @@ pub enum AgentEvent {
         tool_call_id: String,
         /// Name of the tool being invoked.
         tool_name: String,
+        /// JSON arguments for the tool call.
+        #[serde(default)]
+        arguments: serde_json::Value,
     },
 
     /// Progress update from a running tool.

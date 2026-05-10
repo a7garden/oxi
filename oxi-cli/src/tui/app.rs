@@ -570,18 +570,20 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                         AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
                                         AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
                                         // ── ToolCall from streaming (ProviderEvent::ToolCallEnd) ──
-                                        // IGNORED: we only use ToolExecutionStart/End for UI.
-                                        // The streaming ToolCall arrives before execution starts,
-                                        // causing duplicate boxes. ToolExecutionStart is the real
-                                        // "tool is now running" signal.
+                                        // IGNORED: this is just the LLM's request, not actual
+                                        // execution. ToolStart arrives when execution begins.
                                         AgentEvent::ToolCall { .. } => {
                                             continue;
                                         }
-                                        // ── ToolStart (legacy) ──
-                                        // IGNORED: superseded by ToolExecutionStart.
-                                        AgentEvent::ToolStart { .. } => {
-                                            continue;
+                                        // ── ToolStart: execution has begun (Agent::run path) ──
+                                        AgentEvent::ToolStart { tool_call_id, tool_name, arguments } => {
+                                            UiEvent::ToolCall {
+                                                id: tool_call_id,
+                                                name: tool_name,
+                                                arguments: arguments.to_string(),
+                                            }
                                         }
+                                        // ── ToolComplete: execution finished (Agent::run path) ──
                                         AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
                                             tool_call_id: Some(result.tool_call_id.clone()),
                                             tool_name: String::new(),
@@ -594,7 +596,8 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             content: error.clone(),
                                             is_error: true,
                                         },
-                                        // ── Primary tool lifecycle events ──
+                                        // ── ToolExecutionStart/End (AgentLoop::run_loop path) ──
+                                        // Maps to the same UiEvents — whichever path is active wins.
                                         AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => {
                                             UiEvent::ToolCall { id: tool_call_id, name: tool_name, arguments: args.to_string() }
                                         }

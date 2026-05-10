@@ -731,6 +731,7 @@ impl Agent {
             let _ = tx.send(AgentEvent::ToolStart {
                 tool_call_id: tool_call_id.clone(),
                 tool_name: tool_name.clone(),
+                arguments: tool_call.arguments.clone(),
             }).await;
 
             let tool_result = self.execute_tool_single(tools, tool_call, tx.clone()).await;
