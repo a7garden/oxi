@@ -11,7 +11,8 @@ use ratatui::{
     text::Line,
     widgets::{Block, BorderType, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
-use crate::{Event, KeyCode, KeyEvent, Theme};
+use crate::Theme;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::fuzzy::fuzzy_match;
 use unicode_width::UnicodeWidthStr;
 
@@ -111,32 +112,33 @@ impl CommandPaletteState {
         }
     }
 
-    pub fn handle_key(&mut self, event: &Event) -> bool {
+    /// Handle a crossterm key event. Returns true if consumed.
+    pub fn handle_key(&mut self, key: &KeyEvent) -> bool {
         if !self.visible {
             return false;
         }
-        match event {
-            Event::Key(KeyEvent { code: KeyCode::Escape, .. }) => {
+        match key.code {
+            KeyCode::Esc => {
                 self.hide();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
+            KeyCode::Up => {
                 self.select_prev();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+            KeyCode::Down => {
                 self.select_next();
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => true,
-            Event::Key(KeyEvent { code: KeyCode::Char(c), .. }) => {
-                self.query.push(*c);
+            KeyCode::Enter => true,
+            KeyCode::Char(c) => {
+                self.query.push(c);
                 self.apply_filter();
                 self.selected = 0;
                 self.scroll_offset = 0;
                 true
             }
-            Event::Key(KeyEvent { code: KeyCode::Backspace, .. }) => {
+            KeyCode::Backspace => {
                 self.query.pop();
                 self.apply_filter();
                 self.selected = 0;
@@ -349,14 +351,16 @@ impl StatefulWidget for CommandPalette<'_> {
                 let name_str: String = cmd.name.chars().take(max_name).collect();
                 spans.push(ratatui::text::Span::styled(name_str, item_style));
 
-                // Padding before shortcut
-                let shortcut_col = if cmd.shortcut.is_some() {
+                // Padding before shortcut — fill to full width for selected items
+                let current_len: usize = spans.iter().map(|s| s.width()).sum();
+                let fill_target = if is_selected {
+                    inner_w
+                } else if cmd.shortcut.is_some() {
                     inner_w.saturating_sub(12)
                 } else {
                     inner_w
                 };
-                let current_len: usize = spans.iter().map(|s| s.width()).sum();
-                let padding = shortcut_col.saturating_sub(current_len);
+                let padding = fill_target.saturating_sub(current_len);
                 if padding > 0 {
                     spans.push(ratatui::text::Span::styled(" ".repeat(padding), item_style));
                 }
@@ -377,18 +381,6 @@ impl StatefulWidget for CommandPalette<'_> {
             .style(Style::default().bg(overlay_bg))
             .wrap(Wrap { trim: false });
         list.render(list_area, buf);
-
-        // Selected row bg fill (manual — fills empty cells at row end)
-        if state.selected >= start && state.selected < end {
-            let row = list_start_y + (state.selected - start) as u16;
-            let highlight_style = Style::default().fg(Color::Black).bg(primary);
-            for col in inner_x..inner_x + inner.width {
-                let cell = &mut buf[(col, row)];
-                if cell.symbol() == " " {
-                    cell.set_style(highlight_style);
-                }
-            }
-        }
     }
 }
 
@@ -514,10 +506,7 @@ mod tests {
         let mut state = CommandPaletteState::new(vec![]);
         state.show();
         assert!(state.is_visible());
-        let consumed = state.handle_key(&Event::Key(KeyEvent {
-            code: KeyCode::Escape,
-            modifiers: crate::KeyModifiers::new(),
-        }));
+        let consumed = state.handle_key(&KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(consumed);
         assert!(!state.is_visible());
     }
@@ -526,15 +515,9 @@ mod tests {
     fn handle_key_char_appends_to_query() {
         let mut state = CommandPaletteState::new(vec![Command::new("Open")]);
         state.show();
-        state.handle_key(&Event::Key(KeyEvent {
-            code: KeyCode::Char('o'),
-            modifiers: crate::KeyModifiers::new(),
-        }));
+        state.handle_key(&KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE));
         assert_eq!(state.query, "o");
-        state.handle_key(&Event::Key(KeyEvent {
-            code: KeyCode::Char('p'),
-            modifiers: crate::KeyModifiers::new(),
-        }));
+        state.handle_key(&KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE));
         assert_eq!(state.query, "op");
     }
 
@@ -543,20 +526,14 @@ mod tests {
         let mut state = CommandPaletteState::new(vec![]);
         state.show();
         state.query = "ab".to_string();
-        state.handle_key(&Event::Key(KeyEvent {
-            code: KeyCode::Backspace,
-            modifiers: crate::KeyModifiers::new(),
-        }));
+        state.handle_key(&KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
         assert_eq!(state.query, "a");
     }
 
     #[test]
     fn handle_key_not_consumed_when_hidden() {
         let mut state = CommandPaletteState::new(vec![]);
-        let consumed = state.handle_key(&Event::Key(KeyEvent {
-            code: KeyCode::Char('a'),
-            modifiers: crate::KeyModifiers::new(),
-        }));
+        let consumed = state.handle_key(&KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
         assert!(!consumed);
     }
 

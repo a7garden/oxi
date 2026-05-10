@@ -3288,6 +3288,7 @@ name = "oxi-tui"
 version = "0.10.0"
 dependencies = [
  "anyhow",
+ "crossterm 0.28.1",
  "parking_lot",
  "ratatui",
  "serde",

@@ -4,7 +4,7 @@
 //! Includes built-in dark and light themes, and supports loading
 //! themes from TOML or JSON files with hot-reloading.
 
-use crate::cell::{Attributes, Color};
+use crate::cell::Color;
 use ratatui::style::Style;
 use serde::Deserialize;
 use std::fmt;
@@ -23,8 +23,6 @@ pub struct Theme {
     pub name: String,
     /// Color palette.
     pub colors: ColorScheme,
-    /// Font / text style scheme.
-    pub fonts: FontScheme,
     /// Spacing configuration.
     pub spacing: Spacing,
 }
@@ -178,39 +176,7 @@ pub struct ThemeStyles {
     pub user_bg: Style,
 }
 
-// ---------------------------------------------------------------------------
-// Font scheme
-// ---------------------------------------------------------------------------
 
-/// Text style scheme for semantic elements.
-#[derive(Clone, Debug)]
-pub struct FontScheme {
-    /// Normal weight text.
-    pub normal: Attributes,
-    /// Bold text.
-    pub bold: Attributes,
-    /// Italic text.
-    pub italic: Attributes,
-    /// Bold italic text.
-    pub bold_italic: Attributes,
-    /// Heading text (bold).
-    pub heading: Attributes,
-    /// Link text (underlined).
-    pub link: Attributes,
-}
-
-impl Default for FontScheme {
-    fn default() -> Self {
-        Self {
-            normal: Attributes::new(),
-            bold: Attributes::new().with_bold(),
-            italic: Attributes::new().with_italic(),
-            bold_italic: Attributes::new().with_bold().with_italic(),
-            heading: Attributes::new().with_bold(),
-            link: Attributes::new().with_underline(),
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Spacing
@@ -250,7 +216,6 @@ impl Theme {
         Self {
             name: "dark".into(),
             colors: ColorScheme::dark(),
-            fonts: FontScheme::default(),
             spacing: Spacing::default(),
         }
     }
@@ -260,7 +225,6 @@ impl Theme {
         Self {
             name: "light".into(),
             colors: ColorScheme::light(),
-            fonts: FontScheme::default(),
             spacing: Spacing::default(),
         }
     }
@@ -461,7 +425,6 @@ impl ThemeFile {
                 self.name
             },
             colors,
-            fonts: FontScheme::default(),
             spacing: Spacing::default(),
         }
     }

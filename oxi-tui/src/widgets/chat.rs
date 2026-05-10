@@ -19,6 +19,47 @@ use tui_markdown;
 use crate::Theme;
 use crate::theme::ThemeStyles;
 
+// ── Tool Call Tracker ─────────────────────────────────────────────────
+
+/// Manages the mapping between tool call IDs and their content block indices.
+/// Extracted from ChatViewState to keep state responsibilities focused.
+#[derive(Debug, Default)]
+struct ToolCallTracker {
+    active: HashMap<String, usize>,
+}
+
+impl ToolCallTracker {
+    fn new() -> Self { Self::default() }
+
+    /// Register a tool call. Returns false if the ID already exists (duplicate).
+    fn register(&mut self, id: String, index: usize) -> bool {
+        if self.active.contains_key(&id) {
+            return false;
+        }
+        self.active.insert(id, index);
+        true
+    }
+
+    /// Find and remove a tool call by ID. Returns the content block index.
+    fn find_and_remove(&mut self, id: &str) -> Option<usize> {
+        self.active.remove(id)
+    }
+
+    /// Remove by ID (ignoring the index).
+    fn remove(&mut self, id: &str) {
+        self.active.remove(id);
+    }
+
+    /// Look up a tool call by ID without removing it.
+    fn get(&self, id: &str) -> Option<usize> {
+        self.active.get(id).copied()
+    }
+
+    fn clear(&mut self) {
+        self.active.clear();
+    }
+}
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 /// Status of a tool call — tracks lifecycle from request to completion.
@@ -77,7 +118,7 @@ pub struct ChatViewState {
     pub pending_images: Vec<(String, String)>,
     /// Map of active tool call IDs to their content_blocks index.
     /// Used for ID-based result matching instead of position-based.
-    active_tool_calls: HashMap<String, usize>,
+    tool_tracker: ToolCallTracker,
 }
 
 impl ChatViewState {
@@ -103,10 +144,9 @@ impl ChatViewState {
             },
             active_content_index: 0,
         });
-        self.active_tool_calls.clear();
+        self.tool_tracker.clear();
     }
 
-    /// Alias for streaming text update.
     pub fn stream_text_delta(&mut self, delta: &str) {
         self.append_text(delta);
         self.update_last_code_block(delta);
@@ -154,7 +194,7 @@ impl ChatViewState {
     /// Update status of a tool call by ID. No-op if ID not found.
     pub fn set_tool_status(&mut self, id: &str, status: ToolCallStatus) {
         if let Some(ref mut s) = self.streaming {
-            if let Some(&idx) = self.active_tool_calls.get(id) {
+            if let Some(idx) = self.tool_tracker.get(id) {
                 if let Some(block) = s.message.content_blocks.get_mut(idx) {
                     if let ContentBlock::ToolCall { status: ref mut curr_status, .. } = block {
                         *curr_status = status;
@@ -169,12 +209,11 @@ impl ChatViewState {
         tracing::debug!("[TUI] stream_tool_call: id={:?}, name={:?}, status={:?}, streaming={}",
             id, name, status, self.streaming.is_some());
         if let Some(ref mut s) = self.streaming {
-            // Guard against duplicate IDs (e.g. double ToolCall events from agent)
-            if self.active_tool_calls.contains_key(&id) {
+            let idx = s.message.content_blocks.len();
+            if !self.tool_tracker.register(id.clone(), idx) {
                 tracing::debug!("[TUI] Duplicate ToolCall ID {:?} — ignoring", id);
                 return;
             }
-            let idx = s.message.content_blocks.len();
             s.message.content_blocks.push(ContentBlock::ToolCall {
                 id: id.clone(),
                 name,
@@ -182,7 +221,6 @@ impl ChatViewState {
                 result: None,
                 status,
             });
-            self.active_tool_calls.insert(id, idx);
             tracing::debug!("[TUI] ToolCall pushed at idx={}, blocks count={}",
                 idx, s.message.content_blocks.len());
         }
@@ -194,12 +232,11 @@ impl ChatViewState {
         if let Some(ref mut s) = self.streaming {
             // ── Try ID-based matching first ──
             if let Some(ref id) = tool_call_id {
-                if let Some(&idx) = self.active_tool_calls.get(id) {
+                if let Some(idx) = self.tool_tracker.find_and_remove(id) {
                     if let Some(block) = s.message.content_blocks.get_mut(idx) {
                         if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = block {
                             *result = Some((content, is_error));
                             *status = ToolCallStatus::Done;
-                            self.active_tool_calls.remove(id);
                             tracing::debug!("[TUI] ID-matched result merged into ToolCall at idx={}", idx);
                             return;
                         }
@@ -215,9 +252,8 @@ impl ChatViewState {
                     if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = last {
                         *result = Some((content, is_error));
                         *status = ToolCallStatus::Done;
-                        // Remove from active_tool_calls (by value search)
                         if let Some(ref id) = tool_call_id {
-                            self.active_tool_calls.remove(id);
+                            self.tool_tracker.remove(id);
                         }
                         tracing::debug!("[TUI] Fallback merge result into last ToolCall");
                         return;
@@ -264,7 +300,7 @@ impl ChatViewState {
         self.scroll_offset = 0;
         self.last_code_block = None;
         self.pending_images.clear();
-        self.active_tool_calls.clear();
+        self.tool_tracker.clear();
     }
 
     pub fn push_message(&mut self, msg: ChatMessage) { self.messages.push(msg); }
@@ -376,7 +412,7 @@ fn extract_last_code_block(text: &str) -> Option<String> {
 /// Render markdown content via tui-markdown, converting to owned Lines.
 fn markdown_lines_internal(content: &str) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
-    let text: ratatui::text::Text = tui_markdown::from_str(&preprocessed);
+    let text: ratatui::text::Text<'_> = tui_markdown::from_str(&preprocessed);
     text.lines.into_iter().map(|l| {
         let spans: Vec<Span<'static>> = l.spans
             .into_iter()
@@ -665,7 +701,11 @@ fn render_segment(
     match &seg.kind {
         SegKind::Text(lines) => {
             let skip = rows_hidden as usize;
-            let vis: Vec<Line<'static>> = lines.iter().skip(skip).take(rect.height as usize).cloned().collect();
+            let vis: ratatui::text::Text = lines.iter()
+                .skip(skip)
+                .take(rect.height as usize)
+                .cloned()
+                .collect();
             Paragraph::new(vis).wrap(Wrap { trim: false }).render(rect, buf);
         }
 
@@ -678,7 +718,11 @@ fn render_segment(
             let text_rect = stripe_block.inner(rect);
             stripe_block.render(rect, buf);
             let skip = rows_hidden as usize;
-            let vis: Vec<Line<'static>> = lines.iter().skip(skip).take(text_rect.height as usize).cloned().collect();
+            let vis: ratatui::text::Text = lines.iter()
+                .skip(skip)
+                .take(text_rect.height as usize)
+                .cloned()
+                .collect();
             Paragraph::new(vis)
                 .style(styles.normal)
                 .wrap(Wrap { trim: false })
@@ -720,7 +764,7 @@ fn render_segment(
                 lines.push(Line::from(Span::styled(format!("  {}", first), styles.muted)));
             }
             let skip = rows_hidden as usize;
-            let vis: Vec<Line<'static>> = lines.iter().skip(skip).take(rect.height as usize).cloned().collect();
+            let vis: ratatui::text::Text = lines.into_iter().skip(skip).take(rect.height as usize).collect();
             Paragraph::new(vis).render(rect, buf);
         }
 
@@ -730,7 +774,7 @@ fn render_segment(
                 Line::from(Span::styled("  Ctrl+I -> open in viewer", styles.muted)),
             ];
             let skip = rows_hidden as usize;
-            let vis: Vec<Line<'static>> = lines.iter().skip(skip).take(rect.height as usize).cloned().collect();
+            let vis: ratatui::text::Text = lines.into_iter().skip(skip).take(rect.height as usize).collect();
             Paragraph::new(vis).render(rect, buf);
         }
 
