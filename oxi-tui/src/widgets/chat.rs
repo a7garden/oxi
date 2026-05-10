@@ -146,24 +146,35 @@ impl ChatViewState {
     }
 
     pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String) {
+        tracing::info!("[TUI] stream_tool_call: name={:?}, streaming={}", name, self.streaming.is_some());
         if let Some(ref mut s) = self.streaming {
             s.message.content_blocks.push(ContentBlock::ToolCall { id, name, arguments, result: None });
+            tracing::info!("[TUI] ToolCall pushed, blocks count={}", s.message.content_blocks.len());
         }
     }
 
     pub fn stream_tool_result(&mut self, tool_name: String, content: String, is_error: bool) {
+        tracing::info!("[TUI] stream_tool_result: tool_name={:?}, streaming={}", tool_name, self.streaming.is_some());
         if let Some(ref mut s) = self.streaming {
+            let last_is_toolcall = s.message.content_blocks.last()
+                .map_or(false, |b| matches!(b, ContentBlock::ToolCall { .. }));
+            tracing::info!("[TUI] blocks count={}, last_is_toolcall={}",
+                s.message.content_blocks.len(), last_is_toolcall);
             // Find last ToolCall and fill in its result — merges call + result into one block
             if let Some(last) = s.message.content_blocks.last_mut() {
                 if matches!(last, ContentBlock::ToolCall { .. }) {
                     if let ContentBlock::ToolCall { ref mut result, .. } = last {
                         *result = Some((content, is_error));
+                        tracing::info!("[TUI] MERGED result into ToolCall");
                         return;
                     }
                 }
             }
             // Fallback: push as separate result block
+            tracing::warn!("[TUI] FALLBACK: pushing standalone ToolResult (last block was not ToolCall)");
             s.message.content_blocks.push(ContentBlock::ToolResult { tool_name, content, is_error });
+        } else {
+            tracing::warn!("[TUI] FALLBACK: streaming is None, ToolResult discarded");
         }
     }
 
@@ -237,6 +248,31 @@ impl ChatViewState {
 }
 
 // ── Code block extraction ────────────────────────────────────────────
+
+/// Fix bare code fences (``` without a language) → ```text.
+/// tui_markdown's SYNTAX_SET has no entry for empty-string language
+/// and emits `warn!("Could not find syntax for code block: \"\"")` each time.
+fn fix_bare_code_fences(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut i = 0;
+    let bytes = content.as_bytes();
+    while i < bytes.len() {
+        // Look for ```
+        if bytes[i] == b'`' && i + 2 < bytes.len() && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
+            // Check if this is a bare fence (not followed by a non-newline char that isn't `)
+            let after = &bytes[i + 3..];
+            let is_bare = after.first().map_or(true, |&c| c == b'\n' || c == b'\r');
+            if is_bare {
+                result.push_str("```text");
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
+}
 
 fn extract_last_code_block(text: &str) -> Option<String> {
     let mut result: Option<String> = None;
@@ -329,8 +365,11 @@ fn user_stripe(styles: &ThemeStyles) -> Vec<Span<'static>> {
 }
 
 /// Render markdown content via tui-markdown, converting to owned Lines.
+/// Pre-processes empty-language code fences to avoid spurious
+/// "Could not find syntax for code block: \"\"" warnings from tui_markdown.
 fn markdown_lines(content: &str) -> Vec<Line<'static>> {
-    let text: ratatui::text::Text = tui_markdown::from_str(content);
+    let preprocessed = fix_bare_code_fences(content);
+    let text: ratatui::text::Text = tui_markdown::from_str(&preprocessed);
     text.lines.into_iter().map(|l| {
         let spans: Vec<Span<'static>> = l.spans
             .into_iter()
