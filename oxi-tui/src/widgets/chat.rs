@@ -61,6 +61,10 @@ pub struct ChatViewState {
     pub auto_scroll: bool,
     pub spinner_frame: usize,
     pub content_height: u16,
+    /// Last code block extracted from assistant text (for copy functionality)
+    pub last_code_block: Option<String>,
+    code_block_active: bool,
+    code_block_buf: String,
 }
 
 impl ChatViewState {
@@ -89,12 +93,36 @@ impl ChatViewState {
         });
     }
 
-    pub fn stream_text(&mut self, text: &str) {
+    /// Alias for streaming text update.
+    pub fn stream_text_delta(&mut self, delta: &str) {
+        self.stream_text(delta);
+        self.update_last_code_block(delta);
+        self.last_code_block = None;
+    }
+
+    /// Returns true when a streaming message is in progress.
+    pub fn is_streaming(&self) -> bool {
+        self.streaming.is_some()
+    }
+
+    /// Update the last code block when new text arrives.
+    fn update_last_code_block(&mut self, delta: &str) {
         if let Some(ref mut s) = self.streaming {
             if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
-                content.push_str(text);
-            } else {
-                s.message.content_blocks.insert(0, ContentBlock::Text { content: text.to_string() });
+                if let Some(code) = extract_last_code_block(content) {
+                    self.last_code_block = Some(code);
+                }
+            }
+        }
+    }
+
+    /// Called when streaming finishes — finalize code block extraction.
+    pub fn refresh_last_code_block(&mut self) {
+        if let Some(ref s) = self.streaming {
+            if let Some(ContentBlock::Text { ref content, .. }) = s.message.content_blocks.first() {
+                if let Some(code) = extract_last_code_block(content) {
+                    self.last_code_block = Some(code);
+                }
             }
         }
     }
@@ -139,6 +167,12 @@ impl ChatViewState {
 
     pub fn push_message(&mut self, msg: ChatMessage) { self.messages.push(msg); }
 
+    pub fn add_message(&mut self, msg: ChatMessage) {
+        self.messages.push(msg);
+        self.streaming = None;
+        self.last_code_block = None;
+    }
+
     pub fn push_system_message(&mut self, content: String) {
         self.messages.push(ChatMessage {
             role: MessageRole::System,
@@ -159,6 +193,33 @@ impl ChatViewState {
             }
         }
     }
+}
+
+// ── Code block extraction ────────────────────────────────────────────
+
+fn extract_last_code_block(text: &str) -> Option<String> {
+    let mut result: Option<String> = None;
+    let mut in_block = false;
+    let mut block_content = String::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            if in_block {
+                let c = block_content.trim().to_string();
+                if !c.is_empty() { result = Some(c); }
+                block_content.clear();
+                in_block = false;
+            } else {
+                block_content.clear();
+                in_block = true;
+            }
+        } else if in_block {
+            if !block_content.is_empty() { block_content.push('
+'); }
+            block_content.push_str(line);
+        }
+    }
+    result
 }
 
 // ── Box-drawing helpers ────────────────────────────────────────────────
