@@ -13,7 +13,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget, Wrap},
+    widgets::{Block, Borders, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget, Wrap},
 };
 use tui_markdown;
 use unicode_width::UnicodeWidthChar;
@@ -77,8 +77,6 @@ pub struct ChatViewState {
     pub content_height: u16,
     /// Last code block extracted from assistant text (for copy functionality)
     pub last_code_block: Option<String>,
-    code_block_active: bool,
-    code_block_buf: String,
     /// Pending images awaiting user action
     pub pending_images: Vec<(String, String)>,
     /// Map of active tool call IDs to their content_blocks index.
@@ -131,11 +129,6 @@ impl ChatViewState {
                 s.message.content_blocks.insert(0, ContentBlock::Text { content: text.to_string() });
             }
         }
-    }
-
-    /// Alias used by app.rs for the same operation.
-    pub fn stream_text(&mut self, text: &str) {
-        self.append_text(text);
     }
 
     /// Returns true when a streaming message is in progress.
@@ -553,29 +546,45 @@ fn measure_wrapped_height(lines: &[Line<'_>], width: u16) -> u16 {
     para.line_count(width) as u16
 }
 
-fn measure_tool_box_height(arguments: &str, result: &Option<(String, bool)>) -> u16 {
+fn measure_tool_box_height(arguments: &str, result: &Option<(String, bool)>, inner_width: u16) -> u16 {
     let arg_count = arguments.lines().count();
     let max_args = if arg_count <= 3 { 5 } else { 3 };
     let mut h: u16 = 2; // top + bottom border
-    h += arg_count.min(max_args) as u16;
-    if arg_count > max_args { h += 1; }
+    // Each argument line may wrap at the inner width
+    let arg_lines: Vec<Line<'static>> = arguments.lines()
+        .take(max_args)
+        .map(|l| Line::from(Span::raw(l.to_string())))
+        .collect();
+    h += measure_wrapped_height(&arg_lines, inner_width);
+    if arg_count > max_args { h += 1; } // "..." truncation line
     if let Some((rc, _)) = result {
         h += 1; // divider
+        let result_lines: Vec<Line<'static>> = rc.lines()
+            .take(6)
+            .map(|l| Line::from(Span::raw(l.to_string())))
+            .collect();
         let rn = rc.lines().count();
-        h += rn.min(6) as u16;
-        if rn > 6 { h += 1; }
+        h += measure_wrapped_height(&result_lines, inner_width);
+        if rn > 6 { h += 1; } // "..." truncation line
     }
     h
 }
 
-fn measure_tool_result_height(content: &str) -> u16 {
+fn measure_tool_result_height(content: &str, inner_width: u16) -> u16 {
+    let lines: Vec<Line<'static>> = content.lines()
+        .take(4)
+        .map(|l| Line::from(Span::raw(l.to_string())))
+        .collect();
     let n = content.lines().count();
-    2 + n.min(4) as u16 + if n > 4 { 1 } else { 0 }
+    2 + measure_wrapped_height(&lines, inner_width) + if n > 4 { 1 } else { 0 }
 }
 
-fn measure_error_height(message: &str, retryable: bool) -> u16 {
-    let n = message.lines().count();
-    2 + n.min(4) as u16 + if retryable { 1 } else { 0 }
+fn measure_error_height(message: &str, retryable: bool, inner_width: u16) -> u16 {
+    let lines: Vec<Line<'static>> = message.lines()
+        .take(4)
+        .map(|l| Line::from(Span::raw(l.to_string())))
+        .collect();
+    2 + measure_wrapped_height(&lines, inner_width) + if retryable { 1 } else { 0 }
 }
 
 fn measure_thinking_height(content: &str, collapsed: bool) -> u16 {
@@ -592,9 +601,9 @@ fn measure_segment(kind: &SegKind, width: u16) -> u16 {
         SegKind::UserText(lines) => measure_wrapped_height(lines, width.saturating_sub(2)),
         SegKind::Rule => 1,
         SegKind::Label { .. } => 1,
-        SegKind::ToolBox { arguments, result, .. } => measure_tool_box_height(arguments, result),
-        SegKind::ToolResultBox { content, .. } => measure_tool_result_height(content),
-        SegKind::ErrorBox { message, retryable, .. } => measure_error_height(message, *retryable),
+        SegKind::ToolBox { arguments, result, .. } => measure_tool_box_height(arguments, result, width.saturating_sub(2)),
+        SegKind::ToolResultBox { content, .. } => measure_tool_result_height(content, width.saturating_sub(2)),
+        SegKind::ErrorBox { message, retryable, .. } => measure_error_height(message, *retryable, width.saturating_sub(2)),
         SegKind::Thinking { content, collapsed } => measure_thinking_height(content, *collapsed),
         SegKind::Image { .. } => 2,
         SegKind::Spinner { .. } => 1,
@@ -698,7 +707,7 @@ fn render_segment(
             let stripe_block = Block::default()
                 .borders(Borders::LEFT)
                 .border_style(styles.user_border)
-                .padding(ratatui::layout::Padding::new(1, 0, 0, 0));
+                .padding(Padding::new(1, 0, 0, 0));
             let text_rect = stripe_block.inner(rect);
             stripe_block.render(rect, buf);
             let skip = rows_hidden as usize;
@@ -1004,7 +1013,7 @@ mod tests {
         let mut s = ChatViewState::new();
         s.start_streaming();
         assert!(s.streaming.is_some());
-        s.stream_text("Hi");
+        s.stream_text_delta("Hi");
         s.finish_streaming();
         assert!(s.streaming.is_none());
         assert_eq!(s.messages.len(), 1);
