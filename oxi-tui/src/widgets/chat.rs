@@ -600,7 +600,7 @@ impl StatefulWidget for ChatView<'_> {
 
             match kind {
                 LineKind::CodeBlock | LineKind::HorizontalRule | LineKind::RoleLabel
-                | LineKind::TableBorder | LineKind::TableHeader => {
+                | LineKind::TableBorder | LineKind::TableHeader | LineKind::TableRow => {
                     spans.push(Span::styled(text.clone(), line_base_style));
                 }
                 _ => {
