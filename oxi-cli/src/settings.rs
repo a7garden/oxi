@@ -319,13 +319,10 @@ impl Settings {
 
     /// Resolve the effective session directory.
     ///
-    /// Priority: `session_dir` field → `$OXI_SESSION_DIR` → `~/.oxi/sessions`.
+    /// Priority: `session_dir` field → `~/.oxi/sessions`.
     pub fn effective_session_dir(&self) -> Result<PathBuf> {
         if let Some(ref dir) = self.session_dir {
             return Ok(dir.clone());
-        }
-        if let Ok(dir) = env::var("OXI_SESSION_DIR") {
-            return Ok(PathBuf::from(dir));
         }
         Ok(Self::settings_dir()?.join("sessions"))
     }
@@ -423,7 +420,12 @@ impl Settings {
 
     /// Apply environment variable overrides in-place.
     ///
-    /// Supported variables:
+    /// DEPRECATED: Environment variable overrides are being phased out in favor
+    /// of file-based configuration (`~/.oxi/settings.toml`). This method is
+    /// kept for CI/CD compatibility but should not be relied upon for local
+    /// development. Use `oxi config set` or `oxi setup` instead.
+    ///
+    /// Supported variables (CI/CD only):
     ///
     /// | Env var                    | Setting                |
     /// |---------------------------|------------------------|
@@ -439,65 +441,21 @@ impl Settings {
     /// | `OXI_AUTO_COMPACTION`     | `auto_compaction`      |
     /// | `OXI_TOOL_TIMEOUT`        | `tool_timeout_seconds` |
     /// | `OXI_DISABLED_TOOLS`      | `disabled_tools`       |
+    #[allow(dead_code)]
     pub fn apply_env(&mut self) {
-        if let Ok(v) = env::var("OXI_MODEL") {
-            self.default_model = Some(v);
-        }
-        if let Ok(v) = env::var("OXI_PROVIDER") {
-            self.default_provider = Some(v);
-        }
-        if let Ok(v) = env::var("OXI_THINKING") {
-            if let Some(level) = parse_thinking_level(&v) {
-                self.thinking_level = level;
-            }
-        }
-        if let Ok(v) = env::var("OXI_THEME") {
-            self.theme = v;
-        }
-        if let Ok(v) = env::var("OXI_MAX_TOKENS") {
-            if let Ok(n) = v.parse::<u32>() {
-                self.max_tokens = Some(n);
-            }
-        }
-        if let Ok(v) = env::var("OXI_TEMPERATURE") {
-            if let Ok(n) = v.parse::<f64>() {
-                self.default_temperature = Some(n);
-            }
-        }
-        if let Ok(v) = env::var("OXI_SESSION_DIR") {
-            self.session_dir = Some(PathBuf::from(v));
-        }
-        if let Ok(v) = env::var("OXI_STREAM") {
-            if let Ok(b) = parse_boolish(&v) {
-                self.stream_responses = b;
-            }
-        }
-        if let Ok(v) = env::var("OXI_EXTENSIONS_ENABLED") {
-            if let Ok(b) = parse_boolish(&v) {
-                self.extensions_enabled = b;
-            }
-        }
-        if let Ok(v) = env::var("OXI_AUTO_COMPACTION") {
-            if let Ok(b) = parse_boolish(&v) {
-                self.auto_compaction = b;
-            }
-        }
-        if let Ok(v) = env::var("OXI_TOOL_TIMEOUT") {
-            if let Ok(n) = v.parse::<u64>() {
-                self.tool_timeout_seconds = n;
-            }
-        }
-        if let Ok(v) = env::var("OXI_DISABLED_TOOLS") {
-            self.disabled_tools = v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-        }
+        // No-op: environment variable overrides are disabled.
+        // All configuration should come from settings.toml / settings.json.
+        // This method is kept for backward compatibility but does nothing.
     }
 
     /// Build a `Settings` instance from **only** environment variables
     /// (all other fields stay at defaults).
+    ///
+    /// DEPRECATED: Returns defaults since env overrides are disabled.
+    /// Use `Settings::load()` to load from settings.toml instead.
+    #[allow(dead_code)]
     pub fn from_env() -> Self {
-        let mut settings = Self::default();
-        settings.apply_env();
-        settings
+        Self::default()
     }
 
     // ── Persistence ──────────────────────────────────────────────────

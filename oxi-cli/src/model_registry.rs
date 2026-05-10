@@ -291,8 +291,8 @@ fn resolve_config_value(value: &str) -> Option<String> {
             None
         }
     } else {
-        // Try as env var
-        std::env::var(value).ok()
+        // Plain string value — return as-is (not an env var lookup)
+        Some(value.to_string())
     }
 }
 
@@ -322,8 +322,8 @@ fn resolve_config_value_or_throw(value: &str, label: &str) -> Result<String, Str
             ))
         }
     } else {
-        std::env::var(value)
-            .map_err(|_| format!("Environment variable '{}' not set for {}", value, label))
+        // Plain string value — return as-is (not an env var lookup)
+        Ok(value.to_string())
     }
 }
 
@@ -587,18 +587,11 @@ impl ModelRegistry {
             };
         }
 
-        if std::env::var(api_key_ref).is_ok() {
-            return AuthStatus {
-                configured: true,
-                source: Some("environment".to_string()),
-                label: Some(api_key_ref.clone()),
-            };
-        }
-
+        // Plain string value — always available as config
         AuthStatus {
             configured: true,
             source: Some("models_json_key".to_string()),
-            label: None,
+            label: Some(api_key_ref.clone()),
         }
     }
 

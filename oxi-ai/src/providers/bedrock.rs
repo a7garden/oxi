@@ -35,10 +35,16 @@ pub struct BedrockProvider {
 
 impl BedrockProvider {
     /// Create a new Bedrock provider with default region (us-east-1)
+    ///
+    /// Region is resolved from:
+    /// 1. `~/.aws/config` (via AWS CLI profile)
+    /// 2. Environment variable `AWS_REGION` (CI/CD fallback)
+    /// 3. Default "us-east-1"
     pub fn new() -> Self {
+        let region = Self::resolve_region();
         Self {
             client: shared_client(),
-            default_region: std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+            default_region: region,
         }
     }
 
@@ -51,15 +57,92 @@ impl BedrockProvider {
         }
     }
 
-    /// Get AWS credentials from environment
-    fn get_credentials(&self) -> Result<(String, String, String), ProviderError> {
-        let access_key =
-            std::env::var("AWS_ACCESS_KEY_ID").map_err(|_| ProviderError::MissingApiKey)?;
-        let secret_key =
-            std::env::var("AWS_SECRET_ACCESS_KEY").map_err(|_| ProviderError::MissingApiKey)?;
-        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| self.default_region.clone());
+    /// Resolve AWS region from file config, then env, then default.
+    fn resolve_region() -> String {
+        // 1. Try ~/.aws/config
+        if let Some(region) = Self::region_from_aws_config() {
+            return region;
+        }
+        // 2. Fallback to env (CI/CD)
+        if let Ok(region) = std::env::var("AWS_REGION") {
+            return region;
+        }
+        // 3. Default
+        "us-east-1".to_string()
+    }
 
-        Ok((access_key, secret_key, region))
+    /// Read region from ~/.aws/config [default] region=...
+    fn region_from_aws_config() -> Option<String> {
+        let home = dirs::home_dir()?;
+        let config_path = home.join(".aws").join("config");
+        let content = std::fs::read_to_string(&config_path).ok()?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if let Some(value) = trimmed.strip_prefix("region") {
+                let value = value.trim_start_matches(|c: char| c == ' ' || c == '=').trim();
+                if !value.is_empty() {
+                    return Some(value.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// Get AWS credentials from auth.json, ~/.aws/credentials, or env.
+    ///
+    /// Priority:
+    /// 1. Environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+    /// 2. ~/.aws/credentials file
+    fn get_credentials(&self) -> Result<(String, String, String), ProviderError> {
+        // 1. Try environment variables (CI/CD)
+        if let (Ok(access_key), Ok(secret_key)) = (
+            std::env::var("AWS_ACCESS_KEY_ID"),
+            std::env::var("AWS_SECRET_ACCESS_KEY"),
+        ) {
+            let region = std::env::var("AWS_REGION").unwrap_or_else(|_| self.default_region.clone());
+            return Ok((access_key, secret_key, region));
+        }
+
+        // 2. Try ~/.aws/credentials
+        if let Some((access_key, secret_key)) = Self::creds_from_aws_file() {
+            return Ok((access_key, secret_key, self.default_region.clone()));
+        }
+
+        Err(ProviderError::MissingApiKey)
+    }
+
+    /// Read credentials from ~/.aws/credentials [default]
+    fn creds_from_aws_file() -> Option<(String, String)> {
+        let home = dirs::home_dir()?;
+        let creds_path = home.join(".aws").join("credentials");
+        let content = std::fs::read_to_string(&creds_path).ok()?;
+
+        let mut access_key = None;
+        let mut secret_key = None;
+        let mut in_default = false;
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') {
+                in_default = trimmed == "[default]";
+                continue;
+            }
+            if !in_default {
+                continue;
+            }
+            if let Some(value) = trimmed.strip_prefix("aws_access_key_id") {
+                let value = value.trim_start_matches(|c: char| c == ' ' || c == '=').trim();
+                access_key = Some(value.to_string());
+            } else if let Some(value) = trimmed.strip_prefix("aws_secret_access_key") {
+                let value = value.trim_start_matches(|c: char| c == ' ' || c == '=').trim();
+                secret_key = Some(value.to_string());
+            }
+        }
+
+        match (access_key, secret_key) {
+            (Some(a), Some(s)) => Some((a, s)),
+            _ => None,
+        }
     }
 
     /// Get optional session token (for temporary credentials)

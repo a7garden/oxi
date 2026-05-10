@@ -401,26 +401,12 @@ pub fn clamp_thinking_level(model_id: &str, requested_level: &str) -> String {
 
 /// Check if auth is configured for a provider/model
 ///
-/// This checks both environment variables and stored auth credentials.
-/// Note: This only checks environment variables as a simple, reliable approach.
+/// Checks stored credentials in auth.json. Does NOT check environment variables.
+/// Use `oxi setup` to configure credentials persistently.
 pub fn has_configured_auth(provider: &str, _model: &Model) -> bool {
-    // Check environment variables
-    let env_var = match provider {
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "openai" => "OPENAI_API_KEY",
-        "google" => "GOOGLE_API_KEY",
-        "deepseek" => "DEEPSEEK_API_KEY",
-        "mistral" => "MISTRAL_API_KEY",
-        "groq" => "GROQ_API_KEY",
-        "cerebras" => "CEREBRAS_API_KEY",
-        "xai" => "XAI_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY",
-        "azure-openai" | "azure-openai-responses" => "AZURE_OPENAI_API_KEY",
-        "amazon-bedrock" => "AWS_ACCESS_KEY_ID",
-        _ => return false,
-    };
-
-    std::env::var(env_var).is_ok()
+    // Check auth storage (auth.json)
+    let auth = crate::auth_storage::AuthStorage::new();
+    auth.has_auth(provider)
 }
 
 /// Parse a model pattern into components
