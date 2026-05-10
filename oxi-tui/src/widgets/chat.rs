@@ -91,14 +91,16 @@ impl ChatViewState {
 
     pub fn scroll_to_bottom(&mut self, visible: u16) {
         self.scroll_offset = self.content_height.saturating_sub(visible);
+        self.auto_scroll = true;
     }
     pub fn scroll_up(&mut self, n: u16) {
         self.scroll_offset = self.scroll_offset.saturating_sub(n);
+        self.auto_scroll = false;
     }
     pub fn scroll_down(&mut self, n: u16) {
         self.scroll_offset = self.scroll_offset.saturating_add(n);
     }
-    pub fn scroll_to_top(&mut self) { self.scroll_offset = 0; }
+    pub fn scroll_to_top(&mut self) { self.scroll_offset = 0; self.auto_scroll = false; }
 
     pub fn start_streaming(&mut self) {
         self.streaming = Some(StreamingState {
@@ -586,8 +588,8 @@ fn measure_thinking_height(content: &str, collapsed: bool) -> u16 {
 
 fn measure_segment(kind: &SegKind, width: u16) -> u16 {
     match kind {
-        SegKind::Text(lines) => measure_wrapped_height(lines, width.saturating_sub(2)),
-        SegKind::UserText(lines) => measure_wrapped_height(lines, width.saturating_sub(4)),
+        SegKind::Text(lines) => measure_wrapped_height(lines, width),
+        SegKind::UserText(lines) => measure_wrapped_height(lines, width.saturating_sub(2)),
         SegKind::Rule => 1,
         SegKind::Label { .. } => 1,
         SegKind::ToolBox { arguments, result, .. } => measure_tool_box_height(arguments, result),
@@ -663,7 +665,7 @@ fn build_segments(state: &ChatViewState, width: u16) -> Vec<Segment> {
             let txt = streaming.line_buffer.trim_end().to_string();
             if !txt.is_empty() {
                 let lines = vec![Line::from(Span::raw(txt))];
-                let h = measure_wrapped_height(&lines, width.saturating_sub(4));
+                let h = measure_wrapped_height(&lines, width);
                 segments.push(Segment { y, height: h, kind: SegKind::Text(lines) });
                 y += h;
             }
@@ -692,19 +694,13 @@ fn render_segment(
         }
 
         SegKind::UserText(lines) => {
-            // Left stripe: ▌ + space (2 cells)
-            for row in rect.top()..rect.bottom() {
-                if rect.x + 1 < rect.x + rect.width {
-                    buf[(rect.x, row)].set_char('\u{258c}').set_style(styles.user_border);
-                    buf[(rect.x + 1, row)].set_char(' ').set_style(styles.user_bg);
-                }
-            }
-            let text_rect = Rect {
-                x: rect.x + 2,
-                y: rect.y,
-                width: rect.width.saturating_sub(2),
-                height: rect.height,
-            };
+            // Left stripe via Block with LEFT border + padding
+            let stripe_block = Block::default()
+                .borders(Borders::LEFT)
+                .border_style(styles.user_border)
+                .padding(ratatui::layout::Padding::new(1, 0, 0, 0));
+            let text_rect = stripe_block.inner(rect);
+            stripe_block.render(rect, buf);
             let skip = rows_hidden as usize;
             let vis: Vec<Line<'static>> = lines.iter().skip(skip).take(text_rect.height as usize).cloned().collect();
             Paragraph::new(vis)
