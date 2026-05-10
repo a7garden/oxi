@@ -28,11 +28,11 @@ use tokio::sync::mpsc;
 
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture,
+        self,
         KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{disable_raw_mode, enable_raw_mode},
 };
 use crossterm::event::{EnableBracketedPaste, DisableBracketedPaste};
 use ratatui::{
@@ -565,8 +565,6 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     if tty_ok {
         let _ = execute!(
             stdout,
-            EnterAlternateScreen,
-            EnableMouseCapture,
             EnableBracketedPaste,
             PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::REPORT_EVENT_TYPES
@@ -688,9 +686,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         PopKeyboardEnhancementFlags,
-        DisableBracketedPaste,
-        LeaveAlternateScreen,
-        DisableMouseCapture
+        DisableBracketedPaste
     )?;
     terminal.show_cursor()?;
     let _ = agent_handle.join();
