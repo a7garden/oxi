@@ -273,10 +273,14 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             state.stream_text_delta(&text);
         }
         UiEvent::ToolCall { id, name, arguments } => {
+            tracing::info!("[HANDLER] UiEvent::ToolCall received: name={:?}, id={:?}", name, id);
             state.chat.stream_tool_call(id, name, arguments);
         }
-        UiEvent::ToolStart { .. } => {}
-        UiEvent::ToolResult { tool_call_id: _, tool_name, content, is_error } => {
+        UiEvent::ToolStart { tool_name } => {
+            tracing::info!("[HANDLER] UiEvent::ToolStart IGNORED: tool_name={:?}", tool_name);
+        }
+        UiEvent::ToolResult { tool_call_id, tool_name, content, is_error } => {
+            tracing::info!("[HANDLER] UiEvent::ToolResult received: tool_call_id={:?}, tool_name={:?}", tool_call_id, tool_name);
             state.chat.stream_tool_result(tool_name, content, is_error);
         }
         UiEvent::Complete => {

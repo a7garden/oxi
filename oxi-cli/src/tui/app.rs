@@ -589,17 +589,14 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             content: error.clone(),
                                             is_error: true,
                                         },
-                                        AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => UiEvent::ToolCall {
-                                            id: tool_call_id,
-                                            name: tool_name,
-                                            arguments: args.to_string(),
-                                        },
-                                        AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => UiEvent::ToolResult {
-                                            tool_call_id: Some(tool_call_id),
-                                            tool_name,
-                                            content: result.content.chars().take(500).collect(),
-                                            is_error,
-                                        },
+                                        AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => {
+                                            tracing::info!("[APP] ToolExecutionStart -> UiEvent::ToolCall: tool_call_id={:?}, tool_name={:?}", tool_call_id, tool_name);
+                                            UiEvent::ToolCall { id: tool_call_id, name: tool_name, arguments: args.to_string() }
+                                        }
+                                        AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
+                                            tracing::info!("[APP] ToolExecutionEnd -> UiEvent::ToolResult: tool_call_id={:?}, tool_name={:?}, is_error={}", tool_call_id, tool_name, is_error);
+                                            UiEvent::ToolResult { tool_call_id: Some(tool_call_id), tool_name, content: result.content.chars().take(500).collect(), is_error }
+                                        }
                                         AgentEvent::Complete { .. } => UiEvent::Complete,
                                         AgentEvent::Error { message, .. } => UiEvent::Error(message),
                                         AgentEvent::MessageUpdate { ref message, delta: _ } => {
