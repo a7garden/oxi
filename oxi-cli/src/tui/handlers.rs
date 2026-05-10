@@ -272,15 +272,11 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         UiEvent::TextDelta(text) => {
             state.stream_text_delta(&text);
         }
-        UiEvent::ToolCall { .. } => {}
-        UiEvent::ToolStart { tool_name } => {
-            state.chat.stream_tool_call(String::new(), tool_name, String::new());
+        UiEvent::ToolCall { id, name, arguments } => {
+            state.chat.stream_tool_call(id, name, arguments);
         }
-        UiEvent::ToolResult {
-            tool_name,
-            content,
-            is_error,
-        } => {
+        UiEvent::ToolStart { .. } => {}
+        UiEvent::ToolResult { tool_call_id: _, tool_name, content, is_error } => {
             state.chat.stream_tool_result(tool_name, content, is_error);
         }
         UiEvent::Complete => {

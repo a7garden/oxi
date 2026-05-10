@@ -149,6 +149,7 @@ pub(crate) enum UiEvent {
         tool_name: String,
     },
     ToolResult {
+        tool_call_id: Option<String>,
         tool_name: String,
         content: String,
         is_error: bool,
@@ -577,9 +578,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             UiEvent::ToolStart { tool_name }
                                         }
                                         AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
-                                            tool_name: String::new(),
+                                            tool_call_id: Some(result.tool_call_id.clone()),
+                                            tool_name: result.name.clone(),
                                             content: result.content.chars().take(500).collect(),
-                                            is_error: false,
+                                            is_error: result.status == "error",
                                         },
                                         AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
                                             tool_name: String::new(),

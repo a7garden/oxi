@@ -255,40 +255,47 @@ fn extract_last_code_block(text: &str) -> Option<String> {
 // ── Block-style tool/error boxes ──────────────────────────────────────
 
 /// Build a header line: ┌─ label ──────┐
-fn block_header_line(label: &str, width: usize, border_style: Style, label_style: Style) -> Line<'static> {
-    let label_width = label.len();
-    let right_dashes = width.saturating_sub(label_width + 4); // ┌─ ─┐
+fn block_header_line(label: &str, box_width: u16, border_style: Style, label_style: Style) -> Line<'static> {
+    let label_width = label.chars().count();
+    let inner_width = (box_width as usize).saturating_sub(2); // subtract ┌ and ┐
+    let right_dashes = inner_width.saturating_sub(label_width + 4); // ┌─ ─┐
     vec![
         Span::styled("\u{250c}", border_style),            // ┌
         Span::styled("\u{2500}".repeat(2), border_style),  // ──
         Span::styled(format!(" {} ", label), label_style),  //  label 
-        Span::styled("\u{2500}".repeat(right_dashes.max(1)), border_style), // ──
+        Span::styled("\u{2500}".repeat(right_dashes.max(1).max(0)), border_style), // ──
         Span::styled("\u{2510}", border_style),            // ┐
     ].into()
 }
 
 /// Build a body line: │  content
-fn block_body_line(text: &str, border_style: Style, body_style: Style) -> Line<'static> {
+fn block_body_line(text: &str, box_width: u16, border_style: Style, body_style: Style) -> Line<'static> {
+    let inner_width = (box_width as usize).saturating_sub(2); // ┌ + ┐
+    let text_display_width = text.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1)).sum::<usize>();
+    let padding = inner_width.saturating_sub(text_display_width + 1); // │ + space + text
+    let fill = if padding > 0 { " ".repeat(padding) } else { String::new() };
     vec![
         Span::styled("\u{2502}", border_style),  // │
-        Span::styled(format!(" {}", text), body_style),
+        Span::styled(format!(" {}{}", text, fill), body_style),
     ].into()
 }
 
 /// Build a truncated body line: │  ...
-fn block_truncate_line(border_style: Style, body_style: Style) -> Line<'static> {
+fn block_truncate_line(box_width: u16, border_style: Style, body_style: Style) -> Line<'static> {
+    let inner_width = (box_width as usize).saturating_sub(2);
+    let dashes = inner_width.saturating_sub(4); // " ..."
     vec![
         Span::styled("\u{2502}", border_style),
-        Span::styled(" ...", body_style),
+        Span::styled(format!(" ...{}", " \u{2500}".repeat(dashes.max(0))), border_style),
     ].into()
 }
 
 /// Build a footer line: └────────────┘
-fn block_footer_line(width: usize, border_style: Style) -> Line<'static> {
+fn block_footer_line(box_width: u16, border_style: Style) -> Line<'static> {
     vec![
-        Span::styled("\u{2514}", border_style),                          // └
-        Span::styled("\u{2500}".repeat(width.saturating_sub(2).max(1)), border_style), // ──
-        Span::styled("\u{2518}", border_style),                          // ┘
+        Span::styled("\u{2514}", border_style),                                              // └
+        Span::styled("\u{2500}".repeat((box_width as usize).saturating_sub(2).max(1)), border_style), // ──
+        Span::styled("\u{2518}", border_style),                                              // ┘
     ].into()
 }
 
@@ -540,10 +547,10 @@ fn push_blocks(
                 lines.push(block_header_line(&format!("tool: {}", name), 50, border, label));
                 let max = if arguments.lines().count() <= 4 { 6 } else { 4 };
                 for l in arguments.lines().take(max) {
-                    lines.push(block_body_line(l, border, body));
+                    lines.push(block_body_line(l, 50, border, body));
                 }
                 if arguments.lines().count() > max {
-                    lines.push(block_truncate_line(border, body));
+                    lines.push(block_truncate_line(50, border, body));
                 }
                 lines.push(block_footer_line(50, border));
             }
@@ -561,10 +568,10 @@ fn push_blocks(
                 };
                 lines.push(block_header_line(&label, 50, border, label_style));
                 for l in content.lines().take(4) {
-                    lines.push(block_body_line(l, border, body));
+                    lines.push(block_body_line(l, 50, border, body));
                 }
                 if content.lines().count() > 4 {
-                    lines.push(block_truncate_line(border, body));
+                    lines.push(block_truncate_line(50, border, body));
                 }
                 lines.push(block_footer_line(50, border));
             }
@@ -574,10 +581,10 @@ fn push_blocks(
                 let label = Style::default().fg(Color::White).bold();
                 lines.push(block_header_line(&format!("error: {}", title), 50, border, label));
                 for l in message.lines().take(4) {
-                    lines.push(block_body_line(l, border, body));
+                    lines.push(block_body_line(l, 50, border, body));
                 }
                 if *retryable {
-                    lines.push(block_body_line("retry: this error may be temporary", border, styles.muted));
+                    lines.push(block_body_line("retry: this error may be temporary", 50, border, styles.muted));
                 }
                 lines.push(block_footer_line(50, border));
             }
