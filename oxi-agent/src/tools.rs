@@ -194,6 +194,8 @@ pub mod github_search;
 pub mod subagent;
 /// File writing tool.
 pub mod write;
+/// Context7 documentation tools.
+pub mod context7;
 
 // Re-export for convenience
 pub use bash::BashTool;
@@ -207,6 +209,7 @@ pub use read::ReadTool;
 pub use subagent::SubagentTool;
 pub use write::WriteTool;
 pub use crate::mcp::McpTool;
+pub use context7::{Context7ResolveLibraryIdTool, Context7QueryDocsTool};
 
 /// Tool registry for managing available tools
 #[derive(Clone)]
@@ -299,8 +302,14 @@ impl ToolRegistry {
         // Helper to create shared cache on demand
         let cache_once: std::cell::OnceCell<Arc<search_cache::SearchCache>> = std::cell::OnceCell::new();
 
+        // MCP: use OnceCell to avoid re-creating McpManager on repeated calls
+        let mcp_once: std::cell::OnceCell<Arc<crate::mcp::McpManager>> = std::cell::OnceCell::new();
+        let mcp_manager = mcp_once.get_or_init(|| {
+            Arc::new(crate::mcp::McpManager::new())
+        }).clone();
+
         // Register all builtin tools — essential ones ignore disabled list
-        let all_tools: Vec<Box<dyn AgentTool>> = vec![
+        let mut all_tools: Vec<Box<dyn AgentTool>> = vec![
             Box::new(ReadTool::new()),
             Box::new(WriteTool::new()),
             Box::new(EditTool::new()),
@@ -312,8 +321,11 @@ impl ToolRegistry {
             Box::new(search_cache::GetSearchResultsTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
             Box::new(github::GitHubTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
             Box::new(SubagentTool::new(cwd)),
-            Box::new(crate::mcp::McpTool::new(std::sync::Arc::new(crate::mcp::McpManager::new()))),
         ];
+
+        all_tools.push(Box::new(crate::mcp::McpTool::new(mcp_manager)));
+        all_tools.push(Box::new(context7::Context7ResolveLibraryIdTool::new()));
+        all_tools.push(Box::new(context7::Context7QueryDocsTool::new()));
 
         for tool in all_tools {
             if tool.essential() || !disabled.contains(tool.name()) {

@@ -12,6 +12,21 @@ use tui_markdown;
 use crate::{Theme, ThemeStyles};
 use super::markdown;
 
+// ── Render line (unified) ────────────────────────────────────────────────
+
+/// A single line in the chat view — either pre-styled (from tui-markdown)
+/// or structural (tools, errors, separators) that needs styling during render.
+enum RenderLine {
+    /// Pre-styled line from tui-markdown (already has bold, code, link spans)
+    Markdown(Line<'static>),
+    /// Structural line needing theme-based styling
+    Structural {
+        role: MessageRole,
+        text: String,
+        kind: LineKind,
+    },
+}
+
 /// ChatView message role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageRole {

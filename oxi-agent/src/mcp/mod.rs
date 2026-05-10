@@ -121,7 +121,7 @@ impl McpManager {
         let mut total_tools = 0;
 
         for name in servers.keys() {
-            let (status_str, tool_count) = if let Some(_client) = inner.clients.get(name) {
+            let (status_marker, tool_count) = if inner.clients.contains_key(name) {
                 connected_count += 1;
                 let count = inner
                     .tool_metadata
@@ -129,13 +129,13 @@ impl McpManager {
                     .map(|m| m.len())
                     .unwrap_or(0);
                 total_tools += count;
-                ("✓ connected".to_string(), count)
+                ("✓", count)
             } else if let Some(failed_at) = inner.failure_tracker.get(name) {
                 let ago = failed_at.elapsed().as_secs();
                 if ago < FAILURE_BACKOFF_SECS {
-                    (format!("✗ failed ({}s ago)", ago), 0)
+                    ("✗", 0)
                 } else {
-                    ("○ not connected".to_string(), 0)
+                    ("○", 0)
                 }
             } else {
                 let count = inner
@@ -144,25 +144,10 @@ impl McpManager {
                     .map(|m| m.len())
                     .unwrap_or(0);
                 total_tools += count;
-                if count > 0 {
-                    ("○ cached".to_string(), count)
-                } else {
-                    ("○ not connected".to_string(), 0)
-                }
+                ("○", count)
             };
 
-            text.push_str(&format!(
-                "{} {} ({} tools)\n",
-                if status_str.starts_with('✓') {
-                    "✓"
-                } else if status_str.starts_with('✗') {
-                    "✗"
-                } else {
-                    "○"
-                },
-                name,
-                tool_count
-            ));
+            text.push_str(&format!("{} {} ({} tools)\n", status_marker, name, tool_count));
         }
 
         format!(
@@ -467,39 +452,28 @@ impl McpManager {
         {
             let inner = self.inner.lock().await;
 
-            // Exact match with server filter
-            if let Some(server) = server_override {
-                if let Some(metadata) = inner.tool_metadata.get(server) {
+            // Determine which servers to search
+            let owned_server_key;
+            let server_keys: Vec<&str> = if let Some(server) = server_override {
+                owned_server_key = server.to_string();
+                vec![owned_server_key.as_str()]
+            } else {
+                inner.tool_metadata.keys().map(|s| s.as_str()).collect()
+            };
+
+            for server_name in server_keys {
+                if let Some(metadata) = inner.tool_metadata.get(server_name) {
+                    // Exact name match
                     if let Some(tool) = metadata.iter().find(|t| t.name == tool_name) {
-                        return Ok((server.to_string(), tool.clone()));
+                        return Ok((server_name.to_string(), tool.clone()));
                     }
-                    // Also check original name
+                    // Original (un-prefixed) name match
                     if let Some(tool) = metadata
                         .iter()
                         .find(|t| t.original_name == tool_name)
                     {
-                        return Ok((server.to_string(), tool.clone()));
+                        return Ok((server_name.to_string(), tool.clone()));
                     }
-                }
-            }
-
-            // Search all servers
-            for (server_name, metadata) in &inner.tool_metadata {
-                if let Some(server) = server_override {
-                    if server_name != server {
-                        continue;
-                    }
-                }
-                // Exact name match
-                if let Some(tool) = metadata.iter().find(|t| t.name == tool_name) {
-                    return Ok((server_name.clone(), tool.clone()));
-                }
-                // Original name match
-                if let Some(tool) = metadata
-                    .iter()
-                    .find(|t| t.original_name == tool_name)
-                {
-                    return Ok((server_name.clone(), tool.clone()));
                 }
             }
         }

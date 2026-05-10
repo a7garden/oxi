@@ -6,7 +6,6 @@
 
 use crate::tools::{AgentTool, AgentToolResult};
 use async_trait::async_trait;
-use parking_lot::RwLock;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -23,48 +22,13 @@ use super::content;
 /// ```
 pub struct McpTool {
     manager: Arc<McpManager>,
-    /// The description string built from the config.
-    description: RwLock<String>,
 }
 
 impl McpTool {
     /// Create a new MCP tool with the given manager.
     pub fn new(manager: Arc<McpManager>) -> Self {
-        let desc = build_description(&manager);
-        Self {
-            manager,
-            description: RwLock::new(desc),
-        }
+        Self { manager }
     }
-
-    /// Update the description after config changes.
-    pub fn refresh_description(&self) {
-        let desc = build_description(&self.manager);
-        *self.description.write() = desc;
-    }
-}
-
-fn build_description(manager: &McpManager) -> String {
-    let config = manager.config();
-    let server_count = config.mcp_servers.len();
-
-    let mut desc = "MCP gateway - connect to MCP servers and call their tools. Non-MCP Pi tools should be called directly, not through mcp.\n\n".to_string();
-
-    if server_count > 0 {
-        let names: Vec<String> = config.mcp_servers.keys().cloned().collect();
-        desc.push_str(&format!("Available servers: {}\n\n", names.join(", ")));
-    }
-
-    desc.push_str("Usage:\n");
-    desc.push_str("  mcp({ })                              → Show server status\n");
-    desc.push_str("  mcp({ server: \"name\" })               → List tools from server\n");
-    desc.push_str("  mcp({ search: \"query\" })              → Search MCP tools by name/description\n");
-    desc.push_str("  mcp({ describe: \"tool_name\" })        → Show tool details and parameters\n");
-    desc.push_str("  mcp({ connect: \"server-name\" })       → Connect to a server and refresh metadata\n");
-    desc.push_str("  mcp({ tool: \"name\", args: '{\"key\": \"value\"}' })    → Call a tool (args is JSON string)\n\n");
-    desc.push_str("Mode: tool (call) > connect > describe > search > server (list) > action > nothing (status)");
-
-    desc
 }
 
 #[async_trait]
@@ -78,10 +42,6 @@ impl AgentTool for McpTool {
     }
 
     fn description(&self) -> &str {
-        // Return the cached description. It's behind RwLock so we can
-        // update it, but for &str return we need a leak or static.
-        // Instead, return a static prefix — the dynamic part is
-        // conveyed through the tool's actual output.
         "MCP gateway - connect to MCP servers and call their tools. Non-MCP Pi tools should be called directly, not through mcp.\n\nUsage:\n  mcp({ }) → status\n  mcp({ tool: \"name\", args: '{}' }) → call tool\n  mcp({ connect: \"server\" }) → connect\n  mcp({ search: \"query\" }) → search\n  mcp({ describe: \"tool\" }) → describe\n  mcp({ server: \"name\" }) → list tools\n\nMode: tool > connect > describe > search > server > status"
     }
 

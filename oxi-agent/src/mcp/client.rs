@@ -15,6 +15,15 @@ const MCP_PROTOCOL_VERSION: &str = "2025-03-26";
 /// Default timeout for individual MCP requests (seconds).
 const REQUEST_TIMEOUT_SECS: u64 = 30;
 
+/// Maximum number of header lines before giving up (prevents infinite loop).
+const MAX_HEADER_LINES: usize = 64;
+
+/// Maximum allowed body size from an MCP server (10 MB).
+const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
+
+/// Environment variables that servers must not override (security).
+const BLOCKED_ENV_VARS: &[&str] = &["LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"];
+
 /// An MCP client connected to a single server via stdio.
 pub struct McpClient {
     /// Child process handle (kept alive to prevent process death).
@@ -55,8 +64,17 @@ impl McpClient {
             cmd.stderr(Stdio::null());
         }
 
-        // Build environment: inherit parent + overlay server-specific
+        // Build environment: inherit parent + overlay server-specific.
+        // Block dangerous variables that could hijack the parent process.
         for (key, value) in env {
+            let upper = key.to_uppercase();
+            if BLOCKED_ENV_VARS.iter().any(|blocked| upper == *blocked) {
+                tracing::warn!(
+                    "MCP: blocked dangerous env override: {}",
+                    key
+                );
+                continue;
+            }
             cmd.env(key, value);
         }
 
@@ -147,7 +165,13 @@ impl McpClient {
             .get("tools")
             .cloned()
             .and_then(|v| serde_json::from_value::<Vec<McpToolDef>>(v).ok())
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    "MCP: failed to parse tools/list response from '{}'",
+                    self.server_info.name
+                );
+                Vec::new()
+            });
 
         Ok(tools)
     }
@@ -226,16 +250,49 @@ impl McpClient {
         Ok(content)
     }
 
-    /// Shut down the client and kill the server process.
+    /// Shut down the client gracefully.
+    ///
+    /// Sends SIGTERM first and waits up to 5 seconds for the server
+    /// to exit cleanly, then falls back to SIGKILL.
     pub async fn close(&mut self) -> Result<()> {
         let _ = self.stdin.shutdown().await;
-        let _ = self._child.kill().await;
+
+        // Try graceful shutdown first
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            if let Some(id) = self._child.id() {
+                unsafe {
+                    libc::kill(id as libc::pid_t, libc::SIGTERM);
+                }
+            }
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                self._child.wait(),
+            )
+            .await
+            {
+                Ok(Ok(_)) => return Ok(()),
+                _ => {
+                    let _ = self._child.kill().await;
+                }
+            }
+        }
+
+        #[cfg(not(unix))]
+        {
+            let _ = self._child.kill().await;
+        }
+
         Ok(())
     }
 
     // ── JSON-RPC transport layer ─────────────────────────────────────
 
     /// Send a JSON-RPC request and wait for the matching response.
+    ///
+    /// If a timeout occurs, drains orphaned responses from the stream to
+    /// prevent ID mismatch on subsequent requests.
     async fn send_request(
         &mut self,
         method: &str,
@@ -275,10 +332,39 @@ impl McpClient {
                 // Notification or unmatched response — skip
             }
         })
-        .await
-        .with_context(|| format!("MCP request '{}' timed out after {}s", method, REQUEST_TIMEOUT_SECS))??;
+        .await;
 
-        Ok(result)
+        match result {
+            Ok(inner) => inner.with_context(|| format!("MCP request '{}' failed", method)),
+            Err(_) => {
+                // Timeout: drain orphaned responses to prevent future ID mismatch
+                tracing::warn!("MCP request '{}' timed out after {}s, draining orphaned responses", method, REQUEST_TIMEOUT_SECS);
+                self.drain_orphaned_responses(16).await;
+                Err(anyhow::anyhow!(
+                    "MCP request '{}' timed out after {}s",
+                    method,
+                    REQUEST_TIMEOUT_SECS
+                ))
+            }
+        }
+    }
+
+    /// Drain up to `max` orphaned responses from the stream.
+    ///
+    /// Called after a timeout to prevent stale server responses from
+    /// being matched against future requests by ID.
+    async fn drain_orphaned_responses(&mut self, max: usize) {
+        for _ in 0..max {
+            match tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                self.read_message(),
+            )
+            .await
+            {
+                Ok(Ok(_)) => continue,
+                _ => break,
+            }
+        }
     }
 
     /// Write a JSON-RPC message with Content-Length framing.
@@ -295,11 +381,19 @@ impl McpClient {
     async fn read_message(&mut self) -> Result<RawJsonRpcMessage> {
         // Parse Content-Length header
         let mut content_length: Option<usize> = None;
+        let mut lines_read = 0;
         loop {
             let mut line = String::new();
             let bytes_read = self.stdout.read_line(&mut line).await?;
             if bytes_read == 0 {
                 return Err(anyhow::anyhow!("MCP server closed connection"));
+            }
+            lines_read += 1;
+            if lines_read > MAX_HEADER_LINES {
+                return Err(anyhow::anyhow!(
+                    "MCP server sent too many header lines (>{})",
+                    MAX_HEADER_LINES
+                ));
             }
             let trimmed = line.trim();
             if trimmed.is_empty() {
@@ -316,6 +410,14 @@ impl McpClient {
 
         let len = content_length
             .ok_or_else(|| anyhow::anyhow!("Missing Content-Length header"))?;
+
+        if len > MAX_BODY_SIZE {
+            return Err(anyhow::anyhow!(
+                "MCP server sent oversized body: {} bytes (max {})",
+                len,
+                MAX_BODY_SIZE
+            ));
+        }
 
         // Read body
         let mut buf = vec![0u8; len];
