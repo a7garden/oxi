@@ -599,12 +599,33 @@ impl StatefulWidget for ChatView<'_> {
             spans.push(Span::styled(" ", line_base_style));
 
             match kind {
-                LineKind::CodeBlock | LineKind::HorizontalRule | LineKind::RoleLabel
-                | LineKind::TableBorder | LineKind::TableHeader | LineKind::TableRow => {
+                LineKind::CodeBlock | LineKind::HorizontalRule | LineKind::RoleLabel => {
                     spans.push(Span::styled(text.clone(), line_base_style));
                 }
-                _ => {
+                LineKind::TableBorder => {
+                    spans.push(Span::styled(text.clone(), line_base_style));
+                }
+                LineKind::TableHeader | LineKind::TableRow => {
+                    // Parse inline markdown within table cells
                     let segments = markdown::parse_inline(text);
+                    for seg in &segments {
+                        let seg_style = match seg {
+                            markdown::Segment::Normal(_) => line_base_style,
+                            markdown::Segment::Bold(_) => markdown::bold_style(line_base_style),
+                            markdown::Segment::Italic(_) => markdown::italic_style(line_base_style),
+                            markdown::Segment::Code(_) => markdown::code_style(line_base_style),
+                            markdown::Segment::Link { .. } => markdown::link_style(line_base_style),
+                        };
+                        let s: &str = match seg {
+                            markdown::Segment::Normal(s) => s,
+                            markdown::Segment::Bold(s) => s,
+                            markdown::Segment::Italic(s) => s,
+                            markdown::Segment::Code(s) => s,
+                            markdown::Segment::Link { text, .. } => text,
+                        };
+                        spans.push(Span::styled(s.to_string(), seg_style));
+                    }
+                }
                     for seg in &segments {
                         let seg_style = match seg {
                             markdown::Segment::Normal(_) => line_base_style,

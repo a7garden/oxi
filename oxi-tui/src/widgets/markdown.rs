@@ -123,7 +123,13 @@ pub fn parse_inline(line: &str) -> Vec<Segment> {
                     }
                     italic.push(chars.next().unwrap());
                 }
-                segments.push(Segment::Italic(italic));
+                // Only add if we actually captured content
+                if !italic.is_empty() {
+                    segments.push(Segment::Italic(italic));
+                } else {
+                    // No closing '_' found — push as normal
+                    normal.push('_');
+                }
             }
 
             // ── normal char ────────────────────────────────────────
@@ -185,9 +191,9 @@ pub fn detect_line_type(line: &str) -> LineType {
     // ATX heading
     let hashes = trimmed.chars().take_while(|c| *c == '#').count();
     if hashes > 0 && hashes <= 6 {
-        // Must be followed by a space (or end-of-line for empty heading).
+        // Must be followed by a space or any non-# char (e.g. emoji like 🔧)
         let after = trimmed.chars().nth(hashes);
-        if after.is_none() || after == Some(' ') {
+        if after.is_none() || (after != Some('#') && after != Some(' ')) {
             return LineType::Heading(hashes as u8);
         }
     }

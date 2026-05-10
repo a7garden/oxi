@@ -20,7 +20,7 @@ use oxi_tui::widgets::{
     footer::FooterState,
     input::InputState,
 };
-use std::io;
+use std::io::{self, Write};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -32,7 +32,7 @@ use crossterm::{
         KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode},
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use crossterm::event::{EnableBracketedPaste, DisableBracketedPaste};
 use ratatui::{
@@ -565,11 +565,19 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     if tty_ok {
         let _ = execute!(
             stdout,
+            EnterAlternateScreen,
             EnableBracketedPaste,
             PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::REPORT_EVENT_TYPES
             )
         );
+        // Enable mouse tracking for scroll only (NOT drag tracking).
+        // \x1b[?1000h = button click/release (includes scroll wheel)
+        // \x1b[?1006h = SGR extended mode for precise coordinates
+        // We intentionally skip \x1b[?1002h (button event tracking)
+        // so that drag-to-select is handled by the terminal natively.
+        let _ = stdout.write_all(b"\x1b[?1000h\x1b[?1006h");
+        let _ = stdout.flush();
     }
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -686,8 +694,12 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
     execute!(
         terminal.backend_mut(),
         PopKeyboardEnhancementFlags,
-        DisableBracketedPaste
+        DisableBracketedPaste,
+        LeaveAlternateScreen
     )?;
+    // Disable mouse tracking
+    let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1006l");
+    let _ = io::stdout().flush();
     terminal.show_cursor()?;
     let _ = agent_handle.join();
     Ok(())
