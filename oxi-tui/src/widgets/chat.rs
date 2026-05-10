@@ -516,6 +516,7 @@ fn push_blocks(
     role: MessageRole,
     blocks: &[ContentBlock],
     styles: &ThemeStyles,
+    area_width: u16,
 ) {
     let box_width = area_width;
     let push = |lines: &mut Vec<Line>, role, text: &str, kind: LineKind| {
