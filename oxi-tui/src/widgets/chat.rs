@@ -52,6 +52,8 @@ pub struct ChatMessage {
 pub struct StreamingState {
     pub message: ChatMessage,
     pub active_content_index: usize,
+    /// Buffer for incomplete lines (no trailing newline yet)
+    pub line_buffer: String,
 }
 
 /// Kind of a collected line, used to pick the right render style.
@@ -120,20 +122,34 @@ impl ChatViewState {
                     .as_millis() as i64,
             },
             active_content_index: 0,
+            line_buffer: String::new(),
         });
     }
 
     pub fn stream_text_delta(&mut self, delta: &str) {
         if let Some(ref mut state) = self.streaming {
-            if let Some(ContentBlock::Text { ref mut content }) =
-                state.message.content_blocks.last_mut()
-            {
-                content.push_str(delta);
-            } else {
-                state.message.content_blocks.push(ContentBlock::Text {
-                    content: delta.to_string(),
-                });
+            // Split delta by lines
+            let mut remaining = delta;
+            while let Some(pos) = remaining.find('\n') {
+                // Complete line found
+                let line = &remaining[..pos];
+                state.line_buffer.push_str(line);
+                // Add completed line to content
+                if let Some(ContentBlock::Text { ref mut content }) =
+                    state.message.content_blocks.last_mut()
+                {
+                    content.push_str(&state.line_buffer);
+                    content.push('\n');
+                } else {
+                    state.message.content_blocks.push(ContentBlock::Text {
+                        content: format!("{}\n", state.line_buffer),
+                    });
+                }
+                state.line_buffer.clear();
+                remaining = &remaining[pos + 1..];
             }
+            // Any remaining text without newline goes to buffer
+            state.line_buffer.push_str(remaining);
         }
         self.update_last_code_block(delta);
     }
@@ -166,6 +182,24 @@ impl ChatViewState {
     pub fn finish_streaming(&mut self) {
         if let Some(state) = self.streaming.take() {
             self.messages.push(state.message);
+        }
+    }
+
+    /// Flush any remaining content in the line buffer to the message.
+    pub fn flush_line_buffer(&mut self) {
+        if let Some(ref mut state) = self.streaming {
+            if !state.line_buffer.is_empty() {
+                if let Some(ContentBlock::Text { ref mut content }) =
+                    state.message.content_blocks.last_mut()
+                {
+                    content.push_str(&state.line_buffer);
+                } else {
+                    state.message.content_blocks.push(ContentBlock::Text {
+                        content: state.line_buffer.clone(),
+                    });
+                }
+                state.line_buffer.clear();
+            }
         }
     }
 
@@ -550,6 +584,13 @@ impl StatefulWidget for ChatView<'_> {
                         all_lines.push((MessageRole::Assistant, String::new(), LineKind::ToolResultFooter));
                     }
                     _ => {}
+                }
+            }
+            // Add buffered incomplete line (streaming in progress)
+            if !streaming.line_buffer.is_empty() {
+                let buffer_line = streaming.line_buffer.trim_end().to_string();
+                if !buffer_line.is_empty() {
+                    all_lines.push((MessageRole::Assistant, buffer_line, LineKind::Normal));
                 }
             }
             let spinner = ["\u{25D0}", "\u{25D3}", "\u{25D1}", "\u{25D2}"]; // ◐◓◑◒
