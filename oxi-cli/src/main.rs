@@ -18,7 +18,7 @@ use uuid::Uuid;
 async fn main() -> Result<()> {
     // Initialize logging — show info by default, can be overridden with RUST_LOG
     // tui_markdown emits spurious warnings for unrecognized code block langs — suppress by default
-    let log_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info,tui_markdown=warn".to_string());
+    let log_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info,tui_markdown=error".to_string());
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env()
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_filter)))
