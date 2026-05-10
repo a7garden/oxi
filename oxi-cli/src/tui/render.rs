@@ -1,5 +1,7 @@
 //! Rendering functions for the TUI.
 
+use unicode_width::UnicodeWidthStr;
+
 use super::app::{AppOverlay, AppState, SetupStep, SPINNER};
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{
@@ -238,11 +240,54 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
 
 fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let spinner_ch = SPINNER[state.spinner_frame as usize % SPINNER.len()];
-    let spinner_line = format!(" {}  Working... (type to queue)", spinner_ch);
-    f.render_widget(
-        Paragraph::new(Span::styled(spinner_line, Style::default().fg(theme.colors.muted.to_ratatui()))),
-        area,
-    );
+
+    // Build spinner + queue-count prefix
+    let prefix = if state.pending_steering > 0 {
+        format!(" {} [{} queued] ", spinner_ch, state.pending_steering)
+    } else {
+        format!(" {} ", spinner_ch)
+    };
+    let prefix_width = UnicodeWidthStr::width(prefix.as_str());
+    let max_text = (area.width as usize).saturating_sub(prefix_width + 3);
+
+    let user_text = &state.input.text;
+    let (display_text, truncated) = if user_text.is_empty() {
+        (String::new(), false)
+    } else {
+        let mut visible = String::new();
+        let mut w = 0usize;
+        for ch in user_text.chars() {
+            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+            if w + cw > max_text { break; }
+            visible.push(ch);
+            w += cw;
+        }
+        let truncated = visible.chars().count() < user_text.chars().count();
+        (visible, truncated)
+    };
+
+    let styles = theme.to_styles();
+
+    if user_text.is_empty() {
+        // Show hint when no text typed
+        let line = Line::from(vec![
+            Span::styled(prefix, styles.muted),
+            Span::styled("type to steer...", styles.muted),
+        ]);
+        f.render_widget(Paragraph::new(line), area);
+    } else {
+        // Show typed text (visible!) with spinner prefix
+        let text_part = if truncated {
+            format!("{}...", display_text)
+        } else {
+            display_text.clone()
+        };
+        let line = Line::from(vec![
+            Span::styled(prefix, styles.muted),
+            Span::styled(text_part, styles.normal),
+        ]);
+        f.render_widget(Paragraph::new(line), area);
+    }
 }
 
 // ── Slash popup overlay ─────────────────────────────────────────────────

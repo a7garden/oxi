@@ -273,6 +273,9 @@ pub struct AgentSession {
     // ── Streaming state ──────────────────────────────────────────────
     streaming: Arc<AtomicBool>,
 
+    // ── Cancellation ─────────────────────────────────────────────────
+    should_stop: Arc<AtomicBool>,
+
     // ── Extensions ───────────────────────────────────────────────────
     extension_runner: Arc<RwLock<Option<ExtensionRunner>>>,
 }
@@ -308,6 +311,7 @@ impl AgentSession {
             session_id: Arc::new(RwLock::new(session_id)),
             cwd,
             streaming: Arc::new(AtomicBool::new(false)),
+            should_stop: Arc::new(AtomicBool::new(false)),
             extension_runner: Arc::new(RwLock::new(None)),
         }
     }
@@ -658,9 +662,24 @@ impl AgentSession {
     }
 
     /// Abort current operation.
+    ///
+    /// Sets the `should_stop` flag which causes the agent loop to exit
+    /// after the current turn completes (via `should_stop_after_turn` hook).
+    /// Also clears any queued steering/follow-up messages.
     pub async fn abort(&self) {
-        // Agent abort is not yet exposed; best-effort
-        tracing::debug!("AgentSession::abort() requested");
+        tracing::debug!("AgentSession::abort() — setting should_stop flag");
+        self.should_stop.store(true, Ordering::SeqCst);
+        self.clear_queue();
+    }
+
+    /// Get a cloneable reference to the should_stop flag.
+    pub fn should_stop_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.should_stop)
+    }
+
+    /// Reset the should_stop flag (call before starting a new prompt).
+    pub fn reset_should_stop(&self) {
+        self.should_stop.store(false, Ordering::SeqCst);
     }
 
     /// Clear all queued messages and return them.
@@ -1217,6 +1236,7 @@ impl AgentSession {
             session_id: Arc::clone(&self.session_id),
             cwd: self.cwd.clone(),
             streaming: Arc::clone(&self.streaming),
+            should_stop: Arc::clone(&self.should_stop),
             extension_runner: Arc::clone(&self.extension_runner),
         }
     }

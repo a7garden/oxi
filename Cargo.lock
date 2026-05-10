@@ -3276,6 +3276,7 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "tracing-subscriber",
+ "unicode-width 0.2.0",
  "url",
  "urlencoding",
  "uuid",

@@ -51,6 +51,7 @@ dirs = "5"
 parking_lot = "0.12"
 crossterm = "0.28"
 ratatui = { version = "0.30", features = ["crossterm"] }
+unicode-width = "0.2"
 base64 = "0.22"
 async-trait = "0.1"
 lazy_static = "1.4"

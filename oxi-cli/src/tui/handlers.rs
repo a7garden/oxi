@@ -329,9 +329,7 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             state.add_system_message(format!("Thinking: {}", level));
         }
         UiEvent::QueueUpdate { pending } => {
-            if pending > 0 {
-                tracing::debug!("Queue: {} pending", pending);
-            }
+            state.pending_steering = pending;
         }
         UiEvent::ImageBlock { mime_type, base64_data } => {
             state.stream_image(mime_type, base64_data);
