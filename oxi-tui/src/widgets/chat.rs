@@ -336,13 +336,14 @@ impl StatefulWidget for ChatView<'_> {
 
         let styles = self.theme.to_styles();
 
-        // Helper: symmetric box-drawing top border filler (n × "─ ")
-        fn box_top(n: usize) -> String {
-            "─".repeat(n)
+        fn bordered_header(label: &str, width: usize) -> String {
+            let inner = label.len() + 2;
+            let right = width.saturating_sub(inner + 2);
+            format!("\u{250c}{} {} {}", "\u{2500}".repeat(1), label, "\u{2500}".repeat(right.max(1)))
         }
 
-        fn box_header(label: &str) -> String {
-            format!("── {} {}", label, "─".repeat(20))
+        fn bordered_footer(width: usize) -> String {
+            format!("\u{2514}{}\u{2510}", "\u{2500}".repeat(width.saturating_sub(2).max(1)))
         }
 
         // Helper: left-border stripe spans for user messages (▌ + tinted space)
@@ -475,7 +476,7 @@ impl StatefulWidget for ChatView<'_> {
                     ContentBlock::ToolCall { name, arguments, .. } => {
                         all_lines.push((
                             msg.role,
-                            format!("  {} tool: {} {}", box_top(15), name, box_top(15)),
+                            bordered_header(&format!("tool: {}", name), 60),
                             LineKind::ToolCallHeader,
                         ));
                         // Truncate long argument blocks (4 lines if >4 lines, else 6)
@@ -486,41 +487,41 @@ impl StatefulWidget for ChatView<'_> {
                         if arguments.lines().count() > max_args {
                             all_lines.push((msg.role, "  ...".to_string(), LineKind::ToolCallBody));
                         }
-                        all_lines.push((msg.role, String::new(), LineKind::ToolCallFooter));
+                        all_lines.push((msg.role, bordered_footer(60), LineKind::ToolCallFooter));
                     }
                     ContentBlock::ToolResult { tool_name, content, is_error } => {
-                        let prefix = if *is_error { "✗" } else { "✓" };
-                        let header = if tool_name.is_empty() {
-                            format!("  {} {}", prefix, box_top(30))
+                        let check = if *is_error { "X" } else { "ok" };
+                        let label = if tool_name.is_empty() {
+                            check.to_string()
                         } else {
-                            format!("  {} {} {}", prefix, tool_name, box_top(20))
+                            format!("{} {}", check, tool_name)
                         };
                         all_lines.push((
                             msg.role,
-                            header,
+                            bordered_header(&label, 60),
                             LineKind::ToolResultHeader,
                         ));
-                        for line in content.lines().take(2) {
+                        for line in content.lines().take(4) {
                             all_lines.push((msg.role, format!("  {}", line), LineKind::ToolResultBody));
                         }
-                        if content.lines().count() > 2 {
+                        if content.lines().count() > 4 {
                             all_lines.push((msg.role, "  ...".to_string(), LineKind::ToolResultBody));
                         }
-                        all_lines.push((msg.role, String::new(), LineKind::ToolResultFooter));
+                        all_lines.push((msg.role, bordered_footer(60), LineKind::ToolResultFooter));
                     }
                     ContentBlock::Error { title, message, retryable } => {
-                        all_lines.push((msg.role, format!("\u{258c} {}", title), LineKind::ErrorHeader));
+                        all_lines.push((msg.role, bordered_header(&format!("error: {}", title), 60), LineKind::ErrorHeader));
                         for line in message.lines().take(4) {
-                            all_lines.push((msg.role, format!("\u{258c} {}", line), LineKind::ErrorBody));
+                            all_lines.push((msg.role, format!("  {}", line), LineKind::ErrorBody));
                         }
                         if *retryable {
                             all_lines.push((
                                 msg.role,
-                                "\u{258c} retry: this error may be temporary".to_string(),
+                                "  retry: this error may be temporary".to_string(),
                                 LineKind::ErrorBody,
                             ));
                         }
-                        all_lines.push((msg.role, String::new(), LineKind::ErrorFooter));
+                        all_lines.push((msg.role, bordered_footer(60), LineKind::ErrorFooter));
                     }
                     ContentBlock::Image { mime_type, base64_data } => {
                         let size_bytes = base64_data.len() * 3 / 4;
@@ -572,7 +573,7 @@ impl StatefulWidget for ChatView<'_> {
                     ContentBlock::ToolCall { name, arguments, .. } => {
                         all_lines.push((
                             MessageRole::Assistant,
-                            format!("  {} tool: {} {}", box_top(15), name, box_top(15)),
+                            bordered_header(&format!("tool: {}", name), 60),
                             LineKind::ToolCallHeader,
                         ));
                         let max_args = if arguments.lines().count() <= 4 { 6 } else { 4 };
@@ -582,27 +583,27 @@ impl StatefulWidget for ChatView<'_> {
                         if arguments.lines().count() > max_args {
                             all_lines.push((MessageRole::Assistant, "  ...".to_string(), LineKind::ToolCallBody));
                         }
-                        all_lines.push((MessageRole::Assistant, String::new(), LineKind::ToolCallFooter));
+                        all_lines.push((MessageRole::Assistant, bordered_footer(60), LineKind::ToolCallFooter));
                     }
                     ContentBlock::ToolResult { tool_name, content, is_error } => {
-                        let prefix = if *is_error { "✗" } else { "✓" };
-                        let header = if tool_name.is_empty() {
-                            format!("  {} {}", prefix, box_top(30))
+                        let check = if *is_error { "X" } else { "ok" };
+                        let label = if tool_name.is_empty() {
+                            check.to_string()
                         } else {
-                            format!("  {} {} {}", prefix, tool_name, box_top(20))
+                            format!("{} {}", check, tool_name)
                         };
                         all_lines.push((
                             MessageRole::Assistant,
-                            header,
+                            bordered_header(&label, 60),
                             LineKind::ToolResultHeader,
                         ));
-                        for line in content.lines().take(2) {
+                        for line in content.lines().take(4) {
                             all_lines.push((MessageRole::Assistant, format!("  {}", line), LineKind::ToolResultBody));
                         }
-                        if content.lines().count() > 2 {
+                        if content.lines().count() > 4 {
                             all_lines.push((MessageRole::Assistant, "  ...".to_string(), LineKind::ToolResultBody));
                         }
-                        all_lines.push((MessageRole::Assistant, String::new(), LineKind::ToolResultFooter));
+                        all_lines.push((MessageRole::Assistant, bordered_footer(60), LineKind::ToolResultFooter));
                     }
                     _ => {}
                 }
