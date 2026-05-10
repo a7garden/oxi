@@ -344,7 +344,10 @@ Same path restrictions as `oxi_read_file` apply.
   "success": true,
   "exit_code": 0,
   "stdout": "all tests passed\n",
-  "stderr": ""
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "timed_out": false
 }
 ```
 
@@ -356,6 +359,8 @@ Same path restrictions as `oxi_read_file` apply.
 | `timeout` | integer | 30 | Timeout in seconds (max 120) |
 
 **Blocked commands:** `sudo`, `su`, `doas`, `rm -rf /`, `mkfs`, `dd if=`, `chmod 777 /`, and other destructive patterns.
+
+**Output limits:** stdout and stderr are each truncated at 10 KB.
 
 ### `oxi_get_env` — Read environment variable
 
@@ -376,15 +381,14 @@ Same path restrictions as `oxi_read_file` apply.
 
 ### `oxi_log` — Write to oxi log
 
-```json
-// Input
-{
-  "level": "info",
-  "message": "Extension started successfully"
-}
+```
+// Input: plain string (not JSON)
+"Extension started successfully"
+
+// No output
 ```
 
-Appears in oxi's debug log output (not shown in TUI).
+The input is a plain string, not a JSON object. It appears in oxi's debug log output (not shown in TUI). Use `RUST_LOG=debug` to see it.
 
 ### `oxi_kv_get` / `oxi_kv_set` — Persistent key-value store
 
@@ -537,12 +541,14 @@ pub fn execute_tool(input: String) -> FnResult<String> {
                 "method": "GET"
             });
 
-            let response: String = host_call(
+            // extism-pdk host_call: invoke an oxi host function
+            let response = extism_pdk::host_call(
                 "oxi_http_request",
-                Some(http_req.to_string().as_bytes()),
+                http_req.to_string().as_bytes(),
             ).map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
 
-            let resp: serde_json::Value = serde_json::from_str(&response)?;
+            let resp: serde_json::Value =
+                serde_json::from_str(&String::from_utf8_lossy(&response))?;
             let body = resp["body"].as_str().unwrap_or("No data");
 
             Ok(json!({
@@ -677,6 +683,9 @@ import (
     "github.com/extism/go-pdk"
 )
 
+// NOTE: In Go, "init" is a reserved function name.
+// Use a different Go function name with //export to set the WASM export name.
+
 //export init
 func initExt() int32 {
     pdk.SetOutput([]byte(`{"name":"go-ext","version":"1.0.0"}`))
@@ -696,8 +705,8 @@ func executeTool() int32 {
     json.Unmarshal([]byte(input), &req)
     params := req["params"].(map[string]interface{})
     name := params["name"].(string)
-    output, _ := json.Marshal(map[string]string{
-        "success": "true",
+    output, _ := json.Marshal(map[string]interface{}{
+        "success": true,
         "output":  "Hello, " + name + "!",
     })
     pdk.SetOutput(output)
