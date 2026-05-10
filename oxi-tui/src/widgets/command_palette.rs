@@ -13,6 +13,7 @@ use ratatui::{
 };
 use crate::{Event, KeyCode, KeyEvent, Theme};
 use crate::fuzzy::fuzzy_match;
+use unicode_width::UnicodeWidthStr;
 
 // ---------------------------------------------------------------------------
 // Command
@@ -263,8 +264,9 @@ impl StatefulWidget for CommandPalette<'_> {
 
         // Cursor block highlight (manual — 1 cell)
         let prompt_len = 2;
-        let cursor_col = inner_x + prompt_len + state.query.len() as u16;
-        if (prompt_len as usize + state.query.len()) < inner_w {
+        let query_display_width = UnicodeWidthStr::width(state.query.as_str()) as u16;
+        let cursor_col = inner_x + prompt_len + query_display_width;
+        if (prompt_len as usize + query_display_width as usize) < inner_w {
             buf[(cursor_col, input_y)]
                 .set_char(' ')
                 .set_style(Style::default().fg(Color::Black).bg(primary));
