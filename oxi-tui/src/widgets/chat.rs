@@ -542,16 +542,13 @@ enum SegKind {
 
 // ── Height measurement ────────────────────────────────────────────────
 
-/// Measure wrapped height of text lines within a given width.
+/// Measure wrapped height using ratatui's own Paragraph::line_count.
+/// This matches the actual rendering behavior exactly (word-break wrapping).
 fn measure_wrapped_height(lines: &[Line<'_>], width: u16) -> u16 {
-    if width == 0 { return lines.len() as u16; }
-    let w = width as usize;
-    lines.iter().map(|line| {
-        let lw: usize = line.spans.iter()
-            .map(|s| unicode_width::UnicodeWidthStr::width(s.content.as_ref()))
-            .sum();
-        if lw == 0 { 1u16 } else { ((lw + w - 1) / w).max(1) as u16 }
-    }).sum()
+    if width < 1 { return lines.len() as u16; }
+    let text: ratatui::text::Text = lines.iter().cloned().collect();
+    let para = Paragraph::new(text).wrap(Wrap { trim: false });
+    para.line_count(width) as u16
 }
 
 fn measure_tool_box_height(arguments: &str, result: &Option<(String, bool)>) -> u16 {
@@ -794,32 +791,36 @@ fn render_tool_box(
         ToolCallStatus::Done => ("\u{2713}", styles.success.fg.unwrap_or(Color::Green)),
     };
 
-    // Build inner content lines
+    // Build inner content lines (divider is rendered separately)
     let mut content_lines: Vec<Line<'static>> = Vec::new();
     let arg_count = arguments.lines().count();
     let max_args = if arg_count <= 3 { 5 } else { 3 };
     for l in arguments.lines().take(max_args) {
         content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
     }
-    if arg_count > max_args {
+    let has_arg_truncate = arg_count > max_args;
+    if has_arg_truncate {
         content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
     }
-    if let Some((result_content, is_error)) = result {
-        content_lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(40),
-            if *is_error { styles.error } else { styles.success },
-        )));
+    // Placeholder for divider — will be rendered as full-width line after arguments
+    let divider_idx = content_lines.len();
+    let divider_style = if let Some((_, is_error)) = result {
+        if *is_error { styles.error } else { styles.success }
+    } else { styles.muted };
+    content_lines.push(Line::from("")); // placeholder
+    let result_line_count = if let Some((result_content, _)) = result {
         let rn = result_content.lines().count();
         for l in result_content.lines().take(6) {
-            content_lines.push(Line::from(Span::styled(
-                l.to_string(),
-                if *is_error { styles.error } else { styles.normal },
-            )));
+            content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
         }
         if rn > 6 {
             content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
         }
-    }
+        rn.min(6) as u16
+    } else {
+        0
+    };
+    let result_truncate = result.as_ref().map_or(false, |(rc, _)| rc.lines().count() > 6);
 
     // Determine visible borders based on which rows are clipped
     let show_top = rows_hidden == 0;
@@ -845,12 +846,37 @@ fn render_tool_box(
 
     // Content starts after top border. Skip rows that were scrolled past.
     let content_skip = rows_hidden.saturating_sub(top_border_rows) as usize;
-    let vis: Vec<Line<'static>> = content_lines.into_iter()
-        .skip(content_skip)
-        .take(inner.height as usize)
+    let vis: Vec<Line<'static>> = content_lines.iter().cloned()
+        .enumerate()
+        .filter_map(|(i, line)| {
+            if i < content_skip { return None; }
+            let row = i - content_skip;
+            if row >= inner.height as usize { return None; }
+            Some(line)
+        })
         .collect();
+
     if !vis.is_empty() {
-        Paragraph::new(vis).render(inner, buf);
+        Paragraph::new(vis.clone()).render(inner, buf);
+    }
+
+    // Render divider as full-width horizontal line
+    if let Some((_, _)) = result {
+        // Divider comes after arguments (and optional truncate line)
+        let arg_lines = max_args.min(arg_count) as usize;
+        let truncate_line_offset = if has_arg_truncate { 1 } else { 0 };
+        let divider_in_content = arg_lines + truncate_line_offset;
+        // Visible divider row within the content
+        let visible_divider_row = divider_in_content.saturating_sub(content_skip);
+        if visible_divider_row < inner.height as usize {
+            let divider_y = inner.y + visible_divider_row as u16;
+            // Render full-width dash line across inner width
+            let dash_count = inner.width.saturating_sub(2) as usize; // -2 for left/right padding
+            let dash_line = "\u{2500}".repeat(dash_count.max(1));
+            let div_rect = Rect { x: inner.x + 1, y: divider_y, width: (dash_count + 2) as u16, height: 1 };
+            Line::from(Span::styled(format!(" {}{} ", dash_line, " "), divider_style))
+                .render(div_rect, buf);
+        }
     }
 }
 
