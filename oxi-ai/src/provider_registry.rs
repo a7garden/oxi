@@ -257,10 +257,10 @@ impl ProviderAuth for AmbientAuth {
 ///
 /// Manages authentication for multiple providers with priority-based resolution:
 /// 1. Runtime override (CLI --api-key)
-/// 2. Stored credential (auth.json)
+/// 2. Stored credential (auth.json) ← Primary source
 /// 3. OAuth token (with auto-refresh)
-/// 4. Environment variable
-/// 5. Ambient credentials (AWS IAM, Google ADC)
+/// 4. Ambient credentials (AWS IAM, Google ADC) ← Via SDK/filesystem
+/// 5. Environment variable ← Last resort, mainly for CI/CD
 pub struct ProviderAuthRegistry {
     providers: HashMap<String, Box<dyn ProviderAuth>>,
     runtime_overrides: RwLock<HashMap<String, String>>,
@@ -361,9 +361,10 @@ impl ProviderAuthRegistry {
     ///
     /// Priority:
     /// 1. Runtime override
-    /// 2. Stored credential (API key or OAuth)
-    /// 3. Environment variable
-    /// 4. Fallback resolver
+    /// 2. Stored credential (auth.json)
+    /// 3. OAuth token
+    /// 4. Ambient credentials (AWS IAM, Google ADC)
+    /// 5. Environment variable (last resort - CI/CD only)
     pub fn get_api_key(&self, provider: &str) -> Option<String> {
         // 1. Runtime override takes highest priority
         {
@@ -373,19 +374,30 @@ impl ProviderAuthRegistry {
             }
         }
 
-        // 2. Check registered provider
+        // 2. Check registered provider (stored API key or OAuth)
         if let Some(auth) = self.providers.get(provider) {
             if let Some(key) = auth.get_api_key() {
                 return Some(key);
             }
         }
 
-        // 3. Check environment variable
+        // 3. Check ambient credentials (AWS IAM, Google ADC via SDK)
+        // These are checked via ProviderAuth::is_configured() above,
+        // but ambient auth returns "<authenticated>" which is handled specially.
+        // For explicit API key lookup, we skip to env only if no stored cred.
+
+        // 4. Environment variable — LAST RESORT
+        // Environment variables are a fallback for CI/CD and container environments.
+        // For local development, use `oxi setup` to store credentials in auth.json.
         if let Some(key) = env_api_keys::get_env_api_key(provider) {
+            tracing::debug!(
+                "API key for '{}' resolved from environment variable (last resort)",
+                provider
+            );
             return Some(key);
         }
 
-        // 4. Fallback resolver
+        // 5. Fallback resolver (custom provider config)
         {
             let resolver = self.fallback_resolver.read();
             if let Some(ref fallback) = *resolver {
@@ -397,6 +409,10 @@ impl ProviderAuthRegistry {
     }
 
     /// Check if any auth is configured for a provider
+    ///
+    /// Note: Environment variables don't count as "configured" —
+    /// they are a last-resort fallback. Use `oxi setup` to store
+    /// credentials properly in auth.json for persistent authentication.
     pub fn has_auth(&self, provider: &str) -> bool {
         // Check runtime override
         if self
@@ -414,10 +430,8 @@ impl ProviderAuthRegistry {
             }
         }
 
-        // Check environment variable
-        if env_api_keys::has_env_key(provider) {
-            return true;
-        }
+        // Environment variables do NOT count as configured auth.
+        // They are a last-resort fallback for CI/CD, not a primary auth source.
 
         false
     }

@@ -237,6 +237,12 @@ pub enum ConfigCommands {
         /// Provider name to remove
         name: String,
     },
+    /// Reset credentials (auth.json) and optionally settings
+    Reset {
+        /// Also reset settings (settings.toml / settings.json)
+        #[arg(long, short)]
+        all: bool,
+    },
 }
 
 // ── Parsing helpers ────────────────────────────────────────────────

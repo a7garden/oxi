@@ -1,7 +1,18 @@
-//! Environment variable-based API key resolution
+//! Environment variable-based API key resolution (LAST RESORT)
 //!
-//! Provides comprehensive environment variable detection for various AI providers.
-//! Provides comprehensive environment variable detection for various AI providers.
+//! Provides environment variable detection as a **last-resort fallback** for
+//! CI/CD, containers, and other automated environments.
+//!
+//! For local development, credentials should be stored via `oxi setup` in
+//! `~/.config/oxi/auth.json`. This file-based approach is more reliable than
+//! environment variables, which are lost when the shell restarts.
+//!
+//! Auth priority (see `provider_registry.rs`):
+//!   1. Runtime override (--api-key)
+//!   2. Stored credential (auth.json)
+//!   3. OAuth token
+//!   4. Ambient credentials (AWS IAM, Google ADC)
+//!   5. Environment variable ← this module
 
 use once_cell::sync::Lazy;
 use std::collections::HashMap;

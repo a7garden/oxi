@@ -767,6 +767,9 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
             settings.save()?;
             println!("Removed custom provider '{}'", name);
         }
+        ConfigCommands::Reset { all } => {
+            return handle_config_reset(*all);
+        }
     }
 
     Ok(())
@@ -775,23 +778,41 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
 /// Handle `oxi setup [--reset]`
 fn handle_setup_command(reset: bool) -> Result<()> {
     if reset {
-        let settings_path = oxi::settings::Settings::settings_path()?;
-        if settings_path.exists() {
-            std::fs::remove_file(&settings_path)?;
-            println!("Removed settings: {}", settings_path.display());
-        }
-        // Reset auth file
-        let auth_path = dirs::config_dir()
-            .unwrap_or_default()
-            .join("oxi")
-            .join("auth.json");
-        if auth_path.exists() {
-            std::fs::remove_file(&auth_path)?;
-            println!("Removed auth: {}", auth_path.display());
-        }
-        println!("Settings reset to defaults.");
+        handle_config_reset(true)?;
     }
     oxi::setup_wizard::run()
+}
+
+/// Handle `oxi config reset [--all]`
+///
+/// Resets auth.json (credentials). With `--all`, also resets settings.
+fn handle_config_reset(all: bool) -> Result<()> {
+    // Always reset auth.json
+    let auth_path = dirs::config_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".config"))
+        .join("oxi")
+        .join("auth.json");
+    if auth_path.exists() {
+        std::fs::remove_file(&auth_path)?;
+        println!("Removed credentials: {}", auth_path.display());
+    } else {
+        println!("No credentials file found at {}", auth_path.display());
+    }
+
+    if all {
+        // Also reset settings
+        if let Ok(settings_path) = oxi::settings::Settings::settings_path() {
+            if settings_path.exists() {
+                std::fs::remove_file(&settings_path)?;
+                println!("Removed settings: {}", settings_path.display());
+            }
+        }
+        println!("Full reset complete. Run 'oxi setup' to reconfigure.");
+    } else {
+        println!("Credentials reset. Run 'oxi setup' to reconfigure API keys.");
+    }
+
+    Ok(())
 }
 
 /// Handle `oxi models [--provider <name>]`

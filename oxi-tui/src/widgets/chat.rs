@@ -8,6 +8,7 @@ use ratatui::{
     widgets::{Block, Paragraph, StatefulWidget},
 };
 use ratatui::widgets::Widget;
+use tui_markdown;
 use crate::{Theme, ThemeStyles};
 use super::markdown;
 
@@ -357,8 +358,21 @@ impl StatefulWidget for ChatView<'_> {
         // Collect all lines
         // ------------------------------------------------------------------
         let mut all_lines: Vec<(MessageRole, String, LineKind)> = Vec::new();
+        // Markdown-rendered lines from tui-markdown (styled, ready to render)
+        let mut markdown_lines: Vec<Line<'static>> = Vec::new();
 
-        let process_text = |role: MessageRole,
+        // Render markdown text using tui-markdown (pulldown-cmark based)
+        // Returns owned Lines ready for rendering
+        let render_markdown = |content: &str| -> Vec<Line<'static>> {
+            let text: ratatui::text::Text = tui_markdown::from_str(content);
+            text.lines.into_iter().map(|l| {
+                let spans: Vec<Span<'static>> = l.spans.into_iter().map(|s| Span::styled(s.content.into_owned(), s.style)).collect();
+                Line::from(spans)
+            }).collect()
+        };
+
+        // Legacy line-by-line processing for non-markdown blocks (tools, errors)
+        let _process_text = |role: MessageRole,
                             content: &str,
                             lines: &mut Vec<(MessageRole, String, LineKind)>| {
             let mut in_code_block = false;
@@ -437,7 +451,11 @@ impl StatefulWidget for ChatView<'_> {
             for block in &msg.content_blocks {
                 match block {
                     ContentBlock::Text { content } => {
-                        process_text(msg.role, content, &mut all_lines);
+                        // Use tui-markdown for rich rendering
+                        let md_lines = render_markdown(content);
+                        for line in md_lines {
+                            markdown_lines.push(line);
+                        }
                     }
                     ContentBlock::Thinking { content, collapsed } => {
                         let indicator = if *collapsed { "▸" } else { "▾" };
@@ -533,7 +551,10 @@ impl StatefulWidget for ChatView<'_> {
             for block in &streaming.message.content_blocks {
                 match block {
                     ContentBlock::Text { content } => {
-                        process_text(MessageRole::Assistant, content, &mut all_lines);
+                        let md_lines = render_markdown(content);
+                        for line in md_lines {
+                            markdown_lines.push(line);
+                        }
                     }
                     ContentBlock::Thinking { content, collapsed } => {
                         let indicator = if *collapsed { "▸" } else { "▾" };
@@ -603,6 +624,12 @@ impl StatefulWidget for ChatView<'_> {
         // ------------------------------------------------------------------
         let mut ratatui_lines: Vec<Line> = Vec::new();
 
+        // Render markdown lines (from tui-markdown) — already styled
+        for line in &markdown_lines {
+            ratatui_lines.push(line.clone());
+        }
+
+        // Render structural lines (tools, errors, thinking, separators, role labels)
         for (role, text, kind) in &all_lines {
             let prefix_style = match role {
                 MessageRole::User => styles.primary,
