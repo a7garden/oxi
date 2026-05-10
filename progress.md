@@ -11,6 +11,23 @@ In Progress
 - **해결 방안**: `push_blocks`에 `area.width` 전달, 하드코딩 `50` → `area.width`로 교체
 - **상세 분석**: `/tmp/analysis_width.md`
 
+### 문제 1: ToolCall + ToolResult 박스 머지가 안 되는 원인 분석 ✅
+- **근본 원인**: `AgentEvent::ToolCall`이 events.rs에 정의만 되어 있고 **어디서도 emit되지 않음**
+- `AgentLoop`는 `ToolExecutionStart/End`을 emit하지만, `app.rs`의 match에서 `_ => continue`로 무시됨
+- `stream_tool_call()`이 절대 호출되지 않아 ToolCall 블록이 생성되지 않음
+- `stream_tool_result()`가 last block에서 ToolCall을 못 찾아 fallback으로 standalone ToolResult block 생성
+- **경쟁상태**: 없음 (finish_streaming은 모든 tool 실행 완료 후에만 발생)
+- **해결 방안**: `app.rs`의 event forwarder에 `ToolExecutionStart → UiEvent::ToolCall`, `ToolExecutionEnd → UiEvent::ToolResult` 매핑 추가
+- **상세 분석**: `/tmp/analysis_merge.md`
+
+### 문제 3: tracing WARN 로그가 TUI에 섞여서 렌더링 깨지는 원인 분석 ✅
+- **원인**: `tui-markdown` 0.3.7이 코드 블록 언어 미인식/미지원 markdown 기능마다 `warn!()` emit → stderr로 출력 → TUI 렌더링과 섞임
+- **핵심 버그**: main.rs의 `"info,tui_markdown=warn"`은 WARN을 **유지**하는 설정. `tui_markdown=error`로 변경 필요
+- **WARN 17개**: 코드 블록 언어 1개 + 미지원 기능(Html, Table, Math, Footnote, Definition list 등) 16개
+- **추가 소스**: oxi-tui(1개), oxi-cli(약 25개)에서도 WARN 발생 가능
+- **추천 해결**: 필터 `tui_markdown=error` 변경 + TUI 모드에서 로그 파일 리다이렉트
+- **상세 분석**: `/tmp/analysis_tracing.md`
+
 ## Files Changed
 
 ## Notes
