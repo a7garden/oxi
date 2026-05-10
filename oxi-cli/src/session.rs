@@ -1952,7 +1952,8 @@ impl SessionManager {
         if source_entries.is_empty() {
             return Err("Cannot fork: source session is empty".to_string());
         }
-        let header = source_entries.iter().find_map(|e| match e {
+        // Validate header exists (content will be replaced with fresh header below)
+        let _header = source_entries.iter().find_map(|e| match e {
             FileEntry::Header(h) => Some(h),
             _ => None,
         }).ok_or_else(|| "Missing session header".to_string())?;
@@ -2167,7 +2168,6 @@ fn is_valid_session_file(file_path: &str) -> bool {
     false
 }
 
-/// Find the most recent session in a directory
 /// Find the path of the most recent session for the given working directory.
 pub fn find_recent_session_path(cwd: &str) -> Option<String> {
     let dir = get_default_session_dir(cwd);

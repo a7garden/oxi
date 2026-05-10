@@ -378,9 +378,11 @@ pub(crate) fn handle_slash_command(
                 match crate::session::SessionManager::fork_from(path, &cwd, None) {
                     Ok(new_sm) => {
                         if let Some(new_path) = new_sm.get_session_file() {
-                            state.add_system_message(format!("Cloned session: {}", new_path));
+                            state.add_system_message(format!(
+                                "Cloned session: {}\nUse /resume to open it.", new_path
+                            ));
                         } else {
-                            state.add_system_message("Session cloned.".to_string());
+                            state.add_system_message("Session cloned. Use /resume to open it.".to_string());
                         }
                     }
                     Err(e) => {
