@@ -83,7 +83,7 @@ notify = "6"
 # Archive extraction for tools-manager
 flate2 = "1"
 tar = "0.4"
-zip = "2"
+zip = "8"
 
 # Unix primitives for SIGTSTP
 [target.'cfg(unix)'.dependencies]
