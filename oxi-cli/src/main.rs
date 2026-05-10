@@ -163,40 +163,9 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Discover and load WASM extensions
-    let wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>> =
-        if app.settings().extensions_enabled {
-            let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd);
-            if !wasm_paths.is_empty() {
-                let mut wasm_mgr = crate::extensions::WasmExtensionManager::new();
-                let (loaded, errors) = wasm_mgr.load_all(&wasm_paths);
-                for info in &loaded {
-                    tracing::info!("WASM extension loaded: {} v{}", info.name, info.version);
-                }
-                for err in &errors {
-                    tracing::warn!("WASM extension error: {}", err);
-                }
-                if !wasm_mgr.is_empty() {
-                    let mgr = Arc::new(wasm_mgr);
-                    for tool_def in mgr.all_tool_defs() {
-                        let wasm_tool = crate::extensions::WasmTool::new(
-                            mgr.clone(),
-                            tool_def.name.clone(),
-                            tool_def.description.clone(),
-                            tool_def.schema.clone(),
-                        );
-                        tools.register(wasm_tool);
-                    }
-                    Some(mgr)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+    // WASM extensions disabled
+    #[allow(unused_variables)]
+    let wasm_ext: Option<std::sync::Arc<oxi::extensions::WasmExtensionManager>> = None;
 
     // Register extension tools with the agent
     for tool in ext_registry.all_tools() {
