@@ -54,7 +54,7 @@ ratatui = { version = "0.30", features = ["crossterm"] }
 base64 = "0.22"
 async-trait = "0.1"
 lazy_static = "1.4"
-rand = "0.8"
+rand = "0.9"
 sha2 = "0.10"
 url = "2"
 
