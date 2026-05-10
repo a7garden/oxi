@@ -21,24 +21,115 @@ use oxi_tui::widgets::{
     input::InputState,
 };
 use std::io::{self, Write};
+use std::panic;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-
-
 use crossterm::{
+    cursor::Hide,
     event::{
-        self,
+        self, DisableBracketedPaste, EnableBracketedPaste,
         KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use crossterm::event::{EnableBracketedPaste, DisableBracketedPaste};
 use ratatui::{
     backend::CrosstermBackend,
     Terminal,
 };
+
+// ── Terminal Lifecycle ───────────────────────────────────────────────────
+
+/// Terminal wrapper following ratatui best practices.
+/// Encapsulates setup/teardown, panic hook, and mouse tracking.
+struct Tui {
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+    tty_ok: bool,
+}
+
+impl Tui {
+    fn enter() -> Result<Self> {
+        // Set panic hook first — ensures terminal is restored on panic
+        Self::set_panic_hook();
+
+        let tty_ok = enable_raw_mode().is_ok();
+        let mut stdout = io::stdout();
+
+        if tty_ok {
+            let _ = execute!(
+                stdout,
+                EnterAlternateScreen,
+                Hide,
+                EnableBracketedPaste,
+                PushKeyboardEnhancementFlags(
+                    KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                )
+            );
+            // Enable mouse scroll tracking without drag tracking.
+            // ?1000h = click/release/scroll, ?1006h = SGR extended coords.
+            // Intentionally skip ?1002h so terminal handles drag-to-select natively.
+            let _ = stdout.write_all(b"\x1b[?1000h\x1b[?1006h");
+            let _ = stdout.flush();
+        }
+
+        let backend = CrosstermBackend::new(stdout);
+        let mut terminal = Terminal::new(backend)?;
+        if tty_ok {
+            let _ = terminal.clear();
+        }
+
+        Ok(Self { terminal, tty_ok })
+    }
+
+    fn exit(&mut self) -> Result<()> {
+        if self.tty_ok {
+            // 1. Disable mouse tracking (before leaving alternate screen)
+            let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1006l");
+            let _ = io::stdout().flush();
+            // 2. Pop keyboard enhancements and bracketed paste
+            execute!(
+                self.terminal.backend_mut(),
+                PopKeyboardEnhancementFlags,
+                DisableBracketedPaste
+            )?;
+            // 3. Show cursor before leaving alternate screen
+            self.terminal.show_cursor()?;
+            // 4. Leave alternate screen
+            execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
+            // 5. Disable raw mode last
+            disable_raw_mode()?;
+        }
+        Ok(())
+    }
+
+    fn set_panic_hook() {
+        let original_hook = panic::take_hook();
+        panic::set_hook(Box::new(move |panic_info| {
+            // Restore terminal state before printing panic info
+            let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1006l");
+            let _ = io::stdout().flush();
+            let _ = execute!(io::stdout(), LeaveAlternateScreen);
+            let _ = disable_raw_mode();
+            original_hook(panic_info);
+        }));
+    }
+}
+
+impl std::ops::Deref for Tui {
+    type Target = Terminal<CrosstermBackend<io::Stdout>>;
+    fn deref(&self) -> &Self::Target { &self.terminal }
+}
+
+impl std::ops::DerefMut for Tui {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.terminal }
+}
+
+impl Drop for Tui {
+    fn drop(&mut self) {
+        let _ = self.exit();
+    }
+}
 
 
 // ── UI Events (agent → TUI) ──────────────────────────────────────────────
@@ -556,34 +647,8 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         });
     });
 
-    // Setup terminal — gracefully handle TTY unavailable (e.g. Warp)
-    let tty_ok = match enable_raw_mode() {
-        Ok(()) => true,
-        Err(_) => false,
-    };
-    let mut stdout = io::stdout();
-    if tty_ok {
-        let _ = execute!(
-            stdout,
-            EnterAlternateScreen,
-            EnableBracketedPaste,
-            PushKeyboardEnhancementFlags(
-                KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-            )
-        );
-        // Enable mouse tracking for scroll only (NOT drag tracking).
-        // \x1b[?1000h = button click/release (includes scroll wheel)
-        // \x1b[?1006h = SGR extended mode for precise coordinates
-        // We intentionally skip \x1b[?1002h (button event tracking)
-        // so that drag-to-select is handled by the terminal natively.
-        let _ = stdout.write_all(b"\x1b[?1000h\x1b[?1006h");
-        let _ = stdout.flush();
-    }
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    if tty_ok {
-        let _ = terminal.clear();
-    }
+    // Setup terminal (Tui handles raw mode, alternate screen, mouse, panic hook)
+    let mut tui = Tui::enter()?;
 
     let theme = Theme::dark();
     let mut state = AppState::new();
@@ -639,7 +704,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         // Render
         let model_debug = state.footer_state.data.model_name.clone();
         tracing::debug!("draw() called, footer.model_name='{}', is_busy={}", model_debug, state.is_agent_busy);
-        terminal.draw(|f| {
+        tui.draw(|f| {
             tracing::debug!("render::draw about to render footer with model_name='{}'", state.footer_state.data.model_name);
             render::draw(f, &mut state, &theme)
         })?;
@@ -682,25 +747,15 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
         // Auto-scroll
         let chat_visible_height = {
-            let size = terminal.size()?;
+            let size = tui.size()?;
             size.height.saturating_sub(5) // Input(2) + StatusBar(3)
         };
         state.ensure_auto_scroll(chat_visible_height);
     }
 
-    // Cleanup
+    // Cleanup — Tui::exit() handles mouse, bracketed paste, alternate screen, raw mode
     drop(prompt_tx);
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        PopKeyboardEnhancementFlags,
-        DisableBracketedPaste,
-        LeaveAlternateScreen
-    )?;
-    // Disable mouse tracking
-    let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1006l");
-    let _ = io::stdout().flush();
-    terminal.show_cursor()?;
+    tui.exit()?;
     let _ = agent_handle.join();
     Ok(())
 }
