@@ -252,16 +252,44 @@ fn extract_last_code_block(text: &str) -> Option<String> {
     result
 }
 
-// ── Box-drawing helpers ────────────────────────────────────────────────
+// ── Block-style tool/error boxes ──────────────────────────────────────
 
-fn bordered_header(label: &str, width: usize) -> String {
-    let inner = label.len() + 2;
-    let right = width.saturating_sub(inner + 2);
-    format!("\u{250c}{} {} {}", "\u{2500}", label, "\u{2500}".repeat(right.max(1)))
+/// Build a header line: ┌─ label ──────┐
+fn block_header_line(label: &str, width: usize, border_style: Style, label_style: Style) -> Line<'static> {
+    let label_width = label.len();
+    let right_dashes = width.saturating_sub(label_width + 4); // ┌─ ─┐
+    vec![
+        Span::styled("\u{250c}", border_style),            // ┌
+        Span::styled("\u{2500}".repeat(2), border_style),  // ──
+        Span::styled(format!(" {} ", label), label_style),  //  label 
+        Span::styled("\u{2500}".repeat(right_dashes.max(1)), border_style), // ──
+        Span::styled("\u{2510}", border_style),            // ┐
+    ].into()
 }
 
-fn bordered_footer(width: usize) -> String {
-    format!("\u{2514}{}\u{2510}", "\u{2500}".repeat(width.saturating_sub(2).max(1)))
+/// Build a body line: │  content
+fn block_body_line(text: &str, border_style: Style, body_style: Style) -> Line<'static> {
+    vec![
+        Span::styled("\u{2502}", border_style),  // │
+        Span::styled(format!(" {}", text), body_style),
+    ].into()
+}
+
+/// Build a truncated body line: │  ...
+fn block_truncate_line(border_style: Style, body_style: Style) -> Line<'static> {
+    vec![
+        Span::styled("\u{2502}", border_style),
+        Span::styled(" ...", body_style),
+    ].into()
+}
+
+/// Build a footer line: └────────────┘
+fn block_footer_line(width: usize, border_style: Style) -> Line<'static> {
+    vec![
+        Span::styled("\u{2514}", border_style),                          // └
+        Span::styled("\u{2500}".repeat(width.saturating_sub(2).max(1)), border_style), // ──
+        Span::styled("\u{2518}", border_style),                          // ┘
+    ].into()
 }
 
 /// User message left-border stripe: solid bar + tinted space.
@@ -507,37 +535,52 @@ fn push_blocks(
                 }
             }
             ContentBlock::ToolCall { name, arguments, .. } => {
-                push(lines, role, &bordered_header(&format!("tool: {}", name), 60), LineKind::ToolCallHeader);
+                let border = styles.muted;
+                let body = styles.normal;
+                let label = Style::default().fg(styles.primary.fg.unwrap_or(Color::White)).add_modifier(Modifier::BOLD);
+                lines.push(block_header_line(&format!("tool: {}", name), 50, border, label));
                 let max = if arguments.lines().count() <= 4 { 6 } else { 4 };
                 for l in arguments.lines().take(max) {
-                    push(lines, role, &format!("  {}", l), LineKind::ToolCallBody);
+                    lines.push(block_body_line(l, border, body));
                 }
                 if arguments.lines().count() > max {
-                    push(lines, role, "  ...", LineKind::ToolCallBody);
+                    lines.push(block_truncate_line(border, body));
                 }
-                push(lines, role, &bordered_footer(60), LineKind::ToolCallFooter);
+                lines.push(block_footer_line(50, border));
             }
             ContentBlock::ToolResult { tool_name, content, is_error } => {
-                let check = if *is_error { "X" } else { "ok" };
+                let (check, border, body) = if *is_error {
+                    ("X", styles.error, styles.error)
+                } else {
+                    ("ok", styles.muted, styles.normal)
+                };
                 let label = if tool_name.is_empty() { check.to_string() } else { format!("{} {}", check, tool_name) };
-                push(lines, role, &bordered_header(&label, 60), LineKind::ToolResultHeader);
+                let label_style = if *is_error {
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(styles.success.fg.unwrap_or(Color::Green)).add_modifier(Modifier::BOLD)
+                };
+                lines.push(block_header_line(&label, 50, border, label_style));
                 for l in content.lines().take(4) {
-                    push(lines, role, &format!("  {}", l), LineKind::ToolResultBody);
+                    lines.push(block_body_line(l, border, body));
                 }
                 if content.lines().count() > 4 {
-                    push(lines, role, "  ...", LineKind::ToolResultBody);
+                    lines.push(block_truncate_line(border, body));
                 }
-                push(lines, role, &bordered_footer(60), LineKind::ToolResultFooter);
+                lines.push(block_footer_line(50, border));
             }
             ContentBlock::Error { title, message, retryable } => {
-                push(lines, role, &bordered_header(&format!("error: {}", title), 60), LineKind::ErrorHeader);
+                let border = styles.error;
+                let body = styles.normal;
+                let label = Style::default().fg(Color::White).add_modifier(Modifier::BOLD);
+                lines.push(block_header_line(&format!("error: {}", title), 50, border, label));
                 for l in message.lines().take(4) {
-                    push(lines, role, &format!("  {}", l), LineKind::ErrorBody);
+                    lines.push(block_body_line(l, border, body));
                 }
                 if *retryable {
-                    push(lines, role, "  retry: this error may be temporary", LineKind::ErrorBody);
+                    lines.push(block_body_line("retry: this error may be temporary", border, styles.muted));
                 }
-                push(lines, role, &bordered_footer(60), LineKind::ErrorFooter);
+                lines.push(block_footer_line(50, border));
             }
             ContentBlock::Image { mime_type, base64_data } => {
                 let sz = base64_data.len() * 3 / 4;
