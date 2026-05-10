@@ -566,7 +566,9 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         let _ = execute!(
             stdout,
             EnterAlternateScreen,
-            EnableMouseCapture,
+            // Note: EnableMouseCapture intentionally omitted — it blocks
+            // terminal-native text selection (drag to select, Cmd+C copy).
+            // Scroll is handled by keyboard (PageUp/Down, arrow keys).
             EnableBracketedPaste,
             PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::REPORT_EVENT_TYPES
@@ -689,8 +691,7 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
         terminal.backend_mut(),
         PopKeyboardEnhancementFlags,
         DisableBracketedPaste,
-        LeaveAlternateScreen,
-        DisableMouseCapture
+        LeaveAlternateScreen
     )?;
     terminal.show_cursor()?;
     let _ = agent_handle.join();
