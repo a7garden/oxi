@@ -480,7 +480,11 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         SessionManager::create(&cwd, None)
     };
     let session_id = session_manager.get_session_id();
-    let session_manager_for_restore = if resume_last { session_manager.clone() } else { session_manager.clone() };
+    let session_manager_for_restore = if resume_last {
+        Some(session_manager.clone())
+    } else {
+        None
+    };
 
     let services = create_agent_session_services(
         CreateAgentSessionServicesOptions::new(std::env::current_dir().unwrap_or_default()),
@@ -673,8 +677,8 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
     let mut state = AppState::new();
 
     // Restore previous messages if resuming a session
-    if resume_last {
-        let branch = session_manager_for_restore.get_branch(None);
+    if let Some(ref sm) = session_manager_for_restore {
+        let branch = sm.get_branch(None);
         for entry in &branch {
             match &entry.message {
                 crate::session::AgentMessage::User { content } => {
