@@ -16,8 +16,6 @@ use ratatui::{
     widgets::{Block, Borders, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget, Wrap},
 };
 use tui_markdown;
-use unicode_width::UnicodeWidthChar;
-
 use crate::Theme;
 use crate::theme::ThemeStyles;
 
@@ -62,7 +60,6 @@ pub struct ChatMessage {
 pub struct StreamingState {
     pub message: ChatMessage,
     pub active_content_index: usize,
-    pub line_buffer: String,
 }
 
 // ── ChatViewState ──────────────────────────────────────────────────────
@@ -72,7 +69,6 @@ pub struct ChatViewState {
     pub messages: Vec<ChatMessage>,
     pub streaming: Option<StreamingState>,
     pub scroll_offset: u16,
-    pub auto_scroll: bool,
     pub spinner_frame: usize,
     pub content_height: u16,
     /// Last code block extracted from assistant text (for copy functionality)
@@ -89,16 +85,14 @@ impl ChatViewState {
 
     pub fn scroll_to_bottom(&mut self, visible: u16) {
         self.scroll_offset = self.content_height.saturating_sub(visible);
-        self.auto_scroll = true;
     }
     pub fn scroll_up(&mut self, n: u16) {
         self.scroll_offset = self.scroll_offset.saturating_sub(n);
-        self.auto_scroll = false;
     }
     pub fn scroll_down(&mut self, n: u16) {
         self.scroll_offset = self.scroll_offset.saturating_add(n);
     }
-    pub fn scroll_to_top(&mut self) { self.scroll_offset = 0; self.auto_scroll = false; }
+    pub fn scroll_to_top(&mut self) { self.scroll_offset = 0; }
 
     pub fn start_streaming(&mut self) {
         self.streaming = Some(StreamingState {
@@ -108,7 +102,6 @@ impl ChatViewState {
                 timestamp: 0,
             },
             active_content_index: 0,
-            line_buffer: String::new(),
         });
         self.active_tool_calls.clear();
     }
@@ -290,23 +283,6 @@ impl ChatViewState {
         });
     }
 
-    pub fn append_streaming_line(&mut self, text: &str) {
-        if let Some(ref mut s) = self.streaming { s.line_buffer.push_str(text); }
-    }
-
-    pub fn flush_streaming_line(&mut self) {
-        if self.streaming.is_none() { return; }
-        let (buf, is_empty) = {
-            let s = self.streaming.as_mut().unwrap();
-            (s.line_buffer.trim_end().to_string(), s.line_buffer.is_empty())
-        };
-        if !is_empty {
-            if let Some(ref mut s) = self.streaming {
-                s.line_buffer.clear();
-            }
-            self.append_text(&buf);
-        }
-    }
 }
 
 // ── Code block extraction ────────────────────────────────────────────
@@ -670,15 +646,6 @@ fn build_segments(state: &ChatViewState, width: u16) -> Vec<Segment> {
             segments.push(Segment { y, height: h, kind });
             y += h;
         }
-        if !streaming.line_buffer.is_empty() {
-            let txt = streaming.line_buffer.trim_end().to_string();
-            if !txt.is_empty() {
-                let lines = vec![Line::from(Span::raw(txt))];
-                let h = measure_wrapped_height(&lines, width);
-                segments.push(Segment { y, height: h, kind: SegKind::Text(lines) });
-                y += h;
-            }
-        }
         segments.push(Segment { y, height: 1, kind: SegKind::Spinner { frame: state.spinner_frame } });
         y += 1;
     }
@@ -807,13 +774,11 @@ fn render_tool_box(
     if has_arg_truncate {
         content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
     }
-    // Placeholder for divider — will be rendered as full-width line after arguments
-    let divider_idx = content_lines.len();
     let divider_style = if let Some((_, is_error)) = result {
         if *is_error { styles.error } else { styles.success }
     } else { styles.muted };
-    content_lines.push(Line::from("")); // placeholder
-    let result_line_count = if let Some((result_content, _)) = result {
+    content_lines.push(Line::from("")); // divider placeholder
+    if let Some((result_content, _)) = result {
         let rn = result_content.lines().count();
         for l in result_content.lines().take(6) {
             content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
@@ -821,11 +786,7 @@ fn render_tool_box(
         if rn > 6 {
             content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
         }
-        rn.min(6) as u16
-    } else {
-        0
     };
-    let result_truncate = result.as_ref().map_or(false, |(rc, _)| rc.lines().count() > 6);
 
     // Determine visible borders based on which rows are clipped
     let show_top = rows_hidden == 0;

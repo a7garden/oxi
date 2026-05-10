@@ -11,7 +11,6 @@ use base64::Engine;
 
 use crossterm::event::{
     Event as CEvent, KeyCode, KeyModifiers, MouseEventKind,
-    KeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     KeyEventKind,
 };
 
@@ -276,10 +275,6 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         UiEvent::ToolCall { id, name, arguments } => {
             tracing::debug!("[HANDLER] UiEvent::ToolCall received: id={:?}, name={:?}", id, name);
             state.chat.stream_tool_call(id, name, arguments, ToolCallStatus::Executing);
-        }
-        UiEvent::ToolStart { tool_name } => {
-            // Deprecated: ToolExecutionStart is used instead.
-            tracing::debug!("[HANDLER] UiEvent::ToolStart IGNORED: tool_name={:?}", tool_name);
         }
         UiEvent::ToolResult { tool_call_id, tool_name, content, is_error } => {
             tracing::debug!("[HANDLER] UiEvent::ToolResult received: tool_call_id={:?}, tool_name={:?}", tool_call_id, tool_name);

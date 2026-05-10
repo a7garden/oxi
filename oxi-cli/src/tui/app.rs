@@ -145,9 +145,6 @@ pub(crate) enum UiEvent {
         name: String,
         arguments: String,
     },
-    ToolStart {
-        tool_name: String,
-    },
     ToolResult {
         tool_call_id: Option<String>,
         tool_name: String,
