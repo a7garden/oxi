@@ -10,7 +10,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget, Wrap},
 };
 use tui_markdown;
 
@@ -31,7 +31,7 @@ pub enum MessageRole {
 pub enum ContentBlock {
     Text { content: String },
     Thinking { content: String, collapsed: bool },
-    ToolCall { id: String, name: String, arguments: String },
+    ToolCall { id: String, name: String, arguments: String, result: Option<(String, bool)> },
     ToolResult { tool_name: String, content: String, is_error: bool },
     Error { title: String, message: String, retryable: bool },
     Image { mime_type: String, base64_data: String },
@@ -147,12 +147,22 @@ impl ChatViewState {
 
     pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String) {
         if let Some(ref mut s) = self.streaming {
-            s.message.content_blocks.push(ContentBlock::ToolCall { id, name, arguments });
+            s.message.content_blocks.push(ContentBlock::ToolCall { id, name, arguments, result: None });
         }
     }
 
     pub fn stream_tool_result(&mut self, tool_name: String, content: String, is_error: bool) {
         if let Some(ref mut s) = self.streaming {
+            // Find last ToolCall and fill in its result — merges call + result into one block
+            if let Some(last) = s.message.content_blocks.last_mut() {
+                if matches!(last, ContentBlock::ToolCall { .. }) {
+                    if let ContentBlock::ToolCall { ref mut result, .. } = last {
+                        *result = Some((content, is_error));
+                        return;
+                    }
+                }
+            }
+            // Fallback: push as separate result block
             s.message.content_blocks.push(ContentBlock::ToolResult { tool_name, content, is_error });
         }
     }
@@ -277,6 +287,17 @@ fn block_body_line(text: &str, box_width: u16, border_style: Style, body_style: 
     vec![
         Span::styled("\u{2502}", border_style),  // │
         Span::styled(format!(" {}{}", text, fill), body_style),
+    ].into()
+}
+
+/// Build a divider line inside a box: │────── (separates call from result)
+fn block_divider_line(box_width: u16, border_style: Style, symbol: &str) -> Line<'static> {
+    let inner_width = (box_width as usize).saturating_sub(2);
+    let repeats = inner_width.saturating_sub(2); // ┌ + ┐ + 1 space
+    vec![
+        Span::styled("\u{2502}", border_style),
+        Span::styled(" ", border_style),
+        Span::styled(symbol.repeat(repeats.max(1)), border_style),
     ].into()
 }
 
@@ -468,9 +489,11 @@ impl StatefulWidget for ChatView<'_> {
 
         // ── Render ──
         {
+            // Wrap at character boundaries so long lines don't bleed past area.width.
             let para = Paragraph::new(lines)
                 .block(Block::default().style(styles.normal))
-                .scroll((off, 0));
+                .scroll((off, 0))
+                .wrap(Wrap { trim: false });
             para.render(area, buf);
         }
 
@@ -540,20 +563,37 @@ fn push_blocks(
                     push(lines, role, &format!("  {}", first), LineKind::Normal);
                 }
             }
-            ContentBlock::ToolCall { name, arguments, .. } => {
+            ContentBlock::ToolCall { id: _, name, arguments, result } => {
                 let border = styles.muted;
                 let body = styles.normal;
                 let label = Style::default().fg(styles.primary.fg.unwrap_or(Color::White)).bold();
                 lines.push(block_header_line(&format!("tool: {}", name), 50, border, label));
-                let max = if arguments.lines().count() <= 4 { 6 } else { 4 };
-                for l in arguments.lines().take(max) {
+                // Arguments (the call input)
+                let max_args = if arguments.lines().count() <= 3 { 5 } else { 3 };
+                for l in arguments.lines().take(max_args) {
                     lines.push(block_body_line(l, 50, border, body));
                 }
-                if arguments.lines().count() > max {
+                if arguments.lines().count() > max_args {
                     lines.push(block_truncate_line(50, border, body));
+                }
+                // Result (if available) — shown inside same box
+                if let Some((result_content, is_error)) = result {
+                    let (sep, res_border, res_body) = if *is_error {
+                        ("─", styles.error, styles.error)
+                    } else {
+                        ("─", styles.success, styles.normal)
+                    };
+                    lines.push(block_divider_line(50, res_border, sep));
+                    for l in result_content.lines().take(6) {
+                        lines.push(block_body_line(l, 50, res_border, res_body));
+                    }
+                    if result_content.lines().count() > 6 {
+                        lines.push(block_truncate_line(50, res_border, res_body));
+                    }
                 }
                 lines.push(block_footer_line(50, border));
             }
+            // ToolResult shown only when NOT merged into ToolCall (standalone result)
             ContentBlock::ToolResult { tool_name, content, is_error } => {
                 let (check, border, body) = if *is_error {
                     ("X", styles.error, styles.error)

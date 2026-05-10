@@ -1942,6 +1942,73 @@ impl SessionManager {
         let meta = SessionMeta::new(id);
         Ok(meta)
     }
+
+    /// Fork from current session at a specific entry, creating a new session file. Synchronous.
+    pub fn branch_from_entry(&self, entry_id: &str) -> Result<String, String> {
+        let path = self
+            .get_session_file()
+            .ok_or_else(|| "No session file path".to_string())?;
+        let source_entries = load_entries_from_file(&path);
+        if source_entries.is_empty() {
+            return Err("Cannot fork: source session is empty".to_string());
+        }
+        let header = source_entries.iter().find_map(|e| match e {
+            FileEntry::Header(h) => Some(h),
+            _ => None,
+        }).ok_or_else(|| "Missing session header".to_string())?;
+        let new_id = Uuid::new_v4().to_string();
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let file_timestamp = timestamp.replace([':', '.', 'T', '-', ':', '+'], "-");
+        let short_id = &new_id[..8];
+        let dir = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".".to_string());
+        let new_file = format!("{}/{}_{}.jsonl", dir, file_timestamp, short_id);
+        let mut found = false;
+        let mut new_entries = vec![FileEntry::Header(SessionHeader {
+            entry_type: "session".to_string(),
+            version: Some(CURRENT_SESSION_VERSION),
+            id: new_id.clone(),
+            timestamp,
+            cwd: self.get_cwd(),
+            parent_session: Some(path),
+        })];
+        for file_entry in &source_entries {
+            if let FileEntry::Entry(entry) = file_entry {
+                let eid = match entry {
+                    SessionEntryEnum::Message(m) => m.base.id.clone(),
+                    SessionEntryEnum::ThinkingLevelChange(m) => m.base.id.clone(),
+                    SessionEntryEnum::ModelChange(m) => m.base.id.clone(),
+                    SessionEntryEnum::Compaction(m) => m.base.id.clone(),
+                    SessionEntryEnum::BranchSummary(m) => m.base.id.clone(),
+                    SessionEntryEnum::Custom(m) => m.base.id.clone(),
+                    SessionEntryEnum::Label(m) => m.base.id.clone(),
+                    SessionEntryEnum::SessionInfo(m) => m.base.id.clone(),
+                    SessionEntryEnum::CustomMessage(m) => m.base.id.clone(),
+                };
+                if eid == entry_id {
+                    found = true;
+                }
+                if found {
+                    new_entries.push(FileEntry::Entry(entry.clone()));
+                }
+            }
+        }
+        if !found {
+            return Err(format!("Entry not found: {}", entry_id));
+        }
+        let mut handle = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&new_file)
+            .map_err(|e| e.to_string())?;
+        for entry in &new_entries {
+            let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
+            writeln!(&mut handle, "{}", line).map_err(|e| e.to_string())?;
+        }
+        Ok(new_file)
+    }
 }
 
 // ============================================================================
@@ -2134,6 +2201,36 @@ fn find_most_recent_session(session_dir: &str) -> Option<String> {
     files.sort_by(|a, b| b.1.cmp(&a.1));
     files.into_iter().next().map(|(p, _)| p)
 }
+
+/// Resolve a session file path from user input, handling relative paths and ~.
+pub fn resolve_session_path(input: &str, cwd: &str) -> Result<String, String> {
+    let path = input.trim();
+    if path.is_empty() {
+        return Err("Empty path".to_string());
+    }
+    let resolved = if path.starts_with("~") || path == "~" {
+        let home =
+            dirs::home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
+        if path == "~" {
+            home.to_string_lossy().into_owned()
+        } else {
+            format!("{}/{}", home.to_string_lossy(), &path[2..])
+        }
+    } else if path.starts_with('/') || path.contains(':') {
+        path.to_string()
+    } else {
+        if path.starts_with("./") {
+            format!("{}/{}", cwd.trim_end_matches('/'), &path[2..])
+        } else {
+            format!("{}/{}", cwd.trim_end_matches('/'), path)
+        }
+    };
+    let p = std::path::Path::new(&resolved);
+    p.canonicalize()
+        .map(|c| c.to_string_lossy().into_owned())
+        .or_else(|_| Ok(resolved))
+}
+
 
 /// Build session context from entries using tree traversal
 fn build_session_context_internal(

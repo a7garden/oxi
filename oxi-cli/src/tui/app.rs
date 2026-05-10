@@ -579,11 +579,12 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                         }
                                         AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
                                             tool_call_id: Some(result.tool_call_id.clone()),
-                                            tool_name: result.name.clone(),
+                                            tool_name: String::new(),
                                             content: result.content.chars().take(500).collect(),
                                             is_error: result.status == "error",
                                         },
                                         AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
+                                            tool_call_id: None,
                                             tool_name: String::new(),
                                             content: error.clone(),
                                             is_error: true,

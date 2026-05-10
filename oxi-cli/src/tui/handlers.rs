@@ -1045,8 +1045,11 @@ async fn handle_resume_select_key(
             state.overlay = Some(AppOverlay::ResumeSelect { sessions, selected: new_sel });
         }
         KeyCode::Enter => {
+            // Only select if input is empty — otherwise user is trying to send a message
+            if !state.input.text.is_empty() {
+                return None;
+            }
             if let Some(session_info) = sessions.get(selected) {
-                // Trigger session switch via TuiNextAction
                 state.next_action = Some(super::app::TuiNextAction::SwitchSession(session_info.path.clone()));
                 state.add_system_message(format!("Switching to session: {}", session_info.path));
             }

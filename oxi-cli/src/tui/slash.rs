@@ -304,12 +304,21 @@ pub(crate) fn handle_slash_command(
         }
         "/import" => {
             if let Some(path) = arg {
-                if !std::path::Path::new(path).exists() {
-                    state.add_system_message(format!("File not found: {}", path));
-                } else {
-                    // Trigger session switch to the imported file
-                    state.next_action = Some(super::app::TuiNextAction::SwitchSession(path.to_string()));
-                    state.add_system_message(format!("Importing session from {}...", path));
+                let cwd = std::env::current_dir()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| ".".to_string());
+                match crate::session::resolve_session_path(path, &cwd) {
+                    Ok(resolved) => {
+                        if !std::path::Path::new(&resolved).exists() {
+                            state.add_system_message(format!("File not found: {}", resolved));
+                        } else {
+                            state.next_action = Some(super::app::TuiNextAction::SwitchSession(resolved.clone()));
+                            state.add_system_message(format!("Importing session from {}...", resolved));
+                        }
+                    }
+                    Err(e) => {
+                        state.add_system_message(format!("Error resolving path: {}", e));
+                    }
                 }
             } else {
                 state.add_system_message("/import <path-to-jsonl>".to_string());
@@ -323,25 +332,38 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/fork" => {
-            // Show user messages to fork from
             if let Some(ref path) = state.session_file_path {
-                let sm = crate::session::SessionManager::open(path, None, None);
-                let branch = sm.get_branch(None);
-                let user_entries: Vec<_> = branch.iter()
-                    .filter(|e| e.message.is_user())
-                    .enumerate()
-                    .collect();
-                if user_entries.is_empty() {
-                    state.add_system_message("No user messages to fork from.".to_string());
-                } else {
-                    let mut out = "Fork from which message?\n\n".to_string();
-                    for (i, entry) in user_entries.iter() {
-                        let preview: String = entry.content().chars().take(60).collect();
-                        let short_id = &entry.id[..8.min(entry.id.len())];
-                        out.push_str(&format!("  {}. [{}] {}\n", i + 1, short_id, preview));
+                if let Some(entry_id) = arg {
+                    // Direct fork: /fork <entry-id>
+                    let sm = crate::session::SessionManager::open(path, None, None);
+                    match sm.branch_from_entry(entry_id) {
+                        Ok(new_path) => {
+                            state.next_action = Some(super::app::TuiNextAction::SwitchSession(new_path));
+                            state.add_system_message(format!("Forked from [{}]\nStarting new session...", &entry_id[..8.min(entry_id.len())]));
+                        }
+                        Err(e) => {
+                            state.add_system_message(format!("Error forking: {}", e));
+                        }
                     }
-                    out.push_str("\n/fork <entry-id> to fork from a specific message");
-                    state.add_system_message(out);
+                } else {
+                    let sm = crate::session::SessionManager::open(path, None, None);
+                    let branch = sm.get_branch(None);
+                    let user_entries: Vec<_> = branch.iter()
+                        .filter(|e| e.message.is_user())
+                        .enumerate()
+                        .collect();
+                    if user_entries.is_empty() {
+                        state.add_system_message("No user messages to fork from.".to_string());
+                    } else {
+                        let mut out = "Fork from which message?\n\n".to_string();
+                        for (i, entry) in user_entries.iter() {
+                            let preview: String = entry.content().chars().take(60).collect();
+                            let short_id = &entry.id[..8.min(entry.id.len())];
+                            out.push_str(&format!("  {}. [{}] {}\n", i + 1, short_id, preview));
+                        }
+                        out.push_str("\n/fork <entry-id> to fork from a specific message");
+                        state.add_system_message(out);
+                    }
                 }
             } else {
                 state.add_system_message("No session file available.".to_string());
@@ -487,6 +509,9 @@ pub(crate) fn handle_slash_command(
             session.set_thinking_level(reloaded.thinking_level);
             if !model_name.is_empty() {
                 state.footer_state.data.model_name = model_name.clone();
+            }
+            if !provider.is_empty() {
+                state.footer_state.data.provider_name = provider.clone();
             }
             state.add_system_message(format!(
                 "OK: Reloaded configuration\n  Model: {}\n  Provider: {}\n  Theme: {}\n  Thinking: {:?}\n  Extensions: {}\n  Stream: {}\n  Auto-compact: {}",
