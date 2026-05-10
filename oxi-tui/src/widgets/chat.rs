@@ -626,6 +626,8 @@ impl StatefulWidget for ChatView<'_> {
                         spans.push(Span::styled(s.to_string(), seg_style));
                     }
                 }
+                LineKind::Normal | LineKind::ListItem | LineKind::Heading(_) => {
+                    let segments = markdown::parse_inline(text);
                     for seg in &segments {
                         let seg_style = match seg {
                             markdown::Segment::Normal(_) => line_base_style,
@@ -643,6 +645,17 @@ impl StatefulWidget for ChatView<'_> {
                         };
                         spans.push(Span::styled(s.to_string(), seg_style));
                     }
+                }
+                LineKind::ToolCallHeader
+                | LineKind::ToolCallBody
+                | LineKind::ToolCallFooter
+                | LineKind::ToolResultHeader
+                | LineKind::ToolResultBody
+                | LineKind::ToolResultFooter
+                | LineKind::ErrorHeader
+                | LineKind::ErrorBody
+                | LineKind::ErrorFooter => {
+                    spans.push(Span::styled(text.clone(), line_base_style));
                 }
             }
 

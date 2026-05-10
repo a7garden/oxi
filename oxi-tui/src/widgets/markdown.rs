@@ -191,9 +191,10 @@ pub fn detect_line_type(line: &str) -> LineType {
     // ATX heading
     let hashes = trimmed.chars().take_while(|c| *c == '#').count();
     if hashes > 0 && hashes <= 6 {
-        // Must be followed by a space or any non-# char (e.g. emoji like 🔧)
+        // Must be followed by a space, end-of-line, or non-# char (e.g. emoji)
+        // e.g. "# Title" → heading, "##🔧 기술" → heading, "####" → not heading
         let after = trimmed.chars().nth(hashes);
-        if after.is_none() || (after != Some('#') && after != Some(' ')) {
+        if after.is_none() || after == Some(' ') || after != Some('#') {
             return LineType::Heading(hashes as u8);
         }
     }
