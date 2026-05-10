@@ -1,6 +1,6 @@
 [package]
 name = "oxi-tui"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2021"
 description = "Terminal UI widgets and theme system for oxi, built on ratatui"
 readme = "README.md"
@@ -13,7 +13,7 @@ exclude = ["target/"]
 
 [dependencies]
 # Terminal UI
-ratatui = { version = "0.30", features = ["unstable-widget-ref"] }
+ratatui = "0.30"
 tui-markdown = "0.3"
 
 # Serialization (for theme file loading)
