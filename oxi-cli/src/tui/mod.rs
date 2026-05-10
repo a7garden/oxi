@@ -8,3 +8,4 @@ mod render;
 mod slash;
 
 pub use app::run_tui_interactive;
+pub use app::run_tui_interactive_with_continue;

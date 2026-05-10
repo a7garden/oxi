@@ -303,11 +303,29 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/import" => {
-            state.add_system_message(if let Some(p) = arg {
-                format!("Import '{}' — coming soon", p)
+            if let Some(path) = arg {
+                if !std::path::Path::new(path).exists() {
+                    state.add_system_message(format!("File not found: {}", path));
+                } else {
+                    state.add_system_message(format!("Importing session from {}...", path));
+                    // The actual switch needs runtime integration
+                    // For now, show the file was found
+                    let cwd = std::env::current_dir()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| ".".to_string());
+                    match crate::session::SessionManager::open(path, None, Some(&cwd)) {
+                        _mgr => {
+                            let entries = _mgr.get_entries();
+                            state.add_system_message(format!(
+                                "Loaded {} entries. Session switching requires runtime integration.",
+                                entries.len()
+                            ));
+                        }
+                    }
+                }
             } else {
-                "/import <path-to-jsonl>".to_string()
-            });
+                state.add_system_message("/import <path-to-jsonl>".to_string());
+            }
             true
         }
         "/share" => {
@@ -387,27 +405,21 @@ pub(crate) fn handle_slash_command(
             let cwd = std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| ".".to_string());
-            let session_dir = crate::session::get_default_session_dir(&cwd);
-            if let Ok(sessions) = std::fs::read_dir(&session_dir) {
-                let list: Vec<_> = sessions
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.path().extension().map_or(false, |ext| ext == "jsonl"))
-                    .take(10)
-                    .collect();
-                if list.is_empty() {
-                    state.add_system_message("No previous sessions".to_string());
-                } else {
-                    let mut out = "Recent:\n\n".to_string();
-                    for (i, entry) in list.iter().enumerate() {
-                        if let Some(name) = entry.file_name().to_str() {
-                            out.push_str(&format!("{}. {}\n", i + 1, name));
-                        }
-                    }
-                    out.push_str("\n/import <path> to resume");
-                    state.add_system_message(out);
+            let rt = tokio::runtime::Handle::current();
+            match rt.block_on(crate::session::SessionManager::list(&cwd, None)) {
+                Ok(sessions) if sessions.is_empty() => {
+                    state.add_system_message("No previous sessions found.".to_string());
                 }
-            } else {
-                state.add_system_message("No sessions found".to_string());
+                Ok(sessions) => {
+                    let recent: Vec<_> = sessions.into_iter().take(15).collect();
+                    state.overlay = Some(AppOverlay::ResumeSelect {
+                        sessions: recent,
+                        selected: 0,
+                    });
+                }
+                Err(e) => {
+                    state.add_system_message(format!("Error listing sessions: {}", e));
+                }
             }
             true
         }

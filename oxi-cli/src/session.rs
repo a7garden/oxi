@@ -898,6 +898,26 @@ pub struct SessionManager {
     leaf_id: RwLock<Option<String>>,
 }
 
+// Manual Clone implementation — only copies internal pointers, not file handles
+impl Clone for SessionManager {
+    fn clone(&self) -> Self {
+        Self {
+            session_id: self.session_id.clone(),
+            session_file: self.session_file.clone(),
+            session_dir: self.session_dir.clone(),
+            cwd: self.cwd.clone(),
+            persist: self.persist,
+            flushed: self.flushed,
+            persisted_count: RwLock::new(*self.persisted_count.read()),
+            file_entries: RwLock::new(self.file_entries.read().clone()),
+            by_id: RwLock::new(self.by_id.read().clone()),
+            labels_by_id: RwLock::new(self.labels_by_id.read().clone()),
+            label_timestamps_by_id: RwLock::new(self.label_timestamps_by_id.read().clone()),
+            leaf_id: RwLock::new(self.leaf_id.read().clone()),
+        }
+    }
+}
+
 impl SessionManager {
     /// Create a new session and persist it to disk.
     pub fn create(cwd: &str, session_dir: Option<&str>) -> Self {
@@ -2159,7 +2179,9 @@ fn build_session_context_internal(
     // Build messages - include all messages in the path
     let messages: Vec<AgentMessage> = path
         .iter()
-        .filter(|e| e.message.is_user() || e.message.is_assistant() || matches!(&e.message, AgentMessage::BranchSummary { .. }))
+        .filter(|e| e.message.is_user() || e.message.is_assistant() 
+            || matches!(&e.message, AgentMessage::BranchSummary { .. })
+            || matches!(&e.message, AgentMessage::CompactionSummary { .. }))
         .map(|e| e.message.clone())
         .collect();
 

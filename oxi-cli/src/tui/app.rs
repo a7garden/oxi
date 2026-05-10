@@ -250,6 +250,11 @@ pub(crate) enum AppOverlay {
         providers: Vec<String>,
         selected: usize,
     },
+    /// Session resume selector
+    ResumeSelect {
+        sessions: Vec<crate::session::SessionInfo>,
+        selected: usize,
+    },
 }
 
 pub(crate) struct AppState {
@@ -455,13 +460,27 @@ fn now_millis() -> i64 {
 
 /// Run the TUI interactive mode.
 pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
+    run_tui_interactive_impl(app, false).await
+}
+
+/// Run TUI interactive mode, optionally resuming the most recent session.
+pub async fn run_tui_interactive_with_continue(app: crate::App, resume_last: bool) -> Result<()> {
+    run_tui_interactive_impl(app, resume_last).await
+}
+
+async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<()> {
     let settings = app.settings().clone();
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| ".".to_string());
 
-    let session_manager = SessionManager::create(&cwd, None);
+    let session_manager = if resume_last {
+        SessionManager::continue_recent(&cwd, None)
+    } else {
+        SessionManager::create(&cwd, None)
+    };
     let session_id = session_manager.get_session_id();
+    let session_manager_for_restore = if resume_last { session_manager.clone() } else { session_manager.clone() };
 
     let services = create_agent_session_services(
         CreateAgentSessionServicesOptions::new(std::env::current_dir().unwrap_or_default()),
@@ -652,6 +671,32 @@ pub async fn run_tui_interactive(app: crate::App) -> Result<()> {
 
     let theme = Theme::dark();
     let mut state = AppState::new();
+
+    // Restore previous messages if resuming a session
+    if resume_last {
+        let branch = session_manager_for_restore.get_branch(None);
+        for entry in &branch {
+            match &entry.message {
+                crate::session::AgentMessage::User { content } => {
+                    state.add_user_message(content.as_str().to_string());
+                }
+                crate::session::AgentMessage::Assistant { content, .. } => {
+                    let text: String = content.iter()
+                        .filter_map(|b| match b {
+                            crate::session::AssistantContentBlock::Text { text } => Some(text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("");
+                    if !text.is_empty() {
+                        state.add_system_message(text);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     let model_id = agent_session.model_id();
     let git_branch =
         crate::git_utils::get_current_branch(&std::env::current_dir().unwrap_or_default());

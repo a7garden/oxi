@@ -228,7 +228,11 @@ async fn main() -> Result<()> {
         std::process::exit(exit_code);
     } else if prompt.is_empty() || args.interactive {
         // TUI interactive mode
-        oxi::tui::run_tui_interactive(app).await?;
+        if args.continue_session {
+            oxi::tui::run_tui_interactive_with_continue(app, true).await?;
+        } else {
+            oxi::tui::run_tui_interactive(app).await?;
+        }
     } else {
         // Single prompt mode
         run_single_prompt(app, &prompt).await?;

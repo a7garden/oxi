@@ -379,6 +379,9 @@ fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme
         Some(AppOverlay::LogoutSelect { .. }) => {
             render_logout_select(f, area, state, theme);
         }
+        Some(AppOverlay::ResumeSelect { .. }) => {
+            render_resume_select(f, area, state, theme);
+        }
         None => {}
     }
 }
@@ -505,4 +508,35 @@ fn render_logout_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
     render_title(f, inner, 0, " Select provider to logout", theme.colors.error.to_ratatui(), theme.colors.background.to_ratatui());
     render_selectable_list(f, inner, 2, &providers, selected, &styles, theme, Some(theme.colors.error.to_ratatui()));
     render_hint(f, inner, " Up/Down select  |  Enter remove  |  Esc cancel", styles.muted);
+}
+
+fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
+    let styles = theme.to_styles();
+
+    let sessions = match &state.overlay {
+        Some(AppOverlay::ResumeSelect { sessions, .. }) => sessions.clone(),
+        _ => return,
+    };
+
+    if sessions.is_empty() {
+        return;
+    }
+
+    let selected = match &state.overlay {
+        Some(AppOverlay::ResumeSelect { selected, .. }) => *selected,
+        _ => 0,
+    };
+
+    // Build session labels
+    let items: Vec<String> = sessions.iter().map(|s| {
+        let name_or_id = s.name.clone().unwrap_or_else(|| s.id[..8.min(s.id.len())].to_string());
+        format!("{} — {} ({} messages)", name_or_id, s.cwd, s.message_count)
+    }).collect();
+
+    let popup = centered_popup(area, 0.6, 0.6);
+    let inner = render_popup_frame(f, popup, theme.colors.background.to_ratatui(), theme.colors.border.to_ratatui());
+
+    render_title(f, inner, 0, " Resume session", theme.colors.primary.to_ratatui(), theme.colors.background.to_ratatui());
+    render_selectable_list(f, inner, 2, &items, selected, &styles, theme, None);
+    render_hint(f, inner, " Up/Down select  |  Enter resume  |  Esc cancel", styles.muted);
 }

@@ -479,6 +479,11 @@ async fn handle_overlay_key(
             handle_logout_select_key(key, state).await
         }
 
+        // ── Resume selector ──
+        Some(AppOverlay::ResumeSelect { .. }) => {
+            handle_resume_select_key(key, state, session).await
+        }
+
         None => None,
     }
 }
@@ -1017,6 +1022,40 @@ async fn handle_model_select_key(
                 filter: new_filter,
                 selected: 0,
             });
+        }
+        _ => {}
+    }
+
+    None
+}
+
+async fn handle_resume_select_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    _session: &crate::agent_session::AgentSession,
+) -> Option<Action> {
+    let (sessions, selected) = match &state.overlay {
+        Some(AppOverlay::ResumeSelect { sessions, selected }) => (sessions.clone(), *selected),
+        _ => return None,
+    };
+
+    match key.code {
+        KeyCode::Up => {
+            let new_sel = if selected == 0 { sessions.len().saturating_sub(1) } else { selected - 1 };
+            state.overlay = Some(AppOverlay::ResumeSelect { sessions, selected: new_sel });
+        }
+        KeyCode::Down => {
+            let new_sel = if sessions.is_empty() { 0 } else { (selected + 1).min(sessions.len() - 1) };
+            state.overlay = Some(AppOverlay::ResumeSelect { sessions, selected: new_sel });
+        }
+        KeyCode::Enter => {
+            if let Some(session_info) = sessions.get(selected) {
+                state.add_system_message(format!("Session switching requires runtime integration. Session: {}", session_info.id));
+            }
+            state.overlay = None;
+        }
+        KeyCode::Esc => {
+            state.overlay = None;
         }
         _ => {}
     }

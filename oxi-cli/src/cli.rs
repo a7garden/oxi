@@ -67,6 +67,10 @@ pub struct CliArgs {
     /// Disable session persistence
     #[arg(long)]
     pub no_session: bool,
+
+    /// Resume the most recent session for this project
+    #[arg(short, long)]
+    pub continue_session: bool,
 }
 
 // ── Subcommands ────────────────────────────────────────────────────
