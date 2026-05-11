@@ -85,7 +85,6 @@ pub struct ChatMessage {
 #[derive(Debug, Clone)]
 pub struct StreamingState {
     pub message: ChatMessage,
-    pub active_content_index: usize,
 }
 
 // ── ChatViewState ──────────────────────────────────────────────────────
@@ -94,7 +93,6 @@ pub struct StreamingState {
 pub struct ChatViewState {
     pub messages: Vec<ChatMessage>,
     pub streaming: Option<StreamingState>,
-    pub scroll_offset: u16,
     pub spinner_frame: usize,
     pub content_height: u16,
     pub last_code_block: Option<String>,
@@ -107,8 +105,7 @@ pub struct ChatViewState {
 impl ChatViewState {
     pub fn new() -> Self { Self::default() }
 
-    pub fn scroll_to_bottom(&mut self, visible: u16) {
-        self.scroll_offset = self.content_height.saturating_sub(visible);
+    pub fn scroll_to_bottom(&mut self, _visible: u16) {
         self.scroll_state.scroll_to_bottom();
     }
     pub fn scroll_up(&mut self, n: u16) {
@@ -128,15 +125,13 @@ impl ChatViewState {
                 content_blocks: Vec::new(),
                 timestamp: 0,
             },
-            active_content_index: 0,
         });
         self.tool_tracker.clear();
     }
 
     pub fn stream_text_delta(&mut self, delta: &str) {
         self.append_text(delta);
-        self.update_last_code_block(delta);
-        self.last_code_block = None;
+        self.update_last_code_block();
     }
 
     fn append_text(&mut self, text: &str) {
@@ -151,9 +146,9 @@ impl ChatViewState {
 
     pub fn is_streaming(&self) -> bool { self.streaming.is_some() }
 
-    fn update_last_code_block(&mut self, _delta: &str) {
-        if let Some(ref mut s) = self.streaming {
-            if let Some(ContentBlock::Text { ref mut content, .. }) = s.message.content_blocks.first_mut() {
+    fn update_last_code_block(&mut self) {
+        if let Some(ref s) = self.streaming {
+            if let Some(ContentBlock::Text { ref content, .. }) = s.message.content_blocks.first() {
                 if let Some(code) = extract_last_code_block(content) {
                     self.last_code_block = Some(code);
                 }
@@ -247,7 +242,7 @@ impl ChatViewState {
     pub fn clear(&mut self) {
         self.messages.clear();
         self.streaming = None;
-        self.scroll_offset = 0;
+        self.scroll_state = ScrollViewState::default();
         self.last_code_block = None;
         self.pending_images.clear();
         self.tool_tracker.clear();
@@ -662,12 +657,10 @@ impl Widget for EntryWidget<'_> {
 
 pub struct ChatView<'a> {
     theme: &'a Theme,
-    scrollbar: bool,
 }
 
 impl<'a> ChatView<'a> {
-    pub fn new(theme: &'a Theme) -> Self { Self { theme, scrollbar: true } }
-    pub fn with_scrollbar(mut self, show: bool) -> Self { self.scrollbar = show; self }
+    pub fn new(theme: &'a Theme) -> Self { Self { theme } }
 }
 
 impl StatefulWidget for ChatView<'_> {

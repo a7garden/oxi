@@ -109,7 +109,6 @@ impl StatefulWidget for Input<'_> {
         let y = area.y;
 
         // Prompt: ">" (1 cell, always safe)
-        let _prompt_str = ">";
         buf[(area.x, y)].set_char('>').set_style(styles.primary);
         buf[(area.x + 1, y)].set_char(' ').set_style(styles.normal);
 
