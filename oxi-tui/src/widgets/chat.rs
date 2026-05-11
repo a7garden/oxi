@@ -312,6 +312,7 @@ fn fix_bare_code_fences(content: &str) -> String {
             if (lang_str == "text" || lang_str == "plaintext" || lang_str == "plain" || lang_str == "none") && !lang_str.is_empty() {
                 result.push_str("```text");
                 i += 3 + lang_end;
+                while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') { i += 1; }
                 continue;
             }
         }
