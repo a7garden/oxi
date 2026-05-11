@@ -22,7 +22,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget, Wrap},
 };
-use tui_scrollview::{ScrollView, ScrollViewState};
+use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 use tui_markdown;
 use crate::Theme;
 use crate::theme::ThemeStyles;
@@ -563,7 +563,9 @@ enum LayoutKind {
 fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     let mut entries = Vec::new();
     let mut y: u16 = 0;
-    let inner_w = width.saturating_sub(2); // Block::bordered inner width
+    // Reserve 1 column for the vertical scrollbar so content doesn't overlap.
+    let usable_width = width.saturating_sub(1);
+    let inner_w = usable_width.saturating_sub(2); // Block::bordered inner width
 
     for (i, msg) in state.messages.iter().enumerate() {
         if i > 0 {
@@ -584,7 +586,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
         }
         for block in &msg.content_blocks {
             let kind = block_to_layout_kind(block, msg.role);
-            let h = measure_kind(&kind, width, inner_w);
+            let h = measure_kind(&kind, usable_width, inner_w);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
@@ -597,7 +599,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
         }
         for block in &streaming.message.content_blocks {
             let kind = block_to_layout_kind(block, MessageRole::Assistant);
-            let h = measure_kind(&kind, width, inner_w);
+            let h = measure_kind(&kind, usable_width, inner_w);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
@@ -854,14 +856,19 @@ impl StatefulWidget for ChatView<'_> {
             .unwrap_or(0);
         state.content_height = total_height;
 
-        // Create ScrollView with virtual buffer sized to total content
+        // Create ScrollView with virtual buffer sized to total content.
+        // Horizontal scrollbar disabled — chat wraps to width.
+        // Vertical scrollbar reserves 1 column on the right.
         let size = ratatui::layout::Size::new(width, total_height.max(area.height));
-        let mut scroll_view = ScrollView::new(size);
+        let mut scroll_view = ScrollView::new(size)
+            .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
 
-        // Render each layout entry
+        // Render each layout entry into the virtual buffer.
+        // Use width-1 so content never overlaps the vertical scrollbar.
+        let content_w = width.saturating_sub(1);
         for entry in &layout {
             if entry.height == 0 { continue; }
-            let rect = Rect::new(0, entry.y, width, entry.height);
+            let rect = Rect::new(0, entry.y, content_w, entry.height);
             let widget = EntryWidget::new(&entry.kind, &styles);
             scroll_view.render_widget(widget, rect);
         }

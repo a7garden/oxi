@@ -395,6 +395,9 @@ impl Agent {
                 };
 
                 // ── Process stream events ───────────────────────
+                // Following pi-mono's architecture: use event.partial() for
+                // MessageUpdate so content blocks (text + toolCalls) are properly
+                // separated by the provider layer.
                 let mut iteration_text = String::new();
                 let mut pending_tool_calls: Vec<oxi_ai::ToolCall> = Vec::new();
                 let mut thinking_text = String::new();
@@ -404,54 +407,68 @@ impl Agent {
 
                 while let Some(event) = stream.next().await {
                     match event {
-                        ProviderEvent::Start { .. } => {
-                            // Emit MessageStart at the beginning of the stream
-                            let start_msg = oxi_ai::Message::Assistant(
-                                oxi_ai::AssistantMessage::new(
-                                    oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
-                                )
-                            );
+                        ProviderEvent::Start { partial } => {
+                            let msg = oxi_ai::Message::Assistant(partial.clone());
                             let _ = tx.send(AgentEvent::MessageStart {
-                                message: start_msg.clone(),
+                                message: msg,
                             }).await;
                             message_started = true;
                         }
-                        ProviderEvent::TextDelta { delta, .. } => {
+                        ProviderEvent::TextDelta { delta, partial, .. } => {
                             if !message_started {
-                                // Emit MessageStart if we missed the Start event
-                                let start_msg = oxi_ai::Message::Assistant(
-                                    oxi_ai::AssistantMessage::new(
-                                        oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
-                                    )
-                                );
+                                let msg = oxi_ai::Message::Assistant(partial.clone());
                                 let _ = tx.send(AgentEvent::MessageStart {
-                                    message: start_msg,
+                                    message: msg,
                                 }).await;
                                 message_started = true;
                             }
                             iteration_text.push_str(&delta);
                             let _ = tx.send(AgentEvent::TextChunk { text: delta.clone() }).await;
-                            // Emit MessageUpdate for live rendering
-                            let mut update_msg = oxi_ai::AssistantMessage::new(
-                                oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
-                            );
-                            update_msg.content = vec![ContentBlock::Text(TextContent::new(iteration_text.clone()))];
+                            // Use provider's partial message for MessageUpdate —
+                            // it has properly separated content blocks.
                             let _ = tx.send(AgentEvent::MessageUpdate {
-                                message: oxi_ai::Message::Assistant(update_msg),
+                                message: oxi_ai::Message::Assistant(partial),
                                 delta: Some(delta),
                             }).await;
                         }
-                        ProviderEvent::ThinkingDelta { delta, .. } => {
+                        ProviderEvent::ThinkingDelta { delta, partial, .. } => {
                             thinking_text.push_str(&delta);
                             let _ = tx.send(AgentEvent::ThinkingDelta { text: delta }).await;
+                            // Also emit MessageUpdate with partial that includes thinking
+                            let _ = tx.send(AgentEvent::MessageUpdate {
+                                message: oxi_ai::Message::Assistant(partial),
+                                delta: None,
+                            }).await;
                         }
-                        ProviderEvent::ToolCallStart { .. } => {}
-                        ProviderEvent::ToolCallEnd { tool_call, .. } => {
+                        ProviderEvent::ToolCallStart { partial, .. } => {
+                            if !message_started {
+                                let msg = oxi_ai::Message::Assistant(partial.clone());
+                                let _ = tx.send(AgentEvent::MessageStart {
+                                    message: msg,
+                                }).await;
+                                message_started = true;
+                            }
+                            // Emit MessageUpdate with partial — tool call block now visible
+                            let _ = tx.send(AgentEvent::MessageUpdate {
+                                message: oxi_ai::Message::Assistant(partial),
+                                delta: None,
+                            }).await;
+                        }
+                        ProviderEvent::ToolCallDelta { partial, .. } => {
+                            let _ = tx.send(AgentEvent::MessageUpdate {
+                                message: oxi_ai::Message::Assistant(partial),
+                                delta: None,
+                            }).await;
+                        }
+                        ProviderEvent::ToolCallEnd { tool_call, partial, .. } => {
                             pending_tool_calls.push(tool_call);
+                            let _ = tx.send(AgentEvent::MessageUpdate {
+                                message: oxi_ai::Message::Assistant(partial),
+                                delta: None,
+                            }).await;
                         }
 
                         ProviderEvent::Done { reason, message: ref done_msg } => {
-                            // Emit MessageEnd with final assistant message
                             if message_started {
                                 let _ = tx.send(AgentEvent::MessageEnd {
                                     message: oxi_ai::Message::Assistant(done_msg.clone()),
@@ -466,24 +483,16 @@ impl Agent {
                                 _ => StopReason::Stop,
                             };
 
-                            // Build assistant message with content blocks
-                            let mut content_blocks = vec![];
-                            if !iteration_text.is_empty() {
-                                content_blocks.push(ContentBlock::Text(TextContent::new(iteration_text.clone())));
-                            }
-                            if !thinking_text.is_empty() {
-                                content_blocks.insert(0, ContentBlock::Thinking(
-                                    oxi_ai::ThinkingContent::new(thinking_text.clone()),
-                                ));
-                            }
-                            for tc in &pending_tool_calls {
-                                content_blocks.push(ContentBlock::ToolCall(tc.clone()));
-                            }
+                            // Use done_msg's content blocks directly — provider already
+                            // built the correct structure with text/thinking/toolCall blocks
+                            let mut assistant_msg = done_msg.clone();
 
-                            let mut assistant_msg = oxi_ai::AssistantMessage::new(
-                                oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
-                            );
-                            assistant_msg.content = content_blocks;
+                            // Track text for final_response_text
+                            for block in &assistant_msg.content {
+                                if let ContentBlock::Text(t) = block {
+                                    iteration_text = t.text.clone();
+                                }
+                            }
 
                             // Add assistant message to state
                             self.state.update(|s| {

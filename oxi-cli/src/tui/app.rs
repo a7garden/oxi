@@ -701,81 +701,11 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             agent.set_hooks(hooks);
                             let _ = agent.run_with_channel(prompt, event_tx).await;
                             let _ = event_forwarder.await;
-
-                            // ── Post-run queue drain ────────────────────
-                            // After the agent finishes, check if steering or follow-up
-                            // messages accumulated. Re-run agent to process them.
-                            loop {
-                                let sh = session_handle.clone_handle();
-                                let sq = sh.steering_queue();
-                                let fq = sh.follow_up_queue();
-                                let ps: Vec<String> = sq.write().drain(..).collect();
-                                let pf: Vec<String> = fq.write().drain(..).collect();
-                                if ps.is_empty() && pf.is_empty() { break; }
-                                for m in &ps { sq.write().push_back(m.clone()); }
-                                for m in &pf { fq.write().push_back(m.clone()); }
-
-                                let combined: Vec<&str> = ps.iter().chain(pf.iter()).map(|s| s.as_str()).collect();
-                                let trigger = if combined.len() == 1 {
-                                    combined[0].to_string()
-                                } else {
-                                    format!("[Continuing with {} queued message(s)]", combined.len())
-                                };
-
-                                let (etx, mut erx) = mpsc::channel::<AgentEvent>(256);
-                                let ufwd = ui_tx_for_thread.clone();
-                                let fwd = tokio::task::spawn_local(async move {
-                                    while let Some(event) = erx.recv().await {
-                                        let ui_event = match event {
-                                            AgentEvent::Start { .. } => UiEvent::Start,
-                                            AgentEvent::Thinking => UiEvent::Thinking,
-                                            AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
-                                            AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
-                                            AgentEvent::ToolCall { .. } => continue,
-                                            AgentEvent::ToolStart { tool_call_id, tool_name, arguments } => UiEvent::ToolCall {
-                                                id: tool_call_id, name: tool_name, arguments: arguments.to_string(),
-                                            },
-                                            AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
-                                                tool_call_id: Some(result.tool_call_id.clone()),
-                                                tool_name: String::new(),
-                                                content: result.content.chars().take(500).collect(),
-                                                is_error: result.status == "error",
-                                            },
-                                            AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
-                                                tool_call_id: None, tool_name: String::new(), content: error.clone(), is_error: true,
-                                            },
-                                            AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => UiEvent::ToolCall {
-                                                id: tool_call_id, name: tool_name, arguments: args.to_string(),
-                                            },
-                                            AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => UiEvent::ToolResult {
-                                                tool_call_id: Some(tool_call_id), tool_name,
-                                                content: result.content.chars().take(500).collect(), is_error,
-                                            },
-                                            AgentEvent::Complete { .. } => UiEvent::Complete,
-                                            AgentEvent::Error { message, .. } => UiEvent::Error(message),
-                                            _ => continue,
-                                        };
-                                        if ufwd.send(ui_event).await.is_err() { break; }
-                                    }
-                                });
-
-                                let sh2 = session_handle.clone_handle();
-                                let agent2 = sh2.agent_ref();
-                                sh2.reset_should_stop();
-                                let sq2 = sh2.steering_queue();
-                                let fq2 = sh2.follow_up_queue();
-                                let ssf2 = sh2.should_stop_flag();
-                                let hooks2 = oxi_agent::AgentHooks {
-                                    should_stop_after_turn: Some(Box::new(move |_ctx| ssf2.load(Ordering::SeqCst))),
-                                    get_steering_messages: Some(Box::new(move || sq2.write().drain(..).collect::<Vec<String>>())),
-                                    get_follow_up_messages: Some(Box::new(move || fq2.write().drain(..).collect::<Vec<String>>())),
-                                    tool_execution: oxi_agent::ToolExecutionMode::Sequential,
-                                    ..Default::default()
-                                };
-                                agent2.set_hooks(hooks2);
-                                let _ = agent2.run_with_channel(trigger, etx).await;
-                                let _ = fwd.await;
-                            }
+                            // NOTE: No post-run queue drain needed.
+                            // The agent's agentic loop (run_with_channel) already processes
+                            // all steering and follow-up messages via the hooks configured
+                            // above. This matches pi-mono's architecture where the agent
+                            // loop handles everything internally before emitting Complete.
                         }
                     })
                     .await;
