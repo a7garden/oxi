@@ -3296,6 +3296,7 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "tui-markdown",
+ "tui-scrollview",
  "unicode-width 0.1.14",
 ]
 
@@ -5393,6 +5394,17 @@ dependencies = [
  "rstest",
  "syntect",
  "tracing",
+]
+
+[[package]]
+name = "tui-scrollview"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94a94f467c7ac7c291039b0733e3b2d379c77884e34fc27d167921fc1ab4842f"
+dependencies = [
+ "indoc",
+ "ratatui-core",
+ "ratatui-widgets",
 ]
 
 [[package]]
