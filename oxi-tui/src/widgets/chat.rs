@@ -1,19 +1,19 @@
 //! ChatView widget — scrollable message list with streaming support.
 //!
-//! Content is built as a list of segments (text, tool boxes, errors, etc.)
-//! and rendered using proper ratatui widgets:
-//! - Tool/error boxes → `Block::bordered()` + `Paragraph`
-//! - Text → `Paragraph` with `Wrap`
-//! - Scrolling via virtual y-coordinates with segment-level clipping.
+//! Architecture: flatten everything into a single Vec<Line> with style.
+//! Scrolling is simply "which range of lines to show". No segment math.
+//! Tool/error boxes are rendered as styled bordered blocks inline.
+//!
+//! Safe characters only: no exotic Unicode that might render as mojibake.
 
 use std::collections::HashMap;
 
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget, Wrap},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 use tui_markdown;
 use crate::Theme;
@@ -21,55 +21,33 @@ use crate::theme::ThemeStyles;
 
 // ── Tool Call Tracker ─────────────────────────────────────────────────
 
-/// Manages the mapping between tool call IDs and their content block indices.
-/// Extracted from ChatViewState to keep state responsibilities focused.
 #[derive(Debug, Default)]
 struct ToolCallTracker {
     active: HashMap<String, usize>,
 }
 
 impl ToolCallTracker {
-    fn new() -> Self { Self::default() }
-
-    /// Register a tool call. Returns false if the ID already exists (duplicate).
     fn register(&mut self, id: String, index: usize) -> bool {
-        if self.active.contains_key(&id) {
-            return false;
-        }
+        if self.active.contains_key(&id) { return false; }
         self.active.insert(id, index);
         true
     }
 
-    /// Find and remove a tool call by ID. Returns the content block index.
     fn find_and_remove(&mut self, id: &str) -> Option<usize> {
         self.active.remove(id)
     }
 
-    /// Remove by ID (ignoring the index).
-    fn remove(&mut self, id: &str) {
-        self.active.remove(id);
-    }
-
-    /// Look up a tool call by ID without removing it.
-    fn get(&self, id: &str) -> Option<usize> {
-        self.active.get(id).copied()
-    }
-
-    fn clear(&mut self) {
-        self.active.clear();
-    }
+    fn remove(&mut self, id: &str) { self.active.remove(id); }
+    fn get(&self, id: &str) -> Option<usize> { self.active.get(id).copied() }
+    fn clear(&mut self) { self.active.clear(); }
 }
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-/// Status of a tool call — tracks lifecycle from request to completion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolCallStatus {
-    /// LLM requested the tool; execution has not started yet.
     Requested,
-    /// Tool is currently executing.
     Executing,
-    /// Tool finished (result field is populated).
     Done,
 }
 
@@ -84,7 +62,13 @@ pub enum MessageRole {
 pub enum ContentBlock {
     Text { content: String },
     Thinking { content: String, collapsed: bool },
-    ToolCall { id: String, name: String, arguments: String, result: Option<(String, bool)>, status: ToolCallStatus },
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: String,
+        result: Option<(String, bool)>,
+        status: ToolCallStatus,
+    },
     ToolResult { tool_name: String, content: String, is_error: bool },
     Error { title: String, message: String, retryable: bool },
     Image { mime_type: String, base64_data: String },
@@ -112,12 +96,8 @@ pub struct ChatViewState {
     pub scroll_offset: u16,
     pub spinner_frame: usize,
     pub content_height: u16,
-    /// Last code block extracted from assistant text (for copy functionality)
     pub last_code_block: Option<String>,
-    /// Pending images awaiting user action
     pub pending_images: Vec<(String, String)>,
-    /// Map of active tool call IDs to their content_blocks index.
-    /// Used for ID-based result matching instead of position-based.
     tool_tracker: ToolCallTracker,
 }
 
@@ -153,7 +133,6 @@ impl ChatViewState {
         self.last_code_block = None;
     }
 
-    /// Core text append to the active streaming content block.
     fn append_text(&mut self, text: &str) {
         if let Some(ref mut s) = self.streaming {
             if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
@@ -164,15 +143,11 @@ impl ChatViewState {
         }
     }
 
-    /// Returns true when a streaming message is in progress.
-    pub fn is_streaming(&self) -> bool {
-        self.streaming.is_some()
-    }
+    pub fn is_streaming(&self) -> bool { self.streaming.is_some() }
 
-    /// Update the last code block when new text arrives.
-    fn update_last_code_block(&mut self, delta: &str) {
+    fn update_last_code_block(&mut self, _delta: &str) {
         if let Some(ref mut s) = self.streaming {
-            if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
+            if let Some(ContentBlock::Text { ref mut content, .. }) = s.message.content_blocks.first_mut() {
                 if let Some(code) = extract_last_code_block(content) {
                     self.last_code_block = Some(code);
                 }
@@ -180,7 +155,6 @@ impl ChatViewState {
         }
     }
 
-    /// Called when streaming finishes — finalize code block extraction.
     pub fn refresh_last_code_block(&mut self) {
         if let Some(ref s) = self.streaming {
             if let Some(ContentBlock::Text { ref content, .. }) = s.message.content_blocks.first() {
@@ -191,14 +165,12 @@ impl ChatViewState {
         }
     }
 
-    /// Update status of a tool call by ID. No-op if ID not found.
     pub fn set_tool_status(&mut self, id: &str, status: ToolCallStatus) {
         if let Some(ref mut s) = self.streaming {
             if let Some(idx) = self.tool_tracker.get(id) {
                 if let Some(block) = s.message.content_blocks.get_mut(idx) {
-                    if let ContentBlock::ToolCall { status: ref mut curr_status, .. } = block {
-                        *curr_status = status;
-                        return;
+                    if let ContentBlock::ToolCall { status: ref mut curr, .. } = block {
+                        *curr = status;
                     }
                 }
             }
@@ -206,65 +178,38 @@ impl ChatViewState {
     }
 
     pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String, status: ToolCallStatus) {
-        tracing::debug!("[TUI] stream_tool_call: id={:?}, name={:?}, status={:?}, streaming={}",
-            id, name, status, self.streaming.is_some());
         if let Some(ref mut s) = self.streaming {
             let idx = s.message.content_blocks.len();
-            if !self.tool_tracker.register(id.clone(), idx) {
-                tracing::debug!("[TUI] Duplicate ToolCall ID {:?} — ignoring", id);
-                return;
-            }
+            if !self.tool_tracker.register(id.clone(), idx) { return; }
             s.message.content_blocks.push(ContentBlock::ToolCall {
-                id: id.clone(),
-                name,
-                arguments,
-                result: None,
-                status,
+                id, name, arguments, result: None, status,
             });
-            tracing::debug!("[TUI] ToolCall pushed at idx={}, blocks count={}",
-                idx, s.message.content_blocks.len());
         }
     }
 
     pub fn stream_tool_result(&mut self, tool_call_id: Option<String>, tool_name: String, content: String, is_error: bool) {
-        tracing::debug!("[TUI] stream_tool_result: tool_call_id={:?}, tool_name={:?}, streaming={}",
-            tool_call_id, tool_name, self.streaming.is_some());
         if let Some(ref mut s) = self.streaming {
-            // ── Try ID-based matching first ──
             if let Some(ref id) = tool_call_id {
                 if let Some(idx) = self.tool_tracker.find_and_remove(id) {
                     if let Some(block) = s.message.content_blocks.get_mut(idx) {
                         if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = block {
                             *result = Some((content, is_error));
                             *status = ToolCallStatus::Done;
-                            tracing::debug!("[TUI] ID-matched result merged into ToolCall at idx={}", idx);
                             return;
                         }
                     }
-                } else {
-                    tracing::debug!("[TUI] ToolResult for unknown ID {:?} — falling back", id);
                 }
             }
-
-            // ── Fallback: last block is ToolCall → merge ──
+            // Fallback: merge into last ToolCall
             if let Some(last) = s.message.content_blocks.last_mut() {
-                if matches!(last, ContentBlock::ToolCall { .. }) {
-                    if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = last {
-                        *result = Some((content, is_error));
-                        *status = ToolCallStatus::Done;
-                        if let Some(ref id) = tool_call_id {
-                            self.tool_tracker.remove(id);
-                        }
-                        tracing::debug!("[TUI] Fallback merge result into last ToolCall");
-                        return;
-                    }
+                if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = last {
+                    *result = Some((content, is_error));
+                    *status = ToolCallStatus::Done;
+                    if let Some(ref id) = tool_call_id { self.tool_tracker.remove(id); }
+                    return;
                 }
             }
-            // ── Final fallback: push as standalone result ──
-            tracing::debug!("[TUI] PUSHING standalone ToolResult");
             s.message.content_blocks.push(ContentBlock::ToolResult { tool_name, content, is_error });
-        } else {
-            tracing::debug!("[TUI] FALLBACK: streaming is None, ToolResult discarded");
         }
     }
 
@@ -318,71 +263,9 @@ impl ChatViewState {
             timestamp: 0,
         });
     }
-
 }
 
 // ── Code block extraction ────────────────────────────────────────────
-
-/// Fix bare code fences (``` without a language) → ```text.
-/// Also normalizes unknown/bare language tokens to "text".
-///
-/// Handles:
-/// - ```        (bare, immediate newline)
-/// - ```        (bare, followed by space/tab before newline)
-/// - ```        (bare, at end-of-string / EOF)
-/// - ```
-/// (empty language is the most common culprit of
-/// `Could not find syntax for code block: ""` warnings)
-///
-/// Also maps tui-markdown unsupported languages to "text" so syntect
-/// can at least render them without warnings.
-fn fix_bare_code_fences(content: &str) -> String {
-    let mut result = String::with_capacity(content.len());
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-
-    while i < len {
-        // Backtick is ASCII — byte-level detection is safe.
-        if bytes[i] == b'`' && i + 2 < len && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
-            let after = &bytes[i + 3..];
-            // "Bare" = next char is whitespace or nothing (EOF)
-            let is_bare = after.first().map_or(true, |&c| c == b'\n' || c == b'\r' || c == b'\t' || c == b' ');
-
-            if is_bare {
-                result.push_str("```text");
-                i += 3;
-                while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') {
-                    i += 1;
-                }
-                continue;
-            }
-
-            // Has a language token — check if it needs remapping
-            let lang_end = after.iter().position(|&c| c == b'\n' || c == b'\r').unwrap_or(after.len());
-            let lang_str = String::from_utf8_lossy(&after[..lang_end]).trim().to_lowercase();
-            let needs_remap = lang_str == "text"
-                || lang_str == "plaintext"
-                || lang_str == "plain"
-                || lang_str == "none";
-
-            if needs_remap && !lang_str.is_empty() {
-                result.push_str("```text");
-                // Skip the original lang token, land on the newline/next char
-                i += 3 + lang_end;
-                continue;
-            }
-        }
-
-        // ── Copy one full UTF-8 character ──
-        // This is the critical fix: bytes[i] as char would break
-        // multi-byte UTF-8 (Korean, CJK, emoji, etc.).
-        let ch = content[i..].chars().next().unwrap();
-        result.push(ch);
-        i += ch.len_utf8();
-    }
-    result
-}
 
 fn extract_last_code_block(text: &str) -> Option<String> {
     let mut result: Option<String> = None;
@@ -408,9 +291,40 @@ fn extract_last_code_block(text: &str) -> Option<String> {
     result
 }
 
+/// Fix bare code fences (``` without a language) to ```text.
+fn fix_bare_code_fences(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
 
-/// Render markdown content via tui-markdown, converting to owned Lines.
-fn markdown_lines_internal(content: &str) -> Vec<Line<'static>> {
+    while i < len {
+        if bytes[i] == b'`' && i + 2 < len && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
+            let after = &bytes[i + 3..];
+            let is_bare = after.first().map_or(true, |&c| c == b'\n' || c == b'\r' || c == b'\t' || c == b' ');
+            if is_bare {
+                result.push_str("```text");
+                i += 3;
+                while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') { i += 1; }
+                continue;
+            }
+            let lang_end = after.iter().position(|&c| c == b'\n' || c == b'\r').unwrap_or(after.len());
+            let lang_str = String::from_utf8_lossy(&after[..lang_end]).trim().to_lowercase();
+            if (lang_str == "text" || lang_str == "plaintext" || lang_str == "plain" || lang_str == "none") && !lang_str.is_empty() {
+                result.push_str("```text");
+                i += 3 + lang_end;
+                continue;
+            }
+        }
+        let ch = content[i..].chars().next().unwrap();
+        result.push(ch);
+        i += ch.len_utf8();
+    }
+    result
+}
+
+/// Convert markdown to styled Lines via tui-markdown.
+fn md_lines(content: &str) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
     let text: ratatui::text::Text<'_> = tui_markdown::from_str(&preprocessed);
     text.lines.into_iter().map(|l| {
@@ -420,6 +334,195 @@ fn markdown_lines_internal(content: &str) -> Vec<Line<'static>> {
             .collect();
         Line::from(spans)
     }).collect()
+}
+
+// ── Line buffer: flatten all content into Vec<Line> ──────────────────
+//
+// Instead of segments with virtual y-coords, we build a flat list of
+// styled Lines. Scrolling is simply skip/take on this list.
+
+/// Flatten a ContentBlock into styled Lines.
+fn block_to_lines(block: &ContentBlock, role: MessageRole, styles: &ThemeStyles, width: u16) -> Vec<Line<'static>> {
+    match block {
+        ContentBlock::Text { content } => {
+            let mut lines = md_lines(content);
+            if role == MessageRole::User {
+                // Indent user text with left stripe visual
+                for line in &mut lines {
+                    let mut new_spans = vec![Span::styled("  ", Style::default())];
+                    new_spans.append(&mut line.spans);
+                    line.spans = new_spans;
+                }
+            }
+            lines
+        }
+
+        ContentBlock::Thinking { content, collapsed } => {
+            let indicator = if *collapsed { ">" } else { "v" };
+            let mut lines = vec![
+                Line::from(Span::styled(
+                    format!("{} Thinking...", indicator),
+                    styles.accent,
+                )),
+            ];
+            if !*collapsed {
+                for l in content.lines() {
+                    lines.push(Line::from(Span::styled(format!("  {}", l), styles.muted)));
+                }
+            } else if let Some(first) = content.lines().next() {
+                lines.push(Line::from(Span::styled(format!("  {}", first), styles.muted)));
+            }
+            lines
+        }
+
+        ContentBlock::ToolCall { name, arguments, result, status, .. } => {
+            let (_icon, name_style) = match status {
+                ToolCallStatus::Requested => ("...", styles.muted),
+                ToolCallStatus::Executing => ("*run", styles.warning),
+                ToolCallStatus::Done => ("ok", styles.success),
+            };
+
+            let inner_w = width.saturating_sub(2) as usize; // account for border
+            let mut lines = Vec::new();
+
+            // Header line
+            lines.push(Line::from(vec![
+                Span::styled(" + ", name_style),
+                Span::styled(format!("tool: {}", name), Style::default().fg(name_style.fg.unwrap_or(Color::White)).add_modifier(Modifier::BOLD)),
+            ]));
+
+            // Argument lines (limited)
+            let arg_lines: Vec<&str> = arguments.lines().collect();
+            let max_args = if arg_lines.len() <= 3 { 5 } else { 3 };
+            for arg in arg_lines.iter().take(max_args) {
+                let truncated: String = arg.chars().take(inner_w).collect();
+                lines.push(Line::from(Span::styled(format!(" | {}", truncated), styles.muted)));
+            }
+            if arg_lines.len() > max_args {
+                lines.push(Line::from(Span::styled(" | ...", styles.muted)));
+            }
+
+            // Divider + result
+            if let Some((result_content, is_error)) = result {
+                lines.push(Line::from(Span::styled(" |---", if *is_error { styles.error } else { styles.success })));
+                let result_style = if *is_error { styles.error } else { styles.normal };
+                let r_lines: Vec<&str> = result_content.lines().collect();
+                for rl in r_lines.iter().take(6) {
+                    let truncated: String = rl.chars().take(inner_w).collect();
+                    lines.push(Line::from(Span::styled(format!(" | {}", truncated), result_style)));
+                }
+                if r_lines.len() > 6 {
+                    lines.push(Line::from(Span::styled(" | ...", styles.muted)));
+                }
+            }
+
+            // Bottom border
+            lines.push(Line::from(Span::styled(" +", styles.muted)));
+
+            lines
+        }
+
+        ContentBlock::ToolResult { tool_name, content, is_error } => {
+            let label = if tool_name.is_empty() {
+                if *is_error { "X".to_string() } else { "ok".to_string() }
+            } else {
+                format!("{} {}", if *is_error { "X" } else { "ok" }, tool_name)
+            };
+            let border_style = if *is_error { styles.error } else { styles.muted };
+            let content_style = if *is_error { styles.error } else { styles.normal };
+            let inner_w = width.saturating_sub(2) as usize;
+
+            let mut lines = Vec::new();
+            lines.push(Line::from(Span::styled(format!(" + {}", label), border_style)));
+            for l in content.lines().take(4) {
+                let truncated: String = l.chars().take(inner_w).collect();
+                lines.push(Line::from(Span::styled(format!(" | {}", truncated), content_style)));
+            }
+            if content.lines().count() > 4 {
+                lines.push(Line::from(Span::styled(" | ...", styles.muted)));
+            }
+            lines.push(Line::from(Span::styled(" +", border_style)));
+            lines
+        }
+
+        ContentBlock::Error { title, message, retryable } => {
+            let mut lines = Vec::new();
+            lines.push(Line::from(Span::styled(
+                format!(" ! error: {}", title),
+                Style::default().fg(Color::White).bg(styles.error.fg.unwrap_or(Color::Red)).bold(),
+            )));
+            for l in message.lines().take(4) {
+                lines.push(Line::from(Span::styled(format!("   {}", l), styles.normal)));
+            }
+            if *retryable {
+                lines.push(Line::from(Span::styled("   retry: this error may be temporary", styles.muted)));
+            }
+            lines
+        }
+
+        ContentBlock::Image { mime_type, base64_data } => {
+            let sz = base64_data.len() * 3 / 4;
+            let sz_str = if sz >= 1_048_576 {
+                format!("{:.1} MB", sz as f64 / 1_048_576.0)
+            } else if sz >= 1024 {
+                format!("{:.1} KB", sz as f64 / 1024.0)
+            } else {
+                format!("{} B", sz)
+            };
+            vec![
+                Line::from(Span::styled(format!("[image: {}, {}]", mime_type, sz_str), styles.normal)),
+                Line::from(Span::styled("  Ctrl+I -> open in viewer", styles.muted)),
+            ]
+        }
+    }
+}
+
+/// Build a flat list of all Lines to display, plus a blank-line spacer between messages.
+fn build_all_lines(state: &ChatViewState, styles: &ThemeStyles, width: u16) -> Vec<Line<'static>> {
+    let mut all_lines: Vec<Line<'static>> = Vec::new();
+
+    for (i, msg) in state.messages.iter().enumerate() {
+        // Spacer between messages
+        if i > 0 {
+            all_lines.push(Line::raw(""));
+        }
+
+        // User label
+        if msg.role == MessageRole::User {
+            // Horizontal rule
+            let rule = "-".repeat(width.saturating_sub(2) as usize);
+            all_lines.push(Line::from(Span::styled(rule, styles.muted)));
+            all_lines.push(Line::from(Span::styled("You", Style::default().add_modifier(Modifier::BOLD).fg(styles.primary.fg.unwrap_or(Color::Blue)))));
+        }
+
+        for block in &msg.content_blocks {
+            let block_lines = block_to_lines(block, msg.role, styles, width);
+            all_lines.extend(block_lines);
+        }
+    }
+
+    // Streaming message
+    if let Some(ref streaming) = state.streaming {
+        // Spacer before streaming if there were previous messages
+        if !state.messages.is_empty() {
+            all_lines.push(Line::raw(""));
+        }
+
+        for block in &streaming.message.content_blocks {
+            let block_lines = block_to_lines(block, MessageRole::Assistant, styles, width);
+            all_lines.extend(block_lines);
+        }
+
+        // Spinner line
+        let sp = ["|", "/", "-", "\\"];
+        let ch = sp[state.spinner_frame % sp.len()];
+        all_lines.push(Line::from(Span::styled(
+            format!("  {} Working...", ch),
+            styles.accent,
+        )));
+    }
+
+    all_lines
 }
 
 // ── ChatView widget ────────────────────────────────────────────────────
@@ -441,43 +544,28 @@ impl StatefulWidget for ChatView<'_> {
         if area.width < 4 || area.height < 1 { return; }
         let styles = self.theme.to_styles();
 
-        // Build segments
-        let segments = build_segments(state, area.width);
-
-        // Calculate total height and scroll
-        let total_height: u16 = segments.last()
-            .map(|s| s.y.saturating_add(s.height))
-            .unwrap_or(0);
+        // Build all lines
+        let all_lines = build_all_lines(state, &styles, area.width);
+        let total_height = all_lines.len() as u16;
         state.content_height = total_height;
+
         let vis = area.height;
         let max_scroll = total_height.saturating_sub(vis);
         let off = state.scroll_offset.min(max_scroll);
 
-        // Clear area
-        Block::default().style(styles.normal).render(area, buf);
+        // Clear area with background
+        Block::default().style(Style::default().bg(self.theme.colors.background.to_ratatui())).render(area, buf);
 
-        // Render visible segments
-        for seg in &segments {
-            let seg_bottom = seg.y.saturating_add(seg.height);
-            let view_top = off;
-            let view_bottom = off.saturating_add(vis);
+        // Render visible lines
+        let skip = off as usize;
+        let take = vis as usize;
+        let visible_lines: Vec<Line<'_>> = all_lines.into_iter().skip(skip).take(take).collect();
 
-            if seg_bottom <= view_top || seg.y >= view_bottom { continue; }
-
-            let screen_top = seg.y.saturating_sub(view_top);
-            let screen_bottom = seg_bottom.saturating_sub(view_top).min(vis);
-            let render_h = screen_bottom.saturating_sub(screen_top);
-            if render_h == 0 { continue; }
-
-            let rect = Rect {
-                x: area.x,
-                y: area.y + screen_top,
-                width: area.width,
-                height: render_h,
-            };
-
-            let rows_hidden = view_top.saturating_sub(seg.y);
-            render_segment(seg, rect, buf, &styles, rows_hidden);
+        if !visible_lines.is_empty() {
+            let text: ratatui::text::Text = visible_lines.into_iter().collect();
+            Paragraph::new(text)
+                .style(styles.normal)
+                .render(area, buf);
         }
 
         // Scrollbar
@@ -487,514 +575,12 @@ impl StatefulWidget for ChatView<'_> {
                 .viewport_content_length(vis as usize);
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(None).end_symbol(None).track_symbol(None)
-                .thumb_symbol("\u{2588}")
+                .thumb_symbol("|")
                 .render(area, buf, &mut sb);
         }
     }
 }
 
-// ── Segment-based content rendering ───────────────────────────────────
-//
-// Instead of flattening everything into Vec<Line> with manual border
-// characters, we build a list of "segments" — each an independent
-// renderable unit — and render them using proper ratatui widgets:
-//   - Tool/error boxes → Block::bordered() + Paragraph
-//   - Text → Paragraph with Wrap
-//   - Rules → Line widget
-//   - User messages → Block::borders(LEFT) + Paragraph
-
-/// A segment of content at a virtual y-position.
-struct Segment {
-    y: u16,
-    height: u16,
-    kind: SegKind,
-}
-
-/// Content kinds — each rendered with appropriate ratatui widgets.
-enum SegKind {
-    /// Markdown text (assistant/system messages).
-    Text(Vec<Line<'static>>),
-    /// Markdown text with user-message left stripe.
-    UserText(Vec<Line<'static>>),
-    /// Horizontal rule separator.
-    Rule,
-    /// Role label line ("You", etc.).
-    Label { text: String, style: Style },
-    /// Tool call box with optional merged result.
-    ToolBox {
-        name: String,
-        arguments: String,
-        result: Option<(String, bool)>,
-        status: ToolCallStatus,
-    },
-    /// Standalone tool result box.
-    ToolResultBox {
-        tool_name: String,
-        content: String,
-        is_error: bool,
-    },
-    /// Error box.
-    ErrorBox {
-        title: String,
-        message: String,
-        retryable: bool,
-    },
-    /// Thinking block.
-    Thinking { content: String, collapsed: bool },
-    /// Image reference.
-    Image { mime_type: String, size_str: String },
-    /// Streaming spinner indicator.
-    Spinner { frame: usize },
-}
-
-// ── Height measurement ────────────────────────────────────────────────
-
-/// Measure wrapped height using ratatui's own Paragraph::line_count.
-/// This matches the actual rendering behavior exactly (word-break wrapping).
-fn measure_wrapped_height(lines: &[Line<'_>], width: u16) -> u16 {
-    if width < 1 { return lines.len() as u16; }
-    let text: ratatui::text::Text = lines.iter().cloned().collect();
-    let para = Paragraph::new(text).wrap(Wrap { trim: false });
-    para.line_count(width) as u16
-}
-
-fn measure_tool_box_height(arguments: &str, result: &Option<(String, bool)>, inner_width: u16) -> u16 {
-    let arg_count = arguments.lines().count();
-    let max_args = if arg_count <= 3 { 5 } else { 3 };
-    let mut h: u16 = 2; // top + bottom border
-    // Each argument line may wrap at the inner width
-    let arg_lines: Vec<Line<'static>> = arguments.lines()
-        .take(max_args)
-        .map(|l| Line::from(Span::raw(l.to_string())))
-        .collect();
-    h += measure_wrapped_height(&arg_lines, inner_width);
-    if arg_count > max_args { h += 1; } // "..." truncation line
-    if let Some((rc, _)) = result {
-        h += 1; // divider
-        let result_lines: Vec<Line<'static>> = rc.lines()
-            .take(6)
-            .map(|l| Line::from(Span::raw(l.to_string())))
-            .collect();
-        let rn = rc.lines().count();
-        h += measure_wrapped_height(&result_lines, inner_width);
-        if rn > 6 { h += 1; } // "..." truncation line
-    }
-    h
-}
-
-fn measure_tool_result_height(content: &str, inner_width: u16) -> u16 {
-    let lines: Vec<Line<'static>> = content.lines()
-        .take(4)
-        .map(|l| Line::from(Span::raw(l.to_string())))
-        .collect();
-    let n = content.lines().count();
-    2 + measure_wrapped_height(&lines, inner_width) + if n > 4 { 1 } else { 0 }
-}
-
-fn measure_error_height(message: &str, retryable: bool, inner_width: u16) -> u16 {
-    let lines: Vec<Line<'static>> = message.lines()
-        .take(4)
-        .map(|l| Line::from(Span::raw(l.to_string())))
-        .collect();
-    2 + measure_wrapped_height(&lines, inner_width) + if retryable { 1 } else { 0 }
-}
-
-fn measure_thinking_height(content: &str, collapsed: bool) -> u16 {
-    if collapsed {
-        1 + if content.lines().next().is_some() { 1 } else { 0 }
-    } else {
-        1 + content.lines().count() as u16
-    }
-}
-
-fn measure_segment(kind: &SegKind, width: u16) -> u16 {
-    match kind {
-        SegKind::Text(lines) => measure_wrapped_height(lines, width),
-        SegKind::UserText(lines) => measure_wrapped_height(lines, width.saturating_sub(2)),
-        SegKind::Rule => 1,
-        SegKind::Label { .. } => 1,
-        SegKind::ToolBox { arguments, result, .. } => measure_tool_box_height(arguments, result, width.saturating_sub(2)),
-        SegKind::ToolResultBox { content, .. } => measure_tool_result_height(content, width.saturating_sub(2)),
-        SegKind::ErrorBox { message, retryable, .. } => measure_error_height(message, *retryable, width.saturating_sub(2)),
-        SegKind::Thinking { content, collapsed } => measure_thinking_height(content, *collapsed),
-        SegKind::Image { .. } => 2,
-        SegKind::Spinner { .. } => 1,
-    }
-}
-
-// ── Segment building ──────────────────────────────────────────────────
-
-fn content_block_to_segkind(block: &ContentBlock, role: MessageRole) -> SegKind {
-    match block {
-        ContentBlock::Text { content } => {
-            let lines = markdown_lines_internal(content);
-            if role == MessageRole::User { SegKind::UserText(lines) } else { SegKind::Text(lines) }
-        }
-        ContentBlock::Thinking { content, collapsed } =>
-            SegKind::Thinking { content: content.clone(), collapsed: *collapsed },
-        ContentBlock::ToolCall { id: _, name, arguments, result, status } =>
-            SegKind::ToolBox { name: name.clone(), arguments: arguments.clone(), result: result.clone(), status: *status },
-        ContentBlock::ToolResult { tool_name, content, is_error } =>
-            SegKind::ToolResultBox { tool_name: tool_name.clone(), content: content.clone(), is_error: *is_error },
-        ContentBlock::Error { title, message, retryable } =>
-            SegKind::ErrorBox { title: title.clone(), message: message.clone(), retryable: *retryable },
-        ContentBlock::Image { mime_type, base64_data } => {
-            let sz = base64_data.len() * 3 / 4;
-            let sz_str = if sz >= 1_048_576 {
-                format!("{:.1} MB", sz as f64 / 1_048_576.0)
-            } else if sz >= 1024 {
-                format!("{:.1} KB", sz as f64 / 1024.0)
-            } else {
-                format!("{} B", sz)
-            };
-            SegKind::Image { mime_type: mime_type.clone(), size_str: sz_str }
-        }
-    }
-}
-
-fn build_segments(state: &ChatViewState, width: u16) -> Vec<Segment> {
-    let mut segments = Vec::new();
-    let mut y: u16 = 0;
-
-    for (i, msg) in state.messages.iter().enumerate() {
-        if msg.role == MessageRole::User && i > 0 {
-            segments.push(Segment { y, height: 1, kind: SegKind::Rule });
-            y += 1;
-        }
-        if msg.role == MessageRole::User {
-            segments.push(Segment { y, height: 1, kind: SegKind::Label {
-                text: "You".to_string(), style: Style::default().bold(),
-            }});
-            y += 1;
-        }
-        for block in &msg.content_blocks {
-            let kind = content_block_to_segkind(block, msg.role);
-            let h = measure_segment(&kind, width);
-            segments.push(Segment { y, height: h, kind });
-            y += h;
-        }
-    }
-
-    if let Some(ref streaming) = state.streaming {
-        for block in &streaming.message.content_blocks {
-            let kind = content_block_to_segkind(block, MessageRole::Assistant);
-            let h = measure_segment(&kind, width);
-            segments.push(Segment { y, height: h, kind });
-            y += h;
-        }
-        segments.push(Segment { y, height: 1, kind: SegKind::Spinner { frame: state.spinner_frame } });
-        y += 1;
-    }
-
-    segments
-}
-
-// ── Segment rendering ─────────────────────────────────────────────────
-
-fn render_segment(
-    seg: &Segment,
-    rect: Rect,
-    buf: &mut Buffer,
-    styles: &ThemeStyles,
-    rows_hidden: u16,
-) {
-    match &seg.kind {
-        SegKind::Text(lines) => {
-            let skip = rows_hidden as usize;
-            let vis: ratatui::text::Text = lines.iter()
-                .skip(skip)
-                .take(rect.height as usize)
-                .cloned()
-                .collect();
-            Paragraph::new(vis).wrap(Wrap { trim: false }).render(rect, buf);
-        }
-
-        SegKind::UserText(lines) => {
-            // Left stripe via Block with LEFT border + padding
-            let stripe_block = Block::default()
-                .borders(Borders::LEFT)
-                .border_style(styles.user_border)
-                .padding(Padding::new(1, 0, 0, 0));
-            let text_rect = stripe_block.inner(rect);
-            stripe_block.render(rect, buf);
-            let skip = rows_hidden as usize;
-            let vis: ratatui::text::Text = lines.iter()
-                .skip(skip)
-                .take(text_rect.height as usize)
-                .cloned()
-                .collect();
-            Paragraph::new(vis)
-                .style(styles.normal)
-                .wrap(Wrap { trim: false })
-                .render(text_rect, buf);
-        }
-
-        SegKind::Rule => {
-            let line = "\u{2500}".repeat(rect.width as usize);
-            Line::from(Span::styled(line, styles.muted)).render(rect, buf);
-        }
-
-        SegKind::Label { text, style } => {
-            Paragraph::new(Line::from(Span::styled(text.clone(), *style)))
-                .render(rect, buf);
-        }
-
-        SegKind::ToolBox { name, arguments, result, status } => {
-            render_tool_box(name, arguments, result, status, rect, buf, styles, seg.height, rows_hidden);
-        }
-
-        SegKind::ToolResultBox { tool_name, content, is_error } => {
-            render_tool_result_box(tool_name, content, *is_error, rect, buf, styles, seg.height, rows_hidden);
-        }
-
-        SegKind::ErrorBox { title, message, retryable } => {
-            render_error_box(title, message, *retryable, rect, buf, styles, seg.height, rows_hidden);
-        }
-
-        SegKind::Thinking { content, collapsed } => {
-            let ind = if *collapsed { "\u{25b8}" } else { "\u{25be}" };
-            let mut lines: Vec<Line<'static>> = vec![
-                Line::from(Span::styled(format!("{} Thinking...", ind), styles.accent)),
-            ];
-            if !*collapsed {
-                for l in content.lines() {
-                    lines.push(Line::from(Span::styled(format!("  {}", l), styles.muted)));
-                }
-            } else if let Some(first) = content.lines().next() {
-                lines.push(Line::from(Span::styled(format!("  {}", first), styles.muted)));
-            }
-            let skip = rows_hidden as usize;
-            let vis: ratatui::text::Text = lines.into_iter().skip(skip).take(rect.height as usize).collect();
-            Paragraph::new(vis).render(rect, buf);
-        }
-
-        SegKind::Image { mime_type, size_str } => {
-            let lines = vec![
-                Line::from(Span::styled(format!("[image: {}, {}]", mime_type, size_str), styles.normal)),
-                Line::from(Span::styled("  Ctrl+I -> open in viewer", styles.muted)),
-            ];
-            let skip = rows_hidden as usize;
-            let vis: ratatui::text::Text = lines.into_iter().skip(skip).take(rect.height as usize).collect();
-            Paragraph::new(vis).render(rect, buf);
-        }
-
-        SegKind::Spinner { frame } => {
-            let sp = ["\u{25d0}", "\u{25d3}", "\u{25d1}", "\u{25d2}"];
-            let ch = sp[frame % sp.len()];
-            Paragraph::new(Line::from(Span::styled(
-                format!("  {} Working", ch), styles.accent,
-            ))).render(rect, buf);
-        }
-    }
-}
-
-// ── Box rendering with ratatui Block ──────────────────────────────────
-
-fn render_tool_box(
-    name: &str,
-    arguments: &str,
-    result: &Option<(String, bool)>,
-    status: &ToolCallStatus,
-    rect: Rect,
-    buf: &mut Buffer,
-    styles: &ThemeStyles,
-    natural_height: u16,
-    rows_hidden: u16,
-) {
-    let (icon, label_fg) = match status {
-        ToolCallStatus::Requested => ("\u{23f3}", styles.muted.fg.unwrap_or(Color::White)),
-        ToolCallStatus::Executing => ("\u{2699}", styles.warning.fg.unwrap_or(Color::Yellow)),
-        ToolCallStatus::Done => ("\u{2713}", styles.success.fg.unwrap_or(Color::Green)),
-    };
-
-    // Build inner content lines (divider is rendered separately)
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    let arg_count = arguments.lines().count();
-    let max_args = if arg_count <= 3 { 5 } else { 3 };
-    for l in arguments.lines().take(max_args) {
-        content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
-    }
-    let has_arg_truncate = arg_count > max_args;
-    if has_arg_truncate {
-        content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
-    }
-    let divider_style = if let Some((_, is_error)) = result {
-        if *is_error { styles.error } else { styles.success }
-    } else { styles.muted };
-    content_lines.push(Line::from("")); // divider placeholder
-    if let Some((result_content, _)) = result {
-        let rn = result_content.lines().count();
-        for l in result_content.lines().take(6) {
-            content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
-        }
-        if rn > 6 {
-            content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
-        }
-    };
-
-    // Determine visible borders based on which rows are clipped
-    let show_top = rows_hidden == 0;
-    let show_bottom = rows_hidden + rect.height >= natural_height;
-    let top_border_rows = if show_top { 1u16 } else { 0 };
-
-    let mut borders = Borders::LEFT | Borders::RIGHT;
-    if show_top { borders |= Borders::TOP; }
-    if show_bottom { borders |= Borders::BOTTOM; }
-
-    let mut block = Block::default()
-        .borders(borders)
-        .border_style(styles.muted);
-    if show_top {
-        block = block.title(Span::styled(
-            format!(" {} tool: {} ", icon, name),
-            Style::default().fg(label_fg).bold(),
-        ));
-    }
-
-    let inner = block.inner(rect);
-    block.render(rect, buf);
-
-    // Content starts after top border. Skip rows that were scrolled past.
-    let content_skip = rows_hidden.saturating_sub(top_border_rows) as usize;
-    let vis: Vec<Line<'static>> = content_lines.iter().cloned()
-        .enumerate()
-        .filter_map(|(i, line)| {
-            if i < content_skip { return None; }
-            let row = i - content_skip;
-            if row >= inner.height as usize { return None; }
-            Some(line)
-        })
-        .collect();
-
-    if !vis.is_empty() {
-        Paragraph::new(vis.clone()).render(inner, buf);
-    }
-
-    // Render divider as full-width horizontal line
-    if let Some((_, _)) = result {
-        // Divider comes after arguments (and optional truncate line)
-        let arg_lines = max_args.min(arg_count) as usize;
-        let truncate_line_offset = if has_arg_truncate { 1 } else { 0 };
-        let divider_in_content = arg_lines + truncate_line_offset;
-        // Visible divider row within the content
-        let visible_divider_row = divider_in_content.saturating_sub(content_skip);
-        if visible_divider_row < inner.height as usize {
-            let divider_y = inner.y + visible_divider_row as u16;
-            // Render full-width dash line across inner width
-            let dash_count = inner.width.saturating_sub(2) as usize; // -2 for left/right padding
-            let dash_line = "\u{2500}".repeat(dash_count.max(1));
-            let div_rect = Rect { x: inner.x + 1, y: divider_y, width: (dash_count + 2) as u16, height: 1 };
-            Line::from(Span::styled(format!(" {}{} ", dash_line, " "), divider_style))
-                .render(div_rect, buf);
-        }
-    }
-}
-
-fn render_tool_result_box(
-    tool_name: &str,
-    content: &str,
-    is_error: bool,
-    rect: Rect,
-    buf: &mut Buffer,
-    styles: &ThemeStyles,
-    natural_height: u16,
-    rows_hidden: u16,
-) {
-    let (check, border_style) = if is_error {
-        ("X", styles.error)
-    } else {
-        ("ok", styles.muted)
-    };
-    let label = if tool_name.is_empty() { check.to_string() } else { format!("{} {}", check, tool_name) };
-    let label_fg = if is_error { Color::White } else { styles.success.fg.unwrap_or(Color::Green) };
-
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    for l in content.lines().take(4) {
-        content_lines.push(Line::from(Span::styled(l.to_string(), if is_error { styles.error } else { styles.normal })));
-    }
-    if content.lines().count() > 4 {
-        content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
-    }
-
-    let show_top = rows_hidden == 0;
-    let show_bottom = rows_hidden + rect.height >= natural_height;
-    let top_border_rows = if show_top { 1u16 } else { 0 };
-
-    let mut borders = Borders::LEFT | Borders::RIGHT;
-    if show_top { borders |= Borders::TOP; }
-    if show_bottom { borders |= Borders::BOTTOM; }
-
-    let mut block = Block::default()
-        .borders(borders)
-        .border_style(border_style);
-    if show_top {
-        block = block.title(Span::styled(
-            format!(" {} ", label),
-            Style::default().fg(label_fg).bold(),
-        ));
-    }
-
-    let inner = block.inner(rect);
-    block.render(rect, buf);
-
-    let content_skip = rows_hidden.saturating_sub(top_border_rows) as usize;
-    let vis: Vec<Line<'static>> = content_lines.into_iter()
-        .skip(content_skip)
-        .take(inner.height as usize)
-        .collect();
-    if !vis.is_empty() {
-        Paragraph::new(vis).render(inner, buf);
-    }
-}
-
-fn render_error_box(
-    title: &str,
-    message: &str,
-    retryable: bool,
-    rect: Rect,
-    buf: &mut Buffer,
-    styles: &ThemeStyles,
-    natural_height: u16,
-    rows_hidden: u16,
-) {
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    for l in message.lines().take(4) {
-        content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
-    }
-    if retryable {
-        content_lines.push(Line::from(Span::styled("retry: this error may be temporary", styles.muted)));
-    }
-
-    let show_top = rows_hidden == 0;
-    let show_bottom = rows_hidden + rect.height >= natural_height;
-    let top_border_rows = if show_top { 1u16 } else { 0 };
-
-    let mut borders = Borders::LEFT | Borders::RIGHT;
-    if show_top { borders |= Borders::TOP; }
-    if show_bottom { borders |= Borders::BOTTOM; }
-
-    let mut block = Block::default()
-        .borders(borders)
-        .border_style(styles.error);
-    if show_top {
-        block = block.title(Span::styled(
-            format!(" error: {} ", title),
-            Style::default().fg(Color::White).bold(),
-        ));
-    }
-
-    let inner = block.inner(rect);
-    block.render(rect, buf);
-
-    let content_skip = rows_hidden.saturating_sub(top_border_rows) as usize;
-    let vis: Vec<Line<'static>> = content_lines.into_iter()
-        .skip(content_skip)
-        .take(inner.height as usize)
-        .collect();
-    if !vis.is_empty() {
-        Paragraph::new(vis).render(inner, buf);
-    }
-}
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1022,5 +608,45 @@ mod tests {
         s.finish_streaming();
         assert!(s.streaming.is_none());
         assert_eq!(s.messages.len(), 1);
+    }
+
+    #[test]
+    fn tool_call_lifecycle() {
+        let mut s = ChatViewState::new();
+        s.start_streaming();
+        s.stream_tool_call("t1".into(), "bash".into(), "ls".into(), ToolCallStatus::Executing);
+        s.stream_tool_result(Some("t1".into()), "bash".into(), "file.txt".into(), false);
+        s.finish_streaming();
+        assert_eq!(s.messages.len(), 1);
+        let msg = &s.messages[0];
+        assert_eq!(msg.content_blocks.len(), 1);
+        match &msg.content_blocks[0] {
+            ContentBlock::ToolCall { status, result, .. } => {
+                assert_eq!(*status, ToolCallStatus::Done);
+                assert!(result.is_some());
+            }
+            _ => panic!("expected ToolCall block"),
+        }
+    }
+
+    #[test]
+    fn build_lines_basic() {
+        let theme = Theme::dark();
+        let styles = theme.to_styles();
+        let mut s = ChatViewState::new();
+        s.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content_blocks: vec![ContentBlock::Text { content: "Hello".into() }],
+            timestamp: 0,
+        });
+        let lines = build_all_lines(&s, &styles, 80);
+        assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn fix_bare_code_fences_basic() {
+        let input = "```\ncode\n```";
+        let fixed = fix_bare_code_fences(input);
+        assert!(fixed.starts_with("```text"));
     }
 }

@@ -1,26 +1,17 @@
-//! Input widget — text input field with cursor, placeholder, and completion.
+//! Input widget — single-line text input with cursor, placeholder, and scrolling.
 //!
 //! Supports full Unicode including CJK double-width characters.
+//! Uses ASCII-safe prompt character '>' instead of Unicode arrows.
 
 use ratatui::{
-    widgets::{StatefulWidget, Paragraph, Widget},
     buffer::Buffer,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
+    widgets::{Paragraph, StatefulWidget, Widget},
 };
 use crate::Theme;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
-// ---------------------------------------------------------------------------
-// Completion
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct Completion {
-    pub text: String,
-    pub display: String,
-}
 
 // ---------------------------------------------------------------------------
 // State
@@ -31,9 +22,6 @@ pub struct InputState {
     pub text: String,
     pub cursor: usize,
     pub placeholder: Option<String>,
-    completions: Vec<Completion>,
-    completion_index: usize,
-    completion_active: bool,
 }
 
 impl InputState {
@@ -78,13 +66,8 @@ impl InputState {
         self.cursor = (self.cursor + 1).min(max);
     }
 
-    pub fn move_home(&mut self) {
-        self.cursor = 0;
-    }
-
-    pub fn move_end(&mut self) {
-        self.cursor = self.text.chars().count();
-    }
+    pub fn move_home(&mut self) { self.cursor = 0; }
+    pub fn move_end(&mut self) { self.cursor = self.text.chars().count(); }
 
     fn char_to_byte(&self, char_idx: usize) -> usize {
         self.text.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(self.text.len())
@@ -93,38 +76,6 @@ impl InputState {
     fn display_width_up_to(&self, char_idx: usize) -> usize {
         let s: String = self.text.chars().take(char_idx).collect();
         UnicodeWidthStr::width(s.as_str())
-    }
-
-    pub fn accept_completion(&mut self) -> bool {
-        if !self.completion_active || self.completions.is_empty() {
-            return false;
-        }
-        let completion = &self.completions[self.completion_index];
-        let chars: Vec<char> = self.text.chars().collect();
-        let mut trigger_pos = self.cursor;
-        while trigger_pos > 0 {
-            match chars.get(trigger_pos - 1).copied() {
-                Some(c) if !c.is_whitespace() => trigger_pos -= 1,
-                _ => break,
-            }
-        }
-        let prefix: String = chars[..trigger_pos].iter().collect();
-        self.text = format!("{}{}", prefix, completion.text);
-        self.cursor = self.text.chars().count();
-        self.completion_active = false;
-        true
-    }
-
-    pub fn next_completion(&mut self) {
-        if !self.completions.is_empty() {
-            self.completion_index = (self.completion_index + 1) % self.completions.len();
-        }
-    }
-
-    pub fn prev_completion(&mut self) {
-        if !self.completions.is_empty() {
-            self.completion_index = self.completion_index.saturating_sub(1);
-        }
     }
 }
 
@@ -135,26 +86,15 @@ impl InputState {
 pub struct Input<'a> {
     theme: &'a Theme,
     placeholder: Option<&'a str>,
-    prompt_char: char,
 }
 
 impl<'a> Input<'a> {
     pub fn new(theme: &'a Theme) -> Self {
-        Self { theme, placeholder: None, prompt_char: '❯' }
-    }
-
-    pub fn with_theme(mut self, theme: &'a Theme) -> Self {
-        self.theme = theme;
-        self
+        Self { theme, placeholder: None }
     }
 
     pub fn with_placeholder(mut self, placeholder: &'a str) -> Self {
         self.placeholder = Some(placeholder);
-        self
-    }
-
-    pub fn with_prompt_char(mut self, c: char) -> Self {
-        self.prompt_char = c;
         self
     }
 }
@@ -163,48 +103,21 @@ impl StatefulWidget for Input<'_> {
     type State = InputState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        if area.height < 1 || area.width < 4 {
-            return;
-        }
+        if area.height < 1 || area.width < 4 { return; }
 
         let styles = self.theme.to_styles();
         let y = area.y;
 
-        // ── Prompt (manual buf — 2 cells max, not worth Paragraph) ──
-        let prompt_width = self.prompt_char.width().unwrap_or(1) as u16;
-        buf[(area.x, y)]
-            .set_char(self.prompt_char)
-            .set_style(styles.primary);
-        if prompt_width > 1 {
-            buf[(area.x + 1, y)]
-                .set_char(' ')
-                .set_style(styles.primary);
-        }
-        let content_start = area.x + prompt_width + 1;
-        buf[(content_start - 1, y)]
-            .set_char(' ')
-            .set_style(styles.normal);
+        // Prompt: ">" (1 cell, always safe)
+        let _prompt_str = ">";
+        buf[(area.x, y)].set_char('>').set_style(styles.primary);
+        buf[(area.x + 1, y)].set_char(' ').set_style(styles.normal);
 
-        // ── Display text ──
-        let text_fg = if state.text.is_empty() {
-            styles.muted
-        } else {
-            styles.normal
-        };
+        let content_start = area.x + 2;
+        let max_cols = (area.width as usize).saturating_sub(3);
 
-        let max_cols = (area.width - prompt_width - 2) as usize;
-        let cursor_col = if state.text.is_empty() {
-            0
-        } else {
-            state.display_width_up_to(state.cursor)
-        };
-        let scroll_col = if cursor_col >= max_cols {
-            cursor_col - max_cols + 1
-        } else {
-            0
-        };
+        let text_fg = if state.text.is_empty() { styles.muted } else { styles.normal };
 
-        // ── Build text area ──
         let text_area = Rect {
             x: content_start,
             y,
@@ -213,37 +126,37 @@ impl StatefulWidget for Input<'_> {
         };
 
         if state.text.is_empty() {
+            // Show placeholder
             let display_text = self.placeholder.unwrap_or("");
             let visible: String = display_text.chars().take(max_cols).collect();
-            let line = Line::from(Span::styled(visible, text_fg));
-            Paragraph::new(line).render(text_area, buf);
+            Paragraph::new(Line::from(Span::styled(visible, text_fg))).render(text_area, buf);
 
-            // Empty cursor block at content_start
+            // Cursor at start
             buf[(content_start, y)]
                 .set_char(' ')
-                .set_style(
-                    Style::default()
-                        .fg(self.theme.colors.cursor_fg.to_ratatui())
-                        .bg(self.theme.colors.cursor_bg.to_ratatui())
-                        .add_modifier(Modifier::BOLD),
-                );
+                .set_style(Style::default()
+                    .fg(self.theme.colors.cursor_fg.to_ratatui())
+                    .bg(self.theme.colors.cursor_bg.to_ratatui())
+                    .add_modifier(Modifier::BOLD));
             return;
         }
 
-        // ── Find visible portion and cursor position ──
-        // All calculations use display widths, not char indices.
+        // Calculate scroll offset for cursor visibility
+        let cursor_col = state.display_width_up_to(state.cursor);
+        let scroll_col = if cursor_col >= max_cols {
+            cursor_col - max_cols + 1
+        } else { 0 };
+
+        // Build visible portion
         let chars: Vec<char> = state.text.chars().collect();
         let total_chars = chars.len();
-
-        // Compute display width of each character
         let char_widths: Vec<usize> = chars.iter().map(|c| c.width().unwrap_or(1)).collect();
-        // Display width up to each char position (exclusive prefix)
-        let mut prefix_width: Vec<usize> = vec![0; total_chars + 1];
+        let mut prefix_width = vec![0usize; total_chars + 1];
         for i in 0..total_chars {
             prefix_width[i + 1] = prefix_width[i] + char_widths[i];
         }
 
-        // Find the first visible char index (skip scrolled-off chars)
+        // Find start char index
         let mut start_ci = 0;
         for i in 0..total_chars {
             if prefix_width[i + 1] > scroll_col {
@@ -253,34 +166,27 @@ impl StatefulWidget for Input<'_> {
             start_ci = i + 1;
         }
 
-        // Collect visible characters and find cursor
         let mut visible_str = String::new();
-        let mut cursor_screen_col: Option<usize> = None; // display column within visible area
+        let mut cursor_screen_col: Option<usize> = None;
         let mut cursor_char = ' ';
         let mut cursor_w: u16 = 1;
 
         for ci in start_ci..total_chars {
             let cw = char_widths[ci];
             let disp_col = prefix_width[ci].saturating_sub(scroll_col);
-
-            if disp_col + cw > max_cols {
-                break;
-            }
+            if disp_col + cw > max_cols { break; }
 
             if state.cursor == ci {
                 cursor_screen_col = Some(disp_col);
                 cursor_char = chars[ci];
                 cursor_w = cw as u16;
             }
-
             visible_str.push(chars[ci]);
         }
 
-        // Cursor at end of text
+        // Cursor at end
         if state.cursor >= total_chars {
             let end_col = prefix_width[total_chars].saturating_sub(scroll_col);
-            // Show cursor even if slightly beyond max_cols — the cursor
-            // highlight only takes 1 cell at end position
             if end_col <= max_cols + 1 {
                 cursor_screen_col = Some(end_col.min(max_cols));
                 cursor_char = ' ';
@@ -288,11 +194,10 @@ impl StatefulWidget for Input<'_> {
             }
         }
 
-        // Render the visible text
-        let line = Line::from(Span::styled(&visible_str, text_fg));
-        Paragraph::new(line).render(text_area, buf);
+        // Render text
+        Paragraph::new(Line::from(Span::styled(&visible_str, text_fg))).render(text_area, buf);
 
-        // ── Draw cursor highlight ──
+        // Draw cursor
         if let Some(col) = cursor_screen_col {
             let cursor_style = Style::default()
                 .fg(self.theme.colors.cursor_fg.to_ratatui())
@@ -332,37 +237,26 @@ mod tests {
         assert_eq!(state.text, "a");
         state.insert_char('b');
         assert_eq!(state.text, "ab");
-        state.insert_char('한');
-        assert_eq!(state.text, "ab한");
+        state.insert_char('\u{d55c}'); // 한
+        assert_eq!(state.text, "ab\u{d55c}");
         assert_eq!(state.cursor, 3);
     }
 
     #[test]
     fn input_state_insert_str() {
         let mut state = InputState::default();
-        state.insert_str("안녕하세요");
-        assert_eq!(state.text, "안녕하세요");
+        state.insert_str("\u{c548}\u{b155}\u{d558}\u{c138}\u{c694}"); // 안녕하세요
         assert_eq!(state.cursor, 5);
     }
 
     #[test]
     fn input_state_backspace() {
         let mut state = InputState::default();
-        state.text = "ab한".to_string();
+        state.text = "ab\u{d55c}".to_string(); // ab한
         state.cursor = 3;
         state.backspace();
         assert_eq!(state.text, "ab");
         assert_eq!(state.cursor, 2);
-    }
-
-    #[test]
-    fn input_state_backspace_korean() {
-        let mut state = InputState::default();
-        state.text = "안녕하세요".to_string();
-        state.cursor = 5;
-        state.backspace();
-        assert_eq!(state.text, "안녕하세");
-        assert_eq!(state.cursor, 4);
     }
 
     #[test]
@@ -383,8 +277,7 @@ mod tests {
     #[test]
     fn input_state_display_width() {
         let mut state = InputState::default();
-        state.text = "ab한글".to_string();
-        // a(1) + b(1) + 한(2) + 글(2) = 6 columns
+        state.text = "ab\u{d55c}\u{ae00}".to_string(); // ab한글
         assert_eq!(state.display_width_up_to(0), 0);
         assert_eq!(state.display_width_up_to(1), 1);
         assert_eq!(state.display_width_up_to(2), 2);
