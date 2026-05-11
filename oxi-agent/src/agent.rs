@@ -1,6 +1,7 @@
 /// Core agent implementation
 
 use crate::config::AgentConfig;
+use crate::config::ShouldStopAfterTurnContext;
 use crate::error::AgentError;
 use crate::events::AgentEvent;
 use crate::state::{AgentState, SharedState};
@@ -15,6 +16,7 @@ use oxi_ai::{
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 
 use crate::stream_retry::{self, RetryCallback};
@@ -233,379 +235,164 @@ impl Agent {
 
     /// Run the agent, delivering events through the provided channel.
     ///
-    /// Implements a 2-level agentic loop matching pi-mono's architecture:
+    /// Delegates to [`AgentLoop`] which implements the same 2-level agentic
+    /// loop matching pi-mono's architecture:
     ///
     /// ```text
-    /// Outer loop (follow-up messages):
-    ///   Inner loop (tool calls + steering):
-    ///     1. Inject pending messages (steering)
-    ///     2. Compaction check
-    ///     3. Build context + stream LLM response
-    ///     4. If ToolUse → execute tools → continue inner loop
-    ///     5. If Stop/Error → emit turn_end
-    ///     6. Check shouldStopAfterTurn
-    ///     7. Poll steering messages → continue inner loop if any
-    ///   Check follow-up messages → continue outer loop if any
-    ///   Exit
+    /// AgentLoop.run_messages()
+    ///   Outer loop (follow-up messages):
+    ///     Inner loop (tool calls + steering):
+    ///       1. Inject pending messages (steering)
+    ///       2. Compaction check
+    ///       3. Stream LLM response (with accumulated partial messages)
+    ///       4. Execute tool calls if any
+    ///       5. Emit turn_end
+    ///       6. Check shouldStopAfterTurn
+    ///       7. Poll steering messages
+    ///     Check follow-up messages
+    ///     Exit
     /// ```
     pub async fn run_with_channel(
         &self,
         prompt: String,
         tx: mpsc::Sender<AgentEvent>,
     ) -> Result<Response> {
-        let _ = tx.send(AgentEvent::Start { prompt: prompt.clone() }).await;
+        use crate::agent_loop::AgentLoop;
 
-        // Add user message to state
-        self.state.update(|s| {
-            s.add_user_message(prompt);
+        let inner = self.inner.read();
+        let provider: Arc<dyn Provider> = Arc::clone(&inner.provider);
+        let max_iterations = inner.config.max_iterations;
+        let system_prompt = inner.config.system_prompt.clone();
+        let temperature = inner.config.temperature;
+        let max_tokens = inner.config.max_tokens;
+        let compaction_strategy = inner.config.compaction_strategy.clone();
+        let context_window = inner.config.context_window;
+        drop(inner); // release read lock
+
+        // Build AgentLoopConfig from Agent's config
+        let loop_config = crate::agent_loop::config::AgentLoopConfig {
+            model_id: self.model_id(),
+            system_prompt,
+            max_iterations,
+            temperature: temperature.unwrap_or(1.0) as f32,
+            max_tokens: max_tokens.unwrap_or(4096) as u32,
+            tool_execution: crate::config::ToolExecutionMode::Sequential,
+            compaction_strategy,
+            compaction_instruction: None,
+            context_window,
+            session_id: None,
+            transport: None,
+            compact_on_start: false,
+            max_retry_delay_ms: None,
+            auto_retry_enabled: false,
+            auto_retry_max_attempts: 3,
+            auto_retry_base_delay_ms: 1000,
+            api_key: None,
+        };
+
+        // Create AgentLoop. We give it a NEW SharedState and sync back after.
+        // (SharedState is not Clone, so we create a fresh one from current state)
+        let mut fresh_state = crate::state::SharedState::new();
+        let current = self.state.get_state();
+        fresh_state.update(|s| {
+            *s = current;
         });
 
-        // ── Pre-flight: resolve model + initial compaction ──────────
+        let agent_loop = AgentLoop::new(
+            provider,
+            loop_config,
+            Arc::clone(&self.tools),
+            fresh_state,
+        );
 
-        let model = {
-            let inner = self.config();
-            crate::model_id::resolve_model_from_id(&inner.config.model_id)
+        // Pre-populate steering/follow-up from hooks
+        let hooks = self.hooks.read();
+        let mut al = agent_loop;
+
+        if let Some(ref get_steering) = hooks.get_steering_messages {
+            for msg_text in get_steering() {
+                al.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
+            }
         }
-        .ok_or_else(|| {
-            let inner = self.config();
-            Error::msg(format!("Model not found: {}", inner.config.model_id))
-        })?;
+        if let Some(ref get_follow_up) = hooks.get_follow_up_messages {
+            for msg_text in get_follow_up() {
+                al.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
+            }
+        }
 
-        // Initial compaction check
-        self.run_compaction_check(&tx).await;
-
-        // ── Agentic loop ────────────────────────────────────────────
-        let tools = self.tools.clone();
-        let max_iterations = {
-            let inner = self.config();
-            inner.config.max_iterations
+        // Wire should_stop_after_turn hook to AgentLoop's external_stop flag.
+        // The hook is typically: |ctx| should_stop_flag.load(SeqCst)
+        // We poll it on TurnEnd events from the emit callback and propagate
+        // to AgentLoop's external_stop flag for clean exit between turns.
+        //
+        // Note: Box<dyn Fn> can't be cloned. We take it from hooks via write lock.
+        let maybe_hook = {
+            drop(hooks);
+            let mut hooks_w = self.hooks.write();
+            hooks_w.should_stop_after_turn.take()
         };
-        let mut turn_number: u32 = 0;
-        let mut final_response_text = String::new();
+        let ext_stop = al.external_stop().clone();
 
-        // Check for steering messages at start
-        let mut pending_messages: Vec<String> = self.drain_steering_messages();
+        // Create emit callback that sends through the channel.
+        // AgentLoop calls this synchronously, so we need blocking_send.
+        // Also polls should_stop_after_turn hook and propagates to external_stop.
+        let tx_emit = tx.clone();
 
-        // Outer loop: continues when follow-up messages arrive
-        'outer: loop {
-            let mut has_more_tool_calls = true;
+        // Run the agent loop
+        let result = al.run(prompt.clone(), move |event: AgentEvent| {
+            // Forward event to channel
+            let _ = tx_emit.blocking_send(event.clone());
 
-            // Inner loop: process tool calls and steering messages
-            while has_more_tool_calls || !pending_messages.is_empty() {
-                // ── Iteration guard ──────────────────────────────
-                let iteration = self.state.get_state().iteration;
-                if iteration >= max_iterations {
-                    let _ = tx.send(AgentEvent::Error {
-                        session_id: None,
-                        message: format!("Max iterations ({}) reached", max_iterations),
-                    }).await;
-                    break 'outer;
-                }
-
-                // ── Turn start ──────────────────────────────────
-                turn_number += 1;
-                let _ = tx.send(AgentEvent::TurnStart { turn_number }).await;
-
-                // ── Inject pending (steering) messages ──────────
-                if !pending_messages.is_empty() {
-                    for msg_text in pending_messages.drain(..) {
-                        let user_msg = oxi_ai::UserMessage::new(msg_text);
-                        let message = oxi_ai::Message::User(user_msg);
-                        let _ = tx.send(AgentEvent::SteeringMessage {
-                            message: message.clone(),
-                        }).await;
-                        self.state.update(|s| {
-                            s.messages.push(message);
-                        });
+            // Poll should_stop_after_turn hook on TurnEnd events
+            // and propagate to AgentLoop's external_stop flag.
+            if let Some(ref hook) = maybe_hook {
+                if matches!(event, AgentEvent::TurnEnd { .. }) {
+                    // Create minimal context for the hook
+                    let ctx = ShouldStopAfterTurnContext {
+                        message: oxi_ai::AssistantMessage::new(
+                            oxi_ai::Api::OpenAiCompletions, "agent", "agent-model",
+                        ),
+                        tool_results: Vec::new(),
+                        iteration: 0,
+                    };
+                    if hook(&ctx) {
+                        ext_stop.store(true, Ordering::SeqCst);
                     }
                 }
-
-                // ── Compaction check ────────────────────────────
-                self.run_compaction_check(&tx).await;
-
-                // ── Build context ───────────────────────────────
-                let state_messages = self.state.get_state().messages.clone();
-                let mut context = Context::new();
-                if let Some(ref sp) = self.config().config.system_prompt {
-                    context.set_system_prompt(sp.clone());
-                }
-                for msg in &state_messages {
-                    context.add_message(msg.clone());
-                }
-                // Add tools
-                let tool_defs = tools.definitions();
-                if !tool_defs.is_empty() {
-                    let mut oxi_tools = Vec::new();
-                    for def in &tool_defs {
-                        let schema = serde_json::to_value(&def.input_schema)
-                            .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
-                        oxi_tools.push(oxi_ai::Tool::new(&def.name, &def.description, schema));
-                    }
-                    context.set_tools(oxi_tools);
-                }
-
-                let stream_options = {
-                    let inner = self.config();
-                    StreamOptions {
-                        temperature: inner.config.temperature,
-                        max_tokens: inner.config.max_tokens,
-                        api_key: inner.config.api_key.clone(),
-                        ..Default::default()
-                    }
-                };
-
-                let provider: Arc<dyn Provider> = {
-                    let inner = self.config();
-                    Arc::clone(&inner.provider)
-                };
-
-                // ── Stream LLM response ─────────────────────────
-                let mut stream = match Self::stream_with_retry(
-                    provider.as_ref(),
-                    &model,
-                    &context,
-                    Some(stream_options),
-                    &tx,
-                ).await {
-                    Ok(s) => s,
-                    Err(primary_err) => {
-                        // Try fallback model before giving up
-                        let _ = tx.send(AgentEvent::Error {
-                            session_id: None,
-                            message: format!("Primary model failed: {}", primary_err.user_friendly()),
-                        }).await;
-
-                        match self.try_fallback(
-                            &model,
-                            &context,
-                            None,
-                            &tx,
-                            primary_err.to_string(),
-                        ).await {
-                            Ok(s) => s,
-                            Err(fallback_err) => {
-                                let _ = tx.send(AgentEvent::Error {
-                                    session_id: None,
-                                    message: format!("Fallback also failed: {}", fallback_err.user_friendly()),
-                                }).await;
-                                break 'outer;
-                            }
-                        }
-                    }
-                };
-
-                // ── Process stream events ───────────────────────
-                // Following pi-mono's architecture: use event.partial() for
-                // MessageUpdate so content blocks (text + toolCalls) are properly
-                // separated by the provider layer.
-                let mut iteration_text = String::new();
-                let mut pending_tool_calls: Vec<oxi_ai::ToolCall> = Vec::new();
-                let mut thinking_text = String::new();
-                let mut stream_done = false;
-                let mut stop_reason = StopReason::Stop;
-                let mut message_started = false;
-
-                while let Some(event) = stream.next().await {
-                    match event {
-                        ProviderEvent::Start { partial } => {
-                            let msg = oxi_ai::Message::Assistant(partial.clone());
-                            let _ = tx.send(AgentEvent::MessageStart {
-                                message: msg,
-                            }).await;
-                            message_started = true;
-                        }
-                        ProviderEvent::TextDelta { delta, partial, .. } => {
-                            if !message_started {
-                                let msg = oxi_ai::Message::Assistant(partial.clone());
-                                let _ = tx.send(AgentEvent::MessageStart {
-                                    message: msg,
-                                }).await;
-                                message_started = true;
-                            }
-                            iteration_text.push_str(&delta);
-                            let _ = tx.send(AgentEvent::TextChunk { text: delta.clone() }).await;
-                            // Use provider's partial message for MessageUpdate —
-                            // it has properly separated content blocks.
-                            let _ = tx.send(AgentEvent::MessageUpdate {
-                                message: oxi_ai::Message::Assistant(partial),
-                                delta: Some(delta),
-                            }).await;
-                        }
-                        ProviderEvent::ThinkingDelta { delta, partial, .. } => {
-                            thinking_text.push_str(&delta);
-                            let _ = tx.send(AgentEvent::ThinkingDelta { text: delta }).await;
-                            // Also emit MessageUpdate with partial that includes thinking
-                            let _ = tx.send(AgentEvent::MessageUpdate {
-                                message: oxi_ai::Message::Assistant(partial),
-                                delta: None,
-                            }).await;
-                        }
-                        ProviderEvent::ToolCallStart { partial, .. } => {
-                            if !message_started {
-                                let msg = oxi_ai::Message::Assistant(partial.clone());
-                                let _ = tx.send(AgentEvent::MessageStart {
-                                    message: msg,
-                                }).await;
-                                message_started = true;
-                            }
-                            // Emit MessageUpdate with partial — tool call block now visible
-                            let _ = tx.send(AgentEvent::MessageUpdate {
-                                message: oxi_ai::Message::Assistant(partial),
-                                delta: None,
-                            }).await;
-                        }
-                        ProviderEvent::ToolCallDelta { partial, .. } => {
-                            let _ = tx.send(AgentEvent::MessageUpdate {
-                                message: oxi_ai::Message::Assistant(partial),
-                                delta: None,
-                            }).await;
-                        }
-                        ProviderEvent::ToolCallEnd { tool_call, partial, .. } => {
-                            pending_tool_calls.push(tool_call);
-                            let _ = tx.send(AgentEvent::MessageUpdate {
-                                message: oxi_ai::Message::Assistant(partial),
-                                delta: None,
-                            }).await;
-                        }
-
-                        ProviderEvent::Done { reason, message: ref done_msg } => {
-                            if message_started {
-                                let _ = tx.send(AgentEvent::MessageEnd {
-                                    message: oxi_ai::Message::Assistant(done_msg.clone()),
-                                }).await;
-                            }
-
-                            stop_reason = match reason {
-                                oxi_ai::StopReason::Stop => StopReason::Stop,
-                                oxi_ai::StopReason::Length => StopReason::Length,
-                                oxi_ai::StopReason::ToolUse => StopReason::ToolUse,
-                                oxi_ai::StopReason::Error => StopReason::Error,
-                                _ => StopReason::Stop,
-                            };
-
-                            // Use done_msg's content blocks directly — provider already
-                            // built the correct structure with text/thinking/toolCall blocks
-                            let mut assistant_msg = done_msg.clone();
-
-                            // Track text for final_response_text
-                            for block in &assistant_msg.content {
-                                if let ContentBlock::Text(t) = block {
-                                    iteration_text = t.text.clone();
-                                }
-                            }
-
-                            // Add assistant message to state
-                            self.state.update(|s| {
-                                s.messages.push(Message::Assistant(assistant_msg.clone()));
-                            });
-
-                            final_response_text = iteration_text.clone();
-                            stream_done = true;
-                        }
-                        ProviderEvent::Error { error, .. } => {
-                            let friendly = error.text_content();
-                            let friendly = if friendly.is_empty() {
-                                "Unknown provider error".to_string()
-                            } else {
-                                friendly
-                            };
-                            let _ = tx.send(AgentEvent::Error {
-                                session_id: None,
-                                message: friendly.clone(),
-                            }).await;
-                            break 'outer;
-                        }
-                        _ => {}
-                    }
-                }
-
-                if !stream_done {
-                    break 'outer;
-                }
-
-                // ── Execute tool calls if any ────────────────────
-                let mut tool_result_messages: Vec<oxi_ai::ToolResultMessage> = Vec::new();
-                has_more_tool_calls = false;
-
-                if !pending_tool_calls.is_empty() && matches!(stop_reason, StopReason::ToolUse) {
-                    let executed = self.execute_tool_batch(
-                        &tools,
-                        &pending_tool_calls,
-                        &tx,
-                    ).await;
-
-                    has_more_tool_calls = !executed.terminate;
-                    tool_result_messages = executed.messages.clone();
-
-                    // Add tool results to state
-                    for msg in &executed.messages {
-                        self.state.update(|s| {
-                            s.messages.push(Message::ToolResult(msg.clone()));
-                        });
-                    }
-                }
-
-                // ── Turn end ────────────────────────────────────
-                // Build the turn's assistant message for TurnEnd event
-                let turn_assistant = {
-                    let mut content_blocks = vec![];
-                    if !iteration_text.is_empty() {
-                        content_blocks.push(ContentBlock::Text(TextContent::new(iteration_text.clone())));
-                    }
-                    let mut msg = oxi_ai::AssistantMessage::new(
-                        oxi_ai::Api::OpenAiCompletions, "agent", &model.id,
-                    );
-                    msg.content = content_blocks;
-                    oxi_ai::Message::Assistant(msg)
-                };
-                let _ = tx.send(AgentEvent::TurnEnd {
-                    turn_number,
-                    assistant_message: turn_assistant,
-                    tool_results: tool_result_messages,
-                }).await;
-
-                self.state.update(|s| {
-                    s.increment_iteration();
-                    s.set_stop_reason(stop_reason);
-                });
-                let _ = tx.send(AgentEvent::Iteration {
-                    number: self.state.get_state().iteration,
-                }).await;
-
-                // ── Check shouldStopAfterTurn ────────────────────
-                if self.should_stop_after_turn() {
-                    break 'outer;
-                }
-
-                // ── Error stop → exit ────────────────────────────
-                if matches!(stop_reason, StopReason::Error) {
-                    break 'outer;
-                }
-
-                // ── Poll steering messages ──────────────────────
-                pending_messages = self.drain_steering_messages();
             }
-
-            // ── Outer loop: check follow-up messages ──────────────
-            let follow_ups = self.drain_follow_up_messages();
-            if !follow_ups.is_empty() {
-                pending_messages = follow_ups;
-                continue 'outer;
-            }
-
-            // No more messages, exit
-            break 'outer;
-        }
-
-        let _ = tx.send(AgentEvent::Complete {
-            content: final_response_text.clone(),
-            stop_reason: format!("{:?}", self.state.get_state().stop_reason.unwrap_or(StopReason::Stop)),
         }).await;
 
-        Ok(Response {
-            content: final_response_text,
-            stop_reason: self.state.get_state().stop_reason.unwrap_or(StopReason::Stop),
-        })
+        match result {
+            Ok(_events) => {
+                // Sync state back from AgentLoop
+                let loop_state = al.state().get_state();
+                self.state.update(|s| {
+                    *s = loop_state;
+                });
+
+                // Extract final response text from state
+                let state = self.state.get_state();
+                let final_text = state.messages.iter().rev()
+                    .find_map(|m| match m {
+                        oxi_ai::Message::Assistant(a) => {
+                            a.content.iter().find_map(|b| match b {
+                                oxi_ai::ContentBlock::Text(t) => Some(t.text.clone()),
+                                _ => None,
+                            })
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+
+                let stop_reason = state.stop_reason.unwrap_or(StopReason::Stop);
+
+                Ok(Response {
+                    content: final_text,
+                    stop_reason,
+                })
+            }
+            Err(e) => Err(e),
+        }
     }
 
     // ── Helper methods for the agentic loop ────────────────────────

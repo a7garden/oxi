@@ -1,6 +1,8 @@
 /// Helper functions for agent loop
 
 use oxi_ai::{ContentBlock, ToolCall, TextContent, ToolResultMessage};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Extract tool calls from an assistant message.
 pub fn extract_tool_calls(message: &oxi_ai::AssistantMessage) -> Vec<ToolCall> {
@@ -31,26 +33,42 @@ pub fn create_tool_result_message(finalized: &FinalizedToolCall) -> ToolResultMe
 }
 
 /// Check if a batch of finalized tool calls should terminate the loop.
+/// pi-mono: ALL finalized results must have `terminate === true` for the
+/// batch to terminate. This is the unanimous consent pattern.
 pub fn should_terminate_batch(finalized_calls: &[FinalizedToolCall]) -> bool {
-    finalized_calls.iter().any(|f| f.result.terminate)
+    if finalized_calls.is_empty() {
+        return false;
+    }
+    finalized_calls.iter().all(|f| f.result.terminate)
 }
 
 /// Check if loop should stop after a turn.
+///
+/// pi-mono: shouldStopAfterTurn is an optional hook. If no hook is defined,
+/// the loop never stops here — it continues until no more tool calls AND
+/// no more steering/follow-up messages.
+///
+/// oxi: We check external_stop (Ctrl+C) and max_iterations.
+/// Stop/Length reasons are handled by the inner loop's has_more_tool_calls
+/// condition, NOT here.
 pub fn should_stop_after_turn(
-    messages: &[oxi_ai::Message],
-    assistant_message: &oxi_ai::AssistantMessage,
+    _messages: &[oxi_ai::Message],
+    _assistant_message: &oxi_ai::AssistantMessage,
     max_iterations: usize,
+    external_stop: &Arc<AtomicBool>,
 ) -> bool {
-    let current_iteration = messages.iter().filter(|m| matches!(m, oxi_ai::Message::Assistant(_))).count();
+    // External stop (Ctrl+C)
+    if external_stop.load(Ordering::SeqCst) {
+        return true;
+    }
 
+    // Max iterations guard
+    let current_iteration = _messages.iter().filter(|m| matches!(m, oxi_ai::Message::Assistant(_))).count();
     if current_iteration >= max_iterations {
         return true;
     }
 
-    match assistant_message.stop_reason {
-        oxi_ai::StopReason::Stop | oxi_ai::StopReason::Length => true,
-        _ => false,
-    }
+    false
 }
 
 use crate::AgentToolResult;

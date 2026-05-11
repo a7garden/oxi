@@ -2,7 +2,7 @@
 
 use crate::{AgentToolResult, AgentEvent};
 use anyhow::Result;
-use oxi_ai::{AssistantMessage, Message, ToolCall, ToolResultMessage};
+use oxi_ai::{progress_callback, AssistantMessage, Message, ToolCall, ToolResultMessage};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -334,15 +334,18 @@ async fn execute_prepared_tool_call(
         let tool_call_id_clone = tool_call_id.clone();
         let emit_clone = emit.clone();
 
-        let progress_cb: Option<Arc<dyn Fn(String) + Send + Sync>> = Some(Arc::new(move |msg: String| {
+        let progress_cb: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |msg: String| {
             emit_clone(AgentEvent::ToolExecutionUpdate {
                 tool_call_id: tool_call_id_clone.clone(),
                 tool_name: tool_name.clone(),
                 partial_result: msg,
             });
-        }));
+        });
 
-        let _ = progress_cb;
+        // Wire up progress callback BEFORE execute — pi-mono: tool's onUpdate
+        tool.on_progress(progress_callback(move |msg: String| {
+            progress_cb(msg);
+        }));
 
         match tool.execute(&tool_call_id, prepared.args.clone(), None).await {
             Ok(r) => result = r,

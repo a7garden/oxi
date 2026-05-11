@@ -118,6 +118,12 @@ pub(crate) async fn stream_assistant_response(
             }
 
             ProviderEvent::Error { error, .. } => {
+                // pi-mono: always close the message lifecycle before error.
+                // If we started a message, emit MessageEnd with the error state.
+                if added_partial {
+                    let error_asst = error.clone();
+                    emit(super::AgentEvent::MessageEnd { message: Message::Assistant(error_asst) });
+                }
                 let raw_msg = error.text_content();
                 let friendly = if raw_msg.is_empty() {
                     "Unknown provider error".to_string()

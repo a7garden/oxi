@@ -315,6 +315,9 @@ pub(crate) struct AppState {
     pub pending_steering: usize,
     /// Whether session needs to be persisted to disk
     pub needs_persist: bool,
+    /// Length of text already rendered from the snapshot's Text block.
+    /// Used to compute incremental text delta from full snapshot.
+    snapshot_text_rendered: usize,
 }
 
 impl AppState {
@@ -339,6 +342,7 @@ impl AppState {
             next_action: None,
             pending_steering: 0,
             needs_persist: false,
+            snapshot_text_rendered: 0,
         }
     }
 
@@ -444,6 +448,7 @@ impl AppState {
         self.chat.start_streaming();
         self.is_agent_busy = true;
         self.auto_scroll = true;
+        self.snapshot_text_rendered = 0;
     }
 
     pub fn stream_text_delta(&mut self, delta: &str) {
@@ -451,31 +456,49 @@ impl AppState {
     }
 
     /// Update the streaming message from a full MessageUpdate snapshot.
-    /// pi-mono pattern: the delta field has incremental text, and the
-    /// full message has the complete content block structure.
-    pub fn update_streaming_message(&mut self, msg: &oxi_ai::Message, delta: Option<&str>) {
+    ///
+    /// pi-mono pattern: render from the snapshot's content blocks, NOT from
+    /// the raw delta string. The provider has already separated Text blocks
+    /// from ToolCall blocks in the snapshot. If the provider sent tool call
+    /// JSON as TextDelta, the snapshot's Text block won't contain it (it'll
+    /// be in a ToolCall block instead). This prevents JSON appearing in chat.
+    pub fn update_streaming_message(&mut self, msg: &oxi_ai::Message, _delta: Option<&str>) {
         if let oxi_ai::Message::Assistant(assistant) = msg {
-            // If there's a text delta, append it (pi-mono: incremental update)
-            if let Some(text) = delta {
-                if !text.is_empty() {
-                    self.chat.stream_text_delta(text);
-                }
-            }
-
-            // Check for new tool calls that aren't tracked yet
             for block in &assistant.content {
-                if let oxi_ai::ContentBlock::ToolCall(tc) = block {
-                    // stream_tool_call is idempotent — it checks tool_tracker
-                    let args_str = serde_json::to_string(&tc.arguments)
-                        .unwrap_or_else(|_| tc.arguments.to_string());
-                    self.chat.stream_tool_call(
-                        tc.id.clone(),
-                        tc.name.clone(),
-                        args_str,
-                        oxi_tui::widgets::chat::ToolCallStatus::Requested,
-                    );
-                } else if let oxi_ai::ContentBlock::Image(img) = block {
-                    self.chat.stream_image(img.mime_type.clone(), img.data.clone());
+                match block {
+                    oxi_ai::ContentBlock::Text(t) => {
+                        // Only render new text beyond what we've already rendered.
+                        // This is the pi-mono snapshot-based approach: use the
+                        // provider's Text block (which is properly separated
+                        // from tool calls), not the raw delta string.
+                        let text = &t.text;
+                        if text.len() > self.snapshot_text_rendered {
+                            let new_text = &text[self.snapshot_text_rendered..];
+                            if !new_text.is_empty() {
+                                self.chat.stream_text_delta(new_text);
+                            }
+                            self.snapshot_text_rendered = text.len();
+                        }
+                    }
+                    oxi_ai::ContentBlock::ToolCall(tc) => {
+                        // stream_tool_call is idempotent — it checks tool_tracker
+                        let args_str = serde_json::to_string(&tc.arguments)
+                            .unwrap_or_else(|_| tc.arguments.to_string());
+                        self.chat.stream_tool_call(
+                            tc.id.clone(),
+                            tc.name.clone(),
+                            args_str,
+                            oxi_tui::widgets::chat::ToolCallStatus::Requested,
+                        );
+                    }
+                    oxi_ai::ContentBlock::Thinking(t) => {
+                        // Thinking blocks — render as collapsed
+                        self.chat.stream_thinking(t.thinking.clone(), true);
+                    }
+                    oxi_ai::ContentBlock::Image(img) => {
+                        self.chat.stream_image(img.mime_type.clone(), img.data.clone());
+                    }
+                    oxi_ai::ContentBlock::Unknown(_) => {}
                 }
             }
         }
@@ -506,6 +529,7 @@ impl AppState {
         let was_streaming = self.chat.is_streaming();
         self.chat.finish_streaming();
         self.is_agent_busy = false;
+        self.snapshot_text_rendered = 0;
         if was_streaming {
             self.message_count += 1;
             // Refresh last code block from completed message
@@ -636,6 +660,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                         while let Some(prompt) = prompt_rx.recv().await {
                             let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
                             let ui_fwd = ui_tx_for_thread.clone();
+                            let session_h = session_handle.clone_handle();
                             let event_forwarder = tokio::task::spawn_local(async move {
                                 while let Some(event) = event_rx.recv().await {
                                     let ui_event = match event {
@@ -735,15 +760,15 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                         AgentEvent::SteeringMessage { .. } => {
                                             // A steering message was consumed from the queue
                                             // → emit queue update so TUI shows current count
-                                            let steering_q = session_handle.steering_queue();
-                                            let follow_up_q = session_handle.follow_up_queue();
+                                            let steering_q = session_h.steering_queue();
+                                            let follow_up_q = session_h.follow_up_queue();
                                             let pending = steering_q.read().len() + follow_up_q.read().len();
                                             let _ = ui_fwd.send(UiEvent::QueueUpdate { pending }).await;
                                             continue;
                                         }
                                         AgentEvent::FollowUpMessage { .. } => {
-                                            let steering_q = session_handle.steering_queue();
-                                            let follow_up_q = session_handle.follow_up_queue();
+                                            let steering_q = session_h.steering_queue();
+                                            let follow_up_q = session_h.follow_up_queue();
                                             let pending = steering_q.read().len() + follow_up_q.read().len();
                                             let _ = ui_fwd.send(UiEvent::QueueUpdate { pending }).await;
                                             continue;

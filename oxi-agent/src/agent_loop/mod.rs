@@ -55,6 +55,9 @@ pub struct AgentLoop {
     auto_retry_attempt: AtomicUsize,
     auto_retry_cancel: AtomicBool,
     circuit_breaker: CircuitBreaker,
+    /// External stop flag — when set, should_stop_after_turn returns true.
+    /// Used by Agent to forward the should_stop_flag from AgentHooks.
+    external_stop: Arc<AtomicBool>,
 }
 
 impl AgentLoop {
@@ -93,6 +96,7 @@ impl AgentLoop {
             auto_retry_attempt: AtomicUsize::new(0),
             auto_retry_cancel: AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
+            external_stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -149,6 +153,17 @@ impl AgentLoop {
 /// TODO: document this function.
     pub fn auto_retry_attempt(&self) -> usize {
         auto_retry_attempt_method(self)
+    }
+
+    /// Get a reference to the shared state.
+    /// Used by Agent to sync state after loop execution.
+    pub fn state(&self) -> &SharedState {
+        &self.state
+    }
+
+    /// Get the external stop flag.
+    pub fn external_stop(&self) -> &Arc<AtomicBool> {
+        &self.external_stop
     }
 
 /// TODO: document this function.
@@ -399,7 +414,7 @@ impl AgentLoop {
                     tool_results: tool_results.clone(),
                 });
 
-                if should_stop_after_turn(&messages, &assistant_message, self.config.max_iterations) {
+                if should_stop_after_turn(&messages, &assistant_message, self.config.max_iterations, &self.external_stop) {
                     return Ok((messages, events));
                 }
 
