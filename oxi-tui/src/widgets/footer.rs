@@ -9,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, LineGauge, Paragraph, StatefulWidget, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 use crate::Theme;
 
 /// Footer data — shared state for token counts and session info.
@@ -147,8 +148,8 @@ impl StatefulWidget for Footer<'_> {
                 ),
             ]);
 
-            let text_w = left_text.len() as u16 + 2;
-            let model_w = model_short.len() as u16 + 4;
+            let text_w = UnicodeWidthStr::width(left_text.as_str()) as u16 + 2;
+            let model_w = UnicodeWidthStr::width(model_short.as_str()) as u16 + 4;
             let gauge_w = rows[1].width.saturating_sub(text_w).saturating_sub(model_w);
 
             let cols = Layout::default()

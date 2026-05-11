@@ -132,7 +132,7 @@ fn render_status_list(
     highlight_color: Option<ratatui::style::Color>,
 ) {
     let strings: Vec<String> = items.iter().map(|(name, has_key)| {
-        let status = if *has_key { "●" } else { "○" };
+        let status = if *has_key { "*" } else { "o" };
         format!("{} {}", status, name)
     }).collect();
     render_selectable_list(f, area, y_offset, &strings, selected, styles, theme, highlight_color);

@@ -1,12 +1,13 @@
 //! ChatView widget — scrollable message list with streaming support.
 //!
-//! Segment-based rendering:
-//! - Each content block becomes a Segment with a measured height.
-//! - Scrolling clips segments at pixel-perfect boundaries.
-//! - Tool/error boxes use ratatui Block::bordered() + Paragraph with Wrap.
-//! - Text uses Paragraph with Wrap for proper word-breaking.
+//! Architecture: **flat visual row** approach.
 //!
-//! Height is measured via Paragraph::line_count(Wrap) — matches rendering exactly.
+//! 1. All content is pre-wrapped into individual visual rows (one `Line` per row).
+//! 2. Tool/error boxes are drawn as styled lines with box-drawing characters.
+//! 3. Scrolling is simply `skip(offset).take(visible_height)` on the flat row list.
+//! 4. No segment math, no rows_hidden clipping, no measurement/render mismatch.
+//!
+//! Word-wrapping is done via `unicode_width` to split lines at display boundaries.
 
 use std::collections::HashMap;
 
@@ -15,11 +16,12 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Padding, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget, Wrap},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget, Wrap},
 };
 use tui_markdown;
 use crate::Theme;
 use crate::theme::ThemeStyles;
+use unicode_width::UnicodeWidthStr;
 
 // ── Tool Call Tracker ─────────────────────────────────────────────────
 
@@ -288,7 +290,6 @@ fn fix_bare_code_fences(content: &str) -> String {
     let bytes = content.as_bytes();
     let len = bytes.len();
     let mut i = 0;
-
     while i < len {
         if bytes[i] == b'`' && i + 2 < len && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
             let after = &bytes[i + 3..];
@@ -327,151 +328,281 @@ fn md_lines(content: &str) -> Vec<Line<'static>> {
     }).collect()
 }
 
-// ── Segment-based rendering ───────────────────────────────────────────
+// ── Word wrapping ─────────────────────────────────────────────────────
 //
-// Each content block maps to a Segment with:
-//   - y: virtual y position
-//   - height: measured via Paragraph::line_count(Wrap) for exact match
-//   - kind: determines how to render
-//
-// Scrolling clips segments and renders only visible portions.
+// We wrap text ourselves so that each output Line is exactly one visual row.
+// This makes skip/take scrolling mathematically exact — no measurement mismatch.
 
-struct Segment {
-    y: u16,
-    height: u16,
-    kind: SegKind,
-}
-
-enum SegKind {
-    /// Markdown text (assistant/system messages). Rendered with Wrap.
-    Text(Vec<Line<'static>>),
-    /// User message text with left accent stripe. Rendered with Wrap.
-    UserText(Vec<Line<'static>>),
-    /// Horizontal rule separator.
-    Rule,
-    /// Role label line.
-    Label { text: String, style: Style },
-    /// Tool call box — rendered as Block::bordered() + Paragraph.
-    ToolBox {
-        name: String,
-        arguments: String,
-        result: Option<(String, bool)>,
-        status: ToolCallStatus,
-    },
-    /// Standalone tool result box.
-    ToolResultBox {
-        tool_name: String,
-        content: String,
-        is_error: bool,
-    },
-    /// Error box.
-    ErrorBox {
-        title: String,
-        message: String,
-        retryable: bool,
-    },
-    /// Thinking block.
-    Thinking { content: String, collapsed: bool },
-    /// Image reference.
-    Image { mime_type: String, size_str: String },
-    /// Streaming spinner.
-    Spinner { frame: usize },
-}
-
-// ── Height measurement ────────────────────────────────────────────────
-
-/// Measure wrapped height — uses the same Paragraph::line_count that
-/// ratatui uses internally for rendering. Guarantees measurement == rendering.
-fn measure_wrapped_height(lines: &[Line<'_>], width: u16) -> u16 {
-    if width < 1 { return lines.len() as u16; }
-    let text: ratatui::text::Text = lines.iter().cloned().collect();
-    let para = Paragraph::new(text).wrap(Wrap { trim: false });
-    para.line_count(width) as u16
-}
-
-/// Measure a tool box: border (2) + wrapped argument lines + optional result.
-fn measure_tool_box_height(arguments: &str, result: &Option<(String, bool)>, inner_width: u16) -> u16 {
-    let arg_count = arguments.lines().count();
-    let max_args = if arg_count <= 3 { 5 } else { 3 };
-    let arg_lines: Vec<Line<'static>> = arguments.lines()
-        .take(max_args)
-        .map(|l| Line::from(Span::raw(l.to_string())))
-        .collect();
-    let mut h: u16 = 2; // top + bottom border
-    h += measure_wrapped_height(&arg_lines, inner_width);
-    if arg_count > max_args { h += 1; }
-    if let Some((rc, _)) = result {
-        h += 1; // divider line
-        let result_lines: Vec<Line<'static>> = rc.lines()
-            .take(6)
-            .map(|l| Line::from(Span::raw(l.to_string())))
+/// Wrap a styled Line into multiple Lines that fit within `width` display columns.
+/// Preserves the style of each span across wrap boundaries.
+fn wrap_line(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 { return vec![Line::raw("")]; }
+    let line_width = UnicodeWidthStr::width(line.to_string().as_str());
+    if line_width <= width {
+        let cloned: Line<'static> = line.spans.iter()
+            .map(|s| Span::styled(s.content.as_ref().to_owned(), s.style))
             .collect();
-        let rn = rc.lines().count();
-        h += measure_wrapped_height(&result_lines, inner_width);
-        if rn > 6 { h += 1; }
+        return vec![cloned];
     }
-    h
-}
 
-fn measure_tool_result_height(content: &str, inner_width: u16) -> u16 {
-    let lines: Vec<Line<'static>> = content.lines()
-        .take(4)
-        .map(|l| Line::from(Span::raw(l.to_string())))
-        .collect();
-    let n = content.lines().count();
-    2 + measure_wrapped_height(&lines, inner_width) + if n > 4 { 1 } else { 0 }
-}
+    let mut rows: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_width: usize = 0;
 
-fn measure_error_height(message: &str, retryable: bool, inner_width: u16) -> u16 {
-    let lines: Vec<Line<'static>> = message.lines()
-        .take(4)
-        .map(|l| Line::from(Span::raw(l.to_string())))
-        .collect();
-    2 + measure_wrapped_height(&lines, inner_width) + if retryable { 1 } else { 0 }
-}
+    for span in &line.spans {
+        let span_style = span.style;
+        let span_text = span.content.as_ref();
 
-fn measure_thinking_height(content: &str, collapsed: bool) -> u16 {
-    if collapsed {
-        1 + if content.lines().next().is_some() { 1 } else { 0 }
-    } else {
-        1 + content.lines().count() as u16
+        // Process each character
+        let mut char_iter = span_text.chars().peekable();
+        while let Some(ch) = char_iter.next() {
+            let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            if ch == '\n' {
+                // Hard break
+                rows.push(Line::from(std::mem::take(&mut current_spans)));
+                current_width = 0;
+                continue;
+            }
+            if current_width + ch_width > width && current_width > 0 {
+                // Wrap boundary
+                rows.push(Line::from(std::mem::take(&mut current_spans)));
+                current_width = 0;
+            }
+            if ch_width > 0 {
+                current_spans.push(Span::styled(ch.to_string(), span_style));
+                current_width += ch_width;
+            }
+        }
     }
-}
-
-fn measure_segment(kind: &SegKind, width: u16) -> u16 {
-    match kind {
-        SegKind::Text(lines) => measure_wrapped_height(lines, width),
-        SegKind::UserText(lines) => measure_wrapped_height(lines, width.saturating_sub(2)),
-        SegKind::Rule => 1,
-        SegKind::Label { .. } => 1,
-        SegKind::ToolBox { arguments, result, .. } =>
-            measure_tool_box_height(arguments, result, width.saturating_sub(2)),
-        SegKind::ToolResultBox { content, .. } =>
-            measure_tool_result_height(content, width.saturating_sub(2)),
-        SegKind::ErrorBox { message, retryable, .. } =>
-            measure_error_height(message, *retryable, width.saturating_sub(2)),
-        SegKind::Thinking { content, collapsed } => measure_thinking_height(content, *collapsed),
-        SegKind::Image { .. } => 2,
-        SegKind::Spinner { .. } => 1,
+    if !current_spans.is_empty() || rows.is_empty() {
+        rows.push(Line::from(current_spans));
     }
+    rows
 }
 
-// ── Segment building ──────────────────────────────────────────────────
+/// Wrap a slice of Lines into a flat list of visual rows, each fitting within `width`.
+fn wrap_lines(lines: &[Line<'_>], width: usize) -> Vec<Line<'static>> {
+    let mut result = Vec::new();
+    for line in lines {
+        let wrapped = wrap_line(line, width);
+        result.extend(wrapped);
+    }
+    result
+}
 
-fn content_block_to_segkind(block: &ContentBlock, role: MessageRole) -> SegKind {
+/// Wrap a plain string into Lines of at most `width` display columns.
+fn wrap_plain(text: &str, width: usize) -> Vec<Line<'static>> {
+    let mut result = Vec::new();
+    for raw_line in text.lines() {
+        let line_width = UnicodeWidthStr::width(raw_line);
+        if line_width <= width || width == 0 {
+            result.push(Line::from(Span::raw(raw_line.to_string())));
+        } else {
+            // Character-by-character wrap
+            let mut current = String::new();
+            let mut current_w = 0;
+            for ch in raw_line.chars() {
+                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
+                if current_w + cw > width && current_w > 0 {
+                    result.push(Line::from(Span::raw(std::mem::take(&mut current))));
+                    current_w = 0;
+                }
+                current.push(ch);
+                current_w += cw;
+            }
+            if !current.is_empty() {
+                result.push(Line::from(Span::raw(current)));
+            }
+        }
+    }
+    if result.is_empty() { result.push(Line::raw("")); }
+    result
+}
+
+// ── Flat row building ─────────────────────────────────────────────────
+//
+// Everything is converted to a single Vec<Line<'static>> where each element
+// is exactly one visual terminal row. No segments, no virtual y-coords.
+
+/// Build the complete flat row list for the current state.
+fn build_rows(state: &ChatViewState, styles: &ThemeStyles, width: u16) -> Vec<Line<'static>> {
+    let w = width as usize;
+    let mut rows: Vec<Line<'static>> = Vec::new();
+
+    for (i, msg) in state.messages.iter().enumerate() {
+        // Spacer between messages
+        if i > 0 { rows.push(Line::raw("")); }
+
+        // User label + rule
+        if msg.role == MessageRole::User {
+            let rule = "-".repeat(w.saturating_sub(2));
+            rows.push(Line::from(Span::styled(rule, styles.muted)));
+            rows.push(Line::from(Span::styled("You".to_string(), Style::default().add_modifier(Modifier::BOLD).fg(styles.primary.fg.unwrap_or(ratatui::style::Color::Blue)))));
+        }
+
+        for block in &msg.content_blocks {
+            let block_rows = block_to_rows(block, msg.role, styles, w);
+            rows.extend(block_rows);
+        }
+    }
+
+    // Streaming message
+    if let Some(ref streaming) = state.streaming {
+        if !state.messages.is_empty() { rows.push(Line::raw("")); }
+        for block in &streaming.message.content_blocks {
+            let block_rows = block_to_rows(block, MessageRole::Assistant, styles, w);
+            rows.extend(block_rows);
+        }
+        // Spinner
+        let sp = ["|", "/", "-", "\\"];
+        let ch = sp[state.spinner_frame % sp.len()];
+        rows.push(Line::from(Span::styled(format!("  {} Working...", ch), styles.accent)));
+    }
+
+    rows
+}
+
+/// Convert a ContentBlock to flat visual rows.
+fn block_to_rows(block: &ContentBlock, role: MessageRole, styles: &ThemeStyles, width: usize) -> Vec<Line<'static>> {
     match block {
         ContentBlock::Text { content } => {
-            let lines = md_lines(content);
-            if role == MessageRole::User { SegKind::UserText(lines) } else { SegKind::Text(lines) }
+            let md = md_lines(content);
+            let wrapped = wrap_lines(&md, if role == MessageRole::User { width.saturating_sub(2) } else { width });
+            if role == MessageRole::User {
+                // Prefix each row with indent for left-stripe visual
+                wrapped.into_iter().map(|line| {
+                    let mut new_spans = vec![Span::styled("  ", Style::default())];
+                    new_spans.extend(line.spans);
+                    Line::from(new_spans)
+                }).collect()
+            } else {
+                wrapped
+            }
         }
-        ContentBlock::Thinking { content, collapsed } =>
-            SegKind::Thinking { content: content.clone(), collapsed: *collapsed },
-        ContentBlock::ToolCall { name, arguments, result, status, .. } =>
-            SegKind::ToolBox { name: name.clone(), arguments: arguments.clone(), result: result.clone(), status: *status },
-        ContentBlock::ToolResult { tool_name, content, is_error } =>
-            SegKind::ToolResultBox { tool_name: tool_name.clone(), content: content.clone(), is_error: *is_error },
-        ContentBlock::Error { title, message, retryable } =>
-            SegKind::ErrorBox { title: title.clone(), message: message.clone(), retryable: *retryable },
+
+        ContentBlock::Thinking { content, collapsed } => {
+            let ind = if *collapsed { ">" } else { "v" };
+            let mut rows = vec![
+                Line::from(Span::styled(format!("{} Thinking...", ind), styles.accent)),
+            ];
+            if !*collapsed {
+                for l in wrap_plain(content, width.saturating_sub(2)) {
+                    let indented: Vec<Span<'static>> = vec![
+                        Span::styled("  ", Style::default()),
+                        Span::styled(l.to_string(), styles.muted),
+                    ];
+                    rows.push(Line::from(indented));
+                }
+            } else if let Some(first) = content.lines().next() {
+                let wrapped = wrap_plain(first, width.saturating_sub(2));
+                for l in wrapped {
+                    rows.push(Line::from(vec![
+                        Span::styled("  ", Style::default()),
+                        Span::styled(l.to_string(), styles.muted),
+                    ]));
+                }
+            }
+            rows
+        }
+
+        ContentBlock::ToolCall { name, arguments, result, status, .. } => {
+            let (icon, name_fg) = match status {
+                ToolCallStatus::Requested => ("...", styles.muted.fg.unwrap_or(ratatui::style::Color::White)),
+                ToolCallStatus::Executing => ("*run", styles.warning.fg.unwrap_or(ratatui::style::Color::Yellow)),
+                ToolCallStatus::Done => ("ok", styles.success.fg.unwrap_or(ratatui::style::Color::Green)),
+            };
+
+            let inner_w = width.saturating_sub(4); // "| " prefix + " |" suffix = 4
+            let mut rows = Vec::new();
+
+            // Top border with title
+            rows.push(Line::from(Span::styled(
+                format!("+ {} tool: {} ", icon, name),
+                Style::default().fg(name_fg).add_modifier(Modifier::BOLD),
+            )));
+
+            // Argument lines (wrapped)
+            let arg_count = arguments.lines().count();
+            let max_args = if arg_count <= 3 { 5 } else { 3 };
+            for arg in arguments.lines().take(max_args) {
+                for wrapped_line in wrap_plain(arg, inner_w) {
+                    rows.push(Line::from(Span::styled(format!("| {}", wrapped_line), styles.muted)));
+                }
+            }
+            if arg_count > max_args {
+                rows.push(Line::from(Span::styled("| ...", styles.muted)));
+            }
+
+            // Result
+            if let Some((result_content, is_error)) = result {
+                let div_style = if *is_error { styles.error } else { styles.success };
+                let div = "-".repeat(inner_w.max(1));
+                rows.push(Line::from(Span::styled(format!("|-{}", div), div_style)));
+
+                let result_style = if *is_error { styles.error } else { styles.normal };
+                let r_count = result_content.lines().count();
+                for rl in result_content.lines().take(6) {
+                    for wrapped_line in wrap_plain(rl, inner_w) {
+                        rows.push(Line::from(Span::styled(format!("| {}", wrapped_line), result_style)));
+                    }
+                }
+                if r_count > 6 {
+                    rows.push(Line::from(Span::styled("| ...", styles.muted)));
+                }
+            }
+
+            // Bottom border
+            rows.push(Line::from(Span::styled("+", styles.muted)));
+            rows
+        }
+
+        ContentBlock::ToolResult { tool_name, content, is_error } => {
+            let (check, border_style) = if *is_error { ("X", styles.error) } else { ("ok", styles.muted) };
+            let label = if tool_name.is_empty() { check.to_string() } else { format!("{} {}", check, tool_name) };
+            let label_fg = if *is_error {
+                ratatui::style::Color::White
+            } else {
+                styles.success.fg.unwrap_or(ratatui::style::Color::Green)
+            };
+            let content_style = if *is_error { styles.error } else { styles.normal };
+            let inner_w = width.saturating_sub(4);
+
+            let mut rows = Vec::new();
+            rows.push(Line::from(Span::styled(
+                format!("+ {}", label),
+                Style::default().fg(label_fg).add_modifier(Modifier::BOLD),
+            )));
+            let n = content.lines().count();
+            for l in content.lines().take(4) {
+                for wrapped_line in wrap_plain(l, inner_w) {
+                    rows.push(Line::from(Span::styled(format!("| {}", wrapped_line), content_style)));
+                }
+            }
+            if n > 4 {
+                rows.push(Line::from(Span::styled("| ...", styles.muted)));
+            }
+            rows.push(Line::from(Span::styled("+", border_style)));
+            rows
+        }
+
+        ContentBlock::Error { title, message, retryable } => {
+            let mut rows = Vec::new();
+            rows.push(Line::from(Span::styled(
+                format!("! error: {}", title),
+                Style::default().fg(ratatui::style::Color::White).bg(styles.error.fg.unwrap_or(ratatui::style::Color::Red)).add_modifier(Modifier::BOLD),
+            )));
+            let inner_w = width.saturating_sub(2);
+            for l in message.lines().take(4) {
+                for wrapped_line in wrap_plain(l, inner_w) {
+                    rows.push(Line::from(Span::styled(format!("  {}", wrapped_line), styles.normal)));
+                }
+            }
+            if *retryable {
+                rows.push(Line::from(Span::styled("  retry: this error may be temporary", styles.muted)));
+            }
+            rows
+        }
+
         ContentBlock::Image { mime_type, base64_data } => {
             let sz = base64_data.len() * 3 / 4;
             let sz_str = if sz >= 1_048_576 {
@@ -481,47 +612,12 @@ fn content_block_to_segkind(block: &ContentBlock, role: MessageRole) -> SegKind 
             } else {
                 format!("{} B", sz)
             };
-            SegKind::Image { mime_type: mime_type.clone(), size_str: sz_str }
+            vec![
+                Line::from(Span::styled(format!("[image: {}, {}]", mime_type, sz_str), styles.normal)),
+                Line::from(Span::styled("  Ctrl+I -> open in viewer", styles.muted)),
+            ]
         }
     }
-}
-
-fn build_segments(state: &ChatViewState, width: u16) -> Vec<Segment> {
-    let mut segments = Vec::new();
-    let mut y: u16 = 0;
-
-    for (i, msg) in state.messages.iter().enumerate() {
-        if msg.role == MessageRole::User && i > 0 {
-            segments.push(Segment { y, height: 1, kind: SegKind::Rule });
-            y += 1;
-        }
-        if msg.role == MessageRole::User {
-            segments.push(Segment { y, height: 1, kind: SegKind::Label {
-                text: "You".to_string(),
-                style: Style::default().add_modifier(Modifier::BOLD),
-            }});
-            y += 1;
-        }
-        for block in &msg.content_blocks {
-            let kind = content_block_to_segkind(block, msg.role);
-            let h = measure_segment(&kind, width);
-            segments.push(Segment { y, height: h, kind });
-            y += h;
-        }
-    }
-
-    if let Some(ref streaming) = state.streaming {
-        for block in &streaming.message.content_blocks {
-            let kind = content_block_to_segkind(block, MessageRole::Assistant);
-            let h = measure_segment(&kind, width);
-            segments.push(Segment { y, height: h, kind });
-            y += h;
-        }
-        segments.push(Segment { y, height: 1, kind: SegKind::Spinner { frame: state.spinner_frame } });
-        y += 1;
-    }
-
-    segments
 }
 
 // ── ChatView widget ────────────────────────────────────────────────────
@@ -543,11 +639,9 @@ impl StatefulWidget for ChatView<'_> {
         if area.width < 4 || area.height < 1 { return; }
         let styles = self.theme.to_styles();
 
-        let segments = build_segments(state, area.width);
-
-        let total_height: u16 = segments.last()
-            .map(|s| s.y.saturating_add(s.height))
-            .unwrap_or(0);
+        // Build flat visual rows
+        let all_rows = build_rows(state, &styles, area.width);
+        let total_height = all_rows.len() as u16;
         state.content_height = total_height;
 
         let vis = area.height;
@@ -555,30 +649,21 @@ impl StatefulWidget for ChatView<'_> {
         let off = state.scroll_offset.min(max_scroll);
 
         // Clear area
-        Block::default().style(Style::default().bg(self.theme.colors.background.to_ratatui())).render(area, buf);
+        Block::default()
+            .style(Style::default().bg(self.theme.colors.background.to_ratatui()))
+            .render(area, buf);
 
-        // Render visible segments
-        for seg in &segments {
-            let seg_bottom = seg.y.saturating_add(seg.height);
-            let view_top = off;
-            let view_bottom = off.saturating_add(vis);
+        // Render visible rows — simple skip/take, mathematically exact
+        let visible: Vec<Line<'_>> = all_rows.into_iter()
+            .skip(off as usize)
+            .take(vis as usize)
+            .collect();
 
-            if seg_bottom <= view_top || seg.y >= view_bottom { continue; }
-
-            let screen_top = seg.y.saturating_sub(view_top);
-            let screen_bottom = seg_bottom.saturating_sub(view_top).min(vis);
-            let render_h = screen_bottom.saturating_sub(screen_top);
-            if render_h == 0 { continue; }
-
-            let rect = Rect {
-                x: area.x,
-                y: area.y + screen_top,
-                width: area.width,
-                height: render_h,
-            };
-
-            let rows_hidden = view_top.saturating_sub(seg.y);
-            render_segment(seg, rect, buf, &styles, rows_hidden);
+        if !visible.is_empty() {
+            let text: ratatui::text::Text = visible.into_iter().collect();
+            Paragraph::new(text)
+                .style(styles.normal)
+                .render(area, buf);
         }
 
         // Scrollbar
@@ -591,312 +676,6 @@ impl StatefulWidget for ChatView<'_> {
                 .thumb_symbol("|")
                 .render(area, buf, &mut sb);
         }
-    }
-}
-
-// ── Segment rendering ─────────────────────────────────────────────────
-
-fn render_segment(
-    seg: &Segment,
-    rect: Rect,
-    buf: &mut Buffer,
-    styles: &ThemeStyles,
-    rows_hidden: u16,
-) {
-    match &seg.kind {
-        SegKind::Text(lines) => {
-            let skip = rows_hidden as usize;
-            let vis: ratatui::text::Text = lines.iter()
-                .skip(skip)
-                .take(rect.height as usize)
-                .cloned()
-                .collect();
-            Paragraph::new(vis).wrap(Wrap { trim: false }).style(styles.normal).render(rect, buf);
-        }
-
-        SegKind::UserText(lines) => {
-            // Left stripe via Block with LEFT border + padding
-            let stripe_block = Block::default()
-                .borders(Borders::LEFT)
-                .border_style(styles.user_border)
-                .padding(Padding::new(1, 0, 0, 0));
-            let text_rect = stripe_block.inner(rect);
-            stripe_block.render(rect, buf);
-            let skip = rows_hidden as usize;
-            let vis: ratatui::text::Text = lines.iter()
-                .skip(skip)
-                .take(text_rect.height as usize)
-                .cloned()
-                .collect();
-            Paragraph::new(vis)
-                .style(styles.normal)
-                .wrap(Wrap { trim: false })
-                .render(text_rect, buf);
-        }
-
-        SegKind::Rule => {
-            let line = "-".repeat(rect.width as usize);
-            Line::from(Span::styled(line, styles.muted)).render(rect, buf);
-        }
-
-        SegKind::Label { text, style } => {
-            Paragraph::new(Line::from(Span::styled(text.clone(), *style)))
-                .render(rect, buf);
-        }
-
-        SegKind::ToolBox { name, arguments, result, status } => {
-            render_tool_box(name, arguments, result, status, rect, buf, styles, seg.height, rows_hidden);
-        }
-
-        SegKind::ToolResultBox { tool_name, content, is_error } => {
-            render_tool_result_box(tool_name, content, *is_error, rect, buf, styles, seg.height, rows_hidden);
-        }
-
-        SegKind::ErrorBox { title, message, retryable } => {
-            render_error_box(title, message, *retryable, rect, buf, styles, seg.height, rows_hidden);
-        }
-
-        SegKind::Thinking { content, collapsed } => {
-            let ind = if *collapsed { ">" } else { "v" };
-            let mut lines: Vec<Line<'static>> = vec![
-                Line::from(Span::styled(format!("{} Thinking...", ind), styles.accent)),
-            ];
-            if !*collapsed {
-                for l in content.lines() {
-                    lines.push(Line::from(Span::styled(format!("  {}", l), styles.muted)));
-                }
-            } else if let Some(first) = content.lines().next() {
-                lines.push(Line::from(Span::styled(format!("  {}", first), styles.muted)));
-            }
-            let skip = rows_hidden as usize;
-            let vis: ratatui::text::Text = lines.into_iter().skip(skip).take(rect.height as usize).collect();
-            Paragraph::new(vis).render(rect, buf);
-        }
-
-        SegKind::Image { mime_type, size_str } => {
-            let lines = vec![
-                Line::from(Span::styled(format!("[image: {}, {}]", mime_type, size_str), styles.normal)),
-                Line::from(Span::styled("  Ctrl+I -> open in viewer", styles.muted)),
-            ];
-            let skip = rows_hidden as usize;
-            let vis: ratatui::text::Text = lines.into_iter().skip(skip).take(rect.height as usize).collect();
-            Paragraph::new(vis).render(rect, buf);
-        }
-
-        SegKind::Spinner { frame } => {
-            let sp = ["|", "/", "-", "\\"];
-            let ch = sp[frame % sp.len()];
-            Paragraph::new(Line::from(Span::styled(
-                format!("  {} Working...", ch), styles.accent,
-            ))).render(rect, buf);
-        }
-    }
-}
-
-// ── Box rendering with ratatui Block::bordered() ──────────────────────
-
-fn render_tool_box(
-    name: &str,
-    arguments: &str,
-    result: &Option<(String, bool)>,
-    status: &ToolCallStatus,
-    rect: Rect,
-    buf: &mut Buffer,
-    styles: &ThemeStyles,
-    natural_height: u16,
-    rows_hidden: u16,
-) {
-    let (icon, label_fg) = match status {
-        ToolCallStatus::Requested => ("...", styles.muted.fg.unwrap_or(ratatui::style::Color::White)),
-        ToolCallStatus::Executing => ("*run", styles.warning.fg.unwrap_or(ratatui::style::Color::Yellow)),
-        ToolCallStatus::Done => ("ok", styles.success.fg.unwrap_or(ratatui::style::Color::Green)),
-    };
-
-    // Build inner content lines
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    let arg_count = arguments.lines().count();
-    let max_args = if arg_count <= 3 { 5 } else { 3 };
-    for l in arguments.lines().take(max_args) {
-        content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
-    }
-    let has_arg_truncate = arg_count > max_args;
-    if has_arg_truncate {
-        content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
-    }
-    // Divider placeholder
-    content_lines.push(Line::raw("")); // divider
-    if let Some((result_content, _)) = result {
-        let rn = result_content.lines().count();
-        for l in result_content.lines().take(6) {
-            content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
-        }
-        if rn > 6 {
-            content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
-        }
-    }
-
-    // Determine border visibility based on clipping
-    let show_top = rows_hidden == 0;
-    let show_bottom = rows_hidden + rect.height >= natural_height;
-    let top_border_rows = if show_top { 1u16 } else { 0 };
-
-    let mut borders = Borders::LEFT | Borders::RIGHT;
-    if show_top { borders |= Borders::TOP; }
-    if show_bottom { borders |= Borders::BOTTOM; }
-
-    let mut block = Block::default()
-        .borders(borders)
-        .border_style(styles.muted);
-    if show_top {
-        block = block.title(Span::styled(
-            format!(" {} tool: {} ", icon, name),
-            Style::default().fg(label_fg).add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    let inner = block.inner(rect);
-    block.render(rect, buf);
-
-    // Content skip for scrolled-past rows
-    let content_skip = rows_hidden.saturating_sub(top_border_rows) as usize;
-    let vis: Vec<Line<'static>> = content_lines.iter().cloned()
-        .enumerate()
-        .filter_map(|(i, line)| {
-            if i < content_skip { return None; }
-            let row = i - content_skip;
-            if row >= inner.height as usize { return None; }
-            Some(line)
-        })
-        .collect();
-
-    if !vis.is_empty() {
-        Paragraph::new(vis).render(inner, buf);
-    }
-
-    // Render divider as a full-width horizontal line
-    if result.is_some() {
-        let arg_lines = max_args.min(arg_count) as usize;
-        let truncate_offset = if has_arg_truncate { 1 } else { 0 };
-        let divider_in_content = arg_lines + truncate_offset;
-        let visible_divider_row = divider_in_content.saturating_sub(content_skip);
-        if visible_divider_row < inner.height as usize {
-            let divider_y = inner.y + visible_divider_row as u16;
-            let dash_count = inner.width.saturating_sub(2) as usize;
-            let dash_line = "-".repeat(dash_count.max(1));
-            let div_rect = Rect { x: inner.x + 1, y: divider_y, width: (dash_count + 2) as u16, height: 1 };
-            let div_style = if let Some((_, is_err)) = result {
-                if *is_err { styles.error } else { styles.success }
-            } else { styles.muted };
-            Line::from(Span::styled(format!(" {} ", dash_line), div_style))
-                .render(div_rect, buf);
-        }
-    }
-}
-
-fn render_tool_result_box(
-    tool_name: &str,
-    content: &str,
-    is_error: bool,
-    rect: Rect,
-    buf: &mut Buffer,
-    styles: &ThemeStyles,
-    natural_height: u16,
-    rows_hidden: u16,
-) {
-    let (check, border_style) = if is_error { ("X", styles.error) } else { ("ok", styles.muted) };
-    let label = if tool_name.is_empty() { check.to_string() } else { format!("{} {}", check, tool_name) };
-    let label_fg = if is_error {
-        ratatui::style::Color::White
-    } else {
-        styles.success.fg.unwrap_or(ratatui::style::Color::Green)
-    };
-
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    let content_style = if is_error { styles.error } else { styles.normal };
-    for l in content.lines().take(4) {
-        content_lines.push(Line::from(Span::styled(l.to_string(), content_style)));
-    }
-    if content.lines().count() > 4 {
-        content_lines.push(Line::from(Span::styled(" ...", styles.muted)));
-    }
-
-    let show_top = rows_hidden == 0;
-    let show_bottom = rows_hidden + rect.height >= natural_height;
-    let top_border_rows = if show_top { 1u16 } else { 0 };
-
-    let mut borders = Borders::LEFT | Borders::RIGHT;
-    if show_top { borders |= Borders::TOP; }
-    if show_bottom { borders |= Borders::BOTTOM; }
-
-    let mut block = Block::default()
-        .borders(borders)
-        .border_style(border_style);
-    if show_top {
-        block = block.title(Span::styled(
-            format!(" {} ", label),
-            Style::default().fg(label_fg).add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    let inner = block.inner(rect);
-    block.render(rect, buf);
-
-    let content_skip = rows_hidden.saturating_sub(top_border_rows) as usize;
-    let vis: Vec<Line<'static>> = content_lines.into_iter()
-        .skip(content_skip)
-        .take(inner.height as usize)
-        .collect();
-    if !vis.is_empty() {
-        Paragraph::new(vis).render(inner, buf);
-    }
-}
-
-fn render_error_box(
-    title: &str,
-    message: &str,
-    retryable: bool,
-    rect: Rect,
-    buf: &mut Buffer,
-    styles: &ThemeStyles,
-    natural_height: u16,
-    rows_hidden: u16,
-) {
-    let mut content_lines: Vec<Line<'static>> = Vec::new();
-    for l in message.lines().take(4) {
-        content_lines.push(Line::from(Span::styled(l.to_string(), styles.normal)));
-    }
-    if retryable {
-        content_lines.push(Line::from(Span::styled("retry: this error may be temporary", styles.muted)));
-    }
-
-    let show_top = rows_hidden == 0;
-    let show_bottom = rows_hidden + rect.height >= natural_height;
-    let top_border_rows = if show_top { 1u16 } else { 0 };
-
-    let mut borders = Borders::LEFT | Borders::RIGHT;
-    if show_top { borders |= Borders::TOP; }
-    if show_bottom { borders |= Borders::BOTTOM; }
-
-    let mut block = Block::default()
-        .borders(borders)
-        .border_style(styles.error);
-    if show_top {
-        block = block.title(Span::styled(
-            format!(" error: {} ", title),
-            Style::default().fg(ratatui::style::Color::White).add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    let inner = block.inner(rect);
-    block.render(rect, buf);
-
-    let content_skip = rows_hidden.saturating_sub(top_border_rows) as usize;
-    let vis: Vec<Line<'static>> = content_lines.into_iter()
-        .skip(content_skip)
-        .take(inner.height as usize)
-        .collect();
-    if !vis.is_empty() {
-        Paragraph::new(vis).render(inner, buf);
     }
 }
 
@@ -947,15 +726,49 @@ mod tests {
     }
 
     #[test]
-    fn measure_wrapped_matches_render() {
-        // A line longer than width should wrap
-        let lines = vec![Line::from(Span::raw("abcdefghij"))];
-        let height = measure_wrapped_height(&lines, 5);
-        assert_eq!(height, 2, "10-char line in width 5 should be 2 rows");
+    fn wrap_line_short() {
+        let line = Line::from(Span::raw("hello"));
+        let wrapped = wrap_line(&line, 10);
+        assert_eq!(wrapped.len(), 1, "short line should not wrap");
     }
 
     #[test]
-    fn build_segments_basic() {
+    fn wrap_line_long() {
+        let line = Line::from(Span::raw("abcdefghij"));
+        let wrapped = wrap_line(&line, 5);
+        assert_eq!(wrapped.len(), 2, "10-char line in width 5 should be 2 rows");
+        assert_eq!(wrapped[0].to_string(), "abcde");
+        assert_eq!(wrapped[1].to_string(), "fghij");
+    }
+
+    #[test]
+    fn wrap_line_preserves_style() {
+        let line = Line::from(Span::styled("abcdefghij", Style::default().fg(ratatui::style::Color::Red)));
+        let wrapped = wrap_line(&line, 5);
+        assert_eq!(wrapped.len(), 2);
+        // Both rows should have Red style
+        for row in &wrapped {
+            for span in &row.spans {
+                assert_eq!(span.style.fg, Some(ratatui::style::Color::Red));
+            }
+        }
+    }
+
+    #[test]
+    fn wrap_plain_basic() {
+        let rows = wrap_plain("hello world", 5);
+        assert_eq!(rows.len(), 3); // "hello", " worl", "d" — actually: "hello", " worl", "d"
+    }
+
+    #[test]
+    fn wrap_plain_cjk() {
+        let text = "\u{d55c}\u{ae00}\u{c544}\u{c608}"; // 한글아예 — each char is 2 display columns
+        let rows = wrap_plain(text, 4);
+        assert_eq!(rows.len(), 2, "4 CJK chars (8 cols) in width 4 = 2 rows");
+    }
+
+    #[test]
+    fn build_rows_basic() {
         let theme = Theme::dark();
         let styles = theme.to_styles();
         let mut s = ChatViewState::new();
@@ -964,10 +777,32 @@ mod tests {
             content_blocks: vec![ContentBlock::Text { content: "Hello".into() }],
             timestamp: 0,
         });
-        let segs = build_segments(&s, 80);
-        assert!(!segs.is_empty());
-        // Should have: Label("You") + Text
-        assert!(segs.iter().any(|s| matches!(&s.kind, SegKind::Label { text, .. } if text == "You")));
+        let rows = build_rows(&s, &styles, 80);
+        assert!(!rows.is_empty());
+        // Should contain "You" label
+        assert!(rows.iter().any(|r| r.to_string().contains("You")));
+    }
+
+    #[test]
+    fn scroll_exact() {
+        // Build 10 rows, scroll offset 3, visible height 4 → should see rows 3-6
+        let theme = Theme::dark();
+        let styles = theme.to_styles();
+        let mut s = ChatViewState::new();
+        for i in 0..10 {
+            s.messages.push(ChatMessage {
+                role: MessageRole::System,
+                content_blocks: vec![ContentBlock::Text { content: format!("Line {}", i) }],
+                timestamp: i as i64,
+            });
+        }
+        let rows = build_rows(&s, &styles, 80);
+        assert!(rows.len() >= 10);
+        // Simulate scroll
+        let off = 3usize;
+        let vis = 4usize;
+        let visible: Vec<_> = rows.into_iter().skip(off).take(vis).collect();
+        assert!(visible.len() == 4);
     }
 
     #[test]
