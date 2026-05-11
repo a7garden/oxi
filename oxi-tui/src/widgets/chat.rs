@@ -1,13 +1,16 @@
 //! ChatView widget — scrollable message list with streaming support.
 //!
-//! Architecture: **flat visual row** approach.
+//! Architecture: **Paragraph::scroll()** approach.
 //!
-//! 1. All content is pre-wrapped into individual visual rows (one `Line` per row).
-//! 2. Tool/error boxes are drawn as styled lines with box-drawing characters.
-//! 3. Scrolling is simply `skip(offset).take(visible_height)` on the flat row list.
-//! 4. No segment math, no rows_hidden clipping, no measurement/render mismatch.
+//! 1. All content is built into a single Vec<Line>.
+//! 2. Tool/error boxes are drawn as styled border lines (─│┌┐└┘).
+//! 3. Rendered via `Paragraph::new(text).wrap(Wrap).scroll((offset, 0))`.
+//! 4. `Paragraph::line_count(width)` gives exact total height.
+//! 5. Scrolling is handled entirely by ratatui — no manual skip/take.
 //!
-//! Word-wrapping is done via `unicode_width` to split lines at display boundaries.
+//! This eliminates ALL measurement/render mismatch because ratatui does
+//! both the measurement (line_count) and rendering (scroll) with the same
+//! internal wrapping logic.
 
 use std::collections::HashMap;
 
@@ -21,7 +24,6 @@ use ratatui::{
 use tui_markdown;
 use crate::Theme;
 use crate::theme::ThemeStyles;
-use unicode_width::UnicodeWidthStr;
 
 // ── Tool Call Tracker ─────────────────────────────────────────────────
 
@@ -328,181 +330,79 @@ fn md_lines(content: &str) -> Vec<Line<'static>> {
     }).collect()
 }
 
-// ── Word wrapping ─────────────────────────────────────────────────────
-//
-// We wrap text ourselves so that each output Line is exactly one visual row.
-// This makes skip/take scrolling mathematically exact — no measurement mismatch.
+// ── Build all content as Vec<Line> ────────────────────────────────────
 
-/// Wrap a styled Line into multiple Lines that fit within `width` display columns.
-/// Preserves the style of each span across wrap boundaries.
-fn wrap_line(line: &Line<'_>, width: usize) -> Vec<Line<'static>> {
-    if width == 0 { return vec![Line::raw("")]; }
-    let line_width = UnicodeWidthStr::width(line.to_string().as_str());
-    if line_width <= width {
-        let cloned: Line<'static> = line.spans.iter()
-            .map(|s| Span::styled(s.content.as_ref().to_owned(), s.style))
-            .collect();
-        return vec![cloned];
-    }
-
-    let mut rows: Vec<Line<'static>> = Vec::new();
-    let mut current_spans: Vec<Span<'static>> = Vec::new();
-    let mut current_width: usize = 0;
-
-    for span in &line.spans {
-        let span_style = span.style;
-        let span_text = span.content.as_ref();
-
-        // Process each character
-        let mut char_iter = span_text.chars().peekable();
-        while let Some(ch) = char_iter.next() {
-            let ch_width = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-            if ch == '\n' {
-                // Hard break
-                rows.push(Line::from(std::mem::take(&mut current_spans)));
-                current_width = 0;
-                continue;
-            }
-            if current_width + ch_width > width && current_width > 0 {
-                // Wrap boundary
-                rows.push(Line::from(std::mem::take(&mut current_spans)));
-                current_width = 0;
-            }
-            if ch_width > 0 {
-                current_spans.push(Span::styled(ch.to_string(), span_style));
-                current_width += ch_width;
-            }
-        }
-    }
-    if !current_spans.is_empty() || rows.is_empty() {
-        rows.push(Line::from(current_spans));
-    }
-    rows
-}
-
-/// Wrap a slice of Lines into a flat list of visual rows, each fitting within `width`.
-fn wrap_lines(lines: &[Line<'_>], width: usize) -> Vec<Line<'static>> {
-    let mut result = Vec::new();
-    for line in lines {
-        let wrapped = wrap_line(line, width);
-        result.extend(wrapped);
-    }
-    result
-}
-
-/// Wrap a plain string into Lines of at most `width` display columns.
-fn wrap_plain(text: &str, width: usize) -> Vec<Line<'static>> {
-    let mut result = Vec::new();
-    for raw_line in text.lines() {
-        let line_width = UnicodeWidthStr::width(raw_line);
-        if line_width <= width || width == 0 {
-            result.push(Line::from(Span::raw(raw_line.to_string())));
-        } else {
-            // Character-by-character wrap
-            let mut current = String::new();
-            let mut current_w = 0;
-            for ch in raw_line.chars() {
-                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-                if current_w + cw > width && current_w > 0 {
-                    result.push(Line::from(Span::raw(std::mem::take(&mut current))));
-                    current_w = 0;
-                }
-                current.push(ch);
-                current_w += cw;
-            }
-            if !current.is_empty() {
-                result.push(Line::from(Span::raw(current)));
-            }
-        }
-    }
-    if result.is_empty() { result.push(Line::raw("")); }
-    result
-}
-
-// ── Flat row building ─────────────────────────────────────────────────
-//
-// Everything is converted to a single Vec<Line<'static>> where each element
-// is exactly one visual terminal row. No segments, no virtual y-coords.
-
-/// Build the complete flat row list for the current state.
-fn build_rows(state: &ChatViewState, styles: &ThemeStyles, width: u16) -> Vec<Line<'static>> {
-    let w = width as usize;
-    let mut rows: Vec<Line<'static>> = Vec::new();
+/// Build the complete content as a flat list of styled Lines.
+/// ratatui handles word-wrapping via Wrap, so we don't wrap ourselves.
+fn build_lines(state: &ChatViewState, styles: &ThemeStyles) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
 
     for (i, msg) in state.messages.iter().enumerate() {
         // Spacer between messages
-        if i > 0 { rows.push(Line::raw("")); }
+        if i > 0 { lines.push(Line::raw("")); }
 
-        // User label + rule
         if msg.role == MessageRole::User {
-            let rule = "-".repeat(w.saturating_sub(2));
-            rows.push(Line::from(Span::styled(rule, styles.muted)));
-            rows.push(Line::from(Span::styled("You".to_string(), Style::default().add_modifier(Modifier::BOLD).fg(styles.primary.fg.unwrap_or(ratatui::style::Color::Blue)))));
+            // Separator rule
+            lines.push(Line::from(Span::styled(
+                "\u{2500}".repeat(40), // ─ horizontal line
+                styles.muted,
+            )));
+            // Label
+            lines.push(Line::from(Span::styled(
+                "You".to_string(),
+                Style::default().add_modifier(Modifier::BOLD).fg(styles.primary.fg.unwrap_or(ratatui::style::Color::Blue)),
+            )));
         }
 
         for block in &msg.content_blocks {
-            let block_rows = block_to_rows(block, msg.role, styles, w);
-            rows.extend(block_rows);
+            let block_lines = block_to_lines(block, msg.role, styles);
+            lines.extend(block_lines);
         }
     }
 
-    // Streaming message
     if let Some(ref streaming) = state.streaming {
-        if !state.messages.is_empty() { rows.push(Line::raw("")); }
+        if !state.messages.is_empty() { lines.push(Line::raw("")); }
         for block in &streaming.message.content_blocks {
-            let block_rows = block_to_rows(block, MessageRole::Assistant, styles, w);
-            rows.extend(block_rows);
+            let block_lines = block_to_lines(block, MessageRole::Assistant, styles);
+            lines.extend(block_lines);
         }
         // Spinner
         let sp = ["|", "/", "-", "\\"];
         let ch = sp[state.spinner_frame % sp.len()];
-        rows.push(Line::from(Span::styled(format!("  {} Working...", ch), styles.accent)));
+        lines.push(Line::from(Span::styled(format!("  {} Working...", ch), styles.accent)));
     }
 
-    rows
+    lines
 }
 
-/// Convert a ContentBlock to flat visual rows.
-fn block_to_rows(block: &ContentBlock, role: MessageRole, styles: &ThemeStyles, width: usize) -> Vec<Line<'static>> {
+/// Convert a ContentBlock to styled Lines.
+fn block_to_lines(block: &ContentBlock, role: MessageRole, styles: &ThemeStyles) -> Vec<Line<'static>> {
     match block {
         ContentBlock::Text { content } => {
-            let md = md_lines(content);
-            let wrapped = wrap_lines(&md, if role == MessageRole::User { width.saturating_sub(2) } else { width });
+            let mut md = md_lines(content);
             if role == MessageRole::User {
-                // Prefix each row with indent for left-stripe visual
-                wrapped.into_iter().map(|line| {
+                for line in &mut md {
                     let mut new_spans = vec![Span::styled("  ", Style::default())];
-                    new_spans.extend(line.spans);
-                    Line::from(new_spans)
-                }).collect()
-            } else {
-                wrapped
+                    new_spans.append(&mut line.spans);
+                    line.spans = new_spans;
+                }
             }
+            md
         }
 
         ContentBlock::Thinking { content, collapsed } => {
             let ind = if *collapsed { ">" } else { "v" };
-            let mut rows = vec![
+            let mut lines = vec![
                 Line::from(Span::styled(format!("{} Thinking...", ind), styles.accent)),
             ];
             if !*collapsed {
-                for l in wrap_plain(content, width.saturating_sub(2)) {
-                    let indented: Vec<Span<'static>> = vec![
-                        Span::styled("  ", Style::default()),
-                        Span::styled(l.to_string(), styles.muted),
-                    ];
-                    rows.push(Line::from(indented));
+                for l in content.lines() {
+                    lines.push(Line::from(Span::styled(format!("  {}", l), styles.muted)));
                 }
             } else if let Some(first) = content.lines().next() {
-                let wrapped = wrap_plain(first, width.saturating_sub(2));
-                for l in wrapped {
-                    rows.push(Line::from(vec![
-                        Span::styled("  ", Style::default()),
-                        Span::styled(l.to_string(), styles.muted),
-                    ]));
-                }
+                lines.push(Line::from(Span::styled(format!("  {}", first), styles.muted)));
             }
-            rows
+            lines
         }
 
         ContentBlock::ToolCall { name, arguments, result, status, .. } => {
@@ -511,96 +411,79 @@ fn block_to_rows(block: &ContentBlock, role: MessageRole, styles: &ThemeStyles, 
                 ToolCallStatus::Executing => ("*run", styles.warning.fg.unwrap_or(ratatui::style::Color::Yellow)),
                 ToolCallStatus::Done => ("ok", styles.success.fg.unwrap_or(ratatui::style::Color::Green)),
             };
-
-            let inner_w = width.saturating_sub(4); // "| " prefix + " |" suffix = 4
-            let mut rows = Vec::new();
-
+            let mut lines = Vec::new();
             // Top border with title
-            rows.push(Line::from(Span::styled(
-                format!("+ {} tool: {} ", icon, name),
+            lines.push(Line::from(Span::styled(
+                format!("\u{250c} {} tool: {}", icon, name),
                 Style::default().fg(name_fg).add_modifier(Modifier::BOLD),
             )));
-
-            // Argument lines (wrapped)
+            // Arguments
             let arg_count = arguments.lines().count();
             let max_args = if arg_count <= 3 { 5 } else { 3 };
             for arg in arguments.lines().take(max_args) {
-                for wrapped_line in wrap_plain(arg, inner_w) {
-                    rows.push(Line::from(Span::styled(format!("| {}", wrapped_line), styles.muted)));
-                }
+                lines.push(Line::from(Span::styled(format!("\u{2502} {}", arg), styles.muted)));
             }
             if arg_count > max_args {
-                rows.push(Line::from(Span::styled("| ...", styles.muted)));
+                lines.push(Line::from(Span::styled("\u{2502} ...", styles.muted)));
             }
-
             // Result
             if let Some((result_content, is_error)) = result {
                 let div_style = if *is_error { styles.error } else { styles.success };
-                let div = "-".repeat(inner_w.max(1));
-                rows.push(Line::from(Span::styled(format!("|-{}", div), div_style)));
-
+                lines.push(Line::from(Span::styled(
+                    format!("\u{251c}{}", "\u{2500}".repeat(20)),
+                    div_style,
+                )));
                 let result_style = if *is_error { styles.error } else { styles.normal };
                 let r_count = result_content.lines().count();
                 for rl in result_content.lines().take(6) {
-                    for wrapped_line in wrap_plain(rl, inner_w) {
-                        rows.push(Line::from(Span::styled(format!("| {}", wrapped_line), result_style)));
-                    }
+                    lines.push(Line::from(Span::styled(format!("\u{2502} {}", rl), result_style)));
                 }
                 if r_count > 6 {
-                    rows.push(Line::from(Span::styled("| ...", styles.muted)));
+                    lines.push(Line::from(Span::styled("\u{2502} ...", styles.muted)));
                 }
             }
-
             // Bottom border
-            rows.push(Line::from(Span::styled("+", styles.muted)));
-            rows
+            lines.push(Line::from(Span::styled("\u{2514}", styles.muted)));
+            lines
         }
 
         ContentBlock::ToolResult { tool_name, content, is_error } => {
-            let (check, border_style) = if *is_error { ("X", styles.error) } else { ("ok", styles.muted) };
-            let label = if tool_name.is_empty() { check.to_string() } else { format!("{} {}", check, tool_name) };
-            let label_fg = if *is_error {
-                ratatui::style::Color::White
+            let (check, border_fg) = if *is_error {
+                ("X", styles.error.fg.unwrap_or(ratatui::style::Color::Red))
             } else {
-                styles.success.fg.unwrap_or(ratatui::style::Color::Green)
+                ("ok", styles.success.fg.unwrap_or(ratatui::style::Color::Green))
             };
+            let label = if tool_name.is_empty() { check.to_string() } else { format!("{} {}", check, tool_name) };
             let content_style = if *is_error { styles.error } else { styles.normal };
-            let inner_w = width.saturating_sub(4);
-
-            let mut rows = Vec::new();
-            rows.push(Line::from(Span::styled(
-                format!("+ {}", label),
-                Style::default().fg(label_fg).add_modifier(Modifier::BOLD),
+            let mut lines = Vec::new();
+            lines.push(Line::from(Span::styled(
+                format!("\u{250c} {}", label),
+                Style::default().fg(border_fg).add_modifier(Modifier::BOLD),
             )));
             let n = content.lines().count();
             for l in content.lines().take(4) {
-                for wrapped_line in wrap_plain(l, inner_w) {
-                    rows.push(Line::from(Span::styled(format!("| {}", wrapped_line), content_style)));
-                }
+                lines.push(Line::from(Span::styled(format!("\u{2502} {}", l), content_style)));
             }
             if n > 4 {
-                rows.push(Line::from(Span::styled("| ...", styles.muted)));
+                lines.push(Line::from(Span::styled("\u{2502} ...", styles.muted)));
             }
-            rows.push(Line::from(Span::styled("+", border_style)));
-            rows
+            lines.push(Line::from(Span::styled("\u{2514}", Style::default().fg(border_fg))));
+            lines
         }
 
         ContentBlock::Error { title, message, retryable } => {
-            let mut rows = Vec::new();
-            rows.push(Line::from(Span::styled(
-                format!("! error: {}", title),
+            let mut lines = Vec::new();
+            lines.push(Line::from(Span::styled(
+                format!("\u{26a0} error: {}", title),
                 Style::default().fg(ratatui::style::Color::White).bg(styles.error.fg.unwrap_or(ratatui::style::Color::Red)).add_modifier(Modifier::BOLD),
             )));
-            let inner_w = width.saturating_sub(2);
             for l in message.lines().take(4) {
-                for wrapped_line in wrap_plain(l, inner_w) {
-                    rows.push(Line::from(Span::styled(format!("  {}", wrapped_line), styles.normal)));
-                }
+                lines.push(Line::from(Span::styled(format!("  {}", l), styles.normal)));
             }
             if *retryable {
-                rows.push(Line::from(Span::styled("  retry: this error may be temporary", styles.muted)));
+                lines.push(Line::from(Span::styled("  retry: this error may be temporary", styles.muted)));
             }
-            rows
+            lines
         }
 
         ContentBlock::Image { mime_type, base64_data } => {
@@ -639,9 +522,13 @@ impl StatefulWidget for ChatView<'_> {
         if area.width < 4 || area.height < 1 { return; }
         let styles = self.theme.to_styles();
 
-        // Build flat visual rows
-        let all_rows = build_rows(state, &styles, area.width);
-        let total_height = all_rows.len() as u16;
+        // Build content lines
+        let lines = build_lines(state, &styles);
+        let text: ratatui::text::Text<'_> = lines.into_iter().collect();
+
+        // Measure total height using ratatui's own line_count (with Wrap)
+        let para_for_measure = Paragraph::new(text.clone()).wrap(Wrap { trim: false });
+        let total_height = para_for_measure.line_count(area.width) as u16;
         state.content_height = total_height;
 
         let vis = area.height;
@@ -653,18 +540,12 @@ impl StatefulWidget for ChatView<'_> {
             .style(Style::default().bg(self.theme.colors.background.to_ratatui()))
             .render(area, buf);
 
-        // Render visible rows — simple skip/take, mathematically exact
-        let visible: Vec<Line<'_>> = all_rows.into_iter()
-            .skip(off as usize)
-            .take(vis as usize)
-            .collect();
-
-        if !visible.is_empty() {
-            let text: ratatui::text::Text = visible.into_iter().collect();
-            Paragraph::new(text)
-                .style(styles.normal)
-                .render(area, buf);
-        }
+        // Render — ratatui handles wrapping + scrolling
+        Paragraph::new(text)
+            .style(styles.normal)
+            .wrap(Wrap { trim: false })
+            .scroll((off, 0))
+            .render(area, buf);
 
         // Scrollbar
         if self.scrollbar && max_scroll > 0 {
@@ -726,49 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn wrap_line_short() {
-        let line = Line::from(Span::raw("hello"));
-        let wrapped = wrap_line(&line, 10);
-        assert_eq!(wrapped.len(), 1, "short line should not wrap");
-    }
-
-    #[test]
-    fn wrap_line_long() {
-        let line = Line::from(Span::raw("abcdefghij"));
-        let wrapped = wrap_line(&line, 5);
-        assert_eq!(wrapped.len(), 2, "10-char line in width 5 should be 2 rows");
-        assert_eq!(wrapped[0].to_string(), "abcde");
-        assert_eq!(wrapped[1].to_string(), "fghij");
-    }
-
-    #[test]
-    fn wrap_line_preserves_style() {
-        let line = Line::from(Span::styled("abcdefghij", Style::default().fg(ratatui::style::Color::Red)));
-        let wrapped = wrap_line(&line, 5);
-        assert_eq!(wrapped.len(), 2);
-        // Both rows should have Red style
-        for row in &wrapped {
-            for span in &row.spans {
-                assert_eq!(span.style.fg, Some(ratatui::style::Color::Red));
-            }
-        }
-    }
-
-    #[test]
-    fn wrap_plain_basic() {
-        let rows = wrap_plain("hello world", 5);
-        assert_eq!(rows.len(), 3); // "hello", " worl", "d" — actually: "hello", " worl", "d"
-    }
-
-    #[test]
-    fn wrap_plain_cjk() {
-        let text = "\u{d55c}\u{ae00}\u{c544}\u{c608}"; // 한글아예 — each char is 2 display columns
-        let rows = wrap_plain(text, 4);
-        assert_eq!(rows.len(), 2, "4 CJK chars (8 cols) in width 4 = 2 rows");
-    }
-
-    #[test]
-    fn build_rows_basic() {
+    fn build_lines_basic() {
         let theme = Theme::dark();
         let styles = theme.to_styles();
         let mut s = ChatViewState::new();
@@ -777,32 +616,9 @@ mod tests {
             content_blocks: vec![ContentBlock::Text { content: "Hello".into() }],
             timestamp: 0,
         });
-        let rows = build_rows(&s, &styles, 80);
-        assert!(!rows.is_empty());
-        // Should contain "You" label
-        assert!(rows.iter().any(|r| r.to_string().contains("You")));
-    }
-
-    #[test]
-    fn scroll_exact() {
-        // Build 10 rows, scroll offset 3, visible height 4 → should see rows 3-6
-        let theme = Theme::dark();
-        let styles = theme.to_styles();
-        let mut s = ChatViewState::new();
-        for i in 0..10 {
-            s.messages.push(ChatMessage {
-                role: MessageRole::System,
-                content_blocks: vec![ContentBlock::Text { content: format!("Line {}", i) }],
-                timestamp: i as i64,
-            });
-        }
-        let rows = build_rows(&s, &styles, 80);
-        assert!(rows.len() >= 10);
-        // Simulate scroll
-        let off = 3usize;
-        let vis = 4usize;
-        let visible: Vec<_> = rows.into_iter().skip(off).take(vis).collect();
-        assert!(visible.len() == 4);
+        let lines = build_lines(&s, &styles);
+        assert!(!lines.is_empty());
+        assert!(lines.iter().any(|l| l.to_string().contains("You")));
     }
 
     #[test]
@@ -810,5 +626,30 @@ mod tests {
         let input = "```\ncode\n```";
         let fixed = fix_bare_code_fences(input);
         assert!(fixed.starts_with("```text"));
+    }
+
+    #[test]
+    fn paragraph_scroll_renders() {
+        // Verify that Paragraph::scroll compiles and renders without panic
+        let theme = Theme::dark();
+        let styles = theme.to_styles();
+        let mut s = ChatViewState::new();
+        for i in 0..20 {
+            s.messages.push(ChatMessage {
+                role: MessageRole::System,
+                content_blocks: vec![ContentBlock::Text { content: format!("Line {}", i) }],
+                timestamp: i as i64,
+            });
+        }
+        let lines = build_lines(&s, &styles);
+        let text: ratatui::text::Text<'_> = lines.into_iter().collect();
+        let area = Rect::new(0, 0, 80, 10);
+        let mut buf = Buffer::empty(area);
+        // Should render with scroll offset without panic
+        Paragraph::new(text)
+            .style(styles.normal)
+            .wrap(Wrap { trim: false })
+            .scroll((5, 0))
+            .render(area, &mut buf);
     }
 }
