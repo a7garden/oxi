@@ -135,24 +135,54 @@ impl Drop for Tui {
 // ── UI Events (agent → TUI) ──────────────────────────────────────────────
 
 pub(crate) enum UiEvent {
-    Start,
-    Thinking,
-    ThinkingDelta(String),
-    TextDelta(String),
-    #[allow(dead_code)]
-    ToolCall {
-        id: String,
-        name: String,
-        arguments: String,
+    // ── Agent lifecycle (pi-mono: agent_start / agent_end) ──────────
+    AgentStart,
+    AgentEnd,
+
+    // ── Turn lifecycle (pi-mono: turn_start / turn_end) ────────────
+    TurnStart {
+        turn_number: u32,
     },
-    ToolResult {
-        tool_call_id: Option<String>,
+    TurnEnd {
+        turn_number: u32,
+    },
+
+    // ── Message lifecycle (pi-mono: message_start / update / end) ──
+    /// A new message is being streamed. pi-mono: message_start.
+    MessageStart {
+        message: oxi_ai::Message,
+    },
+    /// Full message snapshot with current content blocks. pi-mono: message_update.
+    /// Content blocks are already separated (text vs toolCall) by the provider.
+    MessageUpdate {
+        message: oxi_ai::Message,
+        delta: Option<String>,
+    },
+    /// Message streaming is complete. pi-mono: message_end.
+    MessageEnd {
+        message: oxi_ai::Message,
+    },
+
+    // ── Tool execution ─────────────────────────────────────────────
+    ToolExecutionStart {
+        tool_call_id: String,
         tool_name: String,
-        content: String,
+        args: serde_json::Value,
+    },
+    ToolExecutionEnd {
+        tool_call_id: String,
+        tool_name: String,
+        result: oxi_ai::ToolResult,
         is_error: bool,
     },
+
+    // ── Legacy events (kept for backward compat during transition) ──
+    Thinking,
+    ThinkingDelta(String),
     Complete,
     Error(String),
+
+    // ── Session events ─────────────────────────────────────────────
     CompactionStart {
         reason: CompactionReason,
     },
@@ -173,13 +203,6 @@ pub(crate) enum UiEvent {
     },
     QueueUpdate {
         pending: usize,
-    },
-    /// An image block was received from the agent.
-    ImageBlock {
-        /// MIME type of the image.
-        mime_type: String,
-        /// Base64-encoded image data.
-        base64_data: String,
     },
     /// Token usage updated.
     TokenUsage {
@@ -290,6 +313,8 @@ pub(crate) struct AppState {
     pub next_action: Option<TuiNextAction>,
     /// Count of pending steering messages (shown in busy input)
     pub pending_steering: usize,
+    /// Whether session needs to be persisted to disk
+    pub needs_persist: bool,
 }
 
 impl AppState {
@@ -313,6 +338,7 @@ impl AppState {
             session_file_path: None,
             next_action: None,
             pending_steering: 0,
+            needs_persist: false,
         }
     }
 
@@ -424,8 +450,56 @@ impl AppState {
         self.chat.stream_text_delta(delta);
     }
 
-    pub fn stream_image(&mut self, mime_type: String, base64_data: String) {
-        self.chat.stream_image(mime_type, base64_data);
+    /// Update the streaming message from a full MessageUpdate snapshot.
+    /// pi-mono pattern: the delta field has incremental text, and the
+    /// full message has the complete content block structure.
+    pub fn update_streaming_message(&mut self, msg: &oxi_ai::Message, delta: Option<&str>) {
+        if let oxi_ai::Message::Assistant(assistant) = msg {
+            // If there's a text delta, append it (pi-mono: incremental update)
+            if let Some(text) = delta {
+                if !text.is_empty() {
+                    self.chat.stream_text_delta(text);
+                }
+            }
+
+            // Check for new tool calls that aren't tracked yet
+            for block in &assistant.content {
+                if let oxi_ai::ContentBlock::ToolCall(tc) = block {
+                    // stream_tool_call is idempotent — it checks tool_tracker
+                    let args_str = serde_json::to_string(&tc.arguments)
+                        .unwrap_or_else(|_| tc.arguments.to_string());
+                    self.chat.stream_tool_call(
+                        tc.id.clone(),
+                        tc.name.clone(),
+                        args_str,
+                        oxi_tui::widgets::chat::ToolCallStatus::Requested,
+                    );
+                } else if let oxi_ai::ContentBlock::Image(img) = block {
+                    self.chat.stream_image(img.mime_type.clone(), img.data.clone());
+                }
+            }
+        }
+    }
+
+    /// Finalize the streaming message from a MessageEnd snapshot.
+    pub fn finalize_streaming_message(&mut self, msg: &oxi_ai::Message) {
+        if let oxi_ai::Message::Assistant(assistant) = msg {
+            // Update token usage from the completed message
+            let usage = &assistant.usage;
+            let context_window_pct = if usage.total_tokens > 0 {
+                (usage.total_tokens as f32 / 200_000.0) * 100.0
+            } else {
+                0.0
+            };
+            self.footer_state.data.input_tokens = usage.input as u32;
+            self.footer_state.data.output_tokens = usage.output as u32;
+            self.footer_state.data.cache_read_tokens = usage.cache_read as u32;
+            self.footer_state.data.cache_write_tokens = usage.cache_write as u32;
+            self.footer_state.data.context_window_pct = context_window_pct;
+            self.footer_state.data.total_cost = usage.cost.total();
+            self.footer_state.data.context_tokens =
+                (usage.input + usage.output + usage.cache_read + usage.cache_write) as u32;
+        }
     }
 
     pub fn finish_streaming(&mut self) {
@@ -565,104 +639,86 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             let event_forwarder = tokio::task::spawn_local(async move {
                                 while let Some(event) = event_rx.recv().await {
                                     let ui_event = match event {
-                                        AgentEvent::Start { .. } => UiEvent::Start,
-                                        AgentEvent::Thinking => UiEvent::Thinking,
-                                        AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
-                                        AgentEvent::TextChunk { text } => UiEvent::TextDelta(text),
-                                        // ── ToolCall from streaming (ProviderEvent::ToolCallEnd) ──
-                                        // IGNORED: this is just the LLM's request, not actual
-                                        // execution. ToolStart arrives when execution begins.
-                                        AgentEvent::ToolCall { .. } => {
-                                            continue;
-                                        }
-                                        // ── ToolStart: execution has begun (Agent::run path) ──
-                                        AgentEvent::ToolStart { tool_call_id, tool_name, arguments } => {
-                                            UiEvent::ToolCall {
-                                                id: tool_call_id,
-                                                name: tool_name,
-                                                arguments: arguments.to_string(),
-                                            }
-                                        }
-                                        // ── ToolComplete: execution finished (Agent::run path) ──
-                                        AgentEvent::ToolComplete { result } => UiEvent::ToolResult {
-                                            tool_call_id: Some(result.tool_call_id.clone()),
-                                            tool_name: String::new(),
-                                            content: result.content.chars().take(500).collect(),
-                                            is_error: result.status == "error",
-                                        },
-                                        AgentEvent::ToolError { error, .. } => UiEvent::ToolResult {
-                                            tool_call_id: None,
-                                            tool_name: String::new(),
-                                            content: error.clone(),
-                                            is_error: true,
-                                        },
-                                        // ── ToolExecutionStart/End (AgentLoop::run_loop path) ──
-                                        // Maps to the same UiEvents — whichever path is active wins.
+                                        // ── Agent lifecycle ─────────────────────────
+                                        AgentEvent::AgentStart { .. } => UiEvent::AgentStart,
+                                        AgentEvent::AgentEnd { .. } => UiEvent::AgentEnd,
+
+                                        // ── Turn lifecycle ───────────────────────────
+                                        AgentEvent::TurnStart { turn_number } => UiEvent::TurnStart { turn_number },
+                                        AgentEvent::TurnEnd { turn_number, .. } => UiEvent::TurnEnd { turn_number },
+
+                                        // ── Message lifecycle (pi-mono pattern) ─────
+                                        // These carry full message snapshots with properly
+                                        // separated content blocks from the provider.
+                                        AgentEvent::MessageStart { message } => UiEvent::MessageStart { message },
+                                        AgentEvent::MessageUpdate { message, delta } => UiEvent::MessageUpdate { message, delta },
+                                        AgentEvent::MessageEnd { message } => UiEvent::MessageEnd { message },
+
+                                        // ── Tool execution (structured events) ──────
                                         AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => {
-                                            UiEvent::ToolCall { id: tool_call_id, name: tool_name, arguments: args.to_string() }
+                                            UiEvent::ToolExecutionStart { tool_call_id, tool_name, args }
                                         }
                                         AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
-                                            UiEvent::ToolResult {
-                                                tool_call_id: Some(tool_call_id),
+                                            UiEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error }
+                                        }
+
+                                        // ── Legacy tool events (from Agent::run_with_channel) ──
+                                        // Map to the same structured UiEvents.
+                                        AgentEvent::ToolStart { tool_call_id, tool_name, arguments } => {
+                                            UiEvent::ToolExecutionStart {
+                                                tool_call_id,
                                                 tool_name,
-                                                content: result.content.chars().take(500).collect(),
-                                                is_error,
+                                                args: arguments,
                                             }
                                         }
+                                        AgentEvent::ToolComplete { result } => {
+                                            UiEvent::ToolExecutionEnd {
+                                                tool_call_id: result.tool_call_id.clone(),
+                                                tool_name: String::new(),
+                                                result,
+                                                is_error: false, // status checked in handler
+                                            }
+                                        }
+                                        AgentEvent::ToolError { tool_call_id, error } => {
+                                            UiEvent::ToolExecutionEnd {
+                                                tool_call_id,
+                                                tool_name: String::new(),
+                                                result: oxi_ai::ToolResult {
+                                                    tool_call_id: String::new(),
+                                                    content: error,
+                                                    status: "error".to_string(),
+                                                },
+                                                is_error: true,
+                                            }
+                                        }
+
+                                        // ── Legacy streaming events ─────────────────
+                                        // Still emitted by agent.rs alongside MessageUpdate.
+                                        // TUI now prefers MessageUpdate, so we skip these.
+                                        AgentEvent::Start { .. } => {
+                                            // AgentStart equivalent — no action needed
+                                            // since we also get AgentStart from events.rs
+                                            continue;
+                                        }
+                                        AgentEvent::Thinking => UiEvent::Thinking,
+                                        AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
+                                        AgentEvent::TextChunk { .. } => {
+                                            // SKIP: TUI now renders from MessageUpdate snapshots,
+                                            // not incremental text deltas. This prevents raw
+                                            // JSON from tool calls appearing in chat.
+                                            continue;
+                                        }
+                                        AgentEvent::ToolCall { .. } => {
+                                            // SKIP: This is the LLM's request, not execution.
+                                            // ToolExecutionStart arrives when execution begins.
+                                            continue;
+                                        }
+
+                                        // ── Completion & errors ──────────────────────
                                         AgentEvent::Complete { .. } => UiEvent::Complete,
                                         AgentEvent::Error { message, .. } => UiEvent::Error(message),
-                                        AgentEvent::MessageUpdate { ref message, delta: _ } => {
-                                            let content_blocks: &[oxi_ai::ContentBlock] = match message {
-                                                oxi_ai::Message::Assistant(a) => &a.content,
-                                                oxi_ai::Message::User(u) => match &u.content {
-                                                    oxi_ai::MessageContent::Blocks(blocks) => blocks,
-                                                    _ => &[],
-                                                },
-                                                oxi_ai::Message::ToolResult(t) => &t.content,
-                                            };
-                                            for block in content_blocks {
-                                                if let oxi_ai::ContentBlock::Image(ref img) = block {
-                                                    let _ = ui_fwd.send(UiEvent::ImageBlock {
-                                                        mime_type: img.mime_type.clone(),
-                                                        base64_data: img.data.clone(),
-                                                    }).await;
-                                                }
-                                            }
-                                            continue;
-                                        }
-                                        AgentEvent::MessageEnd { ref message } => {
-                                            let content_blocks: &[oxi_ai::ContentBlock] = match message {
-                                                oxi_ai::Message::Assistant(a) => &a.content,
-                                                oxi_ai::Message::User(u) => match &u.content {
-                                                    oxi_ai::MessageContent::Blocks(blocks) => blocks,
-                                                    _ => &[],
-                                                },
-                                                oxi_ai::Message::ToolResult(t) => &t.content,
-                                            };
-                                            for block in content_blocks {
-                                                if let oxi_ai::ContentBlock::Image(ref img) = block {
-                                                    let _ = ui_fwd.send(UiEvent::ImageBlock {
-                                                        mime_type: img.mime_type.clone(),
-                                                        base64_data: img.data.clone(),
-                                                    }).await;
-                                                }
-                                            }
-                                            if let oxi_ai::Message::Assistant(ref a) = message {
-                                                let usage = &a.usage;
-                                                let context_window_pct = if usage.total_tokens > 0 {
-                                                    (usage.total_tokens as f32 / 200_000.0) * 100.0
-                                                } else { 0.0 };
-                                                let _ = ui_fwd.send(UiEvent::TokenUsage {
-                                                    input_tokens: usage.input as u32,
-                                                    output_tokens: usage.output as u32,
-                                                    cache_read_tokens: usage.cache_read as u32,
-                                                    cache_write_tokens: usage.cache_write as u32,
-                                                    context_window_pct,
-                                                    total_cost: usage.cost.total(),
-                                                }).await;
-                                            }
-                                            continue;
-                                        }
+
+                                        // ── Usage ────────────────────────────────────
                                         AgentEvent::Usage { input_tokens, output_tokens } => {
                                             let _ = ui_fwd.send(UiEvent::TokenUsage {
                                                 input_tokens: input_tokens as u32,
@@ -674,6 +730,26 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             }).await;
                                             continue;
                                         }
+
+                                        // ── Steering / follow-up consumption ──
+                                        AgentEvent::SteeringMessage { .. } => {
+                                            // A steering message was consumed from the queue
+                                            // → emit queue update so TUI shows current count
+                                            let steering_q = session_handle.steering_queue();
+                                            let follow_up_q = session_handle.follow_up_queue();
+                                            let pending = steering_q.read().len() + follow_up_q.read().len();
+                                            let _ = ui_fwd.send(UiEvent::QueueUpdate { pending }).await;
+                                            continue;
+                                        }
+                                        AgentEvent::FollowUpMessage { .. } => {
+                                            let steering_q = session_handle.steering_queue();
+                                            let follow_up_q = session_handle.follow_up_queue();
+                                            let pending = steering_q.read().len() + follow_up_q.read().len();
+                                            let _ = ui_fwd.send(UiEvent::QueueUpdate { pending }).await;
+                                            continue;
+                                        }
+
+                                        // ── Everything else: skip ───────────────────
                                         _ => continue,
                                     };
                                     if ui_fwd.send(ui_event).await.is_err() { break; }
@@ -810,6 +886,11 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
             while let Ok(ui_event) = ui_rx.try_recv() {
                 handlers::handle_ui_event(ui_event, &mut state);
+                // Persist session after message_end events (pi-mono: persist on every message_end)
+                if state.needs_persist {
+                    agent_session.persist();
+                    state.needs_persist = false;
+                }
             }
             while let Ok(session_event) = session_event_rx.try_recv() {
                 handlers::handle_session_event(session_event, &ui_tx).await;

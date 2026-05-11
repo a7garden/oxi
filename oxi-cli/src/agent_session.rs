@@ -31,7 +31,7 @@ use crate::extensions::{ExtensionContext, ExtensionContextBuilder, ExtensionRunn
 use crate::session::{AgentMessage, SessionManager};
 use crate::settings::{Settings, ThinkingLevel};
 use anyhow::{Context, Result};
-use oxi_agent::{Agent, AgentEvent, AgentState, AgentHooks};
+use oxi_agent::{Agent, AgentEvent, AgentState};
 use oxi_ai::Message;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
@@ -1210,6 +1210,15 @@ impl AgentSession {
     /// Use this when you need direct agent access (e.g., `run_with_channel`).
     pub fn agent_ref(&self) -> Arc<Agent> {
         Arc::clone(&self.agent)
+    }
+
+    /// Persist the current agent state to the session file.
+    ///
+    /// Called by the TUI event loop after `MessageEnd` events to ensure
+    /// session data is saved incrementally, matching pi-mono's behavior
+    /// of persisting on every `message_end`.
+    pub fn persist(&self) {
+        self.persist_session();
     }
 
     /// Get a cheap cloneable handle that references the same underlying session.

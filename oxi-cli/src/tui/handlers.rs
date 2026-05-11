@@ -4,10 +4,10 @@ use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
 use super::slash;
 use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
 use crate::clipboard_write;
+use base64::Engine;
 use oxi_agent::AgentEvent;
 use oxi_tui::widgets::chat::ToolCallStatus;
 use tokio::sync::mpsc;
-use base64::Engine;
 
 use crossterm::event::{
     Event as CEvent, KeyCode, KeyModifiers, MouseEventKind,
@@ -266,27 +266,104 @@ async fn handle_key(
 }
 
 /// Handle an agent UI event.
+/// pi-mono pattern: MessageUpdate drives rendering (not TextChunk deltas).
 pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
     match event {
-        UiEvent::Start | UiEvent::Thinking | UiEvent::ThinkingDelta(_) => {}
-        UiEvent::TextDelta(text) => {
-            state.stream_text_delta(&text);
+        // ── Agent lifecycle ───────────────────────────────────────
+        UiEvent::AgentStart => {
+            // Agent started processing
         }
-        UiEvent::ToolCall { id, name, arguments } => {
-            tracing::debug!("[HANDLER] UiEvent::ToolCall received: id={:?}, name={:?}", id, name);
-            state.chat.stream_tool_call(id, name, arguments, ToolCallStatus::Executing);
+        UiEvent::AgentEnd => {
+            // Agent finished all processing
         }
-        UiEvent::ToolResult { tool_call_id, tool_name, content, is_error } => {
-            tracing::debug!("[HANDLER] UiEvent::ToolResult received: tool_call_id={:?}, tool_name={:?}", tool_call_id, tool_name);
-            state.chat.stream_tool_result(tool_call_id, tool_name, content, is_error);
+
+        // ── Turn lifecycle ────────────────────────────────────────
+        UiEvent::TurnStart { .. } => {
+            // New turn began
+        }
+        UiEvent::TurnEnd { .. } => {
+            // Turn completed
+        }
+
+        // ── Message lifecycle (pi-mono pattern) ───────────────────
+        // These are the primary rendering events.
+        UiEvent::MessageStart { message } => {
+            // pi-mono: message_start — begin streaming
+            state.chat.start_streaming();
+            state.is_agent_busy = true;
+            state.auto_scroll = true;
+            // Apply initial snapshot (delta = None for first message)
+            state.update_streaming_message(&message, None);
+        }
+        UiEvent::MessageUpdate { message, delta } => {
+            // pi-mono: message_update — full snapshot with separated content blocks.
+            // The provider has already split text vs toolCall vs thinking.
+            state.update_streaming_message(&message, delta.as_deref());
+        }
+        UiEvent::MessageEnd { message } => {
+            // pi-mono: message_end — finalize the message
+            state.finalize_streaming_message(&message);
+
+            // Persist session data (pi-mono: persist on every message_end)
+            // Access agent_session through the handler context — we don't have it
+            // here, so we'll persist via the main loop.
+            state.needs_persist = true;
+
+            // Finalize moves the message to the permanent list
+            let was_streaming = state.chat.is_streaming();
+            state.chat.finish_streaming();
+            state.is_agent_busy = false;
+            if was_streaming {
+                state.message_count += 1;
+                state.chat.refresh_last_code_block();
+            }
+        }
+
+        // ── Tool execution ────────────────────────────────────────
+        UiEvent::ToolExecutionStart { tool_call_id, tool_name, args } => {
+            tracing::debug!("[HANDLER] ToolExecutionStart: id={:?}, name={:?}", tool_call_id, tool_name);
+            let args_str = serde_json::to_string(&args).unwrap_or_else(|_| args.to_string());
+            state.chat.stream_tool_call(
+                tool_call_id,
+                tool_name,
+                args_str,
+                ToolCallStatus::Executing,
+            );
+        }
+        UiEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
+            tracing::debug!("[HANDLER] ToolExecutionEnd: id={:?}, name={:?}", tool_call_id, tool_name);
+            state.chat.stream_tool_result(
+                Some(tool_call_id),
+                tool_name,
+                result.content.chars().take(500).collect(),
+                is_error || result.status == "error",
+            );
+        }
+
+        // ── Legacy events ─────────────────────────────────────────
+        UiEvent::Thinking => {
+            // Agent is waiting for first token
+        }
+        UiEvent::ThinkingDelta(text) => {
+            // Thinking text — still useful for showing reasoning
+            state.chat.stream_thinking(text, true);
         }
         UiEvent::Complete => {
-            state.finish_streaming();
+            // Agent completed — only finalize if still streaming
+            // (MessageEnd may have already finalized)
+            if state.chat.is_streaming() {
+                state.finish_streaming();
+            } else {
+                // Already finalized via MessageEnd, just clear busy state
+                state.is_agent_busy = false;
+            }
         }
         UiEvent::Error(msg) => {
             state.cancel_streaming();
             state.add_system_message(format!("Error: {}", msg));
         }
+
+        // ── Session events ────────────────────────────────────────
         UiEvent::CompactionStart { reason } => {
             let reason_str = match reason {
                 CompactionReason::Manual => "manual",
@@ -325,9 +402,6 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         }
         UiEvent::QueueUpdate { pending } => {
             state.pending_steering = pending;
-        }
-        UiEvent::ImageBlock { mime_type, base64_data } => {
-            state.stream_image(mime_type, base64_data);
         }
         UiEvent::TokenUsage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, context_window_pct, total_cost } => {
             state.footer_state.data.input_tokens = input_tokens;
