@@ -5,13 +5,16 @@
 //! into a virtual buffer, and the ScrollView handles scrolling/clipping.
 //!
 //! Benefits over manual approaches:
-//! - Tool/error boxes use Block::bordered() — real borders, no manual art
+//! - Tool/error boxes use Block::bordered() — real ratatui borders
 //! - Text uses Paragraph::wrap(Wrap) — proper word-wrapping
 //! - No measurement/render mismatch — we render once, ScrollView clips
 //! - pending_images works — images are tracked in stream methods
+//! - Layout caching — only recomputes when state actually changes
+//! - Truncation at ingest — no height inflation from monster inputs
 
 use std::collections::HashMap;
 
+use parking_lot::RwLock;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -23,6 +26,33 @@ use tui_scrollview::{ScrollView, ScrollViewState};
 use tui_markdown;
 use crate::Theme;
 use crate::theme::ThemeStyles;
+
+// ── Limits (truncation at ingest) ──────────────────────────────────────
+
+const MAX_TOOL_ARG_CHARS: usize = 50_000;
+const MAX_TOOL_ARG_LINES: usize = 200;
+const MAX_TOOL_RESULT_CHARS: usize = 50_000;
+const MAX_TOOL_RESULT_LINES: usize = 100;
+const MAX_TEXT_CHARS: usize = 500_000;
+
+fn clamp_str(s: String, max_chars: usize, max_lines: usize) -> String {
+    let n = s.chars().count();
+    let lines = s.lines().count();
+    if n <= max_chars && lines <= max_lines {
+        return s;
+    }
+    let truncated: String = s
+        .chars()
+        .take(max_chars)
+        .collect();
+    let truncated_lines: Vec<&str> = truncated.lines().take(max_lines).collect();
+    let mut result = truncated_lines.join("\n");
+    // Add overflow marker if we cut anything
+    if n > max_chars || lines > max_lines {
+        result.push_str("\n ...");
+    }
+    result
+}
 
 // ── Tool Call Tracker ─────────────────────────────────────────────────
 
@@ -87,6 +117,57 @@ pub struct StreamingState {
     pub message: ChatMessage,
 }
 
+// ── Layout Cache ──────────────────────────────────────────────────────
+//
+// Caches the result of compute_layout(). Invalidated when any of these change:
+// - messages.len()
+// - streaming content block count
+// - spinner_frame
+// - width
+//
+// Uses parking_lot::RwLock so multiple readers can access concurrently.
+
+struct LayoutCache {
+    /// Last known messages count
+    msg_count: usize,
+    /// Last known streaming block count
+    streaming_len: usize,
+    /// Last known spinner frame
+    spinner_frame: usize,
+    /// Last known width
+    width: u16,
+    /// Cached layout entries (None = needs recompute)
+    entries: Option<Vec<LayoutEntry>>,
+    /// Cached total content height
+    total_height: u16,
+}
+
+impl std::fmt::Debug for LayoutCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LayoutCache")
+            .field("msg_count", &self.msg_count)
+            .field("streaming_len", &self.streaming_len)
+            .field("spinner_frame", &self.spinner_frame)
+            .field("width", &self.width)
+            .field("entries", &self.entries.as_ref().map(|v| v.len()))
+            .field("total_height", &self.total_height)
+            .finish()
+    }
+}
+
+impl Default for LayoutCache {
+    fn default() -> Self {
+        Self {
+            msg_count: 0,
+            streaming_len: 0,
+            spinner_frame: 0,
+            width: 0,
+            entries: None,
+            total_height: 0,
+        }
+    }
+}
+
 // ── ChatViewState ──────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -100,6 +181,8 @@ pub struct ChatViewState {
     tool_tracker: ToolCallTracker,
     /// ScrollView state — manages scroll position
     pub scroll_state: ScrollViewState,
+    /// Layout cache — guarded by RwLock
+    layout_cache: RwLock<LayoutCache>,
 }
 
 impl ChatViewState {
@@ -137,9 +220,27 @@ impl ChatViewState {
     fn append_text(&mut self, text: &str) {
         if let Some(ref mut s) = self.streaming {
             if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
-                content.push_str(text);
+                // Clamp total text size to prevent unbounded growth
+                if content.chars().count() > MAX_TEXT_CHARS {
+                    return;
+                }
+                let new_chars = text.chars().count();
+                if content.chars().count() + new_chars > MAX_TEXT_CHARS {
+                    // Truncate delta if it would exceed the limit
+                    let remaining = MAX_TEXT_CHARS.saturating_sub(content.chars().count());
+                    let taken: String = text.chars().take(remaining).collect();
+                    content.push_str(&taken);
+                } else {
+                    content.push_str(text);
+                }
             } else {
-                s.message.content_blocks.insert(0, ContentBlock::Text { content: text.to_string() });
+                let truncated = if text.chars().count() > MAX_TEXT_CHARS {
+                    let c: String = text.chars().take(MAX_TEXT_CHARS).collect();
+                    format!("{}\n ...", c)
+                } else {
+                    text.to_string()
+                };
+                s.message.content_blocks.insert(0, ContentBlock::Text { content: truncated });
             }
         }
     }
@@ -183,7 +284,11 @@ impl ChatViewState {
             let idx = s.message.content_blocks.len();
             if !self.tool_tracker.register(id.clone(), idx) { return; }
             s.message.content_blocks.push(ContentBlock::ToolCall {
-                id, name, arguments, result: None, status,
+                id,
+                name,
+                arguments: clamp_str(arguments, MAX_TOOL_ARG_CHARS, MAX_TOOL_ARG_LINES),
+                result: None,
+                status,
             });
         }
     }
@@ -194,7 +299,10 @@ impl ChatViewState {
                 if let Some(idx) = self.tool_tracker.find_and_remove(id) {
                     if let Some(block) = s.message.content_blocks.get_mut(idx) {
                         if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = block {
-                            *result = Some((content, is_error));
+                            *result = Some((
+                                clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
+                                is_error,
+                            ));
                             *status = ToolCallStatus::Done;
                             return;
                         }
@@ -203,25 +311,39 @@ impl ChatViewState {
             }
             if let Some(last) = s.message.content_blocks.last_mut() {
                 if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = last {
-                    *result = Some((content, is_error));
+                    *result = Some((
+                        clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
+                        is_error,
+                    ));
                     *status = ToolCallStatus::Done;
                     if let Some(ref id) = tool_call_id { self.tool_tracker.remove(id); }
                     return;
                 }
             }
-            s.message.content_blocks.push(ContentBlock::ToolResult { tool_name, content, is_error });
+            s.message.content_blocks.push(ContentBlock::ToolResult {
+                tool_name,
+                content: clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
+                is_error,
+            });
         }
     }
 
     pub fn stream_error(&mut self, title: String, message: String, retryable: bool) {
         if let Some(ref mut s) = self.streaming {
-            s.message.content_blocks.push(ContentBlock::Error { title, message, retryable });
+            s.message.content_blocks.push(ContentBlock::Error {
+                title,
+                message: clamp_str(message, 5000, 50),
+                retryable,
+            });
         }
     }
 
     pub fn stream_thinking(&mut self, content: String, collapsed: bool) {
         if let Some(ref mut s) = self.streaming {
-            s.message.content_blocks.push(ContentBlock::Thinking { content, collapsed });
+            s.message.content_blocks.push(ContentBlock::Thinking {
+                content: clamp_str(content, 50_000, 200),
+                collapsed,
+            });
         }
     }
 
@@ -234,10 +356,20 @@ impl ChatViewState {
     }
 
     pub fn finish_streaming(&mut self) {
-        if let Some(s) = self.streaming.take() { self.messages.push(s.message); }
+        if let Some(s) = self.streaming.take() {
+            self.messages.push(s.message);
+        }
+        // Invalidate cache
+        let mut cache = self.layout_cache.write();
+        cache.entries = None;
     }
 
-    pub fn cancel_streaming(&mut self) { self.streaming = None; }
+    pub fn cancel_streaming(&mut self) {
+        self.streaming = None;
+        // Invalidate cache
+        let mut cache = self.layout_cache.write();
+        cache.entries = None;
+    }
 
     pub fn clear(&mut self) {
         self.messages.clear();
@@ -246,14 +378,22 @@ impl ChatViewState {
         self.last_code_block = None;
         self.pending_images.clear();
         self.tool_tracker.clear();
+        let mut cache = self.layout_cache.write();
+        cache.entries = None;
     }
 
-    pub fn push_message(&mut self, msg: ChatMessage) { self.messages.push(msg); }
+    pub fn push_message(&mut self, msg: ChatMessage) {
+        self.messages.push(msg);
+        let mut cache = self.layout_cache.write();
+        cache.entries = None;
+    }
 
     pub fn add_message(&mut self, msg: ChatMessage) {
         self.messages.push(msg);
         self.streaming = None;
         self.last_code_block = None;
+        let mut cache = self.layout_cache.write();
+        cache.entries = None;
     }
 
     pub fn push_system_message(&mut self, content: String) {
@@ -262,6 +402,43 @@ impl ChatViewState {
             content_blocks: vec![ContentBlock::Text { content }],
             timestamp: 0,
         });
+        let mut cache = self.layout_cache.write();
+        cache.entries = None;
+    }
+
+    /// Get cached layout entries, recomputing if needed.
+    fn get_layout(&self, width: u16) -> Vec<LayoutEntry> {
+        let msg_count = self.messages.len();
+        let streaming_len = self.streaming.as_ref().map(|s| s.message.content_blocks.len()).unwrap_or(0);
+        let spinner = self.spinner_frame;
+
+        {
+            let cache = self.layout_cache.read();
+            if cache.entries.is_some()
+                && cache.msg_count == msg_count
+                && cache.streaming_len == streaming_len
+                && cache.spinner_frame == spinner
+                && cache.width == width
+            {
+                return cache.entries.clone().unwrap();
+            }
+        }
+
+        // Recompute outside the read lock
+        let entries = compute_layout(self, width);
+        let total_height = entries.last().map(|e| e.y.saturating_add(e.height)).unwrap_or(0);
+
+        {
+            let mut cache = self.layout_cache.write();
+            cache.msg_count = msg_count;
+            cache.streaming_len = streaming_len;
+            cache.spinner_frame = spinner;
+            cache.width = width;
+            cache.entries = Some(entries.clone());
+            cache.total_height = total_height;
+        }
+
+        entries
     }
 }
 
@@ -292,6 +469,8 @@ fn extract_last_code_block(text: &str) -> Option<String> {
 }
 
 /// Fix bare code fences (``` without a language) to ```text.
+/// Also skips trailing whitespace to prevent tui-markdown treating
+/// "``` text" as a code language "text".
 fn fix_bare_code_fences(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
     let bytes = content.as_bytes();
@@ -337,10 +516,6 @@ fn md_lines(content: &str) -> Vec<Line<'static>> {
 }
 
 // ── Layout calculation ────────────────────────────────────────────────
-//
-// We calculate the y-position and height of each content block to know
-// where to render it in the ScrollView's virtual buffer. Height is
-// measured via Paragraph::line_count(Wrap) — matches rendering exactly.
 
 /// Measure wrapped height using ratatui's Paragraph::line_count.
 fn measure_wrapped_height(lines: &[Line<'_>], width: u16) -> u16 {
@@ -351,12 +526,14 @@ fn measure_wrapped_height(lines: &[Line<'_>], width: u16) -> u16 {
 }
 
 /// Calculate the layout: list of (y, height, block_ref) for each piece of content.
+#[derive(Clone)]
 struct LayoutEntry {
     y: u16,
     height: u16,
     kind: LayoutKind,
 }
 
+#[derive(Clone)]
 enum LayoutKind {
     Spacer,
     Rule,
@@ -499,7 +676,7 @@ fn measure_kind(kind: &LayoutKind, width: u16, inner_w: u16) -> u16 {
 
 // ── Rendering into ScrollView ─────────────────────────────────────────
 
-/// A wrapper widget that renders a single content block into a rect.
+/// A wrapper widget that renders a single content block.
 struct EntryWidget<'a> {
     entry: &'a LayoutKind,
     styles: &'a ThemeStyles,
@@ -539,7 +716,6 @@ impl Widget for EntryWidget<'_> {
                     ToolCallStatus::Executing => ("*run", self.styles.warning.fg.unwrap_or(ratatui::style::Color::Yellow)),
                     ToolCallStatus::Done => ("ok", self.styles.success.fg.unwrap_or(ratatui::style::Color::Green)),
                 };
-
                 let block = Block::bordered()
                     .border_style(self.styles.muted)
                     .title(Span::styled(
@@ -580,7 +756,6 @@ impl Widget for EntryWidget<'_> {
                     self.styles.success.fg.unwrap_or(ratatui::style::Color::Green)
                 };
                 let content_style = if *is_error { self.styles.error } else { self.styles.normal };
-
                 let block = Block::bordered()
                     .border_style(border_style)
                     .title(Span::styled(
@@ -672,18 +847,18 @@ impl StatefulWidget for ChatView<'_> {
         let styles = self.theme.to_styles();
         let width = area.width;
 
-        // Compute layout
-        let layout = compute_layout(state, width);
+        // Get layout (from cache or recomputed)
+        let layout = state.get_layout(width);
         let total_height = layout.last()
             .map(|e| e.y.saturating_add(e.height))
             .unwrap_or(0);
         state.content_height = total_height;
 
-        // Create ScrollView with virtual buffer
+        // Create ScrollView with virtual buffer sized to total content
         let size = ratatui::layout::Size::new(width, total_height.max(area.height));
         let mut scroll_view = ScrollView::new(size);
 
-        // Render each layout entry into the scroll view
+        // Render each layout entry
         for entry in &layout {
             if entry.height == 0 { continue; }
             let rect = Rect::new(0, entry.y, width, entry.height);
@@ -691,7 +866,7 @@ impl StatefulWidget for ChatView<'_> {
             scroll_view.render_widget(widget, rect);
         }
 
-        // Render the scroll view — it handles clipping and scrolling
+        // Render the scroll view — handles clipping and scrolling
         scroll_view.render(area, buf, &mut state.scroll_state);
     }
 }
@@ -707,7 +882,6 @@ mod tests {
         let mut s = ChatViewState::new();
         s.content_height = 100;
         s.scroll_to_bottom(20);
-        // ScrollViewState sets y to u16::MAX, render clamps
         assert!(s.scroll_state.offset().y > 80 || s.scroll_state.offset().y == u16::MAX);
     }
 
@@ -765,5 +939,65 @@ mod tests {
         let input = "```\ncode\n```";
         let fixed = fix_bare_code_fences(input);
         assert!(fixed.starts_with("```text"));
+    }
+
+    #[test]
+    fn clamp_str_no_truncate() {
+        let short = "hello world".to_string();
+        let result = clamp_str(short.clone(), 100, 10);
+        assert_eq!(result, short);
+    }
+
+    #[test]
+    fn clamp_str_truncates_chars() {
+        let long = "x".repeat(100);
+        let result = clamp_str(long.clone(), 10, 200);
+        // 10 chars + "\n ..." = 16 chars, 2 lines
+        assert!(result.starts_with("xxxxxxxxxx"));
+        assert!(result.contains("..."));
+    }
+
+    #[test]
+    fn clamp_str_truncates_lines() {
+        let long = (0..20).map(|i| format!("line{}", i)).collect::<Vec<_>>().join("\n");
+        let result = clamp_str(long.clone(), 10000, 5);
+        assert!(result.lines().count() <= 6); // 5 + "...\n"
+        assert!(result.ends_with(" ..."));
+    }
+
+    #[test]
+    fn layout_cache_hit() {
+        let mut s = ChatViewState::new();
+        s.messages.push(ChatMessage {
+            role: MessageRole::User,
+            content_blocks: vec![ContentBlock::Text { content: "Hello".into() }],
+            timestamp: 0,
+        });
+        // First call — cache miss, recompute
+        let layout1 = s.get_layout(80);
+        // Second call with same params — cache hit
+        let layout2 = s.get_layout(80);
+        assert_eq!(layout1.len(), layout2.len());
+        // Different width — cache miss
+        let layout3 = s.get_layout(60);
+        assert_eq!(layout1.len(), layout3.len()); // same content, different heights
+    }
+
+    #[test]
+    fn text_truncation_on_ingest() {
+        let mut s = ChatViewState::new();
+        s.start_streaming();
+        // Append a huge chunk
+        let huge = "x".repeat(600_000);
+        s.stream_text_delta(&huge);
+        let content = match &s.streaming {
+            Some(ref st) => match &st.message.content_blocks[0] {
+                ContentBlock::Text { content } => content.clone(),
+                _ => panic!("expected Text"),
+            },
+            None => panic!("expected streaming"),
+        };
+        // Content should be clamped to MAX_TEXT_CHARS (with overflow marker)
+        assert!(content.chars().count() <= MAX_TEXT_CHARS + 10, "content len = {}", content.chars().count());
     }
 }
