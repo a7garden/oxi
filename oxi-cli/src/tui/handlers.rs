@@ -305,14 +305,15 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             state.finalize_streaming_message(&message);
 
             // Persist session data (pi-mono: persist on every message_end)
-            // Access agent_session through the handler context — we don't have it
-            // here, so we'll persist via the main loop.
             state.needs_persist = true;
 
             // Finalize moves the message to the permanent list
             let was_streaming = state.chat.is_streaming();
             state.chat.finish_streaming();
-            state.is_agent_busy = false;
+            // NOTE: Do NOT set is_agent_busy = false here.
+            // The agent may still be executing tools and starting another
+            // turn. is_agent_busy is cleared on TurnEnd (via Complete)
+            // or when the user cancels.
             if was_streaming {
                 state.message_count += 1;
                 state.chat.refresh_last_code_block();

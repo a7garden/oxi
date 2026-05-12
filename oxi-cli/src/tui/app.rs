@@ -503,7 +503,14 @@ impl AppState {
                         if thinking.len() > self.snapshot_thinking_rendered {
                             let new_thinking = &thinking[self.snapshot_thinking_rendered..];
                             if !new_thinking.is_empty() {
-                                self.chat.stream_thinking(new_thinking.to_string(), self.snapshot_thinking_rendered == 0);
+                                // GLM models put tool call JSON arrays in
+                                // reasoning_content. Strip them out so only
+                                // real thinking text is shown. Actual tool
+                                // calls arrive via ToolCall content blocks.
+                                let filtered = filter_tool_call_json(new_thinking);
+                                if !filtered.is_empty() {
+                                    self.chat.stream_thinking(filtered, false);
+                                }
                             }
                             self.snapshot_thinking_rendered = thinking.len();
                         }
@@ -577,6 +584,51 @@ impl AppState {
     pub fn messages(&self) -> &[ChatMessage] {
         &self.chat.messages
     }
+}
+
+/// Strip JSON tool call arrays from thinking text.
+/// GLM-5.1 writes tool call plans as `[{"function":...}]` inside
+/// reasoning_content. We detect `[{"` and skip to the matching `]`,
+/// keeping only the real thinking text.
+fn filter_tool_call_json(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut result = String::new();
+    let mut i = 0;
+
+    while i < len {
+        // Detect `[{"` — start of a JSON array containing tool calls
+        if chars[i] == '['
+            && i + 2 < len
+            && chars[i + 1] == '{'
+            && chars[i + 2] == '"'
+        {
+            // Skip to matching `]`
+            let mut depth: i32 = 0;
+            while i < len {
+                match chars[i] {
+                    '[' | '{' => depth += 1,
+                    ']' | '}' => {
+                        depth -= 1;
+                        if depth <= 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            continue;
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+
+    result.lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn now_millis() -> i64 {
@@ -841,7 +893,16 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             // Agent runs on LocalSet, forwarder on its own thread.
                             // Agent drops event_tx when done → forwarder sees disconnect → exits.
                             let _ = agent_handle.await;
-                            let _ = forwarder_handle.join();
+                            // Do NOT call forwarder_handle.join() here — it blocks the
+                            // tokio runtime thread, preventing prompt_rx.recv() from
+                            // resolving on the next iteration. The forwarder will exit
+                            // on its own when event_rx is disconnected.
+                            //
+                            // NOTE: The forwarder thread is detached and will clean up
+                            // when it sees the channel disconnect. If we need to wait
+                            // for it before session teardown, the outer loop handles
+                            // that via drop(prompt_tx) + agent_handle.join().
+                            let _ = forwarder_handle; // move ownership, don't block
                             // NOTE: No post-run queue drain needed.
                             // The agent's agentic loop (run_with_channel) already processes
                             // all steering and follow-up messages via the hooks configured
@@ -926,7 +987,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 {
                     match action {
                         handlers::Action::SendPrompt(value) => {
-                            tracing::info!("[TUI] SendPrompt action triggered: {:?}", &value[..value.len().min(50)]);
+                            tracing::info!("[TUI] SendPrompt action triggered: {:?}", &value[..value.char_indices().take(50).last().map(|(i,c)| i + c.len_utf8()).unwrap_or(0)]);
                             state.add_user_message(value.clone());
                             state.input_history.insert(0, value.clone());
                             if state.input_history.len() > 100 { state.input_history.pop(); }

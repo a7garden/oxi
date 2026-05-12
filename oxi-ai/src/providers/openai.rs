@@ -11,6 +11,7 @@ use std::pin::Pin;
 use super::shared_client;
 use crate::{
     error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
+    TextContent, ThinkingContent,
     ProviderEvent, StopReason, StreamOptions, Usage,
 };
 
@@ -162,14 +163,19 @@ impl Provider for OpenAiProvider {
         let provider_name = model.provider.clone();
         let model_id = model.id.clone();
 
+        // Emit Start event once at the beginning of the stream (matches pi's behavior)
+        let start_event = ProviderEvent::Start {
+            partial: AssistantMessage::new(Api::OpenAiCompletions, &provider_name, &model_id),
+        };
+
         // Stateful stream parser that accumulates tool calls across chunks.
         // OpenAI sends tool calls as multiple deltas (id, name, arguments fragments)
         // that must be reassembled before emitting ToolCallEnd.
         //
         // State: (pending_bytes, accumulated tool calls keyed by index)
         let stream = response.bytes_stream().scan(
-            (Vec::new(), std::collections::HashMap::<usize, (String, String, String)>::new()),
-            move |(pending_bytes, pending_tc), chunk: Result<Bytes, reqwest::Error>| {
+            (Vec::new(), std::collections::HashMap::<usize, (String, String, String)>::new(), false),
+            move |(pending_bytes, pending_tc, thinking_started), chunk: Result<Bytes, reqwest::Error>| {
                 let events = match chunk {
                     Ok(bytes) => {
                         // Prepend any incomplete UTF-8 bytes from previous chunk
@@ -184,10 +190,23 @@ impl Provider for OpenAiProvider {
 
                         let raw_events = parse_sse_events(&text, &provider_name, &model_id);
 
-                        // Post-process: accumulate tool call deltas and emit ToolCallEnd
+                        // Post-process: accumulate tool call deltas, inject ThinkingStart once
                         let mut processed = Vec::new();
                         for event in raw_events {
                             match &event {
+                                ProviderEvent::ThinkingDelta { content_index, .. } => {
+                                    // Inject ThinkingStart before the first ThinkingDelta
+                                    if !*thinking_started {
+                                        *thinking_started = true;
+                                        processed.push(ProviderEvent::ThinkingStart {
+                                            content_index: *content_index,
+                                            partial: AssistantMessage::new(
+                                                Api::OpenAiCompletions, &provider_name, &model_id,
+                                            ),
+                                        });
+                                    }
+                                    processed.push(event);
+                                }
                                 ProviderEvent::ToolCallDelta { content_index, delta, .. } => {
                                     let entry = pending_tc.entry(*content_index).or_insert_with(|| (
                                         String::new(),
@@ -260,7 +279,9 @@ impl Provider for OpenAiProvider {
             },
         ).flatten();
 
-        Ok(Box::pin(stream))
+        // Prepend Start event to the stream
+        let stream_with_start = futures::stream::once(async move { start_event }).chain(stream);
+        Ok(Box::pin(stream_with_start))
     }
 
     fn name(&self) -> &str {
@@ -404,7 +425,9 @@ fn find_valid_utf8_prefix(bytes: &[u8]) -> (String, Vec<u8>) {
 ///   the Done message at stream end, not on every chunk.
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
+    // pi-mono pattern: one mutable output message that accumulates all content.
+    // Every event carries a snapshot of this message as `partial`.
+    let mut output = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
 
     // Pre-estimate capacity: one event per data line is a reasonable upper bound.
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
@@ -446,20 +469,38 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
         for choice in &chunk.choices {
             if let Some(delta) = &choice.delta {
                 if let Some(content) = &delta.content {
+                    // pi-mono: append to the output's text block
+                    let last_text_idx = output.content.iter().rposition(|b| matches!(b, ContentBlock::Text(_)));
+                    if let Some(idx) = last_text_idx {
+                        if let ContentBlock::Text(t) = &mut output.content[idx] {
+                            t.text.push_str(content);
+                        }
+                    } else {
+                        output.content.push(ContentBlock::Text(TextContent::new(content.clone())));
+                    }
                     events.push(ProviderEvent::TextDelta {
                         content_index: choice.index,
                         delta: content.clone(),
-                        partial: partial_message.clone(),
+                        partial: output.clone(),
                     });
                 }
 
                 // Handle GLM's reasoning_content field (thinking/thought chain)
                 if let Some(ref reasoning) = delta.reasoning_content {
                     if !reasoning.is_empty() {
+                        // pi-mono: append to the output's thinking block
+                        let last_think_idx = output.content.iter().rposition(|b| matches!(b, ContentBlock::Thinking(_)));
+                        if let Some(idx) = last_think_idx {
+                            if let ContentBlock::Thinking(t) = &mut output.content[idx] {
+                                t.thinking.push_str(reasoning);
+                            }
+                        } else {
+                            output.content.push(ContentBlock::Thinking(ThinkingContent::new(reasoning.clone())));
+                        }
                         events.push(ProviderEvent::ThinkingDelta {
                             content_index: choice.index,
                             delta: reasoning.clone(),
-                            partial: partial_message.clone(),
+                            partial: output.clone(),
                         });
                     }
                 }
@@ -474,7 +515,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                                 content_index: tc_index,
                                 tool_call_id: tc.id.clone(),
                                 tool_name: tc.function.as_ref().and_then(|f| f.name.clone()),
-                                partial: partial_message.clone(),
+                                partial: output.clone(),
                             });
                         }
 
@@ -483,7 +524,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                             events.push(ProviderEvent::ToolCallDelta {
                                 content_index: tc_index,
                                 delta: func.arguments.clone().unwrap_or_default(),
-                                partial: partial_message.clone(),
+                                partial: output.clone(),
                             });
                         }
                     }
@@ -503,7 +544,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     None => StopReason::Stop,
                 };
 
-                let mut done_msg = partial_message.clone();
+                let mut done_msg = output.clone();
                 done_msg.usage = accumulated_usage.clone();
                 events.push(ProviderEvent::Done {
                     reason,

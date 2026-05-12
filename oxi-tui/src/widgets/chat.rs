@@ -280,6 +280,12 @@ impl ChatViewState {
     }
 
     pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String, status: ToolCallStatus) {
+        // If streaming has already finished (e.g., MessageEnd came before
+        // ToolExecutionStart), start a new streaming message so the tool
+        // call block is visible in the UI.
+        if self.streaming.is_none() {
+            self.start_streaming();
+        }
         if let Some(ref mut s) = self.streaming {
             let idx = s.message.content_blocks.len();
             if !self.tool_tracker.register(id.clone(), idx) { return; }
@@ -294,6 +300,9 @@ impl ChatViewState {
     }
 
     pub fn stream_tool_result(&mut self, tool_call_id: Option<String>, tool_name: String, content: String, is_error: bool) {
+        if self.streaming.is_none() {
+            self.start_streaming();
+        }
         if let Some(ref mut s) = self.streaming {
             if let Some(ref id) = tool_call_id {
                 if let Some(idx) = self.tool_tracker.find_and_remove(id) {

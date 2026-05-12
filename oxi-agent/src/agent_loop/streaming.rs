@@ -1,9 +1,15 @@
-/// Streaming implementation for agent loop
+/// Streaming implementation for agent loop.
+///
+/// pi-mono pattern: the provider accumulates content into a single `output`
+/// message. Each event carries a snapshot (`partial`) of this message.
+/// Done carries the complete accumulated message.
+///
+/// This module simply forwards events to the agent loop emit function.
 
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
-    ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent,
+    ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions,
     Tool as OxTool,
 };
 
@@ -36,7 +42,7 @@ pub(crate) async fn stream_assistant_response(
         context.set_tools(oxi_tools);
     }
 
-    let mut stream_options = StreamOptions {
+    let stream_options = StreamOptions {
         temperature: Some(loop_ref.config.temperature as f64),
         max_tokens: Some(loop_ref.config.max_tokens as usize),
         api_key: loop_ref.config.api_key.clone(),
@@ -45,7 +51,9 @@ pub(crate) async fn stream_assistant_response(
 
     let stream = super::retry::stream_with_retry(loop_ref, &model, &context, Some(stream_options), emit).await?;
 
-    let mut partial_message: Option<oxi_ai::AssistantMessage> = None;
+    // pi-mono pattern: track whether we've emitted MessageStart.
+    // Start event initializes the stream. Subsequent deltas carry
+    // accumulated partial messages (content grows in-place at the provider).
     let mut added_partial = false;
     let mut event_count = 0u32;
 
@@ -55,60 +63,83 @@ pub(crate) async fn stream_assistant_response(
         match event {
             ProviderEvent::Start { partial } => {
                 tracing::info!("Stream event #{}: Start", event_count);
-                partial_message = Some(partial.clone());
-                messages.push(Message::Assistant(partial.clone()));
+                messages.push(Message::Assistant(partial));
                 added_partial = true;
-                emit(super::AgentEvent::MessageStart { message: messages.last().expect("messages non-empty after push").clone() });
+                emit(super::AgentEvent::MessageStart {
+                    message: messages.last().expect("non-empty after push").clone(),
+                });
             }
 
             ProviderEvent::TextDelta { delta, partial, .. } => {
-                if let Some(ref mut partial) = partial_message {
-                    if let Some(last) = partial.content.last_mut() {
-                        if let ContentBlock::Text(t) = last {
-                            t.text.push_str(&delta);
-                        }
-                    } else {
-                        partial.content.push(ContentBlock::Text(TextContent::new(delta.clone())));
+                // Replace the last assistant message with the provider's
+                // accumulated snapshot (pi-mono: content grows in partial).
+                if added_partial {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        *m = partial;
                     }
-                    emit(super::AgentEvent::MessageUpdate {
-                        message: Message::Assistant(partial.clone()),
-                        delta: Some(delta.clone()),
-                    });
                 }
-                let _ = partial;
+                emit(super::AgentEvent::MessageUpdate {
+                    message: messages.last().expect("non-empty").clone(),
+                    delta: Some(delta),
+                });
             }
 
             ProviderEvent::ThinkingStart { partial, .. } => {
-                if let Some(ref mut partial) = partial_message {
-                    partial.content.push(ContentBlock::Thinking(ThinkingContent::new("")));
+                // ThinkingStart arrives before ThinkingDelta.
+                // Update the snapshot.
+                if added_partial {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        *m = partial;
+                    }
                 }
-                let _ = partial;
             }
 
             ProviderEvent::ThinkingDelta { delta, partial, .. } => {
-                if let Some(ref mut partial) = partial_message {
-                    if let Some(last) = partial.content.last_mut() {
-                        if let ContentBlock::Thinking(t) = last {
-                            t.thinking.push_str(&delta);
-                        }
+                if added_partial {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        *m = partial;
                     }
                 }
-                let _ = partial;
+                emit(super::AgentEvent::MessageUpdate {
+                    message: messages.last().expect("non-empty").clone(),
+                    delta: Some(delta),
+                });
             }
 
             ProviderEvent::ToolCallStart { partial, .. } => {
-                let _ = partial;
+                if added_partial {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        *m = partial;
+                    }
+                }
+            }
+
+            ProviderEvent::ToolCallDelta { partial, .. } => {
+                if added_partial {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        *m = partial;
+                    }
+                }
             }
 
             ProviderEvent::ToolCallEnd { tool_call, partial, .. } => {
-                if let Some(ref mut partial) = partial_message {
-                    partial.content.push(ContentBlock::ToolCall(tool_call));
+                // ToolCallEnd: the partial already includes the tool call block
+                if added_partial {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        *m = partial;
+                    }
                 }
-                let _ = partial;
             }
 
             ProviderEvent::Done { message, .. } => {
                 tracing::info!("Stream event #{}: Done (stop_reason={:?})", event_count, message.stop_reason);
+                // Done carries the complete accumulated message from the provider.
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
@@ -117,17 +148,14 @@ pub(crate) async fn stream_assistant_response(
                 } else {
                     messages.push(Message::Assistant(message.clone()));
                 }
-                emit(super::AgentEvent::MessageEnd { message: Message::Assistant(message.clone()) });
+                emit(super::AgentEvent::MessageEnd {
+                    message: Message::Assistant(message.clone()),
+                });
                 return Ok(message);
             }
 
             ProviderEvent::Error { mut error, .. } => {
-                tracing::info!("Stream event #{}: Error (stop_reason={:?})", event_count, error.stop_reason);
-                // pi-mono: errors are encoded in the returned AssistantMessage,
-                // NOT thrown. The event lifecycle must always complete.
-                // See: pi-mono agent-loop.ts stream contract —
-                //   "Once invoked, request/model/runtime failures should be
-                //    encoded in the returned stream, not thrown."
+                tracing::info!("Stream event #{}: Error", event_count);
                 let raw_msg = error.text_content();
                 let friendly = if raw_msg.is_empty() {
                     "Unknown provider error".to_string()
@@ -136,10 +164,8 @@ pub(crate) async fn stream_assistant_response(
                 };
                 tracing::error!(session_id = ?loop_ref.session_id, "Provider stream error: {}", friendly);
 
-                // Ensure the error message has the right stop reason
                 error.stop_reason = StopReason::Error;
 
-                // Finalize in messages array
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
@@ -149,23 +175,18 @@ pub(crate) async fn stream_assistant_response(
                     messages.push(Message::Assistant(error.clone()));
                 }
 
-                // Complete the message lifecycle
-                emit(super::AgentEvent::MessageEnd { message: Message::Assistant(error.clone()) });
-                emit(super::AgentEvent::Error { message: format!("⚠ {}", friendly), session_id: loop_ref.session_id.clone() });
+                emit(super::AgentEvent::MessageEnd {
+                    message: Message::Assistant(error.clone()),
+                });
+                emit(super::AgentEvent::Error {
+                    message: format!("⚠ {}", friendly),
+                    session_id: loop_ref.session_id.clone(),
+                });
 
-                // Return Ok with error message — NOT Err().
-                // The caller (run_loop) checks stop_reason to decide what to do.
                 return Ok(error);
             }
 
             _ => {}
-        }
-
-        if let Some(ref partial) = partial_message {
-            let last_idx = messages.len() - 1;
-            if let Message::Assistant(ref mut m) = messages[last_idx] {
-                *m = partial.clone();
-            }
         }
     }
 
@@ -179,6 +200,8 @@ pub(crate) async fn stream_assistant_response(
         })
         .ok_or_else(|| Error::msg("No assistant message in context"))?;
 
-    emit(super::AgentEvent::MessageEnd { message: Message::Assistant(final_message.clone()) });
+    emit(super::AgentEvent::MessageEnd {
+        message: Message::Assistant(final_message.clone()),
+    });
     Ok(final_message)
 }

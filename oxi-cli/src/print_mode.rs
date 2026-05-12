@@ -126,14 +126,16 @@ async fn run_single_prompt(
     let agent_clone: Arc<Agent> = Arc::clone(agent);
     let prompt_owned = prompt.to_string();
 
-    // Bridge thread: converts std::sync::mpsc events to tokio::mpsc
+    // Bridge thread: converts std::sync::mpsc events to tokio::mpsc.
+    //
+    // The bridge uses try_send (non-blocking) on the tokio channel instead
+    // of rt.block_on(async_tx.send(...)) because the bridge thread has no
+    // Tokio runtime. The tokio channel is bounded(256) so try_send may drop
+    // events under extreme backpressure, but this is acceptable for print mode.
     let bridge_handle = std::thread::spawn(move || {
         while let Ok(event) = event_rx.recv() {
-            // Use blocking send on tokio channel from sync thread
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                async_tx.send(event).await.ok();
-            });
+            // Non-blocking send — no Tokio runtime needed
+            let _ = async_tx.try_send(event);
         }
     });
 
@@ -164,8 +166,23 @@ async fn run_single_prompt(
                 match event {
                     Some(ev) => {
                         match &ev {
+                            // Legacy TextChunk (from old Agent::run_with_channel)
                             AgentEvent::TextChunk { text } => {
                                 last_text.push_str(text);
+                            }
+                            // AgentLoop MessageUpdate — extract text from snapshot
+                            AgentEvent::MessageUpdate { message, .. } => {
+                                if let oxi_ai::Message::Assistant(asst) = message {
+                                    // Extract the full text snapshot (not incremental delta)
+                                    let full_text: String = asst.content.iter()
+                                        .filter_map(|b| match b {
+                                            oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                            oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
+                                            _ => None,
+                                        })
+                                        .collect();
+                                    last_text = full_text;
+                                }
                             }
                             AgentEvent::Complete { .. } => {
                                 _stop_reason = Some("complete".to_string());
@@ -207,6 +224,25 @@ async fn run_single_prompt(
     }
 
     Ok(())
+}
+
+/// Extract text content from an oxi_ai::Message.
+/// Includes both Text and Thinking blocks (models like GLM-5.1
+/// send all output as reasoning_content).
+fn extract_text_from_message(msg: &oxi_ai::Message) -> String {
+    match msg {
+        oxi_ai::Message::Assistant(asst) => asst
+            .content
+            .iter()
+            .filter_map(|b| match b {
+                oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
 }
 
 /// Convert an AgentEvent to a JSON-serializable value for JSON mode.
@@ -262,6 +298,59 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
         }),
+
+               // AgentLoop events (new-style lifecycle)
+        AgentEvent::AgentStart { .. } => serde_json::json!({
+            "type": "agent_start"
+        }),
+        AgentEvent::AgentEnd { .. } => serde_json::json!({
+            "type": "agent_end"
+        }),
+        AgentEvent::TurnStart { turn_number } => serde_json::json!({
+            "type": "turn_start",
+            "turn_number": turn_number,
+        }),
+        AgentEvent::TurnEnd { turn_number, .. } => serde_json::json!({
+            "type": "turn_end",
+            "turn_number": turn_number,
+        }),
+        AgentEvent::MessageStart { message } => {
+            let text = extract_text_from_message(message);
+            serde_json::json!({
+                "type": "message_start",
+                "text": text,
+            })
+        }
+        AgentEvent::MessageUpdate { message, delta } => {
+            let text = extract_text_from_message(message);
+            serde_json::json!({
+                "type": "message_update",
+                "text": text,
+                "delta": delta,
+            })
+        }
+        AgentEvent::MessageEnd { message } => {
+            let text = extract_text_from_message(message);
+            serde_json::json!({
+                "type": "message_end",
+                "text": text,
+            })
+        }
+        AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => serde_json::json!({
+            "type": "tool_execution_start",
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "args": args.to_string(),
+        }),
+        AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => serde_json::json!({
+            "type": "tool_execution_end",
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "result": result.content.chars().take(2000).collect::<String>(),
+            "is_error": is_error,
+        }),
+
+               // Everything else
         _ => serde_json::json!({
             "type": "unknown"
         }),
