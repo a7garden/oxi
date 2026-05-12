@@ -1,29 +1,30 @@
 # Progress
 
 ## Status
-In Progress
+Completed
 
 ## Tasks
-
-### Fix 1: app.rs에서 ToolExecutionStart/End을 UiEvent로 매핑 ✅ DONE
-- **File**: `oxi-cli/src/tui/app.rs` (lines ~593-604)
-- **What**: Added two new match arms to the event forwarder for `AgentEvent::ToolExecutionStart` → `UiEvent::ToolCall` and `AgentEvent::ToolExecutionEnd` → `UiEvent::ToolResult`
-- **Verification**: `cargo check -p oxi-cli` passes (no new errors/warnings)
-
-### Fix 2: push_blocks에 area.width 전달, box_width 하드코딩 50 제거 ✅ DONE
-- **File**: `oxi-tui/src/widgets/chat.rs`
-- **What**:
-  1. Added `area_width: u16` parameter to `push_blocks` function signature
-  2. Added `let box_width = area_width;` inside push_blocks
-  3. Replaced all 17 hardcoded `50` with `box_width` in block_header_line/block_body_line/block_footer_line/block_divider_line/block_truncate_line calls
-  4. Updated both call sites (completed messages loop + streaming message) to pass `area.width`
-- **Verification**: `cargo check -p oxi-tui` passes (no new errors)
+- [x] Fix print mode to only extract Text blocks (not Thinking) with GLM fallback
+- [x] Improve TUI thinking rendering with tui-markdown + italic style
+- [x] Add state-based border colors for ToolBox (yellow/green/red)
+- [x] Update measurement for Thinking to use md_lines
+- [x] Fix ZAI provider handling in openai.rs
 
 ## Files Changed
-- `oxi-cli/src/tui/app.rs` — Added ToolExecutionStart/End mapping in event forwarder match
-- `oxi-tui/src/widgets/chat.rs` — Added area_width param to push_blocks, replaced hardcoded 50 with dynamic box_width
+- `oxi-cli/src/print_mode.rs` — MessageUpdate handler + extract_text_from_message: Text-only with GLM fallback
+- `oxi-tui/src/widgets/chat.rs` — Thinking: tui-markdown + italic; ToolBox: state-based border colors
+- `oxi-ai/src/providers/openai.rs` — ZAI-specific params, dual-map tool call lookup, incremental JSON parsing
 
 ## Notes
-- Existing `AgentEvent::ToolStart`, `AgentEvent::ToolComplete`, `AgentEvent::ToolCall`, `AgentEvent::ToolError` mappings preserved
-- ToolExecutionEnd result content truncated to 500 chars (consistent with ToolComplete mapping)
-- All 17 occurrences of hardcoded 50 replaced with box_width (area.width from caller)
+- Print mode now matches pi behavior: Text blocks only, with GLM fallback when no Text blocks exist
+- Thinking blocks in TUI now rendered via tui-markdown with italic style for distinct visual appearance
+- ToolBox borders: yellow for pending/executing, green for success, red for error
+- All 9 print_mode tests pass, all 11 chat widget tests pass
+- Release build succeeds
+- ZAI changes:
+  - Added `is_zai()` detection (provider contains "zai" or base_url contains "api.z.ai")
+  - When ZAI + reasoning: sends `enable_thinking: true/false` based on thinking_level presence
+  - When ZAI + tools: sends `tool_stream: true`
+  - Dual-map tool call lookup in scan() closure: index-based primary, ID-based fallback
+  - Uses `parse_streaming_json` for incremental tool call argument parsing
+  - All 78 openai tests pass, release build succeeds

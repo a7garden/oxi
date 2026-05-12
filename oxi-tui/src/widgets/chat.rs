@@ -686,7 +686,11 @@ fn measure_kind(kind: &LayoutKind, width: u16, inner_w: u16) -> u16 {
         }
         LayoutKind::Thinking { content, collapsed } => {
             if *collapsed { 1 + if content.lines().next().is_some() { 1 } else { 0 } }
-            else { 1 + content.lines().count() as u16 }
+            else {
+                // Use md_lines for measurement to match rendering
+                let md = md_lines(content);
+                1 + md.len() as u16
+            }
         }
         LayoutKind::Image { .. } => 2,
     }
@@ -729,13 +733,36 @@ impl Widget for EntryWidget<'_> {
                 }
             }
             LayoutKind::ToolBox { name, arguments, result, status } => {
-                let (icon, label_fg) = match status {
-                    ToolCallStatus::Requested => ("...", self.styles.muted.fg.unwrap_or(ratatui::style::Color::White)),
-                    ToolCallStatus::Executing => ("*run", self.styles.warning.fg.unwrap_or(ratatui::style::Color::Yellow)),
-                    ToolCallStatus::Done => ("ok", self.styles.success.fg.unwrap_or(ratatui::style::Color::Green)),
+                let (icon, label_fg, border_style) = match status {
+                    ToolCallStatus::Requested => (
+                        "...",
+                        self.styles.muted.fg.unwrap_or(ratatui::style::Color::White),
+                        Style::default().fg(ratatui::style::Color::Yellow),
+                    ),
+                    ToolCallStatus::Executing => (
+                        "*run",
+                        self.styles.warning.fg.unwrap_or(ratatui::style::Color::Yellow),
+                        Style::default().fg(ratatui::style::Color::Yellow),
+                    ),
+                    ToolCallStatus::Done => {
+                        let is_error = result.as_ref().map_or(false, |(_, e)| *e);
+                        if is_error {
+                            (
+                                "err",
+                                ratatui::style::Color::White,
+                                Style::default().fg(ratatui::style::Color::Red),
+                            )
+                        } else {
+                            (
+                                "ok",
+                                self.styles.success.fg.unwrap_or(ratatui::style::Color::Green),
+                                Style::default().fg(ratatui::style::Color::Green),
+                            )
+                        }
+                    }
                 };
                 let block = Block::bordered()
-                    .border_style(self.styles.muted)
+                    .border_style(border_style)
                     .title(Span::styled(
                         format!(" {} tool: {} ", icon, name),
                         Style::default().fg(label_fg).add_modifier(Modifier::BOLD),
@@ -819,11 +846,23 @@ impl Widget for EntryWidget<'_> {
                     Line::from(Span::styled(format!("{} Thinking...", ind), self.styles.accent)),
                 ];
                 if !*collapsed {
-                    for l in content.lines() {
-                        lines.push(Line::from(Span::styled(format!("  {}", l), self.styles.muted)));
+                    // Render thinking content with tui-markdown in italic style
+                    let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
+                    let md_rendered = md_lines(content);
+                    for md_line in md_rendered {
+                        let spans: Vec<Span<'static>> = md_line.spans
+                            .into_iter()
+                            .map(|s| {
+                                let mut combined = thinking_style;
+                                combined = combined.patch(s.style);
+                                Span::styled(s.content.into_owned(), combined)
+                            })
+                            .collect();
+                        lines.push(Line::from(spans));
                     }
                 } else if let Some(first) = content.lines().next() {
-                    lines.push(Line::from(Span::styled(format!("  {}", first), self.styles.muted)));
+                    let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
+                    lines.push(Line::from(Span::styled(format!("  {}", first), thinking_style)));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 Paragraph::new(text).render(rect, buf);

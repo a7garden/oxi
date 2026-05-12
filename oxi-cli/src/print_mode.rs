@@ -173,15 +173,30 @@ async fn run_single_prompt(
                             // AgentLoop MessageUpdate — extract text from snapshot
                             AgentEvent::MessageUpdate { message, .. } => {
                                 if let oxi_ai::Message::Assistant(asst) = message {
-                                    // Extract the full text snapshot (not incremental delta)
-                                    let full_text: String = asst.content.iter()
+                                    // Only extract Text blocks (matching pi's print-mode.ts behavior).
+                                    // GLM fallback: if no Text blocks exist but Thinking
+                                    // blocks do, use Thinking content since GLM puts all
+                                    // output in reasoning_content.
+                                    let text_only: String = asst.content.iter()
                                         .filter_map(|b| match b {
                                             oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
-                                            oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
                                             _ => None,
                                         })
                                         .collect();
-                                    last_text = full_text;
+                                    if !text_only.is_empty() {
+                                        last_text = text_only;
+                                    } else {
+                                        // GLM fallback: use Thinking blocks when no Text
+                                        let thinking_text: String = asst.content.iter()
+                                            .filter_map(|b| match b {
+                                                oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
+                                                _ => None,
+                                            })
+                                            .collect();
+                                        if !thinking_text.is_empty() {
+                                            last_text = thinking_text;
+                                        }
+                                    }
                                 }
                             }
                             AgentEvent::Complete { .. } => {
@@ -227,20 +242,33 @@ async fn run_single_prompt(
 }
 
 /// Extract text content from an oxi_ai::Message.
-/// Includes both Text and Thinking blocks (models like GLM-5.1
-/// send all output as reasoning_content).
+/// Prefers Text blocks; falls back to Thinking blocks if no Text
+/// content exists (GLM models send all output as reasoning_content).
 fn extract_text_from_message(msg: &oxi_ai::Message) -> String {
     match msg {
-        oxi_ai::Message::Assistant(asst) => asst
-            .content
-            .iter()
-            .filter_map(|b| match b {
-                oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
-                oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(""),
+        oxi_ai::Message::Assistant(asst) => {
+            let text_only: String = asst
+                .content
+                .iter()
+                .filter_map(|b| match b {
+                    oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("");
+            if !text_only.is_empty() {
+                return text_only;
+            }
+            // GLM fallback: use Thinking blocks
+            asst.content
+                .iter()
+                .filter_map(|b| match b {
+                    oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        }
         _ => String::new(),
     }
 }

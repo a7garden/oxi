@@ -9,11 +9,17 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use super::shared_client;
+use super::openai_responses_shared::parse_streaming_json;
 use crate::{
     error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
     TextContent, ThinkingContent,
     ProviderEvent, StopReason, StreamOptions, Usage,
 };
+
+/// Detect whether a model targets the ZAI provider.
+fn is_zai(model: &Model) -> bool {
+    model.provider.eq_ignore_ascii_case("zai") || model.base_url.contains("api.z.ai")
+}
 
 /// OpenAI-compatible provider
 #[derive(Clone)]
@@ -121,6 +127,18 @@ impl Provider for OpenAiProvider {
             body["tools"] = build_tools(&context.tools)?;
         }
 
+        // ── ZAI-specific parameters ──────────────────────────────────
+        // Mirror pi's detectCompat: when provider is ZAI (or base_url contains
+        // api.z.ai), send enable_thinking and tool_stream.
+        if is_zai(model) {
+            if model.reasoning {
+                body["enable_thinking"] = serde_json::json!(options.thinking_level.is_some());
+            }
+            if !context.tools.is_empty() {
+                body["tool_stream"] = serde_json::json!(true);
+            }
+        }
+
         tracing::info!("Sending request to {} model={} body_len={}", url, model.id, body.to_string().len());
 
         // Build headers
@@ -172,10 +190,25 @@ impl Provider for OpenAiProvider {
         // OpenAI sends tool calls as multiple deltas (id, name, arguments fragments)
         // that must be reassembled before emitting ToolCallEnd.
         //
-        // State: (pending_bytes, accumulated tool calls keyed by index)
+        // State:
+        //   pending_bytes     – incomplete UTF-8 bytes from the previous HTTP chunk
+        //   pending_tc_index  – accumulated tool calls keyed by streaming index
+        //   pending_tc_id     – secondary lookup by tool-call ID (ZAI et al. may
+        //                       omit the index on continuation deltas)
+        //   thinking_started  – whether ThinkingStart has been emitted
         let stream = response.bytes_stream().scan(
-            (Vec::new(), std::collections::HashMap::<usize, (String, String, String)>::new(), false),
-            move |(pending_bytes, pending_tc, thinking_started), chunk: Result<Bytes, reqwest::Error>| {
+            (
+                Vec::new(),
+                std::collections::HashMap::<usize, (String, String, String)>::new(),
+                std::collections::HashMap::<String, usize>::new(), // id → index
+                false,
+            ),
+            move |(
+                pending_bytes,
+                pending_tc,
+                tc_id_to_index,
+                thinking_started,
+            ), chunk: Result<Bytes, reqwest::Error>| {
                 let events = match chunk {
                     Ok(bytes) => {
                         // Prepend any incomplete UTF-8 bytes from previous chunk
@@ -207,15 +240,6 @@ impl Provider for OpenAiProvider {
                                     }
                                     processed.push(event);
                                 }
-                                ProviderEvent::ToolCallDelta { content_index, delta, .. } => {
-                                    let entry = pending_tc.entry(*content_index).or_insert_with(|| (
-                                        String::new(),
-                                        String::new(),
-                                        String::new(),
-                                    ));
-                                    entry.2.push_str(delta);
-                                    processed.push(event);
-                                }
                                 ProviderEvent::ToolCallStart { content_index, tool_call_id, tool_name, .. } => {
                                     let entry = pending_tc.entry(*content_index).or_insert_with(|| (
                                         String::new(),
@@ -223,11 +247,31 @@ impl Provider for OpenAiProvider {
                                         String::new(),
                                     ));
                                     if let Some(ref id) = tool_call_id {
-                                        if !id.is_empty() { entry.0 = id.clone(); }
+                                        if !id.is_empty() {
+                                            entry.0 = id.clone();
+                                            tc_id_to_index.insert(id.clone(), *content_index);
+                                        }
                                     }
                                     if let Some(ref name) = tool_name {
                                         if !name.is_empty() { entry.1 = name.clone(); }
                                     }
+                                    processed.push(event);
+                                }
+                                ProviderEvent::ToolCallDelta { content_index, delta, .. } => {
+                                    // Dual-map lookup: prefer index, fall back to ID
+                                    let idx = if pending_tc.contains_key(content_index) {
+                                        *content_index
+                                    } else {
+                                        // Scan id→index map for a match
+                                        tc_id_to_index.values().copied().find(|i| *i == *content_index)
+                                            .unwrap_or(*content_index)
+                                    };
+                                    let entry = pending_tc.entry(idx).or_insert_with(|| (
+                                        String::new(),
+                                        String::new(),
+                                        String::new(),
+                                    ));
+                                    entry.2.push_str(delta);
                                     processed.push(event);
                                 }
                                 ProviderEvent::ToolCallEnd { .. } => {
@@ -241,8 +285,7 @@ impl Provider for OpenAiProvider {
                                         indices.sort();
                                         for idx in indices {
                                             let (id, name, arguments) = &pending_tc[&idx];
-                                            let args_value = serde_json::from_str::<serde_json::Value>(arguments)
-                                                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                                            let args_value = parse_streaming_json(arguments);
                                             processed.push(ProviderEvent::ToolCallEnd {
                                                 content_index: idx,
                                                 tool_call: crate::ToolCall {
@@ -737,7 +780,14 @@ mod tests {
             "\n"
         );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
-        assert_eq!(events.len(), 2);
+        // First chunk: ToolCallStart (id+name present) + ToolCallDelta (function present)
+        // Second chunk: ToolCallDelta only
+        assert_eq!(events.len(), 3);
+        let starts: Vec<&str> = events.iter().filter_map(|e| match e {
+            ProviderEvent::ToolCallStart { tool_name, .. } => tool_name.as_deref(),
+            _ => None,
+        }).collect();
+        assert_eq!(starts, vec!["get_weather"]);
         let deltas: Vec<&str> = events.iter().filter_map(|e| match e {
             ProviderEvent::ToolCallDelta { delta, .. } => Some(delta.as_str()),
             _ => None,
@@ -747,11 +797,17 @@ mod tests {
 
     #[test]
     fn parse_tool_call_with_no_arguments_field() {
-        // function field present but arguments is null → should default to ""
+        // function field present but arguments is null → emits ToolCallStart + ToolCallDelta
         let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"run\"}}]}}]}\n\n";
         let events = parse_sse_events(sse, PROVIDER, MODEL);
-        assert_eq!(events.len(), 1);
+        assert_eq!(events.len(), 2);
         match &events[0] {
+            ProviderEvent::ToolCallStart { tool_name, .. } => {
+                assert_eq!(tool_name.as_deref(), Some("run"));
+            }
+            other => panic!("expected ToolCallStart, got {other:?}"),
+        }
+        match &events[1] {
             ProviderEvent::ToolCallDelta { delta, .. } => assert_eq!(delta, ""),
             other => panic!("expected ToolCallDelta, got {other:?}"),
         }
@@ -868,15 +924,17 @@ mod tests {
             "data: [DONE]\n"
         );
         let events = parse_sse_events(sse, PROVIDER, MODEL);
-        assert_eq!(events.len(), 4); // 2 TextDelta + 1 ToolCallDelta + 1 Done
+        assert_eq!(events.len(), 5); // 2 TextDelta + ToolCallStart + ToolCallDelta + Done
 
         let mut text_count = 0;
-        let mut tool_count = 0;
+        let mut tc_start_count = 0;
+        let mut tc_delta_count = 0;
         let mut done_count = 0;
         for e in &events {
             match e {
                 ProviderEvent::TextDelta { .. } => text_count += 1,
-                ProviderEvent::ToolCallDelta { .. } => tool_count += 1,
+                ProviderEvent::ToolCallStart { .. } => tc_start_count += 1,
+                ProviderEvent::ToolCallDelta { .. } => tc_delta_count += 1,
                 ProviderEvent::Done { reason, .. } => {
                     done_count += 1;
                     assert!(matches!(reason, StopReason::ToolUse));
@@ -885,7 +943,8 @@ mod tests {
             }
         }
         assert_eq!(text_count, 2);
-        assert_eq!(tool_count, 1);
+        assert_eq!(tc_start_count, 1);
+        assert_eq!(tc_delta_count, 1);
         assert_eq!(done_count, 1);
     }
 }
