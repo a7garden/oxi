@@ -151,7 +151,7 @@ impl ThemeColors {
             border: Color::new(60, 60, 75),
             cursor: Color::new(220, 223, 228),
             selection: Color::new(80, 80, 100),
-            scrollbar: Color::new(80, 80, 100),
+            scrollbar: Color::new(45, 45, 55),
         }
     }
 
@@ -185,7 +185,7 @@ impl ThemeColors {
             border: Color::new(180, 185, 200),
             cursor: Color::new(76, 79, 105),
             selection: Color::new(180, 190, 210),
-            scrollbar: Color::new(170, 175, 190),
+            scrollbar: Color::new(160, 165, 175),
         }
     }
 
@@ -219,7 +219,7 @@ impl ThemeColors {
             border: Color::new(67, 76, 94),
             cursor: Color::new(236, 239, 244),
             selection: Color::new(88, 102, 122),
-            scrollbar: Color::new(88, 102, 122),
+            scrollbar: Color::new(67, 76, 94),
         }
     }
 
@@ -253,7 +253,7 @@ impl ThemeColors {
             border: Color::new(51, 51, 73),
             cursor: Color::new(205, 214, 244),
             selection: Color::new(68, 68, 92),
-            scrollbar: Color::new(68, 68, 92),
+            scrollbar: Color::new(48, 48, 68),
         }
     }
 
@@ -287,7 +287,7 @@ impl ThemeColors {
             border: Color::new(48, 54, 61),
             cursor: Color::new(201, 209, 217),
             selection: Color::new(56, 62, 70),
-            scrollbar: Color::new(56, 62, 70),
+            scrollbar: Color::new(48, 54, 61),
         }
     }
 
@@ -321,7 +321,7 @@ impl ThemeColors {
             border: Color::new(66, 67, 58),
             cursor: Color::new(248, 248, 240),
             selection: Color::new(60, 61, 54),
-            scrollbar: Color::new(80, 81, 74),
+            scrollbar: Color::new(50, 51, 45),
         }
     }
 }

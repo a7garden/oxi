@@ -117,11 +117,25 @@ async fn run_single_prompt(
     mode: PrintMode,
     shutdown_rx: &mut mpsc::Receiver<()>,
 ) -> Result<(), PromptError> {
-    let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
+    // Agent expects std::sync::mpsc, but we need async for tokio::select
+    // Use a sync mpsc channel inside spawn_blocking, bridge to tokio mpsc
+    let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
+    let (async_tx, mut async_rx) = mpsc::channel::<AgentEvent>(256);
 
     // Spawn agent run on a LocalSet (non-Send futures)
     let agent_clone: Arc<Agent> = Arc::clone(agent);
     let prompt_owned = prompt.to_string();
+
+    // Bridge thread: converts std::sync::mpsc events to tokio::mpsc
+    let bridge_handle = std::thread::spawn(move || {
+        while let Ok(event) = event_rx.recv() {
+            // Use blocking send on tokio channel from sync thread
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async {
+                async_tx.send(event).await.ok();
+            });
+        }
+    });
 
     let agent_handle = tokio::task::spawn_blocking(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -146,7 +160,7 @@ async fn run_single_prompt(
 
     loop {
         tokio::select! {
-            event = event_rx.recv() => {
+            event = async_rx.recv() => {
                 match event {
                     Some(ev) => {
                         match &ev {
@@ -181,6 +195,7 @@ async fn run_single_prompt(
 
     // Wait for the agent thread to finish
     let _ = agent_handle.await;
+    let _ = bridge_handle.join();
 
     if had_error {
         return Err(PromptError::AgentError(error_message));

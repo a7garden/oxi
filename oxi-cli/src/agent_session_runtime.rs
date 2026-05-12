@@ -235,7 +235,7 @@ pub fn create_agent_session_from_services(
         .or_else(|| settings.effective_model(None))
     {
         Some(id) if !id.is_empty() => {
-            tracing::info!("Model resolved: {} (default_model={:?}, last_used={:?})", id, settings.default_model, settings.last_used_model);
+            tracing::debug!("Model resolved: {} (default_model={:?}, last_used={:?})", id, settings.default_model, settings.last_used_model);
             id
         }
         other => {

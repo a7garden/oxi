@@ -47,11 +47,14 @@ pub(crate) async fn stream_assistant_response(
 
     let mut partial_message: Option<oxi_ai::AssistantMessage> = None;
     let mut added_partial = false;
+    let mut event_count = 0u32;
 
     let mut rx = stream;
     while let Some(event) = rx.next().await {
+        event_count += 1;
         match event {
             ProviderEvent::Start { partial } => {
+                tracing::info!("Stream event #{}: Start", event_count);
                 partial_message = Some(partial.clone());
                 messages.push(Message::Assistant(partial.clone()));
                 added_partial = true;
@@ -105,6 +108,7 @@ pub(crate) async fn stream_assistant_response(
             }
 
             ProviderEvent::Done { message, .. } => {
+                tracing::info!("Stream event #{}: Done (stop_reason={:?})", event_count, message.stop_reason);
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
@@ -118,6 +122,7 @@ pub(crate) async fn stream_assistant_response(
             }
 
             ProviderEvent::Error { mut error, .. } => {
+                tracing::info!("Stream event #{}: Error (stop_reason={:?})", event_count, error.stop_reason);
                 // pi-mono: errors are encoded in the returned AssistantMessage,
                 // NOT thrown. The event lifecycle must always complete.
                 // See: pi-mono agent-loop.ts stream contract —
@@ -163,6 +168,8 @@ pub(crate) async fn stream_assistant_response(
             }
         }
     }
+
+    tracing::info!("Stream ended after {} events", event_count);
 
     let final_message = messages
         .last()

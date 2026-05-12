@@ -16,15 +16,31 @@ use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging — show info by default, can be overridden with RUST_LOG
-    // tui_markdown emits spurious warnings for unrecognized code block langs — suppress by default
-    let log_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info,tui_markdown=error".to_string());
+    // Always log to file for debugging (no stderr to keep TUI clean)
+    let log_dir = dirs::cache_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("oxi");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("oxi.log");
+
+    let log_filter = std::env::var("RUST_LOG")
+        .unwrap_or_else(|_| "debug".to_string());
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_filter));
+
+    // Always create/truncate the log file and write to it
+    let log_file = std::fs::File::create(&log_path).expect("Failed to create log file");
+    let writer = std::sync::Mutex::new(log_file);
+
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_filter)))
+        .with_env_filter(env_filter)
+        .with_writer(writer)
         .with_target(true)
         .with_thread_ids(true)
+        .with_ansi(false)
         .init();
+
+    tracing::info!("Logging initialized, log file: {:?}", log_path);
 
     // Parse arguments (using unified CliArgs from cli module)
     let args = CliArgs::parse();

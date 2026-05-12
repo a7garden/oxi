@@ -594,7 +594,7 @@ impl AgentSession {
                 let local = tokio::task::LocalSet::new();
                 local
                     .run_until(async move {
-                        let (agent_tx, mut agent_rx) = mpsc::channel::<AgentEvent>(256);
+                        let (agent_tx, agent_rx) = std::sync::mpsc::channel::<AgentEvent>();
 
                         // Run agent inside LocalSet
                         let agent_for_task = Arc::clone(&agent);
@@ -602,8 +602,8 @@ impl AgentSession {
                             agent_for_task.run_with_channel(text, agent_tx).await
                         });
 
-                        // Forward events from the agent channel to our unbounded output
-                        while let Some(event) = agent_rx.recv().await {
+                        // Forward events from std::sync channel to unbounded output
+                        while let Ok(event) = agent_rx.recv() {
                             let _ = tx.send(event);
                         }
 

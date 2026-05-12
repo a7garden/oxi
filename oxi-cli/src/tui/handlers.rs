@@ -25,7 +25,7 @@ pub async fn handle_input(
     event: CEvent,
     state: &mut AppState,
     session: &AgentSession,
-    ui_tx: &mpsc::Sender<UiEvent>,
+    ui_tx: &mpsc::UnboundedSender<UiEvent>,
     _prompt_tx: &mpsc::Sender<String>,
     running: &mut bool,
 ) -> Option<Action> {
@@ -64,7 +64,7 @@ async fn handle_key(
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
     session: &AgentSession,
-    _ui_tx: &mpsc::Sender<UiEvent>,
+    _ui_tx: &mpsc::UnboundedSender<UiEvent>,
     running: &mut bool,
 ) -> Option<Action> {
     // 키보드 이벤트 타입이 지원되는 경우 Press만 처리
@@ -418,11 +418,11 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
 /// Handle a session event, forwarding relevant ones as UI events.
 pub async fn handle_session_event(
     event: SessionEvent,
-    ui_tx: &mpsc::Sender<UiEvent>,
+    ui_tx: &mpsc::UnboundedSender<UiEvent>,
 ) {
     match event {
         SessionEvent::CompactionStart { reason } => {
-            let _ = ui_tx.send(UiEvent::CompactionStart { reason }).await;
+            let _ = ui_tx.send(UiEvent::CompactionStart { reason });
         }
         SessionEvent::CompactionEnd {
             reason, error_message, ..
@@ -432,18 +432,18 @@ pub async fn handle_session_event(
                     _reason: reason,
                     error_message,
                 })
-                .await;
+                ;
         }
         SessionEvent::ThinkingLevelChanged { level } => {
             let _ = ui_tx
                 .send(UiEvent::ThinkingLevelChanged {
                     level: format!("{:?}", level),
                 })
-                .await;
+                ;
         }
         SessionEvent::QueueUpdate { steering, follow_up } => {
             let pending = steering.len() + follow_up.len();
-            let _ = ui_tx.send(UiEvent::QueueUpdate { pending }).await;
+            let _ = ui_tx.send(UiEvent::QueueUpdate { pending });
         }
         SessionEvent::SessionInfoChanged { name: _ } => {}
         SessionEvent::Agent(agent_event) => match &agent_event {
@@ -452,7 +452,7 @@ pub async fn handle_session_event(
                     .send(UiEvent::ModelChanged {
                         model_id: to_model.clone(),
                     })
-                    .await;
+                    ;
             }
             AgentEvent::Retry {
                 attempt,
@@ -466,7 +466,7 @@ pub async fn handle_session_event(
                         max_attempts: *max_retries as u32,
                         error_message: reason.clone(),
                     })
-                    .await;
+                    ;
             }
             AgentEvent::Compaction { .. } => {}
             _ => {}

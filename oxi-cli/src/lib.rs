@@ -557,7 +557,7 @@ impl<'a> InteractiveLoop<'a> {
         self.session.thinking = true;
 
         // Run agent with channel
-        let (tx, mut rx) = mpsc::channel::<AgentEvent>(100);
+        let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
 
         // Run the agent — we execute inline instead of spawning because
         // the agent's internal RwLockReadGuard is not Send-safe across
@@ -571,8 +571,9 @@ impl<'a> InteractiveLoop<'a> {
             let _ = agent.run_with_channel(prompt, tx).await;
         });
 
-        // Collect events
-        while let Some(event) = rx.recv().await {
+        // Collect events from std::sync channel (blocks thread, but that's OK
+        // because agent runs on LocalSet which has its own thread)
+        while let Ok(event) = rx.recv() {
             match event {
                 AgentEvent::TextChunk { text } => {
                     self.session.append_to_response(&text);

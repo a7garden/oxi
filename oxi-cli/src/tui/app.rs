@@ -656,7 +656,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             let _ = session_event_tx.send(event.clone());
         }));
 
-        let (ui_tx, mut ui_rx) = mpsc::channel::<UiEvent>(256);
+        let (ui_tx, mut ui_rx) = mpsc::unbounded_channel::<UiEvent>();
         let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
 
         // Agent worker thread
@@ -672,11 +672,18 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 local
                     .run_until(async {
                         while let Some(prompt) = prompt_rx.recv().await {
-                            let (event_tx, mut event_rx) = mpsc::channel::<AgentEvent>(256);
+                            tracing::info!("[TUI] Received prompt, starting agent run");
+                            let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
                             let ui_fwd = ui_tx_for_thread.clone();
                             let session_h = session_handle.clone_handle();
-                            let event_forwarder = tokio::task::spawn_local(async move {
-                                while let Some(event) = event_rx.recv().await {
+                            // Forward events on a dedicated thread so it's never starved
+                            // by the agent's synchronous emit callbacks.
+                            let forwarder_handle = std::thread::spawn(move || {
+                                let mut event_count = 0u32;
+                                tracing::info!("[FORWARDER] Thread started, waiting for events");
+                                while let Ok(event) = event_rx.recv() {
+                                    event_count += 1;
+                                    tracing::info!("[FORWARDER] Event #{}: {:?}", event_count, std::mem::discriminant(&event));
                                     let ui_event = match event {
                                         // ── Agent lifecycle ─────────────────────────
                                         AgentEvent::AgentStart { .. } => UiEvent::AgentStart,
@@ -766,7 +773,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                                 cache_write_tokens: 0,
                                                 context_window_pct: 0.0,
                                                 total_cost: 0.0,
-                                            }).await;
+                                            });
                                             continue;
                                         }
 
@@ -777,22 +784,28 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             let steering_q = session_h.steering_queue();
                                             let follow_up_q = session_h.follow_up_queue();
                                             let pending = steering_q.read().len() + follow_up_q.read().len();
-                                            let _ = ui_fwd.send(UiEvent::QueueUpdate { pending }).await;
+                                            let _ = ui_fwd.send(UiEvent::QueueUpdate { pending });
                                             continue;
                                         }
                                         AgentEvent::FollowUpMessage { .. } => {
                                             let steering_q = session_h.steering_queue();
                                             let follow_up_q = session_h.follow_up_queue();
                                             let pending = steering_q.read().len() + follow_up_q.read().len();
-                                            let _ = ui_fwd.send(UiEvent::QueueUpdate { pending }).await;
+                                            let _ = ui_fwd.send(UiEvent::QueueUpdate { pending });
                                             continue;
                                         }
 
                                         // ── Everything else: skip ───────────────────
                                         _ => continue,
                                     };
-                                    if ui_fwd.send(ui_event).await.is_err() { break; }
+                                    tracing::info!("[FORWARDER] Sending UiEvent to ui_fwd");
+                                    if ui_fwd.send(ui_event).is_err() {
+                                        tracing::warn!("[FORWARDER] ui_fwd send failed, breaking");
+                                        break;
+                                    }
+                                    tracing::info!("[FORWARDER] UiEvent sent successfully");
                                 }
+                                tracing::info!("[FORWARDER] Event loop ended");
                             });
                             let sh = session_handle.clone_handle();
                             let agent = sh.agent_ref();
@@ -814,8 +827,21 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                 ..Default::default()
                             };
                             agent.set_hooks(hooks);
-                            let _ = agent.run_with_channel(prompt, event_tx).await;
-                            let _ = event_forwarder.await;
+                            let agent_clone = Arc::clone(&agent);
+                            tracing::info!("[AGENT-WORKER] Spawning agent task");
+                            let agent_handle = tokio::task::spawn_local(async move {
+                                tracing::info!("[AGENT-WORKER] Agent task started, calling run_with_channel");
+                                let result = agent_clone.run_with_channel(prompt, event_tx).await;
+                                if let Err(ref e) = result {
+                                    tracing::error!("Agent run_with_channel error: {:?}", e);
+                                }
+                                tracing::info!("[AGENT-WORKER] Agent run_with_channel completed: {:?}", result);
+                                result
+                            });
+                            // Agent runs on LocalSet, forwarder on its own thread.
+                            // Agent drops event_tx when done → forwarder sees disconnect → exits.
+                            let _ = agent_handle.await;
+                            let _ = forwarder_handle.join();
                             // NOTE: No post-run queue drain needed.
                             // The agent's agentic loop (run_with_channel) already processes
                             // all steering and follow-up messages via the hooks configured
@@ -900,13 +926,16 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 {
                     match action {
                         handlers::Action::SendPrompt(value) => {
+                            tracing::info!("[TUI] SendPrompt action triggered: {:?}", &value[..value.len().min(50)]);
                             state.add_user_message(value.clone());
                             state.input_history.insert(0, value.clone());
                             if state.input_history.len() > 100 { state.input_history.pop(); }
                             state.history_index = 0;
                             state.start_streaming();
                             agent_session.reset_should_stop();
+                            tracing::info!("[TUI] About to send prompt to channel");
                             let _ = prompt_tx.send(value).await;
+                            tracing::info!("[TUI] Prompt sent to channel");
                             state.input_clear();
                         }
                         handlers::Action::ExecuteSlashCommand(cmd) => {

@@ -228,9 +228,9 @@ impl Agent {
     /// [`AgentEvent`] produced during the run.
     pub async fn run(&self, prompt: String) -> Result<(Response, Vec<AgentEvent>)> {
         let mut events = Vec::new();
-        let (tx, mut rx) = mpsc::channel::<AgentEvent>(100);
+        let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
         let result = self.run_with_channel(prompt, tx).await;
-        while let Some(event) = rx.recv().await {
+        while let Ok(event) = rx.recv() {
             events.push(event);
         }
         result.map(|r| (r, events))
@@ -258,7 +258,7 @@ impl Agent {
     pub async fn run_with_channel(
         &self,
         prompt: String,
-        tx: mpsc::Sender<AgentEvent>,
+        tx: std::sync::mpsc::Sender<AgentEvent>,
     ) -> Result<Response> {
         // pi-mono: Agent.prompt() throws if activeRun exists.
         // Prevent concurrent runs that would corrupt shared state.
@@ -280,7 +280,7 @@ impl Agent {
     async fn run_with_channel_inner(
         &self,
         prompt: String,
-        tx: mpsc::Sender<AgentEvent>,
+        tx: std::sync::mpsc::Sender<AgentEvent>,
     ) -> Result<Response> {
         use crate::agent_loop::AgentLoop;
 
@@ -292,6 +292,7 @@ impl Agent {
         let max_tokens = inner.config.max_tokens;
         let compaction_strategy = inner.config.compaction_strategy.clone();
         let context_window = inner.config.context_window;
+        let api_key = inner.config.api_key.clone();
         drop(inner); // release read lock
 
         // Build AgentLoopConfig from Agent's config
@@ -309,10 +310,10 @@ impl Agent {
             transport: None,
             compact_on_start: false,
             max_retry_delay_ms: None,
-            auto_retry_enabled: false,
+            auto_retry_enabled: true,
             auto_retry_max_attempts: 3,
             auto_retry_base_delay_ms: 1000,
-            api_key: None,
+            api_key,
         };
 
         // Create AgentLoop. We give it a NEW SharedState and sync back after.
@@ -358,16 +359,20 @@ impl Agent {
         let ext_stop = al.external_stop().clone();
 
         // Create emit callback that sends through the channel.
-        // AgentLoop calls this synchronously. We use try_send (non-blocking)
-        // because blocking_send panics inside a tokio runtime.
-        // If the channel is full, the event is dropped — the channel should
-        // be sized generously (256+) to avoid this.
+        // AgentLoop calls this synchronously. UnboundedSender::send() is
+        // non-blocking and never drops events (unlike try_send on bounded).
         let tx_emit = tx.clone();
 
         // Run the agent loop
+        tracing::info!("[AGENT] Starting agent run with channel");
         let result = al.run(prompt.clone(), move |event: AgentEvent| {
-            // Forward event to channel (non-blocking)
-            let _ = tx_emit.try_send(event.clone());
+            // Forward event to channel (std::sync::mpsc — send from sync context)
+            tracing::info!("[AGENT-EMIT] Event: {:?}", std::mem::discriminant(&event));
+            if let Err(e) = tx_emit.send(event.clone()) {
+                tracing::error!("[AGENT-EMIT] Failed to send agent event to channel: {:?}", e);
+            } else {
+                tracing::info!("[AGENT-EMIT] Successfully sent event");
+            }
 
             // On TurnEnd, poll the should_stop_after_turn hook to detect Ctrl+C.
             // The hook wraps an AtomicBool (should_stop_flag from AgentSession).
@@ -718,10 +723,9 @@ impl Agent {
     where
         F: FnMut(AgentEvent) + Send,
     {
-        let (tx, mut rx) = mpsc::channel::<AgentEvent>(100);
-        let tx_clone = tx;
-        let result = self.run_with_channel(prompt, tx_clone).await;
-        while let Some(event) = rx.recv().await {
+        let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
+        let result = self.run_with_channel(prompt, tx).await;
+        while let Ok(event) = rx.recv() {
             on_event(event);
         }
         result

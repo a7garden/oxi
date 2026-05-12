@@ -120,6 +120,8 @@ impl Provider for OpenAiProvider {
             body["tools"] = build_tools(&context.tools)?;
         }
 
+        tracing::info!("Sending request to {} model={} body_len={}", url, model.id, body.to_string().len());
+
         // Build headers
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
@@ -451,6 +453,17 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     });
                 }
 
+                // Handle GLM's reasoning_content field (thinking/thought chain)
+                if let Some(ref reasoning) = delta.reasoning_content {
+                    if !reasoning.is_empty() {
+                        events.push(ProviderEvent::ThinkingDelta {
+                            content_index: choice.index,
+                            delta: reasoning.clone(),
+                            partial: partial_message.clone(),
+                        });
+                    }
+                }
+
                 if let Some(tool_calls) = &delta.tool_calls {
                     for tc in tool_calls {
                         let tc_index = tc.index.unwrap_or(choice.index);
@@ -545,6 +558,7 @@ struct Choice {
 #[derive(Debug, Deserialize)]
 struct Delta {
     content: Option<String>,
+    reasoning_content: Option<String>,
     tool_calls: Option<Vec<ToolCallDelta>>,
 }
 

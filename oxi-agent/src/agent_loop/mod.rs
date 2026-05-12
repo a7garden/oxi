@@ -270,6 +270,7 @@ impl AgentLoop {
         initial_prompts: Vec<Message>,
         emit: EmitFn,
     ) -> Result<(Vec<Message>, Vec<AgentEvent>)> {
+        tracing::info!("[AGENT-LOOP] run_loop started");
         let mut messages = self.state.get_state().messages.clone();
         messages.extend(initial_prompts.clone());
 
@@ -281,6 +282,7 @@ impl AgentLoop {
         let mut pending_messages: Vec<Message> = self.drain_steering_queue();
 
         loop {
+            tracing::info!("[AGENT-LOOP] Top of loop, has_more_tool_calls={}, pending_messages={}", true, pending_messages.is_empty());
             let mut has_more_tool_calls = true;
 
             while has_more_tool_calls || !pending_messages.is_empty() {
@@ -311,6 +313,7 @@ impl AgentLoop {
 
                 self.maybe_compact(&mut messages, turn_number as usize, &emit).await;
 
+                tracing::info!("[AGENT-LOOP] About to call stream_assistant_response");
                 let assistant_message = match stream_assistant_response(self, &mut messages, &emit).await {
                     Ok(msg) => msg,
                     Err(e) => {
@@ -333,6 +336,7 @@ impl AgentLoop {
                         new_messages.push(Message::Assistant(error_asst.clone()));
                         messages.push(Message::Assistant(error_asst.clone()));
 
+                        emit(AgentEvent::MessageStart { message: Message::Assistant(error_asst.clone()) });
                         emit(AgentEvent::MessageEnd { message: Message::Assistant(error_asst.clone()) });
                         emit(AgentEvent::Error { message: err_msg.clone(), session_id: self.session_id.clone() });
 
@@ -422,13 +426,35 @@ impl AgentLoop {
                 has_more_tool_calls = false;
 
                 if !tool_calls.is_empty() {
-                    let executed_batch = execute_tool_calls(
+                    let executed_batch = match execute_tool_calls(
                         self,
                         &mut messages,
                         &assistant_message,
                         tool_calls,
                         &emit,
-                    ).await?;
+                    ).await {
+                        Ok(batch) => batch,
+                        Err(e) => {
+                            // Tool execution failed — emit TurnEnd and return Ok.
+                            // The lifecycle must always complete.
+                            tracing::error!(session_id = ?self.session_id, "Tool execution error: {}", e);
+                            emit(AgentEvent::Error {
+                                message: format!("Tool execution error: {}", e),
+                                session_id: self.session_id.clone(),
+                            });
+                            emit(AgentEvent::TurnEnd {
+                                turn_number,
+                                assistant_message: Message::Assistant(assistant_message.clone()),
+                                tool_results: vec![],
+                            });
+                            events.push(AgentEvent::TurnEnd {
+                                turn_number,
+                                assistant_message: Message::Assistant(assistant_message.clone()),
+                                tool_results: vec![],
+                            });
+                            return Ok((messages, events));
+                        }
+                    };
 
                     tool_results = executed_batch.messages;
                     has_more_tool_calls = !executed_batch.terminate;
