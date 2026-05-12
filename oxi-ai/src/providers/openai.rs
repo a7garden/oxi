@@ -479,10 +479,15 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
 
             if choice.finish_reason.is_some() {
                 let reason = match choice.finish_reason.as_deref() {
-                    Some("stop") => StopReason::Stop,
+                    Some("stop") | Some("end") => StopReason::Stop,
                     Some("length") => StopReason::Length,
-                    Some("tool_calls") => StopReason::ToolUse,
-                    _ => StopReason::Stop,
+                    Some("tool_calls") | Some("function_call") => StopReason::ToolUse,
+                    Some("content_filter") => StopReason::Error,
+                    Some(unknown) => {
+                        tracing::warn!("Unknown finish_reason: '{}', treating as Error", unknown);
+                        StopReason::Error
+                    }
+                    None => StopReason::Stop,
                 };
 
                 let mut done_msg = partial_message.clone();

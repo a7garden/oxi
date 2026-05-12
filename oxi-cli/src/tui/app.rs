@@ -318,6 +318,9 @@ pub(crate) struct AppState {
     /// Length of text already rendered from the snapshot's Text block.
     /// Used to compute incremental text delta from full snapshot.
     snapshot_text_rendered: usize,
+    /// Length of thinking text already rendered from the snapshot's Thinking block.
+    /// Prevents duplicate thinking blocks on repeated MessageUpdates.
+    snapshot_thinking_rendered: usize,
 }
 
 impl AppState {
@@ -343,6 +346,7 @@ impl AppState {
             pending_steering: 0,
             needs_persist: false,
             snapshot_text_rendered: 0,
+            snapshot_thinking_rendered: 0,
         }
     }
 
@@ -449,6 +453,7 @@ impl AppState {
         self.is_agent_busy = true;
         self.auto_scroll = true;
         self.snapshot_text_rendered = 0;
+        self.snapshot_thinking_rendered = 0;
     }
 
     pub fn stream_text_delta(&mut self, delta: &str) {
@@ -492,8 +497,16 @@ impl AppState {
                         );
                     }
                     oxi_ai::ContentBlock::Thinking(t) => {
-                        // Thinking blocks — render as collapsed
-                        self.chat.stream_thinking(t.thinking.clone(), true);
+                        // Thinking blocks — only append new content beyond
+                        // what we've already rendered. Prevents duplicates.
+                        let thinking = &t.thinking;
+                        if thinking.len() > self.snapshot_thinking_rendered {
+                            let new_thinking = &thinking[self.snapshot_thinking_rendered..];
+                            if !new_thinking.is_empty() {
+                                self.chat.stream_thinking(new_thinking.to_string(), self.snapshot_thinking_rendered == 0);
+                            }
+                            self.snapshot_thinking_rendered = thinking.len();
+                        }
                     }
                     oxi_ai::ContentBlock::Image(img) => {
                         self.chat.stream_image(img.mime_type.clone(), img.data.clone());
@@ -530,6 +543,7 @@ impl AppState {
         self.chat.finish_streaming();
         self.is_agent_busy = false;
         self.snapshot_text_rendered = 0;
+        self.snapshot_thinking_rendered = 0;
         if was_streaming {
             self.message_count += 1;
             // Refresh last code block from completed message

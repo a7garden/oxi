@@ -340,10 +340,17 @@ impl ChatViewState {
 
     pub fn stream_thinking(&mut self, content: String, collapsed: bool) {
         if let Some(ref mut s) = self.streaming {
-            s.message.content_blocks.push(ContentBlock::Thinking {
-                content: clamp_str(content, 50_000, 200),
-                collapsed,
-            });
+            // If the last block is already a Thinking block, append to it.
+            // Otherwise create a new one.
+            if let Some(ContentBlock::Thinking { content: existing, .. }) = s.message.content_blocks.last_mut() {
+                existing.push_str(&content);
+                *existing = clamp_str(existing.clone(), 50_000, 200);
+            } else {
+                s.message.content_blocks.push(ContentBlock::Thinking {
+                    content: clamp_str(content, 50_000, 200),
+                    collapsed,
+                });
+            }
         }
     }
 

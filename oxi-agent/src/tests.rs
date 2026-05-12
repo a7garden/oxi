@@ -182,10 +182,10 @@ async fn test_agent_with_mock_provider() {
 
     assert_eq!(response.content, "Hello! How can I help you?");
     assert_eq!(*provider.call_count.lock().unwrap(), 1);
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Start { .. })));
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentStart { .. })));
     assert!(events
         .iter()
-        .any(|e| matches!(e, AgentEvent::Complete { .. })));
+        .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
 }
 
 #[tokio::test]
@@ -201,12 +201,9 @@ async fn test_agent_events_sequence() {
 
     assert!(events
         .first()
-        .map(|e| matches!(e, AgentEvent::Start { .. }))
+        .map(|e| matches!(e, AgentEvent::AgentStart { .. }))
         .unwrap_or(false));
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::Thinking)));
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::Complete { .. })));
+    assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
 }
 
 #[test]
@@ -1396,12 +1393,14 @@ async fn test_follow_up_processed_in_tool_use_loop() {
     assert!(result.is_ok());
     let events = events.lock().unwrap();
 
-    // We expect 2 turns: tool call + response
+    // We expect 3 turns: tool call + response + follow-up
+    // (Previously expected 2 when should_stop_after_turn checked StopReason::Stop.
+    //  Now that check is removed, follow-ups are properly processed.)
     let turn_count = events
         .iter()
         .filter(|e| matches!(e, AgentEvent::TurnStart { .. }))
         .count();
-    assert_eq!(turn_count, 2);
+    assert_eq!(turn_count, 3);
 
     // Tool should have been called
     assert!(events

@@ -22,8 +22,8 @@ use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
 use crate::{state::SharedState, tools::ToolRegistry};
 use anyhow::{Error, Result};
 use oxi_ai::{
-    Message, Provider,
-    StopReason, UserMessage, CompactionStrategy,
+    ContentBlock, Message, Provider,
+    StopReason, TextContent, UserMessage, CompactionStrategy,
     CompactionManager as OxCompactionManager,
     estimate_tokens, LlmCompactor,
 };
@@ -206,6 +206,12 @@ impl AgentLoop {
         });
 
         tracing::info!(session_id = ?self.session_id, "AgentLoop run_messages complete");
+
+        // Sync messages back to shared state
+        self.state.update(|s| {
+            s.replace_messages(result_messages.clone());
+        });
+
         emit(AgentEvent::AgentEnd { 
             messages: result_messages.clone(), 
             stop_reason: stop_reason.clone(),
@@ -308,10 +314,40 @@ impl AgentLoop {
                 let assistant_message = match stream_assistant_response(self, &mut messages, &emit).await {
                     Ok(msg) => msg,
                     Err(e) => {
-                        let err_msg = format!("{:?}", e);
+                        // Unexpected error (not a provider stream error — those
+                        // are now encoded in the returned AssistantMessage).
+                        // This path is for truly unexpected failures like
+                        // missing model, config errors, etc.
+                        let err_msg = format!("{}", e);
+                        tracing::error!(session_id = ?self.session_id, "Unexpected streaming error: {}", err_msg);
+
+                        // Synthesize an error message to complete the lifecycle
+                        let mut error_asst = oxi_ai::AssistantMessage::new(
+                            oxi_ai::Api::OpenAiCompletions,
+                            "agent",
+                            &self.config.model_id,
+                        );
+                        error_asst.stop_reason = StopReason::Error;
+                        error_asst.content.push(ContentBlock::Text(TextContent::new(format!("⚠ {}", err_msg))));
+
+                        new_messages.push(Message::Assistant(error_asst.clone()));
+                        messages.push(Message::Assistant(error_asst.clone()));
+
+                        emit(AgentEvent::MessageEnd { message: Message::Assistant(error_asst.clone()) });
                         emit(AgentEvent::Error { message: err_msg.clone(), session_id: self.session_id.clone() });
-                        events.push(AgentEvent::Error { message: err_msg, session_id: self.session_id.clone() });
-                        return Err(Error::msg(e));
+
+                        emit(AgentEvent::TurnEnd {
+                            turn_number,
+                            assistant_message: Message::Assistant(error_asst.clone()),
+                            tool_results: vec![],
+                        });
+                        events.push(AgentEvent::TurnEnd {
+                            turn_number,
+                            assistant_message: Message::Assistant(error_asst),
+                            tool_results: vec![],
+                        });
+                        // Return Ok — lifecycle is complete
+                        return Ok((messages, events));
                     }
                 };
 

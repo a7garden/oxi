@@ -3,7 +3,7 @@
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
-    ContentBlock, Context, Message, ProviderEvent, StreamOptions, TextContent, ThinkingContent,
+    ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent,
     Tool as OxTool,
 };
 
@@ -117,13 +117,12 @@ pub(crate) async fn stream_assistant_response(
                 return Ok(message);
             }
 
-            ProviderEvent::Error { error, .. } => {
-                // pi-mono: always close the message lifecycle before error.
-                // If we started a message, emit MessageEnd with the error state.
-                if added_partial {
-                    let error_asst = error.clone();
-                    emit(super::AgentEvent::MessageEnd { message: Message::Assistant(error_asst) });
-                }
+            ProviderEvent::Error { mut error, .. } => {
+                // pi-mono: errors are encoded in the returned AssistantMessage,
+                // NOT thrown. The event lifecycle must always complete.
+                // See: pi-mono agent-loop.ts stream contract —
+                //   "Once invoked, request/model/runtime failures should be
+                //    encoded in the returned stream, not thrown."
                 let raw_msg = error.text_content();
                 let friendly = if raw_msg.is_empty() {
                     "Unknown provider error".to_string()
@@ -131,8 +130,27 @@ pub(crate) async fn stream_assistant_response(
                     raw_msg
                 };
                 tracing::error!(session_id = ?loop_ref.session_id, "Provider stream error: {}", friendly);
+
+                // Ensure the error message has the right stop reason
+                error.stop_reason = StopReason::Error;
+
+                // Finalize in messages array
+                if added_partial {
+                    let last_idx = messages.len() - 1;
+                    if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        *m = error.clone();
+                    }
+                } else {
+                    messages.push(Message::Assistant(error.clone()));
+                }
+
+                // Complete the message lifecycle
+                emit(super::AgentEvent::MessageEnd { message: Message::Assistant(error.clone()) });
                 emit(super::AgentEvent::Error { message: format!("⚠ {}", friendly), session_id: loop_ref.session_id.clone() });
-                return Err(Error::msg(friendly));
+
+                // Return Ok with error message — NOT Err().
+                // The caller (run_loop) checks stop_reason to decide what to do.
+                return Ok(error);
             }
 
             _ => {}

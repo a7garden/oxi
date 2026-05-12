@@ -63,6 +63,8 @@ pub struct Agent {
     state: SharedState,
     compaction_manager: CompactionManager,
     hooks: parking_lot::RwLock<crate::config::AgentHooks>,
+    /// Guard: true while a run is in progress. Prevents concurrent runs.
+    is_running: AtomicBool,
 }
 
 /// Result of executing a batch of tool calls.
@@ -94,6 +96,7 @@ impl Agent {
             state: SharedState::new(),
             compaction_manager,
             hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
+            is_running: AtomicBool::new(false),
         }
     }
 
@@ -257,6 +260,28 @@ impl Agent {
         prompt: String,
         tx: mpsc::Sender<AgentEvent>,
     ) -> Result<Response> {
+        // pi-mono: Agent.prompt() throws if activeRun exists.
+        // Prevent concurrent runs that would corrupt shared state.
+        if self.is_running.compare_exchange(
+            false, true,
+            Ordering::SeqCst, Ordering::SeqCst,
+        ).is_err() {
+            return Err(Error::msg("Agent is already running"));
+        }
+
+        let result = self.run_with_channel_inner(prompt, tx).await;
+
+        // Always clear the running flag
+        self.is_running.store(false, Ordering::SeqCst);
+        result
+    }
+
+    /// Inner implementation of run_with_channel, called after the running guard is set.
+    async fn run_with_channel_inner(
+        &self,
+        prompt: String,
+        tx: mpsc::Sender<AgentEvent>,
+    ) -> Result<Response> {
         use crate::agent_loop::AgentLoop;
 
         let inner = self.inner.read();
@@ -320,12 +345,11 @@ impl Agent {
             }
         }
 
-        // Wire should_stop_after_turn hook to AgentLoop's external_stop flag.
-        // The hook is typically: |ctx| should_stop_flag.load(SeqCst)
-        // We poll it on TurnEnd events from the emit callback and propagate
-        // to AgentLoop's external_stop flag for clean exit between turns.
+        // Wire should_stop_after_turn hook: share AgentLoop's external_stop
+        // Arc with the emit callback. When the hook fires (Ctrl+C detected),
+        // it sets ext_stop. AgentLoop checks this in should_stop_after_turn().
         //
-        // Note: Box<dyn Fn> can't be cloned. We take it from hooks via write lock.
+        // Note: Box<dyn Fn> can't be cloned. We take it from hooks.
         let maybe_hook = {
             drop(hooks);
             let mut hooks_w = self.hooks.write();
@@ -334,25 +358,44 @@ impl Agent {
         let ext_stop = al.external_stop().clone();
 
         // Create emit callback that sends through the channel.
-        // AgentLoop calls this synchronously, so we need blocking_send.
-        // Also polls should_stop_after_turn hook and propagates to external_stop.
+        // AgentLoop calls this synchronously. We use try_send (non-blocking)
+        // because blocking_send panics inside a tokio runtime.
+        // If the channel is full, the event is dropped — the channel should
+        // be sized generously (256+) to avoid this.
         let tx_emit = tx.clone();
 
         // Run the agent loop
         let result = al.run(prompt.clone(), move |event: AgentEvent| {
-            // Forward event to channel
-            let _ = tx_emit.blocking_send(event.clone());
+            // Forward event to channel (non-blocking)
+            let _ = tx_emit.try_send(event.clone());
 
-            // Poll should_stop_after_turn hook on TurnEnd events
-            // and propagate to AgentLoop's external_stop flag.
+            // On TurnEnd, poll the should_stop_after_turn hook to detect Ctrl+C.
+            // The hook wraps an AtomicBool (should_stop_flag from AgentSession).
+            // We can't pass real context here, but the TUI hook only checks
+            // the AtomicBool anyway: |ctx| should_stop_flag.load(SeqCst).
             if let Some(ref hook) = maybe_hook {
-                if matches!(event, AgentEvent::TurnEnd { .. }) {
-                    // Create minimal context for the hook
+                if let AgentEvent::TurnEnd { ref assistant_message, ref tool_results, .. } = event {
+                    // Build real context from actual turn data
+                    let asst = match assistant_message {
+                        oxi_ai::Message::Assistant(a) => a.clone(),
+                        _ => {
+                            // Can't extract assistant message, just check the hook with empty ctx
+                            let ctx = ShouldStopAfterTurnContext {
+                                message: oxi_ai::AssistantMessage::new(
+                                    oxi_ai::Api::OpenAiCompletions, "agent", "agent-model",
+                                ),
+                                tool_results: Vec::new(),
+                                iteration: 0,
+                            };
+                            if hook(&ctx) {
+                                ext_stop.store(true, Ordering::SeqCst);
+                            }
+                            return;
+                        }
+                    };
                     let ctx = ShouldStopAfterTurnContext {
-                        message: oxi_ai::AssistantMessage::new(
-                            oxi_ai::Api::OpenAiCompletions, "agent", "agent-model",
-                        ),
-                        tool_results: Vec::new(),
+                        message: asst,
+                        tool_results: tool_results.clone(),
                         iteration: 0,
                     };
                     if hook(&ctx) {

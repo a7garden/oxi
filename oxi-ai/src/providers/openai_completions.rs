@@ -379,9 +379,14 @@ fn parse_completions_sse(text: &str, provider: &str, model_id: &str) -> Vec<Prov
         // Check for completion
         if chunk.choices.first().map(|c| c.finish_reason.is_some()).unwrap_or(false) {
             let reason = match chunk.choices.first().and_then(|c| c.finish_reason.as_ref()).map(|s| s.as_str()) {
-                Some("stop") => StopReason::Stop,
+                Some("stop") | Some("end") => StopReason::Stop,
                 Some("length") => StopReason::Length,
-                _ => StopReason::Stop,
+                Some("content_filter") => StopReason::Error,
+                Some(unknown) => {
+                    tracing::warn!("Unknown finish_reason: '{}', treating as Error", unknown);
+                    StopReason::Error
+                }
+                None => StopReason::Stop,
             };
 
             let mut done_msg = partial_message.clone();
