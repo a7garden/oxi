@@ -597,19 +597,13 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
 
     for (i, msg) in state.messages.iter().enumerate() {
         if i > 0 {
+            // Gap between messages — use a spacer for breathing room
             entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
             y += 1;
         }
+        // User messages: left accent border, no label needed (single-user context)
         if msg.role == MessageRole::User {
             entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Rule });
-            y += 1;
-            entries.push(LayoutEntry {
-                y, height: 1,
-                kind: LayoutKind::Label {
-                    text: "\u{25C8} You".to_string(),
-                    style: Style::default().fg(ratatui::style::Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD),
-                },
-            });
             y += 1;
         }
         for block in &msg.content_blocks {
@@ -670,25 +664,22 @@ fn measure_kind(kind: &LayoutKind, width: u16, inner_w: u16) -> u16 {
             measure_wrapped_height(lines, w)
         }
         LayoutKind::ToolBox { arguments, result, .. } => {
-            let mut h: u16 = 1; // status bar (icon + name)
-            // Pretty-printed key-value lines
+            let mut h: u16 = 1; // header (icon + name)
+            // Arguments: max 3 key-value lines
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
                 if let Some(obj) = parsed.as_object() {
-                    h += obj.len().min(5) as u16;
-                    if obj.len() > 5 { h += 1; }
+                    h += obj.len().min(3) as u16;
                 } else {
-                    h += 1; // single line for non-object
+                    h += 1;
                 }
             } else {
-                let lines = arguments.lines().count();
-                h += lines.min(3) as u16;
-                if lines > 3 { h += 1; }
+                h += 1;
             }
+            // Result: max 3 lines + ellipsis
             if let Some((rc, _)) = result {
-                h += 1; // divider
                 let rn = rc.lines().count();
-                h += rn.min(6) as u16;
-                if rn > 6 { h += 1; }
+                h += rn.min(3) as u16;
+                if rn > 3 { h += 1; }
             }
             h
         }
@@ -732,8 +723,8 @@ impl Widget for EntryWidget<'_> {
         match &self.entry {
             LayoutKind::Spacer => { /* empty line, already cleared */ }
             LayoutKind::Rule => {
-                let line = "-".repeat(rect.width as usize);
-                Line::from(Span::styled(line, self.styles.muted)).render(rect, buf);
+                let line = "\u{2500}".repeat(rect.width as usize); // ─
+                Line::from(Span::styled(line, Style::default().fg(ratatui::style::Color::Rgb(35, 35, 50)))).render(rect, buf);
             }
             LayoutKind::Label { text, style } => {
                 Paragraph::new(Line::from(Span::styled(text.clone(), *style))).render(rect, buf);
@@ -754,94 +745,81 @@ impl Widget for EntryWidget<'_> {
             LayoutKind::ToolBox { name, arguments, result, status } => {
                 let (icon, border_color, bg_color) = match status {
                     ToolCallStatus::Requested => (
-                        "\u{29D6}",  // ⤖ (or will fallback to ...)
-                        ratatui::style::Color::Rgb(122, 162, 247),  // primary blue
-                        ratatui::style::Color::Rgb(22, 28, 45),     // dark blue bg
+                        "\u{29D6}",
+                        ratatui::style::Color::Rgb(100, 140, 200),  // muted blue
+                        ratatui::style::Color::Rgb(18, 24, 38),     // very dark blue bg
                     ),
                     ToolCallStatus::Executing => (
-                        "\u{27F3}",  // ⟳
-                        ratatui::style::Color::Rgb(224, 175, 104),  // warning amber
-                        ratatui::style::Color::Rgb(40, 34, 20),     // dark amber bg
+                        "\u{27F3}",
+                        ratatui::style::Color::Rgb(200, 165, 80),   // warm amber
+                        ratatui::style::Color::Rgb(32, 28, 16),     // very dark amber bg
                     ),
                     ToolCallStatus::Done => {
                         let is_error = result.as_ref().map_or(false, |(_, e)| *e);
                         if is_error {
-                            (
-                                "\u{2718}",  // ✘
-                                ratatui::style::Color::Rgb(247, 118, 142), // error red
-                                ratatui::style::Color::Rgb(45, 20, 24),    // dark red bg
-                            )
+                            ("\u{2718}", ratatui::style::Color::Rgb(220, 90, 110), ratatui::style::Color::Rgb(36, 16, 20))
                         } else {
-                            (
-                                "\u{2713}",  // ✓
-                                ratatui::style::Color::Rgb(158, 206, 106), // success green
-                                ratatui::style::Color::Rgb(24, 38, 20),    // dark green bg
-                            )
+                            ("\u{2713}", ratatui::style::Color::Rgb(120, 180, 90), ratatui::style::Color::Rgb(18, 30, 16))
                         }
                     }
                 };
 
-                // Render as a rounded box with colored left accent border
+                // Thin left accent border only
                 let block = Block::default()
                     .borders(Borders::LEFT)
-                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .border_style(Style::default().fg(border_color))
                     .style(Style::default().bg(bg_color));
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
-                // Status bar: icon + tool name + timing hint
+                let mut content_lines: Vec<Line<'static>> = Vec::new();
+
+                // Header: icon + tool name — single compact line
                 let name_style = Style::default().fg(border_color).add_modifier(Modifier::BOLD);
-                let status_bar = Line::from(vec![
+                content_lines.push(Line::from(vec![
                     Span::styled(format!("{} ", icon), name_style),
                     Span::styled(name.clone(), name_style),
-                ]);
+                ]));
 
-                // Parse arguments as pretty key=value
-                let mut content_lines: Vec<Line<'static>> = vec![status_bar];
-                let args_dim = Style::default().fg(ratatui::style::Color::Rgb(120, 130, 160));
-                let args_val = Style::default().fg(ratatui::style::Color::Rgb(180, 190, 210));
+                // Arguments: show compact "key: value" pairs, max 3, truncate long values
+                let dim = Style::default().fg(ratatui::style::Color::Rgb(100, 108, 135));
+                let val = Style::default().fg(ratatui::style::Color::Rgb(155, 163, 185));
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
                     if let Some(obj) = parsed.as_object() {
-                        for (key, val) in obj.iter().take(5) {
-                            let val_str = match val {
-                                serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string(),
+                        for (key, v) in obj.iter().take(3) {
+                            let val_str = match v {
+                                serde_json::Value::String(s) => {
+                                    // Truncate long strings
+                                    if s.len() > 60 {
+                                        format!("{}\u{2026}", &s[..s.char_indices().take(60).last().map(|(i,_)| i).unwrap_or(0)])
+                                    } else {
+                                        s.clone()
+                                    }
+                                }
+                                other => {
+                                    let s = other.to_string();
+                                    if s.len() > 60 { format!("{}\u{2026}", &s[..60]) } else { s }
+                                }
                             };
                             content_lines.push(Line::from(vec![
-                                Span::styled(format!("  {}", key), args_dim),
-                                Span::styled(": ", args_dim),
-                                Span::styled(val_str, args_val),
+                                Span::styled(format!("  {}", key), dim),
+                                Span::styled(": ", dim),
+                                Span::styled(val_str, val),
                             ]));
                         }
-                        if obj.len() > 5 {
-                            content_lines.push(Line::from(Span::styled("  ...", args_dim)));
-                        }
-                    } else {
-                        // Not an object — show as-is (truncated)
-                        let display = if arguments.len() > 200 { format!("{}...", &arguments[..200]) } else { arguments.clone() };
-                        content_lines.push(Line::from(Span::styled(format!("  {}", display), args_dim)));
-                    }
-                } else {
-                    // Not valid JSON — raw display
-                    for arg in arguments.lines().take(3) {
-                        content_lines.push(Line::from(Span::styled(format!("  {}", arg), args_dim)));
-                    }
-                    if arguments.lines().count() > 3 {
-                        content_lines.push(Line::from(Span::styled("  ...", args_dim)));
                     }
                 }
 
-                // Result section
+                // Result: max 3 lines, dimmed
                 if let Some((result_content, _)) = result {
-                    content_lines.push(Line::from(Span::styled("", self.styles.muted)));
-                    let result_style = Style::default().fg(ratatui::style::Color::Rgb(160, 170, 195));
-                    for rl in result_content.lines().take(6) {
-                        content_lines.push(Line::from(Span::styled(format!("  {}", rl), result_style)));
+                    for rl in result_content.lines().take(3) {
+                        content_lines.push(Line::from(Span::styled(format!("  {}", rl), val)));
                     }
-                    if result_content.lines().count() > 6 {
-                        content_lines.push(Line::from(Span::styled("  ...", self.styles.muted)));
+                    if result_content.lines().count() > 3 {
+                        content_lines.push(Line::from(Span::styled("  \u{2026}", dim)));
                     }
                 }
+
                 let text: ratatui::text::Text = content_lines.into_iter().collect();
                 Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
             }
@@ -1063,7 +1041,7 @@ mod tests {
         });
         let layout = compute_layout(&s, 80);
         assert!(!layout.is_empty());
-        assert!(layout.iter().any(|e| matches!(&e.kind, LayoutKind::Label { text, .. } if text == "You")));
+        assert!(layout.iter().any(|e| matches!(&e.kind, LayoutKind::Rule)));
     }
 
     #[test]
