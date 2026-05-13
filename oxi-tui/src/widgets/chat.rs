@@ -737,9 +737,12 @@ impl Widget for EntryWidget<'_> {
                         .border_style(self.styles.user_border);
                     let inner = block.inner(rect);
                     block.render(rect, buf);
-                    Paragraph::new(text).style(self.styles.normal).wrap(Wrap { trim: false }).render(inner, buf);
+                    Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
                 } else {
-                    Paragraph::new(text).style(self.styles.normal).wrap(Wrap { trim: false }).render(rect, buf);
+                    // Don't set .style() here — markdown Spans already carry
+                    // their own styling (bold, italic, code, headings).
+                    // Paragraph::style() would override all per-Span styles.
+                    Paragraph::new(text).wrap(Wrap { trim: false }).render(rect, buf);
                 }
             }
             LayoutKind::ToolBox { name, arguments, result, status } => {
