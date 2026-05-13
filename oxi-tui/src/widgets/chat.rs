@@ -770,7 +770,7 @@ impl Widget for EntryWidget<'_> {
             LayoutKind::Spacer => { /* empty line, already cleared */ }
             LayoutKind::Rule => {
                 let line = "\u{2500}".repeat(rect.width as usize); // ─
-                Line::from(Span::styled(line, Style::default().fg(ratatui::style::Color::Rgb(35, 35, 50)))).render(rect, buf);
+                Line::from(Span::styled(line, self.styles.border)).render(rect, buf);
             }
             LayoutKind::Label { text, style } => {
                 Paragraph::new(Line::from(Span::styled(text.clone(), *style))).render(rect, buf);
@@ -792,48 +792,44 @@ impl Widget for EntryWidget<'_> {
                 }
             }
             LayoutKind::ToolBox { name, arguments, result, status } => {
-                let (icon, border_color, bg_color) = match status {
+                let (icon, border_style, bg_style) = match status {
                     ToolCallStatus::Requested => (
-                        "\u{29D6}",
-                        ratatui::style::Color::Rgb(100, 140, 200),
-                        ratatui::style::Color::Rgb(18, 24, 38),
+                        "\u{25CB}",  // ○ (hollow circle — universal)
+                        self.styles.muted,
+                        Style::default().bg(ratatui::style::Color::Rgb(18, 20, 28)),
                     ),
                     ToolCallStatus::Executing => (
-                        "\u{27F3}",
-                        ratatui::style::Color::Rgb(200, 165, 80),
-                        ratatui::style::Color::Rgb(32, 28, 16),
+                        "\u{25CF}",  // ● (filled circle — running)
+                        self.styles.warning,
+                        Style::default().bg(ratatui::style::Color::Rgb(28, 24, 14)),
                     ),
                     ToolCallStatus::Done => {
                         let is_error = result.as_ref().map_or(false, |(_, e)| *e);
                         if is_error {
-                            ("\u{2718}", ratatui::style::Color::Rgb(220, 90, 110), ratatui::style::Color::Rgb(36, 16, 20))
+                            ("\u{2718}", self.styles.error, Style::default().bg(ratatui::style::Color::Rgb(32, 16, 18)))
                         } else {
-                            ("\u{2713}", ratatui::style::Color::Rgb(120, 180, 90), ratatui::style::Color::Rgb(18, 30, 16))
+                            ("\u{2713}", self.styles.success, Style::default().bg(ratatui::style::Color::Rgb(16, 26, 14)))
                         }
                     }
                 };
 
-                // Thin left accent border only
+                // Thin left accent border
                 let block = Block::default()
                     .borders(Borders::LEFT)
-                    .border_style(Style::default().fg(border_color))
-                    .style(Style::default().bg(bg_color));
+                    .border_style(border_style)
+                    .style(bg_style);
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
-                // Max content width = inner.width (no wrapping, pre-truncate instead)
                 let max_w = inner.width as usize;
                 let mut content_lines: Vec<Line<'static>> = Vec::new();
 
                 // Header: icon + tool name
-                let name_style = Style::default().fg(border_color).add_modifier(Modifier::BOLD);
+                let name_style = border_style.add_modifier(Modifier::BOLD);
                 content_lines.push(Line::from(vec![
                     Span::styled(format!("{} ", icon), name_style),
                     Span::styled(name.clone(), name_style),
                 ]));
-
-                let dim = Style::default().fg(ratatui::style::Color::Rgb(100, 108, 135));
-                let val_style = Style::default().fg(ratatui::style::Color::Rgb(155, 163, 185));
 
                 // Arguments: compact key: value, truncate to fit inner width
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
@@ -843,68 +839,59 @@ impl Widget for EntryWidget<'_> {
                                 serde_json::Value::String(s) => s.clone(),
                                 other => other.to_string(),
                             };
-                            // "  key: value" — truncate value to fit
                             let prefix_len = 2 + UnicodeWidthStr::width(key.as_str()) + 2;
                             let avail = max_w.saturating_sub(prefix_len);
                             let display = truncate_str(&val_str, avail);
                             content_lines.push(Line::from(vec![
-                                Span::styled(format!("  {}", key), dim),
-                                Span::styled(": ", dim),
-                                Span::styled(display, val_style),
+                                Span::styled(format!("  {}", key), self.styles.muted),
+                                Span::styled(": ", self.styles.muted),
+                                Span::styled(display, self.styles.normal),
                             ]));
                         }
                     }
                 }
 
-                // Result: max 3 lines, each truncated to inner width
+                // Result: max 3 lines
                 if let Some((result_content, _)) = result {
                     for rl in result_content.lines().take(3) {
                         let display = truncate_str(rl, max_w.saturating_sub(2));
-                        content_lines.push(Line::from(Span::styled(format!("  {}", display), val_style)));
+                        content_lines.push(Line::from(Span::styled(format!("  {}", display), self.styles.normal)));
                     }
                     if result_content.lines().count() > 3 {
-                        content_lines.push(Line::from(Span::styled("  \u{2026}", dim)));
+                        content_lines.push(Line::from(Span::styled("  \u{2026}", self.styles.muted)));
                     }
                 }
 
                 let text: ratatui::text::Text = content_lines.into_iter().collect();
-                // No wrap — lines are pre-truncated to exact width
                 Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::ToolResultBox { tool_name, content, is_error } => {
-                let (icon, border_color, bg_color) = if *is_error {
-                    ("\u{2718}", ratatui::style::Color::Rgb(247, 118, 142), ratatui::style::Color::Rgb(45, 20, 24))
+                let (icon, border_style, bg_style) = if *is_error {
+                    ("\u{2718}", self.styles.error, Style::default().bg(ratatui::style::Color::Rgb(32, 16, 18)))
                 } else {
-                    ("\u{2713}", ratatui::style::Color::Rgb(80, 180, 100), ratatui::style::Color::Rgb(20, 34, 22))
+                    ("\u{2713}", self.styles.success, Style::default().bg(ratatui::style::Color::Rgb(16, 26, 14)))
                 };
                 let label = if tool_name.is_empty() { icon.to_string() } else { format!("{} {}", icon, tool_name) };
-                let label_style = Style::default().fg(border_color);
-                let content_style = if *is_error {
-                    Style::default().fg(ratatui::style::Color::Rgb(247, 150, 165))
-                } else {
-                    Style::default().fg(ratatui::style::Color::Rgb(160, 170, 195))
-                };
 
                 let block = Block::default()
                     .borders(Borders::LEFT)
-                    .border_style(Style::default().fg(border_color))
-                    .style(Style::default().bg(bg_color));
+                    .border_style(border_style)
+                    .style(bg_style);
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
                 let max_w = inner.width as usize;
                 let mut lines: Vec<Line<'static>> = vec![
-                    Line::from(Span::styled(format!("  {}", label), label_style)),
+                    Line::from(Span::styled(format!("  {}", label), border_style.add_modifier(Modifier::BOLD))),
                 ];
                 for l in content.lines().take(4) {
                     let display = truncate_str(l, max_w.saturating_sub(2));
-                    lines.push(Line::from(Span::styled(format!("  {}", display), content_style)));
+                    lines.push(Line::from(Span::styled(format!("  {}", display), self.styles.normal)));
                 }
                 if content.lines().count() > 4 {
                     lines.push(Line::from(Span::styled("  \u{2026}", self.styles.muted)));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
-                // No wrap — pre-truncated to exact width
                 Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::ErrorBox { title, message, retryable } => {
@@ -934,29 +921,21 @@ impl Widget for EntryWidget<'_> {
                 let filtered = filter_tool_json(content);
                 let mut lines: Vec<Line<'static>> = Vec::new();
 
-                // Header line with subtle styling
-                let header_style = Style::default().fg(ratatui::style::Color::Rgb(147, 130, 220)); // soft purple
+                let header_style = self.styles.accent;
                 if *collapsed {
                     lines.push(Line::from(Span::styled("\u{25B8} thinking".to_string(), header_style)));
                     if let Some(first) = filtered.lines().next() {
-                        let preview_style = Style::default()
-                            .fg(ratatui::style::Color::Rgb(90, 85, 130))
-                            .add_modifier(Modifier::ITALIC);
-                        lines.push(Line::from(Span::styled(format!("  {}", first), preview_style)));
+                        lines.push(Line::from(Span::styled(format!("  {}", first), self.styles.muted.add_modifier(Modifier::ITALIC))));
                     }
                 } else {
                     lines.push(Line::from(Span::styled("\u{25BE} thinking".to_string(), header_style)));
-                    // Render thinking content with tui-markdown in italic style
-                    let thinking_style = Style::default()
-                        .fg(ratatui::style::Color::Rgb(130, 135, 170))
-                        .add_modifier(Modifier::ITALIC);
+                    let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
                     let md_rendered = md_lines(&filtered);
                     for md_line in md_rendered {
                         let spans: Vec<Span<'static>> = md_line.spans
                             .into_iter()
                             .map(|s| {
-                                let mut combined = thinking_style;
-                                combined = combined.patch(s.style);
+                                let combined = thinking_style.patch(s.style);
                                 Span::styled(s.content.into_owned(), combined)
                             })
                             .collect();
@@ -975,13 +954,12 @@ impl Widget for EntryWidget<'_> {
                 Paragraph::new(text).render(rect, buf);
             }
             LayoutKind::Spinner { frame } => {
-                let sp = ["\u{2850}", "\u{2854}", "\u{2860}", "\u{284E}"];
-                // Fallback to simple ASCII if unicode doesn't render
-                let sp_ascii = ["|", "/", "-", "\\"];
+                // Braille spinner — cycles through progressively filled dots
+                let sp = ["\u{2801}", "\u{2802}", "\u{2804}", "\u{2840}",
+                          "\u{2880}", "\u{2810}", "\u{2808}", "\u{2804}"];
                 let ch = sp[frame % sp.len()];
-                let spinner_style = Style::default().fg(ratatui::style::Color::Rgb(187, 154, 247));
                 Paragraph::new(Line::from(Span::styled(
-                    format!("  {} Working...", ch), spinner_style,
+                    format!("  {} Working...", ch), self.styles.accent,
                 ))).render(rect, buf);
             }
         }
