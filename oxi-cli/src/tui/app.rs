@@ -593,51 +593,6 @@ impl AppState {
     }
 }
 
-/// Strip JSON tool call arrays from thinking text.
-/// GLM-5.1 writes tool call plans as `[{"function":...}]` inside
-/// reasoning_content. We detect `[{"` and skip to the matching `]`,
-/// keeping only the real thinking text.
-fn filter_tool_call_json(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let mut result = String::new();
-    let mut i = 0;
-
-    while i < len {
-        // Detect `[{"` — start of a JSON array containing tool calls
-        if chars[i] == '['
-            && i + 2 < len
-            && chars[i + 1] == '{'
-            && chars[i + 2] == '"'
-        {
-            // Skip to matching `]`
-            let mut depth: i32 = 0;
-            while i < len {
-                match chars[i] {
-                    '[' | '{' => depth += 1,
-                    ']' | '}' => {
-                        depth -= 1;
-                        if depth <= 0 {
-                            i += 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            continue;
-        }
-        result.push(chars[i]);
-        i += 1;
-    }
-
-    result.lines()
-        .filter(|l| !l.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

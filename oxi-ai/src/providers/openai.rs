@@ -546,10 +546,6 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str, output: &mut Ass
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
     events.reserve(estimated_events);
 
-    // Accumulate tool calls across deltas (keyed by index)
-    let _pending_tool_calls: std::collections::HashMap<usize, (String, String, String)> =
-        std::collections::HashMap::new(); // index → (id, name, arguments)
-
     let mut accumulated_usage = Usage::default();
 
     for line in text.split('\n') {
