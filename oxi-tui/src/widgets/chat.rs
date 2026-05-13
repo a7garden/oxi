@@ -713,12 +713,10 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
                 if let Some(obj) = parsed.as_object() {
                     h += obj.len().min(3) as u16;
-                } else {
-                    h += 1;
                 }
-            } else {
-                h += 1;
+                // Non-object JSON: render shows nothing, measure 0
             }
+            // Invalid JSON: render shows nothing, measure 0
             // Result: max 3 lines + ellipsis
             if let Some((rc, _)) = result {
                 let rn = rc.lines().count();
@@ -733,11 +731,16 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             1 + n as u16 + if content.lines().count() > 4 { 1 } else { 0 }
         }
         LayoutKind::ErrorBox { message, retryable, .. } => {
+            // Block::bordered() adds top + bottom border (2 rows)
             let n = message.lines().count().min(4);
-            1 + n as u16 + if *retryable { 1 } else { 0 }
+            2 + n as u16 + if *retryable { 1 } else { 0 }
         }
         LayoutKind::Thinking { content, collapsed } => {
-            if *collapsed { 1 + if content.lines().next().is_some() { 1 } else { 0 } }
+            if *collapsed {
+                // Use filtered content for preview — matches render
+                let filtered = filter_tool_json(content);
+                1 + if filtered.lines().next().is_some() { 1 } else { 0 }
+            }
             else {
                 // Use filtered content for measurement to match rendering
                 let filtered = filter_tool_json(content);
