@@ -155,6 +155,8 @@ struct LayoutCache {
     msg_count: usize,
     /// Last known streaming block count
     streaming_len: usize,
+    /// Last known streaming text character count (detects content growth)
+    streaming_text_len: usize,
     /// Last known spinner frame
     spinner_frame: usize,
     /// Last known width
@@ -170,6 +172,7 @@ impl std::fmt::Debug for LayoutCache {
         f.debug_struct("LayoutCache")
             .field("msg_count", &self.msg_count)
             .field("streaming_len", &self.streaming_len)
+            .field("streaming_text_len", &self.streaming_text_len)
             .field("spinner_frame", &self.spinner_frame)
             .field("width", &self.width)
             .field("entries", &self.entries.as_ref().map(|v| v.len()))
@@ -183,6 +186,7 @@ impl Default for LayoutCache {
         Self {
             msg_count: 0,
             streaming_len: 0,
+            streaming_text_len: 0,
             spinner_frame: 0,
             width: 0,
             entries: None,
@@ -461,6 +465,13 @@ impl ChatViewState {
     fn get_layout(&self, width: u16) -> Vec<LayoutEntry> {
         let msg_count = self.messages.len();
         let streaming_len = self.streaming.as_ref().map(|s| s.message.content_blocks.len()).unwrap_or(0);
+        let streaming_text_len = self.streaming.as_ref()
+            .and_then(|s| s.message.content_blocks.first())
+            .map(|b| match b {
+                ContentBlock::Text { content } => content.len(),
+                _ => 0,
+            })
+            .unwrap_or(0);
         let spinner = self.spinner_frame;
 
         {
@@ -468,6 +479,7 @@ impl ChatViewState {
             if cache.entries.is_some()
                 && cache.msg_count == msg_count
                 && cache.streaming_len == streaming_len
+                && cache.streaming_text_len == streaming_text_len
                 && cache.spinner_frame == spinner
                 && cache.width == width
             {
@@ -483,6 +495,7 @@ impl ChatViewState {
             let mut cache = self.layout_cache.write();
             cache.msg_count = msg_count;
             cache.streaming_len = streaming_len;
+            cache.streaming_text_len = streaming_text_len;
             cache.spinner_frame = spinner;
             cache.width = width;
             cache.entries = Some(entries.clone());
