@@ -478,7 +478,14 @@ impl AppState {
                         // from tool calls), not the raw delta string.
                         let text = &t.text;
                         if text.len() > self.snapshot_text_rendered {
-                            let new_text = &text[self.snapshot_text_rendered..];
+                            // Use char_indices to find the safe byte boundary
+                            // closest to snapshot_text_rendered (Korean chars
+                            // are 3 bytes each in UTF-8).
+                            let byte_off = text.char_indices()
+                                .map(|(i, _)| i)
+                                .find(|&i| i >= self.snapshot_text_rendered)
+                                .unwrap_or(text.len());
+                            let new_text = &text[byte_off..];
                             if !new_text.is_empty() {
                                 self.chat.stream_text_delta(new_text);
                             }
@@ -499,18 +506,18 @@ impl AppState {
                     oxi_ai::ContentBlock::Thinking(t) => {
                         // Thinking blocks — only append new content beyond
                         // what we've already rendered. Prevents duplicates.
+                        // Note: raw thinking content (including JSON tool call
+                        // arrays from GLM) is accumulated as-is. Filtering
+                        // happens at render time in chat.rs.
                         let thinking = &t.thinking;
                         if thinking.len() > self.snapshot_thinking_rendered {
-                            let new_thinking = &thinking[self.snapshot_thinking_rendered..];
+                            let byte_off = thinking.char_indices()
+                                .map(|(i, _)| i)
+                                .find(|&i| i >= self.snapshot_thinking_rendered)
+                                .unwrap_or(thinking.len());
+                            let new_thinking = &thinking[byte_off..];
                             if !new_thinking.is_empty() {
-                                // GLM models put tool call JSON arrays in
-                                // reasoning_content. Strip them out so only
-                                // real thinking text is shown. Actual tool
-                                // calls arrive via ToolCall content blocks.
-                                let filtered = filter_tool_call_json(new_thinking);
-                                if !filtered.is_empty() {
-                                    self.chat.stream_thinking(filtered, false);
-                                }
+                                self.chat.stream_thinking(new_thinking.to_string(), false);
                             }
                             self.snapshot_thinking_rendered = thinking.len();
                         }
@@ -715,7 +722,8 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         let session_handle = agent_session.clone_handle();
         let ui_tx_for_thread = ui_tx.clone();
         let agent_handle = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
                 .enable_all()
                 .build()
                 .expect("Failed to build agent runtime");

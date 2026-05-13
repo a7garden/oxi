@@ -421,11 +421,13 @@ impl AgentLoop {
                 }
 
                 let tool_calls = helpers::extract_tool_calls(&assistant_message);
+                tracing::info!("[AGENT-LOOP] extract_tool_calls found {} calls, stop_reason={:?}", tool_calls.len(), assistant_message.stop_reason);
 
                 let mut tool_results: Vec<oxi_ai::ToolResultMessage> = Vec::new();
                 has_more_tool_calls = false;
 
                 if !tool_calls.is_empty() {
+                    tracing::info!("[AGENT-LOOP] Executing {} tool calls", tool_calls.len());
                     let executed_batch = match execute_tool_calls(
                         self,
                         &mut messages,
@@ -477,10 +479,12 @@ impl AgentLoop {
                 });
 
                 if should_stop_after_turn(&messages, &assistant_message, self.config.max_iterations, &self.external_stop) {
+                    tracing::info!("[AGENT-LOOP] should_stop_after_turn=true, ending loop");
                     return Ok((messages, events));
                 }
 
                 pending_messages = self.drain_steering_queue();
+                tracing::info!("[AGENT-LOOP] TurnEnd complete, pending_messages={}, has_more_tool_calls={}", !pending_messages.is_empty(), has_more_tool_calls);
             }
 
             let follow_up_messages = self.drain_follow_up_queue();

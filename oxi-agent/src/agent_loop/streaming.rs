@@ -127,31 +127,48 @@ pub(crate) async fn stream_assistant_response(
                 }
             }
 
-            ProviderEvent::ToolCallEnd { tool_call, partial, .. } => {
-                // ToolCallEnd: the partial already includes the tool call block
+            ProviderEvent::ToolCallEnd { tool_call, .. } => {
+                // Add the tool call directly to our tracked message.
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = partial;
+                        m.content.push(ContentBlock::ToolCall(tool_call));
                     }
+                    // CRITICAL: emit MessageUpdate so the TUI sees the ToolCall block.
+                    // Without this, tool calls are never rendered (matching pi's behavior
+                    // where toolcall_end emits message_update).
+                    emit(super::AgentEvent::MessageUpdate {
+                        message: messages.last().expect("non-empty").clone(),
+                        delta: None,
+                    });
                 }
             }
 
             ProviderEvent::Done { message, .. } => {
                 tracing::info!("Stream event #{}: Done (stop_reason={:?})", event_count, message.stop_reason);
-                // Done carries the complete accumulated message from the provider.
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
+                        let tool_calls: Vec<ContentBlock> = m.content.drain(..)
+                            .filter(|b| matches!(b, ContentBlock::ToolCall(_)))
+                            .collect();
+                        tracing::info!("Done: preserving {} tool_calls from ToolCallEnd, Done message has {} content blocks", tool_calls.len(), message.content.len());
                         *m = message.clone();
+                        m.content.extend(tool_calls);
+                        tracing::info!("Done: final message has {} content blocks, stop_reason={:?}", m.content.len(), m.stop_reason);
                     }
                 } else {
                     messages.push(Message::Assistant(message.clone()));
                 }
                 emit(super::AgentEvent::MessageEnd {
-                    message: Message::Assistant(message.clone()),
+                    message: messages.last().expect("non-empty").clone(),
                 });
-                return Ok(message);
+                // Return the message we actually stored (with tool calls preserved)
+                if let Message::Assistant(m) = messages.last().expect("non-empty") {
+                    return Ok(m.clone());
+                } else {
+                    return Ok(message);
+                }
             }
 
             ProviderEvent::Error { mut error, .. } => {

@@ -274,7 +274,8 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             // Agent started processing
         }
         UiEvent::AgentEnd => {
-            // Agent finished all processing
+            // Agent finished all processing — clear busy state
+            state.is_agent_busy = false;
         }
 
         // ── Turn lifecycle ────────────────────────────────────────

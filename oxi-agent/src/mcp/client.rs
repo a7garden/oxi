@@ -260,7 +260,6 @@ impl McpClient {
         // Try graceful shutdown first
         #[cfg(unix)]
         {
-            use std::os::unix::process::ExitStatusExt;
             if let Some(id) = self._child.id() {
                 unsafe {
                     libc::kill(id as libc::pid_t, libc::SIGTERM);

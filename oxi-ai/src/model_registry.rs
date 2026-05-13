@@ -8,7 +8,6 @@ use crate::{Api, Cost, InputModality, Model};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 /// Extract the model name after the last '/', or return the whole id if no '/' is present.
 fn extract_model_name(id: &str) -> &str {

@@ -287,6 +287,17 @@ impl ChatViewState {
             self.start_streaming();
         }
         if let Some(ref mut s) = self.streaming {
+            // Check if this tool call was already registered (e.g., from
+            // a prior MessageUpdate that included ToolCall blocks).
+            if let Some(existing_idx) = self.tool_tracker.get(&id) {
+                // Update the existing block's status (Requested → Executing etc.)
+                if let Some(block) = s.message.content_blocks.get_mut(existing_idx) {
+                    if let ContentBlock::ToolCall { status: ref mut s, .. } = block {
+                        *s = status;
+                    }
+                }
+                return;
+            }
             let idx = s.message.content_blocks.len();
             if !self.tool_tracker.register(id.clone(), idx) { return; }
             s.message.content_blocks.push(ContentBlock::ToolCall {
@@ -375,6 +386,7 @@ impl ChatViewState {
         if let Some(s) = self.streaming.take() {
             self.messages.push(s.message);
         }
+        self.tool_tracker.clear();
         // Invalidate cache
         let mut cache = self.layout_cache.write();
         cache.entries = None;
@@ -687,8 +699,9 @@ fn measure_kind(kind: &LayoutKind, width: u16, inner_w: u16) -> u16 {
         LayoutKind::Thinking { content, collapsed } => {
             if *collapsed { 1 + if content.lines().next().is_some() { 1 } else { 0 } }
             else {
-                // Use md_lines for measurement to match rendering
-                let md = md_lines(content);
+                // Use filtered content for measurement to match rendering
+                let filtered = filter_tool_json(content);
+                let md = md_lines(&filtered);
                 1 + md.len() as u16
             }
         }
@@ -845,10 +858,14 @@ impl Widget for EntryWidget<'_> {
                 let mut lines: Vec<Line<'static>> = vec![
                     Line::from(Span::styled(format!("{} Thinking...", ind), self.styles.accent)),
                 ];
+                // Filter JSON tool call arrays from thinking text at render time.
+                // GLM-5.1 puts tool call plans as `[{"function":...}]` in
+                // reasoning_content. We detect `[{\"` and skip to the matching `]`.
+                let filtered = filter_tool_json(content);
                 if !*collapsed {
-                    // Render thinking content with tui-markdown in italic style
+                    // Render filtered thinking content with tui-markdown in italic style
                     let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
-                    let md_rendered = md_lines(content);
+                    let md_rendered = md_lines(&filtered);
                     for md_line in md_rendered {
                         let spans: Vec<Span<'static>> = md_line.spans
                             .into_iter()
@@ -860,7 +877,7 @@ impl Widget for EntryWidget<'_> {
                             .collect();
                         lines.push(Line::from(spans));
                     }
-                } else if let Some(first) = content.lines().next() {
+                } else if let Some(first) = filtered.lines().next() {
                     let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
                     lines.push(Line::from(Span::styled(format!("  {}", first), thinking_style)));
                 }
@@ -1062,4 +1079,49 @@ mod tests {
         // Content should be clamped to MAX_TEXT_CHARS (with overflow marker)
         assert!(content.chars().count() <= MAX_TEXT_CHARS + 10, "content len = {}", content.chars().count());
     }
+}
+
+/// Filter JSON tool call arrays from thinking text.
+/// GLM-5.1 writes tool call plans as `[{\"function\":...}]` inside
+/// reasoning_content. We detect `[{\"` and skip to the matching `]`.
+fn filter_tool_json(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut result = String::new();
+    let mut i = 0;
+
+    while i < len {
+        // Detect `[{"` — start of a JSON array containing tool calls
+        if chars[i] == '['
+            && i + 2 < len
+            && chars[i + 1] == '{'
+            && chars[i + 2] == '"'
+        {
+            // Skip to matching `]`
+            let mut depth: i32 = 0;
+            while i < len {
+                match chars[i] {
+                    '[' | '{' => depth += 1,
+                    ']' | '}' => {
+                        depth -= 1;
+                        if depth <= 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            continue;
+        }
+        result.push(chars[i]);
+        i += 1;
+    }
+
+    // Trim empty lines but preserve content whitespace
+    result.lines()
+        .filter(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }

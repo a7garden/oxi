@@ -199,6 +199,31 @@ async fn run_single_prompt(
                                     }
                                 }
                             }
+                            AgentEvent::MessageEnd { message } => {
+                                // Finalize last_text from the completed message snapshot
+                                if let oxi_ai::Message::Assistant(asst) = message {
+                                    let text_only: String = asst.content.iter()
+                                        .filter_map(|b| match b {
+                                            oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                            _ => None,
+                                        })
+                                        .collect();
+                                    if !text_only.is_empty() {
+                                        last_text = text_only;
+                                    } else {
+                                        // GLM fallback
+                                        let thinking_text: String = asst.content.iter()
+                                            .filter_map(|b| match b {
+                                                oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
+                                                _ => None,
+                                            })
+                                            .collect();
+                                        if !thinking_text.is_empty() {
+                                            last_text = thinking_text;
+                                        }
+                                    }
+                                }
+                            }
                             AgentEvent::Complete { .. } => {
                                 _stop_reason = Some("complete".to_string());
                             }

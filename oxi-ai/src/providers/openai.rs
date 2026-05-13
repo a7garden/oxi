@@ -132,14 +132,19 @@ impl Provider for OpenAiProvider {
         // api.z.ai), send enable_thinking and tool_stream.
         if is_zai(model) {
             if model.reasoning {
-                body["enable_thinking"] = serde_json::json!(options.thinking_level.is_some());
+                body["enable_thinking"] = serde_json::json!(true);
             }
             if !context.tools.is_empty() {
                 body["tool_stream"] = serde_json::json!(true);
             }
         }
 
-        tracing::info!("Sending request to {} model={} body_len={}", url, model.id, body.to_string().len());
+        tracing::info!("Sending request to {} model={} body_len={} enable_thinking={} tool_stream={}", 
+            url, model.id, body.to_string().len(),
+            body.get("enable_thinking").is_some(),
+            body.get("tool_stream").is_some()
+        );
+        tracing::debug!("Request body: {}", body.to_string());
 
         // Build headers
         let mut headers = reqwest::header::HeaderMap::new();
@@ -202,26 +207,32 @@ impl Provider for OpenAiProvider {
                 std::collections::HashMap::<usize, (String, String, String)>::new(),
                 std::collections::HashMap::<String, usize>::new(), // id → index
                 false,
+                AssistantMessage::new(Api::OpenAiCompletions, &provider_name, &model_id),
             ),
             move |(
                 pending_bytes,
                 pending_tc,
                 tc_id_to_index,
                 thinking_started,
+                accumulated_output,
             ), chunk: Result<Bytes, reqwest::Error>| {
                 let events = match chunk {
                     Ok(bytes) => {
-                        // Prepend any incomplete UTF-8 bytes from previous chunk
+                        // Prepend any incomplete bytes from previous chunk
                         let mut combined = Vec::with_capacity(pending_bytes.len() + bytes.len());
                         combined.extend_from_slice(pending_bytes);
                         combined.extend_from_slice(&bytes);
 
-                        // Extract valid UTF-8 and save trailing incomplete bytes for next chunk
-                        let (text, trailing) = find_valid_utf8_prefix(&combined);
+                        // Split into complete lines (ending with \n) and trailing incomplete data.
+                        // This prevents JSON parse failures from partial SSE lines
+                        // that were split across HTTP chunks.
+                        let (text, trailing) = split_complete_lines(&combined);
                         *pending_bytes = trailing;
 
 
-                        let raw_events = parse_sse_events(&text, &provider_name, &model_id);
+                        tracing::debug!("parse_sse_events input: {} bytes, {} lines", text.len(), text.lines().count());
+                        let raw_events = parse_sse_events(&text, &provider_name, &model_id, accumulated_output);
+                        tracing::debug!("parse_sse_events output: {} events", raw_events.len());
 
                         // Post-process: accumulate tool call deltas, inject ThinkingStart once
                         let mut processed = Vec::new();
@@ -271,6 +282,7 @@ impl Provider for OpenAiProvider {
                                         String::new(),
                                         String::new(),
                                     ));
+                                    tracing::debug!("[TC-DELTA] idx={}, delta_len={}, accumulated_len={}", idx, delta.len(), entry.2.len() + delta.len());
                                     entry.2.push_str(delta);
                                     processed.push(event);
                                 }
@@ -285,7 +297,9 @@ impl Provider for OpenAiProvider {
                                         indices.sort();
                                         for idx in indices {
                                             let (id, name, arguments) = &pending_tc[&idx];
+                                            tracing::info!("[TC-END] idx={}, id={}, name={}, args_len={}", idx, id.len(), name.len(), arguments.len());
                                             let args_value = parse_streaming_json(arguments);
+                                            tracing::info!("[TC-END] parsed args: {:?}", args_value);
                                             processed.push(ProviderEvent::ToolCallEnd {
                                                 content_index: idx,
                                                 tool_call: crate::ToolCall {
@@ -301,6 +315,11 @@ impl Provider for OpenAiProvider {
                                             });
                                         }
                                     }
+                                    // Clear pending_tc for the next stream/turn.
+                                    // Without this, tool call arguments from the previous
+                                    // turn leak into the next turn's accumulation.
+                                    pending_tc.clear();
+                                    tc_id_to_index.clear();
                                     processed.push(event);
                                 }
                                 _ => {
@@ -358,19 +377,47 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
                 }));
             }
             crate::Message::Assistant(a) => {
-                let content = blocks_to_content(&a.content)?.to_string();
-                messages.push(serde_json::json!({
+                // OpenAI format: separate content (text) and tool_calls
+                let mut text_parts = Vec::new();
+                let mut tool_calls = Vec::new();
+                for block in &a.content {
+                    match block {
+                        ContentBlock::Text(t) => {
+                            text_parts.push(t.text.clone());
+                        }
+                        ContentBlock::Thinking(_) => {
+                            // Skip thinking blocks in message history
+                        }
+                        ContentBlock::ToolCall(tc) => {
+                            tool_calls.push(serde_json::json!({
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.name,
+                                    "arguments": tc.arguments.to_string(),
+                                },
+                            }));
+                        }
+                        ContentBlock::Image(_) | ContentBlock::Unknown(_) => {}
+                    }
+                }
+                let mut msg = serde_json::json!({
                     "role": "assistant",
-                    "content": content,
-                }));
+                    "content": text_parts.join(""),
+                });
+                if !tool_calls.is_empty() {
+                    msg["tool_calls"] = serde_json::json!(tool_calls);
+                }
+                messages.push(msg);
             }
             crate::Message::ToolResult(t) => {
-                let content = blocks_to_content(&t.content)?.to_string();
+                let result_text: String = t.content.iter()
+                    .filter_map(|b| b.as_text())
+                    .collect::<Vec<_>>().join("");
                 messages.push(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": t.tool_call_id,
-                    "tool_name": t.tool_name,
-                    "content": content,
+                    "content": result_text,
                 }));
             }
         }
@@ -456,6 +503,32 @@ fn find_valid_utf8_prefix(bytes: &[u8]) -> (String, Vec<u8>) {
     }
 }
 
+/// Split bytes into complete lines (ending with \n) and trailing incomplete data.
+/// This ensures `parse_sse_events` only receives complete SSE `data:` lines,
+/// preventing JSON parse failures from lines split across HTTP chunks.
+fn split_complete_lines(bytes: &[u8]) -> (String, Vec<u8>) {
+    // Find the last newline — everything up to and including it is complete.
+    match bytes.iter().rposition(|&b| b == b'\n') {
+        Some(last_nl) => {
+            let split_at = last_nl + 1;
+            let complete = match std::str::from_utf8(&bytes[..split_at]) {
+                Ok(s) => s.to_string(),
+                Err(_) => {
+                    let (s, _) = find_valid_utf8_prefix(&bytes[..split_at]);
+                    s
+                }
+            };
+            let trailing = bytes[split_at..].to_vec();
+            (complete, trailing)
+        }
+        None => {
+            // No newline at all — the entire buffer is incomplete.
+            // Check if it's valid UTF-8; if not, save as pending.
+            (String::new(), bytes.to_vec())
+        }
+    }
+}
+
 /// Parse SSE event stream from a byte buffer.
 ///
 /// Optimizations over a naïve implementation:
@@ -466,18 +539,15 @@ fn find_valid_utf8_prefix(bytes: &[u8]) -> (String, Vec<u8>) {
 /// - **Pre-allocated events** – reserves capacity based on data-line count.
 /// - **Accumulated usage** – tracks usage separately, only cloning into
 ///   the Done message at stream end, not on every chunk.
-fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
+fn parse_sse_events(text: &str, provider: &str, model_id: &str, output: &mut AssistantMessage) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    // pi-mono pattern: one mutable output message that accumulates all content.
-    // Every event carries a snapshot of this message as `partial`.
-    let mut output = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
 
     // Pre-estimate capacity: one event per data line is a reasonable upper bound.
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
     events.reserve(estimated_events);
 
     // Accumulate tool calls across deltas (keyed by index)
-    let mut pending_tool_calls: std::collections::HashMap<usize, (String, String, String)> =
+    let _pending_tool_calls: std::collections::HashMap<usize, (String, String, String)> =
         std::collections::HashMap::new(); // index → (id, name, arguments)
 
     let mut accumulated_usage = Usage::default();
@@ -586,8 +656,10 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     }
                     None => StopReason::Stop,
                 };
+                tracing::info!("finish_reason={:?} → {:?}", choice.finish_reason, reason);
 
                 let mut done_msg = output.clone();
+                done_msg.stop_reason = reason.clone();
                 done_msg.usage = accumulated_usage.clone();
                 events.push(ProviderEvent::Done {
                     reason,
@@ -685,12 +757,17 @@ mod tests {
     const PROVIDER: &str = "openai";
     const MODEL: &str = "gpt-4o";
 
+    fn parse_sse(sse: &str) -> Vec<ProviderEvent> {
+        let mut output = AssistantMessage::new(Api::OpenAiCompletions, PROVIDER, MODEL);
+        parse_sse_events(sse, PROVIDER, MODEL, &mut output)
+    }
+
     // ── SSE event parsing ──────────────────────────────────────────────
 
     #[test]
     fn parse_single_text_event() {
         let sse = "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}\n\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         assert_eq!(events.len(), 1);
         match &events[0] {
             ProviderEvent::TextDelta { delta, content_index, .. } => {
@@ -709,7 +786,7 @@ mod tests {
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"lo!\"}}]}\n",
             "\n"
         );
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         assert_eq!(events.len(), 2);
         let texts: Vec<&str> = events.iter().filter_map(|e| match e {
             ProviderEvent::TextDelta { delta, .. } => Some(delta.as_str()),
@@ -727,7 +804,7 @@ mod tests {
             "\n",
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"NEVER\"}}]}\n"
         );
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         // Should stop at [DONE]; the final data line is never parsed
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -741,7 +818,7 @@ mod tests {
     #[test]
     fn parse_finish_reason_stop() {
         let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}]}\n\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         assert_eq!(events.len(), 1);
         match &events[0] {
             ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::Stop)),
@@ -752,7 +829,7 @@ mod tests {
     #[test]
     fn parse_finish_reason_length() {
         let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"length\"}]}\n\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         match &events[0] {
             ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::Length)),
             other => panic!("expected Done with Length, got {other:?}"),
@@ -762,7 +839,7 @@ mod tests {
     #[test]
     fn parse_finish_reason_tool_calls() {
         let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"tool_calls\"}]}\n\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         match &events[0] {
             ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::ToolUse)),
             other => panic!("expected Done with ToolUse, got {other:?}"),
@@ -779,7 +856,7 @@ mod tests {
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"city\\\":\\\"SF\\\"}\"}}]}}]}\n",
             "\n"
         );
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         // First chunk: ToolCallStart (id+name present) + ToolCallDelta (function present)
         // Second chunk: ToolCallDelta only
         assert_eq!(events.len(), 3);
@@ -799,7 +876,7 @@ mod tests {
     fn parse_tool_call_with_no_arguments_field() {
         // function field present but arguments is null → emits ToolCallStart + ToolCallDelta
         let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"run\"}}]}}]}\n\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         assert_eq!(events.len(), 2);
         match &events[0] {
             ProviderEvent::ToolCallStart { tool_name, .. } => {
@@ -824,7 +901,7 @@ mod tests {
             "\n",
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}]}\n"
         );
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         // TextDelta + Done
         assert_eq!(events.len(), 2);
         match &events[1] {
@@ -846,7 +923,7 @@ mod tests {
             "\n",
             "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":null,\"finish_reason\":\"stop\"}]}\n"
         );
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         match &events[0] {
             ProviderEvent::Done { message, .. } => {
                 assert_eq!(message.usage.input, 5);
@@ -861,20 +938,20 @@ mod tests {
 
     #[test]
     fn parse_empty_input() {
-        let events = parse_sse_events("", PROVIDER, MODEL);
+        let events = parse_sse("");
         assert!(events.is_empty());
     }
 
     #[test]
     fn parse_only_empty_lines() {
-        let events = parse_sse_events("\n\n\n", PROVIDER, MODEL);
+        let events = parse_sse("\n\n\n");
         assert!(events.is_empty());
     }
 
     #[test]
     fn parse_malformed_json_after_data() {
         let sse = "data: {not json at all}\ndata: also bad\ndata: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         // Malformed lines are skipped, only the valid one emits
         assert_eq!(events.len(), 1);
         match &events[0] {
@@ -886,21 +963,21 @@ mod tests {
     #[test]
     fn parse_empty_data_line() {
         let sse = "data: \ndata: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"X\"}}]}\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         assert_eq!(events.len(), 1);
     }
 
     #[test]
     fn parse_non_data_lines_ignored() {
         let sse = "event: ping\nid: 42\nretry: 5000\ndata: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Y\"}}]}\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         assert_eq!(events.len(), 1);
     }
 
     #[test]
     fn parse_carriage_return_line_endings() {
         let sse = "data: {\"id\":\"c\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"CR\"}}]}\r\n\r\n";
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         assert_eq!(events.len(), 1);
         match &events[0] {
             ProviderEvent::TextDelta { delta, .. } => assert_eq!(delta, "CR"),
@@ -923,7 +1000,7 @@ mod tests {
             "\n",
             "data: [DONE]\n"
         );
-        let events = parse_sse_events(sse, PROVIDER, MODEL);
+        let events = parse_sse(sse);
         assert_eq!(events.len(), 5); // 2 TextDelta + ToolCallStart + ToolCallDelta + Done
 
         let mut text_count = 0;

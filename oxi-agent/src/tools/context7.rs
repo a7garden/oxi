@@ -92,7 +92,7 @@ fn api_key() -> &'static Option<String> {
 /// Where the user should put their key (for error messages).
 fn key_location_hint() -> String {
     match dirs::config_dir() {
-        Some(dir) => format!("~/.config/oxi/keys/context7 or CONTEXT7_API_KEY env var"),
+        Some(_) => format!("~/.config/oxi/keys/context7 or CONTEXT7_API_KEY env var"),
         None => "CONTEXT7_API_KEY env var".to_string(),
     }
 }
@@ -122,6 +122,7 @@ struct LibraryResult {
 pub struct Context7ResolveLibraryIdTool;
 
 impl Context7ResolveLibraryIdTool {
+    /// Create a new instance.
     pub fn new() -> Self {
         Self
     }
@@ -236,6 +237,7 @@ impl AgentTool for Context7ResolveLibraryIdTool {
 pub struct Context7QueryDocsTool;
 
 impl Context7QueryDocsTool {
+    /// Create a new instance.
     pub fn new() -> Self {
         Self
     }

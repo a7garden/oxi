@@ -68,6 +68,7 @@ async fn gh_exec(args: &[&str]) -> Result<String, ToolError> {
 }
 
 /// Run a `gh` command with `--json` and parse the result.
+#[allow(dead_code)]
 async fn gh_json(args: &[&str]) -> Result<Value, ToolError> {
     let mut full_args = args.to_vec();
     // Ensure --json flag is present
@@ -230,7 +231,7 @@ async fn gh_issue(params: &Value) -> Result<AgentToolResult, ToolError> {
             let limit_str = limit.to_string();
             let mut args = vec!["issue", "list", "--state", state, "--limit", &limit_str,
                 "--json", "number,title,url,state,labels,createdAt,updatedAt,author"];
-            let mut label_arg = String::new();
+            let label_arg;
             if let Some(l) = label {
                 label_arg = format!("--label={}", l);
                 args.push(&label_arg);
@@ -256,7 +257,7 @@ async fn gh_issue(params: &Value) -> Result<AgentToolResult, ToolError> {
                 .ok_or_else(|| "Missing parameter: title".to_string())?;
             let body = params["body"].as_str().unwrap_or("");
             let mut args = vec!["issue", "create", "--title", title];
-            let mut body_arg = String::new();
+            let body_arg;
             if !body.is_empty() {
                 body_arg = format!("--body={}", body);
                 args.push(&body_arg);
@@ -344,8 +345,8 @@ async fn gh_pr(params: &Value) -> Result<AgentToolResult, ToolError> {
             let base = params["base"].as_str().unwrap_or("main");
             let head = params["head"].as_str().unwrap_or("");
             let mut args = vec!["pr", "create", "--title", title, "--base", base];
-            let mut body_arg = String::new();
-            let mut head_arg = String::new();
+            let body_arg;
+            let head_arg;
             if !body.is_empty() {
                 body_arg = format!("--body={}", body);
                 args.push(&body_arg);
