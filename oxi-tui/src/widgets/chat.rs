@@ -714,14 +714,13 @@ fn measure_kind(kind: &LayoutKind, width: u16, inner_w: u16) -> u16 {
             h
         }
         LayoutKind::ToolResultBox { content, .. } => {
-            let lines: Vec<Line<'static>> = content.lines().take(4)
-                .map(|l| Line::from(Span::raw(l.to_string()))).collect();
-            2 + measure_wrapped_height(&lines, inner_w) + if content.lines().count() > 4 { 1 } else { 0 }
+            // 1 header + content lines (max 4) + optional ellipsis
+            let n = content.lines().count().min(4);
+            1 + n as u16 + if content.lines().count() > 4 { 1 } else { 0 }
         }
         LayoutKind::ErrorBox { message, retryable, .. } => {
-            let lines: Vec<Line<'static>> = message.lines().take(4)
-                .map(|l| Line::from(Span::raw(l.to_string()))).collect();
-            2 + measure_wrapped_height(&lines, inner_w) + if *retryable { 1 } else { 0 }
+            let n = message.lines().count().min(4);
+            1 + n as u16 + if *retryable { 1 } else { 0 }
         }
         LayoutKind::Thinking { content, collapsed } => {
             if *collapsed { 1 + if content.lines().next().is_some() { 1 } else { 0 } }
@@ -876,17 +875,20 @@ impl Widget for EntryWidget<'_> {
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
+                let max_w = inner.width as usize;
                 let mut lines: Vec<Line<'static>> = vec![
                     Line::from(Span::styled(format!("  {}", label), label_style)),
                 ];
                 for l in content.lines().take(4) {
-                    lines.push(Line::from(Span::styled(format!("  {}", l), content_style)));
+                    let display = truncate_str(l, max_w.saturating_sub(2));
+                    lines.push(Line::from(Span::styled(format!("  {}", display), content_style)));
                 }
                 if content.lines().count() > 4 {
-                    lines.push(Line::from(Span::styled("  ...", self.styles.muted)));
+                    lines.push(Line::from(Span::styled("  \u{2026}", self.styles.muted)));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
-                Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
+                // No wrap — pre-truncated to exact width
+                Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::ErrorBox { title, message, retryable } => {
                 let block = Block::bordered()
@@ -898,15 +900,18 @@ impl Widget for EntryWidget<'_> {
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
+                let max_w = inner.width as usize;
                 let mut lines: Vec<Line<'static>> = Vec::new();
                 for l in message.lines().take(4) {
-                    lines.push(Line::from(Span::styled(l.to_string(), self.styles.normal)));
+                    let display = truncate_str(l, max_w);
+                    lines.push(Line::from(Span::styled(display, self.styles.normal)));
                 }
                 if *retryable {
                     lines.push(Line::from(Span::styled("retry: this error may be temporary", self.styles.muted)));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
-                Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
+                // No wrap — pre-truncated to exact width
+                Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::Thinking { content, collapsed } => {
                 let filtered = filter_tool_json(content);
