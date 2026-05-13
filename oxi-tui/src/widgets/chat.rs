@@ -606,8 +606,8 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             entries.push(LayoutEntry {
                 y, height: 1,
                 kind: LayoutKind::Label {
-                    text: "You".to_string(),
-                    style: Style::default().add_modifier(Modifier::BOLD),
+                    text: "\u{25C8} You".to_string(),
+                    style: Style::default().fg(ratatui::style::Color::Rgb(122, 162, 247)).add_modifier(Modifier::BOLD),
                 },
             });
             y += 1;
@@ -670,19 +670,25 @@ fn measure_kind(kind: &LayoutKind, width: u16, inner_w: u16) -> u16 {
             measure_wrapped_height(lines, w)
         }
         LayoutKind::ToolBox { arguments, result, .. } => {
-            let arg_count = arguments.lines().count();
-            let max_args = if arg_count <= 3 { 5 } else { 3 };
-            let arg_lines: Vec<Line<'static>> = arguments.lines().take(max_args)
-                .map(|l| Line::from(Span::raw(l.to_string()))).collect();
-            let mut h: u16 = 2; // top + bottom border
-            h += measure_wrapped_height(&arg_lines, inner_w);
-            if arg_count > max_args { h += 1; }
+            let mut h: u16 = 1; // status bar (icon + name)
+            // Pretty-printed key-value lines
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
+                if let Some(obj) = parsed.as_object() {
+                    h += obj.len().min(5) as u16;
+                    if obj.len() > 5 { h += 1; }
+                } else {
+                    h += 1; // single line for non-object
+                }
+            } else {
+                let lines = arguments.lines().count();
+                h += lines.min(3) as u16;
+                if lines > 3 { h += 1; }
+            }
             if let Some((rc, _)) = result {
                 h += 1; // divider
-                let r_lines: Vec<Line<'static>> = rc.lines().take(6)
-                    .map(|l| Line::from(Span::raw(l.to_string()))).collect();
-                h += measure_wrapped_height(&r_lines, inner_w);
-                if rc.lines().count() > 6 { h += 1; }
+                let rn = rc.lines().count();
+                h += rn.min(6) as u16;
+                if rn > 6 { h += 1; }
             }
             h
         }
@@ -746,89 +752,128 @@ impl Widget for EntryWidget<'_> {
                 }
             }
             LayoutKind::ToolBox { name, arguments, result, status } => {
-                let (icon, label_fg, border_style) = match status {
+                let (icon, border_color, bg_color) = match status {
                     ToolCallStatus::Requested => (
-                        "...",
-                        self.styles.muted.fg.unwrap_or(ratatui::style::Color::White),
-                        Style::default().fg(ratatui::style::Color::Yellow),
+                        "\u{29D6}",  // ⤖ (or will fallback to ...)
+                        ratatui::style::Color::Rgb(122, 162, 247),  // primary blue
+                        ratatui::style::Color::Rgb(22, 28, 45),     // dark blue bg
                     ),
                     ToolCallStatus::Executing => (
-                        "*run",
-                        self.styles.warning.fg.unwrap_or(ratatui::style::Color::Yellow),
-                        Style::default().fg(ratatui::style::Color::Yellow),
+                        "\u{27F3}",  // ⟳
+                        ratatui::style::Color::Rgb(224, 175, 104),  // warning amber
+                        ratatui::style::Color::Rgb(40, 34, 20),     // dark amber bg
                     ),
                     ToolCallStatus::Done => {
                         let is_error = result.as_ref().map_or(false, |(_, e)| *e);
                         if is_error {
                             (
-                                "err",
-                                ratatui::style::Color::White,
-                                Style::default().fg(ratatui::style::Color::Red),
+                                "\u{2718}",  // ✘
+                                ratatui::style::Color::Rgb(247, 118, 142), // error red
+                                ratatui::style::Color::Rgb(45, 20, 24),    // dark red bg
                             )
                         } else {
                             (
-                                "ok",
-                                self.styles.success.fg.unwrap_or(ratatui::style::Color::Green),
-                                Style::default().fg(ratatui::style::Color::Green),
+                                "\u{2713}",  // ✓
+                                ratatui::style::Color::Rgb(158, 206, 106), // success green
+                                ratatui::style::Color::Rgb(24, 38, 20),    // dark green bg
                             )
                         }
                     }
                 };
-                let block = Block::bordered()
-                    .border_style(border_style)
-                    .title(Span::styled(
-                        format!(" {} tool: {} ", icon, name),
-                        Style::default().fg(label_fg).add_modifier(Modifier::BOLD),
-                    ));
+
+                // Render as a rounded box with colored left accent border
+                let block = Block::default()
+                    .borders(Borders::LEFT)
+                    .border_style(Style::default().fg(border_color).add_modifier(Modifier::BOLD))
+                    .style(Style::default().bg(bg_color));
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
-                let mut content_lines: Vec<Line<'static>> = Vec::new();
-                let arg_count = arguments.lines().count();
-                let max_args = if arg_count <= 3 { 5 } else { 3 };
-                for arg in arguments.lines().take(max_args) {
-                    content_lines.push(Line::from(Span::styled(arg.to_string(), self.styles.muted)));
+                // Status bar: icon + tool name + timing hint
+                let name_style = Style::default().fg(border_color).add_modifier(Modifier::BOLD);
+                let status_bar = Line::from(vec![
+                    Span::styled(format!("{} ", icon), name_style),
+                    Span::styled(name.clone(), name_style),
+                ]);
+
+                // Parse arguments as pretty key=value
+                let mut content_lines: Vec<Line<'static>> = vec![status_bar];
+                let args_dim = Style::default().fg(ratatui::style::Color::Rgb(120, 130, 160));
+                let args_val = Style::default().fg(ratatui::style::Color::Rgb(180, 190, 210));
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
+                    if let Some(obj) = parsed.as_object() {
+                        for (key, val) in obj.iter().take(5) {
+                            let val_str = match val {
+                                serde_json::Value::String(s) => s.clone(),
+                                other => other.to_string(),
+                            };
+                            content_lines.push(Line::from(vec![
+                                Span::styled(format!("  {}", key), args_dim),
+                                Span::styled(": ", args_dim),
+                                Span::styled(val_str, args_val),
+                            ]));
+                        }
+                        if obj.len() > 5 {
+                            content_lines.push(Line::from(Span::styled("  ...", args_dim)));
+                        }
+                    } else {
+                        // Not an object — show as-is (truncated)
+                        let display = if arguments.len() > 200 { format!("{}...", &arguments[..200]) } else { arguments.clone() };
+                        content_lines.push(Line::from(Span::styled(format!("  {}", display), args_dim)));
+                    }
+                } else {
+                    // Not valid JSON — raw display
+                    for arg in arguments.lines().take(3) {
+                        content_lines.push(Line::from(Span::styled(format!("  {}", arg), args_dim)));
+                    }
+                    if arguments.lines().count() > 3 {
+                        content_lines.push(Line::from(Span::styled("  ...", args_dim)));
+                    }
                 }
-                if arg_count > max_args {
-                    content_lines.push(Line::from(Span::styled(" ...", self.styles.muted)));
-                }
+
+                // Result section
                 if let Some((result_content, _)) = result {
                     content_lines.push(Line::from(Span::styled("", self.styles.muted)));
-                    let rn = result_content.lines().count();
+                    let result_style = Style::default().fg(ratatui::style::Color::Rgb(160, 170, 195));
                     for rl in result_content.lines().take(6) {
-                        content_lines.push(Line::from(Span::styled(rl.to_string(), self.styles.normal)));
+                        content_lines.push(Line::from(Span::styled(format!("  {}", rl), result_style)));
                     }
-                    if rn > 6 {
-                        content_lines.push(Line::from(Span::styled(" ...", self.styles.muted)));
+                    if result_content.lines().count() > 6 {
+                        content_lines.push(Line::from(Span::styled("  ...", self.styles.muted)));
                     }
                 }
                 let text: ratatui::text::Text = content_lines.into_iter().collect();
                 Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
             }
             LayoutKind::ToolResultBox { tool_name, content, is_error } => {
-                let (check, border_style) = if *is_error { ("X", self.styles.error) } else { ("ok", self.styles.muted) };
-                let label = if tool_name.is_empty() { check.to_string() } else { format!("{} {}", check, tool_name) };
-                let label_fg = if *is_error {
-                    ratatui::style::Color::White
+                let (icon, border_color, bg_color) = if *is_error {
+                    ("\u{2718}", ratatui::style::Color::Rgb(247, 118, 142), ratatui::style::Color::Rgb(45, 20, 24))
                 } else {
-                    self.styles.success.fg.unwrap_or(ratatui::style::Color::Green)
+                    ("\u{2713}", ratatui::style::Color::Rgb(80, 180, 100), ratatui::style::Color::Rgb(20, 34, 22))
                 };
-                let content_style = if *is_error { self.styles.error } else { self.styles.normal };
-                let block = Block::bordered()
-                    .border_style(border_style)
-                    .title(Span::styled(
-                        format!(" {} ", label),
-                        Style::default().fg(label_fg).add_modifier(Modifier::BOLD),
-                    ));
+                let label = if tool_name.is_empty() { icon.to_string() } else { format!("{} {}", icon, tool_name) };
+                let label_style = Style::default().fg(border_color);
+                let content_style = if *is_error {
+                    Style::default().fg(ratatui::style::Color::Rgb(247, 150, 165))
+                } else {
+                    Style::default().fg(ratatui::style::Color::Rgb(160, 170, 195))
+                };
+
+                let block = Block::default()
+                    .borders(Borders::LEFT)
+                    .border_style(Style::default().fg(border_color))
+                    .style(Style::default().bg(bg_color));
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
-                let mut lines: Vec<Line<'static>> = Vec::new();
+                let mut lines: Vec<Line<'static>> = vec![
+                    Line::from(Span::styled(format!("  {}", label), label_style)),
+                ];
                 for l in content.lines().take(4) {
-                    lines.push(Line::from(Span::styled(l.to_string(), content_style)));
+                    lines.push(Line::from(Span::styled(format!("  {}", l), content_style)));
                 }
                 if content.lines().count() > 4 {
-                    lines.push(Line::from(Span::styled(" ...", self.styles.muted)));
+                    lines.push(Line::from(Span::styled("  ...", self.styles.muted)));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
@@ -854,17 +899,25 @@ impl Widget for EntryWidget<'_> {
                 Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
             }
             LayoutKind::Thinking { content, collapsed } => {
-                let ind = if *collapsed { ">" } else { "v" };
-                let mut lines: Vec<Line<'static>> = vec![
-                    Line::from(Span::styled(format!("{} Thinking...", ind), self.styles.accent)),
-                ];
-                // Filter JSON tool call arrays from thinking text at render time.
-                // GLM-5.1 puts tool call plans as `[{"function":...}]` in
-                // reasoning_content. We detect `[{\"` and skip to the matching `]`.
                 let filtered = filter_tool_json(content);
-                if !*collapsed {
-                    // Render filtered thinking content with tui-markdown in italic style
-                    let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
+                let mut lines: Vec<Line<'static>> = Vec::new();
+
+                // Header line with subtle styling
+                let header_style = Style::default().fg(ratatui::style::Color::Rgb(147, 130, 220)); // soft purple
+                if *collapsed {
+                    lines.push(Line::from(Span::styled("\u{25B8} thinking".to_string(), header_style)));
+                    if let Some(first) = filtered.lines().next() {
+                        let preview_style = Style::default()
+                            .fg(ratatui::style::Color::Rgb(90, 85, 130))
+                            .add_modifier(Modifier::ITALIC);
+                        lines.push(Line::from(Span::styled(format!("  {}", first), preview_style)));
+                    }
+                } else {
+                    lines.push(Line::from(Span::styled("\u{25BE} thinking".to_string(), header_style)));
+                    // Render thinking content with tui-markdown in italic style
+                    let thinking_style = Style::default()
+                        .fg(ratatui::style::Color::Rgb(130, 135, 170))
+                        .add_modifier(Modifier::ITALIC);
                     let md_rendered = md_lines(&filtered);
                     for md_line in md_rendered {
                         let spans: Vec<Span<'static>> = md_line.spans
@@ -877,9 +930,6 @@ impl Widget for EntryWidget<'_> {
                             .collect();
                         lines.push(Line::from(spans));
                     }
-                } else if let Some(first) = filtered.lines().next() {
-                    let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
-                    lines.push(Line::from(Span::styled(format!("  {}", first), thinking_style)));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 Paragraph::new(text).render(rect, buf);
@@ -893,10 +943,13 @@ impl Widget for EntryWidget<'_> {
                 Paragraph::new(text).render(rect, buf);
             }
             LayoutKind::Spinner { frame } => {
-                let sp = ["|", "/", "-", "\\"];
+                let sp = ["\u{2850}", "\u{2854}", "\u{2860}", "\u{284E}"];
+                // Fallback to simple ASCII if unicode doesn't render
+                let sp_ascii = ["|", "/", "-", "\\"];
                 let ch = sp[frame % sp.len()];
+                let spinner_style = Style::default().fg(ratatui::style::Color::Rgb(187, 154, 247));
                 Paragraph::new(Line::from(Span::styled(
-                    format!("  {} Working...", ch), self.styles.accent,
+                    format!("  {} Working...", ch), spinner_style,
                 ))).render(rect, buf);
             }
         }
