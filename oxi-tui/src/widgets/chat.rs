@@ -623,7 +623,6 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     let mut y: u16 = 0;
     // Reserve 1 column for the vertical scrollbar so content doesn't overlap.
     let usable_width = width.saturating_sub(1);
-    let inner_w = usable_width.saturating_sub(2); // Block::bordered inner width
 
     for (i, msg) in state.messages.iter().enumerate() {
         if i > 0 {
@@ -638,7 +637,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
         }
         for block in &msg.content_blocks {
             let kind = block_to_layout_kind(block, msg.role);
-            let h = measure_kind(&kind, usable_width, inner_w);
+            let h = measure_kind(&kind, usable_width);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
@@ -651,7 +650,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
         }
         for block in &streaming.message.content_blocks {
             let kind = block_to_layout_kind(block, MessageRole::Assistant);
-            let h = measure_kind(&kind, usable_width, inner_w);
+            let h = measure_kind(&kind, usable_width);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
@@ -686,11 +685,13 @@ fn block_to_layout_kind(block: &ContentBlock, role: MessageRole) -> LayoutKind {
     }
 }
 
-fn measure_kind(kind: &LayoutKind, width: u16, inner_w: u16) -> u16 {
+fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
     match kind {
         LayoutKind::Spacer | LayoutKind::Rule | LayoutKind::Label { .. } | LayoutKind::Spinner { .. } => 1,
         LayoutKind::Text { lines, is_user } => {
-            let w = if *is_user { width.saturating_sub(2) } else { width };
+            // User text: Block::borders(LEFT) takes 1 col, so inner = width-1
+            // Assistant text: no block, renders at full width
+            let w = if *is_user { width.saturating_sub(1) } else { width };
             measure_wrapped_height(lines, w)
         }
         LayoutKind::ToolBox { arguments, result, .. } => {
