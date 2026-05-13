@@ -954,9 +954,8 @@ impl Widget for EntryWidget<'_> {
                 Paragraph::new(text).render(rect, buf);
             }
             LayoutKind::Spinner { frame } => {
-                // Braille spinner — cycles through progressively filled dots
-                let sp = ["\u{2801}", "\u{2802}", "\u{2804}", "\u{2840}",
-                          "\u{2880}", "\u{2810}", "\u{2808}", "\u{2804}"];
+                // Moon phase spinner ◐ ◓ ◑ ◒
+                let sp = ["\u{25D0}", "\u{25D3}", "\u{25D1}", "\u{25D2}"];
                 let ch = sp[frame % sp.len()];
                 Paragraph::new(Line::from(Span::styled(
                     format!("  {} Working...", ch), self.styles.accent,
