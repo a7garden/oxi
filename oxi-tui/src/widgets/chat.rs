@@ -24,6 +24,7 @@ use ratatui::{
 };
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 use tui_markdown;
+use unicode_width::UnicodeWidthStr;
 use crate::Theme;
 use crate::theme::ThemeStyles;
 
@@ -52,6 +53,28 @@ fn clamp_str(s: String, max_chars: usize, max_lines: usize) -> String {
         result.push_str("\n ...");
     }
     result
+}
+
+/// Truncate a string to fit within `max_width` terminal columns.
+/// Appends \u{2026} (…) if truncated.
+fn truncate_str(s: &str, max_width: usize) -> String {
+    if max_width == 0 { return String::new(); }
+    let mut width = 0usize;
+    let mut end = 0usize;
+    for (i, ch) in s.char_indices() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw > max_width {
+            // Not enough room for ellipsis either
+            return s[..end].to_string();
+        }
+        if width + cw > max_width.saturating_sub(1) {
+            // Would overflow if we add ellipsis
+            return format!("{}\u{2026}", &s[..end]);
+        }
+        width += cw;
+        end = i + ch.len_utf8();
+    }
+    s.to_string()
 }
 
 // ── Tool Call Tracker ─────────────────────────────────────────────────
@@ -497,35 +520,36 @@ fn extract_last_code_block(text: &str) -> Option<String> {
 }
 
 /// Fix bare code fences (``` without a language) to ```text.
-/// Also skips trailing whitespace to prevent tui-markdown treating
-/// "``` text" as a code language "text".
+/// Tracks open/close state so closing fences are left as ```.
 fn fix_bare_code_fences(content: &str) -> String {
     let mut result = String::with_capacity(content.len());
-    let bytes = content.as_bytes();
-    let len = bytes.len();
-    let mut i = 0;
-    while i < len {
-        if bytes[i] == b'`' && i + 2 < len && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
-            let after = &bytes[i + 3..];
-            let is_bare = after.first().map_or(true, |&c| c == b'\n' || c == b'\r' || c == b'\t' || c == b' ');
-            if is_bare {
-                result.push_str("```text");
-                i += 3;
-                while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') { i += 1; }
-                continue;
+    let mut in_code = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            if in_code {
+                // Closing fence — emit as-is
+                result.push_str("```");
+                in_code = false;
+            } else {
+                // Opening fence
+                let lang = &trimmed[3..];
+                let lang = lang.trim();
+                if lang.is_empty() {
+                    result.push_str("```text");
+                } else {
+                    result.push_str(trimmed);
+                }
+                in_code = true;
             }
-            let lang_end = after.iter().position(|&c| c == b'\n' || c == b'\r').unwrap_or(after.len());
-            let lang_str = String::from_utf8_lossy(&after[..lang_end]).trim().to_lowercase();
-            if (lang_str == "text" || lang_str == "plaintext" || lang_str == "plain" || lang_str == "none") && !lang_str.is_empty() {
-                result.push_str("```text");
-                i += 3 + lang_end;
-                while i < len && (bytes[i] == b' ' || bytes[i] == b'\t') { i += 1; }
-                continue;
-            }
+        } else {
+            result.push_str(line);
         }
-        let ch = content[i..].chars().next().unwrap();
-        result.push(ch);
-        i += ch.len_utf8();
+        result.push('\n');
+    }
+    // Remove trailing newline if original didn't have one
+    if !content.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
     }
     result
 }
@@ -535,9 +559,15 @@ fn md_lines(content: &str) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
     let text: ratatui::text::Text<'_> = tui_markdown::from_str(&preprocessed);
     text.lines.into_iter().map(|l| {
+        // tui-markdown uses Line-level styles (e.g. for code blocks).
+        // We must merge the line style into each span so nothing is lost.
+        let line_style = l.style;
         let spans: Vec<Span<'static>> = l.spans
             .into_iter()
-            .map(|s| Span::styled(s.content.into_owned(), s.style))
+            .map(|s| {
+                let merged = line_style.patch(s.style);
+                Span::styled(s.content.into_owned(), merged)
+            })
             .collect();
         Line::from(spans)
     }).collect()
@@ -749,13 +779,13 @@ impl Widget for EntryWidget<'_> {
                 let (icon, border_color, bg_color) = match status {
                     ToolCallStatus::Requested => (
                         "\u{29D6}",
-                        ratatui::style::Color::Rgb(100, 140, 200),  // muted blue
-                        ratatui::style::Color::Rgb(18, 24, 38),     // very dark blue bg
+                        ratatui::style::Color::Rgb(100, 140, 200),
+                        ratatui::style::Color::Rgb(18, 24, 38),
                     ),
                     ToolCallStatus::Executing => (
                         "\u{27F3}",
-                        ratatui::style::Color::Rgb(200, 165, 80),   // warm amber
-                        ratatui::style::Color::Rgb(32, 28, 16),     // very dark amber bg
+                        ratatui::style::Color::Rgb(200, 165, 80),
+                        ratatui::style::Color::Rgb(32, 28, 16),
                     ),
                     ToolCallStatus::Done => {
                         let is_error = result.as_ref().map_or(false, |(_, e)| *e);
@@ -775,48 +805,46 @@ impl Widget for EntryWidget<'_> {
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
+                // Max content width = inner.width (no wrapping, pre-truncate instead)
+                let max_w = inner.width as usize;
                 let mut content_lines: Vec<Line<'static>> = Vec::new();
 
-                // Header: icon + tool name — single compact line
+                // Header: icon + tool name
                 let name_style = Style::default().fg(border_color).add_modifier(Modifier::BOLD);
                 content_lines.push(Line::from(vec![
                     Span::styled(format!("{} ", icon), name_style),
                     Span::styled(name.clone(), name_style),
                 ]));
 
-                // Arguments: show compact "key: value" pairs, max 3, truncate long values
                 let dim = Style::default().fg(ratatui::style::Color::Rgb(100, 108, 135));
-                let val = Style::default().fg(ratatui::style::Color::Rgb(155, 163, 185));
+                let val_style = Style::default().fg(ratatui::style::Color::Rgb(155, 163, 185));
+
+                // Arguments: compact key: value, truncate to fit inner width
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
                     if let Some(obj) = parsed.as_object() {
                         for (key, v) in obj.iter().take(3) {
                             let val_str = match v {
-                                serde_json::Value::String(s) => {
-                                    // Truncate long strings
-                                    if s.len() > 60 {
-                                        format!("{}\u{2026}", &s[..s.char_indices().take(60).last().map(|(i,_)| i).unwrap_or(0)])
-                                    } else {
-                                        s.clone()
-                                    }
-                                }
-                                other => {
-                                    let s = other.to_string();
-                                    if s.len() > 60 { format!("{}\u{2026}", &s[..60]) } else { s }
-                                }
+                                serde_json::Value::String(s) => s.clone(),
+                                other => other.to_string(),
                             };
+                            // "  key: value" — truncate value to fit
+                            let prefix_len = 2 + UnicodeWidthStr::width(key.as_str()) + 2;
+                            let avail = max_w.saturating_sub(prefix_len);
+                            let display = truncate_str(&val_str, avail);
                             content_lines.push(Line::from(vec![
                                 Span::styled(format!("  {}", key), dim),
                                 Span::styled(": ", dim),
-                                Span::styled(val_str, val),
+                                Span::styled(display, val_style),
                             ]));
                         }
                     }
                 }
 
-                // Result: max 3 lines, dimmed
+                // Result: max 3 lines, each truncated to inner width
                 if let Some((result_content, _)) = result {
                     for rl in result_content.lines().take(3) {
-                        content_lines.push(Line::from(Span::styled(format!("  {}", rl), val)));
+                        let display = truncate_str(rl, max_w.saturating_sub(2));
+                        content_lines.push(Line::from(Span::styled(format!("  {}", display), val_style)));
                     }
                     if result_content.lines().count() > 3 {
                         content_lines.push(Line::from(Span::styled("  \u{2026}", dim)));
@@ -824,7 +852,8 @@ impl Widget for EntryWidget<'_> {
                 }
 
                 let text: ratatui::text::Text = content_lines.into_iter().collect();
-                Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
+                // No wrap — lines are pre-truncated to exact width
+                Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::ToolResultBox { tool_name, content, is_error } => {
                 let (icon, border_color, bg_color) = if *is_error {
