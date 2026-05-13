@@ -297,9 +297,8 @@ impl Provider for OpenAiProvider {
                                         indices.sort();
                                         for idx in indices {
                                             let (id, name, arguments) = &pending_tc[&idx];
-                                            tracing::info!("[TC-END] idx={}, id={}, name={}, args_len={}", idx, id.len(), name.len(), arguments.len());
+                                            tracing::debug!("[TC-END] idx={}, id={}, name={}, args_len={}", idx, id.len(), name.len(), arguments.len());
                                             let args_value = parse_streaming_json(arguments);
-                                            tracing::info!("[TC-END] parsed args: {:?}", args_value);
                                             processed.push(ProviderEvent::ToolCallEnd {
                                                 content_index: idx,
                                                 tool_call: crate::ToolCall {
