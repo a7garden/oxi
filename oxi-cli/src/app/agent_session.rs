@@ -850,10 +850,12 @@ impl AgentSession {
     /// Cycle to the next thinking level.
     pub fn cycle_thinking_level(&self) -> Option<ThinkingLevel> {
         let levels = [
-            ThinkingLevel::None,
+            ThinkingLevel::Off,
             ThinkingLevel::Minimal,
-            ThinkingLevel::Standard,
-            ThinkingLevel::Thorough,
+            ThinkingLevel::Low,
+            ThinkingLevel::Medium,
+            ThinkingLevel::High,
+            ThinkingLevel::XHigh,
         ];
         let current = self.thinking_level();
         let current_index = levels.iter().position(|l| *l == current).unwrap_or(0);
@@ -1633,7 +1635,7 @@ mod tests {
     #[test]
     fn test_session_creation_default_thinking_level() {
         let session = make_session();
-        assert_eq!(session.thinking_level(), ThinkingLevel::Standard);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Medium);
     }
 
     #[test]
@@ -1688,7 +1690,7 @@ mod tests {
             ScopedModel {
                 provider: "anthropic".to_string(),
                 model_id: "claude-sonnet-4-20250514".to_string(),
-                thinking_level: Some(ThinkingLevel::Standard),
+                thinking_level: Some(ThinkingLevel::Medium),
             },
             ScopedModel {
                 provider: "openai".to_string(),
@@ -1722,7 +1724,7 @@ mod tests {
             ScopedModel {
                 provider: "anthropic".to_string(),
                 model_id: "claude-sonnet-4-20250514".to_string(),
-                thinking_level: Some(ThinkingLevel::Thorough),
+                thinking_level: Some(ThinkingLevel::High),
             },
             ScopedModel {
                 provider: "openai".to_string(),
@@ -1747,11 +1749,11 @@ mod tests {
         let model = ScopedModel {
             provider: "anthropic".to_string(),
             model_id: "claude-sonnet-4-20250514".to_string(),
-            thinking_level: Some(ThinkingLevel::Standard),
+            thinking_level: Some(ThinkingLevel::Medium),
         };
         assert_eq!(model.provider, "anthropic");
         assert_eq!(model.model_id, "claude-sonnet-4-20250514");
-        assert_eq!(model.thinking_level, Some(ThinkingLevel::Standard));
+        assert_eq!(model.thinking_level, Some(ThinkingLevel::Medium));
     }
 
     #[test]
@@ -1759,7 +1761,7 @@ mod tests {
         let result = ModelCycleResult {
             provider: "openai".to_string(),
             model_id: "gpt-4o".to_string(),
-            thinking_level: ThinkingLevel::Standard,
+            thinking_level: ThinkingLevel::Medium,
             is_scoped: false,
         };
         assert!(!result.is_scoped);
@@ -1774,13 +1776,13 @@ mod tests {
     #[test]
     fn test_set_thinking_level() {
         let session = make_session();
-        assert_eq!(session.thinking_level(), ThinkingLevel::Standard);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Medium);
 
-        session.set_thinking_level(ThinkingLevel::Thorough);
-        assert_eq!(session.thinking_level(), ThinkingLevel::Thorough);
+        session.set_thinking_level(ThinkingLevel::High);
+        assert_eq!(session.thinking_level(), ThinkingLevel::High);
 
-        session.set_thinking_level(ThinkingLevel::None);
-        assert_eq!(session.thinking_level(), ThinkingLevel::None);
+        session.set_thinking_level(ThinkingLevel::Off);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Off);
 
         session.set_thinking_level(ThinkingLevel::Minimal);
         assert_eq!(session.thinking_level(), ThinkingLevel::Minimal);
@@ -1790,41 +1792,41 @@ mod tests {
     fn test_set_thinking_level_noop_when_same() {
         let session = make_session();
         // Should not emit event when setting to same level
-        session.set_thinking_level(ThinkingLevel::Standard);
-        assert_eq!(session.thinking_level(), ThinkingLevel::Standard);
+        session.set_thinking_level(ThinkingLevel::Medium);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Medium);
     }
 
     #[test]
     fn test_cycle_thinking_level() {
         let session = make_session();
-        assert_eq!(session.thinking_level(), ThinkingLevel::Standard);
+        assert_eq!(session.thinking_level(), ThinkingLevel::Medium);
 
         let next = session.cycle_thinking_level();
-        assert_eq!(next, Some(ThinkingLevel::Thorough));
-        assert_eq!(session.thinking_level(), ThinkingLevel::Thorough);
+        assert_eq!(next, Some(ThinkingLevel::High));
+        assert_eq!(session.thinking_level(), ThinkingLevel::High);
 
         // Continue cycling
         let next = session.cycle_thinking_level();
-        assert_eq!(next, Some(ThinkingLevel::None));
-        assert_eq!(session.thinking_level(), ThinkingLevel::None);
+        assert_eq!(next, Some(ThinkingLevel::Off));
+        assert_eq!(session.thinking_level(), ThinkingLevel::Off);
 
         let next = session.cycle_thinking_level();
         assert_eq!(next, Some(ThinkingLevel::Minimal));
 
         let next = session.cycle_thinking_level();
-        assert_eq!(next, Some(ThinkingLevel::Standard));
+        assert_eq!(next, Some(ThinkingLevel::Medium));
 
         let next = session.cycle_thinking_level();
-        assert_eq!(next, Some(ThinkingLevel::Thorough));
+        assert_eq!(next, Some(ThinkingLevel::High));
     }
 
     #[test]
     fn test_thinking_level_full_cycle() {
         let levels = [
-            ThinkingLevel::None,
+            ThinkingLevel::Off,
             ThinkingLevel::Minimal,
-            ThinkingLevel::Standard,
-            ThinkingLevel::Thorough,
+            ThinkingLevel::Medium,
+            ThinkingLevel::High,
         ];
         // Ensure we can cycle through all levels
         let mut current = 0;
@@ -2063,7 +2065,7 @@ mod tests {
         }));
 
         // Trigger an event via set_thinking_level (Standard → Thorough)
-        session.set_thinking_level(ThinkingLevel::Thorough);
+        session.set_thinking_level(ThinkingLevel::High);
 
         let events = received.read();
         assert!(!events.is_empty(), "Listener should receive at least one event");
@@ -2083,12 +2085,12 @@ mod tests {
         }));
 
         // Trigger event: Standard → None
-        session.set_thinking_level(ThinkingLevel::None);
+        session.set_thinking_level(ThinkingLevel::Off);
 
         let event = rx.try_recv().expect("Should receive event via subscribed channel");
         match event {
             SessionEvent::ThinkingLevelChanged { level } => {
-                assert_eq!(level, ThinkingLevel::None);
+                assert_eq!(level, ThinkingLevel::Off);
             }
             other => panic!("Expected ThinkingLevelChanged, got {:?}", other),
         }
@@ -2132,8 +2134,8 @@ mod tests {
         assert_eq!(session.session_id(), handle.session_id());
 
         // Mutations through the handle should be visible on the original
-        handle.set_thinking_level(ThinkingLevel::Thorough);
-        assert_eq!(session.thinking_level(), ThinkingLevel::Thorough);
+        handle.set_thinking_level(ThinkingLevel::High);
+        assert_eq!(session.thinking_level(), ThinkingLevel::High);
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -2210,7 +2212,7 @@ mod tests {
                 received_clone.write().push(format!("{:?}", event));
             }));
             // Guard is active, event should fire
-            session.set_thinking_level(ThinkingLevel::Thorough);
+            session.set_thinking_level(ThinkingLevel::High);
         }
         // Guard dropped — the slot is replaced with no-op
         let count_after_drop = received.read().len();

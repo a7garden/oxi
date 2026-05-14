@@ -28,15 +28,19 @@ const ENV_PREFIX: &str = "OXI_";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingLevel {
-    /// No thinking (fastest)
-    None,
-    /// Minimal thinking
-    Minimal,
-    /// Standard thinking (default)
+    /// 확장 추론 비활성화 (기본값).
     #[default]
-    Standard,
-    /// Thorough thinking (slowest, best quality)
-    Thorough,
+    Off,
+    /// 최소 수준의 추론.
+    Minimal,
+    /// 낮은 수준의 추론.
+    Low,
+    /// 중간 수준의 추론.
+    Medium,
+    /// 높은 수준의 추론.
+    High,
+    /// 매우 높은 수준의 추론.
+    XHigh,
 }
 
 /// A custom OpenAI-compatible provider configuration.
@@ -184,7 +188,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             version: SETTINGS_VERSION,
-            thinking_level: ThinkingLevel::Standard,
+            thinking_level: ThinkingLevel::Medium,
             theme: default_theme(),
             default_model: None,
             default_provider: None,
@@ -797,10 +801,12 @@ fn merge_json_values(base: serde_json::Value, override_: serde_json::Value) -> s
 /// Parse a thinking level from a string.
 pub fn parse_thinking_level(s: &str) -> Option<ThinkingLevel> {
     match s.to_lowercase().as_str() {
-        "none" => Some(ThinkingLevel::None),
+        "off" => Some(ThinkingLevel::Off),
         "minimal" => Some(ThinkingLevel::Minimal),
-        "standard" => Some(ThinkingLevel::Standard),
-        "thorough" => Some(ThinkingLevel::Thorough),
+        "low" => Some(ThinkingLevel::Low),
+        "medium" => Some(ThinkingLevel::Medium),
+        "high" => Some(ThinkingLevel::High),
+        "xhigh" => Some(ThinkingLevel::XHigh),
         _ => None,
     }
 }
@@ -860,7 +866,7 @@ mod tests {
     fn test_default_settings() {
         let settings = Settings::default();
         assert_eq!(settings.version, SETTINGS_VERSION);
-        assert_eq!(settings.thinking_level, ThinkingLevel::Standard);
+        assert_eq!(settings.thinking_level, ThinkingLevel::Medium);
         assert_eq!(settings.theme, "default");
         assert!(settings.default_model.is_none());
         assert!(settings.default_provider.is_none());
@@ -899,7 +905,7 @@ theme = "dracula"
         assert_eq!(merged.default_model, Some("openai/gpt-4o".to_string()));
         assert_eq!(merged.theme, "dracula");
         // Unchanged fields retain defaults
-        assert_eq!(merged.thinking_level, ThinkingLevel::Standard);
+        assert_eq!(merged.thinking_level, ThinkingLevel::Medium);
         assert!(merged.extensions_enabled);
     }
 
@@ -973,7 +979,7 @@ theme = "dracula"
         let tmp = tempfile::tempdir().unwrap();
         let settings = Settings::load_from(tmp.path()).unwrap();
         // Falls back to defaults (may include global ~/.oxi/settings)
-        assert_eq!(settings.thinking_level, ThinkingLevel::Standard);
+        assert_eq!(settings.thinking_level, ThinkingLevel::Medium);
     }
 
     // ── Environment variables ────────────────────────────────────────
@@ -1028,18 +1034,18 @@ theme = "dracula"
 
     #[test]
     fn test_parse_thinking_level() {
-        assert_eq!(parse_thinking_level("none"), Some(ThinkingLevel::None));
+        assert_eq!(parse_thinking_level("none"), Some(ThinkingLevel::Off));
         assert_eq!(
             parse_thinking_level("MINIMAL"),
             Some(ThinkingLevel::Minimal)
         );
         assert_eq!(
             parse_thinking_level("Standard"),
-            Some(ThinkingLevel::Standard)
+            Some(ThinkingLevel::Medium)
         );
         assert_eq!(
             parse_thinking_level("thorough"),
-            Some(ThinkingLevel::Thorough)
+            Some(ThinkingLevel::High)
         );
         assert_eq!(parse_thinking_level("invalid"), None);
     }
@@ -1291,13 +1297,13 @@ theme = "dracula"
         let mut settings = Settings::default();
         settings.default_model = Some("gemini-pro".to_string());
         settings.default_provider = Some("google".to_string());
-        settings.thinking_level = ThinkingLevel::Thorough;
+        settings.thinking_level = ThinkingLevel::High;
 
         let toml_content = Settings::serialize_for_format(&settings, SettingsFormat::Toml).unwrap();
         let parsed: Settings = toml::from_str(&toml_content).unwrap();
 
         assert_eq!(parsed.default_model, Some("gemini-pro".to_string()));
-        assert_eq!(parsed.thinking_level, ThinkingLevel::Thorough);
+        assert_eq!(parsed.thinking_level, ThinkingLevel::High);
     }
 
     #[test]
@@ -1315,7 +1321,7 @@ theme = "dracula"
         assert_eq!(settings.theme, "nord");
         assert_eq!(settings.tool_timeout_seconds, 90);
         // Unchanged fields retain defaults
-        assert_eq!(settings.thinking_level, ThinkingLevel::Standard);
+        assert_eq!(settings.thinking_level, ThinkingLevel::Medium);
         assert!(settings.extensions_enabled);
     }
 
@@ -1336,7 +1342,7 @@ tool_timeout_seconds = 45
         assert_eq!(settings.default_provider, Some("anthropic".to_string()));
         assert_eq!(settings.theme, "monokai");
         assert_eq!(settings.tool_timeout_seconds, 45);
-        assert_eq!(settings.thinking_level, ThinkingLevel::Standard);
+        assert_eq!(settings.thinking_level, ThinkingLevel::Medium);
     }
 
     #[test]
@@ -1358,7 +1364,7 @@ tool_timeout_seconds = 45
         assert_eq!(merged.theme, "dracula");
         assert!(!merged.auto_compaction);
         // Unchanged fields retain defaults
-        assert_eq!(merged.thinking_level, ThinkingLevel::Standard);
+        assert_eq!(merged.thinking_level, ThinkingLevel::Medium);
         assert!(merged.extensions_enabled);
         assert_eq!(merged.tool_timeout_seconds, 120);
     }

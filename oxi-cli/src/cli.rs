@@ -528,7 +528,7 @@ mod tests {
     fn test_thinking_level_reexport() {
         // Verify the re-export from settings works
         assert_eq!(
-            format!("{:?}", ThinkingLevel::Standard),
+            format!("{:?}", ThinkingLevel::Medium),
             "Standard"
         );
     }

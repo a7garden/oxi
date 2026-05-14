@@ -132,6 +132,17 @@ async fn handle_key(
             open_last_image(state);
             None
         }
+        // Shift+Tab: cycle thinking level
+        KeyCode::BackTab => {
+            if state.slash_completion_active {
+                return None;
+            }
+            if let Some(next_level) = session.cycle_thinking_level() {
+                state.footer_state.data.thinking_level = Some(format!("{:?}", next_level).to_lowercase());
+                state.add_system_message(format!("Thinking: {:?}", next_level));
+            }
+            None
+        }
         KeyCode::PageUp => {
             state.scroll_up(10);
             None

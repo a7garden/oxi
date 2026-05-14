@@ -230,20 +230,28 @@ impl InteractiveSession {
 
 fn build_system_prompt(thinking_level: oxi_store::settings::ThinkingLevel, skill_contents: &[String]) -> String {
     let custom_prompt = match thinking_level {
-        oxi_store::settings::ThinkingLevel::None => {
+        oxi_store::settings::ThinkingLevel::Off => {
             Some(String::from("You are a helpful AI assistant. Provide direct, concise answers."))
         }
         oxi_store::settings::ThinkingLevel::Minimal => {
             Some(String::from("You are a helpful AI assistant. Provide clear and helpful answers."))
         }
-        oxi_store::settings::ThinkingLevel::Standard => Some(String::from(
+        oxi_store::settings::ThinkingLevel::Low => Some(String::from(
+            "You are a helpful AI assistant. Provide brief, actionable responses.",
+        )),
+        oxi_store::settings::ThinkingLevel::Medium => Some(String::from(
             "You are a helpful AI coding assistant. Think through problems \
              step by step when helpful, but keep responses focused and actionable.",
         )),
-        oxi_store::settings::ThinkingLevel::Thorough => Some(String::from(
+        oxi_store::settings::ThinkingLevel::High => Some(String::from(
             "You are an expert AI coding assistant. Take time to thoroughly \
              analyze problems, consider edge cases, and provide comprehensive \
              solutions with explanations. Think deeply before responding.",
+        )),
+        oxi_store::settings::ThinkingLevel::XHigh => Some(String::from(
+            "You are an expert AI coding assistant. Use maximum reasoning depth. \
+             Consider all alternatives, edge cases, and potential implications. \
+             Provide the most thorough, comprehensive analysis possible.",
         )),
     };
 

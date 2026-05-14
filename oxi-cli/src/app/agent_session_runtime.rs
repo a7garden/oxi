@@ -725,21 +725,30 @@ fn parse_model_id(model_id: &str) -> (String, String) {
 /// Delegates to [`crate::prompt::system_prompt::build_system_prompt`].
 fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
     let custom_prompt = match thinking_level {
-        ThinkingLevel::None => {
+        ThinkingLevel::Off => {
             Some("You are a helpful AI assistant. Provide direct, concise answers.".to_string())
         }
         ThinkingLevel::Minimal => {
             Some("You are a helpful AI assistant. Provide clear and helpful answers.".to_string())
         }
-        ThinkingLevel::Standard => Some(
+        ThinkingLevel::Low => Some(
+            "You are a helpful AI assistant. Provide brief, actionable responses.".to_string(),
+        ),
+        ThinkingLevel::Medium => Some(
             "You are a helpful AI coding assistant. Think through problems \
              step by step when helpful, but keep responses focused and actionable."
                 .to_string(),
         ),
-        ThinkingLevel::Thorough => Some(
+        ThinkingLevel::High => Some(
             "You are an expert AI coding assistant. Take time to thoroughly \
              analyze problems, consider edge cases, and provide comprehensive \
              solutions with explanations. Think deeply before responding."
+                .to_string(),
+        ),
+        ThinkingLevel::XHigh => Some(
+            "You are an expert AI coding assistant. Use maximum reasoning depth. \
+             Consider all alternatives, edge cases, and potential implications. \
+             Provide the most thorough, comprehensive analysis possible."
                 .to_string(),
         ),
     };
@@ -853,13 +862,13 @@ mod tests {
 
     #[test]
     fn test_build_system_prompt() {
-        let prompt = build_system_prompt(ThinkingLevel::None);
+        let prompt = build_system_prompt(ThinkingLevel::Off);
         assert!(prompt.contains("concise"));
 
-        let prompt = build_system_prompt(ThinkingLevel::Standard);
+        let prompt = build_system_prompt(ThinkingLevel::Medium);
         assert!(prompt.contains("coding"));
 
-        let prompt = build_system_prompt(ThinkingLevel::Thorough);
+        let prompt = build_system_prompt(ThinkingLevel::High);
         assert!(prompt.contains("comprehensive"));
     }
 
