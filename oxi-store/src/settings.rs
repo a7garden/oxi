@@ -74,7 +74,7 @@ pub struct Settings {
 
     // ── Core LLM settings ───────────────────────────────────────────
     /// Thinking level for agent responses
-    #[serde(default)]
+    #[serde(default = "default_thinking_level")]
     pub thinking_level: ThinkingLevel,
 
     /// Color theme (e.g., "default", "monokai", "dracula")
@@ -170,6 +170,10 @@ pub struct Settings {
 
 fn default_theme() -> String {
     "default".to_string()
+}
+
+fn default_thinking_level() -> ThinkingLevel {
+    ThinkingLevel::Medium
 }
 
 fn default_session_history_size() -> usize {
