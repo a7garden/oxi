@@ -1807,17 +1807,26 @@ mod tests {
 
         // Continue cycling
         let next = session.cycle_thinking_level();
+        assert_eq!(next, Some(ThinkingLevel::XHigh));
+        assert_eq!(session.thinking_level(), ThinkingLevel::XHigh);
+
+        let next = session.cycle_thinking_level();
         assert_eq!(next, Some(ThinkingLevel::Off));
-        assert_eq!(session.thinking_level(), ThinkingLevel::Off);
 
         let next = session.cycle_thinking_level();
         assert_eq!(next, Some(ThinkingLevel::Minimal));
+
+        let next = session.cycle_thinking_level();
+        assert_eq!(next, Some(ThinkingLevel::Low));
 
         let next = session.cycle_thinking_level();
         assert_eq!(next, Some(ThinkingLevel::Medium));
 
         let next = session.cycle_thinking_level();
         assert_eq!(next, Some(ThinkingLevel::High));
+
+        let next = session.cycle_thinking_level();
+        assert_eq!(next, Some(ThinkingLevel::XHigh));
     }
 
     #[test]
