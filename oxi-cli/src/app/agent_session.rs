@@ -1825,8 +1825,10 @@ mod tests {
         let levels = [
             ThinkingLevel::Off,
             ThinkingLevel::Minimal,
+            ThinkingLevel::Low,
             ThinkingLevel::Medium,
             ThinkingLevel::High,
+            ThinkingLevel::XHigh,
         ];
         // Ensure we can cycle through all levels
         let mut current = 0;

@@ -529,7 +529,7 @@ mod tests {
         // Verify the re-export from settings works
         assert_eq!(
             format!("{:?}", ThinkingLevel::Medium),
-            "Standard"
+            "Medium"
         );
     }
 
