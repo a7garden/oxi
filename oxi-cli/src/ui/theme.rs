@@ -727,139 +727,139 @@ impl ThemeFile {
                     .colors
                     .bg_primary
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.bg_primary),
                 bg_secondary: self
                     .colors
                     .bg_secondary
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.bg_secondary),
                 bg_tertiary: self
                     .colors
                     .bg_tertiary
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.bg_tertiary),
                 bg_hover: self
                     .colors
                     .bg_hover
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.bg_hover),
                 bg_active: self
                     .colors
                     .bg_active
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.bg_active),
                 bg_selected: self
                     .colors
                     .bg_selected
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.bg_selected),
                 fg_primary: self
                     .colors
                     .fg_primary
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.fg_primary),
                 fg_secondary: self
                     .colors
                     .fg_secondary
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.fg_secondary),
                 fg_tertiary: self
                     .colors
                     .fg_tertiary
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.fg_tertiary),
                 fg_dim: self
                     .colors
                     .fg_dim
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.fg_dim),
                 accent_blue: self
                     .colors
                     .accent_blue
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.accent_blue),
                 accent_green: self
                     .colors
                     .accent_green
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.accent_green),
                 accent_yellow: self
                     .colors
                     .accent_yellow
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.accent_yellow),
                 accent_red: self
                     .colors
                     .accent_red
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.accent_red),
                 accent_purple: self
                     .colors
                     .accent_purple
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.accent_purple),
                 syntax_keyword: self
                     .colors
                     .syntax_keyword
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.syntax_keyword),
                 syntax_string: self
                     .colors
                     .syntax_string
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.syntax_string),
                 syntax_comment: self
                     .colors
                     .syntax_comment
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.syntax_comment),
                 syntax_function: self
                     .colors
                     .syntax_function
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.syntax_function),
                 border: self
                     .colors
                     .border
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.border),
                 cursor: self
                     .colors
                     .cursor
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.cursor),
                 selection: self
                     .colors
                     .selection
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.selection),
                 scrollbar: self
                     .colors
                     .scrollbar
                     .as_ref()
-                    .and_then(parse_color)
+                    .and_then(|s| parse_color(s))
                     .unwrap_or(defaults.scrollbar),
             },
             font: Some(FontScheme::default_scheme()),
@@ -1372,16 +1372,16 @@ mod tests {
 
     #[test]
     fn test_theme_file_parse_toml() {
-        let toml = r#"
-name = "custom-theme"
-author = "Test Author"
+        let toml = "\
+name = \"custom-theme\"
+author = \"Test Author\"
 is_dark = true
 
 [colors]
-fg_primary = "#ff0000"
-bg_primary = "#000000"
-accent_blue = "#0000ff"
-"#;
+fg_primary = \"#ff0000\"
+bg_primary = \"#000000\"
+accent_blue = \"#0000ff\"
+";
         let file: ThemeFile = toml::from_str(toml).unwrap();
         assert_eq!(file.name, "custom-theme");
         assert_eq!(file.author, Some("Test Author".to_string()));
@@ -1391,14 +1391,14 @@ accent_blue = "#0000ff"
 
     #[test]
     fn test_theme_file_into_theme() {
-        let toml = r#"
-name = "test-theme"
+        let toml = "\
+name = \"test-theme\"
 is_dark = false
 
 [colors]
-fg_primary = "#112233"
-bg_primary = "#445566"
-"#;
+fg_primary = \"#112233\"
+bg_primary = \"#445566\"
+";
         let file: ThemeFile = toml::from_str(toml).unwrap();
         let theme = file.into_theme();
         assert_eq!(theme.name, "test-theme");

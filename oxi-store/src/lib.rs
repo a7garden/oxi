@@ -14,6 +14,8 @@ pub mod auth_storage;
 pub mod auth_guidance;
 
 // Public re-exports
+pub use auth_storage::AuthStorage;
+pub use model_registry::ModelRegistry;
 pub use session::{SessionEntry, SessionManager, SessionTreeNode, AgentMessage, ContentValue, ContentBlock, AssistantContentBlock};
 pub use settings::Settings;
 pub use settings_validation::ValidationReport;

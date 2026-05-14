@@ -81,7 +81,6 @@ impl CompactionContext {
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use oxi_ai::{get_model, get_provider};
-use oxi_store::Settings;
 use parking_lot::RwLock;
 use skills::SkillManager;
 use std::sync::Arc;
