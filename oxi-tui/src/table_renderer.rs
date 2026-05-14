@@ -5,6 +5,8 @@ use pulldown_cmark::{
     Event, Options, Parser, Tag, TagEnd,
 };
 use ratatui::text::{Line, Span};
+use ratatui::style::{Modifier, Style};
+use tui_markdown;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Wrap text to fit within max_width, breaking at word boundaries.
@@ -83,6 +85,10 @@ fn longest_word_width(text: &str, max_width: usize) -> usize {
 
 /// Render a markdown table as styled Lines.
 /// Uses pulldown-cmark for parsing and implements pi's column width algorithm.
+///
+/// If the content contains a table, renders the *entire* content (text before/after
+/// the table is preserved). Returns empty Vec if no table is found (so the caller
+/// can fall back to tui-markdown).
 pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'static>> {
     // In practice pulldown-cmark's table parsing can be sensitive to option
     // combinations; enable all extensions so tables are reliably recognized.
@@ -98,14 +104,27 @@ pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'s
         &content_owned
     };
 
+    // First pass: check if there's a table at all.
+    // If not, return empty so caller falls back to tui-markdown.
+    let has_table = Parser::new_ext(input, options).any(|e| {
+        matches!(e, Event::Start(Tag::Table(_)) | Event::Start(Tag::TableHead))
+    });
+    if !has_table {
+        return Vec::new();
+    }
+
+    // Second pass: render everything, handling tables specially.
     let parser = Parser::new_ext(input, options);
-    
     let mut table_state = TableState::default();
     let mut in_table = false;
-    
+    let mut pending_text = String::new();
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
     for event in parser {
         match event {
             Event::Start(Tag::Table(_)) | Event::Start(Tag::TableHead) => {
+                // Flush accumulated text before table
+                flush_text(&mut pending_text, &mut lines);
                 in_table = true;
                 table_state = TableState::default();
                 if matches!(event, Event::Start(Tag::TableHead)) {
@@ -121,6 +140,8 @@ pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'s
             Event::Text(text) => {
                 if in_table {
                     table_state.current_cell.push_str(&text);
+                } else {
+                    pending_text.push_str(&text);
                 }
             }
             Event::End(TagEnd::TableCell) => {
@@ -130,34 +151,42 @@ pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'s
             }
             Event::End(TagEnd::TableRow) => {
                 if in_table {
-                    if table_state.in_head {
-                        table_state.header = table_state.current_row.clone();
-                    } else {
+                    if !table_state.in_head {
                         table_state.rows.push(table_state.current_row.clone());
                     }
                     table_state.current_row = Vec::new();
                 }
             }
             Event::End(TagEnd::TableHead) => {
-                // Store header row before switching to body rows
-                if table_state.current_row.len() > 0 {
-                    table_state.header = table_state.current_row.clone();
-                    table_state.current_row = Vec::new();
-                }
+                table_state.header = table_state.current_row.clone();
+                table_state.current_row = Vec::new();
                 table_state.in_head = false;
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
-                // Render the table
                 let rendered = render_table_data(&table_state, available_width);
-                return rendered;
+                lines.extend(rendered);
             }
-            _ => {}
+            Event::SoftBreak | Event::HardBreak => {
+                if in_table {
+                    table_state.current_cell.push(' ');
+                } else {
+                    pending_text.push('\n');
+                }
+            }
+            // All other structural events: flush text separator
+            _ => {
+                if !in_table {
+                    pending_text.push('\n');
+                }
+            }
         }
     }
-    
-    // No table found, return empty
-    Vec::new()
+
+    // Flush remaining text after table
+    flush_text(&mut pending_text, &mut lines);
+
+    lines
 }
 
 #[derive(Default)]
@@ -206,7 +235,7 @@ fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'stat
     }
     
     // Calculate column widths
-    let mut column_widths = calculate_column_widths(
+    let column_widths = calculate_column_widths(
         &natural_widths,
         &min_word_widths,
         available_for_cells,
@@ -223,24 +252,26 @@ fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'stat
     let header_line_count = header_lines.iter().map(|l| l.len()).max().unwrap_or(1);
     
     for line_idx in 0..header_line_count {
-        let parts: Vec<String> = header_lines.iter()
-            .map(|cell_lines| {
-                cell_lines.get(line_idx).map(|s| s.as_str()).unwrap_or("")
-            })
-            .enumerate()
-            .map(|(col_idx, text)| {
-                let padded = pad_to_width(text, column_widths[col_idx]);
-                format!("\x1b[1m{}\x1b[0m", padded) // Bold for header
-            })
-            .collect();
-        lines.push(Line::from(Span::raw(format!("│ {} │", parts.join(" │ ")))));
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        spans.push(Span::raw("│ ".to_string()));
+        for (col_idx, cell_lines) in header_lines.iter().enumerate() {
+            if col_idx > 0 {
+                spans.push(Span::raw(" │ ".to_string()));
+            }
+            let text = cell_lines.get(line_idx).map(|s| s.as_str()).unwrap_or("");
+            let padded = pad_to_width(text, column_widths[col_idx]);
+            spans.push(Span::styled(padded, Style::default().add_modifier(Modifier::BOLD)));
+        }
+        spans.push(Span::raw(" │".to_string()));
+        lines.push(Line::from(spans));
     }
     
     // Separator
     lines.push(make_separator_line(&column_widths));
     
     // Body rows
-    for row in &state.rows {
+    let separator = make_separator_line(&column_widths);
+    for (row_index, row) in state.rows.iter().enumerate() {
         let cell_lines = wrap_cell_rows(row, &column_widths);
         let row_line_count = cell_lines.iter().map(|l| l.len()).max().unwrap_or(1);
         
@@ -253,6 +284,10 @@ fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'stat
                 .map(|(col_idx, text)| pad_to_width(text, column_widths[col_idx]))
                 .collect();
             lines.push(Line::from(Span::raw(format!("│ {} │", parts.join(" │ ")))));
+        }
+
+        if row_index < state.rows.len() - 1 {
+            lines.push(separator.clone());
         }
     }
     
@@ -310,9 +345,8 @@ fn calculate_column_widths(
     
     // Check if natural widths fit
     let total_natural: usize = natural_widths.iter().sum();
-    let total_natural_with_border = total_natural + num_cols - 1;
     
-    if total_natural_with_border <= available_for_cells {
+    if total_natural <= available_for_cells {
         // Everything fits naturally
         return natural_widths.iter()
             .enumerate()
@@ -321,7 +355,8 @@ fn calculate_column_widths(
     }
     
     // Need to shrink
-    let extra_width = available_for_cells.saturating_sub(min_column_widths.iter().sum::<usize>() + num_cols - 1);
+    let min_cells_width: usize = min_column_widths.iter().sum();
+    let extra_width = available_for_cells.saturating_sub(min_cells_width);
     let total_grow_potential: usize = natural_widths.iter()
         .enumerate()
         .map(|(i, &w)| w.saturating_sub(min_column_widths[i]))
@@ -343,7 +378,7 @@ fn calculate_column_widths(
     
     // Adjust for rounding errors
     let allocated: usize = column_widths.iter().sum();
-    let mut remaining = available_for_cells - num_cols - allocated;
+    let mut remaining = available_for_cells.saturating_sub(allocated);
     
     while remaining > 0 {
         let mut grew = false;
@@ -372,7 +407,7 @@ fn wrap_cell_rows(cells: &[String], widths: &[usize]) -> Vec<Vec<String>> {
 fn pad_to_width(text: &str, width: usize) -> String {
     let text_width = UnicodeWidthStr::width(text);
     if text_width >= width {
-        // Truncate
+        // Truncate to fit
         let mut result = String::new();
         let mut current_width = 0usize;
         for ch in text.chars() {
@@ -385,7 +420,13 @@ fn pad_to_width(text: &str, width: usize) -> String {
         }
         result
     } else {
-        format!("{:<width$}", text, width = width)
+        // Pad with spaces on the right, accounting for display width
+        let padding = width - text_width;
+        let mut result = text.to_string();
+        for _ in 0..padding {
+            result.push(' ');
+        }
+        result
     }
 }
 
@@ -439,7 +480,7 @@ fn fallback_render(header: &[String], rows: &[Vec<String>], width: usize) -> Vec
     
     for cell in header {
         let padded = pad_to_width(cell, col_width);
-        lines.push(Line::from(Span::raw(format!("\x1b[1m{}\x1b[0m", padded))));
+        lines.push(Line::from(Span::styled(padded, Style::default().add_modifier(Modifier::BOLD))));
     }
     
     for row in rows {
@@ -457,4 +498,24 @@ fn fallback_render(header: &[String], rows: &[Vec<String>], width: usize) -> Vec
     }
     
     lines
+}
+
+/// Flush accumulated non-table text through tui-markdown.
+fn flush_text(pending: &mut String, lines: &mut Vec<Line<'static>>) {
+    if pending.is_empty() || pending.trim().is_empty() {
+        pending.clear();
+        return;
+    }
+    // Use tui-markdown for non-table text
+    let preprocessed = pending.replace("\t", "   ");
+    let text: ratatui::text::Text<'_> = tui_markdown::from_str(&preprocessed);
+    for l in text.lines {
+        let line_style = l.style;
+        let spans: Vec<Span<'static>> = l.spans
+            .into_iter()
+            .map(|s| Span::styled(s.content.into_owned(), line_style.patch(s.style)))
+            .collect();
+        lines.push(Line::from(spans));
+    }
+    pending.clear();
 }
