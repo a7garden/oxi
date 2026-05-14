@@ -1033,6 +1033,7 @@ fn test_registry_with_builtins() {
     let registry = ToolRegistry::with_builtins();
     let names = registry.names();
 
+    // Core file/system tools
     assert!(names.contains(&"read".to_string()));
     assert!(names.contains(&"write".to_string()));
     assert!(names.contains(&"edit".to_string()));
@@ -1040,15 +1041,27 @@ fn test_registry_with_builtins() {
     assert!(names.contains(&"grep".to_string()));
     assert!(names.contains(&"find".to_string()));
     assert!(names.contains(&"ls".to_string()));
+
+    // Search tools
     assert!(names.contains(&"web_search".to_string()));
-    assert_eq!(names.len(), 9);
+    assert!(names.contains(&"get_search_results".to_string()));
+
+    // Integrations
+    assert!(names.contains(&"github".to_string()));
+    assert!(names.contains(&"subagent".to_string()));
+    assert!(names.contains(&"mcp".to_string()));
+    assert!(names.contains(&"context7_resolve-library-id".to_string()));
+    assert!(names.contains(&"context7_query-docs".to_string()));
+
+    // Keep this in sync with ToolRegistry::with_builtins_cwd()
+    assert_eq!(names.len(), 14);
 }
 
 #[test]
 fn test_registry_definitions() {
     let registry = ToolRegistry::with_builtins();
     let defs = registry.definitions();
-    assert_eq!(defs.len(), 9);
+    assert_eq!(defs.len(), 14);
 
     // Each should have name, description, and input_schema
     for def in &defs {

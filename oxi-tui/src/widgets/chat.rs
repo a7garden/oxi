@@ -25,6 +25,8 @@ use ratatui::{
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 use tui_markdown;
 use unicode_width::UnicodeWidthStr;
+
+use crate::table_renderer::render_markdown_table;
 use crate::Theme;
 use crate::theme::ThemeStyles;
 
@@ -237,6 +239,8 @@ impl ChatViewState {
             },
         });
         self.tool_tracker.clear();
+        // Streaming lifecycle changes should always invalidate layout.
+        self.layout_cache.write().entries = None;
     }
 
     pub fn stream_text_delta(&mut self, delta: &str) {
@@ -246,6 +250,22 @@ impl ChatViewState {
 
     fn append_text(&mut self, text: &str) {
         if let Some(ref mut s) = self.streaming {
+            // Providers sometimes emit whitespace-only text around tool calls.
+            // Rendering that literally creates large blank gaps in the chat view.
+            // Ignore whitespace-only deltas until we have any non-whitespace text.
+            if text.trim().is_empty() {
+                let has_nonempty_text = s.message.content_blocks.iter().any(|b| {
+                    if let ContentBlock::Text { content } = b {
+                        !content.trim().is_empty()
+                    } else {
+                        false
+                    }
+                });
+                if !has_nonempty_text {
+                    return;
+                }
+            }
+
             if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
                 // Clamp total text size to prevent unbounded growth
                 if content.chars().count() > MAX_TEXT_CHARS {
@@ -335,6 +355,7 @@ impl ChatViewState {
                 result: None,
                 status,
             });
+            self.layout_cache.write().entries = None;
         }
     }
 
@@ -386,6 +407,7 @@ impl ChatViewState {
                 message: clamp_str(message, 5000, 50),
                 retryable,
             });
+            self.layout_cache.write().entries = None;
         }
     }
 
@@ -409,12 +431,23 @@ impl ChatViewState {
             // Track for Ctrl+I viewer
             self.pending_images.push((base64_data.clone(), mime_type.clone()));
             s.message.content_blocks.push(ContentBlock::Image { mime_type, base64_data });
+            self.layout_cache.write().entries = None;
         }
     }
 
     pub fn finish_streaming(&mut self) {
-        if let Some(s) = self.streaming.take() {
-            self.messages.push(s.message);
+        if let Some(mut s) = self.streaming.take() {
+            // Drop whitespace-only blocks so they don't render as multi-line blank gaps.
+            s.message.content_blocks.retain(|b| match b {
+                ContentBlock::Text { content } => !content.trim().is_empty(),
+                ContentBlock::Thinking { content, .. } => !content.trim().is_empty(),
+                _ => true,
+            });
+
+            // Don't push empty assistant messages (they only add spacer rows).
+            if !s.message.content_blocks.is_empty() {
+                self.messages.push(s.message);
+            }
         }
         self.tool_tracker.clear();
         // Invalidate cache
@@ -571,253 +604,17 @@ fn fix_bare_code_fences(content: &str) -> String {
 }
 
 /// Parse markdown, extract tables, and render to styled Lines.
-/// Tables are rendered as ASCII-box tables; rest goes through tui-markdown.
+/// Tables are rendered using pulldown-cmark with width-aware column sizing.
 /// `width` limits table width to prevent overflow.
 fn md_lines(content: &str, width: u16) -> Vec<Line<'static>> {
-    // Quick pre-check: skip if no pipe character (likely no table)
-    if !content.contains('|') {
-        return render_markdown(content);
+    // Try table rendering first (pulldown-cmark based)
+    let table_lines = render_markdown_table(content, width);
+    if !table_lines.is_empty() {
+        return table_lines;
     }
 
-    // Split content into segments: table vs non-table
-    let segments = split_table_segments(content);
-    let mut result = Vec::new();
-
-    for segment in segments {
-        if segment.is_table {
-            let table_lines = render_table(segment.text, width);
-            result.extend(table_lines);
-        } else {
-            result.extend(render_markdown(&segment.text));
-        }
-    }
-
-    result
-}
-
-/// A segment of content that is either a table or regular markdown.
-struct ContentSegment {
-    is_table: bool,
-    text: String,
-}
-
-/// Find the next table in the given lines, return (start_idx, end_idx) if found.
-fn find_table(lines: &[&str]) -> Option<(usize, usize)> {
-    for i in 0..lines.len() {
-        let line = lines[i].trim();
-        if !line.starts_with('|') || !line.ends_with('|') { continue; }
-        if line.matches('|').count() < 3 { continue; }
-
-        if i + 1 >= lines.len() { continue; }
-        let sep_line = lines[i + 1].trim();
-        if is_table_separator(sep_line).is_none() { continue; }
-
-        let mut table_end = i + 2;
-        for j in (i + 2)..lines.len() {
-            let data_line = lines[j].trim();
-            if data_line.is_empty() { break; }
-            if data_line.starts_with('|') && data_line.ends_with('|') {
-                table_end = j + 1;
-            } else { break; }
-        }
-        return Some((i, table_end));
-    }
-    None
-}
-
-/// Split content into table/non-table segments.
-fn split_table_segments(content: &str) -> Vec<ContentSegment> {
-    let lines: Vec<&str> = content.lines().collect();
-    let mut segments = Vec::new();
-    let mut pos = 0usize;
-
-    while pos < lines.len() {
-        if let Some((start, end)) = find_table(&lines[pos..]) {
-            if start > 0 {
-                let before = &lines[pos..pos + start];
-                if !before.iter().all(|s| s.trim().is_empty()) {
-                    segments.push(ContentSegment { is_table: false, text: before.join("\n") });
-                }
-            }
-            let table_lines = &lines[pos + start..pos + end];
-            segments.push(ContentSegment { is_table: true, text: table_lines.join("\n") });
-            pos += end;
-        } else {
-            let remaining = &lines[pos..];
-            if !remaining.is_empty() && !remaining.iter().all(|s| s.trim().is_empty()) {
-                segments.push(ContentSegment { is_table: false, text: remaining.join("\n") });
-            }
-            break;
-        }
-    }
-    segments
-}
-
-/// Table cell alignment.
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
-enum CellAlign {
-    #[default]
-    Left,
-    Center,
-    Right,
-}
-
-impl CellAlign {
-    fn from_separator_cell(cell: &str) -> Self {
-        let trimmed = cell.trim();
-        let left_colon = trimmed.starts_with(':');
-        let right_colon = trimmed.ends_with(':');
-        match (left_colon, right_colon) {
-            (true, true) => CellAlign::Center,
-            (false, true) => CellAlign::Right,
-            _ => CellAlign::Left,
-        }
-    }
-
-    fn format_cell(&self, text: &str, width: usize) -> String {
-        let text_width = UnicodeWidthStr::width(text);
-        if text_width >= width {
-            return text.chars().take(width).collect();
-        }
-        let padding = width - text_width;
-        match self {
-            CellAlign::Left => format!("{:<width$}", text, width = width),
-            CellAlign::Center => {
-                let left = padding / 2;
-                let right = padding - left;
-                format!("{}{:>right$}", format!("{:>left$}", text, left = left), right = right)
-            }
-            CellAlign::Right => format!("{:>width$}", text, width = width),
-        }
-    }
-}
-
-/// Check if a line is a table separator: `|---|---|---|`.
-fn is_table_separator(line: &str) -> Option<Vec<CellAlign>> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with('|') || !trimmed.ends_with('|') { return None; }
-    let content = trimmed.trim_start_matches('|').trim_end_matches('|');
-    if content.trim().is_empty() { return None; }
-
-    let mut alignments = Vec::new();
-    for cell in content.split('|') {
-        let stripped = cell.replace(':', "").replace('-', "").replace(' ', "");
-        if !stripped.is_empty() { return None; }
-        alignments.push(CellAlign::from_separator_cell(cell));
-    }
-    Some(alignments)
-}
-
-/// Parse a table row into cell strings.
-fn parse_table_row(row: &str) -> Vec<String> {
-    row.trim()
-        .trim_start_matches('|')
-        .trim_end_matches('|')
-        .split('|')
-        .map(|cell| cell.trim().to_string())
-        .collect()
-}
-
-/// Render a table as an ASCII-box style table.
-fn render_table(table_text: String, max_width: u16) -> Vec<Line<'static>> {
-    let lines: Vec<&str> = table_text.lines().collect();
-    if lines.is_empty() { return vec![]; }
-
-    // Find separator line and parse alignments
-    let sep_idx = lines[1..]
-        .iter()
-        .position(|l| is_table_separator(l).is_some())
-        .map(|i| i + 1);
-
-    // Parse header
-    let headers = parse_table_row(lines[0]);
-    if headers.is_empty() { return vec![]; }
-    let col_count = headers.len();
-
-    // Parse alignments from separator
-    let alignments: Vec<CellAlign> = sep_idx
-        .and_then(|i| is_table_separator(lines[i]))
-        .unwrap_or_else(|| vec![CellAlign::Left; col_count]);
-
-    // Parse data rows
-    let data_rows: Vec<Vec<String>> = lines[sep_idx.map(|i| i + 1).unwrap_or(1)..]
-        .iter()
-        .filter(|l| !l.trim().is_empty() && l.trim().starts_with('|'))
-        .map(|l| parse_table_row(l))
-        .collect();
-
-    // Calculate column widths
-    let mut col_widths = vec![3usize; col_count];
-    for (i, cell) in headers.iter().enumerate() {
-        col_widths[i] = col_widths[i].max(UnicodeWidthStr::width(cell.as_str()) + 2);
-    }
-    for row in &data_rows {
-        for (i, cell) in row.iter().enumerate().take(col_count) {
-            col_widths[i] = col_widths[i].max(UnicodeWidthStr::width(cell.as_str()) + 2);
-        }
-    }
-
-    // Clamp to terminal width
-    let usable_width = max_width.saturating_sub(2);
-    let total_width: usize = col_widths.iter().sum::<usize>() + col_count - 1;
-    if total_width > usable_width as usize {
-        let excess = total_width - usable_width as usize;
-        let mut to_reduce = excess;
-        while to_reduce > 0 {
-            if let Some(max_idx) = col_widths.iter().enumerate().max_by_key(|(_, w)| *w).map(|(i, _)| i) {
-                if col_widths[max_idx] > 3 {
-                    col_widths[max_idx] -= 1;
-                    to_reduce -= 1;
-                } else { break; }
-            } else { break; }
-        }
-    }
-
-    let mut result = Vec::new();
-    let joiner = "│";
-
-    // Top border
-    result.push(Line::from(Span::raw(format!(
-        "┌{}┐",
-        col_widths.iter().map(|w| "─".repeat(*w)).collect::<Vec<_>>().join("┼")
-    ))));
-
-    // Header row
-    result.push(Line::from(Span::raw(format!(
-        "│{}│",
-        headers.iter()
-            .enumerate()
-            .map(|(i, h)| alignments.get(i).unwrap_or(&CellAlign::Center).format_cell(h, col_widths[i]))
-            .collect::<Vec<_>>().join(joiner)
-    ))));
-
-    // Header separator
-    result.push(Line::from(Span::raw(format!(
-        "╞{}╡",
-        col_widths.iter().map(|w| "═".repeat(*w)).collect::<Vec<_>>().join("╪")
-    ))));
-
-    // Data rows
-    for row in &data_rows {
-        result.push(Line::from(Span::raw(format!(
-            "│{}│",
-            (0..col_count)
-                .map(|i| {
-                    let align = alignments.get(i).copied().unwrap_or(CellAlign::Left);
-                    let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
-                    align.format_cell(cell, col_widths[i])
-                })
-                .collect::<Vec<_>>().join(joiner)
-        ))));
-    }
-
-    // Bottom border
-    result.push(Line::from(Span::raw(format!(
-        "└{}┘",
-        col_widths.iter().map(|w| "─".repeat(*w)).collect::<Vec<_>>().join("┼")
-    ))));
-
-    result
+    // No table found, use regular markdown rendering
+    render_markdown(content)
 }
 
 /// Render regular markdown (non-table content).
@@ -885,18 +682,42 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     // Reserve 1 column for the vertical scrollbar so content doesn't overlap.
     let usable_width = width.saturating_sub(1);
 
-    for (i, msg) in state.messages.iter().enumerate() {
-        if i > 0 {
+    let mut rendered_any_message = false;
+
+    for msg in &state.messages {
+        // Skip messages that have no visible content; they only create empty spacer rows.
+        let has_visible_content = msg.content_blocks.iter().any(|b| match b {
+            ContentBlock::Text { content } => !content.trim().is_empty(),
+            ContentBlock::Thinking { content, .. } => !content.trim().is_empty(),
+            _ => true,
+        });
+        if !has_visible_content {
+            continue;
+        }
+
+        if rendered_any_message {
             // Gap between messages — use a spacer for breathing room
             entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
             y += 1;
         }
+        rendered_any_message = true;
+
         // User messages: left accent border, no label needed (single-user context)
         if msg.role == MessageRole::User {
             entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Rule });
             y += 1;
         }
         for block in &msg.content_blocks {
+            // Skip whitespace-only blocks (defensive; finish_streaming also removes them).
+            let is_empty = match block {
+                ContentBlock::Text { content } => content.trim().is_empty(),
+                ContentBlock::Thinking { content, .. } => content.trim().is_empty(),
+                _ => false,
+            };
+            if is_empty {
+                continue;
+            }
+
             let kind = block_to_layout_kind(block, msg.role, usable_width);
             let h = measure_kind(&kind, usable_width);
             entries.push(LayoutEntry { y, height: h, kind });
@@ -905,11 +726,22 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     }
 
     if let Some(ref streaming) = state.streaming {
-        if !state.messages.is_empty() {
+        // Only add a spacer if we actually rendered any history messages.
+        if rendered_any_message {
             entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
             y += 1;
         }
         for block in &streaming.message.content_blocks {
+            // Skip whitespace-only blocks (prevents large blank gaps during tool-only turns).
+            let is_empty = match block {
+                ContentBlock::Text { content } => content.trim().is_empty(),
+                ContentBlock::Thinking { content, .. } => content.trim().is_empty(),
+                _ => false,
+            };
+            if is_empty {
+                continue;
+            }
+
             let kind = block_to_layout_kind(block, MessageRole::Assistant, usable_width);
             let h = measure_kind(&kind, usable_width);
             entries.push(LayoutEntry { y, height: h, kind });
@@ -1439,80 +1271,52 @@ fn filter_tool_json(text: &str) -> String {
 #[cfg(test)]
 mod table_tests {
     use super::*;
+    use crate::table_renderer::render_markdown_table;
 
     #[test]
-    fn parse_table_row_basic() {
-        let row = "| Name | Age | City |";
-        let cells = parse_table_row(row);
-        assert_eq!(cells, vec!["Name", "Age", "City"]);
-    }
-
-    #[test]
-    fn parse_table_row_no_whitespace() {
-        let row = "|Alice|25|New York|";
-        let cells = parse_table_row(row);
-        assert_eq!(cells, vec!["Alice", "25", "New York"]);
-    }
-
-    #[test]
-    fn is_table_separator_valid() {
-        assert!(is_table_separator("|---|---|---|").is_some());
-        assert!(is_table_separator("| :--- | :---: | ---: |").is_some());
-    }
-
-    #[test]
-    fn is_table_separator_invalid() {
-        assert!(is_table_separator("| Name | Age |").is_none());
-        assert!(is_table_separator("not a separator").is_none());
-    }
-
-    #[test]
-    fn cell_align_parsing() {
-        assert_eq!(CellAlign::from_separator_cell("---"), CellAlign::Left);
-        assert_eq!(CellAlign::from_separator_cell(":---"), CellAlign::Left);
-        assert_eq!(CellAlign::from_separator_cell("---:"), CellAlign::Right);
-        assert_eq!(CellAlign::from_separator_cell(":---:"), CellAlign::Center);
-    }
-
-    #[test]
-    fn render_table_basic() {
-        let md = "| Name | Age |\n|---|---|---|\n| Alice | 30 |\n| Bob | 25 |";
-        let lines = render_table(md.to_string(), 80);
-        assert!(!lines.is_empty());
+    fn render_markdown_table_basic() {
+        let md = "| Name | Age |\n|---|---|
+| Alice | 30 |
+| Bob | 25 |";
+        let lines = render_markdown_table(md, 80);
+        assert!(!lines.is_empty(), "Expected table lines, got empty");
         let text = lines.iter().map(|l| l.to_string()).collect::<String>();
-        assert!(text.contains('┌'));
-        assert!(text.contains('│'));
-        assert!(text.contains('└'));
-    }
-
-    #[test]
-    fn split_table_segments_with_table() {
-        let md = "Hello\n\n| Name | Age |\n|---|---|---|\n| Alice | 30 |\n\nWorld";
-        let segments = split_table_segments(md);
-        assert!(segments.len() >= 2);
-        assert!(segments.iter().any(|s| s.is_table));
-    }
-
-    #[test]
-    fn split_table_segments_without_table() {
-        let md = "Hello world";
-        let segments = split_table_segments(md);
-        assert!(segments.len() == 1);
-        assert!(!segments[0].is_table);
+        assert!(text.contains('┌'), "Expected top border, got: {}", text);
+        assert!(text.contains('│'), "Expected cell separator, got: {}", text);
+        assert!(text.contains('└'), "Expected bottom border, got: {}", text);
     }
 
     #[test]
     fn md_lines_with_table() {
-        let md = "Hello\n\n| Name | Age |\n|---|---|---|\n| Alice | 30 |\n\nWorld";
+        let md = "| Name | Age |
+|---|---|---|
+| Alice | 30 |
+| Bob | 25 |";
         let lines = md_lines(md, 80);
         assert!(!lines.is_empty());
     }
 
     #[test]
-    fn md_lines_without_pipe() {
+    fn md_lines_without_table() {
         let md = "Hello **world**";
         let lines = md_lines(md, 80);
         assert!(!lines.is_empty());
     }
+}
 
+
+#[test]
+fn debug_table_direct() {
+    use crate::table_renderer::render_markdown_table;
+    
+    let md = "| Name | Age |\n|---|---|\n| Alice | 30 |\n| Bob | 25 |";
+    let lines = render_markdown_table(md, 80);
+    
+    // Debug output
+    eprintln!("Table lines count: {}", lines.len());
+    for (i, line) in lines.iter().enumerate() {
+        eprintln!("Line {}: {:?}", i, line);
+    }
+    
+    assert!(!lines.is_empty(), "Expected table lines");
 }

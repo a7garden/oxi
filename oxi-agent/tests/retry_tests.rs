@@ -133,7 +133,8 @@ fn circuit_breaker_manual_reset() {
 fn circuit_breaker_half_open_allows_requests() {
     let config = CircuitBreakerConfig {
         failure_threshold: 1,
-        open_duration: Duration::from_millis(1), // very short cooldown
+        // Use a non-tiny cooldown to avoid flaky timing on busy/slow CI.
+        open_duration: Duration::from_millis(50), // short but stable
         half_open_successes: 2,
         ..Default::default()
     };
@@ -143,7 +144,7 @@ fn circuit_breaker_half_open_allows_requests() {
     assert!(cb.allow_request().is_err());
 
     // Wait for cooldown
-    std::thread::sleep(Duration::from_millis(5));
+    std::thread::sleep(Duration::from_millis(60));
 
     // Should transition to half-open and allow
     assert!(cb.allow_request().is_ok());
@@ -153,14 +154,14 @@ fn circuit_breaker_half_open_allows_requests() {
 fn circuit_breaker_half_open_closes_after_enough_successes() {
     let config = CircuitBreakerConfig {
         failure_threshold: 1,
-        open_duration: Duration::from_millis(1),
+        open_duration: Duration::from_millis(50),
         half_open_successes: 3,
         ..Default::default()
     };
     let cb = CircuitBreaker::new(config);
 
     cb.record_failure(); // opens
-    std::thread::sleep(Duration::from_millis(5));
+    std::thread::sleep(Duration::from_millis(60));
     let _ = cb.allow_request(); // transitions to half-open
 
     // Need half_open_successes (3) to close
@@ -182,14 +183,14 @@ fn circuit_breaker_half_open_closes_after_enough_successes() {
 fn circuit_breaker_half_open_reopens_on_failure() {
     let config = CircuitBreakerConfig {
         failure_threshold: 1,
-        open_duration: Duration::from_millis(1),
+        open_duration: Duration::from_millis(50),
         half_open_successes: 3,
         ..Default::default()
     };
     let cb = CircuitBreaker::new(config);
 
     cb.record_failure(); // opens
-    std::thread::sleep(Duration::from_millis(5));
+    std::thread::sleep(Duration::from_millis(60));
     let _ = cb.allow_request(); // transitions to half-open
 
     cb.record_failure(); // reopens immediately from half-open

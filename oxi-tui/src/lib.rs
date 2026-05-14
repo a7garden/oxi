@@ -9,6 +9,7 @@
 
 pub mod cell;
 pub mod fuzzy;
+pub mod table_renderer;
 pub mod theme;
 pub mod widgets;
 

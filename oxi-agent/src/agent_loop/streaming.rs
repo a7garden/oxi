@@ -12,6 +12,7 @@ use oxi_ai::{
     ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions,
     Tool as OxTool,
 };
+use std::collections::HashSet;
 
 pub(crate) async fn stream_assistant_response(
     loop_ref: &super::AgentLoop,
@@ -149,13 +150,42 @@ pub(crate) async fn stream_assistant_response(
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        let tool_calls: Vec<ContentBlock> = m.content.drain(..)
+                        // Preserve tool calls we may have injected via ToolCallEnd.
+                        // Some providers also include ToolCall blocks in the final Done message,
+                        // so dedupe by tool_call_id to avoid executing the same tool twice.
+                        let mut preserved_tool_calls: Vec<ContentBlock> = m
+                            .content
+                            .drain(..)
                             .filter(|b| matches!(b, ContentBlock::ToolCall(_)))
                             .collect();
-                        tracing::info!("Done: preserving {} tool_calls from ToolCallEnd, Done message has {} content blocks", tool_calls.len(), message.content.len());
+
+                        let mut seen: HashSet<String> = message
+                            .content
+                            .iter()
+                            .filter_map(|b| match b {
+                                ContentBlock::ToolCall(tc) => Some(tc.id.clone()),
+                                _ => None,
+                            })
+                            .collect();
+
+                        preserved_tool_calls.retain(|b| match b {
+                            ContentBlock::ToolCall(tc) => seen.insert(tc.id.clone()),
+                            _ => true,
+                        });
+
+                        tracing::info!(
+                            "Done: preserving {} tool_calls (deduped), Done message has {} content blocks",
+                            preserved_tool_calls.len(),
+                            message.content.len()
+                        );
+
                         *m = message.clone();
-                        m.content.extend(tool_calls);
-                        tracing::info!("Done: final message has {} content blocks, stop_reason={:?}", m.content.len(), m.stop_reason);
+                        m.content.extend(preserved_tool_calls);
+                        tracing::info!(
+                            "Done: final message has {} content blocks, stop_reason={:?}",
+                            m.content.len(),
+                            m.stop_reason
+                        );
                     }
                 } else {
                     messages.push(Message::Assistant(message.clone()));
