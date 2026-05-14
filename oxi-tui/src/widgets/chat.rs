@@ -302,6 +302,7 @@ impl ChatViewState {
                         *curr = status;
                     }
                 }
+                self.layout_cache.write().entries = None;
             }
         }
     }
@@ -317,12 +318,12 @@ impl ChatViewState {
             // Check if this tool call was already registered (e.g., from
             // a prior MessageUpdate that included ToolCall blocks).
             if let Some(existing_idx) = self.tool_tracker.get(&id) {
-                // Update the existing block's status (Requested → Executing etc.)
                 if let Some(block) = s.message.content_blocks.get_mut(existing_idx) {
                     if let ContentBlock::ToolCall { status: ref mut s, .. } = block {
                         *s = status;
                     }
                 }
+                self.layout_cache.write().entries = None;
                 return;
             }
             let idx = s.message.content_blocks.len();
@@ -351,6 +352,7 @@ impl ChatViewState {
                                 is_error,
                             ));
                             *status = ToolCallStatus::Done;
+                            self.layout_cache.write().entries = None;
                             return;
                         }
                     }
@@ -364,6 +366,7 @@ impl ChatViewState {
                     ));
                     *status = ToolCallStatus::Done;
                     if let Some(ref id) = tool_call_id { self.tool_tracker.remove(id); }
+                    self.layout_cache.write().entries = None;
                     return;
                 }
             }
@@ -372,6 +375,7 @@ impl ChatViewState {
                 content: clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
                 is_error,
             });
+            self.layout_cache.write().entries = None;
         }
     }
 
@@ -567,20 +571,265 @@ fn fix_bare_code_fences(content: &str) -> String {
     result
 }
 
-/// Convert markdown to styled Lines via tui-markdown.
-fn md_lines(content: &str) -> Vec<Line<'static>> {
+/// Parse markdown, extract tables, and render to styled Lines.
+/// Tables are rendered as ASCII-box tables; rest goes through tui-markdown.
+/// `width` limits table width to prevent overflow.
+fn md_lines(content: &str, width: u16) -> Vec<Line<'static>> {
+    // Quick pre-check: skip if no pipe character (likely no table)
+    if !content.contains('|') {
+        return render_markdown(content);
+    }
+
+    // Split content into segments: table vs non-table
+    let segments = split_table_segments(content);
+    let mut result = Vec::new();
+
+    for segment in segments {
+        if segment.is_table {
+            let table_lines = render_table(segment.text, width);
+            result.extend(table_lines);
+        } else {
+            result.extend(render_markdown(&segment.text));
+        }
+    }
+
+    result
+}
+
+/// A segment of content that is either a table or regular markdown.
+struct ContentSegment {
+    is_table: bool,
+    text: String,
+}
+
+/// Find the next table in the given lines, return (start_idx, end_idx) if found.
+fn find_table(lines: &[&str]) -> Option<(usize, usize)> {
+    for i in 0..lines.len() {
+        let line = lines[i].trim();
+        if !line.starts_with('|') || !line.ends_with('|') { continue; }
+        if line.matches('|').count() < 3 { continue; }
+
+        if i + 1 >= lines.len() { continue; }
+        let sep_line = lines[i + 1].trim();
+        if is_table_separator(sep_line).is_none() { continue; }
+
+        let mut table_end = i + 2;
+        for j in (i + 2)..lines.len() {
+            let data_line = lines[j].trim();
+            if data_line.is_empty() { break; }
+            if data_line.starts_with('|') && data_line.ends_with('|') {
+                table_end = j + 1;
+            } else { break; }
+        }
+        return Some((i, table_end));
+    }
+    None
+}
+
+/// Split content into table/non-table segments.
+fn split_table_segments(content: &str) -> Vec<ContentSegment> {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut segments = Vec::new();
+    let mut pos = 0usize;
+
+    while pos < lines.len() {
+        if let Some((start, end)) = find_table(&lines[pos..]) {
+            if start > 0 {
+                let before = &lines[pos..pos + start];
+                if !before.iter().all(|s| s.trim().is_empty()) {
+                    segments.push(ContentSegment { is_table: false, text: before.join("\n") });
+                }
+            }
+            let table_lines = &lines[pos + start..pos + end];
+            segments.push(ContentSegment { is_table: true, text: table_lines.join("\n") });
+            pos += end;
+        } else {
+            let remaining = &lines[pos..];
+            if !remaining.is_empty() && !remaining.iter().all(|s| s.trim().is_empty()) {
+                segments.push(ContentSegment { is_table: false, text: remaining.join("\n") });
+            }
+            break;
+        }
+    }
+    segments
+}
+
+/// Table cell alignment.
+#[derive(Clone, Copy, Default)]
+enum CellAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+impl CellAlign {
+    fn from_separator_cell(cell: &str) -> Self {
+        let trimmed = cell.trim();
+        let left_colon = trimmed.starts_with(':');
+        let right_colon = trimmed.ends_with(':');
+        match (left_colon, right_colon) {
+            (true, true) => CellAlign::Center,
+            (false, true) => CellAlign::Right,
+            _ => CellAlign::Left,
+        }
+    }
+
+    fn format_cell(&self, text: &str, width: usize) -> String {
+        let text_width = UnicodeWidthStr::width(text);
+        if text_width >= width {
+            return text.chars().take(width).collect();
+        }
+        let padding = width - text_width;
+        match self {
+            CellAlign::Left => format!("{:<width$}", text, width = width),
+            CellAlign::Center => {
+                let left = padding / 2;
+                let right = padding - left;
+                format!("{}{:>right$}", format!("{:>left$}", text, left = left), right = right)
+            }
+            CellAlign::Right => format!("{:>width$}", text, width = width),
+        }
+    }
+}
+
+/// Check if a line is a table separator: `|---|---|---|`.
+fn is_table_separator(line: &str) -> Option<Vec<CellAlign>> {
+    let trimmed = line.trim();
+    if !trimmed.starts_with('|') || !trimmed.ends_with('|') { return None; }
+    let content = trimmed.trim_start_matches('|').trim_end_matches('|');
+    if content.trim().is_empty() { return None; }
+
+    let mut alignments = Vec::new();
+    for cell in content.split('|') {
+        let stripped = cell.replace(':', "").replace('-', "").replace(' ', "");
+        if !stripped.is_empty() { return None; }
+        alignments.push(CellAlign::from_separator_cell(cell));
+    }
+    Some(alignments)
+}
+
+/// Parse a table row into cell strings.
+fn parse_table_row(row: &str) -> Vec<String> {
+    row.trim()
+        .trim_start_matches('|')
+        .trim_end_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
+}
+
+/// Render a table as an ASCII-box style table.
+fn render_table(table_text: String, max_width: u16) -> Vec<Line<'static>> {
+    let lines: Vec<&str> = table_text.lines().collect();
+    if lines.is_empty() { return vec![]; }
+
+    // Find separator line and parse alignments
+    let sep_idx = lines[1..]
+        .iter()
+        .position(|l| is_table_separator(l).is_some())
+        .map(|i| i + 1);
+
+    // Parse header
+    let headers = parse_table_row(lines[0]);
+    if headers.is_empty() { return vec![]; }
+    let col_count = headers.len();
+
+    // Parse alignments from separator
+    let alignments: Vec<CellAlign> = sep_idx
+        .and_then(|i| is_table_separator(lines[i]))
+        .unwrap_or_else(|| vec![CellAlign::Left; col_count]);
+
+    // Parse data rows
+    let data_rows: Vec<Vec<String>> = lines[sep_idx.map(|i| i + 1).unwrap_or(1)..]
+        .iter()
+        .filter(|l| !l.trim().is_empty() && l.trim().starts_with('|'))
+        .map(|l| parse_table_row(l))
+        .collect();
+
+    // Calculate column widths
+    let mut col_widths = vec![3usize; col_count];
+    for (i, cell) in headers.iter().enumerate() {
+        col_widths[i] = col_widths[i].max(UnicodeWidthStr::width(cell.as_str()) + 2);
+    }
+    for row in &data_rows {
+        for (i, cell) in row.iter().enumerate().take(col_count) {
+            col_widths[i] = col_widths[i].max(UnicodeWidthStr::width(cell.as_str()) + 2);
+        }
+    }
+
+    // Clamp to terminal width
+    let usable_width = max_width.saturating_sub(2);
+    let total_width: usize = col_widths.iter().sum::<usize>() + col_count - 1;
+    if total_width > usable_width as usize {
+        let excess = total_width - usable_width as usize;
+        let mut to_reduce = excess;
+        while to_reduce > 0 {
+            if let Some(max_idx) = col_widths.iter().enumerate().max_by_key(|(_, w)| *w).map(|(i, _)| i) {
+                if col_widths[max_idx] > 3 {
+                    col_widths[max_idx] -= 1;
+                    to_reduce -= 1;
+                } else { break; }
+            } else { break; }
+        }
+    }
+
+    let mut result = Vec::new();
+    let joiner = "│";
+
+    // Top border
+    result.push(Line::from(Span::raw(format!(
+        "┌{}┐",
+        col_widths.iter().map(|w| "─".repeat(*w)).collect::<Vec<_>>().join("┼")
+    ))));
+
+    // Header row
+    result.push(Line::from(Span::raw(format!(
+        "│{}│",
+        headers.iter()
+            .enumerate()
+            .map(|(i, h)| alignments.get(i).unwrap_or(&CellAlign::Center).format_cell(h, col_widths[i]))
+            .collect::<Vec<_>>().join(joiner)
+    ))));
+
+    // Header separator
+    result.push(Line::from(Span::raw(format!(
+        "╞{}╡",
+        col_widths.iter().map(|w| "═".repeat(*w)).collect::<Vec<_>>().join("╪")
+    ))));
+
+    // Data rows
+    for row in &data_rows {
+        result.push(Line::from(Span::raw(format!(
+            "│{}│",
+            (0..col_count)
+                .map(|i| {
+                    let align = alignments.get(i).copied().unwrap_or(CellAlign::Left);
+                    let cell = row.get(i).map(|s| s.as_str()).unwrap_or("");
+                    align.format_cell(cell, col_widths[i])
+                })
+                .collect::<Vec<_>>().join(joiner)
+        ))));
+    }
+
+    // Bottom border
+    result.push(Line::from(Span::raw(format!(
+        "└{}┘",
+        col_widths.iter().map(|w| "─".repeat(*w)).collect::<Vec<_>>().join("┼")
+    ))));
+
+    result
+}
+
+/// Render regular markdown (non-table content).
+fn render_markdown(content: &str) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
     let text: ratatui::text::Text<'_> = tui_markdown::from_str(&preprocessed);
     text.lines.into_iter().map(|l| {
-        // tui-markdown uses Line-level styles (e.g. for code blocks).
-        // We must merge the line style into each span so nothing is lost.
         let line_style = l.style;
         let spans: Vec<Span<'static>> = l.spans
             .into_iter()
-            .map(|s| {
-                let merged = line_style.patch(s.style);
-                Span::styled(s.content.into_owned(), merged)
-            })
+            .map(|s| Span::styled(s.content.into_owned(), line_style.patch(s.style)))
             .collect();
         Line::from(spans)
     }).collect()
@@ -649,7 +898,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             y += 1;
         }
         for block in &msg.content_blocks {
-            let kind = block_to_layout_kind(block, msg.role);
+            let kind = block_to_layout_kind(block, msg.role, usable_width);
             let h = measure_kind(&kind, usable_width);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
@@ -662,7 +911,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             y += 1;
         }
         for block in &streaming.message.content_blocks {
-            let kind = block_to_layout_kind(block, MessageRole::Assistant);
+            let kind = block_to_layout_kind(block, MessageRole::Assistant, usable_width);
             let h = measure_kind(&kind, usable_width);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
@@ -674,10 +923,10 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     entries
 }
 
-fn block_to_layout_kind(block: &ContentBlock, role: MessageRole) -> LayoutKind {
+fn block_to_layout_kind(block: &ContentBlock, role: MessageRole, width: u16) -> LayoutKind {
     match block {
         ContentBlock::Text { content } => {
-            let lines = md_lines(content);
+            let lines = md_lines(content, width);
             LayoutKind::Text { lines, is_user: role == MessageRole::User }
         }
         ContentBlock::Thinking { content, collapsed } =>
@@ -744,7 +993,7 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             else {
                 // Use filtered content for measurement to match rendering
                 let filtered = filter_tool_json(content);
-                let md = md_lines(&filtered);
+                let md = md_lines(&filtered, width);
                 1 + md.len() as u16
             }
         }
@@ -930,7 +1179,7 @@ impl Widget for EntryWidget<'_> {
                 } else {
                     lines.push(Line::from(Span::styled("\u{25BE} thinking".to_string(), header_style)));
                     let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
-                    let md_rendered = md_lines(&filtered);
+                    let md_rendered = md_lines(&filtered, rect.width);
                     for md_line in md_rendered {
                         let spans: Vec<Span<'static>> = md_line.spans
                             .into_iter()
