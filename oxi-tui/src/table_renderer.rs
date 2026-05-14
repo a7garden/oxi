@@ -431,18 +431,17 @@ fn pad_to_width(text: &str, width: usize) -> String {
 }
 
 fn make_border_line(widths: &[usize], left: char, mid: char, right: char) -> Line<'static> {
-    // +2 accounts for the spaces we render around each cell: `│ {cell} │`
-    let parts: Vec<String> = widths
-        .iter()
-        .map(|w| "─".repeat(w.saturating_add(2)))
-        .collect();
-
     let mut s = String::new();
     s.push(left);
-    for (i, part) in parts.iter().enumerate() {
-        s.push_str(part);
-        if i + 1 < parts.len() {
+    s.push('─');
+    for (i, w) in widths.iter().enumerate() {
+        s.push_str(&"─".repeat(*w));
+        if i + 1 < widths.len() {
+            s.push('─');
             s.push(mid);
+            s.push('─');
+        } else {
+            s.push('─');
         }
     }
     s.push(right);
@@ -450,17 +449,17 @@ fn make_border_line(widths: &[usize], left: char, mid: char, right: char) -> Lin
 }
 
 fn make_separator_line(widths: &[usize]) -> Line<'static> {
-    let parts: Vec<String> = widths
-        .iter()
-        .map(|w| "─".repeat(w.saturating_add(2)))
-        .collect();
-
     let mut s = String::new();
     s.push('├');
-    for (i, part) in parts.iter().enumerate() {
-        s.push_str(part);
-        if i + 1 < parts.len() {
+    s.push('─');
+    for (i, w) in widths.iter().enumerate() {
+        s.push_str(&"─".repeat(*w));
+        if i + 1 < widths.len() {
+            s.push('─');
             s.push('┼');
+            s.push('─');
+        } else {
+            s.push('─');
         }
     }
     s.push('┤');
