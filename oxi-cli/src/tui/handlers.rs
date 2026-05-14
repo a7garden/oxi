@@ -617,7 +617,7 @@ async fn handle_wizard_step_key(
                         match *selected {
                             0 => { /* OAuth — not yet implemented */ }
                             1 => {
-                                let auth = crate::auth_storage::AuthStorage::new();
+                                let auth = oxi_store::auth_storage::AuthStorage::new();
                                 let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
                                     .iter()
                                     .map(|builtin| {
@@ -695,7 +695,7 @@ async fn handle_wizard_step_key(
                     };
 
                     if !key_val.is_empty() {
-                        let auth = crate::auth_storage::AuthStorage::new();
+                        let auth = oxi_store::auth_storage::AuthStorage::new();
                         auth.set_api_key(&provider, key_val);
 
                         let models: Vec<String> = oxi_ai::model_db::get_all_models()
@@ -708,7 +708,7 @@ async fn handle_wizard_step_key(
                             if !is_config {
                                 let model_id = "default".to_string();
                                 let full_model = format!("{}/{}", provider, model_id);
-                                if let Ok(mut settings) = crate::settings::Settings::load() {
+                                if let Ok(mut settings) = oxi_store::settings::Settings::load() {
                                     settings.default_model = Some(model_id.clone());
                                     settings.default_provider = Some(provider.clone());
                                     let _ = settings.save();
@@ -733,7 +733,7 @@ async fn handle_wizard_step_key(
                     }
                 }
                 KeyCode::Esc => {
-                    let auth = crate::auth_storage::AuthStorage::new();
+                    let auth = oxi_store::auth_storage::AuthStorage::new();
                     let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
                         .iter()
                         .map(|builtin| {
@@ -764,7 +764,7 @@ async fn handle_wizard_step_key(
                     if let Some(SetupStep::SelectModel { provider, models, selected }) = extract_step(&state.overlay) {
                         if let Some(model_id) = models.get(*selected) {
                             let full_model = format!("{}/{}", provider, model_id);
-                            if let Ok(mut settings) = crate::settings::Settings::load() {
+                            if let Ok(mut settings) = oxi_store::settings::Settings::load() {
                                 settings.default_model = Some(model_id.to_string());
                                 settings.default_provider = Some(provider.clone());
                                 let _ = settings.save();
@@ -851,7 +851,7 @@ async fn handle_model_select_key(
                     Ok(()) => {
                         state.add_system_message(format!("Model: {}", model_id));
                         state.footer_state.data.model_name = model_id.clone();
-                        crate::settings::Settings::save_last_used(&model_id);
+                        oxi_store::settings::Settings::save_last_used(&model_id);
                     }
                     Err(e) => {
                         state.add_system_message(format!("Error: {}", e));
@@ -946,7 +946,7 @@ async fn handle_logout_select_key(
         }
         KeyCode::Enter => {
             if let Some(provider) = providers.get(selected) {
-                let auth = crate::auth_storage::AuthStorage::new();
+                let auth = oxi_store::auth_storage::AuthStorage::new();
                 auth.remove(provider);
                 state.add_system_message(format!("Removed {}", provider));
             }

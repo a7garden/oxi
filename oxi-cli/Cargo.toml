@@ -22,6 +22,7 @@ path = "src/lib.rs"
 [dependencies]
 oxi-ai = { version = "0.10.0", path = "../oxi-ai" }
 oxi-agent = { version = "0.10.0", path = "../oxi-agent" }
+oxi-store = { version = "0.10.0", path = "../oxi-store" }
 oxi-tui = { version = "0.10.0", path = "../oxi-tui" }
 
 # Async runtime

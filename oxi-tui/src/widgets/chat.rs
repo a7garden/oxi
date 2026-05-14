@@ -1069,6 +1069,7 @@ impl StatefulWidget for ChatView<'_> {
         // Vertical scrollbar reserves 1 column on the right.
         let size = ratatui::layout::Size::new(width, total_height.max(area.height));
         let mut scroll_view = ScrollView::new(size)
+            .vertical_scrollbar_visibility(ScrollbarVisibility::Always)
             .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
 
         // Render each layout entry into the virtual buffer.

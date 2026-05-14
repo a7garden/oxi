@@ -54,6 +54,21 @@ impl InputState {
         self.textarea.lines().join("\n")
     }
 
+    /// Get a mutable reference to the text (for compatibility)
+    pub fn text_mut(&mut self) -> &mut String {
+        // ratatui-textarea doesn't expose a direct text mutation API
+        // For setting text directly, use set_text() or clear() + insert_str()
+        unimplemented!("Use set_text() instead")
+    }
+
+    /// Set text directly (replaces all content)
+    pub fn set_text(&mut self, text: String) {
+        self.textarea.clear();
+        if !text.is_empty() {
+            self.textarea.insert_str(&text);
+        }
+    }
+
     /// Get lines as a vector
     pub fn lines(&self) -> Vec<String> {
         self.textarea.lines().to_vec()
@@ -70,6 +85,58 @@ impl InputState {
         } else {
             self.textarea.set_placeholder_text("");
         }
+    }
+
+    // ── Backward-compatible API (used by oxi-cli handlers) ──
+
+    /// Insert a character at cursor position
+    pub fn insert_char(&mut self, c: char) {
+        self.handle_char(c);
+    }
+
+    /// Insert a string at cursor position
+    pub fn insert_str(&mut self, s: &str) {
+        self.textarea.insert_str(s);
+    }
+
+    /// Delete character before cursor (Backspace)
+    pub fn backspace(&mut self) {
+        self.textarea.input(TextAreaInput { key: Key::Backspace, ..Default::default() });
+    }
+
+    /// Delete character after cursor (Delete)
+    pub fn delete(&mut self) {
+        self.textarea.input(TextAreaInput { key: Key::Delete, ..Default::default() });
+    }
+
+    /// Move cursor left
+    pub fn move_left(&mut self) {
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Back);
+    }
+
+    /// Move cursor right
+    pub fn move_right(&mut self) {
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Forward);
+    }
+
+    /// Move cursor to start of line
+    pub fn move_home(&mut self) {
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
+    }
+
+    /// Move cursor to end of line
+    pub fn move_end(&mut self) {
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::End);
+    }
+
+    /// Move cursor by word (Ctrl+Left/Right)
+    pub fn move_word_left(&mut self) {
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::WordBack);
+    }
+
+    /// Move cursor by word (Ctrl+Left/Right)
+    pub fn move_word_right(&mut self) {
+        self.textarea.move_cursor(ratatui_textarea::CursorMove::WordForward);
     }
 
     // ── Input handling ──
@@ -105,11 +172,6 @@ impl InputState {
             self.textarea.input(input);
             false
         }
-    }
-
-    /// Insert text at cursor position
-    pub fn insert_str(&mut self, s: &str) {
-        self.textarea.insert_str(s);
     }
 
     /// Get mutable access to the underlying textarea

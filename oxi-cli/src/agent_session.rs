@@ -28,8 +28,8 @@
 
 use crate::auto_compaction::CompactionConfig;
 use crate::extensions::{ExtensionContext, ExtensionContextBuilder, ExtensionRunner, InputEvent as ExtInputEvent, InputEventResult as ExtInputEventResult, SessionShutdownEvent, SessionShutdownReason};
-use crate::session::{AgentMessage, SessionManager};
-use crate::settings::{Settings, ThinkingLevel};
+use oxi_store::session::{AgentMessage, SessionManager};
+use oxi_store::settings::{Settings, ThinkingLevel};
 use anyhow::{Context, Result};
 use oxi_agent::{Agent, AgentEvent, AgentState};
 use oxi_ai::Message;
@@ -1052,41 +1052,41 @@ impl AgentSession {
                         }
                     };
                     sm.append_message(AgentMessage::User {
-                        content: crate::session::ContentValue::String(content),
+                        content: oxi_store::session::ContentValue::String(content),
                     });
                 }
                 Message::Assistant(a) => {
                     // Convert oxi_ai ContentBlocks → session AssistantContentBlocks
-                    let content_blocks: Vec<crate::session::AssistantContentBlock> = a
+                    let content_blocks: Vec<oxi_store::session::AssistantContentBlock> = a
                         .content
                         .iter()
                         .map(|b| match b {
                             oxi_ai::ContentBlock::Text(t) => {
-                                crate::session::AssistantContentBlock::Text {
+                                oxi_store::session::AssistantContentBlock::Text {
                                     text: t.text.clone(),
                                 }
                             }
                             oxi_ai::ContentBlock::Thinking(t) => {
-                                crate::session::AssistantContentBlock::Thinking {
+                                oxi_store::session::AssistantContentBlock::Thinking {
                                     thinking: t.thinking.clone(),
                                 }
                             }
                             oxi_ai::ContentBlock::ToolCall(tc) => {
-                                crate::session::AssistantContentBlock::ToolCall {
+                                oxi_store::session::AssistantContentBlock::ToolCall {
                                     id: tc.id.clone(),
                                     name: tc.name.clone(),
                                     arguments: tc.arguments.clone(),
                                 }
                             }
                             oxi_ai::ContentBlock::Image(img) => {
-                                crate::session::AssistantContentBlock::ImageResult {
+                                oxi_store::session::AssistantContentBlock::ImageResult {
                                     data: img.data.clone(),
                                     media_type: img.mime_type.clone(),
                                 }
                             }
                             oxi_ai::ContentBlock::Unknown(v) => {
                                 // Best-effort: try to extract text from unknown JSON
-                                crate::session::AssistantContentBlock::Text {
+                                oxi_store::session::AssistantContentBlock::Text {
                                     text: v.to_string(),
                                 }
                             }
@@ -1097,7 +1097,7 @@ impl AgentSession {
                         content: content_blocks,
                         provider: Some(a.provider.clone()),
                         model_id: Some(a.model.clone()),
-                        usage: Some(crate::session::Usage {
+                        usage: Some(oxi_store::session::Usage {
                             input: Some(a.usage.input as i64),
                             output: Some(a.usage.output as i64),
                             cache_read: Some(a.usage.cache_read as i64),
@@ -1115,7 +1115,7 @@ impl AgentSession {
                         .collect::<Vec<_>>()
                         .join("");
                     sm.append_message(AgentMessage::ToolResult {
-                        content: crate::session::ContentValue::String(content),
+                        content: oxi_store::session::ContentValue::String(content),
                         tool_call_id: t.tool_call_id.clone(),
                     });
                 }

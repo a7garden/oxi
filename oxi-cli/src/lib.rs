@@ -11,11 +11,7 @@ pub mod extensions;
 pub(crate) mod oauth_server;
 pub mod packages;
 pub mod print_mode;
-pub mod session;
-pub(crate) mod session_navigation;
-pub mod settings;
 pub mod setup_wizard;
-pub(crate) mod settings_validation;
 pub mod skills;
 pub(crate) mod templates;
 pub mod tui;
@@ -31,7 +27,7 @@ pub(crate) mod image_resize;
 pub(crate) mod file_processor;
 
 // Utility modules
-pub mod auth_storage;
+
 pub(crate) mod auto_compaction;
 pub(crate) mod branch_summarization;
 pub(crate) mod bash_executor;
@@ -93,8 +89,6 @@ pub(crate) mod footer_data;
 pub(crate) mod git_utils;
 pub(crate) mod keybindings;
 pub(crate) mod messages;
-pub(crate) mod model_registry;
-pub(crate) mod model_resolver;
 pub(crate) mod resource_loader;
 pub(crate) mod frontmatter;
 pub(crate) mod resource_loader_compat;
@@ -107,7 +101,6 @@ pub(crate) mod version_check;
 // Core modules
 pub mod defaults;
 pub mod provider_display_names;
-pub mod session_cwd;
 pub mod slash_commands;
 pub mod agent_session;
 pub mod agent_session_runtime;
@@ -115,7 +108,6 @@ pub(crate) mod compaction_utils;
 pub mod source_info;
 pub mod system_prompt;
 pub mod telemetry;
-pub mod auth_guidance;
 pub mod exif_orientation;
 pub mod pi_user_agent;
 pub mod timings;
@@ -124,7 +116,7 @@ use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use oxi_ai::{get_model, get_provider};
 use parking_lot::RwLock;
-use settings::{Settings, ThinkingLevel};
+use oxi_store::settings::{Settings, ThinkingLevel};
 use skills::SkillManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -184,7 +176,7 @@ pub struct InteractiveSession {
     /// Optional human-readable session name.
     pub name: Option<String>,
     /// Raw session entries for persistence and tree navigation.
-    pub entries: Vec<session::SessionEntry>,
+    pub entries: Vec<oxi_store::session::SessionEntry>,
 }
 
 impl Default for InteractiveSession {
@@ -212,8 +204,8 @@ impl InteractiveSession {
     pub fn add_user_message(&mut self, content: String) {
         self.messages.push(ChatMessage::user(content.clone()));
         // Also add to entries for session persistence
-        let entry = session::SessionEntry::new(session::AgentMessage::User {
-            content: session::ContentValue::String(content),
+        let entry = oxi_store::session::SessionEntry::new(oxi_store::session::AgentMessage::User {
+            content: oxi_store::session::ContentValue::String(content),
         });
         self.entries.push(entry);
     }
@@ -222,9 +214,9 @@ impl InteractiveSession {
     pub fn add_assistant_message(&mut self, content: String) {
         self.messages.push(ChatMessage::assistant(content.clone()));
         // Also add to entries for session persistence
-        let entry = session::SessionEntry::new(session::AgentMessage::Assistant {
-// FIXME: document.
-            content: vec![session::AssistantContentBlock::Text { text: content }],
+        let entry = oxi_store::session::SessionEntry::new(oxi_store::session::AgentMessage::Assistant {
+            // FIXME: document.
+            content: vec![oxi_store::session::AssistantContentBlock::Text { text: content }],
             provider: None,
             model_id: None,
             usage: None,
@@ -248,17 +240,17 @@ impl InteractiveSession {
     }
 
     /// Get all entries in the session
-    pub fn entries(&self) -> &[session::SessionEntry] {
+    pub fn entries(&self) -> &[oxi_store::session::SessionEntry] {
         &self.entries
     }
 
     /// Get entry at a specific index
-    pub fn get_entry(&self, index: usize) -> Option<&session::SessionEntry> {
+    pub fn get_entry(&self, index: usize) -> Option<&oxi_store::session::SessionEntry> {
         self.entries.get(index)
     }
 
     /// Get entry by ID
-    pub fn get_entry_by_id(&self, id: &str) -> Option<&session::SessionEntry> {
+    pub fn get_entry_by_id(&self, id: &str) -> Option<&oxi_store::session::SessionEntry> {
         self.entries.iter().find(|e| e.id == id)
     }
 
@@ -376,7 +368,7 @@ impl App {
             oxi_ai::CompactionStrategy::Disabled
         };
         // Resolve API key from auth storage
-        let auth = crate::auth_storage::AuthStorage::new();
+        let auth = oxi_store::auth_storage::AuthStorage::new();
         let api_key = auth.get_api_key(&provider_name);
 
         let config = AgentConfig {
@@ -617,12 +609,12 @@ impl<'a> InteractiveLoop<'a> {
     }
 
     /// Get session entries for tree navigation
-    pub fn entries(&self) -> &[session::SessionEntry] {
+    pub fn entries(&self) -> &[oxi_store::session::SessionEntry] {
         self.session.entries()
     }
 
     /// Get entry by ID
-    pub fn get_entry(&self, id: Uuid) -> Option<&session::SessionEntry> {
+    pub fn get_entry(&self, id: Uuid) -> Option<&oxi_store::session::SessionEntry> {
         self.session.get_entry_by_id(&id.to_string())
     }
 

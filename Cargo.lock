@@ -3198,6 +3198,7 @@ dependencies = [
  "once_cell",
  "oxi-agent",
  "oxi-ai",
+ "oxi-store",
  "oxi-tui",
  "parking_lot",
  "predicates",
@@ -3222,6 +3223,30 @@ dependencies = [
  "urlencoding",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "oxi-store"
+version = "0.10.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "futures",
+ "oxi-ai",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]

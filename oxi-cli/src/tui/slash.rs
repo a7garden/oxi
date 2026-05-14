@@ -2,7 +2,7 @@
 
 use super::app::{AppOverlay, AppState, SetupStep};
 use crate::agent_session::{AgentSession, ScopedModel};
-use crate::auth_storage::AuthStorage;
+use oxi_store::auth_storage::AuthStorage;
 use crate::clipboard_write;
 use crate::export::{self, ExportMeta, HtmlExportOptions};
 use oxi_tui::widgets::chat::{ContentBlock, MessageRole};
@@ -50,7 +50,7 @@ pub(crate) fn handle_slash_command(
                     Ok(()) => {
                         state.add_system_message(format!("Model: {}", model_id));
                         state.footer_state.data.model_name = model_id.to_string();
-                        crate::settings::Settings::save_last_used(model_id);
+                        oxi_store::settings::Settings::save_last_used(model_id);
                     }
                     Err(e) => {
                         state.add_system_message(format!("Error: {}", e));
@@ -59,7 +59,7 @@ pub(crate) fn handle_slash_command(
             } else {
                 // Show interactive model selector overlay
                 // Only show models from providers that have API keys configured
-                let auth = crate::auth_storage::AuthStorage::new();
+                let auth = oxi_store::auth_storage::AuthStorage::new();
                 let all_models: Vec<String> = oxi_ai::model_db::get_all_models()
                     .filter(|entry| auth.get_api_key(&entry.provider).is_some())
                     .map(|entry| format!("{}/{}", entry.provider, entry.id))
@@ -259,7 +259,7 @@ pub(crate) fn handle_slash_command(
                 total_user_tokens: None,
                 total_assistant_tokens: None,
             };
-            let entries: Vec<crate::session::SessionEntry> = state
+            let entries: Vec<oxi_store::session::SessionEntry> = state
                 .messages()
                 .iter()
                 .map(|msg| {
@@ -277,7 +277,7 @@ pub(crate) fn handle_slash_command(
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    crate::session::SessionEntry::simple_message(role, &content)
+                    oxi_store::session::SessionEntry::simple_message(role, &content)
                 })
                 .collect();
             match export::export_to_html(&entries, &meta, &HtmlExportOptions::default()) {
@@ -307,7 +307,7 @@ pub(crate) fn handle_slash_command(
                 let cwd = std::env::current_dir()
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| ".".to_string());
-                match crate::session::resolve_session_path(path, &cwd) {
+                match oxi_store::session::resolve_session_path(path, &cwd) {
                     Ok(resolved) => {
                         if !std::path::Path::new(&resolved).exists() {
                             state.add_system_message(format!("File not found: {}", resolved));
@@ -335,7 +335,7 @@ pub(crate) fn handle_slash_command(
             if let Some(ref path) = state.session_file_path {
                 if let Some(entry_id) = arg {
                     // Direct fork: /fork <entry-id>
-                    let sm = crate::session::SessionManager::open(path, None, None);
+                    let sm = oxi_store::session::SessionManager::open(path, None, None);
                     match sm.branch_from_entry(entry_id) {
                         Ok(new_path) => {
                             state.next_action = Some(super::app::TuiNextAction::SwitchSession(new_path));
@@ -346,7 +346,7 @@ pub(crate) fn handle_slash_command(
                         }
                     }
                 } else {
-                    let sm = crate::session::SessionManager::open(path, None, None);
+                    let sm = oxi_store::session::SessionManager::open(path, None, None);
                     let branch = sm.get_branch(None);
                     let user_entries: Vec<_> = branch.iter()
                         .filter(|e| e.message.is_user())
@@ -375,7 +375,7 @@ pub(crate) fn handle_slash_command(
                 let cwd: String = std::env::current_dir()
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| ".".to_string());
-                match crate::session::SessionManager::fork_from(path, &cwd, None) {
+                match oxi_store::session::SessionManager::fork_from(path, &cwd, None) {
                     Ok(new_sm) => {
                         if let Some(new_path) = new_sm.get_session_file() {
                             state.add_system_message(format!(
@@ -396,18 +396,18 @@ pub(crate) fn handle_slash_command(
         }
         "/tree" => {
             if let Some(ref path) = state.session_file_path {
-                let sm = crate::session::SessionManager::open(path, None, None);
+                let sm = oxi_store::session::SessionManager::open(path, None, None);
                 match sm.get_tree(uuid::Uuid::nil()) {
                     Ok(roots) => {
                         if roots.is_empty() {
                             state.add_system_message("Empty session.".to_string());
                         } else {
                             let mut out = "Session tree:\n\n".to_string();
-                            fn render_node(node: &crate::session::SessionTreeNode, depth: usize, out: &mut String) {
+                            fn render_node(node: &oxi_store::session::SessionTreeNode, depth: usize, out: &mut String) {
                                 let indent = "  ".repeat(depth);
                                 let role = match &node.entry.message {
-                                    crate::session::AgentMessage::User { .. } => "U",
-                                    crate::session::AgentMessage::Assistant { .. } => "A",
+                                    oxi_store::session::AgentMessage::User { .. } => "U",
+                                    oxi_store::session::AgentMessage::Assistant { .. } => "A",
                                     _ => "-",
                                 };
                                 let preview: String = node.entry.content().chars().take(50).collect();
@@ -486,7 +486,7 @@ pub(crate) fn handle_slash_command(
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| ".".to_string());
             let rt = tokio::runtime::Handle::current();
-            match rt.block_on(crate::session::SessionManager::list(&cwd, None)) {
+            match rt.block_on(oxi_store::session::SessionManager::list(&cwd, None)) {
                 Ok(sessions) if sessions.is_empty() => {
                     state.add_system_message("No previous sessions found.".to_string());
                 }
@@ -504,7 +504,7 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/reload" => {
-            let reloaded = crate::settings::Settings::load().unwrap_or_default();
+            let reloaded = oxi_store::settings::Settings::load().unwrap_or_default();
             let model_name = reloaded.effective_model(None).unwrap_or_default();
             let provider = reloaded.effective_provider(None).unwrap_or_default();
             let theme_name = reloaded.theme.clone();

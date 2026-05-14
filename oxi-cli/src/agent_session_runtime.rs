@@ -31,12 +31,12 @@
 //! ```
 
 use crate::agent_session::{AgentSession, AgentSessionHandle, ScopedModel};
-use crate::auth_storage::AuthStorage;
-use crate::model_registry::ModelRegistry;
+use oxi_store::auth_storage::AuthStorage;
+use oxi_store::model_registry::ModelRegistry;
 use crate::resource_loader::ResourceLoader;
-use crate::session::SessionManager;
-use crate::session_cwd::{assert_session_cwd_exists, SessionCwdSource};
-use crate::settings::{Settings, ThinkingLevel};
+use oxi_store::session::SessionManager;
+use oxi_store::session_cwd::{assert_session_cwd_exists, SessionCwdSource};
+use oxi_store::settings::{Settings, ThinkingLevel};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

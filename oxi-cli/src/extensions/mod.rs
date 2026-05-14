@@ -64,7 +64,7 @@ pub trait Extension: Send + Sync {
 /// TODO: document.
     fn on_session_end(&self, _session_id: &str) {}
 /// TODO: document.
-    fn on_settings_changed(&self, _settings: &crate::settings::Settings) {}
+    fn on_settings_changed(&self, _settings: &oxi_store::settings::Settings) {}
 /// TODO: document.
     fn on_event(&self, _event: &oxi_agent::AgentEvent) {}
 /// TODO: document.
@@ -139,7 +139,7 @@ impl Extension for RecordingExtension {
     fn on_tool_result(&self, tool: &str, _result: &oxi_agent::AgentToolResult) { self.push(&format!("on_tool_result({})", tool)); }
     fn on_session_start(&self, session_id: &str) { self.push(&format!("on_session_start({})", session_id)); }
     fn on_session_end(&self, session_id: &str) { self.push(&format!("on_session_end({})", session_id)); }
-    fn on_settings_changed(&self, _settings: &crate::settings::Settings) { self.push("on_settings_changed"); }
+    fn on_settings_changed(&self, _settings: &oxi_store::settings::Settings) { self.push("on_settings_changed"); }
     fn on_event(&self, _event: &oxi_agent::AgentEvent) { self.push("on_event"); }
 }
 
@@ -147,7 +147,7 @@ impl Extension for RecordingExtension {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::Settings;
+    use oxi_store::settings::Settings;
     use std::sync::Arc;
 
     #[test]

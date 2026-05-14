@@ -8,8 +8,8 @@ use crate::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
 };
-use crate::auth_storage::AuthStorage;
-use crate::session::SessionManager;
+use oxi_store::auth_storage::AuthStorage;
+use oxi_store::session::SessionManager;
 use crate::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
@@ -273,7 +273,7 @@ pub(crate) enum AppOverlay {
     },
     /// Session resume selector
     ResumeSelect {
-        sessions: Vec<crate::session::SessionInfo>,
+        sessions: Vec<oxi_store::session::SessionInfo>,
         selected: usize,
     },
 }
@@ -626,7 +626,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
     // ── Determine initial session ──
     let mut session_target: Option<String> = if resume_last {
-        crate::session::find_recent_session_path(&cwd)
+        oxi_store::session::find_recent_session_path(&cwd)
     } else {
         None
     };
@@ -884,17 +884,17 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // Restore previous messages if resuming
         if is_resuming {
             if let Some(ref path) = session_target {
-                let sm = crate::session::SessionManager::open(path, None, Some(&cwd));
+                let sm = oxi_store::session::SessionManager::open(path, None, Some(&cwd));
                 let branch = sm.get_branch(None);
                 for entry in &branch {
                     match &entry.message {
-                        crate::session::AgentMessage::User { content } => {
+                        oxi_store::session::AgentMessage::User { content } => {
                             state.add_user_message(content.as_str().to_string());
                         }
-                        crate::session::AgentMessage::Assistant { content, .. } => {
+                        oxi_store::session::AgentMessage::Assistant { content, .. } => {
                             let text: String = content.iter()
                                 .filter_map(|b| match b {
-                                    crate::session::AssistantContentBlock::Text { text } => Some(text.as_str()),
+                                    oxi_store::session::AssistantContentBlock::Text { text } => Some(text.as_str()),
                                     _ => None,
                                 })
                                 .collect::<Vec<_>>()
@@ -920,7 +920,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // Check if model is configured
         let has_model = !model_id.is_empty() && model_id.contains('/');
         if !has_model {
-            let auth = crate::auth_storage::AuthStorage::new();
+            let auth = oxi_store::auth_storage::AuthStorage::new();
             let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
                 .iter()
                 .map(|builtin| {

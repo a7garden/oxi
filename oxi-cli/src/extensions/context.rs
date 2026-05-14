@@ -1,6 +1,6 @@
 //! Extension context and builder.
 
-use crate::settings::Settings;
+use oxi_store::settings::Settings;
 use crate::extensions::types::ExtensionErrorRecord;
 use anyhow::{bail, Context, Result};
 use parking_lot::RwLock;
