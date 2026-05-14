@@ -305,6 +305,9 @@ pub(crate) struct AppState {
     pub message_count: usize,
     /// Active overlay (None = normal chat mode)
     pub overlay: Option<AppOverlay>,
+    /// Component-based overlay (takes priority over AppOverlay variants for
+    /// ModelSelect, LogoutSelect, ResumeSelect). Migrated from AppOverlay.
+    pub overlay_state: Option<Box<dyn super::overlay::OverlayComponent>>,
     /// WASM extension manager for dynamic commands
     pub wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
     /// Session file path for the current session
@@ -340,6 +343,7 @@ impl AppState {
             slash_completion_active: false,
             message_count: 0,
             overlay: None,
+            overlay_state: None,
             wasm_ext: None,
             session_file_path: None,
             next_action: None,

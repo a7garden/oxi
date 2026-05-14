@@ -511,6 +511,28 @@ async fn handle_overlay_key(
         return None;
     }
 
+    // ── Component-based overlay (takes priority) ──
+    if let Some(ref mut overlay) = state.overlay_state {
+        use super::overlay::{OverlayAction, OverlayComponent};
+        let action = overlay.handle_key(key);
+        match action {
+            OverlayAction::Close => {
+                state.overlay_state = None;
+                state.overlay = None;
+            }
+            OverlayAction::SwitchSession(path) => {
+                state.next_action = Some(super::app::TuiNextAction::SwitchSession(path));
+                state.overlay_state = None;
+            }
+            OverlayAction::NewSession => {
+                state.next_action = Some(super::app::TuiNextAction::NewSession);
+                state.overlay_state = None;
+            }
+            _ => {}
+        }
+        return None;
+    }
+
     // Clone overlay variant to avoid borrow conflicts
     let overlay = state.overlay.clone();
     match &overlay {

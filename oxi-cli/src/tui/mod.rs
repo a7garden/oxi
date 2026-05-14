@@ -4,6 +4,7 @@
 
 mod app;
 mod handlers;
+mod overlay;
 mod render;
 mod slash;
 

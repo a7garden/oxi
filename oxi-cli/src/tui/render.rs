@@ -407,6 +407,12 @@ fn render_slash_popup_overlay(
 // ── Overlay dispatch ────────────────────────────────────────────────────
 
 fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
+    // ── Component-based overlay (takes priority) ──
+    if let Some(ref mut overlay) = state.overlay_state {
+        overlay.render(f, area, theme);
+        return;
+    }
+    // ── Legacy AppOverlay enum ──
     match &state.overlay {
         Some(AppOverlay::Setup(step)) | Some(AppOverlay::ProviderConfig(step)) => {
             let step = step.clone();

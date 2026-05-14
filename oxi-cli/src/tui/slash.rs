@@ -70,11 +70,8 @@ pub(crate) fn handle_slash_command(
                         session.model_id()
                     ));
                 } else {
-                    state.overlay = Some(AppOverlay::ModelSelect {
-                        models: all_models,
-                        filter: String::new(),
-                        selected: 0,
-                    });
+                    state.overlay = None;
+                    state.overlay_state = Some(super::overlay::model_select(all_models, session, state));
                 }
             }
             true
@@ -468,10 +465,8 @@ pub(crate) fn handle_slash_command(
                 if providers.is_empty() {
                     state.add_system_message("No providers configured.".to_string());
                 } else {
-                    state.overlay = Some(AppOverlay::LogoutSelect {
-                        providers,
-                        selected: 0,
-                    });
+                    state.overlay = None;
+                    state.overlay_state = Some(super::overlay::logout_select(providers, state));
                 }
             }
             true
@@ -492,10 +487,8 @@ pub(crate) fn handle_slash_command(
                 }
                 Ok(sessions) => {
                     let recent: Vec<_> = sessions.into_iter().take(15).collect();
-                    state.overlay = Some(AppOverlay::ResumeSelect {
-                        sessions: recent,
-                        selected: 0,
-                    });
+                    state.overlay = None;
+                    state.overlay_state = Some(super::overlay::resume_select(recent));
                 }
                 Err(e) => {
                     state.add_system_message(format!("Error listing sessions: {}", e));
