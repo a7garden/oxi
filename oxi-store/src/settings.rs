@@ -930,7 +930,6 @@ theme = "dracula"
 
     #[test]
     fn test_load_from_dir_with_project_config() {
-        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&[
             "OXI_MODEL",
             "OXI_PROVIDER",
@@ -968,7 +967,6 @@ theme = "dracula"
     #[test]
     fn test_load_from_dir_no_config() {
         // Clean env vars that load_from() reads via apply_env()
-        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&[
             "OXI_MODEL",
             "OXI_PROVIDER",
@@ -990,45 +988,52 @@ theme = "dracula"
 
     #[test]
     fn test_from_env() {
-        let _guard = EnvGuard::new(&["OXI_MODEL", "OXI_THEME", "OXI_TOOL_TIMEOUT"]);
-        env::set_var("OXI_MODEL", "anthropic/claude-haiku-4-20250414");
-        env::set_var("OXI_THEME", "nord");
-        env::set_var("OXI_TOOL_TIMEOUT", "60");
+        // NOTE: Environment variable overrides are disabled.
+        // from_env() returns defaults only.
+        let _guard = EnvGuard::new(&[ // no env vars to clear
+            "OXI_MODEL", "OXI_THEME", "OXI_TOOL_TIMEOUT",
+            "OXI_PROVIDER", "OXI_DEFAULT_MODEL",
+        ]);
 
         let settings = Settings::from_env();
-        assert_eq!(
-            settings.default_model,
-            Some("anthropic/claude-haiku-4-20250414".to_string())
-        );
-        assert_eq!(settings.theme, "nord");
-        assert_eq!(settings.tool_timeout_seconds, 60);
+        // All fields should be at defaults since env overrides are disabled
+        assert_eq!(settings.default_model, None);
+        assert_eq!(settings.theme, "default");
+        assert_eq!(settings.tool_timeout_seconds, 120);
     }
 
     #[test]
     fn test_apply_env_boolish() {
+        // NOTE: Environment variable overrides are disabled.
+        // apply_env() is a no-op.
         let _guard = EnvGuard::new(&["OXI_STREAM", "OXI_EXTENSIONS_ENABLED"]);
         env::set_var("OXI_STREAM", "false");
         env::set_var("OXI_EXTENSIONS_ENABLED", "0");
 
         let mut settings = Settings::default();
         settings.apply_env();
-        assert!(!settings.stream_responses);
-        assert!(!settings.extensions_enabled);
+        // Since env overrides are disabled, values stay at defaults
+        assert!(settings.stream_responses); // default is true
+        assert!(settings.extensions_enabled); // default is true
     }
 
     #[test]
     fn test_apply_env_temperature() {
+        // NOTE: Environment variable overrides are disabled.
         let _guard = EnvGuard::new(&["OXI_TEMPERATURE"]);
         env::set_var("OXI_TEMPERATURE", "0.7");
 
         let mut settings = Settings::default();
         settings.apply_env();
-        assert_eq!(settings.default_temperature, Some(0.7));
+        // Since env overrides are disabled, temperature stays at None
+        assert_eq!(settings.default_temperature, None);
     }
 
     #[test]
     fn test_env_does_not_override_when_unset() {
-        let _guard = EnvGuard::new(&["OXI_MODEL", "OXI_PROVIDER"]);
+        let _guard = EnvGuard::new(&[
+            "OXI_MODEL", "OXI_PROVIDER", "OXI_THEME", "OXI_TEMPERATURE",
+        ]);
         let settings = Settings::from_env();
         assert!(settings.default_model.is_none());
         assert!(settings.default_provider.is_none());
@@ -1154,7 +1159,6 @@ theme = "dracula"
 
     #[test]
     fn test_effective_session_dir_default() {
-        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         let settings = Settings::default();
         let dir = settings.effective_session_dir().unwrap();
@@ -1163,7 +1167,6 @@ theme = "dracula"
 
     #[test]
     fn test_effective_session_dir_from_field() {
-        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         let mut settings = Settings::default();
         settings.session_dir = Some(PathBuf::from("/tmp/oxi-sessions"));
@@ -1174,15 +1177,15 @@ theme = "dracula"
     }
 
     #[test]
-    fn test_effective_session_dir_from_env() {
-        let _lock = ENV_LOCK.lock().unwrap();
+    fn test_effective_session_dir_env_disabled() {
+        // NOTE: Environment variable overrides are disabled.
+        // OXI_SESSION_DIR is ignored; effective_session_dir() returns the field value (or default).
         let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
         env::set_var("OXI_SESSION_DIR", "/tmp/env-sessions");
         let settings = Settings::default();
-        assert_eq!(
-            settings.effective_session_dir().unwrap(),
-            PathBuf::from("/tmp/env-sessions")
-        );
+        // Env is ignored, so it should use the default path, not /tmp/env-sessions
+        let dir = settings.effective_session_dir().unwrap();
+        assert!(dir.ends_with("sessions"), "expected default sessions dir, got: {:?}", dir);
     }
 
     // ── Migration ────────────────────────────────────────────────────
@@ -1452,7 +1455,6 @@ tool_timeout_seconds = 45
 
     #[test]
     fn test_load_from_dir_with_json_project_config() {
-        let _lock = ENV_LOCK.lock().unwrap();
         let _guard = EnvGuard::new(&[
             "OXI_MODEL",
             "OXI_PROVIDER",

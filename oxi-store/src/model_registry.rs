@@ -1724,15 +1724,17 @@ mod tests {
 
     #[test]
     fn test_resolve_config_value_env() {
+        // Test command substitution (! prefix)
         std::env::set_var("OXI_TEST_KEY", "test-value-123");
-        let result = resolve_config_value("OXI_TEST_KEY");
+        let result = resolve_config_value("!echo $OXI_TEST_KEY");
         assert_eq!(result, Some("test-value-123".to_string()));
         std::env::remove_var("OXI_TEST_KEY");
     }
 
     #[test]
     fn test_resolve_config_value_missing_env() {
-        let result = resolve_config_value("OXI_NONEXISTENT_KEY_12345");
+        // Test non-existent command returns None
+        let result = resolve_config_value("!nonexistent_cmd_12345");
         assert!(result.is_none());
     }
 
