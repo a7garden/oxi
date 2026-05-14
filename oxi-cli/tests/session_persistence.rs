@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use oxi::session::{SessionManager, AgentMessage, ContentValue};
+    use oxi_store::session::{SessionManager, AgentMessage, ContentValue};
     use tempfile::TempDir;
 
     #[test]
