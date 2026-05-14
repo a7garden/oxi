@@ -16,14 +16,17 @@ pub(crate) mod oauth_server;
 // ─── Directory groups ───────────────────────────────────────────────────────
 pub(crate) mod app;
 pub(crate) mod context;
-pub(crate) mod extensions;
+pub mod extensions; // public for main.rs
 pub(crate) mod infra;
 pub(crate) mod media;
 pub(crate) mod prompt;
 pub(crate) mod rpc_mode;
 pub(crate) mod skills;
-pub(crate) mod storage;
-pub(crate) mod tui;
+pub mod storage; // public for main.rs (packages)
+// Re-exports from storage for main.rs
+pub use storage::packages::PackageManager;
+pub use storage::packages::ResourceKind;
+pub mod tui; // public for main.rs
 pub(crate) mod ui;
 pub(crate) mod util;
 

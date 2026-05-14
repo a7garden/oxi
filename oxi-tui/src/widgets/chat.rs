@@ -252,18 +252,10 @@ impl ChatViewState {
         if let Some(ref mut s) = self.streaming {
             // Providers sometimes emit whitespace-only text around tool calls.
             // Rendering that literally creates large blank gaps in the chat view.
-            // Ignore whitespace-only deltas until we have any non-whitespace text.
+            // Skip whitespace-only deltas entirely — paragraph breaks within text
+            // come as part of non-whitespace deltas (e.g., "text\n\nmore text").
             if text.trim().is_empty() {
-                let has_nonempty_text = s.message.content_blocks.iter().any(|b| {
-                    if let ContentBlock::Text { content } = b {
-                        !content.trim().is_empty()
-                    } else {
-                        false
-                    }
-                });
-                if !has_nonempty_text {
-                    return;
-                }
+                return;
             }
 
             if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
@@ -676,6 +668,16 @@ enum LayoutKind {
     Spinner { frame: usize },
 }
 
+/// Check if a content block renders as a bordered box (tool calls, errors).
+/// Consecutive box blocks need spacers between them for visual separation.
+fn is_box_block(block: &ContentBlock) -> bool {
+    matches!(block,
+        ContentBlock::ToolCall { .. }
+        | ContentBlock::ToolResult { .. }
+        | ContentBlock::Error { .. }
+    )
+}
+
 fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     let mut entries = Vec::new();
     let mut y: u16 = 0;
@@ -707,6 +709,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Rule });
             y += 1;
         }
+        let mut prev_was_box = false;
         for block in &msg.content_blocks {
             // Skip whitespace-only blocks (defensive; finish_streaming also removes them).
             let is_empty = match block {
@@ -717,6 +720,14 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             if is_empty {
                 continue;
             }
+
+            // Insert spacer between consecutive box-type blocks (tool calls, errors)
+            let is_box = is_box_block(block);
+            if is_box && prev_was_box {
+                entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
+                y += 1;
+            }
+            prev_was_box = is_box;
 
             let kind = block_to_layout_kind(block, msg.role, usable_width);
             let h = measure_kind(&kind, usable_width);
@@ -731,6 +742,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
             y += 1;
         }
+        let mut prev_was_box = false;
         for block in &streaming.message.content_blocks {
             // Skip whitespace-only blocks (prevents large blank gaps during tool-only turns).
             let is_empty = match block {
@@ -741,6 +753,14 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             if is_empty {
                 continue;
             }
+
+            // Insert spacer between consecutive box-type blocks (tool calls, errors)
+            let is_box = is_box_block(block);
+            if is_box && prev_was_box {
+                entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
+                y += 1;
+            }
+            prev_was_box = is_box;
 
             let kind = block_to_layout_kind(block, MessageRole::Assistant, usable_width);
             let h = measure_kind(&kind, usable_width);

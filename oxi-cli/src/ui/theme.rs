@@ -1068,7 +1068,10 @@ impl ThemeManager {
     /// Toggle between dark and light themes
     pub fn toggle_dark_light(&self) -> bool {
         let current = self.current_theme.read().clone();
-        let current_theme = self.themes.get(&current)?;
+        let current_theme = match self.themes.get(&current) {
+            Some(t) => t,
+            None => return false,
+        };
 
         let next_name = if current_theme.is_dark { "oxi_light" } else { "oxi_dark" };
         self.set_current_theme(next_name)

@@ -6,7 +6,7 @@ use anyhow::Result;
 use clap::Parser;
 use oxi::cli::{CliArgs, Commands, ConfigCommands, ExtCommands, PkgCommands};
 use oxi::extensions::ExtensionRegistry;
-use oxi::packages::{PackageManager, ResourceKind};
+use oxi::storage::packages::{PackageManager, ResourceKind};
 use oxi_store::session::{AgentMessage, SessionManager};
 use oxi_store::settings::Settings;
 use std::path::{Path, PathBuf};
