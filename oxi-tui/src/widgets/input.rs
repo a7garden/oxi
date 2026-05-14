@@ -1,81 +1,130 @@
-//! Input widget — single-line text input with cursor, placeholder, and scrolling.
+//! Input widget — multi-line text input with cursor, placeholder, and scrolling.
 //!
-//! Supports full Unicode including CJK double-width characters.
-//! Uses ASCII-safe prompt character '>' instead of Unicode arrows.
+//! Built on `ratatui-textarea` for:
+//! - Full Unicode including CJK double-width characters
+//! - Emacs-like shortcuts (Ctrl+Left/Right for word movement, Ctrl+A/E)
+//! - Undo/Redo support (Ctrl+Z / Ctrl+Shift+Z)
+//! - Better IME handling via bracketed paste mode
+//!
+//! Behavior:
+//! - Enter submits text
+//! - Shift+Enter inserts newline (multiline mode)
 
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::{Paragraph, StatefulWidget, Widget},
-};
+use ratatui::prelude::*;
+use ratatui_textarea::{TextArea, Input as TextAreaInput, Key};
 use crate::Theme;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default)]
+/// Input state wrapping ratatui-textarea's TextArea.
+///
+/// This provides all textarea features:
+/// - Insert/delete characters, word-by-word deletion (Ctrl+Backspace)
+/// - Cursor movement (Left/Right, Ctrl+Left/Right, Home/End)
+/// - Undo/Redo (Ctrl+Z / Ctrl+Shift+Z)
+/// - Selection support (Shift+Arrow)
+/// - Multi-line text with automatic line wrapping
+/// - Shift+Enter inserts newline
+#[derive(Debug)]
 pub struct InputState {
-    pub text: String,
-    pub cursor: usize,
-    pub placeholder: Option<String>,
+    /// The textarea holds all state (text, cursor, history, etc.)
+    textarea: TextArea<'static>,
+}
+
+impl Default for InputState {
+    fn default() -> Self {
+        let mut textarea = TextArea::default();
+        // No visual line numbers for input
+        textarea.remove_line_number();
+        // Disable cursor line highlight for cleaner look
+        textarea.set_cursor_line_style(Style::default());
+        Self { textarea }
+    }
 }
 
 impl InputState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get the current text content
+    pub fn text(&self) -> String {
+        self.textarea.lines().join("\n")
+    }
+
+    /// Get lines as a vector
+    pub fn lines(&self) -> Vec<String> {
+        self.textarea.lines().to_vec()
+    }
+
     pub fn clear(&mut self) {
-        self.text.clear();
-        self.cursor = 0;
+        self.textarea.clear();
     }
 
-    pub fn insert_char(&mut self, c: char) {
-        let byte_pos = self.char_to_byte(self.cursor);
-        self.text.insert(byte_pos, c);
-        self.cursor += 1;
+    /// Set placeholder text
+    pub fn set_placeholder(&mut self, placeholder: Option<String>) {
+        if let Some(p) = placeholder {
+            self.textarea.set_placeholder_text(&p);
+        } else {
+            self.textarea.set_placeholder_text("");
+        }
     }
 
+    // ── Input handling ──
+
+    /// Handle a key event, returning true if it was consumed (Enter/Tab).
+    pub fn handle_key(&mut self, key: Key) -> bool {
+        match key {
+            Key::Enter => true, // Enter is reserved for submit
+            Key::Tab => true,   // Tab is used for slash completion
+            _ => {
+                self.textarea.input(TextAreaInput { key, ..Default::default() });
+                false
+            }
+        }
+    }
+
+    /// Handle a char input event.
+    pub fn handle_char(&mut self, c: char) {
+        self.textarea.input(TextAreaInput {
+            key: Key::Char(c),
+            ctrl: false,
+            alt: false,
+            shift: false,
+        });
+    }
+
+    /// Handle a full Input event.
+    /// Returns true if Enter pressed (should submit).
+    pub fn handle_input(&mut self, input: TextAreaInput) -> bool {
+        if input.key == Key::Enter && !input.shift {
+            true // Enter without shift = submit
+        } else {
+            self.textarea.input(input);
+            false
+        }
+    }
+
+    /// Insert text at cursor position
     pub fn insert_str(&mut self, s: &str) {
-        let byte_pos = self.char_to_byte(self.cursor);
-        self.text.insert_str(byte_pos, s);
-        self.cursor += s.chars().count();
+        self.textarea.insert_str(s);
     }
 
-    pub fn backspace(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-            let byte_pos = self.char_to_byte(self.cursor);
-            self.text.remove(byte_pos);
-        }
+    /// Get mutable access to the underlying textarea
+    pub fn textarea_mut(&mut self) -> &mut TextArea<'static> {
+        &mut self.textarea
     }
 
-    pub fn delete(&mut self) {
-        if self.cursor < self.text.chars().count() {
-            let byte_pos = self.char_to_byte(self.cursor);
-            self.text.remove(byte_pos);
-        }
+    /// Undo last change
+    pub fn undo(&mut self) {
+        self.textarea.undo();
     }
 
-    pub fn move_left(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    pub fn move_right(&mut self) {
-        let max = self.text.chars().count();
-        self.cursor = (self.cursor + 1).min(max);
-    }
-
-    pub fn move_home(&mut self) { self.cursor = 0; }
-    pub fn move_end(&mut self) { self.cursor = self.text.chars().count(); }
-
-    fn char_to_byte(&self, char_idx: usize) -> usize {
-        self.text.char_indices().nth(char_idx).map(|(i, _)| i).unwrap_or(self.text.len())
-    }
-
-    fn display_width_up_to(&self, char_idx: usize) -> usize {
-        let s: String = self.text.chars().take(char_idx).collect();
-        UnicodeWidthStr::width(s.as_str())
+    /// Redo last undone change
+    pub fn redo(&mut self) {
+        self.textarea.redo();
     }
 }
 
@@ -83,6 +132,10 @@ impl InputState {
 // Widget
 // ---------------------------------------------------------------------------
 
+/// Input widget for the main prompt.
+///
+/// This widget wraps the textarea and adds a prompt character ("> ").
+/// The textarea is rendered as a StatefulWidget using TextArea::widget().
 pub struct Input<'a> {
     theme: &'a Theme,
     placeholder: Option<&'a str>,
@@ -99,118 +152,44 @@ impl<'a> Input<'a> {
     }
 }
 
-impl StatefulWidget for Input<'_> {
+impl ratatui::widgets::StatefulWidget for Input<'_> {
     type State = InputState;
 
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+    fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer, state: &mut Self::State) {
         if area.height < 1 || area.width < 4 { return; }
 
-        let styles = self.theme.to_styles();
         let y = area.y;
+        
+        // Render prompt: ">" (1 cell)
+        let prompt_fg = self.theme.colors.primary.to_ratatui();
+        buf[(area.x, y)].set_char('>').set_style(Style::default().fg(prompt_fg));
+        buf[(area.x + 1, y)].set_char(' ').set_style(Style::default());
 
-        // Prompt: ">" (1 cell, always safe)
-        buf[(area.x, y)].set_char('>').set_style(styles.primary);
-        buf[(area.x + 1, y)].set_char(' ').set_style(styles.normal);
+        // Configure the textarea with oxi styling
+        let textarea = state.textarea_mut();
+        textarea.set_style(Style::default().fg(self.theme.colors.foreground.to_ratatui()));
+        textarea.set_cursor_style(Style::default()
+            .fg(self.theme.colors.cursor_fg.to_ratatui())
+            .bg(self.theme.colors.cursor_bg.to_ratatui()));
+        textarea.set_cursor_line_style(Style::default());
+        textarea.remove_line_number();
+        
+        // Placeholder
+        let placeholder_text = self.placeholder.unwrap_or("");
+        textarea.set_placeholder_text(placeholder_text);
+        textarea.set_placeholder_style(Style::default().fg(self.theme.colors.muted.to_ratatui()));
 
-        let content_start = area.x + 2;
-        let max_cols = (area.width as usize).saturating_sub(3);
-
-        let text_fg = if state.text.is_empty() { styles.muted } else { styles.normal };
-
-        let text_area = Rect {
-            x: content_start,
+        // Render the textarea widget
+        let content_area = Rect {
+            x: area.x + 2,
             y,
-            width: max_cols as u16,
-            height: 1,
+            width: area.width - 2,
+            height: area.height,
         };
 
-        if state.text.is_empty() {
-            // Show placeholder
-            let display_text = self.placeholder.unwrap_or("");
-            let visible: String = display_text.chars().take(max_cols).collect();
-            Paragraph::new(Line::from(Span::styled(visible, text_fg))).render(text_area, buf);
-
-            // Cursor at start
-            buf[(content_start, y)]
-                .set_char(' ')
-                .set_style(Style::default()
-                    .fg(self.theme.colors.cursor_fg.to_ratatui())
-                    .bg(self.theme.colors.cursor_bg.to_ratatui())
-                    .add_modifier(Modifier::BOLD));
-            return;
-        }
-
-        // Calculate scroll offset for cursor visibility
-        let cursor_col = state.display_width_up_to(state.cursor);
-        let scroll_col = if cursor_col >= max_cols {
-            cursor_col - max_cols + 1
-        } else { 0 };
-
-        // Build visible portion
-        let chars: Vec<char> = state.text.chars().collect();
-        let total_chars = chars.len();
-        let char_widths: Vec<usize> = chars.iter().map(|c| c.width().unwrap_or(1)).collect();
-        let mut prefix_width = vec![0usize; total_chars + 1];
-        for i in 0..total_chars {
-            prefix_width[i + 1] = prefix_width[i] + char_widths[i];
-        }
-
-        // Find start char index
-        let mut start_ci = 0;
-        for i in 0..total_chars {
-            if prefix_width[i + 1] > scroll_col {
-                start_ci = i;
-                break;
-            }
-            start_ci = i + 1;
-        }
-
-        let mut visible_str = String::new();
-        let mut cursor_screen_col: Option<usize> = None;
-        let mut cursor_char = ' ';
-        let mut cursor_w: u16 = 1;
-
-        for ci in start_ci..total_chars {
-            let cw = char_widths[ci];
-            let disp_col = prefix_width[ci].saturating_sub(scroll_col);
-            if disp_col + cw > max_cols { break; }
-
-            if state.cursor == ci {
-                cursor_screen_col = Some(disp_col);
-                cursor_char = chars[ci];
-                cursor_w = cw as u16;
-            }
-            visible_str.push(chars[ci]);
-        }
-
-        // Cursor at end
-        if state.cursor >= total_chars {
-            let end_col = prefix_width[total_chars].saturating_sub(scroll_col);
-            if end_col <= max_cols + 1 {
-                cursor_screen_col = Some(end_col.min(max_cols));
-                cursor_char = ' ';
-                cursor_w = 1;
-            }
-        }
-
-        // Render text
-        Paragraph::new(Line::from(Span::styled(&visible_str, text_fg))).render(text_area, buf);
-
-        // Draw cursor
-        if let Some(col) = cursor_screen_col {
-            let cursor_style = Style::default()
-                .fg(self.theme.colors.cursor_fg.to_ratatui())
-                .bg(self.theme.colors.cursor_bg.to_ratatui())
-                .add_modifier(Modifier::BOLD);
-
-            let screen_x = content_start + col as u16;
-            if screen_x < area.x + area.width {
-                buf[(screen_x, y)].set_char(cursor_char).set_style(cursor_style);
-                if cursor_w > 1 && screen_x + 1 < area.x + area.width {
-                    buf[(screen_x + 1, y)].set_char(' ').set_style(cursor_style);
-                }
-            }
-        }
+        // Clone textarea for rendering (TextArea implements Clone)
+        let textarea_clone = textarea.clone();
+        textarea_clone.render(content_area, buf);
     }
 }
 
@@ -225,62 +204,56 @@ mod tests {
     #[test]
     fn input_state_empty() {
         let state = InputState::default();
-        assert!(state.text.is_empty());
-        assert_eq!(state.cursor, 0);
+        assert!(state.text().is_empty());
     }
 
     #[test]
     fn input_state_insert() {
         let mut state = InputState::default();
-        state.insert_char('a');
-        assert_eq!(state.text, "a");
-        state.insert_char('b');
-        assert_eq!(state.text, "ab");
-        state.insert_char('\u{d55c}'); // 한
-        assert_eq!(state.text, "ab\u{d55c}");
-        assert_eq!(state.cursor, 3);
+        state.handle_char('a');
+        assert_eq!(state.text(), "a");
+        state.handle_char('b');
+        assert_eq!(state.text(), "ab");
+        state.handle_char('\u{d55c}'); // 한
+        assert_eq!(state.text(), "ab한");
     }
 
     #[test]
     fn input_state_insert_str() {
         let mut state = InputState::default();
-        state.insert_str("\u{c548}\u{b155}\u{d558}\u{c138}\u{c694}"); // 안녕하세요
-        assert_eq!(state.cursor, 5);
+        state.insert_str("안녕하세요");
+        assert_eq!(state.text(), "안녕하세요");
     }
 
     #[test]
-    fn input_state_backspace() {
+    fn input_state_multiline() {
         let mut state = InputState::default();
-        state.text = "ab\u{d55c}".to_string(); // ab한
-        state.cursor = 3;
-        state.backspace();
-        assert_eq!(state.text, "ab");
-        assert_eq!(state.cursor, 2);
+        state.handle_char('a');
+        state.handle_input(TextAreaInput {
+            key: Key::Enter,
+            shift: true, // Shift+Enter = newline
+            ..Default::default()
+        });
+        state.handle_char('b');
+        assert_eq!(state.text(), "a\nb");
     }
 
     #[test]
-    fn input_state_cursor_movement() {
+    fn input_state_clear() {
         let mut state = InputState::default();
-        state.text = "hello".to_string();
-        state.cursor = 5;
-        state.move_left();
-        assert_eq!(state.cursor, 4);
-        state.move_right();
-        assert_eq!(state.cursor, 5);
-        state.move_home();
-        assert_eq!(state.cursor, 0);
-        state.move_end();
-        assert_eq!(state.cursor, 5);
+        state.insert_str("hello");
+        state.clear();
+        assert!(state.text().is_empty());
     }
 
     #[test]
-    fn input_state_display_width() {
+    fn input_state_undo_redo() {
         let mut state = InputState::default();
-        state.text = "ab\u{d55c}\u{ae00}".to_string(); // ab한글
-        assert_eq!(state.display_width_up_to(0), 0);
-        assert_eq!(state.display_width_up_to(1), 1);
-        assert_eq!(state.display_width_up_to(2), 2);
-        assert_eq!(state.display_width_up_to(3), 4);
-        assert_eq!(state.display_width_up_to(4), 6);
+        state.insert_str("hello");
+        assert_eq!(state.text(), "hello");
+        state.undo();
+        assert_eq!(state.text(), "");
+        state.redo();
+        assert_eq!(state.text(), "hello");
     }
 }

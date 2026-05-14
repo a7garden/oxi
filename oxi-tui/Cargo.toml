@@ -14,6 +14,7 @@ exclude = ["target/"]
 [dependencies]
 # Terminal UI
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
+ratatui-textarea = "0.9"
 crossterm = "0.28"
 tui-markdown = { version = "0.3", default-features = false, features = [] }
 tui-scrollview = "0.6"
