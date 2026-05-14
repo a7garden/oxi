@@ -169,15 +169,7 @@ async fn handle_key(
         }
         KeyCode::Left => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
-                let text: Vec<char> = state.input.text.chars().collect();
-                let mut pos = state.input.cursor;
-                while pos > 0 && text[pos - 1].is_whitespace() {
-                    pos -= 1;
-                }
-                while pos > 0 && !text[pos - 1].is_whitespace() {
-                    pos -= 1;
-                }
-                state.input.cursor = pos;
+                state.input.move_word_left();
             } else {
                 state.input.move_left();
             }
@@ -185,15 +177,7 @@ async fn handle_key(
         }
         KeyCode::Right => {
             if key.modifiers.contains(KeyModifiers::CONTROL) {
-                let text: Vec<char> = state.input.text.chars().collect();
-                let mut pos = state.input.cursor;
-                while pos < text.len() && !text[pos].is_whitespace() {
-                    pos += 1;
-                }
-                while pos < text.len() && text[pos].is_whitespace() {
-                    pos += 1;
-                }
-                state.input.cursor = pos;
+                state.input.move_word_right();
             } else {
                 state.input.move_right();
             }
@@ -221,9 +205,9 @@ async fn handle_key(
         KeyCode::Up => {
             if state.slash_completion_active {
                 state.prev_slash_completion();
-            } else if state.input.text.is_empty() && !state.input_history.is_empty() {
+            } else if state.input.text().is_empty() && !state.input_history.is_empty() {
                 if state.history_index == 0 {
-                    state.saved_input = state.input.text.clone();
+                    state.saved_input = state.input.text();
                 }
                 if state.history_index < state.input_history.len() {
                     state.history_index += 1;
@@ -908,7 +892,7 @@ async fn handle_resume_select_key(
         }
         KeyCode::Enter => {
             // Only select if input is empty — otherwise user is trying to send a message
-            if !state.input.text.is_empty() {
+            if !state.input.text().is_empty() {
                 return None;
             }
             if let Some(session_info) = sessions.get(selected) {

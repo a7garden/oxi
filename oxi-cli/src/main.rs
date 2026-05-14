@@ -7,8 +7,8 @@ use clap::Parser;
 use oxi::cli::{CliArgs, Commands, ConfigCommands, ExtCommands, PkgCommands};
 use oxi::extensions::ExtensionRegistry;
 use oxi::packages::{PackageManager, ResourceKind};
-use oxi::session::{AgentMessage, SessionManager};
-use oxi::settings::Settings;
+use oxi_store::session::{AgentMessage, SessionManager};
+use oxi_store::settings::Settings;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -70,7 +70,7 @@ async fn main() -> Result<()> {
     }
 
     // Register custom OpenAI-compatible providers from settings
-    let auth_storage = oxi::auth_storage::AuthStorage::new();
+    let auth_storage = oxi_store::auth_storage::AuthStorage::new();
     for cp in &settings.custom_providers {
         let api_key = auth_storage.get_api_key(&cp.name);
         let api = cp.api.to_lowercase();
@@ -143,7 +143,7 @@ async fn main() -> Result<()> {
 
     // Apply thinking level if specified
     if let Some(ref level_str) = args.thinking {
-        if let Some(level) = oxi::settings::parse_thinking_level(level_str) {
+        if let Some(level) = oxi_store::settings::parse_thinking_level(level_str) {
             settings.thinking_level = level;
         } else {
             anyhow::bail!(
@@ -635,7 +635,7 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
                     settings.default_provider = Some(value.clone());
                 }
                 "thinking_level" | "thinking" => {
-                    let level = oxi::settings::parse_thinking_level(value)
+                    let level = oxi_store::settings::parse_thinking_level(value)
                         .ok_or_else(|| anyhow::anyhow!(
                             "Invalid thinking level: '{}'. Valid: none, minimal, standard, thorough",
                             value
@@ -749,7 +749,7 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
         }
 
         ConfigCommands::AddProvider { name, base_url, api_key_env, api } => {
-            use oxi::settings::CustomProvider;
+            use oxi_store::settings::CustomProvider;
 
             let mut settings = Settings::load()?;
 
@@ -822,7 +822,7 @@ fn handle_config_reset(all: bool) -> Result<()> {
 
     if all {
         // Also reset settings
-        if let Ok(settings_path) = oxi::settings::Settings::settings_path() {
+        if let Ok(settings_path) = oxi_store::settings::Settings::settings_path() {
             if settings_path.exists() {
                 std::fs::remove_file(&settings_path)?;
                 println!("Removed settings: {}", settings_path.display());
@@ -844,7 +844,7 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
     if let Some(ref provider_name) = *provider {
         let settings = Settings::load().unwrap_or_default();
         if let Some(cp) = settings.custom_providers.iter().find(|cp| cp.name == *provider_name) {
-            let auth = oxi::auth_storage::AuthStorage::new();
+            let auth = oxi_store::auth_storage::AuthStorage::new();
             let api_key = auth.get_api_key(&cp.name);
             if let Some(ref key) = api_key {
                 match oxi_ai::fetch_models_blocking(&cp.base_url, key) {

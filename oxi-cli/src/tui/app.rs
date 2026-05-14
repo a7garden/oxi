@@ -352,8 +352,8 @@ impl AppState {
 
     // ── Input helpers ──
 
-    pub fn input_value(&self) -> &str {
-        &self.input.text
+    pub fn input_value(&self) -> String {
+        self.input.text()
     }
 
     pub fn input_clear(&mut self) {
@@ -362,8 +362,7 @@ impl AppState {
     }
 
     pub fn input_set_text(&mut self, text: String) {
-        self.input.text = text;
-        self.input.cursor = self.input.text.chars().count();
+        self.input.set_text(text);
     }
 
     pub fn clear_slash_completions(&mut self) {
@@ -373,13 +372,14 @@ impl AppState {
     }
 
     pub fn update_slash_completions(&mut self) {
-        let text = self.input_value().trim();
+        let input_str = self.input_value();
+        let text = input_str.trim();
         if !text.starts_with('/') || text.contains(' ') {
             self.clear_slash_completions();
             return;
         }
         let cmd_part = text.split_whitespace().next().unwrap_or("");
-        let query = &cmd_part[1..];
+        let query = if cmd_part.len() > 1 { &cmd_part[1..] } else { "" };
         let mut matches: Vec<slash::SlashCompletion> = BUILTIN_SLASH_COMMANDS
             .iter()
             .filter(|cmd| query.is_empty() || cmd.name.starts_with(query))

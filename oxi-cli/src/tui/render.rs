@@ -250,7 +250,7 @@ fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
     let prefix_width = UnicodeWidthStr::width(prefix.as_str());
     let max_text = (area.width as usize).saturating_sub(prefix_width + 3);
 
-    let user_text = &state.input.text;
+    let user_text = state.input.text();
     let (display_text, truncated) = if user_text.is_empty() {
         (String::new(), false)
     } else {
