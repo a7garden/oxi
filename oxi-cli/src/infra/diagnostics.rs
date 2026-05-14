@@ -294,7 +294,7 @@ pub fn check_common_issues() -> Vec<String> {
     }
 
     // Check for missing required tools
-    if !crate::bash_executor::command_exists("git") {
+    if !super::bash_executor::command_exists("git") {
         issues.push("git is not installed".to_string());
     }
 

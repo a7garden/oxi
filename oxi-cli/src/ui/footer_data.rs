@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::git_utils;
+use crate::util::git_utils;
 
 /// Footer data containing all status information for the TUI footer display
 #[derive(Debug, Clone)]

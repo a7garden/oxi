@@ -2,7 +2,7 @@
 //!
 //! Built-in slash command definitions.
 
-use crate::source_info::SourceInfo;
+use crate::util::source_info::SourceInfo;
 
 /// Where a slash command originates from.
 #[derive(Debug, Clone, PartialEq, Eq)]

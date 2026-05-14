@@ -6,46 +6,38 @@
 //!
 //! This crate provides the main application logic for the oxi CLI.
 
-pub(crate) mod export;
-pub mod extensions;
-pub(crate) mod oauth_server;
-pub mod packages;
-pub mod print_mode;
-pub mod setup_wizard;
-pub mod skills;
-pub(crate) mod templates;
-pub mod tui;
-
-// RPC mode for headless operation
-pub(crate) mod rpc_mode;
-
-// Image processing modules
-pub(crate) mod clipboard_image;
-pub(crate) mod clipboard_write;
-pub(crate) mod image_convert;
-pub(crate) mod image_resize;
-pub(crate) mod file_processor;
-
-// Utility modules
-
-pub(crate) mod auto_compaction;
-pub(crate) mod branch_summarization;
-pub(crate) mod bash_executor;
-pub(crate) mod changelog;
-pub(crate) mod child_process;
+// ─── Root-level entry modules ───────────────────────────────────────────────
 // cli must be pub for main.rs binary
 pub mod cli;
-pub(crate) mod diagnostics;
-pub(crate) mod error_recovery;
-pub(crate) mod fs_watch;
-pub(crate) mod mime_detect;
-pub(crate) mod paths;
-pub(crate) mod sleep;
+pub mod print_mode;
+pub mod setup_wizard;
+pub(crate) mod oauth_server;
 
-// Re-exports for extension hooks
-pub use crate::error_recovery::{RetryConfig, RetryableError};
+// ─── Directory groups ───────────────────────────────────────────────────────
+pub(crate) mod app;
+pub(crate) mod context;
+pub(crate) mod extensions;
+pub(crate) mod infra;
+pub(crate) mod media;
+pub(crate) mod prompt;
+pub(crate) mod rpc_mode;
+pub(crate) mod skills;
+pub(crate) mod storage;
+pub(crate) mod tui;
+pub(crate) mod ui;
+pub(crate) mod util;
 
-// Note: RetryStrategy is available in error_recovery::RetryStrategy
+// ─── oxi-store re-exports (shared persistent state) ─────────────────────────
+pub use oxi_store::{
+    auth_guidance, auth_storage, model_registry, model_resolver, session,
+    session_cwd, session_navigation, settings, settings_validation,
+    AuthStorage, ModelRegistry, SessionEntry, SessionManager, SessionTreeNode,
+    AgentMessage, ContentValue, ContentBlock, AssistantContentBlock,
+    Settings, ValidationReport,
+};
+
+// Re-exports from submodules for extension hooks
+pub use infra::error_recovery::{RetryConfig, RetryableError};
 
 /// Context for compaction operations, passed to extension hooks
 #[derive(Debug, Clone)]
@@ -84,43 +76,19 @@ impl CompactionContext {
         self.target_tokens as f32 / self.tokens_before as f32
     }
 }
-pub(crate) mod event_bus;
-pub(crate) mod footer_data;
-pub(crate) mod git_utils;
-pub(crate) mod keybindings;
-pub(crate) mod messages;
-pub(crate) mod resource_loader;
-pub(crate) mod frontmatter;
-pub(crate) mod resource_loader_compat;
-pub(crate) mod output_guard;
-pub(crate) mod tmux_detect;
-pub(crate) mod tools_manager;
-pub(crate) mod shutdown;
-pub(crate) mod version_check;
 
-// Core modules
-pub mod defaults;
-pub mod provider_display_names;
-pub mod slash_commands;
-pub mod agent_session;
-pub mod agent_session_runtime;
-pub(crate) mod compaction_utils;
-pub mod source_info;
-pub mod system_prompt;
-pub mod telemetry;
-pub mod exif_orientation;
-pub mod pi_user_agent;
-pub mod timings;
-
+// ─── Module-level imports ────────────────────────────────────────────────────
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use oxi_ai::{get_model, get_provider};
+use oxi_store::Settings;
 use parking_lot::RwLock;
-use oxi_store::settings::{Settings, ThinkingLevel};
 use skills::SkillManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+// ─── Application state ───────────────────────────────────────────────────────
 
 /// Application state and entry point
 pub struct App {
@@ -176,7 +144,7 @@ pub struct InteractiveSession {
     /// Optional human-readable session name.
     pub name: Option<String>,
     /// Raw session entries for persistence and tree navigation.
-    pub entries: Vec<oxi_store::session::SessionEntry>,
+    pub entries: Vec<SessionEntry>,
 }
 
 impl Default for InteractiveSession {
@@ -186,7 +154,6 @@ impl Default for InteractiveSession {
             thinking: false,
             current_response: String::new(),
             session_id: None,
-// FIXME: document.
             name: None,
             entries: Vec::new(),
         }
@@ -196,16 +163,14 @@ impl Default for InteractiveSession {
 impl InteractiveSession {
     /// Create a new empty interactive session.
     pub fn new() -> Self {
-// FIXME: document.
         Self::default()
     }
 
     /// Add a user message to the session.
     pub fn add_user_message(&mut self, content: String) {
         self.messages.push(ChatMessage::user(content.clone()));
-        // Also add to entries for session persistence
-        let entry = oxi_store::session::SessionEntry::new(oxi_store::session::AgentMessage::User {
-            content: oxi_store::session::ContentValue::String(content),
+        let entry = SessionEntry::new(AgentMessage::User {
+            content: ContentValue::String(content),
         });
         self.entries.push(entry);
     }
@@ -213,10 +178,8 @@ impl InteractiveSession {
     /// Add an assistant message to the session.
     pub fn add_assistant_message(&mut self, content: String) {
         self.messages.push(ChatMessage::assistant(content.clone()));
-        // Also add to entries for session persistence
-        let entry = oxi_store::session::SessionEntry::new(oxi_store::session::AgentMessage::Assistant {
-            // FIXME: document.
-            content: vec![oxi_store::session::AssistantContentBlock::Text { text: content }],
+        let entry = SessionEntry::new(AgentMessage::Assistant {
+            content: vec![AssistantContentBlock::Text { text: content }],
             provider: None,
             model_id: None,
             usage: None,
@@ -240,17 +203,17 @@ impl InteractiveSession {
     }
 
     /// Get all entries in the session
-    pub fn entries(&self) -> &[oxi_store::session::SessionEntry] {
+    pub fn entries(&self) -> &[SessionEntry] {
         &self.entries
     }
 
     /// Get entry at a specific index
-    pub fn get_entry(&self, index: usize) -> Option<&oxi_store::session::SessionEntry> {
+    pub fn get_entry(&self, index: usize) -> Option<&SessionEntry> {
         self.entries.get(index)
     }
 
     /// Get entry by ID
-    pub fn get_entry_by_id(&self, id: &str) -> Option<&oxi_store::session::SessionEntry> {
+    pub fn get_entry_by_id(&self, id: &str) -> Option<&SessionEntry> {
         self.entries.iter().find(|e| e.id == id)
     }
 
@@ -260,39 +223,37 @@ impl InteractiveSession {
     }
 }
 
-/// Build the system prompt based on thinking level and active skills.
-///
-/// Delegates to [`system_prompt::build_system_prompt`] with a simple options
-/// struct derived from the given thinking level and skill contents.
-fn build_system_prompt(thinking_level: ThinkingLevel, skill_contents: &[String]) -> String {
+// ─── System prompt builder ───────────────────────────────────────────────────
+
+fn build_system_prompt(thinking_level: oxi_store::settings::ThinkingLevel, skill_contents: &[String]) -> String {
     let custom_prompt = match thinking_level {
-        ThinkingLevel::None => {
+        oxi_store::settings::ThinkingLevel::None => {
             Some(String::from("You are a helpful AI assistant. Provide direct, concise answers."))
         }
-        ThinkingLevel::Minimal => {
+        oxi_store::settings::ThinkingLevel::Minimal => {
             Some(String::from("You are a helpful AI assistant. Provide clear and helpful answers."))
         }
-        ThinkingLevel::Standard => Some(String::from(
+        oxi_store::settings::ThinkingLevel::Standard => Some(String::from(
             "You are a helpful AI coding assistant. Think through problems \
              step by step when helpful, but keep responses focused and actionable.",
         )),
-        ThinkingLevel::Thorough => Some(String::from(
+        oxi_store::settings::ThinkingLevel::Thorough => Some(String::from(
             "You are an expert AI coding assistant. Take time to thoroughly \
              analyze problems, consider edge cases, and provide comprehensive \
              solutions with explanations. Think deeply before responding.",
         )),
     };
 
-    let skills: Vec<system_prompt::Skill> = skill_contents
+    let skills: Vec<prompt::system_prompt::Skill> = skill_contents
         .iter()
         .enumerate()
-        .map(|(i, content)| system_prompt::Skill {
+        .map(|(i, content)| prompt::system_prompt::Skill {
             name: format!("skill-{}", i),
             content: content.clone(),
         })
         .collect();
 
-    let options = system_prompt::BuildSystemPromptOptions {
+    let options = prompt::system_prompt::BuildSystemPromptOptions {
         custom_prompt,
         skills,
         cwd: std::env::current_dir()
@@ -301,26 +262,19 @@ fn build_system_prompt(thinking_level: ThinkingLevel, skill_contents: &[String])
         ..Default::default()
     };
 
-    system_prompt::build_system_prompt(&options)
+    prompt::system_prompt::build_system_prompt(&options)
 }
+
+// ─── App implementation ─────────────────────────────────────────────────────
 
 impl App {
     /// Create a new App instance
     pub async fn new(settings: Settings) -> Result<Self> {
-        let model_id = settings.effective_model(None)
-            .unwrap_or_default();
-        let provider_name = settings.effective_provider(None)
-            .unwrap_or_else(|| {
-                model_id.split('/').next().unwrap_or("").to_string()
-            });
+        let model_id = settings.effective_model(None).unwrap_or_default();
+        let provider_name = settings
+            .effective_provider(None)
+            .unwrap_or_else(|| model_id.split('/').next().unwrap_or("").to_string());
 
-        // If no model configured, use a placeholder — TUI will show setup wizard
-        if model_id.is_empty() {
-            // Return App with empty state — TUI handles the setup flow
-            // We'll create a minimal session
-        }
-
-        // Parse model ID to get provider and model
         let (provider_name, model_name) = if model_id.contains('/') {
             let parts: Vec<&str> = model_id.split('/').collect();
             (parts[0].to_string(), parts[1..].join("/"))
@@ -330,25 +284,20 @@ impl App {
             (String::new(), String::new())
         };
 
-        // Get the model
         let _model = if !provider_name.is_empty() && !model_name.is_empty() {
             get_model(&provider_name, &model_name)
         } else {
             None
         };
 
-        // Create a provider for this model
         let provider = if !provider_name.is_empty() {
             get_provider(&provider_name)
                 .ok_or_else(|| Error::msg(format!("Provider '{}' not found", provider_name)))?
         } else {
-            // No provider configured — use anthropic as placeholder so App can be created
-            // TUI will detect this and show setup wizard
             get_provider("anthropic")
                 .ok_or_else(|| Error::msg("No provider available"))?
         };
 
-        // Load skills
         let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
             dirs::home_dir()
                 .unwrap_or_default()
@@ -360,15 +309,13 @@ impl App {
             SkillManager::new()
         });
 
-        // Build agent config from settings
         let system_prompt = build_system_prompt(settings.thinking_level, &[]);
         let compaction_strategy = if settings.auto_compaction {
             oxi_ai::CompactionStrategy::Threshold(0.8)
         } else {
             oxi_ai::CompactionStrategy::Disabled
         };
-        // Resolve API key from auth storage
-        let auth = oxi_store::auth_storage::AuthStorage::new();
+        let auth = AuthStorage::new();
         let api_key = auth.get_api_key(&provider_name);
 
         let config = AgentConfig {
@@ -413,17 +360,6 @@ impl App {
     }
 
     /// Get a reference to the underlying agent.
-    ///
-    /// # Examples
-    ///
-    /// ```ignore
-    /// use oxi_cli::App;
-    ///
-    /// async fn example(app: &App) {
-    ///     let agent = app.agent();
-    ///     // Use the agent directly
-    /// }
-    /// ```
     pub fn agent(&self) -> Arc<Agent> {
         Arc::clone(&self.agent)
     }
@@ -501,7 +437,6 @@ impl App {
         F: FnMut(AgentEvent) + Send + 'static,
     {
         self.agent.run_streaming(prompt, on_event).await?;
-        // Get the last assistant message's text content
         let state = self.agent_state();
         for msg in state.messages.iter().rev() {
             if let oxi_ai::Message::Assistant(a) = msg {
@@ -523,8 +458,6 @@ impl App {
     }
 
     /// Switch the model used for future LLM calls.
-    ///
-    /// See [`Agent::switch_model`] for details.
     pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
         self.agent.switch_model(model_id)
     }
@@ -544,35 +477,23 @@ pub struct InteractiveLoop<'a> {
 impl<'a> InteractiveLoop<'a> {
     /// Add a user message and get the assistant response
     pub async fn send_message(&mut self, prompt: String) -> Result<()> {
-        // Add user message
         self.session.add_user_message(prompt.clone());
         self.session.thinking = true;
 
-        // Run agent with channel
         let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
-
-        // Run the agent — we execute inline instead of spawning because
-        // the agent's internal RwLockReadGuard is not Send-safe across
-        // await points. We use a select-like approach: run the agent in a
-        // local task that doesn't require Send.
         let agent = Arc::clone(&self.app.agent);
 
-        // Use LocalSet to spawn a non-Send future
         let local = tokio::task::LocalSet::new();
         local.spawn_local(async move {
             let _ = agent.run_with_channel(prompt, tx).await;
         });
 
-        // Collect events from std::sync channel (blocks thread, but that's OK
-        // because agent runs on LocalSet which has its own thread)
         while let Ok(event) = rx.recv() {
             match event {
                 AgentEvent::TextChunk { text } => {
                     self.session.append_to_response(&text);
                 }
-                AgentEvent::Thinking => {
-                    // Thinking state
-                }
+                AgentEvent::Thinking => {}
                 AgentEvent::Complete { .. } => {
                     self.session.finish_response();
                     self.session.thinking = false;
@@ -587,9 +508,7 @@ impl<'a> InteractiveLoop<'a> {
             }
         }
 
-        // Run local set to completion (drain remaining agent work)
         local.await;
-
         Ok(())
     }
 
@@ -609,12 +528,12 @@ impl<'a> InteractiveLoop<'a> {
     }
 
     /// Get session entries for tree navigation
-    pub fn entries(&self) -> &[oxi_store::session::SessionEntry] {
+    pub fn entries(&self) -> &[SessionEntry] {
         self.session.entries()
     }
 
     /// Get entry by ID
-    pub fn get_entry(&self, id: Uuid) -> Option<&oxi_store::session::SessionEntry> {
+    pub fn get_entry(&self, id: Uuid) -> Option<&SessionEntry> {
         self.session.get_entry_by_id(&id.to_string())
     }
 

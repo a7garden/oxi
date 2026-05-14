@@ -20,7 +20,7 @@ use std::time::Instant;
 use parking_lot::RwLock;
 
 // Re-export types from resource_loader_compat
-pub use crate::resource_loader_compat::{Skill, Theme, Prompt};
+pub use super::resource_loader_compat::{Skill, Theme, Prompt};
 
 // ============================================================================
 // Context Files
@@ -1263,37 +1263,37 @@ pub fn prompts_dir(base: &std::path::Path) -> std::path::PathBuf {
 
 /// Load skills from a directory
 pub fn load_skills_from_dir(dir: &std::path::Path) -> LoadResult<Skill> {
-    crate::resource_loader_compat::load_skills_from_dir_impl(dir)
+    super::resource_loader_compat::load_skills_from_dir_impl(dir)
 }
 
 /// Load a single skill
 pub fn load_skill(path: &std::path::Path) -> Result<Skill, String> {
-    crate::resource_loader_compat::load_skill_impl(path)
+    super::resource_loader_compat::load_skill_impl(path)
 }
 
 /// Load themes from a directory
 pub fn load_themes_from_dir(dir: &std::path::Path) -> LoadResult<Theme> {
-    crate::resource_loader_compat::load_themes_from_dir_impl(dir)
+    super::resource_loader_compat::load_themes_from_dir_impl(dir)
 }
 
 /// Load a single theme
 pub fn load_theme(path: &std::path::Path) -> Result<Theme, String> {
-    crate::resource_loader_compat::load_theme_impl(path)
+    super::resource_loader_compat::load_theme_impl(path)
 }
 
 /// Load prompts from a directory
 pub fn load_prompts_from_dir(dir: &std::path::Path) -> LoadResult<Prompt> {
-    crate::resource_loader_compat::load_prompts_from_dir_impl(dir)
+    super::resource_loader_compat::load_prompts_from_dir_impl(dir)
 }
 
 /// Load a single prompt
 pub fn load_prompt(path: &std::path::Path) -> Result<Prompt, String> {
-    crate::resource_loader_compat::load_prompt_impl(path)
+    super::resource_loader_compat::load_prompt_impl(path)
 }
 
 /// Load all resources from default locations
 pub fn load_all_resources(base_dir: &std::path::Path) -> LoadAllResourcesResult {
-    crate::resource_loader_compat::load_all_resources_impl(base_dir)
+    super::resource_loader_compat::load_all_resources_impl(base_dir)
 }
 
 /// Resolve a path with ~ expansion
@@ -1385,7 +1385,7 @@ fn dedupe_prompts(prompts: Vec<Prompt>) -> (Vec<Prompt>, Vec<ResourceCollision>)
 // Re-exports from compat module
 // ============================================================================
 
-pub use crate::resource_loader_compat::{
+pub use super::resource_loader_compat::{
     ResourceType, Resource, LoadResult, LoadError,
     ResourceDiagnostic, DiagnosticSeverity, ResourcePaths, ResourceWatcher,
     ResourceChange, ChangeKind, LoadAllResourcesResult,

@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 
 use super::{centered_popup, OverlayAction, OverlayComponent};
-use crate::agent_session::{AgentSession, AgentSessionHandle};
+use crate::app::agent_session::{AgentSession, AgentSessionHandle};
 use oxi_store::session::SessionInfo;
 use oxi_store::settings::Settings;
 use ratatui::{layout::Rect, style::Style, Frame};

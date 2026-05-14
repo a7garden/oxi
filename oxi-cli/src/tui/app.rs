@@ -3,14 +3,14 @@
 use super::handlers;
 use super::render;
 use super::slash;
-use crate::agent_session::{CompactionReason, SessionEvent};
-use crate::agent_session_runtime::{
+use crate::app::agent_session::{CompactionReason, SessionEvent};
+use crate::app::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
 };
 use oxi_store::auth_storage::AuthStorage;
 use oxi_store::session::SessionManager;
-use crate::slash_commands::BUILTIN_SLASH_COMMANDS;
+use crate::util::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
 use oxi_ai::model_db;
@@ -626,7 +626,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
     let cwd_path = std::env::current_dir().unwrap_or_default();
-    let git_branch = crate::git_utils::get_current_branch(&cwd_path);
+    let git_branch = crate::util::git_utils::get_current_branch(&cwd_path);
 
     // ── Determine initial session ──
     let mut session_target: Option<String> = if resume_last {

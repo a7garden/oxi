@@ -3,9 +3,9 @@
 //! Processes @file arguments from CLI, converting them to ContentBlocks
 //! for inclusion in messages. Handles both text and image files.
 
-use crate::frontmatter::{parse_frontmatter, Frontmatter};
-use crate::image_convert::{convert_to_png, detect_format, get_image_dimensions};
-use crate::image_resize::{resize_image, ResizeOptions};
+use crate::prompt::frontmatter::{parse_frontmatter, Frontmatter};
+use super::image_convert::{convert_to_png, detect_format, get_image_dimensions};
+use super::image_resize::{resize_image, ResizeOptions};
 use anyhow::Result;
 use base64::Engine as _;
 use oxi_ai::{ContentBlock, ImageContent, TextContent};
@@ -79,7 +79,7 @@ pub struct ProcessedContent {
 fn detect_mime_type(path: &PathBuf, data: &[u8]) -> String {
     // Check magic bytes first
     let from_bytes = detect_format(data);
-    if from_bytes != crate::image_convert::ImageFormat::Unknown {
+    if from_bytes != super::image_convert::ImageFormat::Unknown {
         return from_bytes.mime_type().to_string();
     }
 
@@ -111,7 +111,7 @@ fn detect_mime_type(path: &PathBuf, data: &[u8]) -> String {
 fn is_image_file(path: &PathBuf, data: &[u8]) -> bool {
     // Check magic bytes
     let format = detect_format(data);
-    if format != crate::image_convert::ImageFormat::Unknown {
+    if format != super::image_convert::ImageFormat::Unknown {
         return true;
     }
 

@@ -2,8 +2,8 @@
 
 use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
 use super::slash;
-use crate::agent_session::{AgentSession, CompactionReason, SessionEvent};
-use crate::clipboard_write;
+use crate::app::agent_session::{AgentSession, CompactionReason, SessionEvent};
+use crate::media::clipboard_write;
 use base64::Engine;
 use oxi_agent::AgentEvent;
 use oxi_tui::widgets::chat::ToolCallStatus;
@@ -896,7 +896,7 @@ async fn handle_model_select_key(
 async fn handle_resume_select_key(
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
-    _session: &crate::agent_session::AgentSession,
+    _session: &crate::app::agent_session::AgentSession,
 ) -> Option<Action> {
     let (sessions, selected) = match &state.overlay {
         Some(AppOverlay::ResumeSelect { sessions, selected }) => (sessions.clone(), *selected),

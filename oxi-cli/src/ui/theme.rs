@@ -375,7 +375,7 @@ pub struct FontStyle {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Spacing/padding configuration
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct Spacing {
     pub padding: u16,
     pub margin: u16,
@@ -536,6 +536,13 @@ pub enum AccentRole {
 impl Default for Theme {
     fn default() -> Self {
         Self::dark()
+    }
+}
+
+impl Theme {
+    /// Built-in dark theme (alias for oxi_dark)
+    pub fn dark() -> Self {
+        Self::oxi_dark()
     }
 }
 

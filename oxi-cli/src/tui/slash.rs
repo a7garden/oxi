@@ -1,10 +1,10 @@
 //! Slash command handling.
 
 use super::app::{AppOverlay, AppState, SetupStep};
-use crate::agent_session::{AgentSession, ScopedModel};
+use crate::app::agent_session::{AgentSession, ScopedModel};
 use oxi_store::auth_storage::AuthStorage;
-use crate::clipboard_write;
-use crate::export::{self, ExportMeta, HtmlExportOptions};
+use crate::media::clipboard_write;
+use crate::storage::export::{self, ExportMeta, HtmlExportOptions};
 use oxi_tui::widgets::chat::{ContentBlock, MessageRole};
 use std::path::PathBuf;
 
@@ -210,9 +210,9 @@ pub(crate) fn handle_slash_command(
         }
         "/changelog" => {
             let paths = vec![PathBuf::from("CHANGELOG.md"), PathBuf::from("../CHANGELOG.md")];
-            let mut entries: Vec<crate::changelog::ChangelogEntry> = Vec::new();
+            let mut entries: Vec<crate::ui::changelog::ChangelogEntry> = Vec::new();
             for path in &paths {
-                let parsed = crate::changelog::parse_changelog(path);
+                let parsed = crate::ui::changelog::parse_changelog(path);
                 if !parsed.is_empty() {
                     entries = parsed;
                     break;
