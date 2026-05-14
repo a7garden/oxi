@@ -385,6 +385,7 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         }
         UiEvent::ThinkingLevelChanged { level } => {
             state.add_system_message(format!("Thinking: {}", level));
+            state.footer_state.data.thinking_level = Some(level.to_lowercase());
         }
         UiEvent::QueueUpdate { pending } => {
             state.pending_steering = pending;

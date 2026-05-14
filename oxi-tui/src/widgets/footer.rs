@@ -16,6 +16,7 @@ use crate::Theme;
 #[derive(Debug, Clone)]
 pub struct FooterData {
     pub model_name: String,
+    pub thinking_level: Option<String>, // e.g., Some("high"), None means "off"
     pub provider_name: String,
     pub git_branch: Option<String>,
     pub git_dirty: bool,
@@ -37,6 +38,7 @@ impl Default for FooterData {
     fn default() -> Self {
         Self {
             model_name: String::new(),
+            thinking_level: None,
             provider_name: String::new(),
             git_branch: None,
             git_dirty: false,
@@ -126,10 +128,20 @@ impl StatefulWidget for Footer<'_> {
             }
             let left_text = left_parts.join("  ");
 
-            let model_short = if d.model_name.is_empty() {
+            // Build model display string with optional thinking level
+            // Format: "(provider) model • thinking" or "(provider) model" or "model • thinking" or just "model"
+            let model_display = if d.model_name.is_empty() {
                 "[no model]".to_string()
             } else {
-                d.model_name.split('/').last().unwrap_or(&d.model_name).to_string()
+                let model_part = d.model_name.split('/').last().unwrap_or(&d.model_name);
+                let provider_part = d.model_name.split('/').next().unwrap_or("");
+                let thinking_part = d.thinking_level.as_ref().map(|l| format!(" • {}", l));
+
+                if provider_part.is_empty() {
+                    format!("{}{}", model_part, thinking_part.unwrap_or_default())
+                } else {
+                    format!("({}) {}{}", provider_part, model_part, thinking_part.unwrap_or_default())
+                }
             };
 
             let indicator_color = if d.is_busy {
@@ -138,26 +150,58 @@ impl StatefulWidget for Footer<'_> {
                 self.theme.colors.success.to_ratatui()
             };
 
-            let right_span = Line::from(vec![
+            // Build right_span with indicator + model name
+            let mut spans = vec![
                 Span::styled("*", Style::default().fg(indicator_color)),
-                Span::styled(
-                    format!(" {}", model_short),
+            ];
+
+            if d.model_name.is_empty() {
+                spans.push(Span::styled(" [no model]", Style::default()
+                    .fg(self.theme.colors.primary.to_ratatui())
+                    .add_modifier(Modifier::BOLD)));
+            } else {
+                let thinking_style = if d.thinking_level.is_some() {
+                    // Style thinking level as muted (secondary info)
+                    Style::default().fg(self.theme.colors.muted.to_ratatui())
+                } else {
                     Style::default()
                         .fg(self.theme.colors.primary.to_ratatui())
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]);
+                        .add_modifier(Modifier::BOLD)
+                };
+
+                let model_part = d.model_name.split('/').last().unwrap_or(&d.model_name);
+                let provider_part = d.model_name.split('/').next().unwrap_or("");
+
+                // Provider
+                if !provider_part.is_empty() {
+                    spans.push(Span::styled(format!(" ({})", provider_part),
+                        Style::default()
+                            .fg(self.theme.colors.primary.to_ratatui())
+                            .add_modifier(Modifier::BOLD)));
+                }
+                // Model name
+                spans.push(Span::styled(format!(" {}", model_part),
+                    Style::default()
+                        .fg(self.theme.colors.primary.to_ratatui())
+                        .add_modifier(Modifier::BOLD)));
+                // Thinking level
+                if let Some(ref level) = d.thinking_level {
+                    spans.push(Span::styled(format!(" • {}", level), thinking_style));
+                }
+            }
+
+            let right_span = Line::from(spans);
 
             let text_w = UnicodeWidthStr::width(left_text.as_str()) as u16 + 2;
-            let model_w = UnicodeWidthStr::width(model_short.as_str()) as u16 + 4;
-            let gauge_w = rows[1].width.saturating_sub(text_w).saturating_sub(model_w);
+            let model_display_w = UnicodeWidthStr::width(model_display.as_str()) as u16 + 4;
+            let gauge_w = rows[1].width.saturating_sub(text_w).saturating_sub(model_display_w);
 
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
                     Constraint::Length(text_w.min(rows[1].width)),
                     Constraint::Length(gauge_w),
-                    Constraint::Min(model_w),
+                    Constraint::Min(model_display_w),
                 ])
                 .split(rows[1]);
 

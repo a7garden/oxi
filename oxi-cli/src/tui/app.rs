@@ -923,6 +923,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         state.footer_state.data.git_branch = git_branch.clone();
         state.footer_state.data.provider_name = model_id.split('/').next().unwrap_or("").to_string();
         state.footer_state.data.version = env!("CARGO_PKG_VERSION").to_string();
+        state.footer_state.data.thinking_level = Some(format!("{:?}", settings.thinking_level).to_lowercase());
         state.wasm_ext = wasm_ext.clone();
         state.questionnaire_bridge = questionnaire_bridge.clone();
 
