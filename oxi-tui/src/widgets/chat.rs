@@ -391,8 +391,6 @@ impl ChatViewState {
 
     pub fn stream_thinking(&mut self, content: String, collapsed: bool) {
         if let Some(ref mut s) = self.streaming {
-            // If the last block is already a Thinking block, append to it.
-            // Otherwise create a new one.
             if let Some(ContentBlock::Thinking { content: existing, .. }) = s.message.content_blocks.last_mut() {
                 existing.push_str(&content);
                 *existing = clamp_str(existing.clone(), 50_000, 200);
@@ -402,6 +400,7 @@ impl ChatViewState {
                     collapsed,
                 });
             }
+            self.layout_cache.write().entries = None;
         }
     }
 
@@ -655,7 +654,7 @@ fn split_table_segments(content: &str) -> Vec<ContentSegment> {
 }
 
 /// Table cell alignment.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 enum CellAlign {
     #[default]
     Left,
@@ -1435,4 +1434,85 @@ fn filter_tool_json(text: &str) -> String {
         .filter(|l| !l.trim().is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod table_tests {
+    use super::*;
+
+    #[test]
+    fn parse_table_row_basic() {
+        let row = "| Name | Age | City |";
+        let cells = parse_table_row(row);
+        assert_eq!(cells, vec!["Name", "Age", "City"]);
+    }
+
+    #[test]
+    fn parse_table_row_no_whitespace() {
+        let row = "|Alice|25|New York|";
+        let cells = parse_table_row(row);
+        assert_eq!(cells, vec!["Alice", "25", "New York"]);
+    }
+
+    #[test]
+    fn is_table_separator_valid() {
+        assert!(is_table_separator("|---|---|---|").is_some());
+        assert!(is_table_separator("| :--- | :---: | ---: |").is_some());
+    }
+
+    #[test]
+    fn is_table_separator_invalid() {
+        assert!(is_table_separator("| Name | Age |").is_none());
+        assert!(is_table_separator("not a separator").is_none());
+    }
+
+    #[test]
+    fn cell_align_parsing() {
+        assert_eq!(CellAlign::from_separator_cell("---"), CellAlign::Left);
+        assert_eq!(CellAlign::from_separator_cell(":---"), CellAlign::Left);
+        assert_eq!(CellAlign::from_separator_cell("---:"), CellAlign::Right);
+        assert_eq!(CellAlign::from_separator_cell(":---:"), CellAlign::Center);
+    }
+
+    #[test]
+    fn render_table_basic() {
+        let md = "| Name | Age |\n|---|---|---|\n| Alice | 30 |\n| Bob | 25 |";
+        let lines = render_table(md.to_string(), 80);
+        assert!(!lines.is_empty());
+        let text = lines.iter().map(|l| l.to_string()).collect::<String>();
+        assert!(text.contains('┌'));
+        assert!(text.contains('│'));
+        assert!(text.contains('└'));
+    }
+
+    #[test]
+    fn split_table_segments_with_table() {
+        let md = "Hello\n\n| Name | Age |\n|---|---|---|\n| Alice | 30 |\n\nWorld";
+        let segments = split_table_segments(md);
+        assert!(segments.len() >= 2);
+        assert!(segments.iter().any(|s| s.is_table));
+    }
+
+    #[test]
+    fn split_table_segments_without_table() {
+        let md = "Hello world";
+        let segments = split_table_segments(md);
+        assert!(segments.len() == 1);
+        assert!(!segments[0].is_table);
+    }
+
+    #[test]
+    fn md_lines_with_table() {
+        let md = "Hello\n\n| Name | Age |\n|---|---|---|\n| Alice | 30 |\n\nWorld";
+        let lines = md_lines(md, 80);
+        assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn md_lines_without_pipe() {
+        let md = "Hello **world**";
+        let lines = md_lines(md, 80);
+        assert!(!lines.is_empty());
+    }
+
 }
