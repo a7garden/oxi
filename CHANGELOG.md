@@ -5,6 +5,28 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-05-14
+
+### Added — oxi-tui / oxi-cli
+
+- **Thinking level display in footer**: Model shown with thinking level indicator (e.g., `(minimax) MiniMax-M2.7 • high`)
+- **Shift+Tab to cycle thinking level**: Press Shift+Tab to cycle through thinking levels: off → minimal → low → medium → high → xhigh → off
+- **Thinking level in TUI footer**: Footer now shows thinking level as secondary info (muted color) next to model name
+
+### Changed — oxi-store
+
+- **ThinkingLevel enum aligned with pi-agent**: Changed from `none, minimal, standard, thorough` to `off, minimal, low, medium, high, xhigh` to match pi-agent naming conventions
+- **Default thinking level is now `medium`**: Consistent with pi-agent behavior
+
+### Changed — oxi-cli / oxi-ai
+
+- **Thinking level system prompts updated**: All thinking levels (off, minimal, low, medium, high, xhigh) now have appropriate system prompts with distinct characteristics
+
+### Fixed — oxi-store
+
+- **Fixed failing tests**: Updated environment variable tests to reflect that `apply_env()` and `from_env()` are now no-op (env overrides disabled)
+- **Fixed PoisonError in parallel tests**: Removed unnecessary ENV_LOCK usage from tests that don't modify env vars
+
 ## [0.8.0] - 2026-05-06
 
 ### Added — oxi-agent
