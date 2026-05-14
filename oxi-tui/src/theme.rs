@@ -64,6 +64,14 @@ pub struct ColorScheme {
     pub cursor_bg: Color,
     /// Selection / highlight background.
     pub selection_bg: Color,
+    /// Tool call pending background (waiting state).
+    pub tool_pending_bg: Color,
+    /// Tool call executing background (running state).
+    pub tool_executing_bg: Color,
+    /// Tool call success background (completed successfully).
+    pub tool_success_bg: Color,
+    /// Tool call error background (completed with error).
+    pub tool_error_bg: Color,
 }
 
 impl Default for ColorScheme {
@@ -91,6 +99,10 @@ impl ColorScheme {
             cursor_fg: Color::Rgb(0, 0, 0),        // #000000
             cursor_bg: Color::Rgb(205, 214, 244),  // #cdd6f4
             selection_bg: Color::Rgb(40, 40, 60),  // #28283c
+            tool_pending_bg: Color::Rgb(18, 20, 28),     // #12141c subtle
+            tool_executing_bg: Color::Rgb(28, 24, 14),   // #1c1810 amber tint
+            tool_success_bg: Color::Rgb(16, 26, 14),    // #101a0e green tint
+            tool_error_bg: Color::Rgb(32, 16, 18),       // #201012 red tint
         }
     }
 
@@ -112,6 +124,10 @@ impl ColorScheme {
             cursor_fg: Color::Rgb(239, 241, 245),
             cursor_bg: Color::Rgb(76, 79, 105),
             selection_bg: Color::Rgb(204, 208, 218),
+            tool_pending_bg: Color::Rgb(235, 238, 245),    // #ebeeff subtle blue tint
+            tool_executing_bg: Color::Rgb(255, 248, 230),  // #fff8e6 amber tint
+            tool_success_bg: Color::Rgb(230, 248, 230),    // #e6f8e6 green tint
+            tool_error_bg: Color::Rgb(255, 230, 235),     // #ffe6eb red tint
         }
     }
 
@@ -139,6 +155,10 @@ impl ColorScheme {
             selection_bg: Style::default().bg(self.selection_bg.to_ratatui()),
             user_border: Style::default().fg(self.user_border.to_ratatui()),
             user_bg: Style::default().bg(self.user_bg.to_ratatui()),
+            tool_pending_bg: Style::default().bg(self.tool_pending_bg.to_ratatui()),
+            tool_executing_bg: Style::default().bg(self.tool_executing_bg.to_ratatui()),
+            tool_success_bg: Style::default().bg(self.tool_success_bg.to_ratatui()),
+            tool_error_bg: Style::default().bg(self.tool_error_bg.to_ratatui()),
         }
     }
 }
@@ -174,6 +194,40 @@ pub struct ThemeStyles {
     pub user_border: Style,
     /// User message background (subtle tint).
     pub user_bg: Style,
+    /// Tool call pending background (waiting state).
+    pub tool_pending_bg: Style,
+    /// Tool call executing background (running state).
+    pub tool_executing_bg: Style,
+    /// Tool call success background (completed successfully).
+    pub tool_success_bg: Style,
+    /// Tool call error background (completed with error).
+    pub tool_error_bg: Style,
+}
+
+impl Default for ThemeStyles {
+    fn default() -> Self {
+        // Return muted styles that won't crash but aren't ideal for actual use
+        ThemeStyles {
+            normal: Style::default(),
+            primary: Style::default(),
+            secondary: Style::default(),
+            error: Style::default(),
+            warning: Style::default(),
+            success: Style::default(),
+            muted: Style::default(),
+            accent: Style::default(),
+            border: Style::default(),
+            cursor_fg: Style::default(),
+            cursor_bg: Style::default(),
+            selection_bg: Style::default(),
+            user_border: Style::default(),
+            user_bg: Style::default(),
+            tool_pending_bg: Style::default(),
+            tool_executing_bg: Style::default(),
+            tool_success_bg: Style::default(),
+            tool_error_bg: Style::default(),
+        }
+    }
 }
 
 
@@ -294,6 +348,14 @@ pub struct ThemeFileColors {
     pub cursor_bg: Option<String>,
     /// Selection background color.
     pub selection_bg: Option<String>,
+    /// Tool call pending background (waiting state).
+    pub tool_pending_bg: Option<String>,
+    /// Tool call executing background (running state).
+    pub tool_executing_bg: Option<String>,
+    /// Tool call success background (completed successfully).
+    pub tool_success_bg: Option<String>,
+    /// Tool call error background (completed with error).
+    pub tool_error_bg: Option<String>,
 }
 
 impl ThemeFile {
@@ -387,6 +449,18 @@ impl ThemeFile {
                 .as_deref()
                 .and_then(parse_color)
                 .unwrap_or(defaults.border),
+            user_border: self
+                .colors
+                .user_border
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.user_border),
+            user_bg: self
+                .colors
+                .user_bg
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.user_bg),
             cursor_fg: self
                 .colors
                 .cursor_fg
@@ -405,18 +479,30 @@ impl ThemeFile {
                 .as_deref()
                 .and_then(parse_color)
                 .unwrap_or(defaults.selection_bg),
-            user_border: self
+            tool_pending_bg: self
                 .colors
-                .user_border
+                .tool_pending_bg
                 .as_deref()
                 .and_then(parse_color)
-                .unwrap_or(defaults.user_border),
-            user_bg: self
+                .unwrap_or(defaults.tool_pending_bg),
+            tool_executing_bg: self
                 .colors
-                .user_bg
+                .tool_executing_bg
                 .as_deref()
                 .and_then(parse_color)
-                .unwrap_or(defaults.user_bg),
+                .unwrap_or(defaults.tool_executing_bg),
+            tool_success_bg: self
+                .colors
+                .tool_success_bg
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.tool_success_bg),
+            tool_error_bg: self
+                .colors
+                .tool_error_bg
+                .as_deref()
+                .and_then(parse_color)
+                .unwrap_or(defaults.tool_error_bg),
         };
         Theme {
             name: if self.name.is_empty() {

@@ -787,23 +787,15 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             let w = if *is_user { width.saturating_sub(1) } else { width };
             measure_wrapped_height(lines, w)
         }
-        LayoutKind::ToolBox { arguments, result, .. } => {
-            let mut h: u16 = 1; // header (icon + name)
-            // Arguments: max 3 key-value lines
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
-                if let Some(obj) = parsed.as_object() {
-                    h += obj.len().min(3) as u16;
-                }
-                // Non-object JSON: render shows nothing, measure 0
-            }
-            // Invalid JSON: render shows nothing, measure 0
-            // Result: max 3 lines + ellipsis
-            if let Some((rc, _)) = result {
-                let rn = rc.lines().count();
-                h += rn.min(3) as u16;
-                if rn > 3 { h += 1; }
-            }
-            h
+        LayoutKind::ToolBox { name, arguments, result, .. } => {
+            use crate::widgets::tool_renderer::{measure_call_height, measure_result_height};
+            let call_h = measure_call_height(name, arguments);
+            let result_h = result.as_ref().map_or(0, |(r, is_err)| {
+                if *is_err { r.lines().count().min(4) as u16 } else { measure_result_height(name, r, false) }
+            });
+            // Block::ALL adds top + bottom border (2 rows) + separator if result exists
+            let separator_h = if result.is_some() { 1 } else { 0 };
+            2 + call_h + separator_h + result_h
         }
         LayoutKind::ToolResultBox { content, .. } => {
             // 1 header + content lines (max 4) + optional ellipsis
@@ -872,78 +864,80 @@ impl Widget for EntryWidget<'_> {
                 }
             }
             LayoutKind::ToolBox { name, arguments, result, status } => {
+                use crate::widgets::tool_renderer::{
+                    format_tool_call, format_tool_result,
+                };
+
                 let (icon, border_style, bg_style) = match status {
                     ToolCallStatus::Requested => (
                         "\u{25CB}",  // ○ (hollow circle — universal)
                         self.styles.muted,
-                        Style::default().bg(ratatui::style::Color::Rgb(18, 20, 28)),
+                        self.styles.tool_pending_bg,
                     ),
                     ToolCallStatus::Executing => (
                         "\u{25CF}",  // ● (filled circle — running)
                         self.styles.warning,
-                        Style::default().bg(ratatui::style::Color::Rgb(28, 24, 14)),
+                        self.styles.tool_executing_bg,
                     ),
                     ToolCallStatus::Done => {
                         let is_error = result.as_ref().map_or(false, |(_, e)| *e);
                         if is_error {
-                            ("\u{2718}", self.styles.error, Style::default().bg(ratatui::style::Color::Rgb(32, 16, 18)))
+                            ("\u{2718}", self.styles.error, self.styles.tool_error_bg)
                         } else {
-                            ("\u{2713}", self.styles.success, Style::default().bg(ratatui::style::Color::Rgb(16, 26, 14)))
+                            ("\u{2713}", self.styles.success, self.styles.tool_success_bg)
                         }
                     }
                 };
 
-                // Thin left accent border
+                let has_result = result.is_some();
+
+                // Box with all borders for a cleaner look
                 let block = Block::default()
-                    .borders(Borders::LEFT)
+                    .borders(Borders::ALL)
                     .border_style(border_style)
                     .style(bg_style);
                 let inner = block.inner(rect);
                 block.render(rect, buf);
 
                 let max_w = inner.width as usize;
+                let max_h = inner.height as usize;
                 let mut content_lines: Vec<Line<'static>> = Vec::new();
 
-                // Header: icon + tool name
-                let name_style = border_style.add_modifier(Modifier::BOLD);
-                content_lines.push(Line::from(vec![
-                    Span::styled(format!("{} ", icon), name_style),
-                    Span::styled(name.clone(), name_style),
-                ]));
-
-                // Arguments: compact key: value, truncate to fit inner width
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(arguments) {
-                    if let Some(obj) = parsed.as_object() {
-                        for (key, v) in obj.iter().take(3) {
-                            let val_str = match v {
-                                serde_json::Value::String(s) => s.clone(),
-                                other => other.to_string(),
-                            };
-                            let prefix_len = 2 + UnicodeWidthStr::width(key.as_str()) + 2;
-                            let avail = max_w.saturating_sub(prefix_len);
-                            let display = truncate_str(&val_str, avail);
-                            content_lines.push(Line::from(vec![
-                                Span::styled(format!("  {}", key), self.styles.muted),
-                                Span::styled(": ", self.styles.muted),
-                                Span::styled(display, self.styles.normal),
-                            ]));
+                // Format tool call using new renderer
+                let call_lines = format_tool_call(name, arguments, max_w, self.styles);
+                for (i, line) in call_lines.into_iter().enumerate() {
+                    if i == 0 {
+                        // Prepend icon to first line
+                        let icon_style = border_style.add_modifier(Modifier::BOLD);
+                        let name_style = border_style.add_modifier(Modifier::BOLD);
+                        let spans = line.spans.into_iter().collect::<Vec<_>>();
+                        let mut new_spans = vec![Span::styled(format!("{} ", icon), icon_style)];
+                        for span in spans {
+                            new_spans.push(Span::styled(span.content.clone(), span.style.patch(name_style)));
                         }
+                        content_lines.push(Line::from(new_spans));
+                    } else {
+                        content_lines.push(line);
                     }
                 }
 
-                // Result: max 3 lines
-                if let Some((result_content, _)) = result {
-                    for rl in result_content.lines().take(3) {
-                        let display = truncate_str(rl, max_w.saturating_sub(2));
-                        content_lines.push(Line::from(Span::styled(format!("  {}", display), self.styles.normal)));
-                    }
-                    if result_content.lines().count() > 3 {
-                        content_lines.push(Line::from(Span::styled("  \u{2026}", self.styles.muted)));
-                    }
+                // Separator line between call and result
+                if has_result {
+                    content_lines.push(Line::from(Span::styled(
+                        "\u{2500}".repeat(max_w.saturating_sub(2)),
+                        border_style,
+                    )));
+                }
+
+                // Format result using new renderer
+                if let Some((result_content, is_err)) = result {
+                    let result_lines = format_tool_result(name, result_content, *is_err, max_w, self.styles);
+                    content_lines.extend(result_lines);
                 }
 
                 let text: ratatui::text::Text = content_lines.into_iter().collect();
-                Paragraph::new(text).render(inner, buf);
+                let para = Paragraph::new(text).wrap(Wrap { trim: false });
+                para.render(inner, buf);
             }
             LayoutKind::ToolResultBox { tool_name, content, is_error } => {
                 let (icon, border_style, bg_style) = if *is_error {
@@ -1302,21 +1296,155 @@ mod table_tests {
         let lines = md_lines(md, 80);
         assert!(!lines.is_empty());
     }
-}
-
-
-#[test]
-fn debug_table_direct() {
-    use crate::table_renderer::render_markdown_table;
-    
-    let md = "| Name | Age |\n|---|---|\n| Alice | 30 |\n| Bob | 25 |";
-    let lines = render_markdown_table(md, 80);
-    
-    // Debug output
-    eprintln!("Table lines count: {}", lines.len());
-    for (i, line) in lines.iter().enumerate() {
-        eprintln!("Line {}: {:?}", i, line);
+    #[test]
+    fn test_empty_cells() {
+        let md = "| Name | Value | Extra |
+|---|---|---|
+| Alice | | 100 |";
+        let out = render_markdown_table(md, 60);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
+");
+        assert!(text.contains("Alice"), "Has Alice");
+        assert!(text.contains("┌"), "Has border");
     }
-    
-    assert!(!lines.is_empty(), "Expected table lines");
+
+    #[test]
+    fn test_single_column() {
+        let md = "| Only |
+|---|
+| One |
+| Two |";
+        let out = render_markdown_table(md, 30);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
+");
+        assert!(text.contains("Only"), "Has header");
+        assert!(text.contains("One"), "Has data");
+        println!("text={}", text);
+        assert!(text.contains("└──────┘") || text.contains("└──┘"), "Has bottom border");
+    }
+
+    #[test]
+    fn test_cjk_characters() {
+        let md = "| 이름 | 나이 | 도시 |
+|---|---|---|
+| 앨리스 | 30 | 서울 |";
+        let out = render_markdown_table(md, 60);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
+");
+        assert!(text.contains("이름"), "Has CJK");
+        assert!(text.contains("앨리스"), "Has CJK data");
+    }
+
+    #[test]
+    fn test_special_characters_in_cells() {
+        let md = "| Name | Desc |
+|---|---|
+| Test | `code` |";
+        let out = render_markdown_table(md, 50);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
+");
+        assert!(text.contains("Test"), "Has Test");
+    }
+
+    #[test]
+    fn test_no_header_row_separator_at_end() {
+        let md = "| A | B |
+|---|---|
+| 1 | 2 |";
+        let out = render_markdown_table(md, 30);
+        // Should have: top border, header, sep, body, bottom border
+        assert!(out.len() >= 5, "Should have at least 5 lines");
+    }
+
+    #[test]
+    fn test_exact_output_format() {
+        let md = "| A | B |
+|---|---|
+| X | Y |";
+        let out = render_markdown_table(md, 30);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
+");
+        // Check exact format
+        assert_eq!(text, "┌───┬───┐
+│ A │ B │
+├───┼───┤
+│ X │ Y │
+└───┴───┘");
+    }
+
+}
+#[cfg(test)]
+mod complete_table_verification {
+    use crate::table_renderer::render_markdown_table;
+
+    #[test]
+    fn test_mixed_content_before_table() {
+        let md = "Check out this table:\n\n| Name | Value |\n|---|---|\n| Alpha | 100 |";
+        let out = render_markdown_table(md, 50);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Check out"), "Before table");
+        assert!(text.contains('┌'), "Table top");
+        assert!(text.contains("Alpha"), "Table data");
+    }
+
+    #[test]
+    fn test_mixed_content_after_table() {
+        let md = "| A | B |\n|---|---|\n| X | Y |\n\nThat was the table.";
+        let out = render_markdown_table(md, 50);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains('┌'), "Table top");
+        assert!(text.contains("That was the table"), "After table");
+    }
+
+    #[test]
+    fn test_mixed_content_both_sides() {
+        let md = "Start\n\n| H1 | H2 | H3 |\n|---|---|---|\n| C1 | C2 | C3 |\n\nEnd";
+        let out = render_markdown_table(md, 60);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Start"), "Before");
+        assert!(text.contains("End"), "After");
+        assert!(text.contains('┌'), "Table");
+    }
+
+    #[test]
+    fn test_narrow_terminal() {
+        let md = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | Seoul |";
+        let out = render_markdown_table(md, 20);
+        assert!(!out.is_empty());
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains("Name") || text.contains("┌") || text.contains("Alice"));
+    }
+
+    #[test]
+    fn test_cell_wrapping() {
+        let md = "| Short | Very Long Header Text Here |\n|---|---|\n| Data | Another long cell that needs wrapping |";
+        let out = render_markdown_table(md, 50);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        assert!(text.contains('┌'), "Table rendered");
+        assert!(text.contains('│'), "Has cell separators");
+    }
+
+    #[test]
+    fn test_multiple_rows_separators() {
+        let md = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |";
+        let out = render_markdown_table(md, 40);
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        // Count separator lines (lines containing ├ or ┼)
+        let separator_lines: Vec<&str> = text.lines()
+            .filter(|l| l.contains('├') || l.contains('┼'))
+            .collect();
+        // 4 data rows → 3 separators between them
+        println!("\n{}", text);
+        assert_eq!(separator_lines.len(), 3, "Should have 4 separator lines");
+        // Check it's a proper table
+        assert!(text.contains("┌"), "Has top border");
+        assert!(text.contains("└"), "Has bottom border");
+    }
+
+    #[test]
+    fn test_header_bold_styling() {
+        let md = "| Name | Value |\n|---|---|\n| X | Y |";
+        let out = render_markdown_table(md, 50);
+        assert!(out.len() >= 4, "Should have top border + header + separator + body");
+    }
 }

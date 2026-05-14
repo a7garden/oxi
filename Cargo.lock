@@ -3230,6 +3230,7 @@ version = "0.10.0"
 dependencies = [
  "anyhow",
  "crossterm 0.28.1",
+ "dirs",
  "parking_lot",
  "pulldown-cmark",
  "ratatui",
