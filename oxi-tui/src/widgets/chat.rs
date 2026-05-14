@@ -20,7 +20,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 use tui_markdown;
@@ -682,7 +682,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     let mut entries = Vec::new();
     let mut y: u16 = 0;
     // Reserve 1 column for the vertical scrollbar so content doesn't overlap.
-    let usable_width = width.saturating_sub(1);
+    let usable_width = width.saturating_sub(1); // used by block_to_layout_kind calls
 
     let mut rendered_any_message = false;
 
@@ -888,39 +888,37 @@ impl Widget for EntryWidget<'_> {
                     format_tool_call, format_tool_result,
                 };
 
-                let (icon, border_style, bg_style) = match status {
+                let (icon, border_style) = match status {
                     ToolCallStatus::Requested => (
                         "\u{25CB}",  // ○ (hollow circle — universal)
                         self.styles.muted,
-                        self.styles.tool_pending_bg,
                     ),
                     ToolCallStatus::Executing => (
                         "\u{25CF}",  // ● (filled circle — running)
                         self.styles.warning,
-                        self.styles.tool_executing_bg,
                     ),
                     ToolCallStatus::Done => {
                         let is_error = result.as_ref().map_or(false, |(_, e)| *e);
                         if is_error {
-                            ("\u{2718}", self.styles.error, self.styles.tool_error_bg)
+                            ("\u{2718}", self.styles.error)
                         } else {
-                            ("\u{2713}", self.styles.success, self.styles.tool_success_bg)
+                            ("\u{2713}", self.styles.success)
                         }
                     }
                 };
 
                 let has_result = result.is_some();
 
-                // Box with all borders for a cleaner look
+                // Box with all borders for a cleaner look (no background fill)
                 let block = Block::default()
                     .borders(Borders::ALL)
-                    .border_style(border_style)
-                    .style(bg_style);
+                    .border_style(border_style);
                 let inner = block.inner(rect);
                 block.render(rect, buf);
+                // Clear any stale content in the inner area before rendering.
+                Clear.render(inner, buf);
 
                 let max_w = inner.width as usize;
-                let max_h = inner.height as usize;
                 let mut content_lines: Vec<Line<'static>> = Vec::new();
 
                 // Format tool call using new renderer
@@ -960,19 +958,21 @@ impl Widget for EntryWidget<'_> {
                 para.render(inner, buf);
             }
             LayoutKind::ToolResultBox { tool_name, content, is_error } => {
-                let (icon, border_style, bg_style) = if *is_error {
-                    ("\u{2718}", self.styles.error, Style::default().bg(ratatui::style::Color::Rgb(32, 16, 18)))
+                let (icon, border_style) = if *is_error {
+                    ("\u{2718}", self.styles.error)
                 } else {
-                    ("\u{2713}", self.styles.success, Style::default().bg(ratatui::style::Color::Rgb(16, 26, 14)))
+                    ("\u{2713}", self.styles.success)
                 };
                 let label = if tool_name.is_empty() { icon.to_string() } else { format!("{} {}", icon, tool_name) };
 
+
                 let block = Block::default()
                     .borders(Borders::LEFT)
-                    .border_style(border_style)
-                    .style(bg_style);
+                    .border_style(border_style);
                 let inner = block.inner(rect);
                 block.render(rect, buf);
+                // Clear any stale content in the inner area before rendering.
+                Clear.render(inner, buf);
 
                 let max_w = inner.width as usize;
                 let mut lines: Vec<Line<'static>> = vec![
@@ -986,6 +986,7 @@ impl Widget for EntryWidget<'_> {
                     lines.push(Line::from(Span::styled("  \u{2026}", self.styles.muted)));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
+                Clear.render(inner, buf);
                 Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::ErrorBox { title, message, retryable } => {
@@ -1009,6 +1010,7 @@ impl Widget for EntryWidget<'_> {
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 // No wrap — pre-truncated to exact width
+                Clear.render(inner, buf);
                 Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::Thinking { content, collapsed } => {
@@ -1045,6 +1047,7 @@ impl Widget for EntryWidget<'_> {
                     Line::from(Span::styled("  Ctrl+I -> open in viewer", self.styles.muted)),
                 ];
                 let text: ratatui::text::Text = lines.into_iter().collect();
+                Clear.render(rect, buf);
                 Paragraph::new(text).render(rect, buf);
             }
             LayoutKind::Spinner { frame } => {
@@ -1084,20 +1087,25 @@ impl StatefulWidget for ChatView<'_> {
             .unwrap_or(0);
         state.content_height = total_height;
 
+        // Apply left/right padding to the inner content area
+        let pad = self.theme.spacing.padding.max(1);
+        let inner_width = width.saturating_sub(pad * 2);
+        let inner_x = area.x + pad;
+
+
         // Create ScrollView with virtual buffer sized to total content.
         // Horizontal scrollbar disabled — chat wraps to width.
-        // Vertical scrollbar reserves 1 column on the right.
-        let size = ratatui::layout::Size::new(width, total_height.max(area.height));
+        // Vertical scrollbar: show only when actively scrolling.
+        let size = ratatui::layout::Size::new(inner_width, total_height.max(area.height));
         let mut scroll_view = ScrollView::new(size)
-            .vertical_scrollbar_visibility(ScrollbarVisibility::Always)
+            .vertical_scrollbar_visibility(ScrollbarVisibility::Automatic)
             .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
 
         // Render each layout entry into the virtual buffer.
-        // Use width-1 so content never overlaps the vertical scrollbar.
-        let content_w = width.saturating_sub(1);
+        // Use inner_width so content never overlaps the vertical scrollbar.
         for entry in &layout {
             if entry.height == 0 { continue; }
-            let rect = Rect::new(0, entry.y, content_w, entry.height);
+            let rect = Rect::new(0, entry.y, inner_width, entry.height);
             let widget = EntryWidget::new(&entry.kind, &styles);
             scroll_view.render_widget(widget, rect);
         }

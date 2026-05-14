@@ -99,6 +99,7 @@ pub struct App {
     skills: RwLock<SkillManager>,
     active_skills: RwLock<Vec<String>>,
     wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
+    questionnaire_bridge: Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
 }
 
 /// Chat message for display
@@ -337,12 +338,17 @@ impl App {
 
         let agent = Arc::new(Agent::new(Arc::from(provider), config));
 
+        let bridge = std::sync::Arc::new(oxi_agent::tools::questionnaire::QuestionnaireBridge::new());
+        let questionnaire_tool = oxi_agent::tools::questionnaire::QuestionnaireTool::new(bridge.clone());
+        agent.tools().register_arc(std::sync::Arc::new(questionnaire_tool));
+
         Ok(Self {
             agent,
             settings,
             skills: RwLock::new(skills),
             active_skills: RwLock::new(Vec::new()),
             wasm_ext: None,
+            questionnaire_bridge: Some(bridge),
         })
     }
 
@@ -369,6 +375,11 @@ impl App {
     /// Get the tool registry (for registering extension tools)
     pub fn agent_tools(&self) -> Arc<oxi_agent::ToolRegistry> {
         self.agent.tools()
+    }
+
+    /// Get the questionnaire bridge, if initialized.
+    pub fn questionnaire_bridge(&self) -> Option<&std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>> {
+        self.questionnaire_bridge.as_ref()
     }
 
     /// Get a reference to the skill manager

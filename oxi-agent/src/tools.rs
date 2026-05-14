@@ -196,6 +196,8 @@ pub mod subagent;
 pub mod write;
 /// Context7 documentation tools.
 pub mod context7;
+/// Questionnaire tool — interactive multi-question TUI overlay.
+pub mod questionnaire;
 
 // Re-export for convenience
 pub use bash::BashTool;
@@ -210,6 +212,7 @@ pub use subagent::SubagentTool;
 pub use write::WriteTool;
 pub use crate::mcp::McpTool;
 pub use context7::{Context7ResolveLibraryIdTool, Context7QueryDocsTool};
+pub use questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 
 /// Tool registry for managing available tools
 #[derive(Clone)]

@@ -9,6 +9,7 @@ use ratatui::{Frame, layout::Rect};
 use oxi_tui::Theme;
 
 pub mod factories;
+pub mod questionnaire;
 pub use factories::{logout_select, model_select, resume_select};
 
 // ---------------------------------------------------------------------------

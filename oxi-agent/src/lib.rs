@@ -57,6 +57,7 @@ pub use tools::github_search::GitHubSearchTool;
 pub use tools::subagent::SubagentTool;
 pub use mcp::{McpTool, McpManager, McpConfig};
 pub use tools::context7::{Context7ResolveLibraryIdTool, Context7QueryDocsTool};
+pub use tools::questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 
 /// Standard imports for oxi-agent usage.
 pub mod prelude {
@@ -77,6 +78,7 @@ pub mod prelude {
     pub use crate::tools::subagent::SubagentTool;
     pub use crate::mcp::{McpTool, McpManager, McpConfig};
     pub use crate::tools::context7::{Context7ResolveLibraryIdTool, Context7QueryDocsTool};
+    pub use crate::tools::questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 }
 
 #[cfg(test)]

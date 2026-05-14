@@ -324,6 +324,8 @@ pub(crate) struct AppState {
     /// Length of thinking text already rendered from the snapshot's Thinking block.
     /// Prevents duplicate thinking blocks on repeated MessageUpdates.
     snapshot_thinking_rendered: usize,
+    /// Questionnaire bridge — set by run_tui_interactive_impl() from App::questionnaire_bridge().
+    questionnaire_bridge: Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
 }
 
 impl AppState {
@@ -351,6 +353,7 @@ impl AppState {
             needs_persist: false,
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: 0,
+            questionnaire_bridge: None,
         }
     }
 
@@ -622,6 +625,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
     let model_id = app.model_id();
     let tools = app.agent().tools();
     let wasm_ext = app.wasm_ext().cloned();
+    let questionnaire_bridge = app.questionnaire_bridge().cloned();
     let cwd: String = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
@@ -920,6 +924,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         state.footer_state.data.provider_name = model_id.split('/').next().unwrap_or("").to_string();
         state.footer_state.data.version = env!("CARGO_PKG_VERSION").to_string();
         state.wasm_ext = wasm_ext.clone();
+        state.questionnaire_bridge = questionnaire_bridge.clone();
 
         // Check if model is configured
         let has_model = !model_id.is_empty() && model_id.contains('/');
@@ -971,6 +976,20 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                 &cmd, &agent_session, &mut state, &mut running,
                             );
                         }
+                    }
+                }
+            }
+
+            // Check for pending questionnaire from bridge (agent thread → TUI thread)
+            if state.overlay.is_none() && state.overlay_state.is_none() {
+                if let Some(bridge) = &state.questionnaire_bridge {
+                    if let Some(pending) = bridge.try_take() {
+                        use super::overlay::questionnaire::QuestionnaireOverlay;
+                        state.overlay_state = Some(Box::new(QuestionnaireOverlay::new(
+                            pending.questions,
+                            pending.responder,
+                        )));
+                        tracing::info!("[TUI] Questionnaire overlay opened");
                     }
                 }
             }
