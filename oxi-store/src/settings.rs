@@ -801,11 +801,11 @@ fn merge_json_values(base: serde_json::Value, override_: serde_json::Value) -> s
 /// Parse a thinking level from a string.
 pub fn parse_thinking_level(s: &str) -> Option<ThinkingLevel> {
     match s.to_lowercase().as_str() {
-        "off" => Some(ThinkingLevel::Off),
+        "off" | "none" => Some(ThinkingLevel::Off),
         "minimal" => Some(ThinkingLevel::Minimal),
         "low" => Some(ThinkingLevel::Low),
-        "medium" => Some(ThinkingLevel::Medium),
-        "high" => Some(ThinkingLevel::High),
+        "medium" | "standard" => Some(ThinkingLevel::Medium),
+        "high" | "thorough" => Some(ThinkingLevel::High),
         "xhigh" => Some(ThinkingLevel::XHigh),
         _ => None,
     }
@@ -1034,18 +1034,39 @@ theme = "dracula"
 
     #[test]
     fn test_parse_thinking_level() {
+        assert_eq!(parse_thinking_level("off"), Some(ThinkingLevel::Off));
         assert_eq!(parse_thinking_level("none"), Some(ThinkingLevel::Off));
         assert_eq!(
             parse_thinking_level("MINIMAL"),
             Some(ThinkingLevel::Minimal)
         );
         assert_eq!(
+            parse_thinking_level("Low"),
+            Some(ThinkingLevel::Low)
+        );
+        assert_eq!(
+            parse_thinking_level("medium"),
+            Some(ThinkingLevel::Medium)
+        );
+        assert_eq!(
+            parse_thinking_level("Medium"),
+            Some(ThinkingLevel::Medium)
+        );
+        assert_eq!(
             parse_thinking_level("Standard"),
             Some(ThinkingLevel::Medium)
         );
         assert_eq!(
+            parse_thinking_level("High"),
+            Some(ThinkingLevel::High)
+        );
+        assert_eq!(
             parse_thinking_level("thorough"),
             Some(ThinkingLevel::High)
+        );
+        assert_eq!(
+            parse_thinking_level("xhigh"),
+            Some(ThinkingLevel::XHigh)
         );
         assert_eq!(parse_thinking_level("invalid"), None);
     }
