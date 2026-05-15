@@ -66,8 +66,6 @@ impl OAuthCallbackServer {
 
     /// Start the callback server and wait for the OAuth callback
     /// Returns the callback data (code and state) when received
-    /// Start the callback server and wait for the OAuth callback
-    /// Returns the callback data (code and state) when received
     pub async fn start(self) -> Result<OAuthCallbackData> {
         self.start_with_csrf(None).await
     }

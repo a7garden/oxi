@@ -64,10 +64,15 @@ async fn execute_tool_calls_sequential(
     let mut tool_result_messages = Vec::new();
 
     for tool_call in tool_calls {
+        // Clone tool_call fields once upfront to avoid repeated clones.
+        let tc_id = tool_call.id.clone();
+        let tc_name = tool_call.name.clone();
+        let tc_args = tool_call.arguments.clone();
+
         emit(AgentEvent::ToolExecutionStart {
-            tool_call_id: tool_call.id.clone(),
-            tool_name: tool_call.name.clone(),
-            args: tool_call.arguments.clone(),
+            tool_call_id: tc_id.clone(),
+            tool_name: tc_name.clone(),
+            args: tc_args,
         });
 
         let prepared = prepare_tool_call(loop_ref, &tool_call).await;
@@ -85,7 +90,7 @@ async fn execute_tool_calls_sequential(
             let mut is_error = executed.is_error;
 
             if let Some(ref hook) = loop_ref.after_tool_call {
-                if let Some(modified) = hook(&tool_call.name, &result).await.ok().flatten() {
+                if let Some(modified) = hook(&tc_name, &result).await.ok().flatten() {
                     result = modified;
                     is_error = !result.success;
                 }
@@ -104,14 +109,15 @@ async fn execute_tool_calls_sequential(
             result: oxi_ai::ToolResult {
                 tool_call_id: finalized.tool_call.id.clone(),
                 content: finalized.result.output.clone(),
-                status: if finalized.is_error { "error".to_string() } else { "success".to_string() },
+                status: if finalized.is_error { String::from("error") } else { String::from("success") },
             },
             is_error: finalized.is_error,
         });
 
         let tool_result_message = create_tool_result_message(&finalized);
-        emit(AgentEvent::MessageStart { message: Message::ToolResult(tool_result_message.clone()) });
-        emit(AgentEvent::MessageEnd { message: Message::ToolResult(tool_result_message.clone()) });
+        let msg = Message::ToolResult(tool_result_message);
+        emit(AgentEvent::MessageStart { message: msg.clone() });
+        emit(AgentEvent::MessageEnd { message: msg });
 
         finalized_calls.push(finalized);
         tool_result_messages.push(tool_result_message);
@@ -133,10 +139,15 @@ async fn execute_tool_calls_parallel(
     let mut finalized_calls: Vec<FinalizedToolCallEntry> = Vec::new();
 
     for tool_call in tool_calls {
+        // Clone tool_call fields once upfront to avoid repeated clones.
+        let tc_id = tool_call.id.clone();
+        let tc_name = tool_call.name.clone();
+        let tc_args = tool_call.arguments.clone();
+
         emit(AgentEvent::ToolExecutionStart {
-            tool_call_id: tool_call.id.clone(),
-            tool_name: tool_call.name.clone(),
-            args: tool_call.arguments.clone(),
+            tool_call_id: tc_id.clone(),
+            tool_name: tc_name.clone(),
+            args: tc_args,
         });
 
         let prepared = prepare_tool_call(loop_ref, &tool_call).await;
@@ -154,7 +165,7 @@ async fn execute_tool_calls_parallel(
                 result: oxi_ai::ToolResult {
                     tool_call_id: finalized.tool_call.id.clone(),
                     content: finalized.result.output.clone(),
-                    status: if finalized.is_error { "error".to_string() } else { "success".to_string() },
+                    status: if finalized.is_error { String::from("error") } else { String::from("success") },
                 },
                 is_error: finalized.is_error,
             });
@@ -215,8 +226,9 @@ async fn execute_tool_calls_parallel(
     let mut tool_result_messages = Vec::new();
     for finalized in &ordered_finalized_calls {
         let tool_result_message = create_tool_result_message(finalized);
-        emit(AgentEvent::MessageStart { message: Message::ToolResult(tool_result_message.clone()) });
-        emit(AgentEvent::MessageEnd { message: Message::ToolResult(tool_result_message.clone()) });
+        let msg = Message::ToolResult(tool_result_message);
+        emit(AgentEvent::MessageStart { message: msg.clone() });
+        emit(AgentEvent::MessageEnd { message: msg });
         tool_result_messages.push(tool_result_message);
     }
 
@@ -262,7 +274,7 @@ pub(crate) async fn execute_prepared_tool_call_static(
         result: oxi_ai::ToolResult {
             tool_call_id,
             content: result.output.clone(),
-            status: if is_error { "error".to_string() } else { "success".to_string() },
+            status: if is_error { String::from("error") } else { String::from("success") },
         },
         is_error,
     });

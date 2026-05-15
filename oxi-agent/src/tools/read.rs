@@ -4,6 +4,7 @@
 /// - Image files (jpg/png/gif/webp) returned as base64-encoded content blocks
 /// - Binary file detection
 
+use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
 use async_trait::async_trait;
@@ -309,15 +310,13 @@ impl AgentTool for ReadTool {
             .and_then(|v| v.as_u64())
             .map(|n| n as usize);
 
-        let path = Path::new(path_str);
-
-        // Security: prevent path traversal
-        if path.components().any(|c| c.as_os_str() == "..") {
-            return Err("Path traversal not allowed".to_string());
-        }
+        // Security: validate path with PathGuard
+        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let path = guard.validate(Path::new(path_str))
+            .map_err(|e| e.to_string())?;
 
         // Check if path exists and is a directory
-        match fs::metadata(path).await {
+        match fs::metadata(&path).await {
             Ok(meta) if meta.is_dir() => {
                 return Err("Cannot read a directory, use read_dir instead".to_string());
             }

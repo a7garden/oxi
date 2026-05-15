@@ -54,13 +54,6 @@ impl InputState {
         self.textarea.lines().join("\n")
     }
 
-    /// Get a mutable reference to the text (for compatibility)
-    pub fn text_mut(&mut self) -> &mut String {
-        // ratatui-textarea doesn't expose a direct text mutation API
-        // For setting text directly, use set_text() or clear() + insert_str()
-        unimplemented!("Use set_text() instead")
-    }
-
     /// Set text directly (replaces all content)
     pub fn set_text(&mut self, text: String) {
         self.textarea.clear();

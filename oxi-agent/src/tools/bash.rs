@@ -48,48 +48,48 @@ const BLOCKED_ENV_VARS: &[&str] = &[
 /// This does NOT block execution - it only emits a warning.
 fn is_dangerous_command(command: &str) -> Option<String> {
     let cmd_lower = command.to_lowercase();
-    let mut warnings: Vec<&str> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
 
     // Pipe to shell
     if cmd_lower.contains("| sh") || cmd_lower.contains("| bash") || cmd_lower.contains("| zsh") {
-        warnings.push("pipe to shell");
+        warnings.push("pipe to shell".to_string());
     }
 
     // Sensitive file access via command substitution
     if command.contains("/etc/passwd") || command.contains("/etc/shadow") {
-        warnings.push("access to sensitive authentication files");
+        warnings.push("access to sensitive authentication files".to_string());
     }
     if command.contains("id_rsa") || command.contains("id_ed25519") || command.contains(".ssh/") {
-        warnings.push("access to SSH private keys/directory");
+        warnings.push("access to SSH private keys/directory".to_string());
     }
 
     // Network exfiltration patterns
     if (cmd_lower.contains("curl") || cmd_lower.contains("wget")) && cmd_lower.contains("| nc") {
-        warnings.push("possible network exfiltration (pipe to netcat)");
+        warnings.push("possible network exfiltration (pipe to netcat)".to_string());
     }
     if command.contains("/dev/tcp/") || command.contains("/dev/udp/") {
-        warnings.push("possible network exfiltration via /dev/tcp|udp");
+        warnings.push("possible network exfiltration via /dev/tcp|udp".to_string());
     }
 
     // Privilege escalation
     if cmd_lower.starts_with("sudo ") || cmd_lower.contains("\nsudo ") || cmd_lower.contains("&&sudo ") {
-        warnings.push("sudo detected (privilege escalation)");
+        warnings.push("sudo detected (privilege escalation)".to_string());
     }
     if cmd_lower.contains("su -") || cmd_lower.contains("su root") {
-        warnings.push("user switch to privileged account");
+        warnings.push("user switch to privileged account".to_string());
     }
 
     // Fork bomb patterns
     if cmd_lower.contains(":(){ :|:& };") || cmd_lower.contains("fork bomb") {
-        warnings.push("fork bomb pattern detected");
+        warnings.push("fork bomb pattern detected".to_string());
     }
     // Also detect the common `:(){ :|:& };:` pattern (without spaces)
     if command.contains(":(){") && command.contains(":|:&") {
-        warnings.push("fork bomb pattern detected");
+        warnings.push("fork bomb pattern detected".to_string());
     }
 
     // Write to system directories
-    let system_write_patterns = [
+    let system_write_patterns: &[(&str, &str)] = &[
         ("> /etc/", "/etc/"),
         (">> /etc/", "/etc/"),
         ("> /boot/", "/boot/"),
@@ -99,9 +99,9 @@ fn is_dangerous_command(command: &str) -> Option<String> {
         ("> /proc/", "/proc/"),
         (">> /proc/", "/proc/"),
     ];
-    for (pattern, dir) in &system_write_patterns {
+    for (pattern, dir) in system_write_patterns {
         if cmd_lower.contains(pattern) {
-            warnings.push(&format!("write to system directory {}", dir));
+            warnings.push(format!("write to system directory {}", dir));
             break;
         }
     }
@@ -111,7 +111,7 @@ fn is_dangerous_command(command: &str) -> Option<String> {
     } else {
         Some(format!(
             "⚠️  SECURITY WARNING: {}",
-            warnings.join(", ")
+            warnings.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
         ))
     }
 }
@@ -330,8 +330,10 @@ impl BashTool {
                 // child processes spawned by the shell are also killed
                 #[cfg(unix)]
                 {
-                    let pgid = -(child.id() as i32);
-                    unsafe { libc::kill(pgid, libc::SIGKILL); }
+                    if let Some(pid) = child.id() {
+                        let pgid = -(pid as i32);
+                        unsafe { libc::kill(pgid, libc::SIGKILL); }
+                    }
                 }
                 let _ = child.kill().await;
                 let _ = child.wait().await; // Reap the child
@@ -352,8 +354,10 @@ impl BashTool {
                 // child processes spawned by the shell are also killed
                 #[cfg(unix)]
                 {
-                    let pgid = -(child.id() as i32);
-                    unsafe { libc::kill(pgid, libc::SIGKILL); }
+                    if let Some(pid) = child.id() {
+                        let pgid = -(pid as i32);
+                        unsafe { libc::kill(pgid, libc::SIGKILL); }
+                    }
                 }
                 let _ = child.kill().await;
                 let _ = child.wait().await; // Reap the child
