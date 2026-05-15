@@ -43,16 +43,6 @@ impl MistralProvider {
         }
     }
 
-    /// Create a Mistral provider with a specific API key
-    /// Create with explicit API key (public API for external consumers)
-
-    pub fn with_api_key(api_key: impl Into<String>) -> Self {
-        Self {
-            client: shared_client(),
-            api_key: Some(api_key.into()),
-        }
-    }
-
     /// Normalize tool call ID to Mistral's expected format (9 characters)
     ///
     /// Mistral's API expects tool call IDs to be exactly 9 characters.
@@ -433,9 +423,9 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 #[derive(Debug, Deserialize)]
  // serde deserialization structs
 struct SSEChunk {
-    id: Option<String>,
+    _id: Option<String>,
     #[serde(rename = "model")]
-    model: Option<String>,
+    _model: Option<String>,
     choices: Vec<Choice>,
     usage: Option<UsageInfo>,
 }
@@ -456,17 +446,17 @@ struct Delta {
 #[derive(Debug, Deserialize)]
  // serde deserialization structs
 struct ToolCallDelta {
-    index: Option<usize>,
+    _index: Option<usize>,
     id: Option<String>,
     #[serde(rename = "type")]
-    type_: Option<String>,
+    _type_: Option<String>,
     function: Option<FunctionDelta>,
 }
 
 #[derive(Debug, Deserialize)]
  // serde deserialization structs
 struct FunctionDelta {
-    name: Option<String>,
+    _name: Option<String>,
     arguments: Option<String>,
 }
 

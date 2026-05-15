@@ -48,15 +48,6 @@ impl BedrockProvider {
         }
     }
 
-    /// Create a Bedrock provider with a specific default region
-
-    pub fn with_region(region: impl Into<String>) -> Self {
-        Self {
-            client: shared_client(),
-            default_region: region.into(),
-        }
-    }
-
     /// Resolve AWS region from file config, then env, then default.
     fn resolve_region() -> String {
         // 1. Try ~/.aws/config
@@ -783,7 +774,7 @@ struct ContentBlockRef {
     #[serde(rename = "type")]
     block_type: Option<String>,
     #[serde(rename = "index")]
-    index: Option<usize>,
+    _index: Option<usize>,
     /// Tool call ID present for toolUse blocks
     #[serde(default)]
     id: Option<String>,
@@ -805,14 +796,14 @@ struct BedrockDelta {
     tool_use: Option<ToolUseDelta>,
     thinking: Option<String>,
     #[serde(rename = "partialJson")]
-    partial_json: Option<String>,
+    _partial_json: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
  // serde deserialization structs
 struct ToolUseDelta {
     #[serde(rename = "toolUseId")]
-    tool_use_id: Option<String>,
+    _tool_use_id: Option<String>,
     name: Option<String>,
     input: Option<String>,
 }
@@ -825,7 +816,7 @@ struct BedrockMetadata {
     #[serde(rename = "usage")]
     usage: Option<BedrockUsage>,
     #[serde(rename = "trace")]
-    trace: Option<serde_json::Value>,
+    _trace: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -836,11 +827,11 @@ struct BedrockUsage {
     #[serde(rename = "outputTokens")]
     output_tokens: Option<usize>,
     #[serde(rename = "totalTokens")]
-    total_tokens: Option<usize>,
+    _total_tokens: Option<usize>,
     #[serde(rename = "cacheReadInputTokens")]
-    cache_read_input_tokens: Option<usize>,
+    _cache_read_input_tokens: Option<usize>,
     #[serde(rename = "cacheCreationInputTokens")]
-    cache_creation_input_tokens: Option<usize>,
+    _cache_creation_input_tokens: Option<usize>,
 }
 
 #[cfg(test)]

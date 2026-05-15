@@ -229,8 +229,8 @@ fn sign_rs256(
  // serde deserialization structs
 struct TokenResponse {
     access_token: String,
-    expires_in: usize,
-    token_type: String,
+    _expires_in: usize,
+    _token_type: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -238,13 +238,13 @@ struct TokenResponse {
 struct ServiceAccountCreds {
     #[serde(rename = "type")]
     _type: String,
-    project_id: String,
-    private_key_id: String,
+    _project_id: String,
+    _private_key_id: String,
     private_key: String,
     client_email: String,
-    client_id: String,
-    auth_uri: String,
-    token_uri: String,
+    _client_id: String,
+    _auth_uri: String,
+    _token_uri: String,
 }
 
 #[cfg(test)]

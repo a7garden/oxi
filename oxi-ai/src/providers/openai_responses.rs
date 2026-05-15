@@ -565,7 +565,7 @@ enum ResponsesEvent {
         response: ResponseCreatedData,
     },
     // Fallback for unrecognized formats
- // variant data consumed by serde
+    #[allow(dead_code)]
     Unknown(JsonValue),
 }
 
@@ -574,11 +574,11 @@ enum ResponsesEvent {
 struct ResponseCreatedData {
     id: Option<String>,
     #[serde(rename = "object")]
-    object: Option<String>,
-    status: Option<String>,
+    _object: Option<String>,
+    _status: Option<String>,
     #[serde(rename = "model")]
-    model: Option<String>,
-    created_at: Option<i64>,
+    _model: Option<String>,
+    _created_at: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -588,7 +588,7 @@ struct OutputItem {
     #[serde(rename = "type")]
     r#type: String,
     id: Option<String>,
-    status: Option<String>,
+    _status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -602,7 +602,7 @@ struct ContentPart {
  // serde deserialization structs
 struct TextDelta {
     content_index: Option<usize>,
-    output_index: Option<usize>,
+    _output_index: Option<usize>,
     slice: Option<String>,
 }
 
@@ -610,17 +610,17 @@ struct TextDelta {
  // serde deserialization structs
 struct FunctionCallDelta {
     content_index: Option<usize>,
-    output_index: Option<usize>,
-    name: Option<String>,
+    _output_index: Option<usize>,
+    _name: Option<String>,
     arguments: Option<String>,
-    call_id: Option<String>,
+    _call_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
  // serde deserialization structs
 struct OutputTextDone {
-    content_index: Option<usize>,
-    output_index: Option<usize>,
+    _content_index: Option<usize>,
+    _output_index: Option<usize>,
     content: Option<TextContent>,
 }
 
@@ -632,8 +632,8 @@ struct TextContent {
 #[derive(Debug, Deserialize)]
  // serde deserialization structs
 struct ReasoningDone {
-    content_index: Option<usize>,
-    output_index: Option<usize>,
+    _content_index: Option<usize>,
+    _output_index: Option<usize>,
     summary: Option<Vec<SummaryItem>>,
 }
 
@@ -648,8 +648,8 @@ struct SummaryItem {
 #[derive(Debug, Deserialize)]
  // serde deserialization structs
 struct ResponseWithUsageData {
-    id: Option<String>,
-    status: Option<String>,
+    _id: Option<String>,
+    _status: Option<String>,
     usage: Option<UsageData>,
     incomplete_details: Option<IncompleteDetails>,
 }

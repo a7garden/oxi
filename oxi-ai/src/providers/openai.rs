@@ -691,9 +691,9 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 #[derive(Debug, Deserialize)]
  // serde deserialization structs
 struct SSEChunk {
-    id: Option<String>,
+    _id: Option<String>,
     #[serde(rename = "model")]
-    model: Option<String>,
+    _model: Option<String>,
     choices: Vec<Choice>,
     usage: Option<UsageInfo>,
 }
@@ -719,7 +719,7 @@ struct ToolCallDelta {
     index: Option<usize>,
     id: Option<String>,
     #[serde(rename = "type")]
-    type_: Option<String>,
+    _type_: Option<String>,
     function: Option<FunctionDelta>,
 }
 

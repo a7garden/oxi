@@ -49,21 +49,6 @@ impl AzureProvider {
         }
     }
 
-    /// Create with explicit configuration (public API for external consumers)
-
-    pub fn with_config(
-        api_key: impl Into<String>,
-        resource_name: impl Into<String>,
-        deployment_name: impl Into<String>,
-    ) -> Self {
-        Self {
-            client: shared_client(),
-            api_key: Some(api_key.into()),
-            resource_name: Some(resource_name.into()),
-            deployment_name: Some(deployment_name.into()),
-        }
-    }
-
     /// Build the Azure endpoint URL
     fn build_url(&self, model: &Model) -> Result<String, ProviderError> {
         // Priority: model.base_url > resource_name env > fallback
@@ -460,11 +445,10 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // SSE chunk structure (same as OpenAI)
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
 struct SSEChunk {
-    id: Option<String>,
+    _id: Option<String>,
     #[serde(rename = "model")]
-    model: Option<String>,
+    _model: Option<String>,
     choices: Vec<Choice>,
     usage: Option<UsageInfo>,
 }
@@ -483,19 +467,17 @@ struct Delta {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
 struct ToolCallDelta {
-    index: Option<usize>,
-    id: Option<String>,
+    _index: Option<usize>,
+    _id: Option<String>,
     #[serde(rename = "type")]
-    type_: Option<String>,
+    _type_: Option<String>,
     function: Option<FunctionDelta>,
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
 struct FunctionDelta {
-    name: Option<String>,
+    _name: Option<String>,
     arguments: Option<String>,
 }
 

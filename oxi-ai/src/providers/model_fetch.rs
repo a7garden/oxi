@@ -17,7 +17,7 @@ struct ModelsResponse {
 struct ModelInfo {
     id: String,
 
-    owned_by: Option<String>,
+    _owned_by: Option<String>,
 }
 
 /// Fetch the model list from an OpenAI-compatible `/v1/models` endpoint

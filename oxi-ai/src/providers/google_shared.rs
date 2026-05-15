@@ -14,19 +14,6 @@ use crate::{Api, AssistantMessage, ContentBlock, Context, StopReason, Tool, Usag
 // Google Thinking Level
 // ---------------------------------------------------------------------------
 
-/// Thinking level for Gemini 3+ models.
-///
-/// Mirrors Google's `ThinkingLevel` enum values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum GoogleThinkingLevel {
-    ThinkingLevelUnspecified,
-    Minimal,
-    Low,
-    Medium,
-    High,
-}
-
 // ---------------------------------------------------------------------------
 // Streaming helpers
 // ---------------------------------------------------------------------------
@@ -40,21 +27,6 @@ pub enum GoogleThinkingLevel {
 /// See: <https://ai.google.dev/gemini-api/docs/thought-signatures>
 pub fn is_thinking_part(part: &GooglePart) -> bool {
     part.thought == Some(true)
-}
-
-/// Retain thought signatures during streaming.
-///
-/// Some backends only send `thoughtSignature` on the first delta for a given
-/// part/block; later deltas may omit it. This helper preserves the last
-/// non-empty signature for the current block.
-pub fn retain_thought_signature(
-    existing: Option<&str>,
-    incoming: Option<&str>,
-) -> Option<String> {
-    match incoming {
-        Some(s) if !s.is_empty() => Some(s.to_string()),
-        _ => existing.map(|s| s.to_string()),
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -86,23 +58,6 @@ pub fn map_stop_reason(reason: &str) -> StopReason {
         | "NO_IMAGE" => StopReason::Error,
         _ => StopReason::Error,
     }
-}
-
-// ---------------------------------------------------------------------------
-// Tool call ID helpers
-// ---------------------------------------------------------------------------
-
-/// Models via Google APIs that require explicit tool call IDs in function calls/responses.
-pub fn requires_tool_call_id(model_id: &str) -> bool {
-    model_id.starts_with("claude-") || model_id.starts_with("gpt-oss-")
-}
-
-/// Normalize a tool call ID for models that require alphanumeric-only IDs.
-pub fn normalize_tool_call_id(model_id: &str, id: &str) -> String {
-    if !requires_tool_call_id(model_id) {
-        return id.to_string();
-    }
-    crate::utils::normalize_tool_call_id(id)
 }
 
 // ---------------------------------------------------------------------------
@@ -525,12 +480,12 @@ pub struct GooglePart {
     pub thought: Option<bool>,
     /// Encrypted thought signature for preserving reasoning context.
     #[serde(rename = "thoughtSignature")]
-    pub thought_signature: Option<String>,
+    pub _thought_signature: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct GoogleFunctionCall {
-    pub name: String,
+    pub _name: String,
     #[serde(default)]
     pub args: JsonValue,
 }
@@ -559,7 +514,7 @@ mod tests {
             text: Some("thinking...".to_string()),
             function_call: None,
             thought: None,
-            thought_signature: None,
+            _thought_signature: None,
         };
         assert!(!is_thinking_part(&part));
 
@@ -571,27 +526,6 @@ mod tests {
     }
 
     #[test]
-    fn test_retain_thought_signature() {
-        assert_eq!(retain_thought_signature(None, None), None);
-        assert_eq!(
-            retain_thought_signature(None, Some("sig123")),
-            Some("sig123".to_string())
-        );
-        assert_eq!(
-            retain_thought_signature(Some("existing"), Some("new")),
-            Some("new".to_string())
-        );
-        assert_eq!(
-            retain_thought_signature(Some("existing"), None),
-            Some("existing".to_string())
-        );
-        assert_eq!(
-            retain_thought_signature(Some("existing"), Some("")),
-            Some("existing".to_string())
-        );
-    }
-
-    #[test]
     fn test_map_stop_reason() {
         assert_eq!(map_stop_reason("STOP"), StopReason::Stop);
         assert_eq!(map_stop_reason("MAX_TOKENS"), StopReason::Length);
@@ -600,29 +534,6 @@ mod tests {
         assert_eq!(map_stop_reason("RECITATION"), StopReason::Error);
         assert_eq!(map_stop_reason("MALFORMED_FUNCTION_CALL"), StopReason::Error);
         assert_eq!(map_stop_reason("UNKNOWN_REASON"), StopReason::Error);
-    }
-
-    #[test]
-    fn test_requires_tool_call_id() {
-        assert!(requires_tool_call_id("claude-3-opus"));
-        assert!(requires_tool_call_id("gpt-oss-4o"));
-        assert!(!requires_tool_call_id("gemini-2.5-pro"));
-        assert!(!requires_tool_call_id("gpt-4o"));
-    }
-
-    #[test]
-    fn test_normalize_tool_call_id() {
-        assert_eq!(
-            normalize_tool_call_id("gemini-2.5-pro", "call_abc/123"),
-            "call_abc/123"
-        );
-        assert_eq!(
-            normalize_tool_call_id("claude-3-opus", "call_abc/123"),
-            "call_abc_123"
-        );
-        let long_id = "a".repeat(100);
-        let result = normalize_tool_call_id("claude-3-opus", &long_id);
-        assert_eq!(result.len(), 64);
     }
 
     #[test]

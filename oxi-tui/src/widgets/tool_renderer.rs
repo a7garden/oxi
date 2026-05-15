@@ -323,7 +323,7 @@ pub fn format_bash_result(result: &str, max_width: usize, styles: &ThemeStyles) 
 
     // Show last N lines of output
     let all_lines: Vec<&str> = result.lines().collect();
-    let preview_lines = if all_lines.len() > RESULT_PREVIEW_LINES {
+    let _preview_lines = if all_lines.len() > RESULT_PREVIEW_LINES {
         // Show last N lines
         let start = all_lines.len() - RESULT_PREVIEW_LINES;
         for line in &all_lines[start..] {

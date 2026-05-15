@@ -30,15 +30,6 @@ impl GoogleProvider {
             api_key: None,
         }
     }
-
-    /// Create with explicit API key (public API for external consumers)
-
-    pub fn with_api_key(api_key: impl Into<String>) -> Self {
-        Self {
-            client: shared_client(),
-            api_key: Some(api_key.into()),
-        }
-    }
 }
 
 impl Default for GoogleProvider {

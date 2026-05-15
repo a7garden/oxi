@@ -5,16 +5,11 @@ use std::sync::OnceLock;
 mod anthropic;
 mod azure;
 mod bedrock;
-mod cloudflare;
-mod copilot;
-mod codex;
-mod deepseek;
 mod event;
 mod google;
 mod google_shared;
 mod mistral;
 mod openai;
-mod openai_completions;
 mod openai_responses;
 pub mod openai_responses_shared;
 mod options;
@@ -37,17 +32,9 @@ pub use crate::ThinkingLevel;
 pub use anthropic::AnthropicProvider;
 #[allow(unused_imports)]
 pub use azure::AzureProvider;
-#[allow(unused_imports)]
-pub use cloudflare::CloudflareProvider;
-#[allow(unused_imports)]
-pub use codex::CodexProvider;
-#[allow(unused_imports)]
-pub use copilot::CopilotProvider;
 pub use event::ProviderEvent;
 #[allow(unused_imports)]
 pub use openai::OpenAiProvider;
-#[allow(unused_imports)]
-pub use openai_completions::OpenAICompletionsProvider;
 #[allow(unused_imports)]
 pub use openai_responses::OpenAiResponsesProvider;
 #[allow(unused_imports)]

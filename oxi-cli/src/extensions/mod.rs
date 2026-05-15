@@ -3,10 +3,12 @@
 //! Extensions allow custom tools, commands, and event hooks to be loaded dynamically at runtime.
 
 pub mod context;
+#[allow(missing_docs)]
 pub mod ext_cli;
 pub mod loading;
 pub mod registry;
 pub mod types;
+#[allow(missing_docs)]
 pub mod wasm;
 pub mod wasm_tool;
 pub mod wasm_hooks;

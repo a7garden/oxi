@@ -24,7 +24,6 @@ use ratatui::{
 };
 use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 use tui_markdown;
-use unicode_width::UnicodeWidthStr;
 
 use crate::table_renderer::render_markdown_table;
 use crate::Theme;
@@ -624,6 +623,7 @@ struct LayoutEntry {
 enum LayoutKind {
     Spacer,
     Rule,
+    #[allow(dead_code)]
     Label { text: String, style: Style },
     Text { lines: Vec<Line<'static>>, is_user: bool },
     ToolBox {
@@ -747,7 +747,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             y += h;
         }
         entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spinner { frame: state.spinner_frame } });
-        y += 1;
+        _ = y;
     }
 
     entries
@@ -1069,7 +1069,6 @@ impl StatefulWidget for ChatView<'_> {
         // Apply left/right padding to the inner content area
         let pad = self.theme.spacing.padding.max(1);
         let inner_width = width.saturating_sub(pad * 2);
-        let inner_x = area.x + pad;
 
 
         // Create ScrollView with virtual buffer sized to total content.
