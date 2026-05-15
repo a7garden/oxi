@@ -9,6 +9,7 @@
 
 use super::{AgentTool, AgentToolResult, ToolError};
 use super::search_cache::{SearchCache, SearchResult};
+use super::http_client::shared_http_client;
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -134,7 +135,7 @@ async fn search_github_repos(
         );
     }
 
-    let mut builder = reqwest::Client::new()
+    let mut builder = shared_http_client()
         .get(&url)
         .header("Accept", "application/vnd.github.v3+json")
         .header("User-Agent", "oxi-agent");

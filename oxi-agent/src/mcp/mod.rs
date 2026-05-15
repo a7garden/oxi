@@ -104,6 +104,16 @@ impl McpManager {
         self.config.read()
     }
 
+    /// Get the configured failure backoff duration in seconds.
+    fn failure_backoff_secs(&self) -> u64 {
+        self.config
+            .read()
+            .settings
+            .as_ref()
+            .and_then(|s| s.failure_backoff_secs)
+            .unwrap_or(DEFAULT_FAILURE_BACKOFF_SECS)
+    }
+
     // ── Status ────────────────────────────────────────────────────
 
     /// Get a formatted status summary of all configured servers.
@@ -132,7 +142,7 @@ impl McpManager {
                 ("✓", count)
             } else if let Some(failed_at) = inner.failure_tracker.get(name) {
                 let ago = failed_at.elapsed().as_secs();
-                if ago < FAILURE_BACKOFF_SECS {
+                if ago < self.failure_backoff_secs() {
                     ("✗", 0)
                 } else {
                     ("○", 0)
@@ -242,7 +252,7 @@ impl McpManager {
             }
             // Check backoff
             if let Some(failed_at) = inner.failure_tracker.get(server_name) {
-                if failed_at.elapsed().as_secs() < FAILURE_BACKOFF_SECS {
+                if failed_at.elapsed().as_secs() < self.failure_backoff_secs() {
                     return false;
                 }
             }

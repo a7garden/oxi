@@ -1,7 +1,9 @@
 /// Agent configuration
 
+use std::sync::Arc;
 use oxi_ai::CompactionStrategy;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 fn default_context_window() -> usize {
     128_000
@@ -82,7 +84,11 @@ pub struct AfterToolCallContext {
 #[derive(Default)]
 pub struct AgentHooks {
     /// Called after each turn completes. Return `true` to stop the agent loop.
-    pub should_stop_after_turn: Option<Box<dyn Fn(&ShouldStopAfterTurnContext) -> bool + Send + Sync>>,
+    ///
+    /// Wrapped in `Arc` so the hook can be invoked multiple times without
+    /// being consumed (unlike `Box<dyn Fn>` which requires `take()`).
+    pub should_stop_after_turn:
+        Option<Arc<dyn Fn(&ShouldStopAfterTurnContext) -> bool + Send + Sync>>,
 
     /// Called before a tool is executed. Return a `BeforeToolCallResult` with
     /// `block: true` to prevent execution.

@@ -8,6 +8,7 @@ pub(crate) mod messages;
 pub(crate) mod tmux_detect;
 pub(crate) mod telemetry;
 pub(crate) mod defaults;
+pub(crate) mod http_client;
 pub(crate) mod slash_commands;
 pub(crate) mod sleep;
 

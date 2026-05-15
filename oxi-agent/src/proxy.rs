@@ -16,6 +16,7 @@ use oxi_ai::{
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Duration, Instant};
 
@@ -258,9 +259,14 @@ impl ProxyStream {
             },
         };
 
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(120))
-            .build()?;
+        // Use a cached proxy client with extended timeout for streaming.
+        static PROXY_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+        let client = PROXY_CLIENT.get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(120))
+                .build()
+                .expect("proxy HTTP client init failed")
+        });
 
         let response = client
             .post(format!("{}/api/stream", proxy_url))

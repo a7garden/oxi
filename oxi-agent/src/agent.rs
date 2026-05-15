@@ -353,11 +353,11 @@ impl Agent {
         // Arc with the emit callback. When the hook fires (Ctrl+C detected),
         // it sets ext_stop. AgentLoop checks this in should_stop_after_turn().
         //
-        // Note: Box<dyn Fn> can't be cloned. We take it from hooks.
+        // Arc<dyn Fn> can be cloned, so we read it without consuming.
         let maybe_hook = {
             drop(hooks);
-            let mut hooks_w = self.hooks.write();
-            hooks_w.should_stop_after_turn.take()
+            let hooks_r = self.hooks.read();
+            hooks_r.should_stop_after_turn.clone()
         };
         let ext_stop = al.external_stop().clone();
 

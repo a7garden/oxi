@@ -7,8 +7,10 @@
 //! GitHub.
 
 use anyhow::{bail, Context, Result};
+use crate::util::http_client::shared_http_client;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tracing;
 
 // ---------------------------------------------------------------------------
@@ -227,12 +229,13 @@ pub fn get_tool_path(tool: ToolName) -> Option<PathBuf> {
 /// Fetch the latest release version tag from GitHub and strip any leading `v`.
 async fn get_latest_version(repo: &str, tag_prefix: &str) -> Result<String> {
     let url = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(NETWORK_TIMEOUT_SECS))
-        .user_agent(format!("{APP_NAME}-coding-agent"))
-        .build()?;
+    let client = shared_http_client();
 
-    let resp = client.get(&url).send().await?;
+    let resp = client
+        .get(&url)
+        .header("User-Agent", format!("{APP_NAME}-coding-agent"))
+        .send()
+        .await?;
     if !resp.status().is_success() {
         bail!("GitHub API error: {}", resp.status());
     }
@@ -249,12 +252,20 @@ async fn get_latest_version(repo: &str, tag_prefix: &str) -> Result<String> {
 
 /// Download a file from `url` to `dest`.
 async fn download_file(url: &str, dest: &Path) -> Result<()> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
-        .user_agent(format!("{APP_NAME}-coding-agent"))
-        .build()?;
+    // Cache a long-timeout client for large downloads.
+    static DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    let client = DOWNLOAD_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(DOWNLOAD_TIMEOUT_SECS))
+            .build()
+            .expect("download HTTP client init failed")
+    });
 
-    let resp = client.get(url).send().await?;
+    let resp = client
+        .get(url)
+        .header("User-Agent", format!("{APP_NAME}-coding-agent"))
+        .send()
+        .await?;
     if !resp.status().is_success() {
         bail!("Failed to download: {} (HTTP {})", url, resp.status());
     }

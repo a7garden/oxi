@@ -14,6 +14,7 @@
 //! Anonymous access works without a key but has lower rate limits.
 
 use crate::tools::{AgentTool, AgentToolResult};
+use crate::tools::http_client::shared_http_client;
 use async_trait::async_trait;
 use std::sync::OnceLock;
 use serde::Deserialize;
@@ -40,17 +41,9 @@ fn api_base_url() -> &'static str {
 /// Process-lifetime cached API key. Loaded once from file or env.
 static API_KEY: OnceLock<Option<String>> = OnceLock::new();
 
-/// Process-lifetime shared HTTP client (reuses connection pool + TLS sessions).
-static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-
-/// Get or initialise the shared reqwest client.
+/// Get the shared reqwest client.
 fn client() -> &'static reqwest::Client {
-    HTTP_CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .expect("reqwest client initialization should not fail")
-    })
+    shared_http_client()
 }
 
 /// Get or initialise the API key.

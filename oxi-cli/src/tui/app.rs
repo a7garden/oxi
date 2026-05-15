@@ -850,7 +850,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             let follow_up_q = sh.follow_up_queue();
                             let should_stop_flag = sh.should_stop_flag();
                             let hooks = oxi_agent::AgentHooks {
-                                should_stop_after_turn: Some(Box::new(move |_ctx| {
+                                should_stop_after_turn: Some(Arc::new(move |_ctx| {
                                     should_stop_flag.load(Ordering::SeqCst)
                                 })),
                                 get_steering_messages: Some(Box::new(move || {

@@ -495,7 +495,7 @@ impl ModelRegistry {
                 tracing::warn!(
                     "Ambiguous model ID '{}' matches providers: {}. Using first match.",
                     model_str,
-                    matches.iter().map(|m| &m.provider).collect::<Vec<_>>().join(", ")
+                    matches.iter().map(|m| m.provider.as_str()).collect::<Vec<_>>().join(", ")
                 );
             }
             return Some(matches[0].clone());
@@ -580,10 +580,20 @@ impl ModelRegistry {
             return auth_status;
         };
 
-        if api_key_ref.starts_with('!') {
+        if api_key_ref.starts_with('$') {
             return AuthStatus {
                 configured: true,
-                source: Some("models_json_command".to_string()),
+                source: Some("models_json_env_var".to_string()),
+                label: None,
+            };
+        } else if api_key_ref.starts_with('!') {
+            // Deprecated: ! prefix no longer supported
+            tracing::warn!(
+                "Command execution (! prefix) in apiKey is no longer supported. Use $ENV_VAR instead."
+            );
+            return AuthStatus {
+                configured: false,
+                source: Some("models_json_command_deprecated".to_string()),
                 label: None,
             };
         }
@@ -1735,17 +1745,29 @@ mod tests {
 
     #[test]
     fn test_resolve_config_value_env() {
-        // Test command substitution (! prefix)
-        std::env::set_var("OXI_TEST_KEY", "test-value-123");
-        let result = resolve_config_value("!echo $OXI_TEST_KEY");
+        // Test env var expansion ($ prefix)
+        // Use a unique var name to avoid parallel test interference
+        let var_name = format!("OXI_TEST_KEY_{}", std::process::id());
+        std::env::set_var(&var_name, "test-value-123");
+        let result = resolve_config_value(&format!("${}", var_name));
         assert_eq!(result, Some("test-value-123".to_string()));
-        std::env::remove_var("OXI_TEST_KEY");
+        std::env::remove_var(&var_name);
     }
 
     #[test]
-    fn test_resolve_config_value_missing_env() {
-        // Test non-existent command returns None
-        let result = resolve_config_value("!nonexistent_cmd_12345");
+    fn test_resolve_config_value_env_braces() {
+        // Test env var expansion with ${VAR} syntax
+        let var_name = format!("OXI_TEST_KEY_{}", std::process::id());
+        std::env::set_var(&var_name, "test-value-456");
+        let result = resolve_config_value(&format!("${{}}", var_name));
+        assert_eq!(result, Some("test-value-456".to_string()));
+        std::env::remove_var(&var_name);
+    }
+
+    #[test]
+    fn test_resolve_config_value_command_rejected() {
+        // ! prefix is now rejected for security
+        let result = resolve_config_value("!echo hello");
         assert!(result.is_none());
     }
 
