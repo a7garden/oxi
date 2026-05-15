@@ -489,8 +489,15 @@ impl ModelRegistry {
             return Some(matches[0].clone());
         }
 
-        // Multiple matches — prefer first
+        // Multiple matches — prefer first, warn about ambiguity
         if !matches.is_empty() {
+            if matches.len() > 1 {
+                tracing::warn!(
+                    "Ambiguous model ID '{}' matches providers: {}. Using first match.",
+                    model_str,
+                    matches.iter().map(|m| &m.provider).collect::<Vec<_>>().join(", ")
+                );
+            }
             return Some(matches[0].clone());
         }
 

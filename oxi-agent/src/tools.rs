@@ -182,6 +182,8 @@ pub mod render_utils;
 pub mod search_cache;
 /// Tool definition wrapper helpers.
 pub mod tool_definition_wrapper;
+/// Shared HTTP client singleton.
+pub mod http_client;
 /// Output truncation helpers.
 pub mod truncate;
 /// Multi-engine web search tool (a3s-search library + DuckDuckGo fallback).

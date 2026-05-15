@@ -51,8 +51,8 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::time::Instant;
 
-/// Back-off period after a server connection failure (seconds).
-const FAILURE_BACKOFF_SECS: u64 = 60;
+/// Default back-off period after a server connection failure (seconds).
+const DEFAULT_FAILURE_BACKOFF_SECS: u64 = 30;
 
 /// Inner mutable state for [`McpManager`].
 struct McpManagerInner {
