@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use parking_lot::RwLock;
 
 // ============================================================================
@@ -57,7 +57,7 @@ impl AuthCredential {
         match self {
             AuthCredential::OAuth { expires_at, .. } => {
                 let now = now_secs();
-                *expires_at <= now
+                *expires_at < now
             }
             AuthCredential::Session { expires_at, .. } => {
                 if *expires_at == 0 {

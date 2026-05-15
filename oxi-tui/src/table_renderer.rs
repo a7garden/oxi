@@ -104,23 +104,22 @@ pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'s
         &content_owned
     };
 
-    // First pass: check if there's a table at all.
-    // If not, return empty so caller falls back to tui-markdown.
-    let has_table = Parser::new_ext(input, options).any(|e| {
+    // Parse once: collect events into a Vec, then check and render.
+    let events: Vec<Event> = Parser::new_ext(input, options).collect();
+    let has_table = events.iter().any(|e| {
         matches!(e, Event::Start(Tag::Table(_)) | Event::Start(Tag::TableHead))
     });
     if !has_table {
         return Vec::new();
     }
 
-    // Second pass: render everything, handling tables specially.
-    let parser = Parser::new_ext(input, options);
+    // Render using the collected events.
     let mut table_state = TableState::default();
     let mut in_table = false;
     let mut pending_text = String::new();
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    for event in parser {
+    for event in events {
         match event {
             Event::Start(Tag::Table(_)) | Event::Start(Tag::TableHead) => {
                 // Flush accumulated text before table

@@ -44,6 +44,43 @@ pub enum ProviderError {
     /// 스트리밍 오류.
     #[error("Stream error: {0}")]
     StreamError(String),
+
+    /// 네트워크 오류.
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
+    /// 요청 시간 초과.
+    #[error("Request timed out")]
+    Timeout,
+
+    /// 요청 속도 제한.
+    #[error("Rate limited")]
+    RateLimited {
+        /// 서버가 제시한 대기 시간.
+        retry_after: Option<std::time::Duration>,
+    },
+}
+
+impl ProviderError {
+    /// 오류가 재시도 가능한지 반환.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::HttpError(status, _) => *status == 429 || *status >= 500,
+            Self::NetworkError(_) => true,
+            Self::Timeout => true,
+            Self::RateLimited { .. } => true,
+            _ => false,
+        }
+    }
+
+    /// 서버가 제시한 재시도 대기 시간을 반환.
+    pub fn retry_after(&self) -> Option<std::time::Duration> {
+        match self {
+            Self::RateLimited { retry_after } => *retry_after,
+            Self::HttpError(429, _) => Some(std::time::Duration::from_secs(5)),
+            _ => None,
+        }
+    }
 }
 
 /// Validation errors

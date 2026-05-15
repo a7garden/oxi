@@ -108,7 +108,7 @@ async fn handle_key(
                 // Agent busy — queue as steering message
                 state.add_system_message(format!("Queued: {}", value.chars().take(50).collect::<String>()));
                 state.input_history.insert(0, value.clone());
-                if state.input_history.len() > 100 { state.input_history.pop(); }
+                if state.input_history.len() > 100 { state.input_history.remove(0); }
                 state.history_index = 0;
                 let _ = session.steer(value);
                 state.input_clear();

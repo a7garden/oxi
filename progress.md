@@ -1,32 +1,18 @@
 # Progress
 
-## Model Registry Security Fixes (`oxi-store/src/model_registry.rs`)
+## Status
+Completed
 
-- [x] **Fix 1: Command injection** — Removed `!` shell command execution from `resolve_config_value()` and `resolve_config_value_or_throw()`. Replaced with `$VAR`/`${VAR}` env var expansion. `!` prefix now logs warning and returns None/Err.
-- [x] **Fix 2: apiKey warning** — Added `tracing::warn!` in `load_custom_models()` when providers have plaintext `apiKey` in models.json.
-- [x] **Fix 3: Ambiguity logging** — Added `tracing::warn!` in `resolve_model()` when multiple providers match the same model ID.
-- [x] **Tests updated** — Updated existing tests for new `$VAR` syntax, added test for `!` rejection and `${VAR}` syntax.
-- [x] **Compiles clean** — `cargo check -p oxi-store` passes with no new warnings.
-- [x] **Findings written** — `fix_model_registry_security.md`
+## Tasks
+- [x] Fix 1: navigate_tree block_on panic (session_navigation.rs)
+- [x] Fix 2: get_branch() lock thrashing (session.rs)
+- [x] Fix 3: _append_entry lock ordering comment (session.rs)
+- [x] Fix 4: SessionCwd escape fix (session_cwd.rs)
 
-### Notes
-- Pre-existing test compilation error in `session_navigation.rs` (unrelated) prevents `cargo test` from building the test binary. Lib compilation is clean.
+## Files Changed
+- oxi-store/src/session_navigation.rs
+- oxi-store/src/session.rs
+- oxi-store/src/session_cwd.rs
 
-## HTTP Client Singleton Consolidation
-
-- [x] **Fix 1: oxi-agent** — Created `oxi-agent/src/tools/http_client.rs` with `shared_http_client()`. Updated context7.rs, github_search.rs, and proxy.rs to use shared/cached clients.
-- [x] **Fix 2: oxi-cli** — Created `oxi-cli/src/util/http_client.rs` with `shared_http_client()`. Updated tools_manager.rs, packages.rs, ext_cli.rs, and version_check.rs.
-- [x] **Custom timeout cases** — proxy.rs (120s streaming) and tools_manager downloads (120s) use local OnceLock caches with their specific timeouts.
-- [x] **Cleanup** — Removed unused constants and imports (NETWORK_TIMEOUT_SECS, Duration).
-- [x] **Builds clean** — `cargo check --workspace` passes.
-- [x] **Findings written** — `fix_http_client.md`
-
-## Code Deduplication Fixes
-
-- [x] **Fix 1: CompactionReason** — Unified `CompactionReason` enum in `auto_compaction.rs` (added `Threshold` variant), removed duplicate from `agent_session.rs`, updated all imports.
-- [x] **Fix 2: normalize_tool_call_id** — Moved core logic to `oxi-ai/src/utils/mod.rs`, both `transform.rs` and `google_shared.rs` delegate to it.
-- [x] **Fix 3: ValidationError rename** — Renamed `tools.rs::ValidationError` → `ToolValidationError`, updated all references + public re-export.
-- [x] **Fix 4: truncate functions** — Created `oxi-tui/src/text.rs` with shared `truncate_to_width()`, removed duplicates from `chat.rs` and `tool_renderer.rs`.
-- [x] **Builds clean** — `cargo check --workspace` passes.
-- [x] **Tests pass** — All affected tests pass (error_handling, truncate, compaction_reason).
-- [x] **Findings written** — `fix_dedup_code.md`
+## Notes
+All four session navigation issues have been fixed. See fix_session_navigation.md for details.

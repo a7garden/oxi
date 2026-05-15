@@ -1221,6 +1221,9 @@ impl SessionManager {
         }
     }
 
+    // LOCK ORDERING CONVENTION (must be followed to prevent deadlock):
+    // 1. file_entries  2. by_id  3. labels_by_id  4. label_timestamps_by_id  5. leaf_id
+    // Always acquire locks in this order. Never acquire an earlier lock after a later one.
     fn _append_entry(&mut self, entry: SessionEntry) {
         let file_entry = convert_from_session_entry(&entry);
         self.file_entries.write().push(FileEntry::Entry(file_entry));
@@ -1473,10 +1476,13 @@ impl SessionManager {
             return path;
         };
 
-        let mut current = self.by_id.read().get(start_id).cloned();
+        // Acquire the lock once and reuse it for the entire traversal
+        let by_id = self.by_id.read();
+        let mut current = by_id.get(start_id).cloned();
         while let Some(entry) = current {
             path.insert(0, entry.clone());
-            current = entry.parent_id.as_ref().and_then(|pid| self.by_id.read().get(pid).cloned());
+            current = entry.parent_id.as_ref()
+                .and_then(|pid| by_id.get(pid).cloned());
         }
         path
     }

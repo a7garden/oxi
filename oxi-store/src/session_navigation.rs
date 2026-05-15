@@ -553,13 +553,17 @@ impl SessionNavigator {
 
         if options.summarize && !collection.entries.is_empty() && extension_summary.is_none() {
             if let Some(summarizer) = summarizer {
-                let rt = summarizer.summarize(
-                    &collection.entries,
-                    custom_instructions.as_deref(),
-                    replace_instructions,
-                );
-                let runtime = tokio::runtime::Handle::current();
-                let result = runtime.block_on(rt);
+                // Use spawn_blocking pattern to avoid panic when called within a tokio runtime
+                let entries_clone: Vec<SessionEntryType> = collection.entries.clone();
+                let custom_clone = custom_instructions.clone();
+                let result = std::thread::spawn(move || {
+                    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+                    rt.block_on(summarizer.summarize(
+                        &entries_clone,
+                        custom_clone.as_deref(),
+                        replace_instructions,
+                    ))
+                }).join().map_err(|e| anyhow::anyhow!("Summary thread panicked: {:?}", e))?;
 
                 match result {
                     Ok(summary_result) => {

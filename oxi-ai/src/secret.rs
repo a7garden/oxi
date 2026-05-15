@@ -60,7 +60,8 @@ impl fmt::Display for Secret<String> {
 
 impl serde::Serialize for Secret<String> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.inner)
+        // Don't serialize the actual secret value
+        s.serialize_str("[REDACTED]")
     }
 }
 

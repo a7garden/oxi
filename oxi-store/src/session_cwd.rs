@@ -54,7 +54,7 @@ pub fn format_missing_session_cwd_error(issue: &SessionCwdIssue) -> String {
         .map(|f| format!("\nSession file: {}", f))
         .unwrap_or_default();
     format!(
-        "Stored session working directory does not exist: {}{}\\nCurrent working directory: {}",
+        "Stored session working directory does not exist: {}\nCurrent working directory: {}",
         issue.session_cwd, session_file_line, issue.fallback_cwd
     )
 }

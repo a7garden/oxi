@@ -234,7 +234,9 @@ impl StatefulWidget for Footer<'_> {
         {
             let mut left_spans: Vec<Span> = Vec::new();
 
-            let home = std::env::var("HOME").unwrap_or_default();
+            let home = dirs::home_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
             let pwd_display = if let Some(ref pwd) = d.pwd {
                 if !home.is_empty() && pwd.starts_with(&home) {
                     format!(" ~{}", &pwd[home.len()..])
