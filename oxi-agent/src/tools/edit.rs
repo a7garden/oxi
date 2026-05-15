@@ -12,6 +12,7 @@ use super::edit_diff::{
     EditDiffError,
 };
 use super::file_mutation_queue::global_mutation_queue;
+use super::path_security::PathGuard;
 use super::{AgentTool, AgentToolResult, ToolError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -89,12 +90,10 @@ impl EditTool {
 
     /// Apply edits to a file with full BOM/line-ending handling and diff output.
     async fn apply_edits(input: &EditInput) -> Result<EditOutput, ToolError> {
-        let path = Path::new(&input.path);
-
-        // Security: prevent path traversal
-        if path.components().any(|c| c.as_os_str() == "..") {
-            return Err("Path traversal not allowed".to_string());
-        }
+        // Security: validate path with PathGuard
+        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let path = guard.validate(Path::new(&input.path))
+            .map_err(|e| e.to_string())?;
 
         // Validate edits
         if input.edits.is_empty() {

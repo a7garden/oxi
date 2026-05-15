@@ -1,6 +1,7 @@
 /// Ls tool - list directory contents
 
 use super::{AgentTool, AgentToolResult, ToolError};
+use super::path_security::PathGuard;
 use crate::tools::truncate::{format_bytes, truncate_head, TruncationOptions};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -54,12 +55,10 @@ impl LsTool {
         long_format: bool,
         entry_limit: Option<usize>,
     ) -> Result<String, ToolError> {
-        let dir_path = Path::new(path);
-
-        // Security: prevent path traversal
-        if dir_path.components().any(|c| c.as_os_str() == "..") {
-            return Err("Path traversal not allowed".to_string());
-        }
+        // Security: validate path with PathGuard
+        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let dir_path = guard.validate(Path::new(path))
+            .map_err(|e| e.to_string())?;
 
         if !dir_path.exists() {
             return Err(format!("Path not found: {}", path));

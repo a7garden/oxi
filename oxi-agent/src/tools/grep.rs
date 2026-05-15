@@ -1,6 +1,7 @@
 /// Grep tool - search files for patterns
 
 use super::{AgentTool, AgentToolResult, ToolError};
+use super::path_security::PathGuard;
 use async_trait::async_trait;
 use regex::RegexBuilder;
 use serde_json::{json, Value};
@@ -60,12 +61,10 @@ impl GrepTool {
         include: Option<&str>,
         max_results: usize,
     ) -> Result<(String, bool), ToolError> {
-        let root = Path::new(path);
-
-        // Security: prevent path traversal
-        if root.components().any(|c| c.as_os_str() == "..") {
-            return Err("Path traversal not allowed".to_string());
-        }
+        // Security: validate path with PathGuard
+        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let root = guard.validate(Path::new(path))
+            .map_err(|e| e.to_string())?;
 
         if !root.exists() {
             return Err(format!("Path not found: {}", path));

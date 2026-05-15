@@ -8,6 +8,7 @@
 /// - Output truncation for very large content
 
 use super::file_mutation_queue::global_mutation_queue;
+use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ToolError};
 use async_trait::async_trait;
@@ -60,12 +61,10 @@ impl WriteTool {
 
     /// Core write implementation — runs inside the mutation queue lock.
     async fn write_file_impl(path: &str, content: &str, append: bool) -> Result<String, ToolError> {
-        let file_path = Path::new(path);
-
-        // Security: prevent path traversal
-        if file_path.components().any(|c| c.as_os_str() == "..") {
-            return Err("Path traversal not allowed".to_string());
-        }
+        // Security: validate path with PathGuard
+        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let file_path = guard.validate(Path::new(path))
+            .map_err(|e| e.to_string())?;
 
         // Ensure parent directory exists (create if missing)
         if let Some(parent) = file_path.parent() {

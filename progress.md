@@ -1,15 +1,19 @@
-# Progress
+# Progress: Bash Security Fixes
 
-## Status
-In Progress
+## Status: ✅ COMPLETE
 
-## Tasks
-- [x] Fix OAuth security issues in oxi-cli/src/oauth_server.rs
+### Task
+Fix CRITICAL security issues in the Bash tool at `oxi-agent/src/tools/bash.rs`.
 
-## Files Changed
-- oxi-cli/src/oauth_server.rs
+### Completed Changes
+1. ✅ **Blocked environment variables** — `BLOCKED_ENV_VARS` const with 19 dangerous env vars, filtered with case-insensitive matching
+2. ✅ **Dangerous command patterns** — `is_dangerous_command()` function detecting 7 categories of dangerous patterns (warning only, no blocking)
+3. ✅ **Process group kill** — `libc::kill(-(pid as i32), SIGKILL)` on timeout and abort for both branches
+4. ✅ **Working directory validation** — `validate_cwd()` with symlink escape detection via canonicalize
 
-## Notes
-- CSRF state validation added
-- URL decoding fixed (urlencoding crate)
-- redirect_uri port mismatch fixed
+### Build Status
+- bash.rs compiles with 0 errors
+- Pre-existing errors in other files (tool_exec.rs, mod.rs, edit.rs, ls.rs, read.rs) are unrelated
+
+### Output
+- Findings: `/Volumes/MERCURY/PROJECTS/oxi/fix_bash_security.md`

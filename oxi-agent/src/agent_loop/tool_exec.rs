@@ -115,7 +115,7 @@ async fn execute_tool_calls_sequential(
         });
 
         let tool_result_message = create_tool_result_message(&finalized);
-        let msg = Message::ToolResult(tool_result_message);
+        let msg = Message::ToolResult(tool_result_message.clone());
         emit(AgentEvent::MessageStart { message: msg.clone() });
         emit(AgentEvent::MessageEnd { message: msg });
 
@@ -226,7 +226,7 @@ async fn execute_tool_calls_parallel(
     let mut tool_result_messages = Vec::new();
     for finalized in &ordered_finalized_calls {
         let tool_result_message = create_tool_result_message(finalized);
-        let msg = Message::ToolResult(tool_result_message);
+        let msg = Message::ToolResult(tool_result_message.clone());
         emit(AgentEvent::MessageStart { message: msg.clone() });
         emit(AgentEvent::MessageEnd { message: msg });
         tool_result_messages.push(tool_result_message);
