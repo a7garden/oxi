@@ -169,53 +169,8 @@ mod tests {
     }
 
     #[test]
-    fn test_compare_versions() {
-        let v1_0_0 = ChangelogEntry::new(1, 0, 0, "");
-        let v0_9_0 = ChangelogEntry::new(0, 9, 0, "");
-        let v1_0_1 = ChangelogEntry::new(1, 0, 1, "");
-
-        assert_eq!(compare_versions(&v1_0_0, &v0_9_0), 1);
-        assert_eq!(compare_versions(&v0_9_0, &v1_0_0), -1);
-        assert_eq!(compare_versions(&v1_0_0, &v1_0_0), 0);
-        assert_eq!(compare_versions(&v1_0_1, &v1_0_0), 1);
-    }
-
-    #[test]
-    fn test_get_new_entries() {
-        let entries = parse_changelog_content(SAMPLE_CHANGELOG);
-        let new_entries = get_new_entries(&entries, "0.9.0");
-
-        assert_eq!(new_entries.len(), 1);
-        assert_eq!(new_entries[0].major, 1);
-        assert_eq!(new_entries[0].minor, 0);
-        assert_eq!(new_entries[0].patch, 0);
-    }
-
-    #[test]
-    fn test_get_latest_version() {
-        let entries = parse_changelog_content(SAMPLE_CHANGELOG);
-        let latest = get_latest_version(&entries);
-
-        assert!(latest.is_some());
-        assert_eq!(latest.unwrap().version_string(), "1.0.0");
-    }
-
-    #[test]
     fn test_version_string() {
         let entry = ChangelogEntry::new(1, 2, 3, "");
         assert_eq!(entry.version_string(), "1.2.3");
-    }
-
-    #[test]
-    fn test_format_changelog_entry() {
-        let entry = ChangelogEntry::new(1, 0, 0, "### Added\n- Feature A");
-        
-        let with_header = format_changelog_entry(&entry, true);
-        assert!(with_header.starts_with("## 1.0.0"));
-        assert!(with_header.contains("Feature A"));
-
-        let without_header = format_changelog_entry(&entry, false);
-        assert!(!without_header.starts_with("## "));
-        assert!(without_header.contains("Feature A"));
     }
 }

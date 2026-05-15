@@ -1465,79 +1465,20 @@ mod tests {
     // ══════════════════════════════════════════════════════════════════
 
     #[test]
-    fn test_cycle_model_forward_without_scoped() {
-        let session = make_session();
-        // Starting model is anthropic/claude-sonnet-4-20250514 (index 0)
-        // Cycling forward should move to the next in default list
-        let result = session.cycle_model(CycleDirection::Forward);
-        // The result may be None if set_model fails (model not registered),
-        // but we verify the cycle logic runs without panic
-        if let Some(r) = result {
-            assert!(!r.is_scoped);
-        }
-    }
-
-    #[test]
-    fn test_cycle_model_backward_without_scoped() {
-        let session = make_session();
-        let result = session.cycle_model(CycleDirection::Backward);
-        if let Some(r) = result {
-            assert!(!r.is_scoped);
-        }
-    }
-
-    #[test]
-    fn test_cycle_model_with_scoped_models() {
-        let session = make_session();
-        session.set_scoped_models(vec![
-            ScopedModel {
-                provider: "anthropic".to_string(),
-                model_id: "claude-sonnet-4-20250514".to_string(),
-                thinking_level: Some(ThinkingLevel::Medium),
-            },
-            ScopedModel {
-                provider: "openai".to_string(),
-                model_id: "gpt-4o".to_string(),
-                thinking_level: None,
-            },
-        ]);
-
-        let scoped = session.scoped_models();
-        assert_eq!(scoped.len(), 2);
-
-        // Single scoped model returns None (can't cycle with 1)
-        let single_session = make_session();
-        single_session.set_scoped_models(vec![ScopedModel {
-            provider: "anthropic".to_string(),
-            model_id: "claude-sonnet-4-20250514".to_string(),
-            thinking_level: None,
-        }]);
-        assert!(single_session.cycle_model(CycleDirection::Forward).is_none());
-    }
-
-    #[test]
-    fn test_cycle_direction_default() {
-        assert_eq!(CycleDirection::default(), CycleDirection::Forward);
-    }
-
-    #[test]
     fn test_set_scoped_models() {
         let session = make_session();
         let models = vec![
             ScopedModel {
                 provider: "anthropic".to_string(),
                 model_id: "claude-sonnet-4-20250514".to_string(),
-                thinking_level: Some(ThinkingLevel::High),
             },
             ScopedModel {
                 provider: "openai".to_string(),
                 model_id: "gpt-4o".to_string(),
-                thinking_level: None,
             },
             ScopedModel {
                 provider: "google".to_string(),
                 model_id: "gemini-2.0-flash".to_string(),
-                thinking_level: Some(ThinkingLevel::Minimal),
             },
         ];
         session.set_scoped_models(models);
@@ -1552,24 +1493,9 @@ mod tests {
         let model = ScopedModel {
             provider: "anthropic".to_string(),
             model_id: "claude-sonnet-4-20250514".to_string(),
-            thinking_level: Some(ThinkingLevel::Medium),
         };
         assert_eq!(model.provider, "anthropic");
         assert_eq!(model.model_id, "claude-sonnet-4-20250514");
-        assert_eq!(model.thinking_level, Some(ThinkingLevel::Medium));
-    }
-
-    #[test]
-    fn test_model_cycle_result_fields() {
-        let result = ModelCycleResult {
-            provider: "openai".to_string(),
-            model_id: "gpt-4o".to_string(),
-            thinking_level: ThinkingLevel::Medium,
-            is_scoped: false,
-        };
-        assert!(!result.is_scoped);
-        assert_eq!(result.provider, "openai");
-        assert_eq!(result.model_id, "gpt-4o");
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1790,8 +1716,6 @@ mod tests {
         assert_eq!(stats.tool_calls, 0);
         assert_eq!(stats.tool_results, 0);
         assert_eq!(stats.total_messages, 0);
-        assert_eq!(stats.tokens.input, 0);
-        assert_eq!(stats.tokens.output, 0);
     }
 
     #[test]
@@ -1803,11 +1727,8 @@ mod tests {
             tool_calls: 0,
             tool_results: 0,
             total_messages: 0,
-            tokens: TokenStats::default(),
-            cost: 0.0,
         };
         assert_eq!(stats.total_messages, 0);
-        assert_eq!(stats.cost, 0.0);
     }
 
     #[test]

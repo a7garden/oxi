@@ -1,6 +1,6 @@
 # Dead Code Removal Progress
 
-## Status: ✅ COMPLETE — 78 → 0 warnings
+## Status: ✅ COMPLETE — 78 → 0 warnings (lib)
 
 Started: 2026-05-16
 Finished: 2026-05-16
