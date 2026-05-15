@@ -1,5 +1,10 @@
 #![allow(unused_doc_comments)]
-/// Agent loop implementation
+
+//! Agent loop — the main request/response cycle driver.
+//!
+//! Coordinates the interaction between the agent, provider, tools, and
+//! state management. Handles streaming, tool execution, retry logic,
+//! and compaction events.
 
 /// Agent-loop configuration.
 pub mod config;
@@ -265,6 +270,72 @@ impl AgentLoop {
         Ok(all_events)
     }
 
+    /// Process pending steering messages, emitting events and appending to message history.
+    fn process_steering_messages(
+        &self,
+        pending_messages: &mut Vec<Message>,
+        messages: &mut Vec<Message>,
+        new_messages: &mut Vec<Message>,
+        events: &mut Vec<AgentEvent>,
+        emit: &EmitFn,
+    ) {
+        if pending_messages.is_empty() {
+            return;
+        }
+        for message in pending_messages.drain(..) {
+            emit(AgentEvent::SteeringMessage { message: message.clone() });
+            emit(AgentEvent::MessageStart { message: message.clone() });
+            emit(AgentEvent::MessageEnd { message: message.clone() });
+            events.push(AgentEvent::SteeringMessage { message: message.clone() });
+            events.push(AgentEvent::MessageStart { message: message.clone() });
+            events.push(AgentEvent::MessageEnd { message: message.clone() });
+            messages.push(message.clone());
+            new_messages.push(message);
+        }
+    }
+
+    /// Handle a streaming error by synthesizing an error message and completing the turn.
+    async fn handle_streaming_error(
+        &self,
+        e: anyhow::Error,
+        messages: &mut Vec<Message>,
+        new_messages: &mut Vec<Message>,
+        events: &mut Vec<AgentEvent>,
+        emit: &EmitFn,
+        turn_number: u32,
+    ) -> (Vec<Message>, Vec<AgentEvent>) {
+        let err_msg = format!("{}", e);
+        tracing::error!(session_id = ?self.session_id, "Unexpected streaming error: {}", err_msg);
+
+        let mut error_asst = oxi_ai::AssistantMessage::new(
+            oxi_ai::Api::OpenAiCompletions,
+            "agent",
+            &self.config.model_id,
+        );
+        error_asst.stop_reason = StopReason::Error;
+        error_asst.content.push(ContentBlock::Text(TextContent::new(format!("⚠ {}", err_msg))));
+
+        new_messages.push(Message::Assistant(error_asst.clone()));
+        messages.push(Message::Assistant(error_asst.clone()));
+
+        emit(AgentEvent::MessageStart { message: Message::Assistant(error_asst.clone()) });
+        emit(AgentEvent::MessageEnd { message: Message::Assistant(error_asst.clone()) });
+        emit(AgentEvent::Error { message: err_msg.clone(), session_id: self.session_id.clone() });
+
+        emit(AgentEvent::TurnEnd {
+            turn_number,
+            assistant_message: Message::Assistant(error_asst.clone()),
+            tool_results: vec![],
+        });
+        events.push(AgentEvent::TurnEnd {
+            turn_number,
+            assistant_message: Message::Assistant(error_asst),
+            tool_results: vec![],
+        });
+        // Return Ok — lifecycle is complete
+        (messages.clone(), events.clone())
+    }
+
     async fn run_loop(
         &self,
         initial_prompts: Vec<Message>,
@@ -298,17 +369,9 @@ impl AgentLoop {
                 }
 
                 if !pending_messages.is_empty() {
-                    for message in pending_messages.drain(..) {
-                        emit(AgentEvent::SteeringMessage { message: message.clone() });
-                        emit(AgentEvent::MessageStart { message: message.clone() });
-                        emit(AgentEvent::MessageEnd { message: message.clone() });
-                        events.push(AgentEvent::SteeringMessage { message: message.clone() });
-                        events.push(AgentEvent::MessageStart { message: message.clone() });
-                        events.push(AgentEvent::MessageEnd { message: message.clone() });
-                        messages.push(message.clone());
-                        new_messages.push(message);
-                    }
-                    pending_messages = Vec::new();
+                    self.process_steering_messages(
+                        &mut pending_messages, &mut messages, &mut new_messages, &mut events, &emit,
+                    );
                 }
 
                 self.maybe_compact(&mut messages, turn_number as usize, &emit).await;
@@ -317,41 +380,9 @@ impl AgentLoop {
                 let assistant_message = match stream_assistant_response(self, &mut messages, &emit).await {
                     Ok(msg) => msg,
                     Err(e) => {
-                        // Unexpected error (not a provider stream error — those
-                        // are now encoded in the returned AssistantMessage).
-                        // This path is for truly unexpected failures like
-                        // missing model, config errors, etc.
-                        let err_msg = format!("{}", e);
-                        tracing::error!(session_id = ?self.session_id, "Unexpected streaming error: {}", err_msg);
-
-                        // Synthesize an error message to complete the lifecycle
-                        let mut error_asst = oxi_ai::AssistantMessage::new(
-                            oxi_ai::Api::OpenAiCompletions,
-                            "agent",
-                            &self.config.model_id,
-                        );
-                        error_asst.stop_reason = StopReason::Error;
-                        error_asst.content.push(ContentBlock::Text(TextContent::new(format!("⚠ {}", err_msg))));
-
-                        new_messages.push(Message::Assistant(error_asst.clone()));
-                        messages.push(Message::Assistant(error_asst.clone()));
-
-                        emit(AgentEvent::MessageStart { message: Message::Assistant(error_asst.clone()) });
-                        emit(AgentEvent::MessageEnd { message: Message::Assistant(error_asst.clone()) });
-                        emit(AgentEvent::Error { message: err_msg.clone(), session_id: self.session_id.clone() });
-
-                        emit(AgentEvent::TurnEnd {
-                            turn_number,
-                            assistant_message: Message::Assistant(error_asst.clone()),
-                            tool_results: vec![],
-                        });
-                        events.push(AgentEvent::TurnEnd {
-                            turn_number,
-                            assistant_message: Message::Assistant(error_asst),
-                            tool_results: vec![],
-                        });
-                        // Return Ok — lifecycle is complete
-                        return Ok((messages, events));
+                        return Ok(self.handle_streaming_error(
+                            e, &mut messages, &mut new_messages, &mut events, &emit, turn_number,
+                        ).await);
                     }
                 };
 

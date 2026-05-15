@@ -115,8 +115,8 @@ fn test_session_branch_and_fork() {
     let mut mgr = SessionManager::create("/tmp/test", Some(&session_dir));
     let id1 = mgr.append_message(make_user_message("User msg 1"));
     let id2 = mgr.append_message(make_assistant_message("Assistant msg 1"));
-    let id3 = mgr.append_message(make_user_message("User msg 2"));
-    let id4 = mgr.append_message(make_assistant_message("Assistant msg 2"));
+    let _id3 = mgr.append_message(make_user_message("User msg 2"));
+    let _id4 = mgr.append_message(make_assistant_message("Assistant msg 2"));
 
     // Branch from id2 (abandoning id3, id4)
     mgr.branch(&id2).expect("branch should succeed");
@@ -171,7 +171,7 @@ fn test_session_branch_with_summary() {
     let mut mgr = SessionManager::in_memory("/tmp/test");
     let id1 = mgr.append_message(make_user_message("First"));
     let _id2 = mgr.append_message(make_user_message("Second"));
-    let id3 = mgr.append_message(make_user_message("Third"));
+    let _id3 = mgr.append_message(make_user_message("Third"));
 
     // Branch back to id1 with a summary
     let summary_id = mgr.branch_with_summary(Some(&id1), "Abandoned branch summary", None, None);
@@ -563,4 +563,28 @@ fn test_session_meta_branched_from() {
     assert_eq!(meta.root_id, Some(parent_id)); // When root_id is None, uses parent_id
     assert_eq!(meta.branch_point, Some(branch_point));
     assert_ne!(meta.id, parent_id); // Should be a new ID
+}
+
+#[test]
+fn test_session_create_save_load_debug() {
+    let tmp = TempDir::new().expect("temp dir");
+    let session_dir = tmp.path().to_string_lossy().to_string();
+
+    let mut mgr = SessionManager::create("/tmp/test", Some(&session_dir));
+    mgr.append_message(make_user_message("Hello from user"));
+    let session_file = mgr.get_session_file().unwrap();
+    
+    // Check if file exists before assistant
+    let before_assistant = Path::new(&session_file).exists();
+    eprintln!("File exists before assistant: {}", before_assistant);
+    
+    mgr.append_message(make_assistant_message("Hi from assistant"));
+    let after_assistant = std::fs::read_to_string(&session_file).unwrap_or_default();
+    eprintln!("File after assistant ({} lines):\n{}", after_assistant.lines().filter(|l| !l.trim().is_empty()).count(), after_assistant);
+    
+    mgr.append_message(make_user_message("Follow-up question"));
+    let after_user2 = std::fs::read_to_string(&session_file).unwrap_or_default();
+    eprintln!("File after user2 ({} lines):\n{}", after_user2.lines().filter(|l| !l.trim().is_empty()).count(), after_user2);
+    
+    panic!("Debug output");
 }

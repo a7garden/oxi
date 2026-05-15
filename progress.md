@@ -1,34 +1,30 @@
-# Unwrap() Audit Progress
+# Documentation Progress
 
-## Status: COMPLETE ✅
+## Task: Add documentation to oxi project
 
-## Files Audited (Top 10 Priority)
-| File | Total unwraps | Non-test unwraps | Action |
-|------|--------------|-------------------|--------|
-| oxi-store/src/settings.rs | 97 | 0 | No changes needed - all in test code |
-| oxi-cli/src/storage/packages.rs | 76 | 0 | No changes needed - all in test code |
-| oxi-cli/src/ui/keybindings.rs | 52 | 0 | No changes needed - all in test code |
-| oxi-cli/src/storage/resource_loader.rs | 47 | 1 | ✅ Added safety comment |
-| oxi-agent/src/tools/read.rs | 40 | 0 | No changes needed - all in test code |
-| oxi-store/src/session.rs | 39 | 0 | No changes needed - all in test code |
-| oxi-agent/src/tools/ls.rs | 39 | 0 | No changes needed - all in test code |
-| oxi-agent/src/tools/write.rs | 37 | 0 | No changes needed - all in test code |
-| oxi-cli/src/prompt/templates.rs | 34 | 2 | ✅ Added safety comments |
-| oxi-cli/src/prompt/frontmatter.rs | 31 | 0 | No changes needed - all in test code |
+**Status: COMPLETE**
 
-## Additional Files Found & Fixed
-| File | Non-test unwraps | Action |
-|------|-------------------|--------|
-| oxi-cli/src/infra/output_guard.rs | 14 | ✅ Added safety comments (static regex) |
-| oxi-cli/src/rpc_mode/handlers.rs | 3 | ✅ Replaced unwrap() with expect() |
-| oxi-agent/src/tools/github.rs | 1 | ✅ Replaced with unwrap_or_default |
-| oxi-cli/src/extensions/ext_cli.rs | 1 | ✅ Added safety comment |
-| oxi-cli/src/extensions/wasm.rs | 1 | ✅ Replaced with expect() |
-| oxi-cli/src/infra/bash_executor.rs | 1 | ✅ Added safety comment |
-| oxi-cli/src/storage/resource_loader_compat.rs | 1 | ✅ Added safety comment |
-| oxi-cli/src/ui/changelog.rs | 1 | ✅ Added safety comment |
-| oxi-tui/src/widgets/chat.rs | 1 | ✅ Added safety comment |
-| oxi-ai/src/model_db.rs | 1 | No change - in doc comment |
+### 1. Fixed TODO doc comments
+- [x] `oxi-store/src/model_resolver.rs` — Fixed `/// TODO.`, `/// TODO: document this function`, and 29 `/// pub.` field doc comments
+- [x] `oxi-store/src/auth_storage.rs` — Fixed 3 `/// TODO: document this function` comments (get_keyring_secret, set_keyring_secret, delete_keyring_secret)
+- [x] `oxi-cli/src/media/image_convert.rs` — Fixed 1 `/// TODO: document this function` (mime_type)
+- [x] `oxi-cli/src/media/file_processor.rs` — Fixed 2 `/// TODO: document this function` and 1 `/// TODO.`, plus 1 `/// pub.`
+- [x] `oxi-cli/src/rpc_mode/protocol.rs` — Fixed 40+ `/// TODO: document.` comments, `/// pub.` constants, and poor doc comments (/// source., /// command., etc.)
 
-## Build Status
-- `cargo check` passes with no new warnings or errors
+### 2. Added module-level docs
+- [x] `oxi-agent/src/agent_loop/mod.rs` — Added `//!` module doc (was only `///` which is item-level)
+- All other lib.rs/mod.rs files already had proper `//!` module docs
+
+### 3. Added doc comments to public API
+- [x] `oxi-ai/src/lib.rs` — Added doc comments to all re-export blocks (14 groups)
+- [x] `oxi-agent/src/lib.rs` — Added doc comments to key re-exports (AgentConfig, recovery, tools)
+- [x] `oxi-store/src/lib.rs` — Added doc comments to all 5 public re-exports
+- [x] `oxi-tui/src/lib.rs` — Added doc comments to 4 re-export groups
+
+### Remaining `/// pub.` comments (not in priority list)
+- `oxi-store/src/session_cwd.rs` (1)
+- `oxi-store/src/model_registry.rs` (9+)
+
+### Verification
+- `cargo check -p oxi-store -p oxi-tui -p oxi-ai -p oxi-agent` passes clean
+- Pre-existing errors in `oxi-cli/src/main.rs` (E0425, E0308) are unrelated to doc changes

@@ -723,144 +723,29 @@ impl ThemeFile {
             },
             author: self.author,
             colors: ThemeColors {
-                bg_primary: self
-                    .colors
-                    .bg_primary
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.bg_primary),
-                bg_secondary: self
-                    .colors
-                    .bg_secondary
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.bg_secondary),
-                bg_tertiary: self
-                    .colors
-                    .bg_tertiary
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.bg_tertiary),
-                bg_hover: self
-                    .colors
-                    .bg_hover
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.bg_hover),
-                bg_active: self
-                    .colors
-                    .bg_active
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.bg_active),
-                bg_selected: self
-                    .colors
-                    .bg_selected
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.bg_selected),
-                fg_primary: self
-                    .colors
-                    .fg_primary
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.fg_primary),
-                fg_secondary: self
-                    .colors
-                    .fg_secondary
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.fg_secondary),
-                fg_tertiary: self
-                    .colors
-                    .fg_tertiary
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.fg_tertiary),
-                fg_dim: self
-                    .colors
-                    .fg_dim
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.fg_dim),
-                accent_blue: self
-                    .colors
-                    .accent_blue
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.accent_blue),
-                accent_green: self
-                    .colors
-                    .accent_green
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.accent_green),
-                accent_yellow: self
-                    .colors
-                    .accent_yellow
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.accent_yellow),
-                accent_red: self
-                    .colors
-                    .accent_red
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.accent_red),
-                accent_purple: self
-                    .colors
-                    .accent_purple
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.accent_purple),
-                syntax_keyword: self
-                    .colors
-                    .syntax_keyword
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.syntax_keyword),
-                syntax_string: self
-                    .colors
-                    .syntax_string
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.syntax_string),
-                syntax_comment: self
-                    .colors
-                    .syntax_comment
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.syntax_comment),
-                syntax_function: self
-                    .colors
-                    .syntax_function
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.syntax_function),
-                border: self
-                    .colors
-                    .border
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.border),
-                cursor: self
-                    .colors
-                    .cursor
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.cursor),
-                selection: self
-                    .colors
-                    .selection
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.selection),
-                scrollbar: self
-                    .colors
-                    .scrollbar
-                    .as_ref()
-                    .and_then(|s| parse_color(s))
-                    .unwrap_or(defaults.scrollbar),
+                bg_primary: resolve_color_or_default(&self.colors.bg_primary, &defaults.bg_primary),
+                bg_secondary: resolve_color_or_default(&self.colors.bg_secondary, &defaults.bg_secondary),
+                bg_tertiary: resolve_color_or_default(&self.colors.bg_tertiary, &defaults.bg_tertiary),
+                bg_hover: resolve_color_or_default(&self.colors.bg_hover, &defaults.bg_hover),
+                bg_active: resolve_color_or_default(&self.colors.bg_active, &defaults.bg_active),
+                bg_selected: resolve_color_or_default(&self.colors.bg_selected, &defaults.bg_selected),
+                fg_primary: resolve_color_or_default(&self.colors.fg_primary, &defaults.fg_primary),
+                fg_secondary: resolve_color_or_default(&self.colors.fg_secondary, &defaults.fg_secondary),
+                fg_tertiary: resolve_color_or_default(&self.colors.fg_tertiary, &defaults.fg_tertiary),
+                fg_dim: resolve_color_or_default(&self.colors.fg_dim, &defaults.fg_dim),
+                accent_blue: resolve_color_or_default(&self.colors.accent_blue, &defaults.accent_blue),
+                accent_green: resolve_color_or_default(&self.colors.accent_green, &defaults.accent_green),
+                accent_yellow: resolve_color_or_default(&self.colors.accent_yellow, &defaults.accent_yellow),
+                accent_red: resolve_color_or_default(&self.colors.accent_red, &defaults.accent_red),
+                accent_purple: resolve_color_or_default(&self.colors.accent_purple, &defaults.accent_purple),
+                syntax_keyword: resolve_color_or_default(&self.colors.syntax_keyword, &defaults.syntax_keyword),
+                syntax_string: resolve_color_or_default(&self.colors.syntax_string, &defaults.syntax_string),
+                syntax_comment: resolve_color_or_default(&self.colors.syntax_comment, &defaults.syntax_comment),
+                syntax_function: resolve_color_or_default(&self.colors.syntax_function, &defaults.syntax_function),
+                border: resolve_color_or_default(&self.colors.border, &defaults.border),
+                cursor: resolve_color_or_default(&self.colors.cursor, &defaults.cursor),
+                selection: resolve_color_or_default(&self.colors.selection, &defaults.selection),
+                scrollbar: resolve_color_or_default(&self.colors.scrollbar, &defaults.scrollbar),
             },
             font: Some(FontScheme::default_scheme()),
             spacing: self.spacing,
@@ -880,6 +765,14 @@ impl ThemeFile {
     pub fn to_json(&self) -> anyhow::Result<String> {
         Ok(serde_json::to_string_pretty(self)?)
     }
+}
+
+/// Resolve a color string to a Color, falling back to the default if unparseable or absent.
+fn resolve_color_or_default(color_str: &Option<String>, default: &Color) -> Color {
+    color_str
+        .as_ref()
+        .and_then(|s| parse_color(s))
+        .unwrap_or_else(|| default.clone())
 }
 
 /// Parse a color string (#rrggbb, rgb(r,g,b), or named)

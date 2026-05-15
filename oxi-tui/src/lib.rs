@@ -14,7 +14,14 @@ pub mod text;
 pub mod theme;
 pub mod widgets;
 
+/// Color representation for TUI rendering.
 pub use cell::Color;
+
+/// Fuzzy matching utilities for search/filter.
 pub use fuzzy::{fuzzy_match, fuzzy_rank, FuzzyResult};
+
+/// Truncate text to a terminal display width.
 pub use text::truncate_to_width;
+
+/// Theme system: color schemes, spacing, style management.
 pub use theme::{ColorScheme, Spacing, Theme, ThemeFile, ThemeManager, ThemeStyles};

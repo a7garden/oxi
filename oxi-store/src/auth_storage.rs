@@ -818,7 +818,6 @@ impl AuthStorage {
             if let Ok(json) = serde_json::to_string_pretty(&*creds) {
                 // Warn once about plaintext storage when not using keyring
                 #[cfg(not(feature = "keyring"))]
-                #[allow(unexpected_cfgs)]
                 {
                     self.plaintext_warned.get_or_init(|| {
                         tracing::warn!(
@@ -978,6 +977,7 @@ pub mod keyring_support {
     /// Retrieve a secret from the OS keyring.
     ///
     /// Returns `None` when the keyring feature is not compiled in.
+    pub fn get_keyring_secret(_service: &str, _account: &str) -> Option<String> {
         None
     }
 
@@ -985,6 +985,7 @@ pub mod keyring_support {
     /// Store a secret in the OS keyring.
     ///
     /// Returns an error when the keyring feature is not compiled in.
+    pub fn set_keyring_secret(
         _service: &str,
         _account: &str,
         _secret: &str,
@@ -998,6 +999,7 @@ pub mod keyring_support {
     /// Delete a secret from the OS keyring.
     ///
     /// Returns an error when the keyring feature is not compiled in.
+    pub fn delete_keyring_secret(_service: &str, _account: &str) -> AuthResult<()> {
         Err(AuthError::KeyringError(
             "Keyring support not compiled".to_string(),
         ))

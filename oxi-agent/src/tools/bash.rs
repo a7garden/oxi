@@ -234,6 +234,106 @@ impl BashTool {
         output
     }
 
+    /// Wait for a child process with timeout and optional abort signal.
+    async fn wait_with_timeout_and_signal(
+        child: &mut tokio::process::Child,
+        timeout: u64,
+        signal: &mut Option<oneshot::Receiver<()>>,
+    ) -> Result<std::process::ExitStatus, String> {
+        let timeout_duration = Duration::from_secs(timeout);
+
+        tokio::select! {
+            status = child.wait() => {
+                status.map_err(|e| format!("Failed to wait for process: {}", e))
+            }
+            _ = tokio::time::sleep(timeout_duration) => {
+                Self::kill_process_group(child).await;
+                Err(format!("Command timed out after {} seconds", timeout))
+            }
+            _ = async {
+                match signal {
+                    Some(rx) => { let _ = rx.await; }
+                    None => std::future::pending::<()>().await,
+                }
+            } => {
+                Self::kill_process_group(child).await;
+                Err("Command aborted".to_string())
+            }
+        }
+    }
+
+    /// Build the shell command with working directory and environment variables.
+    fn build_shell_command(
+        command: &str,
+        work_dir: &Option<String>,
+        env: Option<&serde_json::Map<String, Value>>,
+    ) -> Command {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(command)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .process_group(0);
+
+        if let Some(ref dir) = work_dir {
+            cmd.current_dir(dir);
+        }
+
+        if let Some(env_map) = env {
+            for (key, val) in env_map {
+                if BLOCKED_ENV_VARS.iter().any(|blocked| blocked.eq_ignore_ascii_case(key)) {
+                    continue;
+                }
+                if let Some(val_str) = val.as_str() {
+                    cmd.env(key, val_str);
+                }
+            }
+        }
+
+        cmd
+    }
+
+    /// Kill a process group (Unix) or fall back to child.kill().
+    async fn kill_process_group(child: &mut tokio::process::Child) {
+        #[cfg(unix)]
+        {
+            if let Some(pid) = child.id() {
+                let pgid = -(pid as i32);
+                unsafe { libc::kill(pgid, libc::SIGKILL); }
+            }
+        }
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
+
+    /// Format error output for timeout/abort cases.
+    fn format_error_output(
+        stdout_str: &str,
+        stderr_str: &str,
+        error_msg: &str,
+        elapsed: Duration,
+    ) -> String {
+        let mut output = String::new();
+        if !stdout_str.is_empty() {
+            output.push_str(stdout_str);
+        }
+        if !stderr_str.is_empty() {
+            if !output.is_empty() {
+                output.push('\n');
+            }
+            output.push_str(stderr_str);
+        }
+
+        if !output.is_empty() {
+            let truncation = truncate::truncate_head(&output, &TruncationOptions::default());
+            output = truncation.content;
+        }
+
+        output.push_str(&format!("\n\n{}", error_msg));
+        output.push_str(&format!("\nTook {}", Self::format_duration(elapsed)));
+        output
+    }
+
     /// Execute a command using tokio::process::Command with full feature support.
     async fn run_command(
         command: &str,
@@ -262,31 +362,7 @@ impl BashTool {
         };
 
         // Build the command
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c")
-            .arg(command)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            // Create a new process group so we can kill the entire tree
-            .process_group(0);
-
-        // Set working directory
-        if let Some(ref dir) = work_dir {
-            cmd.current_dir(dir);
-        }
-
-        // Set environment variables, filtering blocked ones
-        if let Some(env_map) = env {
-            for (key, val) in env_map {
-                if BLOCKED_ENV_VARS.iter().any(|blocked| blocked.eq_ignore_ascii_case(key)) {
-                    // Silently skip blocked environment variables
-                    continue;
-                }
-                if let Some(val_str) = val.as_str() {
-                    cmd.env(key, val_str);
-                }
-            }
-        }
+        let mut cmd = Self::build_shell_command(command, &work_dir, env);
 
         // Spawn the child process
         let mut child = cmd
@@ -315,55 +391,10 @@ impl BashTool {
             buf
         });
 
-        // Wait for the process with timeout and signal handling via tokio::select!
-        let timeout_duration = Duration::from_secs(timeout);
-        let result = tokio::select! {
-            // Branch 1: Process exits normally
-            status = child.wait() => {
-                let status = status.map_err(|e| format!("Failed to wait for process: {}", e))?;
-                Ok(status)
-            }
-
-            // Branch 2: Timeout elapsed
-            _ = tokio::time::sleep(timeout_duration) => {
-                // Kill the entire process group using libc to ensure
-                // child processes spawned by the shell are also killed
-                #[cfg(unix)]
-                {
-                    if let Some(pid) = child.id() {
-                        let pgid = -(pid as i32);
-                        unsafe { libc::kill(pgid, libc::SIGKILL); }
-                    }
-                }
-                let _ = child.kill().await;
-                let _ = child.wait().await; // Reap the child
-                Err(format!("Command timed out after {} seconds", timeout))
-            }
-
-            // Branch 3: External cancel/abort signal received
-            sig = async {
-                if let Some(ref mut rx) = signal {
-                    let _ = rx.await;
-                } else {
-                    // If no signal is provided, wait forever (never triggers)
-                    std::future::pending::<()>().await;
-                }
-            } => {
-                let _ = sig; // suppress unused warning
-                // Kill the entire process group using libc to ensure
-                // child processes spawned by the shell are also killed
-                #[cfg(unix)]
-                {
-                    if let Some(pid) = child.id() {
-                        let pgid = -(pid as i32);
-                        unsafe { libc::kill(pgid, libc::SIGKILL); }
-                    }
-                }
-                let _ = child.kill().await;
-                let _ = child.wait().await; // Reap the child
-                Err("Command aborted".to_string())
-            }
-        };
+        // Wait for the process with timeout and signal handling
+        let result = Self::wait_with_timeout_and_signal(
+            &mut child, timeout, &mut signal,
+        ).await;
 
         let elapsed = start.elapsed();
 
@@ -397,10 +428,8 @@ impl BashTool {
                     format!("{}\n{}", stdout_str, stderr_str)
                 };
 
-                // Check for dangerous command patterns (warning only, does not block)
                 let security_warning = is_dangerous_command(command);
 
-                // Apply truncation
                 let truncation = truncate::truncate_head(
                     if combined.is_empty() {
                         "(no output)"
@@ -412,7 +441,6 @@ impl BashTool {
 
                 let mut output = Self::build_output(&truncation, elapsed, exit_code);
 
-                // Append security warning if dangerous patterns were detected
                 if let Some(ref warning) = security_warning {
                     output.push_str(&format!("\n{}", warning));
                 }
@@ -424,26 +452,9 @@ impl BashTool {
                 }
             }
             Err(e) => {
-                // Timeout or abort - include whatever output we got
-                let mut output = String::new();
-                if !stdout_str.is_empty() {
-                    output.push_str(&stdout_str);
-                }
-                if !stderr_str.is_empty() {
-                    if !output.is_empty() {
-                        output.push('\n');
-                    }
-                    output.push_str(&stderr_str);
-                }
-
-                if !output.is_empty() {
-                    let truncation =
-                        truncate::truncate_head(&output, &TruncationOptions::default());
-                    output = truncation.content;
-                }
-
-                output.push_str(&format!("\n\n{}", e));
-                output.push_str(&format!("\nTook {}", Self::format_duration(elapsed)));
+                let output = Self::format_error_output(
+                    &stdout_str, &stderr_str, &e, elapsed,
+                );
                 Ok(AgentToolResult::error(output))
             }
         }

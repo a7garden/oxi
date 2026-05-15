@@ -38,28 +38,58 @@ pub mod prelude {
 }
 
 // Re-export main types
+
+/// Provider-specific error type for LLM operations.
 pub use crate::error::ProviderError;
+
+/// Shared conversation context.
 pub use context::Context;
+
+/// Result type alias for oxi-ai operations.
 pub use error::{Error, Result};
+
+/// Message types for constructing conversations.
 pub use messages::*;
+
+/// Cache retention control for provider requests.
 pub use providers::CacheRetention;
+
+/// Provider trait and streaming options.
 pub use providers::{get_provider, register_provider, unregister_provider, custom_provider_names, Provider, ProviderEvent, StreamOptions};
+
+/// OpenAI-compatible provider implementation.
 pub use providers::OpenAiProvider;
+
+/// Model fetching utilities (async and blocking).
 pub use providers::model_fetch::{fetch_models_async, fetch_models_blocking};
+
+/// OpenAI Responses API provider.
 pub use providers::OpenAiResponsesProvider;
+
+/// Tool definition and argument validation.
 pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ToolValidationError};
+
+/// Core type definitions (tokens, cost, etc.).
 pub use types::*;
 
 // High-level API
+
+/// Token estimation and context usage helpers.
 pub use high_level::tokens::{context_usage, estimate, estimate_words};
+
+/// High-level completion and token estimation.
 pub use high_level::{complete, estimate_tokens};
 
 // Context compaction
+
+/// Compaction strategies and managers for long conversations.
 pub use compaction::{
     CompactedContext, CompactionManager, CompactionStrategy, Compactor, LlmCompactor,
 };
 
 // Cross-provider message transformation
+
+/// Message transformation between provider formats.
 pub use transform::{
     anthropic_to_google, anthropic_to_openai, google_to_openai, normalize_tool_call_id,
     openai_to_anthropic, transform_messages, transform_messages_for_model, TransformOptions,
@@ -67,10 +97,18 @@ pub use transform::{
 
 // Model registry (runtime mutable registry)
 mod model_registry;
+
+/// Runtime model registry for dynamically registered models.
+///
+/// Unlike the static `model_db`, this supports adding/removing models at runtime.
 pub use model_registry::{get_model, get_models, get_providers, register_model, unregister_model, lookup_model, ModelRegistry};
 
 // Static model database (comprehensive)
 pub mod model_db;
+
+/// Static database of known models with cost and modality info.
+///
+/// Provides comprehensive model listings, filtering, and search capabilities.
 pub use model_db::{
     get_all_models, get_cheapest_models, get_model_entry, get_provider_models,
     get_reasoning_models, get_vision_models, model_count, search_models, ModelEntry,
@@ -80,7 +118,11 @@ pub use model_db::{
 pub use messages::AssistantMessage;
 
 // Environment-based API key resolution
+
+/// Utilities for discovering API keys from the environment.
 pub use env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_key};
 
 // Provider authentication registry
+
+/// OAuth token and API key management for providers.
 pub use provider_registry::{OAuthTokenInfo, ProviderAuth, ProviderAuthRegistry};

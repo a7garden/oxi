@@ -37,15 +37,21 @@ pub mod mcp;
 
 pub use agent::Agent;
 pub use agent_loop::{AgentLoop, AgentLoopConfig};
+
+/// Agent configuration, hooks, and tool execution mode.
 pub use config::{AgentConfig, AgentHooks, ToolExecutionMode, BeforeToolCallContext, BeforeToolCallResult, AfterToolCallContext, AfterToolCallResult, ShouldStopAfterTurnContext};
 pub use error::AgentError;
 pub use events::AgentEvent;
+
+/// Fault-recovery primitives for resilient agent execution.
 pub use recovery::{
     CircuitBreaker, CircuitBreakerConfig, CircuitOpenError, FallbackChain, PartialResponse,
 };
 pub use state::{AgentState, SharedState};
 pub use compaction::{CompactedContext, CompactionEvent};
 pub use oxi_ai::{CompactionManager, CompactionStrategy};
+
+/// Built-in tool implementations and registry.
 pub use tools::{
     AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
     LsTool, ReadTool, ToolRegistry, WriteTool, ToolError,

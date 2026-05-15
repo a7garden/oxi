@@ -7,8 +7,8 @@
 //! default — HTTP access is granted via the `oxi_http_request` host function.
 
 use anyhow::{Context, Result};
-use extism::{CurrentPlugin, Function, UserData, Val, ValType, PTR};
-use parking_lot::{Mutex, RwLock};
+use extism::{CurrentPlugin, Function, UserData, Val, PTR};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

@@ -368,96 +368,96 @@ pub enum RpcResponse {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "method", rename_all = "snake_case")]
 pub enum RpcExtensionUiRequest {
-    /// select.
+    /// Present a single-select menu to the user.
     Select {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// Dialog title.
         title: String,
-        /// TODO: document.
+        /// Available choices.
         options: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Timeout in seconds.
         timeout: Option<u64>,
     },
-    /// confirm.
+    /// Ask the user for a yes/no confirmation.
     Confirm {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// Dialog title.
         title: String,
-        /// TODO: document.
+        /// Confirmation prompt text.
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Timeout in seconds.
         timeout: Option<u64>,
     },
-    /// input.
+    /// Ask the user for a free-form text input.
     Input {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// Dialog title.
         title: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Placeholder text for the input field.
         placeholder: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Timeout in seconds.
         timeout: Option<u64>,
     },
-    /// editor.
+    /// Open a full-screen editor for multi-line text input.
     Editor {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// Dialog title.
         title: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Pre-filled editor content.
         prefill: Option<String>,
     },
-    /// notify.
+    /// Display a non-blocking notification to the user.
     Notify {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// Notification body text.
         message: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Notification type hint (e.g. "info", "warning", "error").
         notify_type: Option<String>,
     },
-    /// set status.
+    /// Set a status bar entry.
     SetStatus {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// Status bar key for deduplication.
         status_key: String,
-        /// TODO: document.
+        /// Status text to display; `None` clears the entry.
         status_text: Option<String>,
     },
-    /// set widget.
+    /// Set or update a custom widget in the UI.
     SetWidget {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// Widget key for deduplication.
         widget_key: String,
-        /// TODO: document.
+        /// Lines of content to render.
         widget_lines: Option<Vec<String>>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Widget placement hint (e.g. "bottom", "sidebar").
         widget_placement: Option<String>,
     },
-    /// set title.
+    /// Set the window/terminal title.
     SetTitle {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// New title text.
         title: String,
     },
-    /// set editor text.
+    /// Replace the text in the user's input editor.
     SetEditorText {
-        /// TODO: document.
+        /// Unique request identifier.
         id: String,
-        /// TODO: document.
+        /// New editor text content.
         text: String,
     },
 }
@@ -468,16 +468,16 @@ pub enum RpcExtensionUiRequest {
 pub enum RpcExtensionUiResponse {
     /// Respond to an extension UI request.
     ExtensionUiResponse {
-        /// TODO: document.
+        /// The request ID being responded to.
         id: String,
         #[serde(default)]
-        /// TODO: document.
+        /// The user's text input (for Input/Editor requests).
         value: Option<String>,
         #[serde(default)]
-        /// TODO: document.
+        /// Whether the user confirmed (for Confirm requests).
         confirmed: Option<bool>,
         #[serde(default)]
-        /// TODO: document.
+        /// Whether the user dismissed the request without answering.
         cancelled: Option<bool>,
     },
 }
@@ -611,11 +611,11 @@ pub enum RpcEvent {
     },
     /// Extension error
     ExtensionError {
-        /// TODO: document.
+        /// Filesystem path of the extension that errored.
         extension_path: String,
-        /// TODO: document.
+        /// Event name during which the error occurred.
         event: String,
-        /// TODO: document.
+        /// Error message.
         error: String,
     },
 }
@@ -626,7 +626,7 @@ pub enum RpcEvent {
 
 /// Tracks pending extension UI requests awaiting client responses.
 pub struct PendingExtensionRequest {
-    /// resolve.
+    /// Sender to deliver the client's response back to the awaiter.
     pub resolve: tokio::sync::oneshot::Sender<RpcExtensionUiResponse>,
 }
 

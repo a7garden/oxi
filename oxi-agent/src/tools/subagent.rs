@@ -316,6 +316,71 @@ fn process_json_line(line: &str, result: &mut SingleResult, text: &mut String, _
 
 // ── Process Execution ──────────────────────────────────────────────────
 
+/// Build command-line arguments for launching a subagent process.
+fn build_agent_args(
+    agent: &AgentConfig,
+    tmp_dir: &Path,
+    task: &str,
+) -> Vec<String> {
+    let mut args = vec![
+        "--mode".to_string(),
+        "json".to_string(),
+        "-p".to_string(),
+    ];
+
+    if let Some(ref model) = agent.model {
+        args.push("--model".to_string());
+        args.push(model.clone());
+    }
+
+    if let Some(ref agent_tools) = agent.tools {
+        if !agent_tools.is_empty() {
+            args.push("--tools".to_string());
+            args.push(agent_tools.join(","));
+        }
+    }
+
+    if !agent.system_prompt.is_empty() {
+        if std::fs::write(tmp_dir.join("system_prompt.md"), &agent.system_prompt).is_ok() {
+            args.push("--append-system-prompt".to_string());
+            args.push(tmp_dir.join("system_prompt.md").to_str().unwrap_or_default().to_string());
+        }
+    }
+
+    args.push(format!("Task: {}", task));
+    args
+}
+
+/// Gracefully terminate a child process (SIGTERM → wait → SIGKILL).
+async fn terminate_child(child: &mut tokio::process::Child, stderr_handle: tokio::task::JoinHandle<String>, result: &mut SingleResult) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = child.id() {
+            unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+        }
+        let deadline = tokio::time::sleep(std::time::Duration::from_secs(5));
+        tokio::pin!(deadline);
+        tokio::select! {
+            _ = &mut deadline => { let _ = child.start_kill(); }
+            _ = child.wait() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.start_kill();
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            child.wait(),
+        ).await;
+    }
+
+    // Collect stderr with short timeout
+    let _ = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        async { if let Ok(err) = stderr_handle.await { result.stderr = err; } },
+    ).await;
+}
+
 /// Run a single agent process with abort support.
 async fn run_single_agent(
     cwd: &Path,
@@ -372,26 +437,6 @@ async fn run_single_agent(
     }
 
     // Build command args
-    let mut args = vec![
-        "--mode".to_string(),
-        "json".to_string(),
-        "-p".to_string(),
-    ];
-
-    if let Some(ref model) = agent.model {
-        args.push("--model".to_string());
-        args.push(model.clone());
-    }
-
-    // Agent-specific tools
-    if let Some(ref agent_tools) = agent.tools {
-        if !agent_tools.is_empty() {
-            args.push("--tools".to_string());
-            args.push(agent_tools.join(","));
-        }
-    }
-
-    // System prompt via temp file (keep alive until process completes)
     let tmp_dir = match create_system_prompt_temp_dir("oxi-subagent") {
         Ok(tmp) => Some(tmp),
         Err(e) => {
@@ -401,17 +446,11 @@ async fn run_single_agent(
             return result;
         }
     };
-    if let Some(ref tmp) = tmp_dir {
-        if !agent.system_prompt.is_empty() {
-            if std::fs::write(tmp.join("system_prompt.md"), &agent.system_prompt).is_ok() {
-                args.push("--append-system-prompt".to_string());
-                args.push(tmp.join("system_prompt.md").to_str().unwrap_or_default().to_string());
-            }
-        }
-    }
 
-    // The task is the final argument
-    args.push(format!("Task: {}", task));
+    let args = match tmp_dir {
+        Some(ref tmp) => build_agent_args(agent, tmp, task),
+        None => vec!["--mode".to_string(), "json".to_string(), "-p".to_string(), format!("Task: {}", task)],
+    };
 
     let working_dir = agent_cwd
         .map(PathBuf::from)
@@ -489,34 +528,7 @@ async fn run_single_agent(
     if aborted {
         result.stop_reason = Some("aborted".into());
         result.error_message = Some("Aborted by user".into());
-
-        // SIGTERM → wait up to 5s → SIGKILL
-        #[cfg(unix)]
-        {
-            if let Some(pid) = child.id() {
-                unsafe { libc::kill(pid as i32, libc::SIGTERM); }
-            }
-            let deadline = tokio::time::sleep(std::time::Duration::from_secs(5));
-            tokio::pin!(deadline);
-            tokio::select! {
-                _ = &mut deadline => { let _ = child.start_kill(); }
-                _ = child.wait() => {}
-            }
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = child.start_kill();
-            let _ = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                child.wait(),
-            ).await;
-        }
-
-        // Collect stderr with short timeout
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            async { if let Ok(err) = stderr_handle.await { result.stderr = err; } },
-        ).await;
+        terminate_child(&mut child, stderr_handle, &mut result).await;
     } else {
         // Normal completion
         if let Ok(err_output) = stderr_handle.await {
@@ -758,135 +770,174 @@ impl AgentTool for SubagentTool {
 
         // ── Chain mode ──
         if has_chain {
-            let steps: Vec<ChainStep> = serde_json::from_value(params["chain"].clone())
-                .map_err(|e| format!("Invalid chain parameter: {}", e))?;
-            let total = steps.len();
-            let mut results = Vec::new();
-            let mut previous_output = String::new();
-            let mut abort_signal = signal;
-
-            for (i, step) in steps.into_iter().enumerate() {
-                let task = step.task.replace("{previous}", &previous_output);
-
-                let step_signal = if i == total - 1 { abort_signal.take() } else { None };
-
-                let result = run_single_agent(
-                    &self.cwd, &agents, &step.agent, &task,
-                    step.cwd.as_deref(), Some(i + 1),
-                    step_signal,
-                    progress.clone(), &binary,
-                ).await;
-
-                let is_error = result.exit_code != 0
-                    || result.stop_reason.as_deref() == Some("error")
-                    || result.stop_reason.as_deref() == Some("aborted");
-
-                if is_error {
-                    let agent_name = result.agent.clone();
-                    let error_msg = result.error_message.clone()
-                        .unwrap_or_else(|| result.stderr.clone());
-                    results.push(result);
-                    return Ok(AgentToolResult::error(format!(
-                        "Chain stopped at step {}/{} ({}): {}",
-                        i + 1, total, agent_name, error_msg
-                    )));
-                }
-
-                previous_output = result.output.clone();
-                results.push(result);
-            }
-
-            let output = results.last().map(|r| r.output.clone()).unwrap_or_default();
-            return Ok(AgentToolResult::success(if output.is_empty() {
-                "(no output)".to_string()
-            } else {
-                output
-            }).with_metadata(json!({
-                "mode": "chain",
-                "steps": results.len(),
-            })));
+            return execute_chain_mode(
+                &self.cwd, &agents, params, &binary, progress, signal,
+            ).await;
         }
 
         // ── Parallel mode ──
         if has_tasks {
-            let tasks: Vec<ParallelTask> = serde_json::from_value(params["tasks"].clone())
-                .map_err(|e| format!("Invalid tasks parameter: {}", e))?;
-
-            if tasks.len() > MAX_PARALLEL_TASKS {
-                return Ok(AgentToolResult::error(format!(
-                    "Too many parallel tasks ({}). Max is {}.",
-                    tasks.len(), MAX_PARALLEL_TASKS
-                )));
-            }
-
-            let results = run_parallel(
-                &self.cwd, &agents, tasks, binary, progress,
+            return execute_parallel_mode(
+                &self.cwd, &agents, params, &binary, progress,
             ).await;
-
-            let success_count = results.iter().filter(|r| r.exit_code == 0).count();
-            let summaries: Vec<String> = results.iter().map(|r| {
-                let _preview = truncate_output(&r.output, 100);
-                format!(
-                    "[{}]: {}",
-                    r.agent,
-                    if r.exit_code == 0 { "completed" } else { "failed" },
-                )
-            }).collect();
-
-            return Ok(AgentToolResult::success(format!(
-                "Parallel: {}/{} succeeded\n\n{}",
-                success_count, results.len(), summaries.join("\n\n")
-            )).with_metadata(json!({
-                "mode": "parallel",
-                "results": results.iter().map(|r| json!({
-                    "agent": r.agent,
-                    "exit_code": r.exit_code,
-                })).collect::<Vec<_>>()
-            })));
         }
 
         // ── Single mode ──
         if has_single {
-            let agent_name = params["agent"].as_str().ok_or("Missing required parameter: agent")?;
-            let task = params["task"].as_str().ok_or("Missing required parameter: task")?;
-            let agent_cwd = params["cwd"].as_str();
-
-            let result = run_single_agent(
-                &self.cwd, &agents, agent_name, task,
-                agent_cwd, None, signal, progress, &binary,
+            return execute_single_mode(
+                &self.cwd, &agents, params, &binary, progress, signal,
             ).await;
-
-            let is_error = result.exit_code != 0
-                || result.stop_reason.as_deref() == Some("error")
-                || result.stop_reason.as_deref() == Some("aborted");
-
-            if is_error {
-                let error_msg = result.error_message.as_deref().unwrap_or(&result.stderr);
-                return Ok(AgentToolResult::error(format!(
-                    "Agent {}: {}",
-                    result.stop_reason.as_deref().unwrap_or("failed"),
-                    error_msg
-                )));
-            }
-
-            return Ok(AgentToolResult::success(if result.output.is_empty() {
-                "(no output)".to_string()
-            } else {
-                result.output.clone()
-            }).with_metadata(json!({
-                "mode": "single",
-                "agent": result.agent,
-                "source": result.agent_source,
-                "usage": {
-                    "input_tokens": result.usage.input_tokens,
-                    "output_tokens": result.usage.output_tokens,
-                    "turns": result.usage.turns,
-                },
-            })));
         }
 
         Ok(AgentToolResult::error("Invalid parameters".to_string()))
     }
+}
+
+/// Execute chain mode: sequential agents where each step can reference {previous} output.
+async fn execute_chain_mode(
+    cwd: &Path,
+    agents: &[AgentConfig],
+    params: Value,
+    binary: &Path,
+    progress: Option<ProgressFn>,
+    signal: Option<oneshot::Receiver<()>>,
+) -> Result<AgentToolResult, ToolError> {
+    let steps: Vec<ChainStep> = serde_json::from_value(params["chain"].clone())
+        .map_err(|e| format!("Invalid chain parameter: {}", e))?;
+    let total = steps.len();
+    let mut results = Vec::new();
+    let mut previous_output = String::new();
+    let mut abort_signal = signal;
+
+    for (i, step) in steps.into_iter().enumerate() {
+        let task = step.task.replace("{previous}", &previous_output);
+        let step_signal = if i == total - 1 { abort_signal.take() } else { None };
+
+        let result = run_single_agent(
+            cwd, agents, &step.agent, &task,
+            step.cwd.as_deref(), Some(i + 1),
+            step_signal, progress.clone(), binary,
+        ).await;
+
+        let is_error = result.exit_code != 0
+            || result.stop_reason.as_deref() == Some("error")
+            || result.stop_reason.as_deref() == Some("aborted");
+
+        if is_error {
+            let agent_name = result.agent.clone();
+            let error_msg = result.error_message.clone()
+                .unwrap_or_else(|| result.stderr.clone());
+            results.push(result);
+            return Ok(AgentToolResult::error(format!(
+                "Chain stopped at step {}/{} ({}): {}",
+                i + 1, total, agent_name, error_msg
+            )));
+        }
+
+        previous_output = result.output.clone();
+        results.push(result);
+    }
+
+    let output = results.last().map(|r| r.output.clone()).unwrap_or_default();
+    Ok(AgentToolResult::success(if output.is_empty() {
+        "(no output)".to_string()
+    } else {
+        output
+    }).with_metadata(json!({
+        "mode": "chain",
+        "steps": results.len(),
+    })))
+}
+
+/// Execute parallel mode: multiple agents running concurrently.
+async fn execute_parallel_mode(
+    cwd: &Path,
+    agents: &[AgentConfig],
+    params: Value,
+    binary: &Path,
+    progress: Option<ProgressFn>,
+) -> Result<AgentToolResult, ToolError> {
+    let tasks: Vec<ParallelTask> = serde_json::from_value(params["tasks"].clone())
+        .map_err(|e| format!("Invalid tasks parameter: {}", e))?;
+
+    if tasks.len() > MAX_PARALLEL_TASKS {
+        return Ok(AgentToolResult::error(format!(
+            "Too many parallel tasks ({}). Max is {}.",
+            tasks.len(), MAX_PARALLEL_TASKS
+        )));
+    }
+
+    let results = run_parallel(
+        cwd, agents, tasks, binary.to_path_buf(), progress,
+    ).await;
+
+    let success_count = results.iter().filter(|r| r.exit_code == 0).count();
+    let summaries: Vec<String> = results.iter().map(|r| {
+        let _preview = truncate_output(&r.output, 100);
+        format!(
+            "[{}]: {}",
+            r.agent,
+            if r.exit_code == 0 { "completed" } else { "failed" },
+        )
+    }).collect();
+
+    Ok(AgentToolResult::success(format!(
+        "Parallel: {}/{} succeeded\n\n{}",
+        success_count, results.len(), summaries.join("\n\n")
+    )).with_metadata(json!({
+        "mode": "parallel",
+        "results": results.iter().map(|r| json!({
+            "agent": r.agent,
+            "exit_code": r.exit_code,
+        })).collect::<Vec<_>>()
+    })))
+}
+
+/// Execute single mode: one agent, one task.
+async fn execute_single_mode(
+    cwd: &Path,
+    agents: &[AgentConfig],
+    params: Value,
+    binary: &Path,
+    progress: Option<ProgressFn>,
+    signal: Option<oneshot::Receiver<()>>,
+) -> Result<AgentToolResult, ToolError> {
+    let agent_name = params["agent"].as_str().ok_or("Missing required parameter: agent")?;
+    let task = params["task"].as_str().ok_or("Missing required parameter: task")?;
+    let agent_cwd = params["cwd"].as_str();
+
+    let result = run_single_agent(
+        cwd, agents, agent_name, task,
+        agent_cwd, None, signal, progress, binary,
+    ).await;
+
+    let is_error = result.exit_code != 0
+        || result.stop_reason.as_deref() == Some("error")
+        || result.stop_reason.as_deref() == Some("aborted");
+
+    if is_error {
+        let error_msg = result.error_message.as_deref().unwrap_or(&result.stderr);
+        return Ok(AgentToolResult::error(format!(
+            "Agent {}: {}",
+            result.stop_reason.as_deref().unwrap_or("failed"),
+            error_msg
+        )));
+    }
+
+    Ok(AgentToolResult::success(if result.output.is_empty() {
+        "(no output)".to_string()
+    } else {
+        result.output.clone()
+    }).with_metadata(json!({
+        "mode": "single",
+        "agent": result.agent,
+        "source": result.agent_source,
+        "usage": {
+            "input_tokens": result.usage.input_tokens,
+            "output_tokens": result.usage.output_tokens,
+            "turns": result.usage.turns,
+        },
+    })))
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────

@@ -336,134 +336,125 @@ impl ProxyStream {
         Ok(())
     }
 
+    /// Parse usage fields from a JSON value.
+    fn parse_proxy_usage(value: &serde_json::Value) -> ProxyUsage {
+        value
+            .get("usage")
+            .map(|u| ProxyUsage {
+                input: u.get("input").and_then(|v| v.as_u64()).unwrap_or(0),
+                output: u.get("output").and_then(|v| v.as_u64()).unwrap_or(0),
+                cache_read: u.get("cacheRead").and_then(|v| v.as_u64()).unwrap_or(0),
+                cache_write: u.get("cacheWrite").and_then(|v| v.as_u64()).unwrap_or(0),
+                total_tokens: u.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0),
+                cost: ProxyCost::default(),
+            })
+            .unwrap_or_default()
+    }
+
     fn parse_proxy_event(value: &serde_json::Value) -> Option<ProxyEvent> {
         let event_type = value.get("type")?.as_str()?;
 
         match event_type {
-            "start" => {
-                let content_index = value.get("contentIndex")?.as_u64()? as usize;
-                let content_type_str = value.get("contentType")?.as_str()?;
-
-                let content_type = match content_type_str {
-                    "text" => ContentType::Text,
-                    "thinking" => ContentType::Thinking,
-                    "toolcall" => {
-                        let id = value.get("id")?.as_str()?.to_string();
-                        let name = value.get("toolName")?.as_str()?.to_string();
-                        ContentType::ToolCall { id, name }
-                    }
-                    _ => return None,
-                };
-
-                Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::Start {
-                        content_index,
-                        content_type,
-                    },
-                ))
-            }
-            "text_delta" => {
-                let content_index = value.get("contentIndex")?.as_u64()? as usize;
-                let delta = value.get("delta")?.as_str()?.to_string();
-
-                Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::TextDelta {
-                        content_index,
-                        delta,
-                    },
-                ))
-            }
-            "thinking_delta" => {
-                let content_index = value.get("contentIndex")?.as_u64()? as usize;
-                let delta = value.get("delta")?.as_str()?.to_string();
-
-                Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::ThinkingDelta {
-                        content_index,
-                        delta,
-                    },
-                ))
-            }
-            "toolcall_delta" => {
-                let content_index = value.get("contentIndex")?.as_u64()? as usize;
-                let delta = value.get("delta")?.as_str()?.to_string();
-
-                Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::ToolCallDelta {
-                        content_index,
-                        delta,
-                    },
-                ))
-            }
-            "done" => {
-                let reason = value.get("reason")?.as_str()?.to_string();
-                let usage = value
-                    .get("usage")
-                    .map(|u| ProxyUsage {
-                        input: u.get("input").and_then(|v| v.as_u64()).unwrap_or(0),
-                        output: u.get("output").and_then(|v| v.as_u64()).unwrap_or(0),
-                        cache_read: u.get("cacheRead").and_then(|v| v.as_u64()).unwrap_or(0),
-                        cache_write: u.get("cacheWrite").and_then(|v| v.as_u64()).unwrap_or(0),
-                        total_tokens: u.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                        cost: ProxyCost::default(),
-                    })
-                    .unwrap_or_default();
-
-                Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::Done { reason, usage },
-                ))
-            }
-            "error" => {
-                let reason = value.get("reason")?.as_str()?.to_string();
-                let error_message = value
-                    .get("errorMessage")
-                    .and_then(|v| v.as_str())
-                    .map(String::from);
-                let usage = value
-                    .get("usage")
-                    .map(|u| ProxyUsage {
-                        input: u.get("input").and_then(|v| v.as_u64()).unwrap_or(0),
-                        output: u.get("output").and_then(|v| v.as_u64()).unwrap_or(0),
-                        cache_read: u.get("cacheRead").and_then(|v| v.as_u64()).unwrap_or(0),
-                        cache_write: u.get("cacheWrite").and_then(|v| v.as_u64()).unwrap_or(0),
-                        total_tokens: u.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                        cost: ProxyCost::default(),
-                    })
-                    .unwrap_or_default();
-
-                Some(ProxyEvent::AssistantMessage(
-                    ProxyAssistantMessageEvent::Error {
-                        reason,
-                        error_message,
-                        usage,
-                    },
-                ))
-            }
-            "tool_execution_start" => Some(ProxyEvent::ToolCall(ToolCallEvent {
-                tool_call_id: value.get("toolCallId")?.as_str()?.to_string(),
-                tool_name: value.get("toolName")?.as_str()?.to_string(),
-                args: value
-                    .get("args")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null),
-                result: None,
-                is_error: false,
-            })),
-            "tool_execution_end" => Some(ProxyEvent::ToolCall(ToolCallEvent {
-                tool_call_id: value.get("toolCallId")?.as_str()?.to_string(),
-                tool_name: value.get("toolName")?.as_str()?.to_string(),
-                args: serde_json::Value::Null,
-                result: value
-                    .get("result")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
-                is_error: value
-                    .get("isError")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
-            })),
+            "start" => Self::parse_start_event(value),
+            "text_delta" => Self::parse_delta_event(value, "text_delta", |idx, delta| {
+                ProxyEvent::AssistantMessage(ProxyAssistantMessageEvent::TextDelta { content_index: idx, delta })
+            }),
+            "thinking_delta" => Self::parse_delta_event(value, "thinking_delta", |idx, delta| {
+                ProxyEvent::AssistantMessage(ProxyAssistantMessageEvent::ThinkingDelta { content_index: idx, delta })
+            }),
+            "toolcall_delta" => Self::parse_delta_event(value, "toolcall_delta", |idx, delta| {
+                ProxyEvent::AssistantMessage(ProxyAssistantMessageEvent::ToolCallDelta { content_index: idx, delta })
+            }),
+            "done" => Self::parse_done_event(value),
+            "error" => Self::parse_error_event(value),
+            "tool_execution_start" => Self::parse_tool_start_event(value),
+            "tool_execution_end" => Self::parse_tool_end_event(value),
             _ => None,
         }
+    }
+
+    fn parse_start_event(value: &serde_json::Value) -> Option<ProxyEvent> {
+        let content_index = value.get("contentIndex")?.as_u64()? as usize;
+        let content_type_str = value.get("contentType")?.as_str()?;
+
+        let content_type = match content_type_str {
+            "text" => ContentType::Text,
+            "thinking" => ContentType::Thinking,
+            "toolcall" => {
+                let id = value.get("id")?.as_str()?.to_string();
+                let name = value.get("toolName")?.as_str()?.to_string();
+                ContentType::ToolCall { id, name }
+            }
+            _ => return None,
+        };
+
+        Some(ProxyEvent::AssistantMessage(
+            ProxyAssistantMessageEvent::Start {
+                content_index,
+                content_type,
+            },
+        ))
+    }
+
+    fn parse_delta_event<F>(value: &serde_json::Value, _name: &str, constructor: F) -> Option<ProxyEvent>
+    where
+        F: FnOnce(usize, String) -> ProxyEvent,
+    {
+        let content_index = value.get("contentIndex")?.as_u64()? as usize;
+        let delta = value.get("delta")?.as_str()?.to_string();
+        Some(constructor(content_index, delta))
+    }
+
+    fn parse_done_event(value: &serde_json::Value) -> Option<ProxyEvent> {
+        let reason = value.get("reason")?.as_str()?.to_string();
+        let usage = Self::parse_proxy_usage(value);
+
+        Some(ProxyEvent::AssistantMessage(
+            ProxyAssistantMessageEvent::Done { reason, usage },
+        ))
+    }
+
+    fn parse_error_event(value: &serde_json::Value) -> Option<ProxyEvent> {
+        let reason = value.get("reason")?.as_str()?.to_string();
+        let error_message = value
+            .get("errorMessage")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let usage = Self::parse_proxy_usage(value);
+
+        Some(ProxyEvent::AssistantMessage(
+            ProxyAssistantMessageEvent::Error {
+                reason,
+                error_message,
+                usage,
+            },
+        ))
+    }
+
+    fn parse_tool_start_event(value: &serde_json::Value) -> Option<ProxyEvent> {
+        Some(ProxyEvent::ToolCall(ToolCallEvent {
+            tool_call_id: value.get("toolCallId")?.as_str()?.to_string(),
+            tool_name: value.get("toolName")?.as_str()?.to_string(),
+            args: value.get("args").cloned().unwrap_or(serde_json::Value::Null),
+            result: None,
+            is_error: false,
+        }))
+    }
+
+    fn parse_tool_end_event(value: &serde_json::Value) -> Option<ProxyEvent> {
+        Some(ProxyEvent::ToolCall(ToolCallEvent {
+            tool_call_id: value.get("toolCallId")?.as_str()?.to_string(),
+            tool_name: value.get("toolName")?.as_str()?.to_string(),
+            args: serde_json::Value::Null,
+            result: value
+                .get("result")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            is_error: value
+                .get("isError")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }))
     }
 }
 
@@ -535,176 +526,147 @@ impl ProxyEventReconstructor {
 
     fn process_assistant_event(&mut self, event: ProxyAssistantMessageEvent) -> Vec<ProviderEvent> {
         match event {
-            ProxyAssistantMessageEvent::Start {
-                content_index,
-                content_type,
-            } => {
-                let state = match content_type {
-                    ContentType::Text => {
-                        self.partial
-                            .content
-                            .push(ContentBlock::Text(TextContent::new(String::new())));
-                        ContentState::Text {
-                            text: String::new(),
-                        }
-                    }
-                    ContentType::Thinking => {
-                        self.partial
-                            .content
-                            .push(ContentBlock::Thinking(ThinkingContent::new(String::new())));
-                        ContentState::Thinking {
-                            thinking: String::new(),
-                        }
-                    }
-                    ContentType::ToolCall { id, name } => {
-                        self.partial.content.push(ContentBlock::ToolCall(ToolCall {
-                            id,
-                            name,
-                            arguments: serde_json::Map::new(),
-                        }));
-                        ContentState::ToolCall {
-                            id,
-                            name,
-                            partial_json: String::new(),
-                        }
-                    }
-                };
-
-                self.content_states.insert(content_index, state);
-                vec![ProviderEvent::Start {
-                    partial: self.partial.clone(),
-                }]
+            ProxyAssistantMessageEvent::Start { content_index, content_type } => {
+                self.handle_start(content_index, content_type)
             }
-
-            ProxyAssistantMessageEvent::TextDelta {
-                content_index,
-                delta,
-            } => {
-                if let Some(state) = self.content_states.get_mut(&content_index) {
-                    if let ContentState::Text { text } = state {
-                        text.push_str(&delta);
-
-                        if let Some(block) = self.partial.content.get_mut(content_index) {
-                            if let ContentBlock::Text(t) = block {
-                                t.text.push_str(&delta);
-                            }
-                        }
-
-                        return vec![ProviderEvent::TextDelta {
-                            content_index,
-                            delta,
-                            partial: self.partial.clone(),
-                        }];
-                    }
-                }
-                vec![]
+            ProxyAssistantMessageEvent::TextDelta { content_index, delta } => {
+                self.handle_text_delta(content_index, delta)
             }
-
-            ProxyAssistantMessageEvent::ThinkingDelta {
-                content_index,
-                delta,
-            } => {
-                if let Some(state) = self.content_states.get_mut(&content_index) {
-                    if let ContentState::Thinking { thinking } = state {
-                        thinking.push_str(&delta);
-
-                        if let Some(block) = self.partial.content.get_mut(content_index) {
-                            if let ContentBlock::Thinking(t) = block {
-                                t.thinking.push_str(&delta);
-                            }
-                        }
-
-                        return vec![ProviderEvent::ThinkingDelta {
-                            content_index,
-                            delta,
-                            partial: self.partial.clone(),
-                        }];
-                    }
-                }
-                vec![]
+            ProxyAssistantMessageEvent::ThinkingDelta { content_index, delta } => {
+                self.handle_thinking_delta(content_index, delta)
             }
-
-            ProxyAssistantMessageEvent::ToolCallDelta {
-                content_index,
-                delta,
-            } => {
-                if let Some(state) = self.content_states.get_mut(&content_index) {
-                    if let ContentState::ToolCall { partial_json, .. } = state {
-                        partial_json.push_str(&delta);
-
-                        // Parse partial JSON
-                        let arguments: serde_json::Map<String, serde_json::Value> =
-                            serde_json::from_str(partial_json).unwrap_or_default();
-
-                        if let Some(block) = self.partial.content.get_mut(content_index) {
-                            if let ContentBlock::ToolCall(tc) = block {
-                                tc.arguments = arguments;
-                            }
-                        }
-
-                        return vec![ProviderEvent::ToolCallDelta {
-                            content_index,
-                            delta,
-                            partial: self.partial.clone(),
-                        }];
-                    }
-                }
-                vec![]
+            ProxyAssistantMessageEvent::ToolCallDelta { content_index, delta } => {
+                self.handle_toolcall_delta(content_index, delta)
             }
-
             ProxyAssistantMessageEvent::Done { reason, usage } => {
-                // Update stop reason and usage
-                self.partial.stop_reason = match reason.as_str() {
-                    "stop" => StopReason::Stop,
-                    "length" => StopReason::Length,
-                    "toolUse" => StopReason::ToolUse,
-                    "error" => StopReason::Error,
-                    "aborted" => StopReason::Aborted,
-                    _ => StopReason::Stop,
-                };
-
-                self.partial.usage.input = usage.input;
-                self.partial.usage.output = usage.output;
-                self.partial.usage.cache_read = usage.cache_read;
-                self.partial.usage.cache_write = usage.cache_write;
-                self.partial.usage.total_tokens = usage.total_tokens;
-                self.partial.usage.cost.input = usage.cost.input;
-                self.partial.usage.cost.output = usage.cost.output;
-                self.partial.usage.cost.cache_read = usage.cost.cache_read;
-                self.partial.usage.cost.cache_write = usage.cost.cache_write;
-                self.partial.usage.cost.total = usage.cost.total;
-
-                // Clean up content states
-                self.content_states.clear();
-
-                vec![ProviderEvent::Done {
-                    reason: self.partial.stop_reason,
-                    message: self.partial.clone(),
-                }]
+                self.handle_done(reason, usage)
             }
-
-            ProxyAssistantMessageEvent::Error {
-                reason,
-                error_message,
-                usage,
-            } => {
-                self.partial.stop_reason = match reason.as_str() {
-                    "error" => StopReason::Error,
-                    "aborted" => StopReason::Aborted,
-                    _ => StopReason::Error,
-                };
-                self.partial.error_message = error_message;
-
-                vec![ProviderEvent::Error {
-                    error: oxi_ai::ProviderError::Other(
-                        self.partial
-                            .error_message
-                            .clone()
-                            .unwrap_or_else(|| "Unknown error".to_string()),
-                    ),
-                }]
+            ProxyAssistantMessageEvent::Error { reason, error_message, usage } => {
+                self.handle_proxy_error(reason, error_message)
             }
         }
+    }
+
+    fn handle_start(&mut self, content_index: usize, content_type: ContentType) -> Vec<ProviderEvent> {
+        let state = match content_type {
+            ContentType::Text => {
+                self.partial.content.push(ContentBlock::Text(TextContent::new(String::new())));
+                ContentState::Text { text: String::new() }
+            }
+            ContentType::Thinking => {
+                self.partial.content.push(ContentBlock::Thinking(ThinkingContent::new(String::new())));
+                ContentState::Thinking { thinking: String::new() }
+            }
+            ContentType::ToolCall { id, name } => {
+                self.partial.content.push(ContentBlock::ToolCall(ToolCall {
+                    id, name, arguments: serde_json::Map::new(),
+                }));
+                ContentState::ToolCall { id: String::new(), name: String::new(), partial_json: String::new() }
+            }
+        };
+
+        self.content_states.insert(content_index, state);
+        vec![ProviderEvent::Start { partial: self.partial.clone() }]
+    }
+
+    fn handle_text_delta(&mut self, content_index: usize, delta: String) -> Vec<ProviderEvent> {
+        if let Some(state) = self.content_states.get_mut(&content_index) {
+            if let ContentState::Text { text } = state {
+                text.push_str(&delta);
+                if let Some(block) = self.partial.content.get_mut(content_index) {
+                    if let ContentBlock::Text(t) = block {
+                        t.text.push_str(&delta);
+                    }
+                }
+                return vec![ProviderEvent::TextDelta {
+                    content_index, delta, partial: self.partial.clone(),
+                }];
+            }
+        }
+        vec![]
+    }
+
+    fn handle_thinking_delta(&mut self, content_index: usize, delta: String) -> Vec<ProviderEvent> {
+        if let Some(state) = self.content_states.get_mut(&content_index) {
+            if let ContentState::Thinking { thinking } = state {
+                thinking.push_str(&delta);
+                if let Some(block) = self.partial.content.get_mut(content_index) {
+                    if let ContentBlock::Thinking(t) = block {
+                        t.thinking.push_str(&delta);
+                    }
+                }
+                return vec![ProviderEvent::ThinkingDelta {
+                    content_index, delta, partial: self.partial.clone(),
+                }];
+            }
+        }
+        vec![]
+    }
+
+    fn handle_toolcall_delta(&mut self, content_index: usize, delta: String) -> Vec<ProviderEvent> {
+        if let Some(state) = self.content_states.get_mut(&content_index) {
+            if let ContentState::ToolCall { partial_json, .. } = state {
+                partial_json.push_str(&delta);
+                let arguments: serde_json::Map<String, serde_json::Value> =
+                    serde_json::from_str(partial_json).unwrap_or_default();
+                if let Some(block) = self.partial.content.get_mut(content_index) {
+                    if let ContentBlock::ToolCall(tc) = block {
+                        tc.arguments = arguments;
+                    }
+                }
+                return vec![ProviderEvent::ToolCallDelta {
+                    content_index, delta, partial: self.partial.clone(),
+                }];
+            }
+        }
+        vec![]
+    }
+
+    fn handle_done(&mut self, reason: String, usage: ProxyUsage) -> Vec<ProviderEvent> {
+        self.partial.stop_reason = match reason.as_str() {
+            "stop" => StopReason::Stop,
+            "length" => StopReason::Length,
+            "toolUse" => StopReason::ToolUse,
+            "error" => StopReason::Error,
+            "aborted" => StopReason::Aborted,
+            _ => StopReason::Stop,
+        };
+
+        self.partial.usage.input = usage.input;
+        self.partial.usage.output = usage.output;
+        self.partial.usage.cache_read = usage.cache_read;
+        self.partial.usage.cache_write = usage.cache_write;
+        self.partial.usage.total_tokens = usage.total_tokens;
+        self.partial.usage.cost.input = usage.cost.input;
+        self.partial.usage.cost.output = usage.cost.output;
+        self.partial.usage.cost.cache_read = usage.cost.cache_read;
+        self.partial.usage.cost.cache_write = usage.cost.cache_write;
+        self.partial.usage.cost.total = usage.cost.total;
+
+        self.content_states.clear();
+
+        vec![ProviderEvent::Done {
+            reason: self.partial.stop_reason,
+            message: self.partial.clone(),
+        }]
+    }
+
+    fn handle_proxy_error(&mut self, reason: String, error_message: Option<String>) -> Vec<ProviderEvent> {
+        self.partial.stop_reason = match reason.as_str() {
+            "error" => StopReason::Error,
+            "aborted" => StopReason::Aborted,
+            _ => StopReason::Error,
+        };
+        self.partial.error_message = error_message;
+
+        vec![ProviderEvent::Error {
+            error: oxi_ai::ProviderError::Other(
+                self.partial
+                    .error_message
+                    .clone()
+                    .unwrap_or_else(|| "Unknown error".to_string()),
+            ),
+        }]
     }
 
     /// Get the current partial message.

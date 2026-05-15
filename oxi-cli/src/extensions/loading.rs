@@ -25,7 +25,6 @@
 //! Extensions are discovered in `~/.oxi/extensions/` and any extra paths
 //! configured in settings.
 
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
