@@ -31,7 +31,7 @@ enum PreparedToolCallKind {
 
 struct PreparedToolCallOutcome {
 
-    kind: PreparedToolCallKind,
+    _kind: PreparedToolCallKind,
     immediate_result: Option<AgentToolResult>,
     is_error: bool,
     tool: Option<Arc<dyn crate::tools::AgentTool>>,

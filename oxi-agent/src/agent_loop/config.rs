@@ -1,14 +1,5 @@
 /// Agent loop configuration types
 
-/// Default max auto-retry attempts (for errors detected in assistant
-/// messages, not provider-level errors).
-
-pub const AUTO_RETRY_MAX_ATTEMPTS: usize = 3;
-
-/// Default base delay in ms for exponential backoff during auto-retry.
-
-pub const AUTO_RETRY_BASE_DELAY_MS: u64 = 2000;
-
 /// Configuration for an [`crate::AgentLoop`] instance.
 #[derive(Clone)]
 pub struct AgentLoopConfig {
