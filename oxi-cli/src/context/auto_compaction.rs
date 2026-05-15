@@ -450,7 +450,12 @@ impl AutoCompactor {
                 _ => "System",
             };
             let content = if msg.content.len() > 500 {
-                format!("{}...", &msg.content[..500])
+                let boundary = msg.content.char_indices()
+                    .take_while(|(i, _)| *i <= 500)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0);
+                format!("{}...", &msg.content[..boundary])
             } else {
                 msg.content.clone()
             };
@@ -469,9 +474,9 @@ impl AutoCompactor {
         messages
             .iter()
             .map(|msg| {
-                let chars = msg.content.len();
-                // Rough approximation: chars / 4
-                (chars / 4).max(1)
+                let chars = msg.content.chars().count();
+                // Rough approximation: chars / 3
+                (chars / 3).max(1)
             })
             .sum()
     }

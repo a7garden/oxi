@@ -377,54 +377,69 @@ impl McpClient {
     }
 
     /// Read a single JSON-RPC message from the transport.
+    ///
+    /// Wraps the header + body read in a timeout to prevent blocking
+    /// indefinitely if the MCP server stalls or disconnects silently.
     async fn read_message(&mut self) -> Result<RawJsonRpcMessage> {
-        // Parse Content-Length header
-        let mut content_length: Option<usize> = None;
-        let mut lines_read = 0;
-        loop {
-            let mut line = String::new();
-            let bytes_read = self.stdout.read_line(&mut line).await?;
-            if bytes_read == 0 {
-                return Err(anyhow::anyhow!("MCP server closed connection"));
-            }
-            lines_read += 1;
-            if lines_read > MAX_HEADER_LINES {
-                return Err(anyhow::anyhow!(
-                    "MCP server sent too many header lines (>{})",
-                    MAX_HEADER_LINES
-                ));
-            }
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                break;
-            }
-            if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
-                content_length = Some(
-                    rest.trim()
-                        .parse::<usize>()
-                        .context("Invalid Content-Length header")?,
-                );
-            }
-        }
+        tokio::time::timeout(
+            std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS),
+            async {
+                // Parse Content-Length header
+                let mut content_length: Option<usize> = None;
+                let mut lines_read = 0;
+                loop {
+                    let mut line = String::new();
+                    let bytes_read = self.stdout.read_line(&mut line).await?;
+                    if bytes_read == 0 {
+                        return Err(anyhow::anyhow!("MCP server closed connection"));
+                    }
+                    lines_read += 1;
+                    if lines_read > MAX_HEADER_LINES {
+                        return Err(anyhow::anyhow!(
+                            "MCP server sent too many header lines (>{})",
+                            MAX_HEADER_LINES
+                        ));
+                    }
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some(rest) = trimmed.strip_prefix("Content-Length:") {
+                        content_length = Some(
+                            rest.trim()
+                                .parse::<usize>()
+                                .context("Invalid Content-Length header")?,
+                        );
+                    }
+                }
 
-        let len = content_length
-            .ok_or_else(|| anyhow::anyhow!("Missing Content-Length header"))?;
+                let len = content_length
+                    .ok_or_else(|| anyhow::anyhow!("Missing Content-Length header"))?;
 
-        if len > MAX_BODY_SIZE {
-            return Err(anyhow::anyhow!(
-                "MCP server sent oversized body: {} bytes (max {})",
-                len,
-                MAX_BODY_SIZE
-            ));
-        }
+                if len > MAX_BODY_SIZE {
+                    return Err(anyhow::anyhow!(
+                        "MCP server sent oversized body: {} bytes (max {})",
+                        len,
+                        MAX_BODY_SIZE
+                    ));
+                }
 
-        // Read body
-        let mut buf = vec![0u8; len];
-        self.stdout.read_exact(&mut buf).await?;
+                // Read body
+                let mut buf = vec![0u8; len];
+                self.stdout.read_exact(&mut buf).await?;
 
-        let msg: RawJsonRpcMessage =
-            serde_json::from_slice(&buf).context("Failed to parse JSON-RPC message")?;
+                let msg: RawJsonRpcMessage =
+                    serde_json::from_slice(&buf).context("Failed to parse JSON-RPC message")?;
 
-        Ok(msg)
+                Ok(msg)
+            },
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "MCP read_message timed out after {}s",
+                REQUEST_TIMEOUT_SECS
+            )
+        })?
     }
 }

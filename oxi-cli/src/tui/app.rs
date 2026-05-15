@@ -607,6 +607,23 @@ fn now_millis() -> i64 {
         .as_millis() as i64
 }
 
+// ── Shared agent runtime ────────────────────────────────────────────────
+
+/// Returns a process-lifetime Tokio runtime used by the agent worker thread.
+/// Re-creating a multi-threaded runtime on every session switch is expensive;
+/// this `OnceLock` ensures exactly one instance lives for the entire process.
+fn get_agent_runtime() -> &'static tokio::runtime::Runtime {
+    use std::sync::OnceLock;
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("Failed to build agent runtime")
+    })
+}
+
 // ── Main entry point ─────────────────────────────────────────────────────
 
 /// Run the TUI interactive mode.
@@ -685,11 +702,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         let session_handle = agent_session.clone_handle();
         let ui_tx_for_thread = ui_tx.clone();
         let agent_handle = std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .expect("Failed to build agent runtime");
+            let rt = get_agent_runtime();
             rt.block_on(async {
                 let local = tokio::task::LocalSet::new();
                 local

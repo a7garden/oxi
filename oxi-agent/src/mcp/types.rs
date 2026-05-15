@@ -53,6 +53,8 @@ pub struct McpSettings {
     pub tool_prefix: Option<ToolPrefix>,
     /// Global idle timeout in minutes (default: 10).
     pub idle_timeout: Option<u64>,
+    /// Back-off period in seconds after a server connection failure (default: 30).
+    pub failure_backoff_secs: Option<u64>,
 }
 
 /// Tool name prefix strategy.

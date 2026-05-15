@@ -1024,11 +1024,13 @@ async fn delete_session(manager: &SessionManager, session_id: &str) -> Result<()
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
+    if s.len() <= max_len { return s.to_string(); }
+    let boundary = s.char_indices()
+        .take_while(|(i, _)| *i <= max_len.saturating_sub(3))
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    format!("{}...", &s[..boundary])
 }
 
 /// Run a single prompt and print the result

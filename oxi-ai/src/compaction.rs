@@ -9,6 +9,17 @@ use crate::{
     Api, AssistantMessage, ContentBlock, Context, Message, Model, Provider, StreamOptions,
     TextContent, UserMessage,
 };
+
+/// Safely truncate a string to a maximum number of characters, appending "..." if truncated.
+fn safe_truncate(s: &str, max_chars: usize) -> String {
+    if s.len() <= max_chars { return s.to_string(); }
+    let boundary = s.char_indices()
+        .take_while(|(i, _)| *i <= max_chars)
+        .last()
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(0);
+    format!("{}...", &s[..boundary])
+}
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -413,11 +424,7 @@ impl LlmCompactor {
                 Message::ToolResult(_) => "Tool",
             };
             let content = msg.text_content().unwrap_or_default();
-            let content_preview = if content.len() > 500 {
-                format!("{}...", &content[..500])
-            } else {
-                content
-            };
+            let content_preview = safe_truncate(&content, 500);
             prompt.push_str(&format!("[{} {}]: {}\n", role, i + 1, content_preview));
         }
 
@@ -516,22 +523,14 @@ impl LlmCompactor {
             // Keep first message's topic
             if let Some(first) = old_messages.first() {
                 let content = first.text_content().unwrap_or_default();
-                let preview = if content.len() > 200 {
-                    format!("{}...", &content[..200])
-                } else {
-                    content
-                };
+                let preview = safe_truncate(&content, 200);
                 summary_parts.push(format!("Started discussing: {}", preview));
             }
 
             // Keep last message (likely the most relevant recent context)
             if let Some(last) = old_messages.last() {
                 let content = last.text_content().unwrap_or_default();
-                let preview = if content.len() > 200 {
-                    format!("{}...", &content[..200])
-                } else {
-                    content
-                };
+                let preview = safe_truncate(&content, 200);
                 summary_parts.push(format!("Ended with: {}", preview));
             }
 
@@ -652,11 +651,7 @@ impl LlmCompactor {
                 Message::ToolResult(_) => "Tool",
             };
             let content = msg.text_content().unwrap_or_default();
-            let content_preview = if content.len() > 300 {
-                format!("{}...", &content[..300])
-            } else {
-                content
-            };
+            let content_preview = safe_truncate(&content, 300);
             prompt.push_str(&format!("[{} {}]: {}\n", role, i + 1, content_preview));
         }
 

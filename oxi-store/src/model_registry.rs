@@ -265,64 +265,58 @@ fn apply_model_override(model: &Model, override_def: &ModelOverride) -> Model {
 // Helper: resolve a config value string
 // =============================================================================
 
-/// Resolve a config value. If it starts with `!`, treat the rest as a command
-/// to execute. Otherwise, look it up as an env var. If the value is a literal
-/// string (not an env var name), return it as-is.
+/// Resolve a config value. Supports environment variable references:
+/// - `$VAR` or `${VAR}` — resolves to the value of the environment variable.
+/// - Plain string — returned as-is.
+///
+/// The `!` command execution prefix has been removed for security.
+/// Use `$ENV_VAR` references instead.
 fn resolve_config_value(value: &str) -> Option<String> {
-    if value.starts_with('!') {
-        // Command-backed config value — execute and capture stdout
-        let cmd = &value[1..];
-        #[cfg(unix)]
-        let output = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .output()
-            .ok()?;
-        #[cfg(windows)]
-        let output = std::process::Command::new("cmd")
-            .arg("/C")
-            .arg(cmd)
-            .output()
-            .ok()?;
-
-        if output.status.success() {
-            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-        } else {
-            None
-        }
-    } else {
-        // Plain string value — return as-is (not an env var lookup)
-        Some(value.to_string())
+    // Support environment variable references: $VAR or ${VAR}
+    if value.starts_with('$') {
+        let var_name = value
+            .strip_prefix("${")
+            .and_then(|s| s.strip_suffix('}'))
+            .unwrap_or(&value[1..]);
+        return std::env::var(var_name).ok().filter(|s| !s.is_empty());
     }
+    // Command execution (! prefix) has been removed for security
+    if value.starts_with('!') {
+        tracing::warn!(
+            "Command execution in config values (! prefix) is no longer supported for security. Use $ENV_VAR instead. Value: {}",
+            value
+        );
+        return None;
+    }
+    Some(value.to_string())
 }
 
 /// Resolve a config value or throw with a descriptive error message.
+///
+/// Supports `$VAR` / `${VAR}` environment variable references.
+/// The `!` command execution prefix has been removed for security.
 fn resolve_config_value_or_throw(value: &str, label: &str) -> Result<String, String> {
-    if value.starts_with('!') {
-        let cmd = &value[1..];
-        #[cfg(unix)]
-        let output = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .output()
-            .map_err(|e| format!("Failed to execute command for {}: {}", label, e))?;
-        #[cfg(windows)]
-        let output = std::process::Command::new("cmd")
-            .arg("/C")
-            .arg(cmd)
-            .output()
-            .map_err(|e| format!("Failed to execute command for {}: {}", label, e))?;
-
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-        } else {
-            Err(format!(
-                "Command for {} failed with exit code {}",
-                label, output.status
-            ))
-        }
+    if value.starts_with('$') {
+        let var_name = value
+            .strip_prefix("${")
+            .and_then(|s| s.strip_suffix('}'))
+            .unwrap_or(&value[1..]);
+        std::env::var(var_name).map_err(|_| {
+            format!(
+                "Environment variable {} not set for {}",
+                var_name, label
+            )
+        })
+    } else if value.starts_with('!') {
+        tracing::warn!(
+            "Command execution in config values (! prefix) is no longer supported for security. Use $ENV_VAR instead. Value: {}",
+            value
+        );
+        Err(format!(
+            "Command execution (! prefix) is no longer supported for {}. Use $ENV_VAR instead.",
+            label
+        ))
     } else {
-        // Plain string value — return as-is (not an env var lookup)
         Ok(value.to_string())
     }
 }
@@ -905,6 +899,16 @@ impl ModelRegistry {
                 for (model_id, model_override) in model_overrides {
                     self.store_model_headers(provider_name, model_id, model_override.headers.as_ref());
                 }
+            }
+        }
+
+        // Warn about apiKey in models.json — recommend env var references instead
+        for (provider_name, provider_config) in &config.providers {
+            if provider_config.api_key.is_some() {
+                tracing::warn!(
+                    "models.json contains apiKey for provider '{}'. Consider using $ENV_VAR reference instead.",
+                    provider_name
+                );
             }
         }
 
