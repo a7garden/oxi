@@ -1,0 +1,1 @@
+Wait, that struct has both `enabled` and `threshold` fields! But the error says only `enabled` is available. This means the actual compilation sees a different struct. Maybe there's a different `CompactionConfig` somewhere?
