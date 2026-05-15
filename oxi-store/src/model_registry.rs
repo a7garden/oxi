@@ -1747,7 +1747,7 @@ mod tests {
     fn test_resolve_config_value_env() {
         // Test env var expansion ($ prefix)
         // Use a unique var name to avoid parallel test interference
-        let var_name = format!("OXI_TEST_KEY_{}", std::process::id());
+        let var_name = format!("OXI_TEST_KEY_DOLLAR_{}", std::process::id());
         std::env::set_var(&var_name, "test-value-123");
         let result = resolve_config_value(&format!("${}", var_name));
         assert_eq!(result, Some("test-value-123".to_string()));
