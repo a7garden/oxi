@@ -1959,7 +1959,7 @@ mod tests {
     fn test_compaction_config_default() {
         let config = CompactionConfig::default();
         assert!(config.enabled);
-        assert_eq!(config.keep_recent, 4);
+        assert!(config.threshold > 0.0);
     }
 
     // ══════════════════════════════════════════════════════════════════

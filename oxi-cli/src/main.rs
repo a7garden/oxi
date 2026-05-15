@@ -321,7 +321,7 @@ async fn handle_ext_command(action: &oxi::cli::ExtCommands) -> Result<()> {
 fn handle_config_command(action: &ConfigCommands) -> Result<()> {
     match action {
         ConfigCommands::Show => config_show(),
-        ConfigCommands::List { resource_type } => config_list(resource_type.as_deref()),
+        ConfigCommands::List { resource_type } => config_list(resource_type.as_ref()),
         ConfigCommands::Enable { resource_type, name } => config_toggle_resource(resource_type, name, true),
         ConfigCommands::Disable { resource_type, name } => config_toggle_resource(resource_type, name, false),
         ConfigCommands::Set { key, value } => config_set(key, value),
@@ -989,7 +989,7 @@ fn fetch_and_register_models(cp: &oxi_store::settings::CustomProvider, api: &str
 /// Register builtin tools with the agent, respecting --tools filter and disabled_tools.
 fn register_builtin_tools(
     tools: &oxi_agent::ToolRegistry,
-    cwd: &Path,
+    cwd: &std::path::Path,
     args: &CliArgs,
     disabled_tools: &[String],
 ) {
@@ -1009,7 +1009,7 @@ fn register_builtin_tools(
 /// Discover and load WASM extensions, registering their tools.
 fn load_wasm_extensions(
     app: &oxi::App,
-    cwd: &Path,
+    cwd: &std::path::Path,
     tools: &oxi_agent::ToolRegistry,
 ) -> Option<std::sync::Arc<oxi::extensions::WasmExtensionManager>> {
     if !app.settings().extensions_enabled {
