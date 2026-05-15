@@ -1011,8 +1011,8 @@ mod tests {
     #[test]
     fn test_llm_compactor_config_builder() {
         // Test that LlmCompactor can be created and builder pattern works
-        use crate::providers::CloudflareProvider;
-        let provider = CloudflareProvider::new();
+        use crate::providers::OpenAiProvider;
+        let provider = OpenAiProvider::new();
         let model = make_test_model();
         let compactor = LlmCompactor::new(model, Arc::new(provider))
             .with_keep_recent(6)
@@ -1107,8 +1107,8 @@ mod tests {
 
     #[test]
     fn test_token_estimation_helper() {
-        use crate::providers::CloudflareProvider;
-        let provider = CloudflareProvider::new();
+        use crate::providers::OpenAiProvider;
+        let provider = OpenAiProvider::new();
         let model = make_test_model();
         let compactor = LlmCompactor::new(model, Arc::new(provider));
 
@@ -1170,8 +1170,8 @@ mod tests {
     #[test]
     fn test_llm_compactor_has_summarize_branch() {
         // Verify that LlmCompactor has the summarize_branch method
-        use crate::providers::CloudflareProvider;
-        let provider = CloudflareProvider::new();
+        use crate::providers::OpenAiProvider;
+        let provider = OpenAiProvider::new();
         let model = make_test_model();
         let compactor = LlmCompactor::new(model, Arc::new(provider));
         
@@ -1192,8 +1192,8 @@ mod tests {
     #[test]
     fn test_summarize_branch_returns_error_on_llm_failure() {
         // Test that summarize_branch handles empty messages gracefully
-        use crate::providers::CloudflareProvider;
-        let provider = CloudflareProvider::new();
+        use crate::providers::OpenAiProvider;
+        let provider = OpenAiProvider::new();
         let model = make_test_model();
         let compactor = LlmCompactor::new(model, Arc::new(provider));
         

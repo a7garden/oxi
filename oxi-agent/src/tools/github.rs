@@ -67,23 +67,6 @@ async fn gh_exec(args: &[&str]) -> Result<String, ToolError> {
     Ok(stdout.trim().to_string())
 }
 
-/// Run a `gh` command with `--json` and parse the result.
-
-async fn gh_json(args: &[&str]) -> Result<Value, ToolError> {
-    let mut full_args = args.to_vec();
-    // Ensure --json flag is present
-    if !full_args.iter().any(|a| a.starts_with("--json")) {
-        full_args.push("--json");
-    }
-
-    let stdout = gh_exec(&full_args).await?;
-    if stdout.is_empty() {
-        return Ok(Value::Null);
-    }
-    serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse gh JSON output: {}. Output: {}", e, stdout.chars().take(200).collect::<String>()))
-}
-
 // ── Search ────────────────────────────────────────────────────────
 
 async fn gh_search(params: &Value) -> Result<AgentToolResult, ToolError> {

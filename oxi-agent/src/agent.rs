@@ -2,21 +2,18 @@
 
 use crate::config::AgentConfig;
 use crate::config::ShouldStopAfterTurnContext;
-use crate::error::AgentError;
 use crate::events::AgentEvent;
 use crate::state::{AgentState, SharedState};
-use crate::tools::{AgentTool, AgentToolResult, ToolRegistry};
+use crate::tools::{AgentTool, ToolRegistry};
 use crate::types::{Response, StopReason};
 use anyhow::{Error, Result};
 use oxi_ai::{
-    progress_callback, transform_for_provider, CompactionManager, CompactionStrategy,
-    ContentBlock, Context, LlmCompactor, Provider, ProviderEvent, StreamOptions,
-    TextContent,
+    transform_for_provider, CompactionManager, CompactionStrategy,
+    LlmCompactor, Provider,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::mpsc;
 
 /// Mutable agent internals protected by a read-write lock.
 

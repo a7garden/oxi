@@ -194,6 +194,7 @@ struct EditEntry {
 struct EditOutput {
     diff: String,
     first_changed_line: Option<usize>,
+    #[allow(dead_code)]
     applied: bool,
     message: String,
 }

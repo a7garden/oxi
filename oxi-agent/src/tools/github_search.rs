@@ -29,7 +29,7 @@ const MAX_RESULTS: usize = 30;
 
 struct GitHubSearchResponse {
     total_count: u64,
-    incomplete_results: bool,
+    _incomplete_results: bool,
     items: Vec<GitHubRepo>,
 }
 
@@ -45,7 +45,7 @@ struct GitHubRepo {
     open_issues_count: u64,
     updated_at: String,
 
-    archived: bool,
+    _archived: bool,
     topics: Vec<String>,
     license: Option<GitHubLicense>,
 }

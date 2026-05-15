@@ -485,6 +485,7 @@ pub struct GooglePart {
 
 #[derive(Debug, Deserialize)]
 pub struct GoogleFunctionCall {
+    #[serde(rename = "name")]
     pub _name: String,
     #[serde(default)]
     pub args: JsonValue,

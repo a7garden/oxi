@@ -49,6 +49,21 @@ impl AzureProvider {
         }
     }
 
+    /// Create with explicit configuration (public API for external consumers)
+    #[cfg(test)]
+    pub fn with_config(
+        api_key: impl Into<String>,
+        resource_name: impl Into<String>,
+        deployment_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            client: shared_client(),
+            api_key: Some(api_key.into()),
+            resource_name: Some(resource_name.into()),
+            deployment_name: Some(deployment_name.into()),
+        }
+    }
+
     /// Build the Azure endpoint URL
     fn build_url(&self, model: &Model) -> Result<String, ProviderError> {
         // Priority: model.base_url > resource_name env > fallback

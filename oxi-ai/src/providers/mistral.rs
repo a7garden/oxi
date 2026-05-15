@@ -43,6 +43,15 @@ impl MistralProvider {
         }
     }
 
+    /// Create a Mistral provider with a specific API key (test-only)
+    #[cfg(test)]
+    pub fn with_api_key(api_key: impl Into<String>) -> Self {
+        Self {
+            client: shared_client(),
+            api_key: Some(api_key.into()),
+        }
+    }
+
     /// Normalize tool call ID to Mistral's expected format (9 characters)
     ///
     /// Mistral's API expects tool call IDs to be exactly 9 characters.

@@ -293,7 +293,7 @@ async fn prepare_tool_call(
         Some(t) => t,
         None => {
             return PreparedToolCallOutcome {
-                kind: PreparedToolCallKind::Immediate,
+                _kind: PreparedToolCallKind::Immediate,
                 immediate_result: Some(AgentToolResult::error(format!(
                     "Tool '{}' not found",
                     tool_call.name
@@ -311,7 +311,7 @@ async fn prepare_tool_call(
     if let Some(ref hook) = loop_ref.before_tool_call {
         if let Some(blocked) = hook(&tool_call.name, &validated_args).await.ok().flatten() {
             return PreparedToolCallOutcome {
-                kind: PreparedToolCallKind::Immediate,
+                _kind: PreparedToolCallKind::Immediate,
                 immediate_result: Some(blocked),
                 is_error: true,
                 tool: None,
@@ -322,7 +322,7 @@ async fn prepare_tool_call(
     }
 
     PreparedToolCallOutcome {
-        kind: PreparedToolCallKind::Prepared,
+        _kind: PreparedToolCallKind::Prepared,
         immediate_result: None,
         is_error: false,
         tool: Some(Arc::clone(&tool)),

@@ -250,7 +250,7 @@ struct ServiceAccountCreds {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{AssistantMessage, Context, Message};
+    use crate::{Context, Message};
 
     #[test]
     fn test_vertex_provider_name() {
