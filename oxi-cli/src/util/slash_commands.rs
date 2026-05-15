@@ -2,32 +2,6 @@
 //!
 //! Built-in slash command definitions.
 
-use crate::util::source_info::SourceInfo;
-
-/// Where a slash command originates from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SlashCommandSource {
-/// extension variant.
-    Extension,
-/// prompt variant.
-    Prompt,
-/// skill variant.
-    Skill,
-}
-
-/// Resolved information about a slash command (may be built-in or from an extension).
-#[derive(Debug, Clone)]
-pub struct SlashCommandInfo {
-/// pub.
-    pub name: String,
-/// pub.
-    pub description: Option<String>,
-/// pub.
-    pub source: SlashCommandSource,
-/// pub.
-    pub source_info: SourceInfo,
-}
-
 /// A built-in slash command definition.
 #[derive(Debug, Clone)]
 pub struct BuiltinSlashCommand {
@@ -65,34 +39,13 @@ pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
     BuiltinSlashCommand { name: "extensions", description: "List extensions & WASM tools" },
 ];
 
-/// Look up a built-in slash command by name.
-pub fn find_builtin_command(name: &str) -> Option<&'static BuiltinSlashCommand> {
-    BUILTIN_SLASH_COMMANDS.iter().find(|c| c.name == name)
-}
-
-/// Get all built-in slash command names.
-pub fn builtin_command_names() -> Vec<&'static str> {
-    BUILTIN_SLASH_COMMANDS.iter().map(|c| c.name).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn find_existing() {
-        assert!(find_builtin_command("settings").is_some());
-        assert_eq!(find_builtin_command("settings").unwrap().name, "settings");
-    }
-
-    #[test]
-    fn find_missing() {
-        assert!(find_builtin_command("nonexistent").is_none());
-    }
-
-    #[test]
     fn names_match() {
-        let names = builtin_command_names();
+        let names: Vec<_> = BUILTIN_SLASH_COMMANDS.iter().map(|c| c.name).collect();
         assert!(names.contains(&"quit"));
         assert!(names.contains(&"model"));
     }
