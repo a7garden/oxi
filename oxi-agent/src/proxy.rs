@@ -293,10 +293,12 @@ impl ProxyStream {
                         Some(Ok(chunk)) => {
                             buffer.extend_from_slice(&chunk);
 
-                            // Process complete lines
-                            while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
-                                let line = buffer.drain(..=pos).collect::<Vec<_>>();
-                                let line_str = String::from_utf8_lossy(&line);
+                            // Process complete lines using index-based approach (no allocation)
+                            let mut start = 0;
+                            while let Some(pos) = buffer[start..].iter().position(|&b| b == b'\n') {
+                                let end = start + pos;
+                                let line = &buffer[start..end];
+                                let line_str = String::from_utf8_lossy(line);
 
                                 if line_str.starts_with("data: ") {
                                     let data = line_str.trim_start_matches("data: ");
@@ -309,6 +311,10 @@ impl ProxyStream {
                                         }
                                     }
                                 }
+                                start = end + 1;
+                            }
+                            if start > 0 {
+                                buffer.drain(..start);
                             }
                         }
                         Some(Err(e)) => {

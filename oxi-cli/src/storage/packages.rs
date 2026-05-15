@@ -43,9 +43,14 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
-
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::time::Duration;
+
+/// Cached regex for parsing npm package specs
+static NPM_SPEC_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"^(@?[^@]+(?:/[^@]+)?)(?:@(.+))?$").expect("valid static regex")
+});
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -362,8 +367,7 @@ impl ParsedSource {
 /// Parse an npm spec into (name, pinned)
 fn parse_npm_spec(spec: &str) -> (String, bool) {
     // Handle scoped packages like @scope/name@version
-    let re = regex::Regex::new(r"^(@?[^@]+(?:/[^@]+)?)(?:@(.+))?$").expect("valid static regex");
-    if let Some(caps) = re.captures(spec) {
+    if let Some(caps) = NPM_SPEC_RE.captures(spec) {
         let name = caps.get(1).map(|m| m.as_str()).unwrap_or(spec);
         let has_version = caps.get(2).is_some();
         return (name.to_string(), has_version);

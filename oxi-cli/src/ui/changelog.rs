@@ -3,8 +3,14 @@
 //! Provides functions for reading and parsing CHANGELOG.md files.
 
 use regex::Regex;
+use std::sync::LazyLock;
 use std::fs;
 use std::path::Path;
+
+/// Cached regex for parsing version headers in changelog
+static VERSION_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"##\s+\[?(\d+)\.(\d+)\.(\d+)\]?").unwrap()
+});
 
 /// A parsed changelog entry
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,11 +68,7 @@ pub fn parse_changelog_content(content: &str) -> Vec<ChangelogEntry> {
     let lines: Vec<&str> = content.split('\n').collect();
     let mut entries: Vec<ChangelogEntry> = Vec::new();
 
-    let version_regex = Regex::new(r"##\s+\[?(\d+)\.(\d+)\.(\d+)\]?").ok();
-    let version_regex = match version_regex {
-        Some(r) => r,
-        None => return Vec::new(),
-    };
+    let version_regex = &VERSION_REGEX;
 
     let mut current_lines: Vec<&str> = Vec::new();
     let mut current_version: Option<(u32, u32, u32)> = None;

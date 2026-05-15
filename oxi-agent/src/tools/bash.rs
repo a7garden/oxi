@@ -12,12 +12,148 @@ use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::oneshot;
+
+/// Environment variables that are blocked from injection via the LLM.
+/// These can be used for privilege escalation, library injection, or path manipulation.
+const BLOCKED_ENV_VARS: &[&str] = &[
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_FRAMEWORK_PATH",
+    "PATH",
+    "HOME",
+    "IFS",
+    "SHELL",
+    "USER",
+    "LOGNAME",
+    "PYTHONPATH",
+    "NODE_PATH",
+    "RUBYLIB",
+    "PERL5LIB",
+    "CLASSPATH",
+    "JAVA_TOOL_OPTIONS",
+    "MallocNanoZone",
+    "MallocSpaceEfficient",
+];
+
+/// Check if a command contains dangerous patterns.
+/// Returns a warning string if dangerous patterns are detected, or None if safe.
+/// This does NOT block execution - it only emits a warning.
+fn is_dangerous_command(command: &str) -> Option<String> {
+    let cmd_lower = command.to_lowercase();
+    let mut warnings: Vec<&str> = Vec::new();
+
+    // Pipe to shell
+    if cmd_lower.contains("| sh") || cmd_lower.contains("| bash") || cmd_lower.contains("| zsh") {
+        warnings.push("pipe to shell");
+    }
+
+    // Sensitive file access via command substitution
+    if command.contains("/etc/passwd") || command.contains("/etc/shadow") {
+        warnings.push("access to sensitive authentication files");
+    }
+    if command.contains("id_rsa") || command.contains("id_ed25519") || command.contains(".ssh/") {
+        warnings.push("access to SSH private keys/directory");
+    }
+
+    // Network exfiltration patterns
+    if (cmd_lower.contains("curl") || cmd_lower.contains("wget")) && cmd_lower.contains("| nc") {
+        warnings.push("possible network exfiltration (pipe to netcat)");
+    }
+    if command.contains("/dev/tcp/") || command.contains("/dev/udp/") {
+        warnings.push("possible network exfiltration via /dev/tcp|udp");
+    }
+
+    // Privilege escalation
+    if cmd_lower.starts_with("sudo ") || cmd_lower.contains("\nsudo ") || cmd_lower.contains("&&sudo ") {
+        warnings.push("sudo detected (privilege escalation)");
+    }
+    if cmd_lower.contains("su -") || cmd_lower.contains("su root") {
+        warnings.push("user switch to privileged account");
+    }
+
+    // Fork bomb patterns
+    if cmd_lower.contains(":(){ :|:& };") || cmd_lower.contains("fork bomb") {
+        warnings.push("fork bomb pattern detected");
+    }
+    // Also detect the common `:(){ :|:& };:` pattern (without spaces)
+    if command.contains(":(){") && command.contains(":|:&") {
+        warnings.push("fork bomb pattern detected");
+    }
+
+    // Write to system directories
+    let system_write_patterns = [
+        ("> /etc/", "/etc/"),
+        (">> /etc/", "/etc/"),
+        ("> /boot/", "/boot/"),
+        (">> /boot/", "/boot/"),
+        ("> /sys/", "/sys/"),
+        (">> /sys/", "/sys/"),
+        ("> /proc/", "/proc/"),
+        (">> /proc/", "/proc/"),
+    ];
+    for (pattern, dir) in &system_write_patterns {
+        if cmd_lower.contains(pattern) {
+            warnings.push(&format!("write to system directory {}", dir));
+            break;
+        }
+    }
+
+    if warnings.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "⚠️  SECURITY WARNING: {}",
+            warnings.join(", ")
+        ))
+    }
+}
+
+/// Validate that a working directory is within the allowed workspace.
+/// Returns an error message if the path is invalid/escapes, or the resolved path on success.
+fn validate_cwd(dir: &str, workspace: Option<&Path>) -> Result<PathBuf, String> {
+    let path = Path::new(dir);
+
+    // Reject path traversal
+    if path.components().any(|c| c.as_os_str() == "..") {
+        return Err("Path traversal (..) not allowed in working directory".to_string());
+    }
+
+    if !path.exists() {
+        return Err(format!("Working directory does not exist: {}", dir));
+    }
+
+    // If we have a workspace root, validate the cwd is within it
+    if let Some(workspace_root) = workspace {
+        // Canonicalize both paths to resolve symlinks and normalize
+        let canonical_cwd = path
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve working directory: {}", e))?;
+        let canonical_workspace = workspace_root
+            .canonicalize()
+            .map_err(|e| format!("Failed to resolve workspace directory: {}", e))?;
+
+        if !canonical_cwd.starts_with(&canonical_workspace) {
+            return Err(format!(
+                "Working directory '{}' is outside the allowed workspace '{}'",
+                canonical_cwd.display(),
+                canonical_workspace.display()
+            ));
+        }
+
+        return Ok(canonical_cwd);
+    }
+
+    // No workspace constraint - just return the original path
+    Ok(path.to_path_buf())
+}
 
 /// Default timeout in seconds
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -117,14 +253,10 @@ impl BashTool {
         // Resolve working directory
         let work_dir = match cwd {
             Some(dir) if !dir.is_empty() => {
-                let path = Path::new(dir);
-                if path.components().any(|c| c.as_os_str() == "..") {
-                    return Err("Path traversal (..) not allowed in working directory".to_string());
-                }
-                if !path.exists() {
-                    return Err(format!("Working directory does not exist: {}", dir));
-                }
-                Some(dir.to_string())
+                // No workspace constraint enforced at this level (workspace is None)
+                // The caller can wrap with workspace validation if needed
+                let validated = validate_cwd(dir, None)?;
+                Some(validated.to_string_lossy().to_string())
             }
             _ => None,
         };
@@ -143,9 +275,13 @@ impl BashTool {
             cmd.current_dir(dir);
         }
 
-        // Set environment variables
+        // Set environment variables, filtering blocked ones
         if let Some(env_map) = env {
             for (key, val) in env_map {
+                if BLOCKED_ENV_VARS.iter().any(|blocked| blocked.eq_ignore_ascii_case(key)) {
+                    // Silently skip blocked environment variables
+                    continue;
+                }
                 if let Some(val_str) = val.as_str() {
                     cmd.env(key, val_str);
                 }
@@ -190,7 +326,13 @@ impl BashTool {
 
             // Branch 2: Timeout elapsed
             _ = tokio::time::sleep(timeout_duration) => {
-                // Kill the entire process group
+                // Kill the entire process group using libc to ensure
+                // child processes spawned by the shell are also killed
+                #[cfg(unix)]
+                {
+                    let pgid = -(child.id() as i32);
+                    unsafe { libc::kill(pgid, libc::SIGKILL); }
+                }
                 let _ = child.kill().await;
                 let _ = child.wait().await; // Reap the child
                 Err(format!("Command timed out after {} seconds", timeout))
@@ -206,7 +348,13 @@ impl BashTool {
                 }
             } => {
                 let _ = sig; // suppress unused warning
-                // Kill the entire process group
+                // Kill the entire process group using libc to ensure
+                // child processes spawned by the shell are also killed
+                #[cfg(unix)]
+                {
+                    let pgid = -(child.id() as i32);
+                    unsafe { libc::kill(pgid, libc::SIGKILL); }
+                }
                 let _ = child.kill().await;
                 let _ = child.wait().await; // Reap the child
                 Err("Command aborted".to_string())
@@ -245,6 +393,9 @@ impl BashTool {
                     format!("{}\n{}", stdout_str, stderr_str)
                 };
 
+                // Check for dangerous command patterns (warning only, does not block)
+                let security_warning = is_dangerous_command(command);
+
                 // Apply truncation
                 let truncation = truncate::truncate_head(
                     if combined.is_empty() {
@@ -255,7 +406,12 @@ impl BashTool {
                     &TruncationOptions::default(),
                 );
 
-                let output = Self::build_output(&truncation, elapsed, exit_code);
+                let mut output = Self::build_output(&truncation, elapsed, exit_code);
+
+                // Append security warning if dangerous patterns were detected
+                if let Some(ref warning) = security_warning {
+                    output.push_str(&format!("\n{}", warning));
+                }
 
                 if status.success() {
                     Ok(AgentToolResult::success(output))

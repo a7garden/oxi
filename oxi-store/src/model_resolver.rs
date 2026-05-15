@@ -10,6 +10,17 @@
 
 use crate::settings::Settings;
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+/// Cached regex for date pattern matching (-YYYYMMDD)
+static DATE_PATTERN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"-\d{8}$").expect("date pattern regex should compile")
+});
+
+/// Cached regex for date pattern stripping
+static DATE_PATTERN_STRIP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"-\d{8}").expect("date pattern strip regex should compile")
+});
 
 // =============================================================================
 // Constants
@@ -197,11 +208,7 @@ fn is_alias(id: &str) -> bool {
         return true;
     }
     // Check if ends with date pattern (-YYYYMMDD)
-    let date_pattern = regex::Regex::new(r"-\d{8}$").ok();
-    match date_pattern {
-        Some(re) => !re.is_match(id),
-        None => true,
-    }
+    !DATE_PATTERN_RE.is_match(id)
 }
 
 /// Match a glob pattern against text
@@ -304,9 +311,7 @@ pub fn get_thinking_level_map(model_id: &str) -> Option<HashMap<String, String>>
     // Strip common suffixes to find base model name
     let base = if let Some(stripped) = model_id.strip_suffix("-latest") {
         stripped
-    } else if let Some(dated) =
-        model_id.strip_suffix(regex::Regex::new(r"-\d{8}").ok().unwrap().as_str())
-    {
+    } else if let Some(dated) = model_id.strip_suffix(DATE_PATTERN_STRIP_RE.as_str()) {
         dated
     } else {
         // Also try stripping numbered suffixes like -5, -6, etc.

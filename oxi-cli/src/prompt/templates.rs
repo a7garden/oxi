@@ -18,6 +18,17 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+/// Cached regex for positional argument placeholders ($1, $2, etc.)
+static POSITIONAL_ARG_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"\$(\d+)").unwrap()
+});
+
+/// Cached regex for argument slice syntax (${@:start} or ${@:start:length})
+static SLICE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"\$\{@:(\d+)(?::(\d+))?\}").unwrap()
+});
 
 /// Config directory name for project-local settings.
 const CONFIG_DIR_NAME: &str = ".oxi";
@@ -186,7 +197,7 @@ pub fn substitute_args(content: &str, args: &[String]) -> String {
     let mut result = content.to_string();
 
     // Replace $1, $2, etc. with positional args FIRST
-    let positional_re = regex::Regex::new(r"\$(\d+)").unwrap();
+    let positional_re = &POSITIONAL_ARG_RE;
     result = positional_re
         .replace_all(&result, |caps: &regex::Captures| {
             let num: usize = caps[1].parse().unwrap_or(0);
@@ -199,7 +210,7 @@ pub fn substitute_args(content: &str, args: &[String]) -> String {
         .into_owned();
 
     // Replace ${@:start} or ${@:start:length} with sliced args
-    let slice_re = regex::Regex::new(r"\$\{@:(\d+)(?::(\d+))?\}").unwrap();
+    let slice_re = &SLICE_RE;
     result = slice_re
         .replace_all(&result, |caps: &regex::Captures| {
             let mut start: usize = caps[1].parse().unwrap_or(1);

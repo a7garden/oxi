@@ -9,6 +9,7 @@
 use anyhow::{Context, Result};
 use std::net::TcpListener;
 use tokio::sync::oneshot;
+use uuid::Uuid;
 
 /// Default callback port range - we try ports in this range to find an available one
 const DEFAULT_PORT_RANGE_START: u16 = 8787;
@@ -31,6 +32,8 @@ pub struct OAuthCallbackServer {
     port: u16,
     /// Shutdown signal sender
     shutdown_tx: oneshot::Sender<()>,
+    /// Expected CSRF state for validation
+    csrf_state: Option<String>,
 }
 
 impl OAuthCallbackServer {
@@ -40,6 +43,7 @@ impl OAuthCallbackServer {
         Self {
             port,
             shutdown_tx,
+            csrf_state: None,
         }
     }
 
@@ -62,7 +66,15 @@ impl OAuthCallbackServer {
 
     /// Start the callback server and wait for the OAuth callback
     /// Returns the callback data (code and state) when received
+    /// Start the callback server and wait for the OAuth callback
+    /// Returns the callback data (code and state) when received
     pub async fn start(self) -> Result<OAuthCallbackData> {
+        self.start_with_csrf(None).await
+    }
+
+    /// Start the callback server with CSRF state validation
+    /// If csrf_state is provided, the returned state parameter must match
+    pub async fn start_with_csrf(self, csrf_state: Option<String>) -> Result<OAuthCallbackData> {
         let listener = TcpListener::bind(("127.0.0.1", self.port))
             .context(format!("Failed to bind to port {}", self.port))?;
 
@@ -74,7 +86,7 @@ impl OAuthCallbackServer {
 
         // Spawn the async server task
         tokio::task::spawn_local(async move {
-            if let Err(e) = run_server(listener, tx).await {
+            if let Err(e) = run_server(listener, tx, csrf_state).await {
                 eprintln!("OAuth callback server error: {}", e);
             }
         });
@@ -110,6 +122,10 @@ pub enum OAuthError {
 /// missing state variant.
     MissingState,
 
+    #[error("CSRF state mismatch - possible CSRF attack")]
+/// csrf mismatch variant.
+    CsrfMismatch,
+
     #[error("Server shutdown")]
 /// shutdown variant.
     Shutdown,
@@ -137,6 +153,7 @@ fn find_available_port(start: u16, end: u16) -> Option<u16> {
 async fn run_server(
     listener: TcpListener,
     tx: oneshot::Sender<Result<OAuthCallbackData, OAuthError>>,
+    csrf_state: Option<String>,
 ) -> Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -161,6 +178,25 @@ async fn run_server(
 
             // Parse the HTTP request to extract the callback URL
             if let Some(callback_data) = parse_oauth_callback(&request) {
+                // Validate CSRF state if expected
+                if let Some(ref expected_state) = csrf_state {
+                    if callback_data.state != *expected_state {
+                        let response = "HTTP/1.1 403 Forbidden\r\n\
+                            Content-Type: text/html\r\n\
+                            Connection: close\r\n\
+                            \r\n\
+                            <!DOCTYPE html>\
+                            <html><head><title>OAuth Error</title></head>\
+                            <body style=\"font-family: system-ui; padding: 40px; text-align: center;\">\
+                            <h2>Authentication Failed</h2>\
+                            <p>CSRF state mismatch. Possible security attack detected.</p>\
+                            </body></html>";
+                        let _ = stream.write_all(response.as_bytes()).await;
+                        let _ = stream.flush().await;
+                        let _ = tx.send(Err(OAuthError::CsrfMismatch));
+                        return Ok(());
+                    }
+                }
                 // Send success response
                 let response = "HTTP/1.1 200 OK\r\n\
                     Content-Type: text/html; charset=utf-8\r\n\
@@ -232,12 +268,17 @@ fn parse_oauth_callback(request: &str) -> Option<OAuthCallbackData> {
     for pair in query.split('&') {
         let mut parts = pair.split('=');
         let key = parts.next()?;
-        let value = parts.next()?.replace("%3D", "=").replace("%26", "&");
+        let value = parts.next()
+            .map(urlencoding::decode)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         
         match key {
-            "code" => code = Some(value),
-            "state" => state = Some(value),
-            "url" => callback_url = Some(value),
+            "code" => code = Some(value.into_owned()),
+            "state" => state = Some(value.into_owned()),
+            "url" => callback_url = Some(value.into_owned()),
             _ => {}
         }
     }
@@ -294,18 +335,30 @@ pub fn open_browser(url: &str) -> std::io::Result<std::process::Child> {
 
 /// Start OAuth flow with browser-based authorization
 pub async fn authorize_with_browser(
-    auth_url: &str,
+    auth_url_base: &str,
 ) -> Result<OAuthCallbackData> {
-    // Open browser
-    open_browser(auth_url).map_err(|e| anyhow::anyhow!("Failed to open browser: {}", e))?;
-
-    // Get callback server ready
+    // Start callback server FIRST to get the port for redirect_uri
     let server = OAuthCallbackServer::with_available_port()
         .context("Failed to create callback server")?;
 
-    let port = server.port();
-    tracing::info!("OAuth callback server listening on port {}", port);
+    // Generate CSRF state for security
+    let csrf_state = Uuid::new_v4().to_string();
 
-    // Start the server
-    server.start().await
+    // Build the redirect_uri and inject it into the auth URL
+    let redirect_uri = server.redirect_uri();
+    let auth_url = format!(
+        "{}&redirect_uri={}&state={}",
+        auth_url_base,
+        urlencoding::encode(&redirect_uri),
+        urlencoding::encode(&csrf_state),
+    );
+
+    let port = server.port();
+    tracing::info!("OAuth callback server listening on port {} with CSRF state", port);
+
+    // Open browser with the auth URL that includes the correct redirect_uri and state
+    open_browser(&auth_url).map_err(|e| anyhow::anyhow!("Failed to open browser: {}", e))?;
+
+    // Start the server with CSRF validation
+    server.start_with_csrf(Some(csrf_state)).await
 }

@@ -56,15 +56,16 @@ pub fn should_stop_after_turn(
     _assistant_message: &oxi_ai::AssistantMessage,
     max_iterations: usize,
     external_stop: &Arc<AtomicBool>,
+    turn_number: usize,
 ) -> bool {
     // External stop (Ctrl+C)
     if external_stop.load(Ordering::SeqCst) {
         return true;
     }
 
-    // Max iterations guard
-    let current_iteration = _messages.iter().filter(|m| matches!(m, oxi_ai::Message::Assistant(_))).count();
-    if current_iteration >= max_iterations {
+    // Max iterations guard — uses caller-provided turn_number
+    // instead of re-counting messages each time (O(n) → O(1)).
+    if turn_number >= max_iterations {
         return true;
     }
 

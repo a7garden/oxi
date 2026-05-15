@@ -31,9 +31,10 @@ pub(crate) async fn stream_assistant_response(
         context.add_message(msg.clone());
     }
 
+    // Cache tool definitions serialization once to avoid repeated serde work.
     let tool_defs = loop_ref.tools.definitions();
     if !tool_defs.is_empty() {
-        let mut oxi_tools = Vec::new();
+        let mut oxi_tools = Vec::with_capacity(tool_defs.len());
         for def in &tool_defs {
             let schema = serde_json::to_value(&def.input_schema).unwrap_or_else(|_| {
                 serde_json::json!({"type": "object", "properties": {}})
@@ -80,8 +81,9 @@ pub(crate) async fn stream_assistant_response(
                         *m = partial;
                     }
                 }
+                let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageUpdate {
-                    message: messages.last().expect("non-empty").clone(),
+                    message: last_msg,
                     delta: Some(delta),
                 });
             }
@@ -104,8 +106,9 @@ pub(crate) async fn stream_assistant_response(
                         *m = partial;
                     }
                 }
+                let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageUpdate {
-                    message: messages.last().expect("non-empty").clone(),
+                    message: last_msg,
                     delta: Some(delta),
                 });
             }
@@ -138,8 +141,9 @@ pub(crate) async fn stream_assistant_response(
                     // CRITICAL: emit MessageUpdate so the TUI sees the ToolCall block.
                     // Without this, tool calls are never rendered (matching pi's behavior
                     // where toolcall_end emits message_update).
+                    let last_msg = messages.last().expect("non-empty").clone();
                     emit(super::AgentEvent::MessageUpdate {
-                        message: messages.last().expect("non-empty").clone(),
+                        message: last_msg,
                         delta: None,
                     });
                 }
@@ -190,11 +194,12 @@ pub(crate) async fn stream_assistant_response(
                 } else {
                     messages.push(Message::Assistant(message.clone()));
                 }
+                let last_msg = messages.last().expect("non-empty").clone();
                 emit(super::AgentEvent::MessageEnd {
-                    message: messages.last().expect("non-empty").clone(),
+                    message: last_msg.clone(),
                 });
                 // Return the message we actually stored (with tool calls preserved)
-                if let Message::Assistant(m) = messages.last().expect("non-empty") {
+                if let Message::Assistant(m) = &last_msg {
                     return Ok(m.clone());
                 } else {
                     return Ok(message);

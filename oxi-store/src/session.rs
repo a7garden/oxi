@@ -13,6 +13,19 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
+// ============================================================================
+// Atomic Write Helper
+// ============================================================================
+
+/// Atomically write content to a file by first writing to a temp file,
+/// then renaming it. This avoids corruption if the process crashes mid-write.
+fn atomic_write(path: &Path, content: &str) -> Result<(), std::io::Error> {
+    let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+    std::fs::write(&tmp_path, content)?;
+    std::fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
 /// Type alias for entry IDs (for backward compatibility)
 pub type EntryId = Uuid;
 
@@ -1119,7 +1132,7 @@ impl SessionManager {
             .join("\n")
             + "\n";
 
-        if let Err(e) = fs::write(file, content) {
+        if let Err(e) = atomic_write(Path::new(file), &content) {
             tracing::warn!("Failed to rewrite session file {}: {}", file, e);
         }
     }
