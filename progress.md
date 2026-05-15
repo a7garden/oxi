@@ -1,19 +1,23 @@
-# Progress: Bash Security Fixes
+# Progress: Streaming & Tool Exec Performance Fixes
 
 ## Status: ✅ COMPLETE
 
-### Task
-Fix CRITICAL security issues in the Bash tool at `oxi-agent/src/tools/bash.rs`.
+## Changes Made
+- [x] streaming.rs: Clone-once for `messages.last()` in TextDelta, ThinkingDelta, ToolCallEnd, Done handlers
+- [x] streaming.rs: Pre-sized tool definitions vector with `Vec::with_capacity`
+- [x] streaming.rs: Reduced double-clone in Done handler
+- [x] tool_exec.rs: Clone tool_call fields once upfront in sequential & parallel paths
+- [x] tool_exec.rs: Single clone pattern for ToolResultMessage emit (MessageStart + MessageEnd)
+- [x] tool_exec.rs: Replaced `"error".to_string()` / `"success".to_string()` with `String::from()`
+- [x] helpers.rs: `should_stop_after_turn` takes `turn_number` param instead of counting messages
+- [x] mod.rs: Updated call site to pass `turn_number as usize`
 
-### Completed Changes
-1. ✅ **Blocked environment variables** — `BLOCKED_ENV_VARS` const with 19 dangerous env vars, filtered with case-insensitive matching
-2. ✅ **Dangerous command patterns** — `is_dangerous_command()` function detecting 7 categories of dangerous patterns (warning only, no blocking)
-3. ✅ **Process group kill** — `libc::kill(-(pid as i32), SIGKILL)` on timeout and abort for both branches
-4. ✅ **Working directory validation** — `validate_cwd()` with symlink escape detection via canonicalize
+## Files Modified
+- `oxi-agent/src/agent_loop/streaming.rs`
+- `oxi-agent/src/agent_loop/tool_exec.rs`
+- `oxi-agent/src/agent_loop/helpers.rs`
+- `oxi-agent/src/agent_loop/mod.rs`
 
-### Build Status
-- bash.rs compiles with 0 errors
-- Pre-existing errors in other files (tool_exec.rs, mod.rs, edit.rs, ls.rs, read.rs) are unrelated
-
-### Output
-- Findings: `/Volumes/MERCURY/PROJECTS/oxi/fix_bash_security.md`
+## Compilation
+- All changed files compile cleanly (zero errors).
+- Pre-existing errors in unrelated files (bash.rs, openai.rs, etc.) are unchanged.

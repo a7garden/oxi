@@ -80,15 +80,14 @@ impl WriteTool {
         let existed = file_path.exists();
 
         // Perform the write through the mutation queue for serialized access
-        let path_buf = file_path.to_path_buf();
         let content_owned = content.to_string();
         let result = global_mutation_queue()
-            .with_queue(&path_buf, || async {
+            .with_queue(&file_path, || async {
                 if append {
                     let mut file = tokio::fs::OpenOptions::new()
                         .create(true)
                         .append(true)
-                        .open(&path_buf)
+                        .open(&file_path)
                         .await
                         .map_err(|e| format!("Cannot open file for append: {}", e))?;
                     use tokio::io::AsyncWriteExt;
@@ -99,7 +98,7 @@ impl WriteTool {
                         .await
                         .map_err(|e| format!("Cannot flush file: {}", e))?;
                 } else {
-                    fs::write(&path_buf, &content_owned)
+                    fs::write(&file_path, &content_owned)
                         .await
                         .map_err(|e| format!("Cannot write file: {}", e))?;
                 }

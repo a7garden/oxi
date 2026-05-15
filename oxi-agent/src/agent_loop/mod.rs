@@ -478,7 +478,7 @@ impl AgentLoop {
                     tool_results: tool_results.clone(),
                 });
 
-                if should_stop_after_turn(&messages, &assistant_message, self.config.max_iterations, &self.external_stop, turn_number) {
+                if should_stop_after_turn(&messages, &assistant_message, self.config.max_iterations, &self.external_stop, turn_number as usize) {
                     tracing::info!("[AGENT-LOOP] should_stop_after_turn=true, ending loop");
                     return Ok((messages, events));
                 }
