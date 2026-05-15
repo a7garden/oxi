@@ -330,7 +330,7 @@ impl App {
         } else {
             oxi_ai::CompactionStrategy::Disabled
         };
-        let auth = AuthStorage::shared();
+        let auth = oxi_store::auth_storage::shared_auth_storage();
         let api_key = auth.get_api_key(&provider_name);
 
         let config = AgentConfig {
