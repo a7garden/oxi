@@ -5,6 +5,7 @@
 
 /// Reason why compaction was triggered
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum CompactionReason {
     /// User manually requested compaction
     Manual,
@@ -26,6 +27,7 @@ pub enum CompactionReason {
 pub struct CompactionConfig {
     /// Whether auto-compaction is enabled
     pub enabled: bool,
+    #[allow(dead_code)]
     /// Token usage ratio threshold (0.0–1.0) that triggers compaction
     pub threshold: f32,
 }

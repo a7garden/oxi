@@ -110,6 +110,7 @@ impl ContextFileType {
 
 /// Source of a loaded resource
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
 pub enum SourceType {
     /// Default system location (~/.oxi or ~/.config/oxi)
     Default,
@@ -140,6 +141,7 @@ impl std::fmt::Display for SourceType {
 
 /// A source directory for resources
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Source {
     /// Path to the source directory
     pub path: PathBuf,
@@ -151,6 +153,7 @@ pub struct Source {
 
 impl Source {
     /// Create a new source
+    #[allow(dead_code)]
     pub fn new(path: PathBuf, source_type: SourceType) -> Self {
         Self {
             path,
@@ -160,11 +163,13 @@ impl Source {
     }
 
     /// Check if path exists
+    #[allow(dead_code)]
     pub fn exists(&self) -> bool {
         self.path.exists()
     }
 
     /// Check if path is a directory
+    #[allow(dead_code)]
     pub fn is_dir(&self) -> bool {
         self.path.is_dir()
     }
@@ -176,6 +181,7 @@ impl Source {
 
 /// Information about where a resource was loaded from
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[allow(dead_code)]
 pub struct SourceInfo {
     /// Path to the resource
     pub path: PathBuf,
@@ -196,12 +202,16 @@ pub struct SourceInfo {
 
 /// Source for extension loading
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ExtensionSource {
     /// Path to the extension
+    #[allow(dead_code)]
     pub path: PathBuf,
     /// Metadata about the extension source
+    #[allow(dead_code)]
     pub metadata: PathMetadata,
     /// Source info for tracking
+    #[allow(dead_code)]
     pub source_info: Option<SourceInfo>,
 }
 
@@ -261,6 +271,7 @@ pub struct SkillSource {
     /// Path to the skill
     pub path: PathBuf,
     /// Metadata
+    #[allow(dead_code)]
     pub metadata: PathMetadata,
     /// Whether enabled
     pub enabled: bool,
@@ -272,6 +283,7 @@ pub struct ThemeSource {
     /// Path to the theme
     pub path: PathBuf,
     /// Metadata
+    #[allow(dead_code)]
     pub metadata: PathMetadata,
     /// Whether enabled
     pub enabled: bool,
@@ -283,6 +295,7 @@ pub struct PromptSource {
     /// Path to the prompt
     pub path: PathBuf,
     /// Metadata
+    #[allow(dead_code)]
     pub metadata: PathMetadata,
     /// Whether enabled
     pub enabled: bool,
@@ -1247,6 +1260,7 @@ pub fn skills_dir(base: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// Get the extensions directory
+#[allow(dead_code)]
 pub fn extensions_dir(base: &std::path::Path) -> std::path::PathBuf {
     base.join("extensions")
 }
@@ -1292,6 +1306,7 @@ pub fn load_prompt(path: &std::path::Path) -> Result<Prompt, String> {
 }
 
 /// Load all resources from default locations
+#[allow(dead_code)]
 pub fn load_all_resources(base_dir: &std::path::Path) -> LoadAllResourcesResult {
     super::resource_loader_compat::load_all_resources_impl(base_dir)
 }

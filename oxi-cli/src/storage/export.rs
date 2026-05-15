@@ -414,6 +414,7 @@ pub fn ansi_to_html(text: &str) -> String {
 
 /// Convert an array of ANSI-escaped lines to HTML.
 /// Each line is wrapped in a `<div class="ansi-line">` element.
+#[allow(dead_code)]
 pub fn ansi_lines_to_html(lines: &[&str]) -> String {
     lines
         .iter()
@@ -783,6 +784,7 @@ fn render_search_tool(query: &str, results: &[String]) -> String {
 ///
 /// `tree` is optional – when provided, a sidebar with session-tree navigation
 /// is included.
+#[allow(dead_code)]
 pub fn export_html(
     entries: &[SessionEntry],
     meta: &ExportMeta,

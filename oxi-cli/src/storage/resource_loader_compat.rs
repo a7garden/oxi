@@ -22,6 +22,7 @@ pub enum ResourceType {
 
 /// A loaded resource
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct Resource {
     /// Resource ID
     pub id: String,
@@ -79,6 +80,7 @@ pub enum DiagnosticSeverity {
 
 /// Resource path configuration
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ResourcePaths {
     /// Base directory for resources
     pub base_dir: PathBuf,
@@ -98,33 +100,6 @@ impl Default for ResourcePaths {
             include_defaults: true,
         }
     }
-}
-
-/// Resolve the default resource directory
-pub fn default_resource_dir() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("oxi")
-}
-
-/// Get the skills directory
-pub fn skills_dir(base: &Path) -> PathBuf {
-    base.join("skills")
-}
-
-/// Get the extensions directory
-pub fn extensions_dir(base: &Path) -> PathBuf {
-    base.join("extensions")
-}
-
-/// Get the themes directory
-pub fn themes_dir(base: &Path) -> PathBuf {
-    base.join("themes")
-}
-
-/// Get the prompts directory
-pub fn prompts_dir(base: &Path) -> PathBuf {
-    base.join("prompts")
 }
 
 /// Load skills from a directory (impl version)
@@ -404,19 +379,8 @@ fn extract_yaml_field(content: &str, field: &str) -> Option<String> {
     None
 }
 
-/// Resolve a path with ~ expansion
-pub fn resolve_path_impl(path: &Path) -> PathBuf {
-    let path_str = path.to_string_lossy();
-    if path_str.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            // SAFE: strip_prefix guaranteed to return Some because we checked starts_with("~/") above
-            return home.join(path_str.strip_prefix("~/").unwrap());
-        }
-    }
-    path.to_path_buf()
-}
-
 /// Watch a directory for changes
+#[allow(dead_code)]
 pub struct ResourceWatcher {
     paths: Vec<PathBuf>,
     callbacks: HashMap<PathBuf, Vec<Box<dyn Fn(ResourceChange) + Send + Sync>>>,
@@ -424,6 +388,7 @@ pub struct ResourceWatcher {
 
 impl ResourceWatcher {
 /// TODO.
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
             paths: Vec::new(),
@@ -432,12 +397,14 @@ impl ResourceWatcher {
     }
 
 /// TODO: document this function.
+    #[allow(dead_code)]
     pub fn add_path(&mut self, path: PathBuf) {
         self.paths.push(path.clone());
         self.callbacks.entry(path).or_insert_with(Vec::new);
     }
 
 /// TODO: document this function.
+    #[allow(dead_code)]
     pub fn on_change<F>(&mut self, path: &Path, callback: F)
     where
         F: Fn(ResourceChange) + Send + Sync + 'static,
@@ -450,6 +417,7 @@ impl ResourceWatcher {
     }
 
 /// TODO: document this function.
+    #[allow(dead_code)]
     pub fn check_changes(&mut self) {
         for path in &self.paths {
             if let Ok(metadata) = fs::metadata(path) {
@@ -477,6 +445,7 @@ impl Default for ResourceWatcher {
 
 /// A resource change event
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ResourceChange {
 /// pub.
     pub path: PathBuf,
@@ -486,6 +455,7 @@ pub struct ResourceChange {
 
 /// Change kind
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum ChangeKind {
 /// created variant.
     Created,
@@ -496,21 +466,22 @@ pub enum ChangeKind {
 }
 
 /// Load all resources from default locations
+#[allow(dead_code)]
 pub fn load_all_resources_impl(base_dir: &Path) -> LoadAllResourcesResult {
     let mut errors = Vec::new();
     let mut diagnostics = Vec::new();
 
-    let skills_base = skills_dir(base_dir);
+    let skills_base = base_dir.join("skills");
     let skills_result = load_skills_from_dir_impl(&skills_base);
     errors.extend(skills_result.errors);
     diagnostics.extend(skills_result.diagnostics);
 
-    let themes_base = themes_dir(base_dir);
+    let themes_base = base_dir.join("themes");
     let themes_result = load_themes_from_dir_impl(&themes_base);
     errors.extend(themes_result.errors);
     diagnostics.extend(themes_result.diagnostics);
 
-    let prompts_base = prompts_dir(base_dir);
+    let prompts_base = base_dir.join("prompts");
     let prompts_result = load_prompts_from_dir_impl(&prompts_base);
     errors.extend(prompts_result.errors);
     diagnostics.extend(prompts_result.diagnostics);
@@ -525,6 +496,7 @@ pub fn load_all_resources_impl(base_dir: &Path) -> LoadAllResourcesResult {
 }
 
 /// Result of loading all resources
+#[allow(dead_code)]
 pub struct LoadAllResourcesResult {
 /// pub.
     pub skills: Vec<Skill>,

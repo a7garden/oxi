@@ -201,6 +201,7 @@ pub fn copy_to_clipboard(text: &str) -> Result<()> {
 }
 
 /// Check if clipboard operations are likely to work on this platform
+#[allow(dead_code)]
 pub fn is_clipboard_supported() -> bool {
     if is_termux() {
         return std::process::Command::new("termux-clipboard-set")

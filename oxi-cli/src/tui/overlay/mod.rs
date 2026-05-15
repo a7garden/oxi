@@ -18,6 +18,7 @@ pub use factories::{logout_select, model_select, resume_select};
 
 /// Actions an overlay can request after handling a key event.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum OverlayAction {
     /// No action needed.
     None,

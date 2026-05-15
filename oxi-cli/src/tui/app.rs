@@ -139,10 +139,14 @@ pub(crate) enum UiEvent {
     AgentEnd,
 
     // ── Turn lifecycle (pi-mono: turn_start / turn_end) ────────────
+    #[allow(dead_code)]
     TurnStart {
+        #[allow(dead_code)]
         turn_number: u32,
     },
+    #[allow(dead_code)]
     TurnEnd {
+        #[allow(dead_code)]
         turn_number: u32,
     },
 
@@ -237,6 +241,7 @@ pub(crate) enum SetupStep {
     EnterApiKey {
         provider: String,
         key: String,
+        #[allow(dead_code)]
         masked_cursor: usize,
     },
     /// Select a model from the provider's available models
@@ -400,15 +405,7 @@ impl AppState {
         self.slash_completion_active = !self.slash_completions.is_empty();
     }
 
-    pub fn accept_slash_completion(&mut self) -> bool {
-        if !self.slash_completion_active || self.slash_completions.is_empty() {
-            return false;
-        }
-        let completion = &self.slash_completions[self.slash_completion_index];
-        self.input_set_text(completion.name.clone());
-        self.clear_slash_completions();
-        true
-    }
+    
 
     /// Get the currently selected slash command (for direct execution).
     pub fn selected_slash_command(&self) -> Option<&slash::SlashCompletion> {
@@ -462,9 +459,8 @@ impl AppState {
         self.snapshot_thinking_rendered = 0;
     }
 
-    pub fn stream_text_delta(&mut self, delta: &str) {
-        self.chat.stream_text_delta(delta);
-    }
+    #[allow(dead_code)]
+    pub fn stream_text_delta(&mut self, _delta: &str) {}
 
     /// Update the streaming message from a full MessageUpdate snapshot.
     ///

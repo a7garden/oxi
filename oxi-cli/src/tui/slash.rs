@@ -524,7 +524,6 @@ pub(crate) fn handle_slash_command(
                             Some(ScopedModel {
                                 provider: parts[0].to_string(),
                                 model_id: parts[1..].join("/"),
-                                thinking_level: None,
                             })
                         } else {
                             None
@@ -676,6 +675,7 @@ fn try_provider_with_key(provider: &str, key: &str, state: &mut AppState) -> boo
 }
 
 /// API key masking (first 6 chars + ... + last 4 chars)
+#[allow(dead_code)]
 fn mask_key(key: &str) -> String {
     if key.len() <= 12 {
         return "***".to_string();

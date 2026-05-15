@@ -446,7 +446,7 @@ pub async fn handle_session_event(
             let pending = steering.len() + follow_up.len();
             let _ = ui_tx.send(UiEvent::QueueUpdate { pending });
         }
-        SessionEvent::SessionInfoChanged { name: _ } => {}
+        SessionEvent::SessionInfoChanged => {}
         SessionEvent::Agent(agent_event) => match &agent_event {
             AgentEvent::Fallback { to_model, .. } => {
                 let _ = ui_tx

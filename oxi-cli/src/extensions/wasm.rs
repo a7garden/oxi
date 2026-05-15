@@ -30,6 +30,7 @@ pub struct ExtensionInfo {
     /// Permissions requested by the extension.
     /// Supported: "fs_read", "fs_write", "exec", "env", "network"
     #[serde(default)]
+    #[allow(dead_code)]
     pub permissions: Vec<String>,
 }
 
@@ -594,6 +595,7 @@ thread_local! {
 }
 
 /// Run a closure with the current extension name set in thread-local storage.
+#[allow(dead_code)]
 fn with_extension_context<F, R>(ext_name: &str, f: F) -> R
 where
     F: FnOnce() -> R,
@@ -762,6 +764,7 @@ pub struct WasmExtensionManager {
     /// HTTP client shared by all extensions for oxi_http_request.
     http_client: Arc<reqwest::blocking::Client>,
     /// Permissions granted to each extension (ext_name → set of permission strings).
+    #[allow(dead_code, unused)]
     permissions: HashMap<String, std::collections::HashSet<String>>,
 }
 

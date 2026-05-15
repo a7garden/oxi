@@ -52,14 +52,15 @@ use std::sync::Arc;
 /// whether errors should abort startup.
 #[derive(Debug, Clone)]
 pub struct AgentSessionRuntimeDiagnostic {
-/// pub.
+    #[allow(dead_code)]
     pub severity: DiagnosticSeverity,
-/// pub.
+    #[allow(dead_code)]
     pub message: String,
 }
 
 /// Severity level for diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum DiagnosticSeverity {
 /// info variant.
     Info,
@@ -91,16 +92,20 @@ pub struct AgentSessionServices {
     /// Current working directory (may change on session switch).
     pub cwd: PathBuf,
     /// Agent data directory (typically `~/.oxi`).
+    #[allow(dead_code)]
     pub agent_dir: PathBuf,
     /// Auth storage for API keys / OAuth tokens.
     pub auth_storage: Arc<AuthStorage>,
     /// Settings (layered configuration).
     pub settings: Arc<Settings>,
     /// Model registry (built-in + custom models).
+    #[allow(dead_code)]
     pub model_registry: Arc<ModelRegistry>,
     /// Resource loader (skills, extensions, themes, context files).
+    #[allow(dead_code)]
     pub resource_loader: Arc<ResourceLoader>,
     /// Diagnostics collected during service creation.
+    #[allow(dead_code)]
     pub diagnostics: Vec<AgentSessionRuntimeDiagnostic>,
 }
 
@@ -348,28 +353,24 @@ pub fn create_agent_session_from_services(
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Result returned by runtime creation.
+#[allow(dead_code)]
 pub struct CreateAgentSessionRuntimeResult {
-/// pub.
     pub session: AgentSession,
-/// pub.
     pub services: Arc<AgentSessionServices>,
-/// pub.
     pub diagnostics: Vec<AgentSessionRuntimeDiagnostic>,
-/// pub.
     pub model_fallback_message: Option<String>,
 }
 
 /// Factory closure type that creates a runtime for a given cwd + session manager.
+#[allow(dead_code)]
 pub type CreateRuntimeFactory =
     dyn Fn(CreateRuntimeOptions) -> Result<CreateAgentSessionRuntimeResult> + Send + Sync;
 
 /// Options passed to the runtime factory.
+#[allow(dead_code)]
 pub struct CreateRuntimeOptions {
-/// pub.
     pub cwd: PathBuf,
-/// pub.
     pub agent_dir: PathBuf,
-/// pub.
     pub session_manager: SessionManager,
 }
 
@@ -379,6 +380,7 @@ pub struct CreateRuntimeOptions {
 
 /// Why a session was replaced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum SessionSwitchReason {
     /// Fresh session created via /new.
     New,
@@ -398,8 +400,8 @@ pub enum SessionSwitchReason {
 
 /// Error when `/import` references a JSONL file that does not exist.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct SessionImportFileNotFoundError {
-/// pub.
     pub file_path: PathBuf,
 }
 
@@ -420,6 +422,7 @@ impl std::error::Error for SessionImportFileNotFoundError {}
 /// Session replacement methods tear down the current runtime first, then
 /// create and apply the next runtime. If creation fails, the error is
 /// propagated to the caller.
+#[allow(dead_code)]
 pub struct AgentSessionRuntime {
     session: AgentSessionHandle,
     services: Arc<AgentSessionServices>,
@@ -428,6 +431,7 @@ pub struct AgentSessionRuntime {
     create_runtime: Arc<CreateRuntimeFactory>,
 }
 
+#[allow(dead_code)]
 impl AgentSessionRuntime {
     /// Create a new runtime wrapper.
     ///
@@ -648,6 +652,7 @@ impl AgentSessionRuntime {
 
 /// Where to fork relative to a session entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ForkPosition {
     /// Fork at the specified entry (includes it).
     At,
@@ -685,6 +690,7 @@ impl SessionCwdSource for SessionManagerCwdAdapter<'_> {
 ///
 /// The same factory is stored on the returned `AgentSessionRuntime` and reused
 /// for later `/new`, `/resume`, `/fork`, and import flows.
+#[allow(dead_code)]
 pub fn create_agent_session_runtime(
     create_runtime: Arc<CreateRuntimeFactory>,
     options: CreateRuntimeOptions,
@@ -801,6 +807,7 @@ fn get_default_session_dir() -> String {
 ///
 /// This is the main entry point for callers that don't need custom
 /// service injection.
+#[allow(dead_code)]
 pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
     Arc::new(|options: CreateRuntimeOptions| {
         // Create services for the target cwd

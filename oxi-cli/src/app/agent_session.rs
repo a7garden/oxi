@@ -39,7 +39,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-use uuid::Uuid;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Session-level events (extends AgentEvent with session concerns)
@@ -48,6 +47,7 @@ use uuid::Uuid;
 /// Events emitted by [`AgentSession`] in addition to the underlying
 /// [`AgentEvent`]s.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum SessionEvent {
     /// A steering or follow-up queue changed.
     QueueUpdate {
@@ -65,40 +65,25 @@ pub enum SessionEvent {
     CompactionEnd {
         /// Why compaction was triggered.
         reason: CompactionReason,
-        /// Compaction result if successful.
-        result: Option<CompactionResult>,
-        /// Whether compaction was aborted.
-        aborted: bool,
-        /// Whether compaction will be retried.
-        will_retry: bool,
         /// Error message if compaction failed.
         error_message: Option<String>,
     },
     /// Session display name changed.
-    SessionInfoChanged {
-        /// New session name.
-        name: Option<String>,
-    },
+    SessionInfoChanged,
+    /// Passthrough agent event.
+    Agent(AgentEvent),
     /// Thinking level changed.
     ThinkingLevelChanged {
         /// New thinking level.
         level: ThinkingLevel,
     },
-    /// Passthrough agent event.
-    Agent(AgentEvent),
 }
 
 /// Result of a compaction operation.
 #[derive(Debug, Clone)]
 pub struct CompactionResult {
-    /// Compaction summary text.
-    pub summary: String,
-    /// ID of the first entry kept after compaction.
-    pub first_kept_entry_id: Option<Uuid>,
     /// Token count before compaction.
     pub tokens_before: usize,
-    /// Additional compaction details.
-    pub details: Option<serde_json::Value>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -112,21 +97,6 @@ pub struct ScopedModel {
     pub provider: String,
     /// Model identifier.
     pub model_id: String,
-    /// Optional thinking level override.
-    pub thinking_level: Option<ThinkingLevel>,
-}
-
-/// Result from [`AgentSession::cycle_model`].
-#[derive(Debug, Clone)]
-pub struct ModelCycleResult {
-    /// Provider name.
-    pub provider: String,
-    /// Model identifier.
-    pub model_id: String,
-    /// Current thinking level.
-    pub thinking_level: ThinkingLevel,
-    /// Whether the model is scoped (Ctrl+P).
-    pub is_scoped: bool,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -135,6 +105,7 @@ pub struct ModelCycleResult {
 
 /// Options for [`AgentSession::prompt`].
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PromptOptions {
     /// Whether to expand file-based prompt templates (default: true).
     pub expand_templates: bool,
@@ -159,6 +130,7 @@ impl Default for PromptOptions {
 
 /// How to queue a message when the agent is already streaming.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum StreamingBehavior {
     /// Inject as a steering message.
     Steer,
@@ -168,6 +140,7 @@ pub enum StreamingBehavior {
 
 /// Source of user input (for extension hooks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum InputSource {
     /// User typed at the interactive prompt.
     Interactive,
@@ -202,21 +175,6 @@ pub struct SessionStats {
     pub tool_results: usize,
     /// Total number of messages.
     pub total_messages: usize,
-    /// Token usage statistics.
-    pub tokens: TokenStats,
-    /// Estimated cost in USD.
-    pub cost: f64,
-}
-
-/// Token usage statistics.
-#[derive(Debug, Clone, Default)]
-pub struct TokenStats {
-    /// Input token count.
-    pub input: usize,
-    /// Output token count.
-    pub output: usize,
-    /// Total token count.
-    pub total: usize,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -269,6 +227,7 @@ pub struct AgentSession {
     extension_runner: Arc<RwLock<Option<ExtensionRunner>>>,
 }
 
+#[allow(dead_code)]
 impl AgentSession {
     /// Create a new session wrapping the given [`Agent`].
     pub fn new(
@@ -315,6 +274,7 @@ impl AgentSession {
     }
 
     /// Get the current agent state.
+    #[allow(dead_code)]
     pub fn state(&self) -> AgentState {
         self.agent.state()
     }
@@ -325,11 +285,13 @@ impl AgentSession {
     }
 
     /// Whether the agent is currently streaming.
+    #[allow(dead_code)]
     pub fn is_streaming(&self) -> bool {
         self.streaming.load(Ordering::SeqCst)
     }
 
     /// All messages in the agent state.
+    #[allow(dead_code)]
     pub fn messages(&self) -> Vec<Message> {
         self.agent.state().messages
     }
@@ -340,6 +302,7 @@ impl AgentSession {
     }
 
     /// Whether compaction is in progress.
+    #[allow(dead_code)]
     pub fn is_compacting(&self) -> bool {
         // try_lock() succeeds only when no one holds the tokio Mutex.
         // If compaction is running, the handle is Some AND the mutex is
@@ -356,6 +319,7 @@ impl AgentSession {
     /// Delegates to the agent loop's retry configuration.
     /// Auto-retry is now handled entirely by the agent loop
     /// (`oxi_agent::AgentLoopConfig::auto_retry_enabled`).
+    #[allow(dead_code)]
     pub fn auto_retry_enabled(&self) -> bool {
         // Agent loop defaults to enabled; we reflect that here.
         true
@@ -368,8 +332,6 @@ impl AgentSession {
         let mut assistant_messages = 0usize;
         let mut tool_results = 0usize;
         let mut tool_calls = 0usize;
-        let input_tokens = 0usize;
-        let output_tokens = 0usize;
 
         for msg in &state.messages {
             match msg {
@@ -395,16 +357,11 @@ impl AgentSession {
             tool_calls,
             tool_results,
             total_messages: state.messages.len(),
-            tokens: TokenStats {
-                input: input_tokens,
-                output: output_tokens,
-                total: input_tokens + output_tokens,
-            },
-            cost: 0.0,
         }
     }
 
     /// Get the number of pending messages (steering + follow-up).
+    #[allow(dead_code)]
     pub fn pending_message_count(&self) -> usize {
         self.steering_messages.read().len() + self.follow_up_messages.read().len()
     }
@@ -430,6 +387,7 @@ impl AgentSession {
     }
 
     /// Current working directory.
+    #[allow(dead_code)]
     pub fn cwd(&self) -> &str {
         &self.cwd
     }
@@ -466,6 +424,7 @@ impl AgentSession {
     }
 
     /// Subscribe via an unbounded channel. Returns the receiver.
+    #[allow(dead_code)]
     pub fn subscribe_channel(&self) -> mpsc::UnboundedReceiver<SessionEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.subscribe(Box::new(move |event| {
@@ -503,6 +462,7 @@ impl AgentSession {
     ///
     /// After the agent finishes, auto-compaction and auto-retry are
     /// checked automatically.
+    #[allow(dead_code)]
     pub async fn prompt(&self, text: String, options: PromptOptions) -> Result<()> {
         // When streaming, queue the message instead
         if self.is_streaming() {
@@ -562,6 +522,7 @@ impl AgentSession {
     /// because `parking_lot::RwLockReadGuard` is intentionally `!Send`
     /// (contains `GuardNoSend`). We use `spawn_blocking` + `LocalSet` to
     /// run it on a dedicated thread.
+    #[allow(dead_code)]
     pub fn prompt_streaming(
         &self,
         text: String,
@@ -640,6 +601,7 @@ impl AgentSession {
     }
 
     /// Queue a follow-up message (processed after agent finishes).
+    #[allow(dead_code)]
     pub async fn follow_up(&self, text: String) -> Result<()> {
         {
             let mut queue = self.follow_up_messages.write();
@@ -711,101 +673,6 @@ impl AgentSession {
         Ok(())
     }
 
-    /// Cycle to the next/previous model.
-    ///
-    /// Uses scoped models (from `--models` flag) if available,
-    /// otherwise cycles through well-known defaults.
-    pub fn cycle_model(&self, direction: CycleDirection) -> Option<ModelCycleResult> {
-        let scoped = self.scoped_models.read().clone();
-
-        if !scoped.is_empty() {
-            return self.cycle_scoped_model(&scoped, direction);
-        }
-
-        // Fall back to a hardcoded list of popular models
-        let defaults = default_model_list();
-        if defaults.len() <= 1 {
-            return None;
-        }
-        self.cycle_default_model(&defaults, direction, false)
-    }
-
-    fn cycle_scoped_model(
-        &self,
-        scoped: &[ScopedModel],
-        direction: CycleDirection,
-    ) -> Option<ModelCycleResult> {
-        if scoped.len() <= 1 {
-            return None;
-        }
-
-        let current_id = self.model_id();
-        let current_index = scoped
-            .iter()
-            .position(|m| format!("{}/{}", m.provider, m.model_id) == current_id)
-            .unwrap_or(0);
-
-        let len = scoped.len();
-        let next_index = match direction {
-            CycleDirection::Forward => (current_index + 1) % len,
-            CycleDirection::Backward => (current_index + len - 1) % len,
-        };
-
-        let next = &scoped[next_index];
-        let new_id = format!("{}/{}", next.provider, next.model_id);
-
-        if let Err(e) = self.set_model(&new_id) {
-            tracing::warn!("Failed to switch to scoped model {}: {}", new_id, e);
-            return None;
-        }
-
-        // Apply thinking level
-        if let Some(level) = next.thinking_level {
-            self.set_thinking_level(level);
-        }
-
-        Some(ModelCycleResult {
-            provider: next.provider.clone(),
-            model_id: next.model_id.clone(),
-            thinking_level: self.thinking_level(),
-            is_scoped: true,
-        })
-    }
-
-    fn cycle_default_model(
-        &self,
-        models: &[(&str, &str)],
-        direction: CycleDirection,
-        _is_scoped: bool,
-    ) -> Option<ModelCycleResult> {
-        let current_id = self.model_id();
-        let current_index = models
-            .iter()
-            .position(|(p, m)| format!("{}/{}", p, m) == current_id)
-            .unwrap_or(0);
-
-        let len = models.len();
-        let next_index = match direction {
-            CycleDirection::Forward => (current_index + 1) % len,
-            CycleDirection::Backward => (current_index + len - 1) % len,
-        };
-
-        let (provider, model) = models[next_index];
-        let new_id = format!("{}/{}", provider, model);
-
-        if let Err(e) = self.set_model(&new_id) {
-            tracing::warn!("Failed to switch to model {}: {}", new_id, e);
-            return None;
-        }
-
-        Some(ModelCycleResult {
-            provider: provider.to_string(),
-            model_id: model.to_string(),
-            thinking_level: self.thinking_level(),
-            is_scoped: false,
-        })
-    }
-
     /// Set scoped models for cycling.
     pub fn set_scoped_models(&self, models: Vec<ScopedModel>) {
         *self.scoped_models.write() = models;
@@ -867,18 +734,12 @@ impl AgentSession {
         let result = self.run_compaction(custom_instructions).await;
 
         match &result {
-            Ok(r) => self.emit(SessionEvent::CompactionEnd {
+            Ok(_r) => self.emit(SessionEvent::CompactionEnd {
                 reason: CompactionReason::Manual,
-                result: Some(r.clone()),
-                aborted: false,
-                will_retry: false,
                 error_message: None,
             }),
             Err(e) => self.emit(SessionEvent::CompactionEnd {
                 reason: CompactionReason::Manual,
-                result: None,
-                aborted: false,
-                will_retry: false,
                 error_message: Some(e.to_string()),
             }),
         }
@@ -887,6 +748,7 @@ impl AgentSession {
     }
 
     /// Check auto-compaction after a response and trigger if needed.
+    #[allow(dead_code)]
     async fn check_auto_compaction(&self) {
         let config = self.compaction_config.read().clone();
         if !config.enabled {
@@ -924,20 +786,14 @@ impl AgentSession {
             let result = self.run_compaction(None).await;
 
             match result {
-                Ok(r) => self.emit(SessionEvent::CompactionEnd {
+                Ok(_r) => self.emit(SessionEvent::CompactionEnd {
                     reason: CompactionReason::Threshold,
-                    result: Some(r),
-                    aborted: false,
-                    will_retry: false,
                     error_message: None,
                 }),
                 Err(e) => {
                     tracing::warn!("Auto-compaction failed: {}", e);
                     self.emit(SessionEvent::CompactionEnd {
                         reason: CompactionReason::Threshold,
-                        result: None,
-                        aborted: false,
-                        will_retry: false,
                         error_message: Some(format!("Auto-compaction failed: {}", e)),
                     });
                 }
@@ -965,7 +821,6 @@ impl AgentSession {
         match compacted {
             Some(ctx) => {
                 let tokens_before = state.estimate_tokens();
-                let compacted_count = ctx.compacted_count;
 
                 // Replace messages in agent state
                 self.agent.state().replace_messages(ctx.kept_messages.clone());
@@ -974,13 +829,7 @@ impl AgentSession {
                 self.persist_session();
 
                 Ok(CompactionResult {
-                    summary: ctx.summary.clone(),
-                    first_kept_entry_id: None,
                     tokens_before,
-                    details: Some(serde_json::json!({
-                        "compacted_count": compacted_count,
-                        "summary_length": ctx.summary.len(),
-                    })),
                 })
             }
             None => {
@@ -990,6 +839,7 @@ impl AgentSession {
     }
 
     /// Abort in-progress compaction.
+    #[allow(dead_code)]
     pub async fn abort_compaction(&self) {
         let mut guard = self.compaction_abort.lock().await;
         if let Some(handle) = guard.take() {
@@ -998,6 +848,7 @@ impl AgentSession {
     }
 
     /// Enable or disable auto-compaction.
+    #[allow(dead_code)]
     pub fn set_auto_compaction_enabled(&self, enabled: bool) {
         self.compaction_config.write().enabled = enabled;
         self.settings.write().auto_compaction = enabled;
@@ -1184,9 +1035,7 @@ impl AgentSession {
     pub fn set_session_name(&self, name: String) {
         let mut sm = self.session_manager.write();
         sm.append_session_info(&name);
-        self.emit(SessionEvent::SessionInfoChanged {
-            name: Some(name),
-        });
+        self.emit(SessionEvent::SessionInfoChanged);
     }
 
     /// Reset the agent state for a new conversation.
@@ -1512,37 +1361,7 @@ impl std::ops::Deref for AgentSessionHandle {
 // ═══════════════════════════════════════════════════════════════════════════
 // Cycling direction
 // ═══════════════════════════════════════════════════════════════════════════
-
-/// Direction for model cycling.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CycleDirection {
-    /// Cycle to the next model.
-    Forward,
-    /// Cycle to the previous model.
-    Backward,
-}
-
-impl Default for CycleDirection {
-    fn default() -> Self {
-        Self::Forward
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
 // Helpers
-// ═══════════════════════════════════════════════════════════════════════════
-
-/// Default list of popular models for cycling when no scoped models are set.
-fn default_model_list() -> Vec<(&'static str, &'static str)> {
-    vec![
-        ("anthropic", "claude-sonnet-4-20250514"),
-        ("anthropic", "claude-haiku-4-20250414"),
-        ("openai", "gpt-4o"),
-        ("openai", "gpt-4o-mini"),
-        ("google", "gemini-2.0-flash"),
-    ]
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1636,14 +1455,9 @@ mod tests {
     }
 
     #[test]
-    fn test_session_creation_default_model_list() {
-        let models = default_model_list();
-        assert!(!models.is_empty());
-        assert!(
-            models
-                .iter()
-                .any(|(p, m)| *p == "anthropic" && *m == "claude-sonnet-4-20250514")
-        );
+    fn test_scoped_models_empty_by_default() {
+        let session = make_session();
+        assert!(session.scoped_models().is_empty());
     }
 
     // ══════════════════════════════════════════════════════════════════
