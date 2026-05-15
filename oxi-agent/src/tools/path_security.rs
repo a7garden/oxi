@@ -61,6 +61,29 @@ impl PathGuard {
             Ok(path.to_path_buf())
         }
     }
+
+    /// Check traversal only (no workspace boundary enforcement).
+    ///
+    /// Use this for tools that may legitimately access paths outside the
+    /// workspace root (e.g. reading system config, writing to temp dirs).
+    /// Blocks `..` components and canonicalizes existing paths but does
+    /// NOT reject absolute paths outside the workspace.
+    pub fn validate_traversal(&self, path: &Path) -> Result<PathBuf, PathSecurityError> {
+        // 1. 순회 방지
+        if path.components().any(|c| c.as_os_str() == "..") {
+            return Err(PathSecurityError::Traversal(path.to_path_buf()));
+        }
+
+        // 2. 존재하는 경로면 canonicalize로 실제 경로 얻기
+        if path.exists() {
+            let canonical = path
+                .canonicalize()
+                .map_err(|_| PathSecurityError::NotFound(path.to_path_buf()))?;
+            Ok(canonical)
+        } else {
+            Ok(path.to_path_buf())
+        }
+    }
 }
 
 #[cfg(test)]

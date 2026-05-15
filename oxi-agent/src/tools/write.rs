@@ -63,7 +63,7 @@ impl WriteTool {
     async fn write_file_impl(path: &str, content: &str, append: bool) -> Result<String, ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-        let file_path = guard.validate(Path::new(path))
+        let file_path = guard.validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
         // Ensure parent directory exists (create if missing)

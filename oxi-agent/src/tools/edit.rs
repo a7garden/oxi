@@ -92,8 +92,9 @@ impl EditTool {
     async fn apply_edits(input: &EditInput) -> Result<EditOutput, ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-        let path = guard.validate(Path::new(&input.path))
+        let validated_path = guard.validate_traversal(Path::new(&input.path))
             .map_err(|e| e.to_string())?;
+        let path = validated_path.as_path();
 
         // Validate edits
         if input.edits.is_empty() {
@@ -146,13 +147,12 @@ impl EditTool {
         }
 
         // Write through mutation queue (serializes per-file)
-        let path_buf = path.to_path_buf();
         let final_content_clone = final_content.clone();
         global_mutation_queue()
             .with_queue(path, || async {
-                fs::write(&path_buf, &final_content_clone)
+                fs::write(&validated_path, &final_content_clone)
                     .await
-                    .map_err(|e| format!("Cannot write file '{}': {}", path_buf.display(), e))
+                    .map_err(|e| format!("Cannot write file '{}': {}", validated_path.display(), e))
             })
             .await
             .map_err(|e: String| e)?;

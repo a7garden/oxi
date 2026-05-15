@@ -312,7 +312,7 @@ impl AgentTool for ReadTool {
 
         // Security: validate path with PathGuard
         let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-        let validated = guard.validate(Path::new(path_str))
+        let validated = guard.validate_traversal(Path::new(path_str))
             .map_err(|e| e.to_string())?;
         let path = validated.as_path();
 

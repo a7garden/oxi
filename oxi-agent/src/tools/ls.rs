@@ -57,7 +57,7 @@ impl LsTool {
     ) -> Result<String, ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-        let dir_path = guard.validate(Path::new(path))
+        let dir_path = guard.validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
         if !dir_path.exists() {
@@ -66,7 +66,7 @@ impl LsTool {
 
         if !dir_path.is_dir() {
             // If it's a file, just return its info
-            let meta = fs::metadata(dir_path)
+            let meta = fs::metadata(&dir_path)
                 .await
                 .map_err(|e| format!("Cannot read metadata: {}", e))?;
             let size = meta.len();
@@ -86,7 +86,7 @@ impl LsTool {
 
         // Read all entries first
         let mut entries: Vec<(String, bool, u64, std::fs::Metadata)> = Vec::new();
-        let mut dir = fs::read_dir(dir_path)
+        let mut dir = fs::read_dir(&dir_path)
             .await
             .map_err(|e| format!("Cannot read directory: {}", e))?;
 

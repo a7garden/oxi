@@ -105,7 +105,7 @@ impl FindTool {
     ) -> Result<String, ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-        let root = guard.validate(Path::new(path))
+        let root = guard.validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
         if !root.is_dir() {
@@ -114,8 +114,8 @@ impl FindTool {
 
         let mut results: Vec<String> = Vec::new();
         Self::find_walk(
-            root,
-            root,
+            &root,
+            &root,
             name,
             file_type,
             max_depth,

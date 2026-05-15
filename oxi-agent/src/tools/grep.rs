@@ -63,7 +63,7 @@ impl GrepTool {
     ) -> Result<(String, bool), ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
-        let root = guard.validate(Path::new(path))
+        let root = guard.validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
         if !root.exists() {
@@ -85,8 +85,8 @@ impl GrepTool {
         let mut matches: Vec<String> = Vec::new();
         let mut lines_truncated = false;
         Self::grep_walk(
-            root,
-            root,
+            &root,
+            &root,
             &re,
             include,
             context_before,
