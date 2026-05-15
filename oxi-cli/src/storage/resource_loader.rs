@@ -1388,8 +1388,7 @@ fn dedupe_prompts(prompts: Vec<Prompt>) -> (Vec<Prompt>, Vec<ResourceCollision>)
 
 pub use super::resource_loader_compat::{
     ResourceType, Resource, LoadResult, LoadError,
-    ResourceDiagnostic, DiagnosticSeverity, ResourcePaths, ResourceWatcher,
-    ResourceChange, ChangeKind, LoadAllResourcesResult,
+    ResourceDiagnostic,
 };
 
 // ============================================================================

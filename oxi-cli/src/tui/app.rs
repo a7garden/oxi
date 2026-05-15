@@ -9,7 +9,6 @@ use crate::app::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
 };
-use oxi_store::auth_storage::AuthStorage;
 use oxi_store::session::SessionManager;
 use crate::util::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;

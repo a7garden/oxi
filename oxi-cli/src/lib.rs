@@ -11,7 +11,6 @@
 pub mod cli;
 pub mod print_mode;
 pub mod setup_wizard;
-pub(crate) mod oauth_server;
 
 // ─── Directory groups ───────────────────────────────────────────────────────
 pub(crate) mod app;
@@ -38,9 +37,6 @@ pub use oxi_store::{
     AgentMessage, ContentValue, ContentBlock, AssistantContentBlock,
     Settings, ValidationReport,
 };
-
-// Re-exports from submodules for extension hooks
-pub use infra::error_recovery::{RetryConfig, RetryableError};
 
 /// Context for compaction operations, passed to extension hooks
 #[derive(Debug, Clone)]
@@ -87,7 +83,6 @@ use oxi_ai::{get_model, get_provider};
 use parking_lot::RwLock;
 use skills::SkillManager;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use uuid::Uuid;
 
 // ─── Application state ───────────────────────────────────────────────────────
