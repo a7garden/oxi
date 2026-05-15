@@ -1,5 +1,19 @@
 # Progress Tracker
 
+## 2026-05-15: WASM Extension Security Fixes
+
+### Status: ✅ Complete
+
+Three security fixes applied to `oxi-cli/src/extensions/wasm.rs`:
+
+1. **Exec timeout** — Replaced informational-only timeout with actual enforcement using `try_wait()` polling loop, `child.kill()` on timeout, 1-30s clamping
+2. **KV store namespacing** — Added thread-local extension identity tracking, KV keys now prefixed with `{extension}:` to prevent cross-extension data leakage
+3. **Safe Send/Sync** — Removed `unsafe impl Send/Sync`, replaced `RwLock` with `Mutex` for plugin storage
+
+Report: `fix_wasm_extension.md`
+
+---
+
 ## 2026-05-15: RPC Bash Injection + CLI Thinking + OAuth + Prompt Dedup + AuthStorage Singleton
 
 ### Status: ✅ Complete
