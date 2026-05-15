@@ -141,7 +141,7 @@ impl Tool {
 
 /// Validation error
 #[derive(Error, Debug)]
-pub enum ValidationError {
+pub enum ToolValidationError {
     #[error("Invalid JSON: {0}")]
 /// invalid json variant.
     InvalidJson(#[from] serde_json::Error),
