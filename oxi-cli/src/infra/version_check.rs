@@ -3,8 +3,8 @@
 //! Checks crates.io for the latest version and compares with current version.
 
 use anyhow::{Context, Result};
+use crate::util::http_client::shared_http_client;
 use serde::Deserialize;
-use std::time::Duration;
 use tracing::{debug, info, warn};
 
 /// Version information from crates.io
@@ -186,10 +186,7 @@ fn calculate_versions_behind(current: &str, latest: &str) -> u32 {
 pub async fn fetch_latest_version(crate_name: &str) -> Result<CrateVersion> {
     let url = format!("https://crates.io/api/v1/crates/{}", crate_name);
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .context("Failed to create HTTP client")?;
+    let client = shared_http_client();
 
     let response = client
         .get(&url)

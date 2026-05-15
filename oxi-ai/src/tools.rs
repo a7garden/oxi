@@ -125,7 +125,7 @@ impl Tool {
     /// let result = tool.validate(&serde_json::json!({"location": "London"}));
     /// assert!(result.is_ok());
     /// ```
-    pub fn validate(&self, args: &JsonValue) -> Result<JsonValue, ValidationError> {
+    pub fn validate(&self, args: &JsonValue) -> Result<JsonValue, ToolValidationError> {
         validate_args_internal(&self.parameters, args)
     }
 
@@ -156,7 +156,7 @@ pub enum ToolValidationError {
 }
 
 /// Validate tool arguments against a JSON Schema
-pub fn validate_args(tool: &Tool, args: &JsonValue) -> Result<JsonValue, ValidationError> {
+pub fn validate_args(tool: &Tool, args: &JsonValue) -> Result<JsonValue, ToolValidationError> {
     validate_args_internal(&tool.parameters, args)
 }
 
@@ -164,9 +164,9 @@ pub fn validate_args(tool: &Tool, args: &JsonValue) -> Result<JsonValue, Validat
 fn validate_args_internal(
     schema: &JsonValue,
     args: &JsonValue,
-) -> Result<JsonValue, ValidationError> {
+) -> Result<JsonValue, ToolValidationError> {
     let validator =
-        Validator::new(schema).map_err(|e| ValidationError::SchemaValidation(e.to_string()))?;
+        Validator::new(schema).map_err(|e| ToolValidationError::SchemaValidation(e.to_string()))?;
 
     let validation_result = validator.validate(args);
 
@@ -175,7 +175,7 @@ fn validate_args_internal(
         Err(errors) => {
             // jsonschema returns an error with formatted message
             let error_msg = format!("{}", errors);
-            Err(ValidationError::SchemaValidation(error_msg))
+            Err(ToolValidationError::SchemaValidation(error_msg))
         }
     }
 }

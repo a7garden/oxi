@@ -29,6 +29,7 @@ use unicode_width::UnicodeWidthStr;
 use crate::table_renderer::render_markdown_table;
 use crate::Theme;
 use crate::theme::ThemeStyles;
+use crate::text::truncate_to_width as truncate_str;
 
 // ── Limits (truncation at ingest) ──────────────────────────────────────
 
@@ -55,28 +56,6 @@ fn clamp_str(s: String, max_chars: usize, max_lines: usize) -> String {
         result.push_str("\n ...");
     }
     result
-}
-
-/// Truncate a string to fit within `max_width` terminal columns.
-/// Appends \u{2026} (…) if truncated.
-fn truncate_str(s: &str, max_width: usize) -> String {
-    if max_width == 0 { return String::new(); }
-    let mut width = 0usize;
-    let mut end = 0usize;
-    for (i, ch) in s.char_indices() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + cw > max_width {
-            // Not enough room for ellipsis either
-            return s[..end].to_string();
-        }
-        if width + cw > max_width.saturating_sub(1) {
-            // Would overflow if we add ellipsis
-            return format!("{}\u{2026}", &s[..end]);
-        }
-        width += cw;
-        end = i + ch.len_utf8();
-    }
-    s.to_string()
 }
 
 // ── Tool Call Tracker ─────────────────────────────────────────────────

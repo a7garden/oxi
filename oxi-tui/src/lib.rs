@@ -10,9 +10,11 @@
 pub mod cell;
 pub mod fuzzy;
 pub mod table_renderer;
+pub mod text;
 pub mod theme;
 pub mod widgets;
 
 pub use cell::Color;
 pub use fuzzy::{fuzzy_match, fuzzy_rank, FuzzyResult};
+pub use text::truncate_to_width;
 pub use theme::{ColorScheme, Spacing, Theme, ThemeFile, ThemeManager, ThemeStyles};

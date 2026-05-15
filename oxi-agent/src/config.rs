@@ -1,6 +1,6 @@
 /// Agent configuration
 
-use std::sync::Arc;
+
 use oxi_ai::CompactionStrategy;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;

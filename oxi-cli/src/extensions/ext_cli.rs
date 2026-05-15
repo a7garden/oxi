@@ -8,6 +8,7 @@
 //! Metadata stored in `~/.oxi/extensions/registry.json`.
 
 use anyhow::{Context, Result};
+use crate::util::http_client::shared_http_client;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -92,7 +93,7 @@ struct GitHubAsset {
 /// Fetch latest release from a GitHub repo.
 async fn fetch_latest_release(source: &str, include_prerelease: bool) -> Result<GitHubRelease> {
     let url = format!("https://api.github.com/repos/{}/releases", source);
-    let client = reqwest::Client::new();
+    let client = shared_http_client();
     let mut request = client
         .get(&url)
         .header("User-Agent", "oxi-ext");
@@ -175,7 +176,7 @@ pub async fn install_extension(
         // Fetch specific release by tag
         let tag = wanted_version.as_ref().unwrap();
         let url = format!("https://api.github.com/repos/{}/releases/tags/{}", repo, tag);
-        let client = reqwest::Client::new();
+        let client = shared_http_client();
         let mut request = client.get(&url).header("User-Agent", "oxi-ext");
         if let Ok(token) = std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN")) {
             request = request.header("Authorization", format!("Bearer {}", token));

@@ -47,7 +47,7 @@ pub use providers::{get_provider, register_provider, unregister_provider, custom
 pub use providers::OpenAiProvider;
 pub use providers::model_fetch::{fetch_models_async, fetch_models_blocking};
 pub use providers::OpenAiResponsesProvider;
-pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ValidationError};
+pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ToolValidationError};
 pub use types::*;
 
 // High-level API

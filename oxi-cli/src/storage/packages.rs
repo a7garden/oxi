@@ -39,13 +39,13 @@
 //! An `oxi-lock.json` file records exact versions/refs for reproducibility.
 
 use anyhow::{bail, Context, Result};
+use crate::util::http_client::shared_http_client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
-use std::time::Duration;
 
 /// Cached regex for parsing npm package specs
 static NPM_SPEC_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -54,7 +54,6 @@ static NPM_SPEC_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 
 // ── Constants ─────────────────────────────────────────────────────────
 
-const NETWORK_TIMEOUT_SECS: u64 = 10;
 const LOCKFILE_NAME: &str = "oxi-lock.json";
 const MANIFEST_NAME: &str = "oxi-package.toml";
 const NPM_MANIFEST_NAME: &str = "package.json";
@@ -482,10 +481,7 @@ impl NpmPackageInfo {
     /// Fetch package info from the npm registry
     pub async fn fetch(name: &str) -> Result<Self> {
         let url = format!("https://registry.npmjs.org/{}", name);
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(NETWORK_TIMEOUT_SECS))
-            .build()
-            .context("Failed to create HTTP client")?;
+        let client = shared_http_client();
 
         let resp = client
             .get(&url)
@@ -1389,9 +1385,7 @@ impl PackageManager {
         url: &str,
         scope: SourceScope,
     ) -> Result<PackageManifest> {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(NETWORK_TIMEOUT_SECS))
-            .build()?;
+        let client = shared_http_client();
 
         let resp = client.get(url).send().await?;
         if !resp.status().is_success() {
