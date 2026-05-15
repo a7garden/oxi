@@ -1,6 +1,6 @@
 //! Tests for oxi-ai error types: creation, display, From impls, and error chains.
 
-use oxi_ai::{Error, ProviderError, ValidationError as ToolsValidationError};
+use oxi_ai::{Error, ProviderError, ToolValidationError as ToolsValidationError};
 
 // ---------------------------------------------------------------------------
 // ProviderError variant creation and display

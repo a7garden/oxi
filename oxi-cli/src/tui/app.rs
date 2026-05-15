@@ -3,7 +3,8 @@
 use super::handlers;
 use super::render;
 use super::slash;
-use crate::app::agent_session::{CompactionReason, SessionEvent};
+use crate::app::agent_session::SessionEvent;
+use crate::context::auto_compaction::CompactionReason;
 use crate::app::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,

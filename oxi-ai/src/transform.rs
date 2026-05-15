@@ -500,18 +500,9 @@ fn downgrade_unsupported_images(messages: &[Message], model: &Model) -> Vec<Mess
 
 /// Normalize a tool call ID for cross-provider compatibility.
 ///
-/// OpenAI Responses API generates IDs that are 450+ chars with special characters like `|`.
-/// Anthropic APIs require IDs matching `^[a-zA-Z0-9_-]+$` (max 64 chars).
+/// Delegates to [`crate::utils::normalize_tool_call_id`].
 pub fn normalize_tool_call_id(id: &str) -> String {
-    let sanitized: String = id
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-        .collect();
-    if sanitized.len() > 64 {
-        sanitized[..64].trim_end_matches('_').to_string()
-    } else {
-        sanitized.trim_end_matches('_').to_string()
-    }
+    crate::utils::normalize_tool_call_id(id)
 }
 
 /// Transform messages for a target model, handling:

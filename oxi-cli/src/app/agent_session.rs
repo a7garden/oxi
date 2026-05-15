@@ -26,7 +26,7 @@
 //!  oxi_ai::Provider  (streaming LLM calls)
 //! ```
 
-use crate::context::auto_compaction::CompactionConfig;
+use crate::context::auto_compaction::{CompactionConfig, CompactionReason};
 use crate::extensions::{ExtensionContext, ExtensionContextBuilder, ExtensionRunner, InputEvent as ExtInputEvent, InputEventResult as ExtInputEventResult, SessionShutdownEvent, SessionShutdownReason};
 use oxi_store::session::{AgentMessage, SessionManager};
 use oxi_store::settings::{Settings, ThinkingLevel};
@@ -86,17 +86,6 @@ pub enum SessionEvent {
     },
     /// Passthrough agent event.
     Agent(AgentEvent),
-}
-
-/// Why compaction was triggered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CompactionReason {
-    /// User ran `/compact`.
-    Manual,
-    /// Context exceeded threshold percentage.
-    Threshold,
-    /// LLM returned a context-overflow error.
-    Overflow,
 }
 
 /// Result of a compaction operation.

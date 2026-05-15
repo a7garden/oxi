@@ -159,7 +159,9 @@ pub enum CompactorEvent {
 pub enum CompactionReason {
     /// Manual compaction requested
     Manual,
-    /// Automatic due to threshold
+    /// Automatic due to threshold percentage exceeded
+    Threshold,
+    /// Automatic compaction (general)
     Automatic,
     /// Context overflow detected
     Overflow,
@@ -176,6 +178,7 @@ impl std::fmt::Display for CompactionReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CompactionReason::Manual => write!(f, "manual"),
+            CompactionReason::Threshold => write!(f, "threshold"),
             CompactionReason::Automatic => write!(f, "automatic"),
             CompactionReason::Overflow => write!(f, "overflow"),
             CompactionReason::Iteration { current, every_n } => {

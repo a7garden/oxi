@@ -2,7 +2,8 @@
 
 use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
 use super::slash;
-use crate::app::agent_session::{AgentSession, CompactionReason, SessionEvent};
+use crate::app::agent_session::{AgentSession, SessionEvent};
+use crate::context::auto_compaction::CompactionReason;
 use crate::media::clipboard_write;
 use base64::Engine;
 use oxi_agent::AgentEvent;
@@ -365,7 +366,9 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             let reason_str = match reason {
                 CompactionReason::Manual => "manual",
                 CompactionReason::Threshold => "auto",
+                CompactionReason::Automatic => "auto",
                 CompactionReason::Overflow => "overflow",
+                CompactionReason::Iteration { .. } => "iteration",
             };
             state.add_system_message(format!("Compacting ({})...", reason_str));
         }

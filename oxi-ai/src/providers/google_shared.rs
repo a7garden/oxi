@@ -103,12 +103,7 @@ pub fn normalize_tool_call_id(model_id: &str, id: &str) -> String {
     if !requires_tool_call_id(model_id) {
         return id.to_string();
     }
-    id.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-        .collect::<String>()
-        .chars()
-        .take(64)
-        .collect()
+    crate::utils::normalize_tool_call_id(id)
 }
 
 // ---------------------------------------------------------------------------
