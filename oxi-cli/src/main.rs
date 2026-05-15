@@ -70,7 +70,7 @@ async fn main() -> Result<()> {
     }
 
     // Register custom OpenAI-compatible providers from settings
-    let auth_storage = oxi_store::auth_storage::AuthStorage::new();
+    let auth_storage = oxi_store::auth_storage::shared_auth_storage();
     for cp in &settings.custom_providers {
         let api_key = auth_storage.get_api_key(&cp.name);
         let api = cp.api.to_lowercase();

@@ -944,7 +944,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // Check if model is configured
         let has_model = !model_id.is_empty() && model_id.contains('/');
         if !has_model {
-            let auth = oxi_store::auth_storage::AuthStorage::new();
+            let auth = oxi_store::auth_storage::shared_auth_storage();
             let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
                 .iter()
                 .map(|builtin| {

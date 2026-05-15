@@ -1,5 +1,21 @@
 # Progress Tracker
 
+## 2026-05-15: RPC Bash Injection + CLI Thinking + OAuth + Prompt Dedup + AuthStorage Singleton
+
+### Status: ✅ Complete
+
+Five fixes applied across `oxi-cli/src/` and `oxi-store/src/`:
+
+1. **RPC Bash injection** — Added `is_dangerous_rpc_command()` with warning log for dangerous patterns in `handlers.rs`
+2. **CLI --thinking error** — Fixed wrong valid values in error messages (`none, minimal, standard, thorough` → `off, minimal, low, medium, high, xhigh`)
+3. **OAuth URL decoding** — Already fixed (verified `urlencoding::decode()` in use)
+4. **System prompt dedup** — Added TODO comments to both `build_system_prompt` instances
+5. **AuthStorage singleton** — Added `shared_auth_storage()` returning `Arc<AuthStorage>`, updated 17 call sites
+
+Report: `fix_rpc_misc.md`
+
+---
+
 ## 2026-05-15: Error Handling Improvements (oxi-ai)
 
 ### Status: ✅ Complete

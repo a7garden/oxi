@@ -155,7 +155,7 @@ pub fn create_agent_session_services(
     // instances (they both read from the same underlying file).
     let auth_storage = options
         .auth_storage
-        .unwrap_or_else(|| Arc::new(AuthStorage::new()));
+        .unwrap_or_else(|| oxi_store::auth_storage::shared_auth_storage());
 
     // Settings — load from cwd + agent_dir
     let settings = options.settings.unwrap_or_else(|| {

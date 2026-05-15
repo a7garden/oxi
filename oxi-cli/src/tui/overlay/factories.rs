@@ -213,7 +213,7 @@ impl OverlayComponent for LogoutSelectOverlay {
             KeyCode::Enter => {
                 if let Some(provider) = self.providers.get(self.selected) {
                     let p = provider.clone();
-                    oxi_store::auth_storage::AuthStorage::new().remove(&p);
+                    oxi_store::auth_storage::shared_auth_storage().remove(&p);
                     if let Ok(ptr) = self.app_state.lock() {
                         unsafe {
                             if let Some(ref mut app) = (*ptr).as_mut() {

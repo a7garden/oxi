@@ -8,12 +8,13 @@
 
 use anyhow::{Context, Result};
 use extism::{CurrentPlugin, Function, UserData, Val, ValType, PTR};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::cell::RefCell;
 use std::io::Read as _;
 use std::time::{Duration, Instant};
 
@@ -532,7 +533,9 @@ fn host_oxi_kv_get(
         let req: KvReq = serde_json::from_str(&input_json)
             .context("oxi_kv_get: invalid request JSON")?;
 
-        let value = kv_store_get(&req.key);
+        // Namespace the key with the current extension identity
+        let ext_name = current_extension_name();
+        let value = kv_namespaced_get(&ext_name, &req.key);
         let response = serde_json::json!({
             "success": value.is_some(),
             "value": value.unwrap_or_default(),
@@ -568,7 +571,9 @@ fn host_oxi_kv_set(
         let req: KvSetReq = serde_json::from_str(&input_json)
             .context("oxi_kv_set: invalid request JSON")?;
 
-        kv_store_set(&req.key, &req.value);
+        // Namespace the key with the current extension identity
+        let ext_name = current_extension_name();
+        kv_namespaced_set(&ext_name, &req.key, &req.value);
         Ok(())
     })();
     result.map_err(extism::Error::from)
@@ -581,6 +586,32 @@ use std::sync::LazyLock;
 static KV_STORE: LazyLock<parking_lot::RwLock<HashMap<String, String>>> =
     LazyLock::new(|| parking_lot::RwLock::new(HashMap::new()));
 
+/// Thread-local tracking the currently executing extension name.
+/// Set by `execute_tool` / `execute_command` / `load` before invoking plugin
+/// calls, read by KV host functions to namespace keys.
+thread_local! {
+    static CURRENT_EXTENSION: RefCell<Option<String>> = RefCell::new(None);
+}
+
+/// Run a closure with the current extension name set in thread-local storage.
+fn with_extension_context<F, R>(ext_name: &str, f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = Some(ext_name.to_string()));
+    let result = f();
+    CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = None);
+    result
+}
+
+/// Get the current extension name from thread-local storage.
+/// Returns `"__unknown__"` if not set (e.g., during `load()` before `init()`).
+fn current_extension_name() -> String {
+    CURRENT_EXTENSION.with(|cell| {
+        cell.borrow().clone().unwrap_or_else(|| "__unknown__".to_string())
+    })
+}
+
 fn kv_store_get(key: &str) -> Option<String> {
     KV_STORE.read().get(key).cloned()
 }
@@ -589,17 +620,13 @@ fn kv_store_set(key: &str, value: &str) {
     KV_STORE.write().insert(key.to_string(), value.to_string());
 }
 
-/// Namespaced KV access — extensions use "ext_name:key" format to
-/// prevent cross-extension key collision. Currently not wired into host
-/// functions because host functions don't have extension identity in UserData.
-/// Will be used when per-extension context is passed to host functions.
-#[allow(dead_code)]
+/// Namespaced KV access — prefixes key with `extension:` to prevent
+/// cross-extension key collision.
 fn kv_namespaced_get(extension: &str, key: &str) -> Option<String> {
     let namespaced = format!("{}:{}", extension, key);
     kv_store_get(&namespaced)
 }
 
-#[allow(dead_code)]
 fn kv_namespaced_set(extension: &str, key: &str, value: &str) {
     let namespaced = format!("{}:{}", extension, key);
     kv_store_set(&namespaced, value);
@@ -720,21 +747,16 @@ fn is_172_private(host: &str) -> bool {
 /// Manages WASM extensions: discovery, loading, and tool execution.
 ///
 /// # Thread Safety
-/// `plugins` is wrapped in `Arc<RwLock<>>` for thread-safe access.
+/// `plugins` is wrapped in `Arc<Mutex<>>` for exclusive thread-safe access.
 /// All host functions run inside `spawn_blocking`, so WASM execution
 /// never blocks the async runtime.
-// SAFETY: WasmExtensionManager is Send+Sync because:
-// - All fields are Send+Sync (HashMap, Arc<RwLock<>>, Arc<Client>)
-// - extism::Plugin access is serialized through the RwLock
-// - execute_tool is called from spawn_blocking, never from async context
-unsafe impl Send for WasmExtensionManager {}
-unsafe impl Sync for WasmExtensionManager {}
-
 pub struct WasmExtensionManager {
     extensions: HashMap<String, LoadedWasmExtension>,
     /// Raw Extism plugin references — needed for execute_tool calls.
-    /// Wrapped in RwLock for thread-safe access from spawn_blocking.
-    pub(crate) plugins: Arc<RwLock<HashMap<String, extism::Plugin>>>,
+    /// Wrapped in Mutex for exclusive thread-safe access (required because
+    /// extism::Plugin's Send+Sync bounds are not publicly documented).
+    /// All access goes through `plugins.lock()` which ensures mutual exclusion.
+    pub(crate) plugins: Arc<parking_lot::Mutex<HashMap<String, extism::Plugin>>>,
     /// Maps tool name → extension name.
     tool_to_ext: HashMap<String, String>,
     /// HTTP client shared by all extensions for oxi_http_request.
@@ -748,7 +770,7 @@ impl WasmExtensionManager {
     pub fn new() -> Self {
         Self {
             extensions: HashMap::new(),
-            plugins: Arc::new(RwLock::new(HashMap::new())),
+            plugins: Arc::new(Mutex::new(HashMap::new())),
             tool_to_ext: HashMap::new(),
             http_client: Arc::new(
                 reqwest::blocking::Client::builder()
@@ -766,7 +788,7 @@ impl WasmExtensionManager {
     pub fn with_http_client(client: reqwest::blocking::Client) -> Self {
         Self {
             extensions: HashMap::new(),
-            plugins: Arc::new(RwLock::new(HashMap::new())),
+            plugins: Arc::new(Mutex::new(HashMap::new())),
             tool_to_ext: HashMap::new(),
             http_client: Arc::new(client),
             permissions: HashMap::new(),
@@ -918,7 +940,10 @@ impl WasmExtensionManager {
             }
         };
 
-        // Call register_tools()
+        // Set extension context so KV operations during register_tools/register_commands
+        // are properly namespaced
+        let ext_name_for_ctx = info.name.clone();
+        CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = Some(ext_name_for_ctx));
         let tools: Vec<WasmToolDef> = match plugin.call::<&str, &str>("register_tools", "{}") {
             Ok(output) => {
                 let resp: Value = serde_json::from_str(output)
@@ -956,6 +981,9 @@ impl WasmExtensionManager {
             Err(_) => vec![], // No commands
         };
 
+        // Clear extension context set during register_tools/register_commands
+        CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = None);
+
         let ext_name = info.name.clone();
 
         // Warn on name collision — clean up old extension fully
@@ -967,7 +995,7 @@ impl WasmExtensionManager {
             // Remove old tool mappings
             self.tool_to_ext.retain(|_, v| v != &ext_name);
             // Remove old plugin instance
-            self.plugins.write().remove(&ext_name);
+            self.plugins.lock().remove(&ext_name);
         }
 
         for tool in &tools {
@@ -982,7 +1010,7 @@ impl WasmExtensionManager {
         };
 
         self.extensions.insert(ext_name.clone(), loaded);
-        self.plugins.write().insert(ext_name, plugin);
+        self.plugins.lock().insert(ext_name, plugin);
 
         tracing::info!(
             name = %info.name,
@@ -1016,11 +1044,15 @@ impl WasmExtensionManager {
 
     /// Execute a tool via the WASM extension.
     pub fn execute_tool(&self, tool_name: &str, params: Value) -> Result<Value> {
-        let ext_name = self.tool_to_ext.get(tool_name)
-            .with_context(|| format!("No extension registered for tool: {}", tool_name))?;
+        let ext_name = self
+            .tool_to_ext
+            .get(tool_name)
+            .with_context(|| format!("No extension registered for tool: {}", tool_name))?
+            .clone();
 
-        let mut plugins = self.plugins.write();
-        let plugin = plugins.get_mut(ext_name)
+        let mut plugins = self.plugins.lock();
+        let plugin = plugins
+            .get_mut(&ext_name)
             .with_context(|| format!("Extension '{}' not loaded", ext_name))?;
 
         let input = serde_json::json!({
@@ -1029,7 +1061,12 @@ impl WasmExtensionManager {
         });
         let input_str = serde_json::to_string(&input)?;
 
-        let output: &str = plugin.call("execute_tool", &input_str)
+        // Set thread-local extension context so KV host functions can namespace keys
+        CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = Some(ext_name.clone()));
+        let call_result = plugin.call("execute_tool", &input_str);
+        CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = None);
+
+        let output: &str = call_result
             .with_context(|| format!("execute_tool('{}') failed in '{}'", tool_name, ext_name))?;
 
         let result: Value = serde_json::from_str(output)
@@ -1094,7 +1131,7 @@ impl WasmExtensionManager {
             .map(|(name, _)| name.clone())
             .with_context(|| format!("No extension registered for command: /{}", command_name))?;
 
-        let mut plugins = self.plugins.write();
+        let mut plugins = self.plugins.lock();
         let plugin = plugins.get_mut(&ext_name)
             .with_context(|| format!("Extension '{}' not loaded", ext_name))?;
 
@@ -1104,8 +1141,13 @@ impl WasmExtensionManager {
         });
         let input_str = serde_json::to_string(&input)?;
 
-        let output: &str = plugin.call("execute_command", &input_str)
-            .with_context(|| format!("execute_command('/{}') failed in '{}'", command_name, ext_name))?;
+        let output: &str = {
+            CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = Some(ext_name.clone()));
+            let result = plugin.call("execute_command", &input_str);
+            CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = None);
+            result
+        }
+        .with_context(|| format!("execute_command('/{}') failed in '{}'", command_name, ext_name))?;
 
         // Parse response — extension returns {"output": "..."} or plain string
         let result: Value = serde_json::from_str(output)

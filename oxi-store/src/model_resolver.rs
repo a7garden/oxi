@@ -410,7 +410,7 @@ pub fn clamp_thinking_level(model_id: &str, requested_level: &str) -> String {
 /// Use `oxi setup` to configure credentials persistently.
 pub fn has_configured_auth(provider: &str, _model: &Model) -> bool {
     // Check auth storage (auth.json)
-    let auth = crate::auth_storage::AuthStorage::new();
+    let auth = crate::auth_storage::shared_auth_storage();
     auth.has_auth(provider)
 }
 

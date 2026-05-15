@@ -1001,6 +1001,20 @@ pub mod keyring_support {
 }
 
 // ============================================================================
+// Singleton
+// ============================================================================
+
+/// Get a shared singleton `Arc<AuthStorage>` instance.
+///
+/// Avoids creating multiple `AuthStorage::new()` instances that each
+/// independently read and cache `auth.json`. All callers share the same
+/// in-memory state through the `Arc`.
+pub fn shared_auth_storage() -> Arc<AuthStorage> {
+    static STORAGE: OnceLock<Arc<AuthStorage>> = OnceLock::new();
+    STORAGE.get_or_init(|| Arc::new(AuthStorage::new())).clone()
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

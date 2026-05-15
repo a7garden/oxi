@@ -638,7 +638,7 @@ async fn handle_wizard_step_key(
                         match *selected {
                             0 => { /* OAuth — not yet implemented */ }
                             1 => {
-                                let auth = oxi_store::auth_storage::AuthStorage::new();
+                                let auth = oxi_store::auth_storage::shared_auth_storage();
                                 let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
                                     .iter()
                                     .map(|builtin| {
@@ -716,7 +716,7 @@ async fn handle_wizard_step_key(
                     };
 
                     if !key_val.is_empty() {
-                        let auth = oxi_store::auth_storage::AuthStorage::new();
+                        let auth = oxi_store::auth_storage::shared_auth_storage();
                         auth.set_api_key(&provider, key_val);
 
                         let models: Vec<String> = oxi_ai::model_db::get_all_models()
@@ -754,7 +754,7 @@ async fn handle_wizard_step_key(
                     }
                 }
                 KeyCode::Esc => {
-                    let auth = oxi_store::auth_storage::AuthStorage::new();
+                    let auth = oxi_store::auth_storage::shared_auth_storage();
                     let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
                         .iter()
                         .map(|builtin| {
@@ -967,7 +967,7 @@ async fn handle_logout_select_key(
         }
         KeyCode::Enter => {
             if let Some(provider) = providers.get(selected) {
-                let auth = oxi_store::auth_storage::AuthStorage::new();
+                let auth = oxi_store::auth_storage::shared_auth_storage();
                 auth.remove(provider);
                 state.add_system_message(format!("Removed {}", provider));
             }

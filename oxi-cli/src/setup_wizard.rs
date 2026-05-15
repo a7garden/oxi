@@ -235,7 +235,7 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
     };
 
     // Get the API key from auth storage
-    let auth_store = oxi_store::auth_storage::AuthStorage::new();
+    let auth_store = oxi_store::auth_storage::shared_auth_storage();
     let api_key = match auth_store.get_api_key(provider_name) {
         Some(key) => key,
         None => {
@@ -1050,7 +1050,7 @@ pub fn run() -> Result<()> {
     }));
 
     // Load data
-    let auth_store = oxi_store::auth_storage::AuthStorage::new();
+    let auth_store = oxi_store::auth_storage::shared_auth_storage();
     let providers = load_providers(&auth_store);
     let models = load_models();
     let themes = load_themes();

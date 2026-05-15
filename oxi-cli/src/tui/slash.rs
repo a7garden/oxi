@@ -59,7 +59,7 @@ pub(crate) fn handle_slash_command(
             } else {
                 // Show interactive model selector overlay
                 // Only show models from providers that have API keys configured
-                let auth = oxi_store::auth_storage::AuthStorage::new();
+                let auth = oxi_store::auth_storage::shared_auth_storage();
                 let all_models: Vec<String> = oxi_ai::model_db::get_all_models()
                     .filter(|entry| auth.get_api_key(&entry.provider).is_some())
                     .map(|entry| format!("{}/{}", entry.provider, entry.id))
@@ -456,11 +456,11 @@ pub(crate) fn handle_slash_command(
         "/logout" => {
             if let Some(provider) = arg {
                 // Direct logout (backward compatible)
-                AuthStorage::new().remove(provider);
+                oxi_store::auth_storage::shared_auth_storage().remove(provider);
                 state.add_system_message(format!("OK: Removed {}", provider));
             } else {
                 // Show provider selection overlay for logout
-                let auth = AuthStorage::new();
+                let auth = oxi_store::auth_storage::shared_auth_storage();
                 let providers = auth.configured_providers();
                 if providers.is_empty() {
                     state.add_system_message("No providers configured.".to_string());
@@ -667,7 +667,7 @@ fn try_provider_with_key(provider: &str, key: &str, state: &mut AppState) -> boo
     if key.is_empty() {
         return false;
     }
-    let auth = AuthStorage::new();
+    let auth = oxi_store::auth_storage::shared_auth_storage();
     auth.set_api_key(provider, key.to_string());
     state.add_system_message(format!(
         "API key for {} saved.",
