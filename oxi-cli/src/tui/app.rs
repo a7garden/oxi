@@ -13,7 +13,6 @@ use oxi_store::session::SessionManager;
 use crate::util::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
-use oxi_ai::model_db;
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{
     chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},

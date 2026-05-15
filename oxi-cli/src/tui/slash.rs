@@ -2,7 +2,6 @@
 
 use super::app::{AppOverlay, AppState, SetupStep};
 use crate::app::agent_session::{AgentSession, ScopedModel};
-use oxi_store::auth_storage::AuthStorage;
 use crate::media::clipboard_write;
 use crate::storage::export::{self, ExportMeta, HtmlExportOptions};
 use oxi_tui::widgets::chat::{ContentBlock, MessageRole};
@@ -128,7 +127,7 @@ pub(crate) fn handle_slash_command(
         }
         "/extensions" | "/ext" => {
             // Re-discover to show what's available
-            let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let _cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
             // let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd);
             let registry = session.agent_ref().tools();
             let names = registry.names();

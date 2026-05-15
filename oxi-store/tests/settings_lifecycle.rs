@@ -163,16 +163,15 @@ theme = "default"
 "#;
     write_settings_file(&global_dir, "settings.json", global_settings);
 
-    // Project settings (override model only)
+    // Project settings (override model only) — use TOML for project config
     let project_dir = tmp.path().join("project");
     let oxi_dir = project_dir.join(".oxi");
     fs::create_dir_all(&oxi_dir).expect("create oxi dir");
 
-    let project_settings = r#"
-default_model = "claude-sonnet-4-20250514"
+    let project_settings = r#"default_model = "claude-sonnet-4-20250514"
 default_provider = "anthropic"
 "#;
-    write_settings_file(&oxi_dir, "settings.json", project_settings);
+    write_settings_file(&oxi_dir, "settings.toml", project_settings);
 
     // Verify project settings can be found
     let found = Settings::find_project_settings(&project_dir);
@@ -181,7 +180,7 @@ default_provider = "anthropic"
     assert!(found_path.starts_with(&oxi_dir));
 
     let content = fs::read_to_string(&found_path).expect("read project settings");
-    let project: Settings = serde_json::from_str(&content).expect("parse project");
+    let project: Settings = toml::from_str(&content).expect("parse project");
     assert_eq!(project.default_model, Some("claude-sonnet-4-20250514".to_string()));
 }
 

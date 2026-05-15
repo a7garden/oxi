@@ -528,7 +528,7 @@ async fn handle_overlay_key(
 
     // ── Component-based overlay (takes priority) ──
     if let Some(ref mut overlay) = state.overlay_state {
-        use super::overlay::{OverlayAction, OverlayComponent};
+        use super::overlay::OverlayAction;
         let action = overlay.handle_key(key);
         match action {
             OverlayAction::Close => {

@@ -586,9 +586,9 @@ use std::sync::LazyLock;
 static KV_STORE: LazyLock<parking_lot::RwLock<HashMap<String, String>>> =
     LazyLock::new(|| parking_lot::RwLock::new(HashMap::new()));
 
-/// Thread-local tracking the currently executing extension name.
-/// Set by `execute_tool` / `execute_command` / `load` before invoking plugin
-/// calls, read by KV host functions to namespace keys.
+// Thread-local tracking the currently executing extension name.
+// Set by `execute_tool` / `execute_command` / `load` before invoking plugin
+// calls, read by KV host functions to namespace keys.
 thread_local! {
     static CURRENT_EXTENSION: RefCell<Option<String>> = RefCell::new(None);
 }
