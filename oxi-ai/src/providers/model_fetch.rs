@@ -16,7 +16,7 @@ struct ModelsResponse {
 #[derive(Debug, Deserialize)]
 struct ModelInfo {
     id: String,
-    #[allow(dead_code)]
+
     owned_by: Option<String>,
 }
 

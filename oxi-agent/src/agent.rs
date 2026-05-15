@@ -21,11 +21,11 @@ use tokio::sync::mpsc;
 use crate::stream_retry::{self, RetryCallback};
 
 /// Default fallback model used when the primary model fails.
-#[allow(dead_code)]
+
 const DEFAULT_FALLBACK_MODEL: &str = "openai/gpt-4o-mini";
 
 /// [`RetryCallback`] that emits [`AgentEvent::Retry`] through an mpsc channel.
-#[allow(dead_code)]
+
 struct MpscRetryCallback {
     tx: mpsc::Sender<AgentEvent>,
 }
@@ -49,7 +49,7 @@ impl RetryCallback for MpscRetryCallback {
 }
 
 /// Mutable agent internals protected by a read-write lock.
-#[allow(dead_code)]
+
 struct AgentInner {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
@@ -70,7 +70,7 @@ pub struct Agent {
 }
 
 /// Result of executing a batch of tool calls.
-#[allow(dead_code)]
+
 struct ToolBatchResult {
     messages: Vec<oxi_ai::ToolResultMessage>,
     terminate: bool,
@@ -449,7 +449,7 @@ impl Agent {
     // ── Helper methods for the agentic loop ────────────────────────
 
     /// Check and run compaction if needed.
-    #[allow(dead_code)]
+
     async fn run_compaction_check(&self, tx: &mpsc::Sender<AgentEvent>) {
         let state_msgs = self.state.get_state().messages.clone();
         let context_text = serde_json::to_string(&state_msgs).unwrap_or_default();
@@ -495,7 +495,7 @@ impl Agent {
     }
 
     /// Drain steering messages from hooks or session queue.
-    #[allow(dead_code)]
+
     fn drain_steering_messages(&self) -> Vec<String> {
         let hooks = self.hooks.read();
         if let Some(ref get_steering) = hooks.get_steering_messages {
@@ -505,7 +505,7 @@ impl Agent {
     }
 
     /// Drain follow-up messages from hooks or session queue.
-    #[allow(dead_code)]
+
     fn drain_follow_up_messages(&self) -> Vec<String> {
         let hooks = self.hooks.read();
         if let Some(ref get_follow_up) = hooks.get_follow_up_messages {
@@ -515,7 +515,7 @@ impl Agent {
     }
 
     /// Check shouldStopAfterTurn hook.
-    #[allow(dead_code)]
+
     fn should_stop_after_turn(&self) -> bool {
         let hooks = self.hooks.read();
         if let Some(ref hook) = hooks.should_stop_after_turn {
@@ -532,7 +532,7 @@ impl Agent {
     }
 
     /// Execute a batch of tool calls, returning results and termination flag.
-    #[allow(dead_code)]
+
     async fn execute_tool_batch(
         &self,
         tools: &Arc<ToolRegistry>,
@@ -747,7 +747,7 @@ impl Agent {
     ///
     /// Delegates to [`stream_retry::stream_with_retry_core`] and emits
     /// [`AgentEvent::Retry`] events through the channel.
-    #[allow(dead_code)]
+
     async fn stream_with_retry(
         provider: &dyn Provider,
         model: &oxi_ai::Model,
@@ -773,7 +773,7 @@ impl Agent {
     ///
     /// Returns the streaming response from the fallback, or the combined
     /// [`AgentError::FallbackFailed`] if both models fail.
-    #[allow(dead_code)]
+
     async fn try_fallback(
         &self,
         model: &oxi_ai::Model,

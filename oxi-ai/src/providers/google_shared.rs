@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Shared utilities for Google Generative AI and Google Vertex providers.
 //!
 //! This module contains common types, message conversion, tool conversion,

@@ -68,7 +68,7 @@ async fn gh_exec(args: &[&str]) -> Result<String, ToolError> {
 }
 
 /// Run a `gh` command with `--json` and parse the result.
-#[allow(dead_code)]
+
 async fn gh_json(args: &[&str]) -> Result<Value, ToolError> {
     let mut full_args = args.to_vec();
     // Ensure --json flag is present

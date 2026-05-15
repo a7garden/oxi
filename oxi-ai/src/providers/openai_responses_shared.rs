@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Shared code between OpenAI Responses API and Codex providers.
 //!
 //! Ported from `openai-responses-shared.ts`. Contains:

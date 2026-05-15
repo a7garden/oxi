@@ -30,7 +30,7 @@ enum PreparedToolCallKind {
 }
 
 struct PreparedToolCallOutcome {
-    #[allow(dead_code)]
+
     kind: PreparedToolCallKind,
     immediate_result: Option<AgentToolResult>,
     is_error: bool,

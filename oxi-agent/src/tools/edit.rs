@@ -190,7 +190,7 @@ struct EditEntry {
 
 /// Result of edit operation
 #[derive(Debug)]
-#[allow(dead_code)]
+
 struct EditOutput {
     diff: String,
     first_changed_line: Option<usize>,

@@ -26,7 +26,7 @@ const MAX_RESULTS: usize = 30;
 
 /// Top-level GitHub search response.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+
 struct GitHubSearchResponse {
     total_count: u64,
     incomplete_results: bool,
@@ -44,7 +44,7 @@ struct GitHubRepo {
     forks_count: u64,
     open_issues_count: u64,
     updated_at: String,
-    #[allow(dead_code)]
+
     archived: bool,
     topics: Vec<String>,
     license: Option<GitHubLicense>,

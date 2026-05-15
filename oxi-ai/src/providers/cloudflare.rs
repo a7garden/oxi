@@ -17,7 +17,7 @@ use super::shared_client;
 
 /// Cloudflare Workers AI provider
 #[derive(Clone)]
-#[allow(dead_code)] // account_id used for gateway URLs
+ // account_id used for gateway URLs
 pub struct CloudflareProvider {
     client: &'static Client,
     api_token: Option<String>,
@@ -37,7 +37,7 @@ impl CloudflareProvider {
     }
 
     /// Create with explicit credentials (public API for external consumers)
-    #[allow(dead_code)]
+
     pub fn with_credentials(api_token: impl Into<String>, account_id: impl Into<String>) -> Self {
         Self {
             client: shared_client(),
@@ -47,7 +47,7 @@ impl CloudflareProvider {
     }
 
     /// Create a model configuration for Cloudflare Workers AI (public API)
-    #[allow(dead_code)]
+
     pub fn model<S: Into<String>>(&self, model_id: S) -> Model {
         let id = model_id.into();
         let base_url = if self.account_id.is_some() {
@@ -63,7 +63,7 @@ impl CloudflareProvider {
     }
 
     /// Create a model with AI Gateway (public API)
-    #[allow(dead_code)]
+
     pub fn model_with_gateway<S: Into<String>>(
         &self,
         model_id: S,
@@ -414,7 +414,7 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // SSE chunk structure
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // serde deserialization structs
+ // serde deserialization structs
 struct SSEChunk {
     id: Option<String>,
     #[serde(rename = "model")]
@@ -437,7 +437,7 @@ struct Delta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // serde deserialization structs
+ // serde deserialization structs
 struct ToolCallDelta {
     index: Option<usize>,
     id: Option<String>,
@@ -447,7 +447,7 @@ struct ToolCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // serde deserialization structs
+ // serde deserialization structs
 struct FunctionDelta {
     name: Option<String>,
     arguments: Option<String>,

@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Built-in provider registration.
 //!
 //! Ported from `register-builtins.ts`. Defines all built-in providers with their

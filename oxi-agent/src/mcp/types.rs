@@ -194,10 +194,10 @@ pub struct JsonRpcNotification {
 /// Raw JSON-RPC message (can be request, response, or notification).
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawJsonRpcMessage {
-    #[allow(dead_code)]
+
     pub jsonrpc: String,
     pub id: Option<u64>,
-    #[allow(dead_code)]
+
     pub method: Option<String>,
     pub result: Option<serde_json::Value>,
     pub error: Option<JsonRpcError>,

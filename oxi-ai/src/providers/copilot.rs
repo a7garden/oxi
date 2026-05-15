@@ -45,7 +45,7 @@ impl CopilotProvider {
     }
 
     /// Create a provider with an explicit API key (public API for external consumers)
-    #[allow(dead_code)]
+
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
             client: shared_client(),
@@ -417,7 +417,7 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // SSE chunk structures
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // serde deserialization structs
+ // serde deserialization structs
 struct SSEChunk {
     id: Option<String>,
     #[serde(rename = "model")]
@@ -440,7 +440,7 @@ struct Delta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // serde deserialization structs
+ // serde deserialization structs
 struct ToolCallDelta {
     index: Option<usize>,
     id: Option<String>,
@@ -450,7 +450,7 @@ struct ToolCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // serde deserialization structs
+ // serde deserialization structs
 struct FunctionDelta {
     name: Option<String>,
     arguments: Option<String>,

@@ -2,11 +2,11 @@
 
 /// Default max auto-retry attempts (for errors detected in assistant
 /// messages, not provider-level errors).
-#[allow(dead_code)]
+
 pub const AUTO_RETRY_MAX_ATTEMPTS: usize = 3;
 
 /// Default base delay in ms for exponential backoff during auto-retry.
-#[allow(dead_code)]
+
 pub const AUTO_RETRY_BASE_DELAY_MS: u64 = 2000;
 
 /// Configuration for an [`crate::AgentLoop`] instance.
