@@ -96,7 +96,7 @@ fn host_oxi_http_request(
 
         // UserData::get() returns Arc<Mutex<T>>
         let client_arc = user_data.get()?;
-        let client = client_arc.lock().unwrap();
+        let client = client_arc.lock().expect("wasm client lock poisoned");
 
         let method = match method.to_uppercase().as_str() {
             "GET" => reqwest::Method::GET,

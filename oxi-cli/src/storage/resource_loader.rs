@@ -1301,6 +1301,7 @@ pub fn resolve_path(path: &std::path::Path) -> std::path::PathBuf {
     let path_str = path.to_string_lossy();
     if path_str.starts_with("~/") {
         if let Some(home) = dirs::home_dir() {
+            // SAFE: strip_prefix guaranteed to return Some because we checked starts_with("~/") above
             return home.join(path_str.strip_prefix("~/").unwrap());
         }
     }

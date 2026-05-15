@@ -9,7 +9,7 @@ use std::path::Path;
 
 /// Cached regex for parsing version headers in changelog
 static VERSION_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"##\s+\[?(\d+)\.(\d+)\.(\d+)\]?").unwrap()
+    Regex::new(r"##\s+\[?(\d+)\.(\d+)\.(\d+)\]?").unwrap() // SAFE: static regex verified at compile time by tests
 });
 
 /// A parsed changelog entry

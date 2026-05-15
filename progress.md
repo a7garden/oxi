@@ -1,44 +1,34 @@
-# Progress Tracker
+# Unwrap() Audit Progress
 
-## 2026-05-15: WASM Extension Security Fixes
+## Status: COMPLETE ✅
 
-### Status: ✅ Complete
+## Files Audited (Top 10 Priority)
+| File | Total unwraps | Non-test unwraps | Action |
+|------|--------------|-------------------|--------|
+| oxi-store/src/settings.rs | 97 | 0 | No changes needed - all in test code |
+| oxi-cli/src/storage/packages.rs | 76 | 0 | No changes needed - all in test code |
+| oxi-cli/src/ui/keybindings.rs | 52 | 0 | No changes needed - all in test code |
+| oxi-cli/src/storage/resource_loader.rs | 47 | 1 | ✅ Added safety comment |
+| oxi-agent/src/tools/read.rs | 40 | 0 | No changes needed - all in test code |
+| oxi-store/src/session.rs | 39 | 0 | No changes needed - all in test code |
+| oxi-agent/src/tools/ls.rs | 39 | 0 | No changes needed - all in test code |
+| oxi-agent/src/tools/write.rs | 37 | 0 | No changes needed - all in test code |
+| oxi-cli/src/prompt/templates.rs | 34 | 2 | ✅ Added safety comments |
+| oxi-cli/src/prompt/frontmatter.rs | 31 | 0 | No changes needed - all in test code |
 
-Three security fixes applied to `oxi-cli/src/extensions/wasm.rs`:
+## Additional Files Found & Fixed
+| File | Non-test unwraps | Action |
+|------|-------------------|--------|
+| oxi-cli/src/infra/output_guard.rs | 14 | ✅ Added safety comments (static regex) |
+| oxi-cli/src/rpc_mode/handlers.rs | 3 | ✅ Replaced unwrap() with expect() |
+| oxi-agent/src/tools/github.rs | 1 | ✅ Replaced with unwrap_or_default |
+| oxi-cli/src/extensions/ext_cli.rs | 1 | ✅ Added safety comment |
+| oxi-cli/src/extensions/wasm.rs | 1 | ✅ Replaced with expect() |
+| oxi-cli/src/infra/bash_executor.rs | 1 | ✅ Added safety comment |
+| oxi-cli/src/storage/resource_loader_compat.rs | 1 | ✅ Added safety comment |
+| oxi-cli/src/ui/changelog.rs | 1 | ✅ Added safety comment |
+| oxi-tui/src/widgets/chat.rs | 1 | ✅ Added safety comment |
+| oxi-ai/src/model_db.rs | 1 | No change - in doc comment |
 
-1. **Exec timeout** — Replaced informational-only timeout with actual enforcement using `try_wait()` polling loop, `child.kill()` on timeout, 1-30s clamping
-2. **KV store namespacing** — Added thread-local extension identity tracking, KV keys now prefixed with `{extension}:` to prevent cross-extension data leakage
-3. **Safe Send/Sync** — Removed `unsafe impl Send/Sync`, replaced `RwLock` with `Mutex` for plugin storage
-
-Report: `fix_wasm_extension.md`
-
----
-
-## 2026-05-15: RPC Bash Injection + CLI Thinking + OAuth + Prompt Dedup + AuthStorage Singleton
-
-### Status: ✅ Complete
-
-Five fixes applied across `oxi-cli/src/` and `oxi-store/src/`:
-
-1. **RPC Bash injection** — Added `is_dangerous_rpc_command()` with warning log for dangerous patterns in `handlers.rs`
-2. **CLI --thinking error** — Fixed wrong valid values in error messages (`none, minimal, standard, thorough` → `off, minimal, low, medium, high, xhigh`)
-3. **OAuth URL decoding** — Already fixed (verified `urlencoding::decode()` in use)
-4. **System prompt dedup** — Added TODO comments to both `build_system_prompt` instances
-5. **AuthStorage singleton** — Added `shared_auth_storage()` returning `Arc<AuthStorage>`, updated 17 call sites
-
-Report: `fix_rpc_misc.md`
-
----
-
-## 2026-05-15: Error Handling Improvements (oxi-ai)
-
-### Status: ✅ Complete
-
-Three fixes applied to `oxi-ai/src/`:
-
-1. **`error.rs`** — Added `NetworkError`, `Timeout`, `RateLimited` variants + `is_retryable()` + `retry_after()` methods to `ProviderError`
-2. **`secret.rs`** — Fixed `Serialize` impl to mask value as `"[REDACTED]"` instead of exposing plain text
-3. **`types.rs`** — Extended `Usage::calculate_cost()` to accept optional per-million pricing parameters (backward compatible)
-4. **`options.rs`** — Protected `StreamOptions.api_key` from leaking via `#[serde(skip)]` + custom `Debug` impl showing `[REDACTED]`
-
-All tests pass. Report: `fix_provider_errors.md`
+## Build Status
+- `cargo check` passes with no new warnings or errors

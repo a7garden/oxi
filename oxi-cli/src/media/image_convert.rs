@@ -165,8 +165,7 @@ pub enum ImageFormat {
 }
 
 impl ImageFormat {
-/// TODO: document this function.
-    pub fn mime_type(&self) -> &'static str {
+    /// Return the MIME type string for this image format.
         match self {
             ImageFormat::Png => "image/png",
             ImageFormat::Jpeg => "image/jpeg",

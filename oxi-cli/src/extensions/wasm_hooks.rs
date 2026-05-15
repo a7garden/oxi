@@ -77,7 +77,7 @@ impl WasmHookManager {
     pub fn fire_tool_call(
         &self, tool_name: &str, tool_call_id: &str, input: &serde_json::Value,
     ) -> Option<ToolCallHookResult> {
-        let mut plugins = self.extensions.plugins.write();
+        let mut plugins = self.extensions.plugins.lock();
         for (ext_name, plugin) in plugins.iter_mut() {
             let event = serde_json::json!({
                 "event": "tool_call", "tool_name": tool_name,
@@ -100,7 +100,7 @@ impl WasmHookManager {
     pub fn fire_tool_result(
         &self, tool_name: &str, tool_call_id: &str, content: &str, is_error: bool,
     ) -> Option<ToolResultHookResult> {
-        let mut plugins = self.extensions.plugins.write();
+        let mut plugins = self.extensions.plugins.lock();
         for (_, plugin) in plugins.iter_mut() {
             let event = serde_json::json!({
                 "event": "tool_result", "tool_name": tool_name,
@@ -120,7 +120,7 @@ impl WasmHookManager {
 
     /// Fire `on_session_shutdown` for all extensions.
     pub fn fire_session_shutdown(&self, reason: &str) {
-        let mut plugins = self.extensions.plugins.write();
+        let mut plugins = self.extensions.plugins.lock();
         for (_, plugin) in plugins.iter_mut() {
             let event = serde_json::json!({ "event": "session_shutdown", "reason": reason });
             let Ok(s) = serde_json::to_string(&event) else { continue };
@@ -130,7 +130,7 @@ impl WasmHookManager {
 
     /// Fire `on_agent_event` for all extensions (fire-and-forget).
     pub fn fire_agent_event(&self, event_name: &str, event_data: &serde_json::Value) {
-        let mut plugins = self.extensions.plugins.write();
+        let mut plugins = self.extensions.plugins.lock();
         for (_, plugin) in plugins.iter_mut() {
             let payload = serde_json::json!({ "event": event_name, "data": event_data });
             let Ok(s) = serde_json::to_string(&payload) else { continue };

@@ -490,7 +490,7 @@ impl ChatViewState {
                 && cache.spinner_frame == spinner
                 && cache.width == width
             {
-                return cache.entries.clone().unwrap();
+                return cache.entries.clone().unwrap(); // SAFE: is_some() checked above
             }
         }
 

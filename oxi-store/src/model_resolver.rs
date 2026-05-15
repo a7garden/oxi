@@ -39,16 +39,16 @@ pub const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high"
 /// Known AI providers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Provider {
-/// pub.
+/// Unique provider identifier (e.g. "anthropic", "openai").
     pub id: String,
-/// pub.
+    /// Human-readable provider name.
     pub name: String,
-/// pub.
+    /// Optional provider website URL.
     pub website: Option<String>,
 }
 
 impl Provider {
-/// TODO.
+/// Create a new provider with the given identifier and display name.
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -57,7 +57,7 @@ impl Provider {
         }
     }
 
-/// TODO: document this function.
+/// Attach a website URL to this provider (builder-style).
     pub fn with_website(mut self, website: impl Into<String>) -> Self {
         self.website = Some(website.into());
         self
@@ -67,29 +67,29 @@ impl Provider {
 /// A discovered model
 #[derive(Debug, Clone)]
 pub struct Model {
-/// pub.
+/// Provider that hosts this model.
     pub provider: String,
-/// pub.
+    /// Model identifier (e.g. "claude-sonnet-4-5").
     pub id: String,
-/// pub.
+    /// Human-readable model name.
     pub name: Option<String>,
-/// pub.
+    /// Optional model description.
     pub description: Option<String>,
-/// pub.
+    /// Maximum context window size in tokens.
     pub context_window: Option<u32>,
-/// pub.
+    /// Features the model supports (e.g. "tools", "vision").
     pub supported_features: Vec<String>,
     // Unified from ModelEntry - cost info
-/// pub.
+    /// Cost per million input tokens.
     pub cost_input: Option<f64>,
-/// pub.
+    /// Cost per million output tokens.
     pub cost_output: Option<f64>,
-/// pub.
+    /// Cost per million cache-read tokens.
     pub cost_cache_read: Option<f64>,
-/// pub.
+    /// Cost per million cache-write tokens.
     pub cost_cache_write: Option<f64>,
     // Unified from ModelEntry - input modalities
-/// pub.
+    /// Supported input modalities (e.g. "text", "image").
     pub input_modalities: Vec<String>,
 }
 
@@ -145,48 +145,48 @@ impl Model {
 /// Result of parsing a model pattern
 #[derive(Debug)]
 pub struct ParsedModelResult {
-/// pub.
+/// Resolved provider name, if identified.
     pub provider: Option<String>,
-/// pub.
+    /// Model ID extracted from the pattern.
     pub model_id: String,
-/// pub.
+    /// Requested thinking level (e.g. "high", "medium").
     pub thinking_level: Option<String>,
-/// pub.
+    /// Warning message when resolution is ambiguous.
     pub warning: Option<String>,
 }
 
 /// Result of resolving a CLI model
 #[derive(Debug)]
 pub struct ResolveCliModelResult {
-/// pub.
+/// The resolved model, if found.
     pub model: Option<Model>,
-/// pub.
+    /// Requested thinking level.
     pub thinking_level: Option<String>,
-/// pub.
+    /// Warning about ambiguous resolution.
     pub warning: Option<String>,
-/// pub.
+    /// Error message when resolution fails.
     pub error: Option<String>,
 }
 
 /// Result of finding initial model
 #[derive(Debug)]
 pub struct InitialModelResult {
-/// pub.
+/// The selected model.
     pub model: Option<Model>,
-/// pub.
+    /// Thinking level applied.
     pub thinking_level: String,
-/// pub.
+    /// Message when a fallback model was chosen.
     pub fallback_message: Option<String>,
 }
 
 /// Result of restore model from session
 #[derive(Debug)]
 pub struct RestoreModelResult {
-/// pub.
+/// The restored model, if available.
     pub model: Option<Model>,
-/// pub.
+    /// Message explaining why a fallback was used.
     pub fallback_message: Option<String>,
-/// pub.
+    /// Machine-readable reason code ("no_auth", "model_not_found", "no_models").
     pub reason: Option<String>,
 }
 

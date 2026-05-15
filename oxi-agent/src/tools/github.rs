@@ -117,7 +117,7 @@ async fn gh_search(params: &Value) -> Result<AgentToolResult, ToolError> {
     let items: Vec<Value> = serde_json::from_str(&output)
         .unwrap_or_else(|_| {
             serde_json::from_str::<Value>(&output)
-                .map(|v| if v.is_array() { v.as_array().unwrap().clone() } else { vec![v] })
+                .map(|v| if v.is_array() { v.as_array().unwrap_or(&Vec::new()).clone() } else { vec![v] })
                 .unwrap_or_default()
         });
 

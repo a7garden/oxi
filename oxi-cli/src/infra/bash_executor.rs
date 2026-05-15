@@ -217,6 +217,7 @@ impl BashExecutor {
 
         // Track cd commands — re-resolve cwd after cd
         if command.trim().starts_with("cd ") && exit_code == Some(0) {
+            // SAFE: strip_prefix guaranteed because starts_with("cd ") was checked above
             let target = command.trim().strip_prefix("cd ").unwrap().trim();
             let target = if target.starts_with("~/") {
                 format!(

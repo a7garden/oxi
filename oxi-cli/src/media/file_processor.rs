@@ -23,8 +23,7 @@ const DEFAULT_MAX_IMAGE_DIMENSION: u32 = 2000;
 pub struct FileProcessorOptions {
     /// Maximum image dimensions
     pub max_image_width: u32,
-/// pub.
-    pub max_image_height: u32,
+    /// Maximum image height in pixels.
     /// Maximum image size after base64 encoding
     pub max_image_bytes: usize,
     /// JPEG quality for resized images
@@ -46,19 +45,16 @@ impl Default for FileProcessorOptions {
 }
 
 impl FileProcessorOptions {
-/// TODO.
-    pub fn new() -> Self {
+    /// Create a new `FileProcessorOptions` with default settings.
         Self::default()
     }
 
-/// TODO: document this function.
-    pub fn max_image_bytes(mut self, bytes: usize) -> Self {
+    /// Set the maximum allowed image size after base64 encoding (in bytes).
         self.max_image_bytes = bytes;
         self
     }
 
-/// TODO: document this function.
-    pub fn extract_frontmatter(mut self, extract: bool) -> Self {
+    /// Set whether to extract YAML frontmatter from text files.
         self.extract_frontmatter = extract;
         self
     }

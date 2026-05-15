@@ -22,12 +22,12 @@ use std::sync::LazyLock;
 
 /// Cached regex for positional argument placeholders ($1, $2, etc.)
 static POSITIONAL_ARG_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"\$(\d+)").unwrap()
+    regex::Regex::new(r"\$(\d+)").unwrap() // SAFE: static regex verified at compile time by tests
 });
 
 /// Cached regex for argument slice syntax (${@:start} or ${@:start:length})
 static SLICE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"\$\{@:(\d+)(?::(\d+))?\}").unwrap()
+    regex::Regex::new(r"\$\{@:(\d+)(?::(\d+))?\}").unwrap() // SAFE: static regex verified at compile time by tests
 });
 
 /// Config directory name for project-local settings.

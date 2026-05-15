@@ -301,6 +301,16 @@ pub enum SummarizationError {
     Failed(String),
 }
 
+impl std::fmt::Display for SummarizationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SummarizationError::NoModel => write!(f, "No model available for summarization"),
+            SummarizationError::Aborted => write!(f, "Summarization was aborted"),
+            SummarizationError::Failed(msg) => write!(f, "Summarization failed: {}", msg),
+        }
+    }
+}
+
 /// Extension hook result for session_before_tree event
 #[derive(Debug, Clone)]
 pub struct BeforeTreeHookResult {
@@ -553,17 +563,18 @@ impl SessionNavigator {
 
         if options.summarize && !collection.entries.is_empty() && extension_summary.is_none() {
             if let Some(summarizer) = summarizer {
-                // Use spawn_blocking pattern to avoid panic when called within a tokio runtime
+                // Use tokio::task::block_in_place to safely call block_on from within
+                // a multi-threaded tokio runtime. Falls back to creating a new runtime
+                // if not in a tokio context.
                 let entries_clone: Vec<SessionEntryType> = collection.entries.clone();
                 let custom_clone = custom_instructions.clone();
-                let result = std::thread::spawn(move || {
-                    let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
-                    rt.block_on(summarizer.summarize(
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(summarizer.summarize(
                         &entries_clone,
                         custom_clone.as_deref(),
                         replace_instructions,
                     ))
-                }).join().map_err(|e| anyhow::anyhow!("Summary thread panicked: {:?}", e))?;
+                });
 
                 match result {
                     Ok(summary_result) => {

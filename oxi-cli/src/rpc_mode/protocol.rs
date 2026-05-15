@@ -92,15 +92,15 @@ pub struct JsonRpcErrorResponse {
 }
 
 // Standard JSON-RPC error codes
-/// pub.
+/// JSON-RPC parse error code.
 pub const JSONRPC_PARSE_ERROR: i64 = -32700;
-/// pub.
+/// JSON-RPC invalid request error code.
 pub const JSONRPC_INVALID_REQUEST: i64 = -32600;
-/// pub.
+/// JSON-RPC method-not-found error code.
 pub const JSONRPC_METHOD_NOT_FOUND: i64 = -32601;
-/// pub.
+/// JSON-RPC invalid params error code.
 pub const JSONRPC_INVALID_PARAMS: i64 = -32602;
-/// pub.
+/// JSON-RPC internal error code.
 pub const JSONRPC_INTERNAL_ERROR: i64 = -32603;
 
 // ============================================================================
@@ -114,210 +114,210 @@ pub enum RpcCommand {
     // ── Prompting ───────────────────────────────────────────────────
     /// Send a prompt message to the agent.
     Prompt {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// TODO: document.
+        /// The user's prompt text.
         message: String,
-        /// TODO: document.
+        /// Optional inline images attached to the prompt.
         images: Option<Vec<ImageData>>,
         #[serde(default)]
-        /// TODO: document.
+        /// Desired streaming behavior (e.g. "full", "partial").
         streaming_behavior: Option<String>,
     },
     /// Send a steering message to interrupt the current stream.
     Steer {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// TODO: document.
+        /// The steering instruction text.
         message: String,
-        /// TODO: document.
+        /// Optional images attached to the steering message.
         images: Option<Vec<ImageData>>,
     },
     /// Send a follow-up message to be processed after the current stream.
     FollowUp {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// TODO: document.
+        /// The follow-up message text.
         message: String,
-        /// TODO: document.
+        /// Optional images attached to the follow-up.
         images: Option<Vec<ImageData>>,
     },
     /// Abort the current agent response.
     Abort {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
     /// Create a new session.
     NewSession {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// TODO: document.
+        /// Optional parent session ID for forked sessions.
         parent_session: Option<String>,
     },
 
     // ── State ───────────────────────────────────────────────────────
     /// Get the current agent state.
     GetState {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
 
     // ── Model ──────────────────────────────────────────────────────
     /// Set the active model.
     SetModel {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// TODO: document.
+        /// Provider name (e.g. "anthropic").
         provider: String,
-        /// TODO: document.
+        /// Model identifier (e.g. "claude-sonnet-4-5").
         model_id: String,
     },
     /// Cycle to the next available model.
     CycleModel {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
     /// List all available models.
     GetAvailableModels {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
 
     // ── Thinking ────────────────────────────────────────────────────
     /// Set the thinking level.
     SetThinkingLevel {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// level.
+        /// Thinking level (e.g. "off", "low", "medium", "high", "xhigh").
         level: String,
     },
     /// Cycle to the next thinking level.
     CycleThinkingLevel {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
 
     // ── Queue modes ─────────────────────────────────────────────────
     /// Set the steering mode.
     SetSteeringMode {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// mode.
+        /// Steering mode (e.g. "all", "system").
         mode: String,
     },
     /// Set the follow-up mode.
     SetFollowUpMode {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// mode.
+        /// Follow-up mode (e.g. "all", "system").
         mode: String,
     },
 
     // ── Compaction ──────────────────────────────────────────────────
     /// Manually trigger compaction.
     Compact {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// custom instructions.
+        /// Optional custom instructions for the compaction prompt.
         custom_instructions: Option<String>,
     },
     /// Enable or disable auto-compaction.
     SetAutoCompaction {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// enabled.
+        /// Whether auto-compaction is enabled.
         enabled: bool,
     },
 
     // ── Retry ───────────────────────────────────────────────────────
     /// Enable or disable auto-retry.
     SetAutoRetry {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// enabled.
+        /// Whether auto-retry is enabled.
         enabled: bool,
     },
     /// Abort the current retry attempt.
     AbortRetry {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
 
     // ── Bash ────────────────────────────────────────────────────────
     /// Execute a bash command.
     Bash {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// command.
+        /// The shell command to execute.
         command: String,
     },
     /// Abort the running bash command.
     AbortBash {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
 
     // ── Session ────────────────────────────────────────────────────
     /// Get session statistics.
     GetSessionStats {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
     /// Export the session as HTML.
     ExportHtml {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// output path.
+        /// Filesystem path for the exported HTML file.
         output_path: Option<String>,
     },
     /// Switch to a different session.
     SwitchSession {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// session path.
+        /// Path to the session file to switch to.
         session_path: String,
     },
     /// Fork the session at a given entry.
     Fork {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// entry id.
+        /// ID of the entry at which to fork.
         entry_id: String,
     },
     /// Clone the current session.
     Clone {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
     /// Get messages from the forked session.
     GetForkMessages {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
     /// Get the last assistant text response.
     GetLastAssistantText {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
     /// Set the session display name.
     SetSessionName {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
-        /// name.
+        /// New display name for the session.
         name: String,
     },
 
     // ── Messages ───────────────────────────────────────────────────
     /// Get all session messages.
     GetMessages {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
 
     // ── Commands ────────────────────────────────────────────────────
     /// get commands.
     GetCommands {
-        /// TODO: document.
+        /// Optional client-side request correlation ID.
         id: Option<String>,
     },
 }
@@ -325,19 +325,19 @@ pub enum RpcCommand {
 /// Image data for RPC commands
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageData {
-    /// source.
+    /// Base64-encoded image data or URL source.
     pub source: String,
     #[serde(rename = "type")]
-    /// Image media type.
+    /// Image media type (e.g. "image/png").
     pub media_type: String,
 }
 
 /// Base64-encoded image data
 #[derive(Debug, Clone)]
 pub struct RpcImageSource {
-    /// Response data.
+    /// Decoded image bytes.
     pub data: Vec<u8>,
-    /// mime type.
+    /// MIME type (e.g. "image/png").
     pub mime_type: String,
 }
 
@@ -347,17 +347,17 @@ pub struct RpcImageSource {
 pub enum RpcResponse {
     /// response.
     Response {
-        /// TODO: document.
+        /// Correlation ID matching the original request.
         id: Option<String>,
-        /// TODO: document.
+        /// Name of the command this responds to.
         command: String,
-        /// TODO: document.
+        /// Whether the command succeeded.
         success: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Response payload on success.
         data: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        /// TODO: document.
+        /// Error message on failure.
         error: Option<String>,
     },
     /// extension ui request.

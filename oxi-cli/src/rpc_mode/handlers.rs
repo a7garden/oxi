@@ -326,7 +326,7 @@ fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> 
                 id,
                 command: "get_state".to_string(),
                 success: true,
-                data: Some(serde_json::to_value(&state).unwrap()),
+                data: Some(serde_json::to_value(&state).expect("state should be serializable")),
                 error: None,
             }
         }
@@ -471,7 +471,7 @@ fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> 
                 id,
                 command: "compact".to_string(),
                 success: true,
-                data: Some(serde_json::to_value(&result).unwrap()),
+                data: Some(serde_json::to_value(&result).expect("compact result should be serializable")),
                 error: None,
             }
         }
@@ -563,7 +563,7 @@ fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> 
                 id,
                 command: "get_session_stats".to_string(),
                 success: true,
-                data: Some(serde_json::to_value(&stats).unwrap()),
+                data: Some(serde_json::to_value(&stats).expect("session stats should be serializable")),
                 error: None,
             }
         }

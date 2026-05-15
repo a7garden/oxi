@@ -174,6 +174,7 @@ pub async fn install_extension(
 
     let release = if wanted_version.is_some() {
         // Fetch specific release by tag
+        // SAFE: wanted_version.is_some() checked in the outer if
         let tag = wanted_version.as_ref().unwrap();
         let url = format!("https://api.github.com/repos/{}/releases/tags/{}", repo, tag);
         let client = shared_http_client();

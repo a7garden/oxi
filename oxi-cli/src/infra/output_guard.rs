@@ -11,85 +11,85 @@ static API_KEY_PATTERNS: LazyLock<Vec<(Regex, &str, &str)>> = LazyLock::new(|| {
     vec![
         // Generic API keys
         (
-            Regex::new(r"(?i)(api[_-]?key|apikey|api[_-]?secret)\s*[:=]\s*\S{8,}").unwrap(),
+            Regex::new(r"(?i)(api[_-]?key|apikey|api[_-]?secret)\s*[:=]\s*\S{8,}").unwrap(), // SAFE: static regex
             "api_key",
             "Potential API key detected",
         ),
         // AWS keys
         (
-            Regex::new(r"(?i)AKIA[0-9A-Z]{16}").unwrap(),
+            Regex::new(r"(?i)AKIA[0-9A-Z]{16}").unwrap(), // SAFE: static regex
             "aws_access_key",
             "AWS access key ID detected",
         ),
         // AWS secret
         (
             Regex::new(r"(?i)aws[_-]?secret[_-]?access[_-]?key\s*[:=]\s*[a-zA-Z0-9/+=]{40}")
-                .unwrap(),
+                .unwrap(), // SAFE: static regex
             "aws_secret",
             "AWS secret access key detected",
         ),
         // GitHub tokens
         (
-            Regex::new(r"ghp_[a-zA-Z0-9]{36}").unwrap(),
+            Regex::new(r"ghp_[a-zA-Z0-9]{36}").unwrap(), // SAFE: static regex
             "github_token",
             "GitHub personal access token detected",
         ),
         (
-            Regex::new(r"gho_[a-zA-Z0-9]{36}").unwrap(),
+            Regex::new(r"gho_[a-zA-Z0-9]{36}").unwrap(), // SAFE: static regex
             "github_token",
             "GitHub OAuth token detected",
         ),
         // Private keys
         (
-            Regex::new(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----").unwrap(),
+            Regex::new(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----").unwrap(), // SAFE: static regex
             "private_key",
             "Private key detected",
         ),
         // Bearer tokens
         (
-            Regex::new(r"(?i)bearer\s+[a-zA-Z0-9_\-\.]{20,}").unwrap(),
+            Regex::new(r"(?i)bearer\s+[a-zA-Z0-9_\-\.]{20,}").unwrap(), // SAFE: static regex
             "bearer_token",
             "Bearer token detected",
         ),
         // Basic auth
         (
-            Regex::new(r"(?i)basic\s+[a-zA-Z0-9+/=]{20,}").unwrap(),
+            Regex::new(r"(?i)basic\s+[a-zA-Z0-9+/=]{20,}").unwrap(), // SAFE: static regex
             "basic_auth",
             "Basic auth credentials detected",
         ),
         // Database URLs with passwords
         (
-            Regex::new(r"(?i)(postgres|mysql|mongodb|redis)://[^:]+:[^@]+@").unwrap(),
+            Regex::new(r"(?i)(postgres|mysql|mongodb|redis)://[^:]+:[^@]+@").unwrap(), // SAFE: static regex
             "db_url",
             "Database URL with credentials detected",
         ),
         // Slack tokens
         (
-            Regex::new(r"xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24,}").unwrap(),
+            Regex::new(r"xox[baprs]-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24,}").unwrap(), // SAFE: static regex
             "slack_token",
             "Slack token detected",
         ),
         // Discord tokens
         (
-            Regex::new(r"[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}").unwrap(),
+            Regex::new(r"[MN][A-Za-z\d]{23,}\.[\w-]{6}\.[\w-]{27}").unwrap(), // SAFE: static regex
             "discord_token",
             "Discord token detected",
         ),
         // JWT tokens
         (
-            Regex::new(r"eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*").unwrap(),
+            Regex::new(r"eyJ[a-zA-Z0-9_-]*\.eyJ[a-zA-Z0-9_-]*\.[a-zA-Z0-9_-]*").unwrap(), // SAFE: static regex
             "jwt",
             "JWT token detected",
         ),
         // Generic secrets
         (
-            Regex::new(r"(?i)(secret|password|passwd|pwd|token|auth)\s*[:=]\s*\S{8,}").unwrap(),
+            Regex::new(r"(?i)(secret|password|passwd|pwd|token|auth)\s*[:=]\s*\S{8,}").unwrap(), // SAFE: static regex
             "generic_secret",
             "Potential secret detected",
         ),
         // SSH keys
         (
-            Regex::new(r"ssh-rsa\s+[A-Za-z0-9+/=]{30,}").unwrap(),
+            Regex::new(r"ssh-rsa\s+[A-Za-z0-9+/=]{30,}").unwrap(), // SAFE: static regex
             "ssh_key",
             "SSH key detected",
         ),

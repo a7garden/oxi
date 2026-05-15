@@ -538,7 +538,7 @@ fn split_complete_lines(bytes: &[u8]) -> (String, Vec<u8>) {
 /// - **Pre-allocated events** – reserves capacity based on data-line count.
 /// - **Accumulated usage** – tracks usage separately, only cloning into
 ///   the Done message at stream end, not on every chunk.
-fn parse_sse_events(text: &str, provider: &str, model_id: &str, output: &mut AssistantMessage) -> Vec<ProviderEvent> {
+fn parse_sse_events(text: &str, _provider: &str, _model_id: &str, output: &mut AssistantMessage) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
 
     // Pre-estimate capacity: one event per data line is a reasonable upper bound.

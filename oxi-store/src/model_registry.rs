@@ -1759,7 +1759,7 @@ mod tests {
         // Test env var expansion with ${VAR} syntax
         let var_name = format!("OXI_TEST_KEY_{}", std::process::id());
         std::env::set_var(&var_name, "test-value-456");
-        let result = resolve_config_value(&format!("${{}}", var_name));
+        let result = resolve_config_value(&format!("${{{}}}", var_name));
         assert_eq!(result, Some("test-value-456".to_string()));
         std::env::remove_var(&var_name);
     }

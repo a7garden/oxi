@@ -816,6 +816,7 @@ pub fn parse_thinking_level(s: &str) -> Option<ThinkingLevel> {
 }
 
 /// Parse a boolean-like string (`"true"`, `"false"`, `"1"`, `"0"`, `"yes"`, `"no"`).
+#[allow(dead_code)]
 fn parse_boolish(s: &str) -> Result<bool> {
     match s.to_lowercase().as_str() {
         "true" | "1" | "yes" | "on" => Ok(true),
