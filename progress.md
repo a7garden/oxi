@@ -20,3 +20,13 @@
 - [x] **Cleanup** — Removed unused constants and imports (NETWORK_TIMEOUT_SECS, Duration).
 - [x] **Builds clean** — `cargo check --workspace` passes.
 - [x] **Findings written** — `fix_http_client.md`
+
+## Code Deduplication Fixes
+
+- [x] **Fix 1: CompactionReason** — Unified `CompactionReason` enum in `auto_compaction.rs` (added `Threshold` variant), removed duplicate from `agent_session.rs`, updated all imports.
+- [x] **Fix 2: normalize_tool_call_id** — Moved core logic to `oxi-ai/src/utils/mod.rs`, both `transform.rs` and `google_shared.rs` delegate to it.
+- [x] **Fix 3: ValidationError rename** — Renamed `tools.rs::ValidationError` → `ToolValidationError`, updated all references + public re-export.
+- [x] **Fix 4: truncate functions** — Created `oxi-tui/src/text.rs` with shared `truncate_to_width()`, removed duplicates from `chat.rs` and `tool_renderer.rs`.
+- [x] **Builds clean** — `cargo check --workspace` passes.
+- [x] **Tests pass** — All affected tests pass (error_handling, truncate, compaction_reason).
+- [x] **Findings written** — `fix_dedup_code.md`
