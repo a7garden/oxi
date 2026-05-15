@@ -723,6 +723,11 @@ fn parse_model_id(model_id: &str) -> (String, String) {
 /// Build the system prompt based on thinking level.
 ///
 /// Delegates to [`crate::prompt::system_prompt::build_system_prompt`].
+///
+/// TODO: This build_system_prompt duplicates the one in crate::lib (root).
+/// Both delegate to prompt::system_prompt::build_system_prompt but with different
+/// options (this one passes tool_snippets; lib passes skills).
+/// Unify into a single shared utility that accepts all options.
 fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
     let custom_prompt = match thinking_level {
         ThinkingLevel::Off => {

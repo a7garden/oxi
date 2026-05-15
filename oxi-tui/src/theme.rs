@@ -389,45 +389,42 @@ impl ThemeFile {
     pub fn into_theme(self) -> Theme {
         let defaults = ColorScheme::dark();
 
-        // Helper to parse a color with warning for invalid user-specified values.
-        macro_rules! parse_color_field {
-            ($name:expr, $value:expr) => {{
-                match $value.as_deref().and_then(parse_color) {
-                    Some(c) => c,
-                    None => {
-                        if $value.is_some() {
-                            tracing::warn!(
-                                "Invalid theme color for '{}': '{}' - using default",
-                                $name,
-                                $value.as_ref().unwrap()
-                            );
-                        }
-                        defaults.$name.clone()
+        // Helper: parse a color string, logging a warning for invalid user-specified values.
+        fn resolve(value: Option<String>, fallback: Color, field_name: &str) -> Color {
+            match value.as_deref().and_then(parse_color) {
+                Some(c) => c,
+                None => {
+                    if let Some(ref v) = value {
+                        tracing::warn!(
+                            "Invalid theme color for '{}': '{}' - using default",
+                            field_name, v
+                        );
                     }
+                    fallback
                 }
-            }};
+            }
         }
 
         let colors = ColorScheme {
-            foreground: parse_color_field!("foreground", self.colors.foreground),
-            background: parse_color_field!("background", self.colors.background),
-            primary: parse_color_field!("primary", self.colors.primary),
-            secondary: parse_color_field!("secondary", self.colors.secondary),
-            error: parse_color_field!("error", self.colors.error),
-            warning: parse_color_field!("warning", self.colors.warning),
-            success: parse_color_field!("success", self.colors.success),
-            muted: parse_color_field!("muted", self.colors.muted),
-            accent: parse_color_field!("accent", self.colors.accent),
-            border: parse_color_field!("border", self.colors.border),
-            user_border: parse_color_field!("user_border", self.colors.user_border),
-            user_bg: parse_color_field!("user_bg", self.colors.user_bg),
-            cursor_fg: parse_color_field!("cursor_fg", self.colors.cursor_fg),
-            cursor_bg: parse_color_field!("cursor_bg", self.colors.cursor_bg),
-            selection_bg: parse_color_field!("selection_bg", self.colors.selection_bg),
-            tool_pending_bg: parse_color_field!("tool_pending_bg", self.colors.tool_pending_bg),
-            tool_executing_bg: parse_color_field!("tool_executing_bg", self.colors.tool_executing_bg),
-            tool_success_bg: parse_color_field!("tool_success_bg", self.colors.tool_success_bg),
-            tool_error_bg: parse_color_field!("tool_error_bg", self.colors.tool_error_bg),
+            foreground: resolve(self.colors.foreground, defaults.foreground, "foreground"),
+            background: resolve(self.colors.background, defaults.background, "background"),
+            primary: resolve(self.colors.primary, defaults.primary, "primary"),
+            secondary: resolve(self.colors.secondary, defaults.secondary, "secondary"),
+            error: resolve(self.colors.error, defaults.error, "error"),
+            warning: resolve(self.colors.warning, defaults.warning, "warning"),
+            success: resolve(self.colors.success, defaults.success, "success"),
+            muted: resolve(self.colors.muted, defaults.muted, "muted"),
+            accent: resolve(self.colors.accent, defaults.accent, "accent"),
+            border: resolve(self.colors.border, defaults.border, "border"),
+            user_border: resolve(self.colors.user_border, defaults.user_border, "user_border"),
+            user_bg: resolve(self.colors.user_bg, defaults.user_bg, "user_bg"),
+            cursor_fg: resolve(self.colors.cursor_fg, defaults.cursor_fg, "cursor_fg"),
+            cursor_bg: resolve(self.colors.cursor_bg, defaults.cursor_bg, "cursor_bg"),
+            selection_bg: resolve(self.colors.selection_bg, defaults.selection_bg, "selection_bg"),
+            tool_pending_bg: resolve(self.colors.tool_pending_bg, defaults.tool_pending_bg, "tool_pending_bg"),
+            tool_executing_bg: resolve(self.colors.tool_executing_bg, defaults.tool_executing_bg, "tool_executing_bg"),
+            tool_success_bg: resolve(self.colors.tool_success_bg, defaults.tool_success_bg, "tool_success_bg"),
+            tool_error_bg: resolve(self.colors.tool_error_bg, defaults.tool_error_bg, "tool_error_bg"),
         };
         Theme {
             name: if self.name.is_empty() {

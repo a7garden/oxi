@@ -3,9 +3,10 @@
 use crate::{CacheRetention, ThinkingLevel};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 
 /// Options for streaming requests
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct StreamOptions {
     /// Sampling temperature (0.0 to 2.0)
     #[serde(default)]
@@ -16,7 +17,8 @@ pub struct StreamOptions {
     pub max_tokens: Option<usize>,
 
     /// API key (overrides environment variable)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// This field is excluded from serialization and Debug output to prevent leakage.
+    #[serde(skip)]
     pub api_key: Option<String>,
 
     /// Cache retention preference
@@ -38,6 +40,21 @@ pub struct StreamOptions {
     /// Custom token budgets for thinking levels
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budgets: Option<ThinkingBudgets>,
+}
+
+impl fmt::Debug for StreamOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("StreamOptions")
+            .field("temperature", &self.temperature)
+            .field("max_tokens", &self.max_tokens)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("cache_retention", &self.cache_retention)
+            .field("session_id", &self.session_id)
+            .field("headers", &self.headers)
+            .field("thinking_level", &self.thinking_level)
+            .field("thinking_budgets", &self.thinking_budgets)
+            .finish()
+    }
 }
 
 impl StreamOptions {

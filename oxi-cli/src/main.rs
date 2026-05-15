@@ -147,7 +147,7 @@ async fn main() -> Result<()> {
             settings.thinking_level = level;
         } else {
             anyhow::bail!(
-                "Invalid thinking level: {}. Valid options: none, minimal, standard, thorough",
+                "Invalid thinking level: {}. Valid options: off, minimal, low, medium, high, xhigh",
                 level_str
             );
         }
@@ -637,9 +637,9 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
                 "thinking_level" | "thinking" => {
                     let level = oxi_store::settings::parse_thinking_level(value)
                         .ok_or_else(|| anyhow::anyhow!(
-                            "Invalid thinking level: '{}'. Valid: none, minimal, standard, thorough",
+                            "Invalid thinking level: '{}'. Valid: off, minimal, low, medium, high, xhigh",
                             value
-                        ))?;
+                        ))?;;
                     settings.thinking_level = level;
                 }
                 "extensions_enabled" => {
@@ -844,7 +844,7 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
     if let Some(ref provider_name) = *provider {
         let settings = Settings::load().unwrap_or_default();
         if let Some(cp) = settings.custom_providers.iter().find(|cp| cp.name == *provider_name) {
-            let auth = oxi_store::auth_storage::AuthStorage::new();
+            let auth = oxi_store::auth_storage::shared_auth_storage();
             let api_key = auth.get_api_key(&cp.name);
             if let Some(ref key) = api_key {
                 match oxi_ai::fetch_models_blocking(&cp.base_url, key) {

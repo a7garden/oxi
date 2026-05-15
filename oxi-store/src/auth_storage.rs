@@ -400,6 +400,8 @@ pub struct AuthStorage {
     errors: RwLock<Vec<AuthError>>,
     /// Whether initial load had an error
     load_error: RwLock<Option<AuthError>>,
+    /// OnceLock to warn about plaintext storage only once
+    plaintext_warned: OnceLock<()>,
 }
 
 impl AuthStorage {
@@ -424,6 +426,7 @@ impl AuthStorage {
             fallback_resolver: RwLock::new(None),
             errors: RwLock::new(Vec::new()),
             load_error: RwLock::new(None),
+            plaintext_warned: OnceLock::new(),
         }
     }
 
@@ -441,6 +444,7 @@ impl AuthStorage {
             fallback_resolver: RwLock::new(None),
             errors: RwLock::new(Vec::new()),
             load_error: RwLock::new(None),
+            plaintext_warned: OnceLock::new(),
         }
     }
 
@@ -453,6 +457,7 @@ impl AuthStorage {
             fallback_resolver: RwLock::new(None),
             errors: RwLock::new(Vec::new()),
             load_error: RwLock::new(None),
+            plaintext_warned: OnceLock::new(),
         }
     }
 
@@ -607,7 +612,9 @@ impl AuthStorage {
         self.credentials
             .write()
             .insert(provider.to_string(), AuthCredential::ApiKey { key });
-        self.persist();
+        if let Err(e) = self.persist() {
+            tracing::warn!("Failed to persist API key for '{}': {}", provider, e);
+        }
     }
 
     /// Set OAuth credential for a provider
@@ -648,7 +655,9 @@ impl AuthStorage {
                 provider_data,
             },
         );
-        self.persist();
+        if let Err(e) = self.persist() {
+            tracing::warn!("Failed to persist OAuth token for '{}': {}", provider, e);
+        }
     }
 
     /// Set session token for a provider
@@ -667,7 +676,9 @@ impl AuthStorage {
                 metadata,
             },
         );
-        self.persist();
+        if let Err(e) = self.persist() {
+            tracing::warn!("Failed to persist session for '{}': {}", provider, e);
+        }
     }
 
     /// Update an existing OAuth credential (for token refresh)
@@ -702,7 +713,9 @@ impl AuthStorage {
         }
 
         drop(creds);
-        self.persist();
+        if let Err(e) = self.persist() {
+            tracing::warn!("Failed to persist OAuth token update for '{}': {}", provider, e);
+        }
         Ok(())
     }
 
@@ -736,13 +749,17 @@ impl AuthStorage {
     /// Set a credential for a provider
     pub fn set(&self, provider: &str, credential: AuthCredential) {
         self.credentials.write().insert(provider.to_string(), credential);
-        self.persist();
+        if let Err(e) = self.persist() {
+            tracing::warn!("Failed to persist credential for '{}': {}", provider, e);
+        }
     }
 
     /// Remove credential for a provider
     pub fn remove(&self, provider: &str) {
         self.credentials.write().remove(provider);
-        self.persist();
+        if let Err(e) = self.persist() {
+            tracing::warn!("Failed to persist after removing '{}': {}", provider, e);
+        }
     }
 
     /// List all providers with credentials
@@ -763,7 +780,9 @@ impl AuthStorage {
     /// Clear all stored credentials
     pub fn clear(&self) {
         self.credentials.write().clear();
-        self.persist();
+        if let Err(e) = self.persist() {
+            tracing::warn!("Failed to persist after clearing credentials: {}", e);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -793,15 +812,29 @@ impl AuthStorage {
     }
 
     /// Persist to disk
-    fn persist(&self) {
+    fn persist(&self) -> Result<(), String> {
         if let Some(ref storage) = self.file_storage {
             let creds = self.credentials.read();
             if let Ok(json) = serde_json::to_string_pretty(&*creds) {
+                // Warn once about plaintext storage when not using keyring
+                #[cfg(not(feature = "keyring"))]
+                {
+                    self.plaintext_warned.get_or_init(|| {
+                        tracing::warn!(
+                            "Auth credentials are stored in plaintext. \
+                             Enable the 'keyring' feature for secure OS-level storage."
+                        );
+                    });
+                }
+
                 if let Err(e) = storage.write(&json) {
+                    tracing::error!("Failed to persist auth storage: {}", e);
                     self.record_error(e);
+                    return Err("persist failed".to_string());
                 }
             }
         }
+        Ok(())
     }
 
     // -----------------------------------------------------------------------

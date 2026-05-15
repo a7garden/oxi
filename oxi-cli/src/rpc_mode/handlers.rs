@@ -509,6 +509,12 @@ fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> 
 
         // ── Bash ───────────────────────────────────────────────────
         RpcCommand::Bash { id, command } => {
+            if is_dangerous_rpc_command(&command) {
+                tracing::warn!(
+                    "RPC bash command contains dangerous pattern: {:?}",
+                    command
+                );
+            }
             let output_result = std::process::Command::new("sh")
                 .arg("-c")
                 .arg(&command)
@@ -678,4 +684,16 @@ fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> 
             }
         }
     }
+}
+
+/// Check for dangerous patterns in RPC bash commands.
+fn is_dangerous_rpc_command(cmd: &str) -> bool {
+    let lower = cmd.to_lowercase();
+    lower.contains("/etc/passwd")
+        || lower.contains("id_rsa")
+        || lower.contains("curl | nc")
+        || lower.contains("/dev/tcp/")
+        || lower.contains("rm -rf /")
+        || lower.contains("> /etc/")
+        || lower.contains("mkfifo")
 }

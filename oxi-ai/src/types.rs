@@ -177,10 +177,18 @@ pub struct Usage {
 
 impl Usage {
     /// Recalculate `total_tokens` and per-component costs from raw token counts.
-    pub fn calculate_cost(&mut self) {
+    ///
+    /// If pricing parameters are provided, they override the default $1/M rate.
+    pub fn calculate_cost(
+        &mut self,
+        input_cost_per_million: Option<f64>,
+        output_cost_per_million: Option<f64>,
+    ) {
         self.total_tokens = self.input + self.output + self.cache_read + self.cache_write;
-        self.cost.input = (self.input as f64) / 1_000_000.0;
-        self.cost.output = (self.output as f64) / 1_000_000.0;
+        self.cost.input =
+            input_cost_per_million.unwrap_or(1.0) * self.input as f64 / 1_000_000.0;
+        self.cost.output =
+            output_cost_per_million.unwrap_or(1.0) * self.output as f64 / 1_000_000.0;
         self.cost.cache_read = (self.cache_read as f64) / 1_000_000.0;
         self.cost.cache_write = (self.cache_write as f64) / 1_000_000.0;
     }
@@ -411,7 +419,7 @@ mod tests {
             cache_write: 100_000,
             ..Default::default()
         };
-        usage.calculate_cost();
+        usage.calculate_cost(None, None);
 
         assert_eq!(usage.total_tokens, 1_800_000);
         assert_eq!(usage.cost.input, 1.0);

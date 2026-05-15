@@ -117,8 +117,12 @@ mod tests {
     fn serde_roundtrip() {
         let s = Secret::new("sk-test-123".to_string());
         let json = serde_json::to_string(&s).unwrap();
-        assert!(json.contains("sk-test-123"));
-        let back: Secret<String> = serde_json::from_str(&json).unwrap();
+        // Serialize should mask the value
+        assert!(json.contains("[REDACTED]"));
+        assert!(!json.contains("sk-test-123"));
+        // Deserialize still works (from non-redacted JSON)
+        let input_json = r#""sk-test-123""#;
+        let back: Secret<String> = serde_json::from_str(input_json).unwrap();
         assert_eq!(back.expose(), "sk-test-123");
     }
 }

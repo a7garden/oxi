@@ -14,6 +14,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::io::Read as _;
 use std::time::{Duration, Instant};
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -333,7 +334,6 @@ fn host_oxi_exec(
 
 
         let cwd = req.cwd.as_deref().unwrap_or(".");
-        let timeout_secs = req.timeout.min(120); // Cap at 2 min
 
         // Build full command string for deny-list checking (command + args)
         let full_cmd = if req.args.is_empty() {
@@ -367,7 +367,7 @@ fn host_oxi_exec(
         let timeout_ms = req.timeout.max(1000).min(30000);
         let timeout_dur = Duration::from_millis(timeout_ms);
 
-        // Spawn child process
+        // Spawn child process with piped stdout/stderr
         let mut child = match std::process::Command::new(&req.command)
             .args(&req.args)
             .current_dir(cwd)
@@ -389,70 +389,65 @@ fn host_oxi_exec(
             }
         };
 
-        // Wait for process with timeout enforcement
+        // Poll for completion with timeout enforcement
         let start = Instant::now();
-        let timed_out;
-        let exit_status;
+        let mut timed_out = false;
+        let mut exit_status: Option<std::process::ExitStatus> = None;
 
         loop {
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    // Process exited
-                    exit_status = status;
-                    timed_out = false;
+                    exit_status = Some(status);
                     break;
                 }
                 Ok(None) => {
-                    // Still running
                     if start.elapsed() >= timeout_dur {
-                        // Timeout reached — kill the process
+                        // Timeout reached — kill the process and clean up
+                        tracing::warn!(
+                            "oxi_exec: command '{}' timed out after {}ms",
+                            req.command, timeout_ms
+                        );
                         let _ = child.kill();
-                        let _ = child.wait(); // Clean up zombie
+                        let _ = child.wait(); // reap zombie
                         timed_out = true;
-                        exit_status = None;
                         break;
                     }
-                    // Brief sleep before checking again
                     std::thread::sleep(Duration::from_millis(50));
                 }
-                Err(e) => {
-                    // Error checking status — process may have exited
+                Err(_) => {
+                    // try_wait failed — fall back to blocking wait
                     match child.wait() {
-                        Ok(status) => {
-                            exit_status = Some(status);
-                            timed_out = false;
-                            break;
-                        }
-                        Err(_) => {
-                            timed_out = true;
-                            exit_status = None;
-                            break;
-                        }
+                        Ok(status) => { exit_status = Some(status); }
+                        Err(_) => { timed_out = true; }
                     }
+                    break;
                 }
             }
         }
 
-        // Collect output (only if process exited normally, not timed out)
-        let stdout_bytes = if !timed_out {
-            child.stdout.as_mut().map(|s| s.read_to_end(&mut Vec::new()).unwrap_or(0))
-        } else { 0 };
-        let stderr_bytes = if !timed_out {
-            child.stderr.as_mut().map(|s| s.read_to_end(&mut Vec::new()).unwrap_or(0))
-        } else { 0 };
+        // Collect stdout/stderr from the child pipes (read what was buffered)
+        let mut stdout_buf = Vec::new();
+        let mut stderr_buf = Vec::new();
+        if let Some(mut out) = child.stdout.take() {
+            let _ = out.read_to_end(&mut stdout_buf);
+        }
+        if let Some(mut err) = child.stderr.take() {
+            let _ = err.read_to_end(&mut stderr_buf);
+        }
 
-        let stdout = String::from_utf8_lossy(&stdout_bytes);
-        let stderr = String::from_utf8_lossy(&stderr_bytes);
+        let stdout = String::from_utf8_lossy(&stdout_buf);
+        let stderr = String::from_utf8_lossy(&stderr_buf);
+        let max_output = 50 * 1024; // 50KB
         let stdout_truncated = stdout.len() > max_output;
         let stderr_truncated = stderr.len() > max_output;
         let stdout_str: String = if stdout_truncated { stdout.chars().take(max_output).collect() } else { stdout.to_string() };
         let stderr_str: String = if stderr_truncated { stderr.chars().take(max_output).collect() } else { stderr.to_string() };
 
         let response = serde_json::json!({
-            "success": exit_status.map(|s| s.success()).unwrap_or(false),
+            "success": !timed_out && exit_status.map(|s| s.success()).unwrap_or(false),
             "stdout": stdout_str,
             "stderr": stderr_str,
-            "exit_code": exit_status.and_then(|s| s.code()).unwrap_or(-1),
+            "exit_code": if timed_out { -2 } else { exit_status.and_then(|s| s.code()).unwrap_or(-1) },
             "stdout_truncated": stdout_truncated,
             "stderr_truncated": stderr_truncated,
             "timed_out": timed_out,
@@ -462,31 +457,6 @@ fn host_oxi_exec(
         if !outputs.is_empty() {
             outputs[0] = plugin.memory_to_val(handle);
         }
-        Ok(())
-
-        // Truncate large outputs
-        let max_output = 50 * 1024; // 50KB
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout_truncated = stdout.len() > max_output;
-        let stderr_truncated = stderr.len() > max_output;
-        let stdout_str: String = if stdout_truncated { stdout.chars().take(max_output).collect() } else { stdout.to_string() };
-        let stderr_str: String = if stderr_truncated { stderr.chars().take(max_output).collect() } else { stderr.to_string() };
-
-                let response = serde_json::json!({
-                    "success": output.status.success(),
-                    "stdout": stdout_str,
-                    "stderr": stderr_str,
-                    "exit_code": output.status.code().unwrap_or(-1),
-                    "stdout_truncated": stdout_truncated,
-                    "stderr_truncated": stderr_truncated,
-                    "timed_out": timed_out,
-                });
-                let out = serde_json::to_string(&response)?;
-                let handle = plugin.memory_new(&out)?;
-                if !outputs.is_empty() {
-                    outputs[0] = plugin.memory_to_val(handle);
-                }
         Ok(())
     })();
     result.map_err(extism::Error::from)

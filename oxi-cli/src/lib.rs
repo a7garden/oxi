@@ -228,6 +228,10 @@ impl InteractiveSession {
 
 // ─── System prompt builder ───────────────────────────────────────────────────
 
+// TODO: This build_system_prompt duplicates the one in
+// app/agent_session_runtime.rs. Both delegate to prompt::system_prompt::build_system_prompt
+// but with different options (this one passes skills; the other passes tool_snippets).
+// Unify into a single shared utility that accepts all options.
 fn build_system_prompt(thinking_level: oxi_store::settings::ThinkingLevel, skill_contents: &[String]) -> String {
     let custom_prompt = match thinking_level {
         oxi_store::settings::ThinkingLevel::Off => {
@@ -326,7 +330,7 @@ impl App {
         } else {
             oxi_ai::CompactionStrategy::Disabled
         };
-        let auth = AuthStorage::new();
+        let auth = AuthStorage::shared();
         let api_key = auth.get_api_key(&provider_name);
 
         let config = AgentConfig {

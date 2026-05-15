@@ -437,10 +437,7 @@ pub fn measure_call_height(name: &str, arguments: &str) -> u16 {
 
     match name {
         "edit" => format_edit_call(&args, &ThemeStyles::default()).len() as u16,
-        "bash" => {
-            let lines = format_bash_call(&args, &ThemeStyles::default());
-            lines.len() as u16 + if get_int(&args, "timeout").is_some() { 1 } else { 0 }
-        }
+        "bash" => format_bash_call(&args, &ThemeStyles::default()).len() as u16,
         "read" => 1, // Always 1 line for read
         "write" => 1,
         "grep" | "find" | "ls" => 1,

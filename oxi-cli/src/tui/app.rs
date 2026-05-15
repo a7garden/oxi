@@ -977,7 +977,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             tracing::info!("[TUI] SendPrompt action triggered: {:?}", &value[..value.char_indices().take(50).last().map(|(i,c)| i + c.len_utf8()).unwrap_or(0)]);
                             state.add_user_message(value.clone());
                             state.input_history.insert(0, value.clone());
-                            if state.input_history.len() > 100 { state.input_history.pop(); }
+                            if state.input_history.len() > 100 { state.input_history.remove(0); }
                             state.history_index = 0;
                             state.start_streaming();
                             agent_session.reset_should_stop();
