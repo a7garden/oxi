@@ -28,26 +28,26 @@ impl<'a> AgentBuilder<'a> {
             system_prompt: None,
         }
     }
-    
+
     /// Set the working directory for file tools.
     pub fn workspace(mut self, dir: impl Into<PathBuf>) -> Self {
         self.workspace_dir = Some(dir.into());
         self
     }
-    
+
     /// Set a custom system prompt.
     pub fn system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
         self
     }
-    
+
     /// Register a tool.
     #[allow(unused_mut)]
     pub fn tool(mut self, tool: impl AgentTool + 'static) -> Self {
         self.tools.register(tool);
         self
     }
-    
+
     /// Register multiple tools.
     #[allow(unused_mut)]
     pub fn tools(mut self, tools: impl IntoIterator<Item = impl AgentTool + 'static>) -> Self {
@@ -56,32 +56,34 @@ impl<'a> AgentBuilder<'a> {
         }
         self
     }
-    
+
     /// Build the agent.
     pub fn build(self) -> anyhow::Result<Agent> {
-        // Resolve model to get the provider
+        // Resolve model from Oxi's instance registry
         let model = self.oxi.resolve_model(&self.config.model_id)?;
-        let provider = self.oxi.create_provider(&model.provider)?;
-        
-        // Convert Box<dyn Provider> to Arc<dyn Provider>
-        let provider: Arc<dyn Provider> = provider.into();
-        
+
+        // Create provider via Oxi (checks custom providers, then built-ins)
+        let provider_box = self.oxi.create_provider(&model.provider)?;
+        let provider: Arc<dyn Provider> = Arc::from(provider_box);
+
         // Merge workspace_dir into config
         let mut config = self.config.clone();
         config.workspace_dir = self.workspace_dir.or(config.workspace_dir);
         if let Some(ref prompt) = self.system_prompt {
             config.system_prompt = Some(prompt.clone());
         }
-        
+
+        // Create the agent
         let agent = Agent::new(provider, config);
-        
-        // Register tools from the builder's registry
+
+        // Register builder's tools into the agent's tool registry
+        let agent_tools = agent.tools();
         for name in self.tools.names() {
             if let Some(tool) = self.tools.get(&name) {
-                agent.tools().register_arc(tool);
+                agent_tools.register_arc(tool);
             }
         }
-        
+
         Ok(agent)
     }
 }

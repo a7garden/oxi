@@ -5,7 +5,7 @@ use super::path_security::PathGuard;
 use async_trait::async_trait;
 use regex::RegexBuilder;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -25,12 +25,21 @@ fn truncate_line(line: &str) -> (String, bool) {
 }
 
 /// GrepTool.
-pub struct GrepTool;
+pub struct GrepTool {
+    root_dir: PathBuf,
+}
 
 impl GrepTool {
-/// TODO.
+/// Create with current directory as root.
     pub fn new() -> Self {
-        Self
+        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Create with a specific working directory.
+    pub fn with_cwd(cwd: PathBuf) -> Self {
+        Self {
+            root_dir: cwd,
+        }
     }
 
     /// Check if a filename matches a simple glob pattern like "*.rs", "*.ts"
@@ -52,6 +61,7 @@ impl GrepTool {
     }
 
     async fn grep_impl(
+        root_dir: &Path,
         pattern: &str,
         path: &str,
         case_insensitive: bool,
@@ -62,7 +72,7 @@ impl GrepTool {
         max_results: usize,
     ) -> Result<(String, bool), ToolError> {
         // Security: validate path with PathGuard
-        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let guard = PathGuard::new(root_dir);
         let root = guard.validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
@@ -387,6 +397,7 @@ impl AgentTool for GrepTool {
             .unwrap_or(100) as usize;
 
         match Self::grep_impl(
+            &self.root_dir,
             pattern,
             path,
             case_insensitive,

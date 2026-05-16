@@ -5,17 +5,26 @@ use super::path_security::PathGuard;
 use async_trait::async_trait;
 use glob::Pattern;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
 
 /// FindTool.
-pub struct FindTool;
+pub struct FindTool {
+    root_dir: PathBuf,
+}
 
 impl FindTool {
-/// TODO.
+/// Create with current directory as root.
     pub fn new() -> Self {
-        Self
+        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Create with a specific working directory.
+    pub fn with_cwd(cwd: PathBuf) -> Self {
+        Self {
+            root_dir: cwd,
+        }
     }
 
     /// Check if a filename matches a simple glob pattern
@@ -95,6 +104,7 @@ impl FindTool {
     }
 
     async fn find_impl(
+        root_dir: &Path,
         path: &str,
         name: Option<&str>,
         file_type: Option<&str>,
@@ -104,7 +114,7 @@ impl FindTool {
         follow_symlinks: bool,
     ) -> Result<String, ToolError> {
         // Security: validate path with PathGuard
-        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let guard = PathGuard::new(root_dir);
         let root = guard.validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
@@ -377,6 +387,7 @@ impl AgentTool for FindTool {
             .unwrap_or(false);
 
         match Self::find_impl(
+            &self.root_dir,
             path,
             name,
             file_type,

@@ -22,6 +22,7 @@ pub use oxi_ai::{
     Provider, Model, Context, Message, ContentBlock,
     ProviderEvent, StreamOptions, CompactionStrategy,
     ProviderError, Api, Cost, InputModality,
+    ModelRegistry,
     lookup_model as oxi_lookup_model, get_models, get_providers,
     get_provider,
 };

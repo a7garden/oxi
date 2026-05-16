@@ -17,17 +17,26 @@ use super::{AgentTool, AgentToolResult, ToolError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
 
 /// EditTool.
-pub struct EditTool;
+pub struct EditTool {
+    root_dir: PathBuf,
+}
 
 impl EditTool {
-/// TODO.
+/// Create with current directory as root.
     pub fn new() -> Self {
-        Self
+        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Create with a specific working directory.
+    pub fn with_cwd(cwd: PathBuf) -> Self {
+        Self {
+            root_dir: cwd,
+        }
     }
 
     /// Prepare edit arguments, handling both legacy and multi-edit formats.
@@ -89,9 +98,9 @@ impl EditTool {
     }
 
     /// Apply edits to a file with full BOM/line-ending handling and diff output.
-    async fn apply_edits(input: &EditInput) -> Result<EditOutput, ToolError> {
+    async fn apply_edits(root_dir: &Path, input: &EditInput) -> Result<EditOutput, ToolError> {
         // Security: validate path with PathGuard
-        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let guard = PathGuard::new(root_dir);
         let validated_path = guard.validate_traversal(Path::new(&input.path))
             .map_err(|e| e.to_string())?;
         let path = validated_path.as_path();
@@ -270,7 +279,7 @@ impl AgentTool for EditTool {
     ) -> Result<AgentToolResult, ToolError> {
         let input = Self::prepare_arguments(&params);
 
-        match Self::apply_edits(&input).await {
+        match Self::apply_edits(&self.root_dir, &input).await {
             Ok(output) => {
                 let mut result =
                     AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));
@@ -354,7 +363,7 @@ mod tests {
             }],
             dry_run: false,
         };
-        let result = EditTool::apply_edits(&input).await;
+        let result = EditTool::apply_edits(Path::new("."), &input).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Cannot read file"));
     }
@@ -373,7 +382,7 @@ mod tests {
             }],
             dry_run: true,
         };
-        let output = EditTool::apply_edits(&input).await.unwrap();
+        let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(!output.applied);
         assert!(output.diff.contains("-hello"));
         assert!(output.diff.contains("+goodbye"));
@@ -399,7 +408,7 @@ mod tests {
             }],
             dry_run: false,
         };
-        let output = EditTool::apply_edits(&input).await.unwrap();
+        let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(output.applied);
         assert!(output.message.contains("1 edit(s)"));
 
@@ -427,7 +436,7 @@ mod tests {
             ],
             dry_run: false,
         };
-        let output = EditTool::apply_edits(&input).await.unwrap();
+        let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(output.applied);
         assert!(output.message.contains("2 edit(s)"));
 
@@ -449,7 +458,7 @@ mod tests {
             }],
             dry_run: false,
         };
-        EditTool::apply_edits(&input).await.unwrap();
+        EditTool::apply_edits(Path::new("."), &input).await.unwrap();
 
         let content = fs::read_to_string(&file_path).await.unwrap();
         assert_eq!(content, "goodbye\r\nworld\r\n");
@@ -471,7 +480,7 @@ mod tests {
             }],
             dry_run: false,
         };
-        EditTool::apply_edits(&input).await.unwrap();
+        EditTool::apply_edits(Path::new("."), &input).await.unwrap();
 
         let content = fs::read_to_string(&file_path).await.unwrap();
         assert!(content.starts_with('\u{feff}'));

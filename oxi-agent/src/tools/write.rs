@@ -280,7 +280,7 @@ mod tests {
         let path = tmp.path().join("test.txt");
         let path_str = path.to_str().unwrap();
 
-        let result = WriteTool::write_file_impl(path_str, "hello world\nline 2", false).await;
+        let result = WriteTool::write_file_impl(Path::new("."), path_str, "hello world\nline 2", false).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -297,7 +297,7 @@ mod tests {
         let path = tmp.path().join("a/b/c/test.txt");
         let path_str = path.to_str().unwrap();
 
-        let result = WriteTool::write_file_impl(path_str, "deep nested", false).await;
+        let result = WriteTool::write_file_impl(Path::new("."), path_str, "deep nested", false).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -313,7 +313,7 @@ mod tests {
         // Create initial file
         std::fs::write(&path, "old content").unwrap();
 
-        let result = WriteTool::write_file_impl(path_str, "new content", false).await;
+        let result = WriteTool::write_file_impl(Path::new("."), path_str, "new content", false).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -330,12 +330,12 @@ mod tests {
         let path_str = path.to_str().unwrap();
 
         // Write initial content
-        WriteTool::write_file_impl(path_str, "line 1\n", false)
+        WriteTool::write_file_impl(Path::new("."), path_str, "line 1\n", false)
             .await
             .unwrap();
 
         // Append to it
-        let result = WriteTool::write_file_impl(path_str, "line 2\n", true).await;
+        let result = WriteTool::write_file_impl(Path::new("."), path_str, "line 2\n", true).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -351,7 +351,7 @@ mod tests {
         let path = tmp.path().join("new.txt");
         let path_str = path.to_str().unwrap();
 
-        let result = WriteTool::write_file_impl(path_str, "appended content", true).await;
+        let result = WriteTool::write_file_impl(Path::new("."), path_str, "appended content", true).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -360,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_path_traversal_blocked() {
-        let result = WriteTool::write_file_impl("../../etc/passwd", "hack", false).await;
+        let result = WriteTool::write_file_impl(Path::new("."), "../../etc/passwd", "hack", false).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Path traversal"));
     }
@@ -371,7 +371,7 @@ mod tests {
         let path = tmp.path().join("empty.txt");
         let path_str = path.to_str().unwrap();
 
-        let result = WriteTool::write_file_impl(path_str, "", false).await;
+        let result = WriteTool::write_file_impl(Path::new("."), path_str, "", false).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -390,7 +390,7 @@ mod tests {
         let lines: Vec<String> = (1..=100).map(|i| format!("line {}", i)).collect();
         let content = lines.join("\n");
 
-        let result = WriteTool::write_file_impl(path_str, &content, false).await;
+        let result = WriteTool::write_file_impl(Path::new("."), path_str, &content, false).await;
         assert!(result.is_ok());
 
         let msg = result.unwrap();

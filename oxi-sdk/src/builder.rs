@@ -78,13 +78,13 @@ impl OxiBuilder {
     }
 
     /// Register a custom tool.
-    pub fn tool(mut self, tool: impl oxi_agent::AgentTool + 'static) -> Self {
+    pub fn tool(self, tool: impl oxi_agent::AgentTool + 'static) -> Self {
         self.tools.register(tool);
         self
     }
 
     /// Register a custom model.
-    pub fn model(mut self, model: Model) -> Self {
+    pub fn model(self, model: Model) -> Self {
         self.models.register(model);
         self
     }
