@@ -65,33 +65,23 @@ impl PasteHandler {
     pub fn process_byte(&mut self, byte: u8) -> Option<u8> {
         match self.state {
             PasteState::Normal => {
-                if self.buffer.is_empty() && byte == 0x1B {
-                    self.buffer.push(byte);
-                    None
-                } else if !self.buffer.is_empty() && self.buffer[0] == 0x1B && byte == 0x5B {
-                    self.buffer.push(byte);
-                    None
-                } else if self.buffer.len() >= 2
-                    && self.buffer[0] == 0x1B
-                    && self.buffer[1] == 0x5B
-                    && byte == 0x32
-                {
-                    self.buffer.push(byte);
-                    None
-                } else if self.buffer.len() >= 3
-                    && self.buffer[0] == 0x1B
-                    && self.buffer[1] == 0x5B
-                    && self.buffer[2] == 0x32
-                    && byte == 0x30
-                {
-                    self.buffer.push(byte);
-                    None
-                } else if self.buffer.len() >= 4
-                    && self.buffer[0] == 0x1B
-                    && self.buffer[1] == 0x5B
-                    && self.buffer[2] == 0x32
-                    && self.buffer[3] == 0x30
-                    && byte == 0x30
+                if (self.buffer.is_empty() && byte == 0x1B)
+                    || (!self.buffer.is_empty() && self.buffer[0] == 0x1B && byte == 0x5B)
+                    || (self.buffer.len() >= 2
+                        && self.buffer[0] == 0x1B
+                        && self.buffer[1] == 0x5B
+                        && byte == 0x32)
+                    || (self.buffer.len() >= 3
+                        && self.buffer[0] == 0x1B
+                        && self.buffer[1] == 0x5B
+                        && self.buffer[2] == 0x32
+                        && byte == 0x30)
+                    || (self.buffer.len() >= 4
+                        && self.buffer[0] == 0x1B
+                        && self.buffer[1] == 0x5B
+                        && self.buffer[2] == 0x32
+                        && self.buffer[3] == 0x30
+                        && byte == 0x30)
                 {
                     self.buffer.push(byte);
                     None
@@ -114,33 +104,23 @@ impl PasteHandler {
                 }
             }
             PasteState::Pasting => {
-                if self.buffer.is_empty() && byte == 0x1B {
-                    self.buffer.push(byte);
-                    None
-                } else if !self.buffer.is_empty() && self.buffer[0] == 0x1B && byte == 0x5B {
-                    self.buffer.push(byte);
-                    None
-                } else if self.buffer.len() >= 2
-                    && self.buffer[0] == 0x1B
-                    && self.buffer[1] == 0x5B
-                    && byte == 0x32
-                {
-                    self.buffer.push(byte);
-                    None
-                } else if self.buffer.len() >= 3
-                    && self.buffer[0] == 0x1B
-                    && self.buffer[1] == 0x5B
-                    && self.buffer[2] == 0x32
-                    && byte == 0x30
-                {
-                    self.buffer.push(byte);
-                    None
-                } else if self.buffer.len() >= 4
-                    && self.buffer[0] == 0x1B
-                    && self.buffer[1] == 0x5B
-                    && self.buffer[2] == 0x32
-                    && self.buffer[3] == 0x30
-                    && byte == 0x31
+                if (self.buffer.is_empty() && byte == 0x1B)
+                    || (!self.buffer.is_empty() && self.buffer[0] == 0x1B && byte == 0x5B)
+                    || (self.buffer.len() >= 2
+                        && self.buffer[0] == 0x1B
+                        && self.buffer[1] == 0x5B
+                        && byte == 0x32)
+                    || (self.buffer.len() >= 3
+                        && self.buffer[0] == 0x1B
+                        && self.buffer[1] == 0x5B
+                        && self.buffer[2] == 0x32
+                        && byte == 0x30)
+                    || (self.buffer.len() >= 4
+                        && self.buffer[0] == 0x1B
+                        && self.buffer[1] == 0x5B
+                        && self.buffer[2] == 0x32
+                        && self.buffer[3] == 0x30
+                        && byte == 0x31)
                 {
                     self.buffer.push(byte);
                     None

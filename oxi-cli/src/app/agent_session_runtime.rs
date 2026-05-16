@@ -250,10 +250,7 @@ pub fn create_agent_session_from_services(
                 "No model configured: effective_model={:?}",
                 settings.effective_model(None)
             );
-            match other {
-                Some(id) => id,
-                None => String::new(),
-            }
+            other.unwrap_or_default()
         }
     };
 

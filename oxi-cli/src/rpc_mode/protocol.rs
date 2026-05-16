@@ -814,18 +814,13 @@ impl JsonlLineReader {
         self.buffer.push_str(data);
         let mut lines = Vec::new();
 
-        loop {
-            match self.buffer.find('\n') {
-                Some(pos) => {
-                    let line = self.buffer[..pos].to_string();
-                    self.buffer = self.buffer[pos + 1..].to_string();
-                    // Strip trailing CR
-                    let trimmed = line.trim_end_matches('\r').to_string();
-                    if !trimmed.is_empty() {
-                        lines.push(trimmed);
-                    }
-                }
-                None => break,
+        while let Some(pos) = self.buffer.find('\n') {
+            let line = self.buffer[..pos].to_string();
+            self.buffer = self.buffer[pos + 1..].to_string();
+            // Strip trailing CR
+            let trimmed = line.trim_end_matches('\r').to_string();
+            if !trimmed.is_empty() {
+                lines.push(trimmed);
             }
         }
 

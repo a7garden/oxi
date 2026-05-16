@@ -393,7 +393,7 @@ fn host_oxi_exec(
         }
 
         // Clamp timeout to 1-30 seconds to prevent abuse
-        let timeout_ms = req.timeout.max(1000).min(30000);
+        let timeout_ms = req.timeout.clamp(1000, 30000);
         let timeout_dur = Duration::from_millis(timeout_ms);
 
         // Spawn child process with piped stdout/stderr

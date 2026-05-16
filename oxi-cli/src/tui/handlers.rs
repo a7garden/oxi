@@ -98,7 +98,6 @@ async fn handle_key(
                 }
             }
 
-            let value = value; // re-bind after slash check
             if state.is_agent_busy {
                 // Agent busy — queue as steering message
                 state.add_system_message(format!(
@@ -110,7 +109,7 @@ async fn handle_key(
                     state.input_history.remove(0);
                 }
                 state.history_index = 0;
-                let _ = session.steer(value);
+                std::mem::drop(session.steer(value));
                 state.input_clear();
                 return None;
             }

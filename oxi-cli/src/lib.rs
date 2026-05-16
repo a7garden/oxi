@@ -1,6 +1,6 @@
 #![warn(missing_docs)]
 #![warn(clippy::unwrap_used)]
-#![allow(clippy::unwrap_used_in_tests)]
+#![allow(unknown_lints)]
 
 //! oxi: CLI coding harness
 //!

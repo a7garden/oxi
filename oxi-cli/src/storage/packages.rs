@@ -85,7 +85,7 @@ impl std::fmt::Display for ResourceKind {
     }
 }
 
-/// All resource kinds for iteration
+// All resource kinds for iteration
 
 /// Package manifest describing bundled resources
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -407,11 +407,7 @@ fn parse_git_source(source: &str) -> ParsedSource {
         } else {
             split_git_path_ref(path_part)
         };
-        let repo = if path_part.ends_with(".git") {
-            format!("git@{}:{}", host, path_part)
-        } else {
-            format!("git@{}:{}", host, path_part)
-        };
+        let repo = format!("git@{}:{}", host, path_part);
         let host = host.to_string();
         return ParsedSource::Git {
             repo,

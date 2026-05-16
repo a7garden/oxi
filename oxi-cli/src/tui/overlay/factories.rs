@@ -20,6 +20,7 @@ use ratatui::{layout::Rect, style::Style, Frame};
 
 type SharedAppState = Arc<Mutex<*mut crate::tui::app::AppState>>;
 
+#[allow(clippy::arc_with_non_send_sync)]
 fn share_state(state: &mut crate::tui::app::AppState) -> SharedAppState {
     Arc::new(Mutex::new(state as *mut _))
 }

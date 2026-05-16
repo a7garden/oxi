@@ -1175,21 +1175,21 @@ fn render_markdown_with_options(input: &str, options: &HtmlExportOptions) -> Str
         }
 
         // ── Headings ──────────────────────────────────────────────
-        if line.starts_with("### ") {
+        if let Some(rest) = line.strip_prefix("### ") {
             out.push_str("<h3>");
-            out.push_str(&render_inline(&line[4..]));
+            out.push_str(&render_inline(rest));
             out.push_str("</h3>\n");
             continue;
         }
-        if line.starts_with("## ") {
+        if let Some(rest) = line.strip_prefix("## ") {
             out.push_str("<h2>");
-            out.push_str(&render_inline(&line[3..]));
+            out.push_str(&render_inline(rest));
             out.push_str("</h2>\n");
             continue;
         }
-        if line.starts_with("# ") {
+        if let Some(rest) = line.strip_prefix("# ") {
             out.push_str("<h1>");
-            out.push_str(&render_inline(&line[2..]));
+            out.push_str(&render_inline(rest));
             out.push_str("</h1>\n");
             continue;
         }

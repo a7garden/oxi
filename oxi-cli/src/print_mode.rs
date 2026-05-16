@@ -212,56 +212,52 @@ async fn run_single_prompt(
                                 last_text.push_str(text);
                             }
                             // AgentLoop MessageUpdate — extract text from snapshot
-                            AgentEvent::MessageUpdate { message, .. } => {
-                                if let oxi_ai::Message::Assistant(asst) = message {
-                                    // Only extract Text blocks (matching pi's print-mode.ts behavior).
-                                    // GLM fallback: if no Text blocks exist but Thinking
-                                    // blocks do, use Thinking content since GLM puts all
-                                    // output in reasoning_content.
-                                    let text_only: String = asst.content.iter()
+                            AgentEvent::MessageUpdate { message: oxi_ai::Message::Assistant(asst), .. } => {
+                                // Only extract Text blocks (matching pi's print-mode.ts behavior).
+                                // GLM fallback: if no Text blocks exist but Thinking
+                                // blocks do, use Thinking content since GLM puts all
+                                // output in reasoning_content.
+                                let text_only: String = asst.content.iter()
+                                    .filter_map(|b| match b {
+                                        oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                if !text_only.is_empty() {
+                                    last_text = text_only;
+                                } else {
+                                    // GLM fallback: use Thinking blocks when no Text
+                                    let thinking_text: String = asst.content.iter()
                                         .filter_map(|b| match b {
-                                            oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                            oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
                                             _ => None,
                                         })
                                         .collect();
-                                    if !text_only.is_empty() {
-                                        last_text = text_only;
-                                    } else {
-                                        // GLM fallback: use Thinking blocks when no Text
-                                        let thinking_text: String = asst.content.iter()
-                                            .filter_map(|b| match b {
-                                                oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
-                                                _ => None,
-                                            })
-                                            .collect();
-                                        if !thinking_text.is_empty() {
-                                            last_text = thinking_text;
-                                        }
+                                    if !thinking_text.is_empty() {
+                                        last_text = thinking_text;
                                     }
                                 }
                             }
-                            AgentEvent::MessageEnd { message } => {
+                            AgentEvent::MessageEnd { message: oxi_ai::Message::Assistant(asst) } => {
                                 // Finalize last_text from the completed message snapshot
-                                if let oxi_ai::Message::Assistant(asst) = message {
-                                    let text_only: String = asst.content.iter()
+                                let text_only: String = asst.content.iter()
+                                    .filter_map(|b| match b {
+                                        oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                        _ => None,
+                                    })
+                                    .collect();
+                                if !text_only.is_empty() {
+                                    last_text = text_only;
+                                } else {
+                                    // GLM fallback
+                                    let thinking_text: String = asst.content.iter()
                                         .filter_map(|b| match b {
-                                            oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                            oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
                                             _ => None,
                                         })
                                         .collect();
-                                    if !text_only.is_empty() {
-                                        last_text = text_only;
-                                    } else {
-                                        // GLM fallback
-                                        let thinking_text: String = asst.content.iter()
-                                            .filter_map(|b| match b {
-                                                oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
-                                                _ => None,
-                                            })
-                                            .collect();
-                                        if !thinking_text.is_empty() {
-                                            last_text = thinking_text;
-                                        }
+                                    if !thinking_text.is_empty() {
+                                        last_text = thinking_text;
                                     }
                                 }
                             }
