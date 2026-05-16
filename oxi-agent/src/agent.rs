@@ -256,6 +256,7 @@ impl Agent {
         let compaction_strategy = inner.config.compaction_strategy.clone();
         let context_window = inner.config.context_window;
         let api_key = inner.config.api_key.clone();
+        let workspace_dir = inner.config.workspace_dir.clone();
         drop(inner); // release read lock
 
         // Build AgentLoopConfig from Agent's config
@@ -277,7 +278,7 @@ impl Agent {
             auto_retry_max_attempts: 3,
             auto_retry_base_delay_ms: 1000,
             api_key,
-            workspace_dir: None,
+            workspace_dir,
         };
 
         // Create AgentLoop. We give it a NEW SharedState and sync back after.

@@ -341,6 +341,7 @@ impl App {
             compaction_instruction: None,
             context_window: 128_000,
             api_key,
+            workspace_dir: None,
         };
 
         let agent = Arc::new(Agent::new(Arc::from(provider), config));
