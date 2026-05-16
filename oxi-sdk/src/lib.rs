@@ -22,8 +22,8 @@ pub use oxi_ai::{
     Provider, Model, Context, Message, ContentBlock,
     ProviderEvent, StreamOptions, CompactionStrategy,
     ProviderError, Api, Cost, InputModality,
-    model_registry::{lookup_model, get_models, get_providers},
-    providers::get_provider,
+    lookup_model as oxi_lookup_model, get_models, get_providers,
+    get_provider,
 };
 
 // Re-export from oxi-agent  

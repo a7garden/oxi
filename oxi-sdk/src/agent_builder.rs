@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use oxi_ai::{Model, Provider};
+use oxi_ai::Provider;
 use oxi_agent::{
     Agent, AgentLoop, AgentLoopConfig, AgentConfig,
     ToolRegistry, AgentTool,
@@ -14,7 +14,7 @@ use crate::builder::Oxi;
 /// Builder for creating an agent with custom configuration.
 pub struct AgentBuilder<'a> {
     oxi: &'a Oxi,
-    config: AgentConfig,
+    config: oxi_agent::AgentConfig,
     tools: ToolRegistry,
     workspace_dir: Option<PathBuf>,
     system_prompt: Option<String>,
@@ -22,7 +22,7 @@ pub struct AgentBuilder<'a> {
 }
 
 impl<'a> AgentBuilder<'a> {
-    pub fn new(oxi: &'a Oxi, config: AgentConfig) -> Self {
+    pub fn new(oxi: &'a Oxi, config: oxi_agent::AgentConfig) -> Self {
         Self {
             oxi,
             config,
@@ -61,37 +61,14 @@ impl<'a> AgentBuilder<'a> {
     
     /// Build the agent.
     pub fn build(self) -> anyhow::Result<Agent> {
-        // Resolve model
+        // Resolve model to get the provider
         let model = self.oxi.resolve_model(&self.config.model_id)?;
         let provider = self.oxi.create_provider(&model.provider)?;
         
-        // Build AgentLoopConfig
-        let loop_config = AgentLoopConfig {
-            model_id: self.config.model_id.clone(),
-            system_prompt: self.system_prompt.or(self.config.system_prompt.clone()),
-            temperature: self.config.temperature.unwrap_or(1.0) as f32,
-            max_tokens: self.config.max_tokens.unwrap_or(4096) as u32,
-            max_iterations: self.config.max_iterations,
-            tool_execution: oxi_agent::ToolExecutionMode::Parallel,
-            compaction_strategy: self.config.compaction_strategy.clone(),
-            context_window: self.config.context_window,
-            compaction_instruction: self.config.compaction_instruction.clone(),
-            session_id: None,
-            transport: None,
-            compact_on_start: false,
-            max_retry_delay_ms: None,
-            auto_retry_enabled: true,
-            auto_retry_max_attempts: 3,
-            auto_retry_base_delay_ms: 2000,
-            api_key: self.config.api_key.clone(),
-        };
+        // Convert Box<dyn Provider> to Arc<dyn Provider>
+        let provider: Arc<dyn Provider> = provider.into();
         
-        // Create AgentLoop with the provider
-        let state = oxi_agent::SharedState::new();
-        let tools = Arc::new(self.tools);
-        let _agent_loop = AgentLoop::new(provider, loop_config, tools, state);
-        
-        // Create Agent directly with the provider
+        // Create Agent with the provider
         Ok(Agent::new(provider, self.config.clone()))
     }
 }

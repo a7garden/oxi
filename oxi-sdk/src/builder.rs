@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use oxi_ai::{Provider, Model};
-use oxi_agent::{Agent, AgentLoop, AgentLoopConfig, ToolRegistry, get_provider as agent_get_provider};
+use oxi_agent::{Agent, AgentLoop, AgentLoopConfig, ToolRegistry};
 
 use crate::agent_builder::AgentBuilder;
 
@@ -18,7 +18,7 @@ pub struct Oxi {
 
 impl Oxi {
     /// Create an agent builder with the given config.
-    pub fn agent(&self, config: AgentConfig) -> AgentBuilder<'_> {
+    pub fn agent(&self, config: oxi_agent::AgentConfig) -> AgentBuilder<'_> {
         AgentBuilder::new(self, config)
     }
 
@@ -35,13 +35,13 @@ impl Oxi {
         } else {
             ("anthropic", parts[0])
         };
-        oxi_ai::model_registry::lookup_model(provider, model)
+        crate::oxi_lookup_model(provider, model)
             .ok_or_else(|| anyhow::anyhow!("Model '{}' not found", model_id))
     }
     
     /// Create a provider instance for a given provider name.
-    pub fn create_provider(&self, name: &str) -> Result<Arc<dyn Provider>> {
-        oxi_ai::providers::get_provider(name)
+    pub fn create_provider(&self, name: &str) -> Result<Box<dyn Provider>> {
+        crate::get_provider(name)
             .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name))
     }
 }
