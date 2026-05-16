@@ -228,11 +228,10 @@ impl ChatViewState {
 
     fn append_text(&mut self, text: &str) {
         if let Some(ref mut s) = self.streaming {
-            // Providers sometimes emit whitespace-only text around tool calls.
-            // Rendering that literally creates large blank gaps in the chat view.
-            // Skip whitespace-only deltas entirely — paragraph breaks within text
-            // come as part of non-whitespace deltas (e.g., "text\n\nmore text").
-            if text.trim().is_empty() {
+            // Pure whitespace (no newlines) is noise from providers around tool calls.
+            // But \n and \n\n deltas carry paragraph breaks that are essential for
+            // markdown structure (headers, tables, lists). Keep them.
+            if text.trim().is_empty() && !text.contains('\n') {
                 return;
             }
 
@@ -660,8 +659,6 @@ fn is_box_block(block: &ContentBlock) -> bool {
 fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     let mut entries = Vec::new();
     let mut y: u16 = 0;
-    // Reserve 1 column for the vertical scrollbar so content doesn't overlap.
-    let usable_width = width.saturating_sub(1); // used by block_to_layout_kind calls
 
     let mut rendered_any_message = false;
 
@@ -708,8 +705,8 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             }
             prev_was_box = is_box;
 
-            let kind = block_to_layout_kind(block, msg.role, usable_width);
-            let h = measure_kind(&kind, usable_width);
+            let kind = block_to_layout_kind(block, msg.role, width);
+            let h = measure_kind(&kind, width);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
@@ -741,8 +738,8 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             }
             prev_was_box = is_box;
 
-            let kind = block_to_layout_kind(block, MessageRole::Assistant, usable_width);
-            let h = measure_kind(&kind, usable_width);
+            let kind = block_to_layout_kind(block, MessageRole::Assistant, width);
+            let h = measure_kind(&kind, width);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
@@ -1072,11 +1069,10 @@ impl StatefulWidget for ChatView<'_> {
 
 
         // Create ScrollView with virtual buffer sized to total content.
-        // Horizontal scrollbar disabled — chat wraps to width.
-        // Vertical scrollbar: show only when actively scrolling.
+        // No scrollbar — scrolling via mouse wheel / keyboard.
         let size = ratatui::layout::Size::new(inner_width, total_height.max(area.height));
         let mut scroll_view = ScrollView::new(size)
-            .vertical_scrollbar_visibility(ScrollbarVisibility::Automatic)
+            .vertical_scrollbar_visibility(ScrollbarVisibility::Never)
             .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
 
         // Render each layout entry into the virtual buffer.
