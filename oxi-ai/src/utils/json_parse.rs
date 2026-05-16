@@ -137,9 +137,7 @@ pub fn parse_json_with_repair<T: serde::de::DeserializeOwned>(
 /// 3. Truncate at last valid position and retry
 ///
 /// Always returns a valid value, using `default` as fallback.
-pub fn parse_streaming_json<T: serde::de::DeserializeOwned + Default>(
-    json: &str,
-) -> T {
+pub fn parse_streaming_json<T: serde::de::DeserializeOwned + Default>(json: &str) -> T {
     let trimmed = json.trim();
     if trimmed.is_empty() {
         return T::default();
@@ -180,16 +178,8 @@ fn parse_partial_json<T: serde::de::DeserializeOwned>(json: &str) -> Option<T> {
         return None;
     }
 
-    let _close_char = if trimmed.starts_with('{') {
-        '}'
-    } else {
-        ']'
-    };
-    let _open_char = if trimmed.starts_with('{') {
-        '{'
-    } else {
-        '['
-    };
+    let _close_char = if trimmed.starts_with('{') { '}' } else { ']' };
+    let _open_char = if trimmed.starts_with('{') { '{' } else { '[' };
 
     // Track nesting depth
     let mut depth = 0;
@@ -234,9 +224,7 @@ fn parse_partial_json<T: serde::de::DeserializeOwned>(json: &str) -> Option<T> {
 
 /// Parse a streaming SSE data field as JSON, with robust error handling.
 /// Returns `None` for non-data lines or unparseable content.
-pub fn parse_sse_data<T: serde::de::DeserializeOwned + Default>(
-    line: &str,
-) -> Option<T> {
+pub fn parse_sse_data<T: serde::de::DeserializeOwned + Default>(line: &str) -> Option<T> {
     let line = line.trim();
 
     if !line.starts_with("data: ") {

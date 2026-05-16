@@ -85,24 +85,43 @@ fn test_jsonrpc_method_mapping() {
 
 #[test]
 fn test_jsonrpc_method_mapping_unknown() {
-    let cmd = protocol::jsonrpc_to_command("nonexistent", None, Some(Value::String("1".to_string())));
+    let cmd =
+        protocol::jsonrpc_to_command("nonexistent", None, Some(Value::String("1".to_string())));
     assert!(cmd.is_none());
 }
 
 #[test]
 fn test_jsonrpc_to_command_all_methods() {
     let methods = [
-        "prompt", "steer", "follow_up", "abort", "new_session",
-        "get_state", "set_model", "cycle_model", "get_available_models",
-        "set_thinking_level", "cycle_thinking_level",
-        "set_steering_mode", "set_follow_up_mode",
-        "compact", "set_auto_compaction",
-        "set_auto_retry", "abort_retry",
-        "bash", "abort_bash",
-        "get_session_stats", "export_html", "switch_session",
-        "fork", "clone", "get_fork_messages",
-        "get_last_assistant_text", "set_session_name",
-        "get_messages", "get_commands",
+        "prompt",
+        "steer",
+        "follow_up",
+        "abort",
+        "new_session",
+        "get_state",
+        "set_model",
+        "cycle_model",
+        "get_available_models",
+        "set_thinking_level",
+        "cycle_thinking_level",
+        "set_steering_mode",
+        "set_follow_up_mode",
+        "compact",
+        "set_auto_compaction",
+        "set_auto_retry",
+        "abort_retry",
+        "bash",
+        "abort_bash",
+        "get_session_stats",
+        "export_html",
+        "switch_session",
+        "fork",
+        "clone",
+        "get_fork_messages",
+        "get_last_assistant_text",
+        "set_session_name",
+        "get_messages",
+        "get_commands",
     ];
     for method in methods {
         let cmd = protocol::jsonrpc_to_command(method, None, Some(Value::Number(1.into())));
@@ -321,9 +340,8 @@ fn test_paste_handler_paste_start_sequence() {
 fn test_paste_handler_extract_image_png() {
     let mut handler = utils::PasteHandler::new();
     handler.buffer = vec![
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-        0x00, 0x00, 0x00, 0x0D,
-        0x49, 0x48, 0x44, 0x52,
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52,
     ];
     let result = handler.extract_image_data();
     assert!(result.is_some());
@@ -333,10 +351,7 @@ fn test_paste_handler_extract_image_png() {
 #[test]
 fn test_paste_handler_extract_image_jpeg() {
     let mut handler = utils::PasteHandler::new();
-    handler.buffer = vec![
-        0xFF, 0xD8, 0xFF, 0xE0,
-        0x00, 0x10, 0x4A, 0x46,
-    ];
+    handler.buffer = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46];
     let result = handler.extract_image_data();
     assert!(result.is_some());
     assert!(result.unwrap().starts_with(&[0xFF, 0xD8, 0xFF]));

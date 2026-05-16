@@ -10,8 +10,8 @@ pub mod registry;
 pub mod types;
 #[allow(missing_docs)]
 pub mod wasm;
-pub mod wasm_tool;
 pub mod wasm_hooks;
+pub mod wasm_tool;
 
 // Re-export types from submodules
 pub use crate::extensions::context::{ExtensionContext, ExtensionContextBuilder};
@@ -20,18 +20,20 @@ pub use crate::extensions::loading::{
     validate_extension, ValidatedExtension, SHARED_LIB_EXTENSION,
 };
 pub use crate::extensions::registry::{ExtensionErrorHandle, ExtensionRegistry, ExtensionRunner};
-pub use crate::extensions::wasm::{WasmExtensionManager, ExtensionInfo, WasmToolDef, WasmCommandDef};
-pub use crate::extensions::wasm_tool::WasmTool;
 pub use crate::extensions::types::{
-    AfterProviderResponseEvent, BashEvent, BeforeProviderRequestEvent, Command,
-    ContextEmitResult, ContextEvent, ExtensionError, ExtensionErrorListener,
-    ExtensionErrorRecord, ExtensionManifest, ExtensionPermission, ExtensionState,
-    InputEvent, InputEventResult, InputSource, ModelSelectEvent, ModelSelectSource,
-    ProviderRequestEmitResult, SessionBeforeCompactEvent, SessionBeforeEmitResult,
-    SessionBeforeForkEvent, SessionBeforeSwitchEvent, SessionBeforeTreeEvent,
-    SessionCompactEvent, SessionShutdownEvent, SessionShutdownReason, SessionSwitchReason,
-    SessionTreeEvent, ThinkingLevelSelectEvent, ToolCallEmitResult, ToolResultEmitResult,
+    AfterProviderResponseEvent, BashEvent, BeforeProviderRequestEvent, Command, ContextEmitResult,
+    ContextEvent, ExtensionError, ExtensionErrorListener, ExtensionErrorRecord, ExtensionManifest,
+    ExtensionPermission, ExtensionState, InputEvent, InputEventResult, InputSource,
+    ModelSelectEvent, ModelSelectSource, ProviderRequestEmitResult, SessionBeforeCompactEvent,
+    SessionBeforeEmitResult, SessionBeforeForkEvent, SessionBeforeSwitchEvent,
+    SessionBeforeTreeEvent, SessionCompactEvent, SessionShutdownEvent, SessionShutdownReason,
+    SessionSwitchReason, SessionTreeEvent, ThinkingLevelSelectEvent, ToolCallEmitResult,
+    ToolResultEmitResult,
 };
+pub use crate::extensions::wasm::{
+    ExtensionInfo, WasmCommandDef, WasmExtensionManager, WasmToolDef,
+};
+pub use crate::extensions::wasm_tool::WasmTool;
 
 // Re-export from oxi-agent
 pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
@@ -39,82 +41,155 @@ pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
 // The Extension trait
 /// Core trait that every oxi extension must implement.
 pub trait Extension: Send + Sync {
-/// TODO: document.
+    /// TODO: document.
     fn name(&self) -> &str;
-/// TODO: document.
+    /// TODO: document.
     fn description(&self) -> &str;
-/// TODO: document.
-    fn manifest(&self) -> ExtensionManifest { ExtensionManifest::new(self.name(), "0.0.0").with_description(self.description()) }
-/// TODO: document.
-    fn register_tools(&self) -> Vec<std::sync::Arc<dyn oxi_agent::AgentTool>> { vec![] }
-/// TODO: document.
-    fn register_commands(&self) -> Vec<Command> { vec![] }
-/// TODO: document.
+    /// TODO: document.
+    fn manifest(&self) -> ExtensionManifest {
+        ExtensionManifest::new(self.name(), "0.0.0").with_description(self.description())
+    }
+    /// TODO: document.
+    fn register_tools(&self) -> Vec<std::sync::Arc<dyn oxi_agent::AgentTool>> {
+        vec![]
+    }
+    /// TODO: document.
+    fn register_commands(&self) -> Vec<Command> {
+        vec![]
+    }
+    /// TODO: document.
     fn on_load(&self, _ctx: &ExtensionContext) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_unload(&self) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_message_sent(&self, _msg: &str) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_message_received(&self, _msg: &str) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_tool_call(&self, _tool: &str, _params: &serde_json::Value) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_tool_result(&self, _tool: &str, _result: &oxi_agent::AgentToolResult) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_session_start(&self, _session_id: &str) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_session_end(&self, _session_id: &str) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_settings_changed(&self, _settings: &oxi_store::settings::Settings) {}
-/// TODO: document.
+    /// TODO: document.
     fn on_event(&self, _event: &oxi_agent::AgentEvent) {}
-/// TODO: document.
-    fn on_before_tool_call(&self, _tool: &str, _args: &serde_json::Value) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn on_after_tool_call(&self, _tool: &str, _result: &oxi_agent::AgentToolResult) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn on_before_compaction(&self, _ctx: &crate::CompactionContext) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn on_after_compaction(&self, _summary: &str) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn on_error(&self, _error: &anyhow::Error) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn session_before_switch(&self, _event: &crate::extensions::types::SessionBeforeSwitchEvent) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn session_before_fork(&self, _event: &crate::extensions::types::SessionBeforeForkEvent) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn session_before_compact(&self, _event: &crate::extensions::types::SessionBeforeCompactEvent) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn session_compact(&self, _event: &crate::extensions::types::SessionCompactEvent) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
+    /// TODO: document.
+    fn on_before_tool_call(
+        &self,
+        _tool: &str,
+        _args: &serde_json::Value,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn on_after_tool_call(
+        &self,
+        _tool: &str,
+        _result: &oxi_agent::AgentToolResult,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn on_before_compaction(&self, _ctx: &crate::CompactionContext) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn on_after_compaction(&self, _summary: &str) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn on_error(&self, _error: &anyhow::Error) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn session_before_switch(
+        &self,
+        _event: &crate::extensions::types::SessionBeforeSwitchEvent,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn session_before_fork(
+        &self,
+        _event: &crate::extensions::types::SessionBeforeForkEvent,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn session_before_compact(
+        &self,
+        _event: &crate::extensions::types::SessionBeforeCompactEvent,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn session_compact(
+        &self,
+        _event: &crate::extensions::types::SessionCompactEvent,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
     fn session_shutdown(&self, _event: &crate::extensions::types::SessionShutdownEvent) {}
-/// TODO: document.
-    fn session_before_tree(&self, _event: &crate::extensions::types::SessionBeforeTreeEvent) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
+    /// TODO: document.
+    fn session_before_tree(
+        &self,
+        _event: &crate::extensions::types::SessionBeforeTreeEvent,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
     fn session_tree(&self, _event: &crate::extensions::types::SessionTreeEvent) {}
-/// TODO: document.
-    fn context(&self, _event: &mut crate::extensions::types::ContextEvent) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn before_provider_request(&self, _event: &mut crate::extensions::types::BeforeProviderRequestEvent) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
-    fn after_provider_response(&self, _event: &crate::extensions::types::AfterProviderResponseEvent) -> Result<(), anyhow::Error> { Ok(()) }
-/// TODO: document.
+    /// TODO: document.
+    fn context(
+        &self,
+        _event: &mut crate::extensions::types::ContextEvent,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn before_provider_request(
+        &self,
+        _event: &mut crate::extensions::types::BeforeProviderRequestEvent,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
+    fn after_provider_response(
+        &self,
+        _event: &crate::extensions::types::AfterProviderResponseEvent,
+    ) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+    /// TODO: document.
     fn model_select(&self, _event: &crate::extensions::types::ModelSelectEvent) {}
-/// TODO: document.
+    /// TODO: document.
     fn thinking_level_select(&self, _event: &crate::extensions::types::ThinkingLevelSelectEvent) {}
-/// TODO: document.
+    /// TODO: document.
     fn bash(&self, _event: &crate::extensions::types::BashEvent) {}
-/// TODO: document.
-    fn input(&self, _event: &crate::extensions::types::InputEvent) -> crate::extensions::types::InputEventResult { crate::extensions::types::InputEventResult::Continue }
+    /// TODO: document.
+    fn input(
+        &self,
+        _event: &crate::extensions::types::InputEvent,
+    ) -> crate::extensions::types::InputEventResult {
+        crate::extensions::types::InputEventResult::Continue
+    }
 }
 
 // Built-in "noop" extension
 /// pub.
 pub struct NoopExtension;
 impl Extension for NoopExtension {
-    fn name(&self) -> &str { "noop" }
-    fn description(&self) -> &str { "Built-in no-op extension" }
+    fn name(&self) -> &str {
+        "noop"
+    }
+    fn description(&self) -> &str {
+        "Built-in no-op extension"
+    }
 }
 
 // Test helpers
@@ -125,24 +200,57 @@ pub struct RecordingExtension {
 }
 #[cfg(test)]
 impl RecordingExtension {
-    pub fn new(name: impl Into<String>) -> Self { Self { name: name.into(), calls: std::sync::Mutex::new(Vec::new()) } }
-    pub fn push(&self, call: &str) { self.calls.lock().unwrap().push(call.to_string()); }
-    pub fn calls(&self) -> Vec<String> { self.calls.lock().unwrap().clone() }
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            calls: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+    pub fn push(&self, call: &str) {
+        self.calls.lock().unwrap().push(call.to_string());
+    }
+    pub fn calls(&self) -> Vec<String> {
+        self.calls.lock().unwrap().clone()
+    }
 }
 #[cfg(test)]
 impl Extension for RecordingExtension {
-    fn name(&self) -> &str { &self.name }
-    fn description(&self) -> &str { "recording test extension" }
-    fn on_load(&self, _ctx: &ExtensionContext) { self.push("on_load"); }
-    fn on_unload(&self) { self.push("on_unload"); }
-    fn on_message_sent(&self, msg: &str) { self.push(&format!("on_message_sent({})", msg)); }
-    fn on_message_received(&self, msg: &str) { self.push(&format!("on_message_received({})", msg)); }
-    fn on_tool_call(&self, tool: &str, _params: &serde_json::Value) { self.push(&format!("on_tool_call({})", tool)); }
-    fn on_tool_result(&self, tool: &str, _result: &oxi_agent::AgentToolResult) { self.push(&format!("on_tool_result({})", tool)); }
-    fn on_session_start(&self, session_id: &str) { self.push(&format!("on_session_start({})", session_id)); }
-    fn on_session_end(&self, session_id: &str) { self.push(&format!("on_session_end({})", session_id)); }
-    fn on_settings_changed(&self, _settings: &oxi_store::settings::Settings) { self.push("on_settings_changed"); }
-    fn on_event(&self, _event: &oxi_agent::AgentEvent) { self.push("on_event"); }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        "recording test extension"
+    }
+    fn on_load(&self, _ctx: &ExtensionContext) {
+        self.push("on_load");
+    }
+    fn on_unload(&self) {
+        self.push("on_unload");
+    }
+    fn on_message_sent(&self, msg: &str) {
+        self.push(&format!("on_message_sent({})", msg));
+    }
+    fn on_message_received(&self, msg: &str) {
+        self.push(&format!("on_message_received({})", msg));
+    }
+    fn on_tool_call(&self, tool: &str, _params: &serde_json::Value) {
+        self.push(&format!("on_tool_call({})", tool));
+    }
+    fn on_tool_result(&self, tool: &str, _result: &oxi_agent::AgentToolResult) {
+        self.push(&format!("on_tool_result({})", tool));
+    }
+    fn on_session_start(&self, session_id: &str) {
+        self.push(&format!("on_session_start({})", session_id));
+    }
+    fn on_session_end(&self, session_id: &str) {
+        self.push(&format!("on_session_end({})", session_id));
+    }
+    fn on_settings_changed(&self, _settings: &oxi_store::settings::Settings) {
+        self.push("on_settings_changed");
+    }
+    fn on_event(&self, _event: &oxi_agent::AgentEvent) {
+        self.push("on_event");
+    }
 }
 
 // Tests
@@ -234,10 +342,18 @@ mod tests {
     fn test_graceful_degradation_on_panic() {
         struct PanickingExtension;
         impl Extension for PanickingExtension {
-            fn name(&self) -> &str { "panicker" }
-            fn description(&self) -> &str { "Panics" }
-            fn on_load(&self, _ctx: &ExtensionContext) { panic!("intentional panic in on_load"); }
-            fn on_message_sent(&self, _msg: &str) { panic!("intentional panic in on_message_sent"); }
+            fn name(&self) -> &str {
+                "panicker"
+            }
+            fn description(&self) -> &str {
+                "Panics"
+            }
+            fn on_load(&self, _ctx: &ExtensionContext) {
+                panic!("intentional panic in on_load");
+            }
+            fn on_message_sent(&self, _msg: &str) {
+                panic!("intentional panic in on_message_sent");
+            }
         }
 
         let mut reg = ExtensionRegistry::new();
@@ -268,6 +384,4 @@ mod tests {
         assert!(runner.is_empty());
         assert_eq!(runner.len(), 0);
     }
-
 }
-

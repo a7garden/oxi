@@ -1,7 +1,6 @@
 #![allow(unused_doc_comments)]
 #![warn(missing_docs)]
 #![warn(clippy::unwrap_used)]
-#![allow(clippy::unwrap_used_in_tests)]
 
 //! oxi-ai: Unified LLM API for oxi
 //!
@@ -20,7 +19,9 @@ pub mod provider_registry;
 mod providers;
 
 #[allow(missing_docs)]
-pub mod register_builtins { pub use crate::providers::register_builtins::*; }
+pub mod register_builtins {
+    pub use crate::providers::register_builtins::*;
+}
 pub mod secret;
 mod tools;
 mod transform;
@@ -58,12 +59,15 @@ pub use messages::*;
 pub use providers::CacheRetention;
 
 /// Provider trait, streaming options, and provider registry.
-pub use providers::{get_provider, register_provider, unregister_provider, custom_provider_names, Provider, ProviderEvent, ProviderRegistry, StreamOptions};
+pub use providers::{
+    custom_provider_names, get_provider, register_provider, unregister_provider, Provider,
+    ProviderEvent, ProviderRegistry, StreamOptions,
+};
 
 /// Built-in provider helpers (re-exported from providers).
 pub use providers::register_builtins::{
-    create_builtin_provider, get_builtin_provider,
-    get_provider_env_key, get_provider_env_keys, get_all_provider_names, is_builtin_provider,
+    create_builtin_provider, get_all_provider_names, get_builtin_provider, get_provider_env_key,
+    get_provider_env_keys, is_builtin_provider,
 };
 
 /// OpenAI-compatible provider implementation.
@@ -110,7 +114,10 @@ mod model_registry;
 /// Runtime model registry for dynamically registered models.
 ///
 /// Unlike the static `model_db`, this supports adding/removing models at runtime.
-pub use model_registry::{get_model, get_models, get_providers, register_model, unregister_model, lookup_model, ModelRegistry};
+pub use model_registry::{
+    get_model, get_models, get_providers, lookup_model, register_model, unregister_model,
+    ModelRegistry,
+};
 
 // Static model database (comprehensive)
 pub mod model_db;

@@ -70,7 +70,7 @@ impl BedrockProvider {
         for line in content.lines() {
             let trimmed = line.trim();
             if let Some(value) = trimmed.strip_prefix("region") {
-                let value = value.trim_start_matches(|c: char| c == ' ' || c == '=').trim();
+                let value = value.trim_start_matches([' ', '=']).trim();
                 if !value.is_empty() {
                     return Some(value.to_string());
                 }
@@ -90,7 +90,8 @@ impl BedrockProvider {
             std::env::var("AWS_ACCESS_KEY_ID"),
             std::env::var("AWS_SECRET_ACCESS_KEY"),
         ) {
-            let region = std::env::var("AWS_REGION").unwrap_or_else(|_| self.default_region.clone());
+            let region =
+                std::env::var("AWS_REGION").unwrap_or_else(|_| self.default_region.clone());
             return Ok((access_key, secret_key, region));
         }
 
@@ -122,10 +123,10 @@ impl BedrockProvider {
                 continue;
             }
             if let Some(value) = trimmed.strip_prefix("aws_access_key_id") {
-                let value = value.trim_start_matches(|c: char| c == ' ' || c == '=').trim();
+                let value = value.trim_start_matches([' ', '=']).trim();
                 access_key = Some(value.to_string());
             } else if let Some(value) = trimmed.strip_prefix("aws_secret_access_key") {
-                let value = value.trim_start_matches(|c: char| c == ' ' || c == '=').trim();
+                let value = value.trim_start_matches([' ', '=']).trim();
                 secret_key = Some(value.to_string());
             }
         }
@@ -160,6 +161,7 @@ impl BedrockProvider {
     }
 
     /// Sign a request using AWS SigV4
+    #[allow(clippy::too_many_arguments)]
     fn sign_request(
         &self,
         method: &str,
@@ -190,10 +192,16 @@ impl BedrockProvider {
         let content_hash = hex_encode(hash_sha256(body));
 
         // Set required headers
-        headers.insert("content-type", "application/json".parse().expect("valid header value"));
+        headers.insert(
+            "content-type",
+            "application/json".parse().expect("valid header value"),
+        );
         headers.insert("host", host.parse().expect("valid header value"));
         headers.insert("x-amz-date", datetime.parse().expect("valid header value"));
-        headers.insert("x-amz-content-sha256", content_hash.parse().expect("valid header value"));
+        headers.insert(
+            "x-amz-content-sha256",
+            content_hash.parse().expect("valid header value"),
+        );
 
         // Build canonical request
         let canonical_request =
@@ -220,7 +228,10 @@ impl BedrockProvider {
             signature
         );
 
-        headers.insert("authorization", authorization.parse().expect("valid header value"));
+        headers.insert(
+            "authorization",
+            authorization.parse().expect("valid header value"),
+        );
 
         Ok(())
     }
@@ -278,11 +289,11 @@ fn build_canonical_request(
     } else {
         let mut parts: Vec<(String, String)> = query
             .split('&')
-            .filter_map(|part| {
+            .map(|part| {
                 let mut split = part.split('=');
                 let key = split.next().unwrap_or("");
                 let val = split.next().unwrap_or("");
-                Some((key.to_string(), val.to_string()))
+                (key.to_string(), val.to_string())
             })
             .collect();
         parts.sort_by(|a, b| a.0.cmp(&b.0));
@@ -419,7 +430,10 @@ impl Provider for BedrockProvider {
 
         // Add session token if present (for temporary credentials)
         if let Some(token) = session_token {
-            headers.insert("x-amz-security-token", token.parse().expect("valid header value"));
+            headers.insert(
+                "x-amz-security-token",
+                token.parse().expect("valid header value"),
+            );
         }
 
         // Sign the request
@@ -554,7 +568,7 @@ fn blocks_to_bedrock_content(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>, 
             ContentBlock::Image(img) => {
                 items.push(serde_json::json!({
                     "image": {
-                        "format": img.mime_type.split('/').last().unwrap_or("jpeg"),
+                        "format": img.mime_type.split('/').next_back().unwrap_or("jpeg"),
                         "source": {
                             "bytes": img.data,
                         },
@@ -756,7 +770,7 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // Bedrock ConverseStream event structure
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct BedrockEvent {
     #[serde(rename = "type")]
     type_: Option<String>,
@@ -769,7 +783,7 @@ struct BedrockEvent {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct ContentBlockRef {
     #[serde(rename = "type")]
     block_type: Option<String>,
@@ -787,7 +801,7 @@ impl ContentBlockRef {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct BedrockDelta {
     #[serde(rename = "type")]
     type_: Option<String>,
@@ -800,7 +814,7 @@ struct BedrockDelta {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct ToolUseDelta {
     #[serde(rename = "toolUseId")]
     _tool_use_id: Option<String>,
@@ -809,7 +823,7 @@ struct ToolUseDelta {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct BedrockMetadata {
     #[serde(rename = "stopReason")]
     stop_reason: Option<String>,
@@ -820,7 +834,7 @@ struct BedrockMetadata {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct BedrockUsage {
     #[serde(rename = "inputTokens")]
     input_tokens: Option<usize>,

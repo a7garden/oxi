@@ -29,16 +29,29 @@ impl WasmTool {
         description: String,
         schema: Value,
     ) -> Self {
-        Self { manager, tool_name, description, schema }
+        Self {
+            manager,
+            tool_name,
+            description,
+            schema,
+        }
     }
 }
 
 #[async_trait]
 impl AgentTool for WasmTool {
-    fn name(&self) -> &str { &self.tool_name }
-    fn label(&self) -> &str { &self.description }
-    fn description(&self) -> &str { &self.description }
-    fn parameters_schema(&self) -> Value { self.schema.clone() }
+    fn name(&self) -> &str {
+        &self.tool_name
+    }
+    fn label(&self) -> &str {
+        &self.description
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn parameters_schema(&self) -> Value {
+        self.schema.clone()
+    }
 
     async fn execute(
         &self,
@@ -50,18 +63,18 @@ impl AgentTool for WasmTool {
         let manager = self.manager.clone();
         let tool_name = self.tool_name.clone();
 
-        let result = tokio::task::spawn_blocking(move || {
-            manager.execute_tool(&tool_name, params)
-        })
-        .await
-        .map_err(|e| format!("WASM execution panicked: {}", e))?;
+        let result = tokio::task::spawn_blocking(move || manager.execute_tool(&tool_name, params))
+            .await
+            .map_err(|e| format!("WASM execution panicked: {}", e))?;
 
         match result {
             Ok(value) => {
-                let success = value.get("success")
+                let success = value
+                    .get("success")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);
-                let output = value.get("output")
+                let output = value
+                    .get("output")
                     .and_then(|v| v.as_str())
                     .unwrap_or("(no output)")
                     .to_string();
@@ -77,7 +90,8 @@ impl AgentTool for WasmTool {
                 }
             }
             Err(e) => Ok(AgentToolResult::error(format!(
-                "WASM tool '{}' error: {}", self.tool_name, e
+                "WASM tool '{}' error: {}",
+                self.tool_name, e
             ))),
         }
     }

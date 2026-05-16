@@ -133,7 +133,11 @@ fn load_providers(auth_store: &oxi_store::auth_storage::AuthStorage) -> Vec<Prov
             has_key,
             key_masked,
             is_custom: false,
-            base_url: if base_url.is_empty() { None } else { Some(base_url.to_string()) },
+            base_url: if base_url.is_empty() {
+                None
+            } else {
+                Some(base_url.to_string())
+            },
         });
     }
 
@@ -219,8 +223,7 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
         .find(|p| p.name == provider_name)
         .and_then(|p| p.base_url.clone())
         .or_else(|| {
-            oxi_ai::register_builtins::get_provider_base_url(provider_name)
-                .map(|s| s.to_string())
+            oxi_ai::register_builtins::get_provider_base_url(provider_name).map(|s| s.to_string())
         });
 
     let base_url = match base_url {
@@ -249,7 +252,7 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
 
     // Only fetch for OpenAI-compatible providers (api = openai-completions or openai-responses)
     let api_type = oxi_ai::register_builtins::get_provider_api(provider_name);
-    let is_openai_compatible = api_type.map_or(true, |api| {
+    let is_openai_compatible = api_type.is_none_or(|api| {
         matches!(
             api,
             oxi_ai::Api::OpenAiCompletions | oxi_ai::Api::OpenAiResponses
@@ -264,7 +267,11 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
         return;
     }
 
-    tracing::info!("Fetching models from {}/models for provider '{}'...", base_url, provider_name);
+    tracing::info!(
+        "Fetching models from {}/models for provider '{}'...",
+        base_url,
+        provider_name
+    );
 
     match oxi_ai::fetch_models_blocking(&base_url, &api_key) {
         Ok(model_ids) => {
@@ -288,7 +295,8 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
             tracing::warn!(
                 "Failed to fetch models from provider '{}': {}. \
                  Falling back to static model list.",
-                provider_name, e
+                provider_name,
+                e
             );
         }
     }
@@ -313,7 +321,11 @@ fn load_themes() -> Vec<String> {
 // ── Save settings ───────────────────────────────────────────────────────────
 
 /// Save the selected model and theme to settings.
-fn save_settings(model_id: &str, theme_name: &str, custom_base_urls: &[(String, String)]) -> Result<()> {
+fn save_settings(
+    model_id: &str,
+    theme_name: &str,
+    custom_base_urls: &[(String, String)],
+) -> Result<()> {
     let mut settings = oxi_store::settings::Settings::load().unwrap_or_default();
 
     // Split "provider/model" into separate fields
@@ -329,12 +341,14 @@ fn save_settings(model_id: &str, theme_name: &str, custom_base_urls: &[(String, 
     for (name, base_url) in custom_base_urls {
         let already_exists = settings.custom_providers.iter().any(|cp| cp.name == *name);
         if !already_exists {
-            settings.custom_providers.push(oxi_store::settings::CustomProvider {
-                name: name.clone(),
-                base_url: base_url.clone(),
-                api_key_env: format!("{}_API_KEY", name.to_uppercase().replace('-', "_")),
-                api: "openai-completions".to_string(),
-            });
+            settings
+                .custom_providers
+                .push(oxi_store::settings::CustomProvider {
+                    name: name.clone(),
+                    base_url: base_url.clone(),
+                    api_key_env: format!("{}_API_KEY", name.to_uppercase().replace('-', "_")),
+                    api: "openai-completions".to_string(),
+                });
         }
     }
 
@@ -355,16 +369,19 @@ fn draw_wizard(
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Title bar
-                Constraint::Min(10),    // Content
-                Constraint::Length(2),  // Footer
+                Constraint::Length(3), // Title bar
+                Constraint::Min(10),   // Content
+                Constraint::Length(2), // Footer
             ])
             .split(size);
 
         // Title bar
         let title = Paragraph::new(Line::from(vec![
             Span::styled(" 🦊 ", Style::default().fg(Color::Rgb(255, 165, 0))),
-            Span::styled("oxi Setup Wizard", Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "oxi Setup Wizard",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
         ]))
         .block(Block::default().borders(Borders::TOP));
         f.render_widget(title, chunks[0]);
@@ -381,9 +398,14 @@ fn draw_wizard(
         // Footer
         let footer_text = match state.step {
             0 => match &state.input_mode {
-                InputMode::Normal => "  ↑/↓ navigate · Enter: enter/change API key · d: delete · →: next · q: quit".to_string(),
+                InputMode::Normal => {
+                    "  ↑/↓ navigate · Enter: enter/change API key · d: delete · →: next · q: quit"
+                        .to_string()
+                }
                 InputMode::EditingApiKey { .. } => "  Enter: save · Esc: cancel".to_string(),
-                InputMode::AddingCustom { .. } => "  Tab: next field · Enter: save · Esc: cancel".to_string(),
+                InputMode::AddingCustom { .. } => {
+                    "  Tab: next field · Enter: save · Esc: cancel".to_string()
+                }
             },
             1 => {
                 if state.model_searching {
@@ -391,7 +413,7 @@ fn draw_wizard(
                 } else {
                     "  ↑/↓ navigate · /: search · Enter: select · ←: previous".to_string()
                 }
-            },
+            }
             2 => "  ↑/↓ navigate · Enter: select · ←: previous".to_string(),
             3 => "  Enter: quit".to_string(),
             _ => String::new(),
@@ -406,27 +428,21 @@ fn draw_wizard(
     Ok(())
 }
 
-fn draw_provider_step(
-    f: &mut ratatui::Frame,
-    state: &mut WizardState,
-    area: Rect,
-) {
+fn draw_provider_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
     match &state.input_mode {
         InputMode::Normal => draw_provider_list(f, state, area),
-        InputMode::EditingApiKey { provider_name, field_text } => {
-            draw_api_key_dialog(f, provider_name, field_text, area)
-        }
-        InputMode::AddingCustom { fields, active_field } => {
-            draw_custom_provider_dialog(f, fields, *active_field, area)
-        }
+        InputMode::EditingApiKey {
+            provider_name,
+            field_text,
+        } => draw_api_key_dialog(f, provider_name, field_text, area),
+        InputMode::AddingCustom {
+            fields,
+            active_field,
+        } => draw_custom_provider_dialog(f, fields, *active_field, area),
     }
 }
 
-fn draw_provider_list(
-    f: &mut ratatui::Frame,
-    state: &mut WizardState,
-    area: Rect,
-) {
+fn draw_provider_list(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
     let step_indicator = build_step_indicator(state.step);
 
     let items: Vec<ListItem> = state
@@ -442,11 +458,22 @@ fn draw_provider_list(
             let custom_tag = if p.is_custom { " (custom)" } else { "" };
 
             let line = Line::from(vec![
-                Span::styled(format!(" {} ", check), Style::default().fg(
-                    if p.has_key { Color::Green } else { Color::DarkGray }
-                )),
-                Span::styled(format!("{:<14}", p.name), Style::default().add_modifier(Modifier::BOLD)),
-                Span::styled(format!("[{}]", key_info), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!(" {} ", check),
+                    Style::default().fg(if p.has_key {
+                        Color::Green
+                    } else {
+                        Color::DarkGray
+                    }),
+                ),
+                Span::styled(
+                    format!("{:<14}", p.name),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("[{}]", key_info),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 Span::styled(custom_tag.to_string(), Style::default().fg(Color::Yellow)),
             ]);
             ListItem::new(line)
@@ -466,7 +493,7 @@ fn draw_provider_list(
         .block(
             Block::default()
                 .borders(Borders::NONE)
-                .title(step_indicator)
+                .title(step_indicator),
         )
         .highlight_style(
             Style::default()
@@ -475,28 +502,20 @@ fn draw_provider_list(
         );
 
     // Update list state selection
-    state.provider_list_state.select(Some(state.provider_selected));
+    state
+        .provider_list_state
+        .select(Some(state.provider_selected));
     f.render_stateful_widget(list, area, &mut state.provider_list_state);
 }
 
-fn draw_api_key_dialog(
-    f: &mut ratatui::Frame,
-    provider_name: &str,
-    field_text: &str,
-    area: Rect,
-) {
+fn draw_api_key_dialog(f: &mut ratatui::Frame, provider_name: &str, field_text: &str, area: Rect) {
     // Center the dialog
     let dialog_height = 7u16;
     let dialog_width = std::cmp::min(area.width, 60);
     let x = (area.width.saturating_sub(dialog_width)) / 2;
     let y = (area.height.saturating_sub(dialog_height)) / 2;
 
-    let dialog_area = Rect::new(
-        area.x + x,
-        area.y + y,
-        dialog_width,
-        dialog_height,
-    );
+    let dialog_area = Rect::new(area.x + x, area.y + y, dialog_width, dialog_height);
 
     let display_text = if field_text.is_empty() {
         String::new()
@@ -508,7 +527,10 @@ fn draw_api_key_dialog(
         Line::from(""),
         Line::from(vec![
             Span::styled("  API Key: ", Style::default().add_modifier(Modifier::BOLD)),
-            Span::styled(format!("[{:<width$}]", display_text, width = 30), Style::default()),
+            Span::styled(
+                format!("[{:<width$}]", display_text, width = 30),
+                Style::default(),
+            ),
             if field_text.is_empty() {
                 Span::styled("Enter your API key", Style::default().fg(Color::DarkGray))
             } else {
@@ -536,39 +558,32 @@ fn draw_custom_provider_dialog(
     let x = (area.width.saturating_sub(dialog_width)) / 2;
     let y = (area.height.saturating_sub(dialog_height)) / 2;
 
-    let dialog_area = Rect::new(
-        area.x + x,
-        area.y + y,
-        dialog_width,
-        dialog_height,
-    );
+    let dialog_area = Rect::new(area.x + x, area.y + y, dialog_width, dialog_height);
 
     let field_labels = ["Name", "Base URL", "API Key"];
     let lines: Vec<Line> = std::iter::once(Line::from(""))
-        .chain(
-            field_labels.iter().enumerate().map(|(i, label)| {
-                let display = if i == 2 && !fields[i].is_empty() {
-                    "*".repeat(fields[i].len())
+        .chain(field_labels.iter().enumerate().map(|(i, label)| {
+            let display = if i == 2 && !fields[i].is_empty() {
+                "*".repeat(fields[i].len())
+            } else {
+                fields[i].clone()
+            };
+            let is_active = i == active_field;
+            let style = if is_active {
+                Style::default().add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+            Line::from(vec![
+                Span::styled(format!("  {:<10}", format!("{}:", label)), style),
+                Span::styled(format!("[{:<width$}]", display, width = 35), style),
+                if is_active && fields[i].is_empty() {
+                    Span::styled("<enter>", Style::default().fg(Color::DarkGray))
                 } else {
-                    fields[i].clone()
-                };
-                let is_active = i == active_field;
-                let style = if is_active {
-                    Style::default().add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                Line::from(vec![
-                    Span::styled(format!("  {:<10}", format!("{}:", label)), style),
-                    Span::styled(format!("[{:<width$}]", display, width = 35), style),
-                    if is_active && fields[i].is_empty() {
-                        Span::styled("<enter>", Style::default().fg(Color::DarkGray))
-                    } else {
-                        Span::raw("")
-                    },
-                ])
-            }),
-        )
+                    Span::raw("")
+                },
+            ])
+        }))
         .collect();
 
     let block = Block::default()
@@ -579,11 +594,7 @@ fn draw_custom_provider_dialog(
     f.render_widget(para, dialog_area);
 }
 
-fn draw_model_step(
-    f: &mut ratatui::Frame,
-    state: &mut WizardState,
-    area: Rect,
-) {
+fn draw_model_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
     let step_indicator = build_step_indicator(state.step);
 
     // Filter models
@@ -595,8 +606,7 @@ fn draw_model_step(
             .models
             .iter()
             .filter(|m| {
-                m.id.to_lowercase().contains(&filter)
-                    || m.provider.to_lowercase().contains(&filter)
+                m.id.to_lowercase().contains(&filter) || m.provider.to_lowercase().contains(&filter)
             })
             .collect()
     };
@@ -606,7 +616,10 @@ fn draw_model_step(
     if state.model_searching {
         lines.push(Line::from(vec![
             Span::styled("  Search: ", Style::default().fg(Color::Yellow)),
-            Span::styled(&state.model_filter, Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &state.model_filter,
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw("_"),
         ]));
     }
@@ -625,7 +638,10 @@ fn draw_model_step(
                 format!("({})", m.provider),
                 Style::default().fg(Color::DarkGray),
             ),
-            Span::styled(format!(", {}", ctx_str), Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                format!(", {}", ctx_str),
+                Style::default().fg(Color::DarkGray),
+            ),
         ]));
     }
 
@@ -637,23 +653,21 @@ fn draw_model_step(
     f.render_widget(para, area);
 }
 
-fn draw_theme_step(
-    f: &mut ratatui::Frame,
-    state: &mut WizardState,
-    area: Rect,
-) {
+fn draw_theme_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
     let step_indicator = build_step_indicator(state.step);
 
     let items: Vec<ListItem> = state
         .themes
         .iter()
-        .map(|t| {
-            ListItem::new(Line::from(format!("  {}", t)))
-        })
+        .map(|t| ListItem::new(Line::from(format!("  {}", t))))
         .collect();
 
     let list = List::new(items)
-        .block(Block::default().borders(Borders::NONE).title(step_indicator))
+        .block(
+            Block::default()
+                .borders(Borders::NONE)
+                .title(step_indicator),
+        )
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
@@ -664,11 +678,7 @@ fn draw_theme_step(
     f.render_stateful_widget(list, area, &mut state.theme_list_state);
 }
 
-fn draw_done_step(
-    f: &mut ratatui::Frame,
-    state: &mut WizardState,
-    area: Rect,
-) {
+fn draw_done_step(f: &mut ratatui::Frame, state: &mut WizardState, area: Rect) {
     let settings_path_display = state.settings_path.display().to_string();
     let auth_path_display = state.auth_path.display().to_string();
 
@@ -676,7 +686,9 @@ fn draw_done_step(
         Line::from(""),
         Line::from(Span::styled(
             "  Settings saved!",
-            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
@@ -690,8 +702,8 @@ fn draw_done_step(
         Line::from(""),
         Line::from(Span::styled(
             "  Run 'oxi' to start.",
-            Style::default().add_modifier(Modifier::BOLD)),
-        ),
+            Style::default().add_modifier(Modifier::BOLD),
+        )),
     ];
 
     let block = Block::default().borders(Borders::NONE);
@@ -711,16 +723,15 @@ fn build_step_indicator(current_step: usize) -> Line<'static> {
         .iter()
         .flat_map(|(label, step)| {
             let style = if *step == current_step {
-                Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan)
-            } else if (*step as usize) < current_step {
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Cyan)
+            } else if *step < current_step {
                 Style::default().fg(Color::Green)
             } else {
                 Style::default().fg(Color::DarkGray)
             };
-            vec![
-                Span::styled(format!("  {}", label), style),
-                Span::raw(" "),
-            ]
+            vec![Span::styled(format!("  {}", label), style), Span::raw(" ")]
         })
         .collect();
 
@@ -729,7 +740,11 @@ fn build_step_indicator(current_step: usize) -> Line<'static> {
 
 // ── Event handling ──────────────────────────────────────────────────────────
 
-fn handle_event(state: &mut WizardState, event: Event, auth_store: &oxi_store::auth_storage::AuthStorage) -> Result<bool> {
+fn handle_event(
+    state: &mut WizardState,
+    event: Event,
+    auth_store: &oxi_store::auth_storage::AuthStorage,
+) -> Result<bool> {
     match state.step {
         0 => handle_provider_event(state, event, auth_store),
         1 => handle_model_event(state, event),
@@ -794,7 +809,10 @@ fn handle_provider_event(
                 }
             }
         }
-        InputMode::EditingApiKey { provider_name, field_text } => {
+        InputMode::EditingApiKey {
+            provider_name,
+            field_text,
+        } => {
             if let Event::Key(key) = event {
                 match key.code {
                     KeyCode::Esc => {
@@ -805,13 +823,17 @@ fn handle_provider_event(
                             auth_store.set_api_key(provider_name, field_text.clone());
 
                             // Update the provider entry
-                            if let Some(entry) = state.providers.iter_mut().find(|p| p.name == *provider_name) {
+                            if let Some(entry) = state
+                                .providers
+                                .iter_mut()
+                                .find(|p| p.name == *provider_name)
+                            {
                                 entry.has_key = true;
                                 entry.key_masked = mask_key(field_text);
                             }
 
                             // Try to fetch models dynamically from the provider's /models endpoint
-                            fetch_and_cache_models(&provider_name, &state.providers);
+                            fetch_and_cache_models(provider_name, &state.providers);
 
                             // Refresh the model list to include newly fetched models
                             state.models = load_models();
@@ -828,7 +850,10 @@ fn handle_provider_event(
                 }
             }
         }
-        InputMode::AddingCustom { fields, active_field } => {
+        InputMode::AddingCustom {
+            fields,
+            active_field,
+        } => {
             if let Event::Key(key) = event {
                 match key.code {
                     KeyCode::Esc => {
@@ -948,8 +973,7 @@ fn select_filtered_model(state: &mut WizardState) {
     }
     let filter = state.model_filter.to_lowercase();
     if let Some(idx) = state.models.iter().position(|m| {
-        m.id.to_lowercase().contains(&filter)
-            || m.provider.to_lowercase().contains(&filter)
+        m.id.to_lowercase().contains(&filter) || m.provider.to_lowercase().contains(&filter)
     }) {
         state.model_selected = idx;
     }
@@ -1055,10 +1079,18 @@ pub fn run() -> Result<()> {
     let models = load_models();
     let themes = load_themes();
 
-    let auth_path = oxi_store::auth_storage::AuthStorage::default_path()
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".oxi").join("auth.json"));
-    let settings_path = oxi_store::settings::Settings::settings_path()
-        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default().join(".oxi").join("settings.json"));
+    let auth_path = oxi_store::auth_storage::AuthStorage::default_path().unwrap_or_else(|| {
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".oxi")
+            .join("auth.json")
+    });
+    let settings_path = oxi_store::settings::Settings::settings_path().unwrap_or_else(|_| {
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".oxi")
+            .join("settings.json")
+    });
 
     // Find the index of the current default model
     let current_model = oxi_store::settings::Settings::load()
@@ -1066,10 +1098,13 @@ pub fn run() -> Result<()> {
         .and_then(|s| s.default_model.clone())
         .unwrap_or_default();
 
-    let model_selected = models.iter().position(|m| {
-        let full_id = format!("{}/{}", m.provider, m.id);
-        full_id == current_model || m.id == current_model
-    }).unwrap_or(0);
+    let model_selected = models
+        .iter()
+        .position(|m| {
+            let full_id = format!("{}/{}", m.provider, m.id);
+            full_id == current_model || m.id == current_model
+        })
+        .unwrap_or(0);
 
     // Find the index of the current theme
     let current_theme = oxi_store::settings::Settings::load()

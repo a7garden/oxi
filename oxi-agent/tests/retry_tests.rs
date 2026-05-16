@@ -1,11 +1,11 @@
 //! Tests for oxi-agent retry logic: circuit breaker, exponential backoff,
 //! and retryable error classification.
 
+use oxi_agent::agent_loop::config::{BACKOFF_BASE_SECS, MAX_RETRIES};
+use oxi_agent::agent_loop::retry::is_retryable_error;
 use oxi_agent::recovery::{
     CircuitBreaker, CircuitBreakerConfig, CircuitOpenError, FallbackChain, PartialResponse,
 };
-use oxi_agent::agent_loop::retry::is_retryable_error;
-use oxi_agent::agent_loop::config::{BACKOFF_BASE_SECS, MAX_RETRIES};
 use std::time::Duration;
 
 use oxi_ai::{
@@ -260,11 +260,7 @@ fn backoff_grows_exponentially() {
         .map(|attempt| BACKOFF_BASE_SECS.pow(attempt as u32 + 1))
         .collect();
     for window in delays.windows(2) {
-        assert!(
-            window[1] > window[0],
-            "Delay should increase: {:?}",
-            delays
-        );
+        assert!(window[1] > window[0], "Delay should increase: {:?}", delays);
     }
 }
 
@@ -274,22 +270,30 @@ fn backoff_grows_exponentially() {
 
 #[test]
 fn retryable_overloaded() {
-    assert!(is_retryable_error(&make_error_message("server is overloaded")));
+    assert!(is_retryable_error(&make_error_message(
+        "server is overloaded"
+    )));
 }
 
 #[test]
 fn retryable_rate_limit() {
-    assert!(is_retryable_error(&make_error_message("rate limit exceeded")));
+    assert!(is_retryable_error(&make_error_message(
+        "rate limit exceeded"
+    )));
 }
 
 #[test]
 fn retryable_429() {
-    assert!(is_retryable_error(&make_error_message("HTTP 429 Too Many Requests")));
+    assert!(is_retryable_error(&make_error_message(
+        "HTTP 429 Too Many Requests"
+    )));
 }
 
 #[test]
 fn retryable_500() {
-    assert!(is_retryable_error(&make_error_message("500 Internal Server Error")));
+    assert!(is_retryable_error(&make_error_message(
+        "500 Internal Server Error"
+    )));
 }
 
 #[test]
@@ -299,12 +303,16 @@ fn retryable_502() {
 
 #[test]
 fn retryable_503() {
-    assert!(is_retryable_error(&make_error_message("503 Service Unavailable")));
+    assert!(is_retryable_error(&make_error_message(
+        "503 Service Unavailable"
+    )));
 }
 
 #[test]
 fn retryable_504() {
-    assert!(is_retryable_error(&make_error_message("504 Gateway Timeout")));
+    assert!(is_retryable_error(&make_error_message(
+        "504 Gateway Timeout"
+    )));
 }
 
 #[test]
@@ -314,7 +322,9 @@ fn retryable_timeout() {
 
 #[test]
 fn retryable_connection_refused() {
-    assert!(is_retryable_error(&make_error_message("connection refused")));
+    assert!(is_retryable_error(&make_error_message(
+        "connection refused"
+    )));
 }
 
 #[test]
@@ -353,7 +363,9 @@ fn retryable_case_insensitive() {
 
 #[test]
 fn retryable_service_unavailable() {
-    assert!(is_retryable_error(&make_error_message("service unavailable")));
+    assert!(is_retryable_error(&make_error_message(
+        "service unavailable"
+    )));
 }
 
 #[test]
@@ -373,7 +385,9 @@ fn retryable_timedout() {
 
 #[test]
 fn retryable_terminated() {
-    assert!(is_retryable_error(&make_error_message("connection terminated")));
+    assert!(is_retryable_error(&make_error_message(
+        "connection terminated"
+    )));
 }
 
 // ---------------------------------------------------------------------------
@@ -451,9 +465,15 @@ fn non_retryable_wrong_stop_reason() {
 
 #[test]
 fn non_retryable_unknown_error_text() {
-    assert!(!is_retryable_error(&make_error_message("user asked to cancel")));
-    assert!(!is_retryable_error(&make_error_message("invalid JSON payload")));
-    assert!(!is_retryable_error(&make_error_message("authentication failed")));
+    assert!(!is_retryable_error(&make_error_message(
+        "user asked to cancel"
+    )));
+    assert!(!is_retryable_error(&make_error_message(
+        "invalid JSON payload"
+    )));
+    assert!(!is_retryable_error(&make_error_message(
+        "authentication failed"
+    )));
 }
 
 // ---------------------------------------------------------------------------
@@ -511,10 +531,7 @@ fn fallback_chain_default() {
 
 #[test]
 fn fallback_chain_custom() {
-    let chain = FallbackChain::new(vec![
-        "anthropic/claude-3".into(),
-        "openai/gpt-4".into(),
-    ]);
+    let chain = FallbackChain::new(vec!["anthropic/claude-3".into(), "openai/gpt-4".into()]);
     assert_eq!(chain.get(0), Some("anthropic/claude-3"));
     assert_eq!(chain.get(1), Some("openai/gpt-4"));
     assert_eq!(chain.get(2), None);

@@ -3,8 +3,8 @@
 //! Provides a broadcast-based message bus that agents can use to
 //! communicate with each other in an oxios environment.
 
-use tokio::sync::broadcast;
 use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 
 /// A message sent between agents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -130,11 +130,8 @@ mod tests {
 
     #[test]
     fn test_broadcast_message() {
-        let msg = InterAgentMessage::broadcast(
-            "agent-1",
-            "status_update",
-            json!({"status": "idle"}),
-        );
+        let msg =
+            InterAgentMessage::broadcast("agent-1", "status_update", json!({"status": "idle"}));
         assert_eq!(msg.from, "agent-1");
         assert!(msg.to.is_none());
         assert!(msg.is_for("agent-2"));

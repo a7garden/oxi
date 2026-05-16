@@ -7,18 +7,18 @@ use chrono::Local;
 /// A skill that can be included in the system prompt.
 #[derive(Debug, Clone)]
 pub struct Skill {
-/// pub.
+    /// pub.
     pub name: String,
-/// pub.
+    /// pub.
     pub content: String,
 }
 
 /// A pre-loaded context file.
 #[derive(Debug, Clone)]
 pub struct ContextFile {
-/// pub.
+    /// pub.
     pub path: String,
-/// pub.
+    /// pub.
     pub content: String,
 }
 
@@ -53,12 +53,7 @@ impl Default for BuildSystemPromptOptions {
     fn default() -> Self {
         Self {
             custom_prompt: None,
-            selected_tools: vec![
-                "read".into(),
-                "bash".into(),
-                "edit".into(),
-                "write".into(),
-            ],
+            selected_tools: vec!["read".into(), "bash".into(), "edit".into(), "write".into()],
             tool_snippets: std::collections::HashMap::new(),
             prompt_guidelines: Vec::new(),
             append_system_prompt: None,
@@ -111,8 +106,8 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
         }
 
         // Append skills section (only if read tool is available)
-        let custom_has_read =
-            options.selected_tools.is_empty() || options.selected_tools.contains(&"read".to_string());
+        let custom_has_read = options.selected_tools.is_empty()
+            || options.selected_tools.contains(&"read".to_string());
         if custom_has_read && !options.skills.is_empty() {
             prompt.push_str(&format_skills_for_prompt(&options.skills));
         }
@@ -151,7 +146,11 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
         visible_tools
             .iter()
             .map(|name| {
-                let snippet = options.tool_snippets.get(*name).map(|s| s.as_str()).unwrap_or("");
+                let snippet = options
+                    .tool_snippets
+                    .get(*name)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
                 format!("- {}: {}", name, snippet)
             })
             .collect::<Vec<_>>()

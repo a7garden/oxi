@@ -10,10 +10,7 @@ use oxi_agent::AgentEvent;
 use oxi_tui::widgets::chat::ToolCallStatus;
 use tokio::sync::mpsc;
 
-use crossterm::event::{
-    Event as CEvent, KeyCode, KeyModifiers, MouseEventKind,
-    KeyEventKind,
-};
+use crossterm::event::{Event as CEvent, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 
 /// Actions returned from input handling that need async work in the main loop.
 pub(crate) enum Action {
@@ -94,9 +91,7 @@ async fn handle_key(
 
             // Slash command in input
             if value.starts_with('/') {
-                let handled = slash::handle_slash_command(
-                    &value, session, state, running,
-                );
+                let handled = slash::handle_slash_command(&value, session, state, running);
                 state.input_clear();
                 if handled {
                     return None;
@@ -106,9 +101,14 @@ async fn handle_key(
             let value = value; // re-bind after slash check
             if state.is_agent_busy {
                 // Agent busy — queue as steering message
-                state.add_system_message(format!("Queued: {}", value.chars().take(50).collect::<String>()));
+                state.add_system_message(format!(
+                    "Queued: {}",
+                    value.chars().take(50).collect::<String>()
+                ));
                 state.input_history.insert(0, value.clone());
-                if state.input_history.len() > 100 { state.input_history.remove(0); }
+                if state.input_history.len() > 100 {
+                    state.input_history.remove(0);
+                }
                 state.history_index = 0;
                 let _ = session.steer(value);
                 state.input_clear();
@@ -116,7 +116,7 @@ async fn handle_key(
             }
 
             // Not busy — send directly
-            return Some(Action::SendPrompt(value));
+            Some(Action::SendPrompt(value))
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if state.is_agent_busy {
@@ -139,7 +139,8 @@ async fn handle_key(
                 return None;
             }
             if let Some(next_level) = session.cycle_thinking_level() {
-                state.footer_state.data.thinking_level = Some(format!("{:?}", next_level).to_lowercase());
+                state.footer_state.data.thinking_level =
+                    Some(format!("{:?}", next_level).to_lowercase());
                 state.add_system_message(format!("Thinking: {:?}", next_level));
             }
             None
@@ -223,9 +224,7 @@ async fn handle_key(
                 }
                 if state.history_index < state.input_history.len() {
                     state.history_index += 1;
-                    state.input_set_text(
-                        state.input_history[state.history_index - 1].clone(),
-                    );
+                    state.input_set_text(state.input_history[state.history_index - 1].clone());
                     state.clear_slash_completions();
                 }
             } else {
@@ -241,9 +240,7 @@ async fn handle_key(
                 if state.history_index == 0 {
                     state.input_set_text(state.saved_input.clone());
                 } else {
-                    state.input_set_text(
-                        state.input_history[state.history_index - 1].clone(),
-                    );
+                    state.input_set_text(state.input_history[state.history_index - 1].clone());
                 }
                 state.clear_slash_completions();
             } else {
@@ -318,8 +315,16 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         }
 
         // ── Tool execution ────────────────────────────────────────
-        UiEvent::ToolExecutionStart { tool_call_id, tool_name, args } => {
-            tracing::debug!("[HANDLER] ToolExecutionStart: id={:?}, name={:?}", tool_call_id, tool_name);
+        UiEvent::ToolExecutionStart {
+            tool_call_id,
+            tool_name,
+            args,
+        } => {
+            tracing::debug!(
+                "[HANDLER] ToolExecutionStart: id={:?}, name={:?}",
+                tool_call_id,
+                tool_name
+            );
             let args_str = serde_json::to_string(&args).unwrap_or_else(|_| args.to_string());
             state.chat.stream_tool_call(
                 tool_call_id,
@@ -328,8 +333,17 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
                 ToolCallStatus::Executing,
             );
         }
-        UiEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
-            tracing::debug!("[HANDLER] ToolExecutionEnd: id={:?}, name={:?}", tool_call_id, tool_name);
+        UiEvent::ToolExecutionEnd {
+            tool_call_id,
+            tool_name,
+            result,
+            is_error,
+        } => {
+            tracing::debug!(
+                "[HANDLER] ToolExecutionEnd: id={:?}, name={:?}",
+                tool_call_id,
+                tool_name
+            );
             state.chat.stream_tool_result(
                 Some(tool_call_id),
                 tool_name,
@@ -404,56 +418,60 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         UiEvent::QueueUpdate { pending } => {
             state.pending_steering = pending;
         }
-        UiEvent::TokenUsage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, context_window_pct, total_cost } => {
+        UiEvent::TokenUsage {
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            context_window_pct,
+            total_cost,
+        } => {
             state.footer_state.data.input_tokens = input_tokens;
             state.footer_state.data.output_tokens = output_tokens;
             state.footer_state.data.cache_read_tokens = cache_read_tokens;
             state.footer_state.data.cache_write_tokens = cache_write_tokens;
             state.footer_state.data.context_window_pct = context_window_pct;
             state.footer_state.data.total_cost = total_cost;
-            state.footer_state.data.context_tokens = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens;
+            state.footer_state.data.context_tokens =
+                input_tokens + output_tokens + cache_read_tokens + cache_write_tokens;
         }
     }
 }
 
 /// Handle a session event, forwarding relevant ones as UI events.
-pub async fn handle_session_event(
-    event: SessionEvent,
-    ui_tx: &mpsc::UnboundedSender<UiEvent>,
-) {
+pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSender<UiEvent>) {
     match event {
         SessionEvent::CompactionStart { reason } => {
             let _ = ui_tx.send(UiEvent::CompactionStart { reason });
         }
         SessionEvent::CompactionEnd {
-            reason, error_message, ..
+            reason,
+            error_message,
+            ..
         } => {
-            let _ = ui_tx
-                .send(UiEvent::CompactionEnd {
-                    _reason: reason,
-                    error_message,
-                })
-                ;
+            let _ = ui_tx.send(UiEvent::CompactionEnd {
+                _reason: reason,
+                error_message,
+            });
         }
         SessionEvent::ThinkingLevelChanged { level } => {
-            let _ = ui_tx
-                .send(UiEvent::ThinkingLevelChanged {
-                    level: format!("{:?}", level),
-                })
-                ;
+            let _ = ui_tx.send(UiEvent::ThinkingLevelChanged {
+                level: format!("{:?}", level),
+            });
         }
-        SessionEvent::QueueUpdate { steering, follow_up } => {
+        SessionEvent::QueueUpdate {
+            steering,
+            follow_up,
+        } => {
             let pending = steering.len() + follow_up.len();
             let _ = ui_tx.send(UiEvent::QueueUpdate { pending });
         }
         SessionEvent::SessionInfoChanged => {}
         SessionEvent::Agent(agent_event) => match &agent_event {
             AgentEvent::Fallback { to_model, .. } => {
-                let _ = ui_tx
-                    .send(UiEvent::ModelChanged {
-                        model_id: to_model.clone(),
-                    })
-                    ;
+                let _ = ui_tx.send(UiEvent::ModelChanged {
+                    model_id: to_model.clone(),
+                });
             }
             AgentEvent::Retry {
                 attempt,
@@ -461,13 +479,11 @@ pub async fn handle_session_event(
                 reason,
                 ..
             } => {
-                let _ = ui_tx
-                    .send(UiEvent::RetryStart {
-                        attempt: *attempt as u32,
-                        max_attempts: *max_retries as u32,
-                        error_message: reason.clone(),
-                    })
-                    ;
+                let _ = ui_tx.send(UiEvent::RetryStart {
+                    attempt: *attempt as u32,
+                    max_attempts: *max_retries as u32,
+                    error_message: reason.clone(),
+                });
             }
             AgentEvent::Compaction { .. } => {}
             _ => {}
@@ -494,12 +510,25 @@ fn open_last_image(state: &mut AppState) {
                 match std::fs::write(&path, &bytes) {
                     Ok(()) => {
                         #[cfg(target_os = "macos")]
-                        { std::process::Command::new("open").arg(&path).spawn().ok(); }
+                        {
+                            std::process::Command::new("open").arg(&path).spawn().ok();
+                        }
                         #[cfg(target_os = "linux")]
-                        { std::process::Command::new("xdg-open").arg(&path).spawn().ok(); }
+                        {
+                            std::process::Command::new("xdg-open")
+                                .arg(&path)
+                                .spawn()
+                                .ok();
+                        }
                         #[cfg(target_os = "windows")]
-                        { std::process::Command::new("cmd").args(["/c", "start"]).arg(&path).spawn().ok(); }
-                        state.add_system_message(format!("Opened image in viewer"));
+                        {
+                            std::process::Command::new("cmd")
+                                .args(["/c", "start"])
+                                .arg(&path)
+                                .spawn()
+                                .ok();
+                        }
+                        state.add_system_message("Opened image in viewer".to_string());
                     }
                     Err(e) => {
                         state.add_system_message(format!("Failed to write image: {}", e));
@@ -552,24 +581,16 @@ async fn handle_overlay_key(
     let overlay = state.overlay.clone();
     match &overlay {
         // ── Setup wizard ──
-        Some(AppOverlay::Setup(_)) => {
-            handle_wizard_step_key(key, state).await
-        }
+        Some(AppOverlay::Setup(_)) => handle_wizard_step_key(key, state).await,
 
         // ── Provider config wizard (same steps as setup) ──
-        Some(AppOverlay::ProviderConfig(_)) => {
-            handle_wizard_step_key(key, state).await
-        }
+        Some(AppOverlay::ProviderConfig(_)) => handle_wizard_step_key(key, state).await,
 
         // ── Model selector ──
-        Some(AppOverlay::ModelSelect { .. }) => {
-            handle_model_select_key(key, state, session).await
-        }
+        Some(AppOverlay::ModelSelect { .. }) => handle_model_select_key(key, state, session).await,
 
         // ── Logout selector ──
-        Some(AppOverlay::LogoutSelect { .. }) => {
-            handle_logout_select_key(key, state).await
-        }
+        Some(AppOverlay::LogoutSelect { .. }) => handle_logout_select_key(key, state).await,
 
         // ── Resume selector ──
         Some(AppOverlay::ResumeSelect { .. }) => {
@@ -622,33 +643,52 @@ async fn handle_wizard_step_key(
     let is_config = is_provider_config(&state.overlay);
 
     match step_kind {
-        0 => { // SelectAuthType
+        0 => {
+            // SelectAuthType
             match key.code {
                 KeyCode::Up | KeyCode::Down => {
-                    if let Some(SetupStep::SelectAuthType { auth_type, selected }) = extract_step(&state.overlay) {
+                    if let Some(SetupStep::SelectAuthType {
+                        auth_type,
+                        selected,
+                    }) = extract_step(&state.overlay)
+                    {
                         let new_sel = if *selected == 0 { 1 } else { 0 };
-                        state.overlay = wrap_step(&state.overlay, SetupStep::SelectAuthType {
-                            auth_type: auth_type.clone(),
-                            selected: new_sel,
-                        });
+                        state.overlay = wrap_step(
+                            &state.overlay,
+                            SetupStep::SelectAuthType {
+                                auth_type: auth_type.clone(),
+                                selected: new_sel,
+                            },
+                        );
                     }
                 }
                 KeyCode::Enter => {
-                    if let Some(SetupStep::SelectAuthType { selected, .. }) = extract_step(&state.overlay) {
+                    if let Some(SetupStep::SelectAuthType { selected, .. }) =
+                        extract_step(&state.overlay)
+                    {
                         match *selected {
                             0 => { /* OAuth — not yet implemented */ }
                             1 => {
                                 let auth = oxi_store::auth_storage::shared_auth_storage();
-                                let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
-                                    .iter()
-                                    .map(|builtin| {
-                                        let has_key = if is_config { auth.has_auth(builtin.name) } else { auth.get_api_key(builtin.name).is_some() };
-                                        (builtin.name.to_string(), has_key)
-                                    }).collect();
-                                state.overlay = wrap_step(&state.overlay, SetupStep::SelectProvider {
-                                    providers,
-                                    selected: 0,
-                                });
+                                let providers: Vec<(String, bool)> =
+                                    oxi_ai::register_builtins::get_builtin_providers()
+                                        .iter()
+                                        .map(|builtin| {
+                                            let has_key = if is_config {
+                                                auth.has_auth(builtin.name)
+                                            } else {
+                                                auth.get_api_key(builtin.name).is_some()
+                                            };
+                                            (builtin.name.to_string(), has_key)
+                                        })
+                                        .collect();
+                                state.overlay = wrap_step(
+                                    &state.overlay,
+                                    SetupStep::SelectProvider {
+                                        providers,
+                                        selected: 0,
+                                    },
+                                );
                             }
                             _ => {}
                         }
@@ -661,28 +701,60 @@ async fn handle_wizard_step_key(
             }
         }
 
-        1 => { // SelectProvider
+        1 => {
+            // SelectProvider
             match key.code {
                 KeyCode::Up => {
-                    if let Some(SetupStep::SelectProvider { providers, selected }) = extract_step(&state.overlay) {
-                        let new_sel = if *selected == 0 { providers.len() - 1 } else { *selected - 1 };
-                        state.overlay = wrap_step(&state.overlay, SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel });
+                    if let Some(SetupStep::SelectProvider {
+                        providers,
+                        selected,
+                    }) = extract_step(&state.overlay)
+                    {
+                        let new_sel = if *selected == 0 {
+                            providers.len() - 1
+                        } else {
+                            *selected - 1
+                        };
+                        state.overlay = wrap_step(
+                            &state.overlay,
+                            SetupStep::SelectProvider {
+                                providers: providers.clone(),
+                                selected: new_sel,
+                            },
+                        );
                     }
                 }
                 KeyCode::Down => {
-                    if let Some(SetupStep::SelectProvider { providers, selected }) = extract_step(&state.overlay) {
+                    if let Some(SetupStep::SelectProvider {
+                        providers,
+                        selected,
+                    }) = extract_step(&state.overlay)
+                    {
                         let new_sel = (*selected + 1) % providers.len();
-                        state.overlay = wrap_step(&state.overlay, SetupStep::SelectProvider { providers: providers.clone(), selected: new_sel });
+                        state.overlay = wrap_step(
+                            &state.overlay,
+                            SetupStep::SelectProvider {
+                                providers: providers.clone(),
+                                selected: new_sel,
+                            },
+                        );
                     }
                 }
                 KeyCode::Enter => {
-                    if let Some(SetupStep::SelectProvider { providers, selected }) = extract_step(&state.overlay) {
+                    if let Some(SetupStep::SelectProvider {
+                        providers,
+                        selected,
+                    }) = extract_step(&state.overlay)
+                    {
                         if let Some((name, _)) = providers.get(*selected).cloned() {
-                            state.overlay = wrap_step(&state.overlay, SetupStep::EnterApiKey {
-                                provider: name,
-                                key: String::new(),
-                                masked_cursor: 0,
-                            });
+                            state.overlay = wrap_step(
+                                &state.overlay,
+                                SetupStep::EnterApiKey {
+                                    provider: name,
+                                    key: String::new(),
+                                    masked_cursor: 0,
+                                },
+                            );
                         }
                     }
                 }
@@ -693,19 +765,24 @@ async fn handle_wizard_step_key(
             }
         }
 
-        2 => { // EnterApiKey
+        2 => {
+            // EnterApiKey
             let provider = match extract_step(&state.overlay) {
                 Some(SetupStep::EnterApiKey { provider, .. }) => provider.clone(),
                 _ => return None,
             };
             match key.code {
                 KeyCode::Char(c) => {
-                    if let Some(SetupStep::EnterApiKey { key, .. }) = extract_step_mut(&mut state.overlay) {
+                    if let Some(SetupStep::EnterApiKey { key, .. }) =
+                        extract_step_mut(&mut state.overlay)
+                    {
                         key.push(c);
                     }
                 }
                 KeyCode::Backspace => {
-                    if let Some(SetupStep::EnterApiKey { key, .. }) = extract_step_mut(&mut state.overlay) {
+                    if let Some(SetupStep::EnterApiKey { key, .. }) =
+                        extract_step_mut(&mut state.overlay)
+                    {
                         key.pop();
                     }
                 }
@@ -720,7 +797,6 @@ async fn handle_wizard_step_key(
                         auth.set_api_key(&provider, key_val);
 
                         let models: Vec<String> = oxi_ai::model_db::get_all_models()
-                            .into_iter()
                             .filter(|e| e.provider == provider)
                             .map(|e| e.id.to_string())
                             .collect();
@@ -736,53 +812,109 @@ async fn handle_wizard_step_key(
                                 }
                                 state.footer_state.data.model_name = full_model.clone();
                                 state.footer_state.data.provider_name = provider.clone();
-                                state.overlay = wrap_step(&state.overlay, SetupStep::Done {
-                                    provider: provider.clone(),
-                                    model: full_model,
-                                });
+                                state.overlay = wrap_step(
+                                    &state.overlay,
+                                    SetupStep::Done {
+                                        provider: provider.clone(),
+                                        model: full_model,
+                                    },
+                                );
                             } else {
                                 state.add_system_message(format!("{} API key saved.", provider));
                                 state.overlay = None;
                             }
                         } else {
-                            state.overlay = wrap_step(&state.overlay, SetupStep::SelectModel {
-                                provider,
-                                models,
-                                selected: 0,
-                            });
+                            state.overlay = wrap_step(
+                                &state.overlay,
+                                SetupStep::SelectModel {
+                                    provider,
+                                    models,
+                                    selected: 0,
+                                },
+                            );
                         }
                     }
                 }
                 KeyCode::Esc => {
                     let auth = oxi_store::auth_storage::shared_auth_storage();
-                    let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
-                        .iter()
-                        .map(|builtin| {
-                            let has_key = if is_config { auth.has_auth(builtin.name) } else { auth.get_api_key(builtin.name).is_some() };
-                            (builtin.name.to_string(), has_key)
-                        }).collect();
-                    state.overlay = wrap_step(&state.overlay, SetupStep::SelectProvider { providers, selected: 0 });
+                    let providers: Vec<(String, bool)> =
+                        oxi_ai::register_builtins::get_builtin_providers()
+                            .iter()
+                            .map(|builtin| {
+                                let has_key = if is_config {
+                                    auth.has_auth(builtin.name)
+                                } else {
+                                    auth.get_api_key(builtin.name).is_some()
+                                };
+                                (builtin.name.to_string(), has_key)
+                            })
+                            .collect();
+                    state.overlay = wrap_step(
+                        &state.overlay,
+                        SetupStep::SelectProvider {
+                            providers,
+                            selected: 0,
+                        },
+                    );
                 }
                 _ => {}
             }
         }
 
-        3 => { // SelectModel
+        3 => {
+            // SelectModel
             match key.code {
                 KeyCode::Up => {
-                    if let Some(SetupStep::SelectModel { provider, models, selected }) = extract_step(&state.overlay) {
-                        let new_sel = if *selected == 0 { models.len().saturating_sub(1) } else { *selected - 1 };
-                        state.overlay = wrap_step(&state.overlay, SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel });
+                    if let Some(SetupStep::SelectModel {
+                        provider,
+                        models,
+                        selected,
+                    }) = extract_step(&state.overlay)
+                    {
+                        let new_sel = if *selected == 0 {
+                            models.len().saturating_sub(1)
+                        } else {
+                            *selected - 1
+                        };
+                        state.overlay = wrap_step(
+                            &state.overlay,
+                            SetupStep::SelectModel {
+                                provider: provider.clone(),
+                                models: models.clone(),
+                                selected: new_sel,
+                            },
+                        );
                     }
                 }
                 KeyCode::Down => {
-                    if let Some(SetupStep::SelectModel { provider, models, selected }) = extract_step(&state.overlay) {
-                        let new_sel = if models.is_empty() { 0 } else { (*selected + 1).min(models.len() - 1) };
-                        state.overlay = wrap_step(&state.overlay, SetupStep::SelectModel { provider: provider.clone(), models: models.clone(), selected: new_sel });
+                    if let Some(SetupStep::SelectModel {
+                        provider,
+                        models,
+                        selected,
+                    }) = extract_step(&state.overlay)
+                    {
+                        let new_sel = if models.is_empty() {
+                            0
+                        } else {
+                            (*selected + 1).min(models.len() - 1)
+                        };
+                        state.overlay = wrap_step(
+                            &state.overlay,
+                            SetupStep::SelectModel {
+                                provider: provider.clone(),
+                                models: models.clone(),
+                                selected: new_sel,
+                            },
+                        );
                     }
                 }
                 KeyCode::Enter => {
-                    if let Some(SetupStep::SelectModel { provider, models, selected }) = extract_step(&state.overlay) {
+                    if let Some(SetupStep::SelectModel {
+                        provider,
+                        models,
+                        selected,
+                    }) = extract_step(&state.overlay)
+                    {
                         if let Some(model_id) = models.get(*selected) {
                             let full_model = format!("{}/{}", provider, model_id);
                             if let Ok(mut settings) = oxi_store::settings::Settings::load() {
@@ -793,10 +925,13 @@ async fn handle_wizard_step_key(
                             state.footer_state.data.model_name = full_model.clone();
                             state.footer_state.data.provider_name = provider.clone();
                             if !is_config {
-                                state.overlay = wrap_step(&state.overlay, SetupStep::Done {
-                                    provider: provider.clone(),
-                                    model: full_model,
-                                });
+                                state.overlay = wrap_step(
+                                    &state.overlay,
+                                    SetupStep::Done {
+                                        provider: provider.clone(),
+                                        model: full_model,
+                                    },
+                                );
                             } else {
                                 state.add_system_message(format!("Model set to {}", full_model));
                                 state.overlay = None;
@@ -805,19 +940,25 @@ async fn handle_wizard_step_key(
                     }
                 }
                 KeyCode::Esc => {
-                    if let Some(SetupStep::SelectModel { provider, .. }) = extract_step(&state.overlay) {
-                        state.overlay = wrap_step(&state.overlay, SetupStep::EnterApiKey {
-                            provider: provider.clone(),
-                            key: String::new(),
-                            masked_cursor: 0,
-                        });
+                    if let Some(SetupStep::SelectModel { provider, .. }) =
+                        extract_step(&state.overlay)
+                    {
+                        state.overlay = wrap_step(
+                            &state.overlay,
+                            SetupStep::EnterApiKey {
+                                provider: provider.clone(),
+                                key: String::new(),
+                                masked_cursor: 0,
+                            },
+                        );
                     }
                 }
                 _ => {}
             }
         }
 
-        4 => { // Done
+        4 => {
+            // Done
             if key.code == KeyCode::Enter {
                 state.overlay = None;
                 state.add_system_message(" Ready to chat. Type a message to start.".to_string());
@@ -844,7 +985,11 @@ async fn handle_model_select_key(
     session: &AgentSession,
 ) -> Option<Action> {
     let (models, filter, selected) = match &state.overlay {
-        Some(AppOverlay::ModelSelect { models, filter, selected }) => (models.clone(), filter.clone(), *selected),
+        Some(AppOverlay::ModelSelect {
+            models,
+            filter,
+            selected,
+        }) => (models.clone(), filter.clone(), *selected),
         _ => return None,
     };
 
@@ -853,17 +998,37 @@ async fn handle_model_select_key(
         models.iter().enumerate().collect()
     } else {
         let lower = filter.to_lowercase();
-        models.iter().enumerate().filter(|(_, m)| m.to_lowercase().contains(&lower)).collect()
+        models
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.to_lowercase().contains(&lower))
+            .collect()
     };
 
     match key.code {
         KeyCode::Up => {
-            let new_sel = if selected == 0 { filtered.len().saturating_sub(1) } else { selected.saturating_sub(1) };
-            state.overlay = Some(AppOverlay::ModelSelect { models, filter, selected: new_sel });
+            let new_sel = if selected == 0 {
+                filtered.len().saturating_sub(1)
+            } else {
+                selected.saturating_sub(1)
+            };
+            state.overlay = Some(AppOverlay::ModelSelect {
+                models,
+                filter,
+                selected: new_sel,
+            });
         }
         KeyCode::Down => {
-            let new_sel = if filtered.is_empty() { 0 } else { (selected + 1).min(filtered.len() - 1) };
-            state.overlay = Some(AppOverlay::ModelSelect { models, filter, selected: new_sel });
+            let new_sel = if filtered.is_empty() {
+                0
+            } else {
+                (selected + 1).min(filtered.len() - 1)
+            };
+            state.overlay = Some(AppOverlay::ModelSelect {
+                models,
+                filter,
+                selected: new_sel,
+            });
         }
         KeyCode::Enter => {
             if let Some((_idx, model_id)) = filtered.get(selected) {
@@ -920,12 +1085,26 @@ async fn handle_resume_select_key(
 
     match key.code {
         KeyCode::Up => {
-            let new_sel = if selected == 0 { sessions.len().saturating_sub(1) } else { selected - 1 };
-            state.overlay = Some(AppOverlay::ResumeSelect { sessions, selected: new_sel });
+            let new_sel = if selected == 0 {
+                sessions.len().saturating_sub(1)
+            } else {
+                selected - 1
+            };
+            state.overlay = Some(AppOverlay::ResumeSelect {
+                sessions,
+                selected: new_sel,
+            });
         }
         KeyCode::Down => {
-            let new_sel = if sessions.is_empty() { 0 } else { (selected + 1).min(sessions.len() - 1) };
-            state.overlay = Some(AppOverlay::ResumeSelect { sessions, selected: new_sel });
+            let new_sel = if sessions.is_empty() {
+                0
+            } else {
+                (selected + 1).min(sessions.len() - 1)
+            };
+            state.overlay = Some(AppOverlay::ResumeSelect {
+                sessions,
+                selected: new_sel,
+            });
         }
         KeyCode::Enter => {
             // Only select if input is empty — otherwise user is trying to send a message
@@ -933,7 +1112,9 @@ async fn handle_resume_select_key(
                 return None;
             }
             if let Some(session_info) = sessions.get(selected) {
-                state.next_action = Some(super::app::TuiNextAction::SwitchSession(session_info.path.clone()));
+                state.next_action = Some(super::app::TuiNextAction::SwitchSession(
+                    session_info.path.clone(),
+                ));
                 state.add_system_message(format!("Switching to session: {}", session_info.path));
             }
             state.overlay = None;
@@ -952,18 +1133,35 @@ async fn handle_logout_select_key(
     state: &mut AppState,
 ) -> Option<Action> {
     let (providers, selected) = match &state.overlay {
-        Some(AppOverlay::LogoutSelect { providers, selected }) => (providers.clone(), *selected),
+        Some(AppOverlay::LogoutSelect {
+            providers,
+            selected,
+        }) => (providers.clone(), *selected),
         _ => return None,
     };
 
     match key.code {
         KeyCode::Up => {
-            let new_sel = if selected == 0 { providers.len().saturating_sub(1) } else { selected - 1 };
-            state.overlay = Some(AppOverlay::LogoutSelect { providers, selected: new_sel });
+            let new_sel = if selected == 0 {
+                providers.len().saturating_sub(1)
+            } else {
+                selected - 1
+            };
+            state.overlay = Some(AppOverlay::LogoutSelect {
+                providers,
+                selected: new_sel,
+            });
         }
         KeyCode::Down => {
-            let new_sel = if providers.is_empty() { 0 } else { (selected + 1).min(providers.len() - 1) };
-            state.overlay = Some(AppOverlay::LogoutSelect { providers, selected: new_sel });
+            let new_sel = if providers.is_empty() {
+                0
+            } else {
+                (selected + 1).min(providers.len() - 1)
+            };
+            state.overlay = Some(AppOverlay::LogoutSelect {
+                providers,
+                selected: new_sel,
+            });
         }
         KeyCode::Enter => {
             if let Some(provider) = providers.get(selected) {
@@ -987,8 +1185,8 @@ async fn handle_logout_select_key(
 fn handle_overlay_paste(text: &str, state: &mut AppState) -> Option<Action> {
     match &state.overlay {
         // Setup/Login EnterApiKey step — paste into key field
-        Some(AppOverlay::Setup(SetupStep::EnterApiKey { .. })) |
-        Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { .. })) => {
+        Some(AppOverlay::Setup(SetupStep::EnterApiKey { .. }))
+        | Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { .. })) => {
             if let Some(SetupStep::EnterApiKey { key, .. }) = extract_step_mut(&mut state.overlay) {
                 key.push_str(text);
             }

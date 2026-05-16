@@ -9,6 +9,7 @@ mod event;
 mod google;
 mod google_shared;
 mod mistral;
+pub mod model_fetch;
 mod openai;
 mod openai_responses;
 pub mod openai_responses_shared;
@@ -16,7 +17,6 @@ mod options;
 pub mod register_builtins;
 mod trait_def;
 mod vertex;
-pub mod model_fetch;
 
 use futures::Stream;
 use std::pin::Pin;
@@ -108,7 +108,7 @@ impl ProviderRegistry {
         }
 
         // 2. Fall back to built-in providers
-        get_provider(name).map(|boxed| Arc::from(boxed))
+        get_provider(name).map(Arc::from)
     }
 
     /// Get a provider by name, checking only custom providers (no built-in fallback).

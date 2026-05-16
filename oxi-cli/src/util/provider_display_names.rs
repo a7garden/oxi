@@ -34,6 +34,9 @@ mod tests {
 
     #[test]
     fn unknown_provider_falls_back() {
-        assert_eq!(provider_display_name("unknown-provider"), "unknown-provider");
+        assert_eq!(
+            provider_display_name("unknown-provider"),
+            "unknown-provider"
+        );
     }
 }

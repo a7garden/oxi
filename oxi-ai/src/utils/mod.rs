@@ -20,7 +20,13 @@ pub mod sanitize_unicode;
 pub fn normalize_tool_call_id(id: &str) -> String {
     let sanitized: String = id
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if sanitized.len() > 64 {
         sanitized[..64].trim_end_matches('_').to_string()

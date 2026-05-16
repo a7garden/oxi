@@ -1,6 +1,4 @@
 /// Agent configuration
-
-
 use oxi_ai::CompactionStrategy;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -8,7 +6,6 @@ use std::sync::Arc;
 fn default_context_window() -> usize {
     128_000
 }
-
 
 /// Hook context for `shouldStopAfterTurn`.
 #[derive(Debug, Clone)]
@@ -22,7 +19,7 @@ pub struct ShouldStopAfterTurnContext {
 }
 
 /// Result of `beforeToolCall` hook.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BeforeToolCallResult {
     /// If `true`, the tool call is blocked and an error result is returned.
     pub block: bool,
@@ -30,14 +27,8 @@ pub struct BeforeToolCallResult {
     pub reason: Option<String>,
 }
 
-impl Default for BeforeToolCallResult {
-    fn default() -> Self {
-        Self { block: false, reason: None }
-    }
-}
-
 /// Result of `afterToolCall` hook.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AfterToolCallResult {
     /// Override content for the tool result.
     pub content: Option<String>,
@@ -45,12 +36,6 @@ pub struct AfterToolCallResult {
     pub is_error: Option<bool>,
     /// Signal that the agent should stop after this batch.
     pub terminate: Option<bool>,
-}
-
-impl Default for AfterToolCallResult {
-    fn default() -> Self {
-        Self { content: None, is_error: None, terminate: None }
-    }
 }
 
 /// Hook context for `beforeToolCall`.
@@ -92,10 +77,12 @@ pub struct AgentHooks {
 
     /// Called before a tool is executed. Return a `BeforeToolCallResult` with
     /// `block: true` to prevent execution.
-    pub before_tool_call: Option<Box<dyn Fn(&BeforeToolCallContext) -> BeforeToolCallResult + Send + Sync>>,
+    pub before_tool_call:
+        Option<Box<dyn Fn(&BeforeToolCallContext) -> BeforeToolCallResult + Send + Sync>>,
 
     /// Called after a tool execution completes. Can override the result.
-    pub after_tool_call: Option<Box<dyn Fn(&AfterToolCallContext) -> AfterToolCallResult + Send + Sync>>,
+    pub after_tool_call:
+        Option<Box<dyn Fn(&AfterToolCallContext) -> AfterToolCallResult + Send + Sync>>,
 
     /// Returns steering messages to inject mid-run. Called after each turn
     /// (unless stopped).

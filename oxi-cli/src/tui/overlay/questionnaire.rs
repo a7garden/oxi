@@ -91,7 +91,9 @@ impl QuestionnaireOverlay {
     }
 
     fn all_answered(&self) -> bool {
-        self.questions.iter().all(|q| self.answers.contains_key(&q.id))
+        self.questions
+            .iter()
+            .all(|q| self.answers.contains_key(&q.id))
     }
 
     fn toggle_multi(&mut self, tab_idx: usize, opt_idx: usize) {
@@ -146,9 +148,7 @@ impl QuestionnaireOverlay {
     }
 
     fn do_submit(&mut self, cancelled: bool) {
-        let answers: Vec<Answer> = std::mem::take(&mut self.answers)
-            .into_values()
-            .collect();
+        let answers: Vec<Answer> = std::mem::take(&mut self.answers).into_values().collect();
         if let Some(responder) = self.responder.take() {
             let _ = responder.send(QuestionnaireResponse { answers, cancelled });
         }
@@ -260,7 +260,13 @@ impl OverlayComponent for QuestionnaireOverlay {
                     if q.multi_select {
                         self.toggle_multi(self.current_tab, sel);
                     } else {
-                        self.save_answer(q_id, opt.value.clone(), opt.label.clone(), false, Some(sel + 1));
+                        self.save_answer(
+                            q_id,
+                            opt.value.clone(),
+                            opt.label.clone(),
+                            false,
+                            Some(sel + 1),
+                        );
                         self.advance();
                     }
                 } else if q.allow_other {
@@ -324,10 +330,7 @@ impl QuestionnaireOverlay {
         let styles = theme.to_styles();
         let lines = self.build_lines(area.width, theme, &styles);
 
-        let list_items: Vec<ListItem> = lines
-            .into_iter()
-            .map(|l| ListItem::new(l))
-            .collect();
+        let list_items: Vec<ListItem> = lines.into_iter().map(ListItem::new).collect();
 
         frame.render_widget(List::new(list_items), area);
 
@@ -356,7 +359,10 @@ impl QuestionnaireOverlay {
             self.build_question_lines(&mut lines, theme, styles, &sep_line);
         }
 
-        lines.push(Line::from(Span::styled(sep_line.clone(), Style::default().fg(fg))));
+        lines.push(Line::from(Span::styled(
+            sep_line.clone(),
+            Style::default().fg(fg),
+        )));
         lines
     }
 
@@ -373,7 +379,10 @@ impl QuestionnaireOverlay {
         };
         let fg = theme.colors.accent.to_ratatui();
 
-        lines.push(Line::from(Span::styled(sep_line.to_string(), Style::default().fg(fg))));
+        lines.push(Line::from(Span::styled(
+            sep_line.to_string(),
+            Style::default().fg(fg),
+        )));
 
         if self.is_multi() {
             self.build_tab_bar(lines, theme, styles);
@@ -384,7 +393,10 @@ impl QuestionnaireOverlay {
             Span::styled(" ? ", styles.accent.add_modifier(Modifier::BOLD)),
             Span::styled(q.prompt.clone(), styles.normal),
         ]));
-        lines.push(Line::from(Span::styled(sep_line.to_string(), Style::default().fg(fg))));
+        lines.push(Line::from(Span::styled(
+            sep_line.to_string(),
+            Style::default().fg(fg),
+        )));
 
         let multi_selected = self.selected.get(&self.current_tab);
         let opt_count = q.options.len() + if q.allow_other { 1 } else { 0 };
@@ -397,9 +409,7 @@ impl QuestionnaireOverlay {
             if i < q.options.len() {
                 let opt = &q.options[i];
                 let check = if q.multi_select {
-                    let is_checked = multi_selected
-                        .map(|s| s.contains(&i))
-                        .unwrap_or(false);
+                    let is_checked = multi_selected.map(|s| s.contains(&i)).unwrap_or(false);
                     Some(if is_checked { "☑" } else { "☐" })
                 } else {
                     None
@@ -425,7 +435,10 @@ impl QuestionnaireOverlay {
                 lines.push(Line::from(vec![
                     Span::styled(pointer.to_string(), pointer_style),
                     Span::styled(format!("{}. ", i + 1), styles.accent),
-                    Span::styled("Type something...".to_string(), styles.accent.add_modifier(Modifier::DIM)),
+                    Span::styled(
+                        "Type something...".to_string(),
+                        styles.accent.add_modifier(Modifier::DIM),
+                    ),
                     Span::styled(" ✎".to_string(), styles.accent),
                 ]));
             }
@@ -441,7 +454,10 @@ impl QuestionnaireOverlay {
     ) {
         let fg = theme.colors.accent.to_ratatui();
 
-        lines.push(Line::from(Span::styled(sep_line.to_string(), Style::default().fg(fg))));
+        lines.push(Line::from(Span::styled(
+            sep_line.to_string(),
+            Style::default().fg(fg),
+        )));
 
         if self.is_multi() {
             self.build_tab_bar(lines, theme, styles);
@@ -450,8 +466,14 @@ impl QuestionnaireOverlay {
 
         if self.all_answered() {
             lines.push(Line::from(vec![
-                Span::styled(" ✓ ".to_string(), styles.success.add_modifier(Modifier::BOLD)),
-                Span::styled("Ready to submit".to_string(), styles.success.add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    " ✓ ".to_string(),
+                    styles.success.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    "Ready to submit".to_string(),
+                    styles.success.add_modifier(Modifier::BOLD),
+                ),
             ]));
         } else {
             let missing: Vec<String> = self
@@ -461,8 +483,14 @@ impl QuestionnaireOverlay {
                 .map(|q| q.label.clone())
                 .collect();
             lines.push(Line::from(vec![
-                Span::styled(" ⚠ ".to_string(), styles.warning.add_modifier(Modifier::BOLD)),
-                Span::styled(format!("Unanswered: {}", missing.join(", ")), styles.warning),
+                Span::styled(
+                    " ⚠ ".to_string(),
+                    styles.warning.add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("Unanswered: {}", missing.join(", ")),
+                    styles.warning,
+                ),
             ]));
         }
         lines.push(Line::from(Span::raw("")));
@@ -506,27 +534,49 @@ impl QuestionnaireOverlay {
         };
         let fg = theme.colors.accent.to_ratatui();
 
-        lines.push(Line::from(Span::styled(sep_line.to_string(), Style::default().fg(fg))));
+        lines.push(Line::from(Span::styled(
+            sep_line.to_string(),
+            Style::default().fg(fg),
+        )));
 
         lines.push(Line::from(vec![
-            Span::styled(" ? ".to_string(), styles.accent.add_modifier(Modifier::BOLD)),
+            Span::styled(
+                " ? ".to_string(),
+                styles.accent.add_modifier(Modifier::BOLD),
+            ),
             Span::styled(q.prompt.clone(), styles.normal),
         ]));
-        lines.push(Line::from(Span::styled(sep_line.to_string(), Style::default().fg(fg))));
+        lines.push(Line::from(Span::styled(
+            sep_line.to_string(),
+            Style::default().fg(fg),
+        )));
 
         for (i, opt) in q.options.iter().enumerate() {
             let is_sel = i == self.option_cursor;
             lines.push(Line::from(vec![
                 Span::styled(if is_sel { "→ " } else { "  " }, styles.accent),
-                Span::styled(format!("{}. {}", i + 1, opt.label), if is_sel { styles.accent } else { styles.normal }),
+                Span::styled(
+                    format!("{}. {}", i + 1, opt.label),
+                    if is_sel { styles.accent } else { styles.normal },
+                ),
             ]));
         }
 
-        lines.push(Line::from(Span::styled(sep_line.to_string(), Style::default().fg(fg))));
-        lines.push(Line::from(Span::styled(" Your answer:".to_string(), styles.muted)));
+        lines.push(Line::from(Span::styled(
+            sep_line.to_string(),
+            Style::default().fg(fg),
+        )));
+        lines.push(Line::from(Span::styled(
+            " Your answer:".to_string(),
+            styles.muted,
+        )));
 
         let max_input_w = (width as usize).saturating_sub(4);
-        let display = self.input_text.chars().take(max_input_w).collect::<String>();
+        let display = self
+            .input_text
+            .chars()
+            .take(max_input_w)
+            .collect::<String>();
         let cursor_style = Style::default()
             .fg(theme.colors.foreground.to_ratatui())
             .bg(theme.colors.primary.to_ratatui());
@@ -551,7 +601,11 @@ impl QuestionnaireOverlay {
     }
 
     fn build_tab_bar(&self, lines: &mut Vec<Line<'static>>, _theme: &Theme, styles: &ThemeStyles) {
-        let left_style = if self.current_tab == 0 { styles.muted } else { styles.normal };
+        let left_style = if self.current_tab == 0 {
+            styles.muted
+        } else {
+            styles.normal
+        };
         lines.push(Line::from(vec![Span::styled("← ".to_string(), left_style)]));
 
         for (i, q) in self.questions.iter().enumerate() {
@@ -585,7 +639,14 @@ impl QuestionnaireOverlay {
             submit_style,
         )]));
 
-        let right_style = if is_submit_active { styles.muted } else { styles.normal };
-        lines.push(Line::from(vec![Span::styled(" →".to_string(), right_style)]));
+        let right_style = if is_submit_active {
+            styles.muted
+        } else {
+            styles.normal
+        };
+        lines.push(Line::from(vec![Span::styled(
+            " →".to_string(),
+            right_style,
+        )]));
     }
 }

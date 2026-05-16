@@ -100,35 +100,39 @@ impl Provider for GoogleProvider {
         // across HTTP chunks at arbitrary byte boundaries.
         let model_name = model.id.clone();
 
-        let stream = response.bytes_stream().scan(
-            Vec::new(), // pending_bytes
-            move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
-                let events = match chunk {
-                    Ok(bytes) => {
-                        let mut combined = Vec::with_capacity(pending_bytes.len() + bytes.len());
-                        combined.extend_from_slice(pending_bytes);
-                        combined.extend_from_slice(&bytes);
-                        let (text, trailing) = split_complete_lines(&combined);
-                        *pending_bytes = trailing;
-                        parse_google_events(
-                            &text,
-                            Api::GoogleGenerativeAi,
-                            "google",
-                            &model_name,
-                        )
-                    }
-                    Err(e) => vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(
-                            Api::GoogleGenerativeAi,
-                            "google",
-                            &e.to_string(),
-                        ),
-                    }],
-                };
-                async move { Some(futures::stream::iter(events)) }
-            },
-        ).flatten();
+        let stream = response
+            .bytes_stream()
+            .scan(
+                Vec::new(), // pending_bytes
+                move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                    let events = match chunk {
+                        Ok(bytes) => {
+                            let mut combined =
+                                Vec::with_capacity(pending_bytes.len() + bytes.len());
+                            combined.extend_from_slice(pending_bytes);
+                            combined.extend_from_slice(&bytes);
+                            let (text, trailing) = split_complete_lines(&combined);
+                            *pending_bytes = trailing;
+                            parse_google_events(
+                                &text,
+                                Api::GoogleGenerativeAi,
+                                "google",
+                                &model_name,
+                            )
+                        }
+                        Err(e) => vec![ProviderEvent::Error {
+                            reason: StopReason::Error,
+                            error: create_error_message(
+                                Api::GoogleGenerativeAi,
+                                "google",
+                                &e.to_string(),
+                            ),
+                        }],
+                    };
+                    async move { Some(futures::stream::iter(events)) }
+                },
+            )
+            .flatten();
 
         Ok(Box::pin(stream))
     }
@@ -186,7 +190,12 @@ mod tests {
     #[test]
     fn test_parse_google_events_basic_text() {
         let sse_data = r#"data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}"#;
-        let events = parse_google_events(sse_data, Api::GoogleGenerativeAi, "google", "gemini-1.5-pro");
+        let events = parse_google_events(
+            sse_data,
+            Api::GoogleGenerativeAi,
+            "google",
+            "gemini-1.5-pro",
+        );
         assert!(!events.is_empty());
     }
 

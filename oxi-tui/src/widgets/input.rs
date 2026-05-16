@@ -10,9 +10,9 @@
 //! - Enter submits text
 //! - Shift+Enter inserts newline (multiline mode)
 
-use ratatui::prelude::*;
-use ratatui_textarea::{TextArea, Input as TextAreaInput, Key};
 use crate::Theme;
+use ratatui::prelude::*;
+use ratatui_textarea::{Input as TextAreaInput, Key, TextArea};
 
 // ---------------------------------------------------------------------------
 // State
@@ -94,27 +94,36 @@ impl InputState {
 
     /// Delete character before cursor (Backspace)
     pub fn backspace(&mut self) {
-        self.textarea.input(TextAreaInput { key: Key::Backspace, ..Default::default() });
+        self.textarea.input(TextAreaInput {
+            key: Key::Backspace,
+            ..Default::default()
+        });
     }
 
     /// Delete character after cursor (Delete)
     pub fn delete(&mut self) {
-        self.textarea.input(TextAreaInput { key: Key::Delete, ..Default::default() });
+        self.textarea.input(TextAreaInput {
+            key: Key::Delete,
+            ..Default::default()
+        });
     }
 
     /// Move cursor left
     pub fn move_left(&mut self) {
-        self.textarea.move_cursor(ratatui_textarea::CursorMove::Back);
+        self.textarea
+            .move_cursor(ratatui_textarea::CursorMove::Back);
     }
 
     /// Move cursor right
     pub fn move_right(&mut self) {
-        self.textarea.move_cursor(ratatui_textarea::CursorMove::Forward);
+        self.textarea
+            .move_cursor(ratatui_textarea::CursorMove::Forward);
     }
 
     /// Move cursor to start of line
     pub fn move_home(&mut self) {
-        self.textarea.move_cursor(ratatui_textarea::CursorMove::Head);
+        self.textarea
+            .move_cursor(ratatui_textarea::CursorMove::Head);
     }
 
     /// Move cursor to end of line
@@ -124,12 +133,14 @@ impl InputState {
 
     /// Move cursor by word (Ctrl+Left/Right)
     pub fn move_word_left(&mut self) {
-        self.textarea.move_cursor(ratatui_textarea::CursorMove::WordBack);
+        self.textarea
+            .move_cursor(ratatui_textarea::CursorMove::WordBack);
     }
 
     /// Move cursor by word (Ctrl+Left/Right)
     pub fn move_word_right(&mut self) {
-        self.textarea.move_cursor(ratatui_textarea::CursorMove::WordForward);
+        self.textarea
+            .move_cursor(ratatui_textarea::CursorMove::WordForward);
     }
 
     // ── Input handling ──
@@ -140,7 +151,10 @@ impl InputState {
             Key::Enter => true, // Enter is reserved for submit
             Key::Tab => true,   // Tab is used for slash completion
             _ => {
-                self.textarea.input(TextAreaInput { key, ..Default::default() });
+                self.textarea.input(TextAreaInput {
+                    key,
+                    ..Default::default()
+                });
                 false
             }
         }
@@ -198,7 +212,10 @@ pub struct Input<'a> {
 
 impl<'a> Input<'a> {
     pub fn new(theme: &'a Theme) -> Self {
-        Self { theme, placeholder: None }
+        Self {
+            theme,
+            placeholder: None,
+        }
     }
 
     pub fn with_placeholder(mut self, placeholder: &'a str) -> Self {
@@ -211,24 +228,32 @@ impl ratatui::widgets::StatefulWidget for Input<'_> {
     type State = InputState;
 
     fn render(self, area: Rect, buf: &mut ratatui::buffer::Buffer, state: &mut Self::State) {
-        if area.height < 1 || area.width < 4 { return; }
+        if area.height < 1 || area.width < 4 {
+            return;
+        }
 
         let y = area.y;
-        
+
         // Render prompt: ">" (1 cell)
         let prompt_fg = self.theme.colors.primary.to_ratatui();
-        buf[(area.x, y)].set_char('>').set_style(Style::default().fg(prompt_fg));
-        buf[(area.x + 1, y)].set_char(' ').set_style(Style::default());
+        buf[(area.x, y)]
+            .set_char('>')
+            .set_style(Style::default().fg(prompt_fg));
+        buf[(area.x + 1, y)]
+            .set_char(' ')
+            .set_style(Style::default());
 
         // Configure the textarea with oxi styling
         let textarea = state.textarea_mut();
         textarea.set_style(Style::default().fg(self.theme.colors.foreground.to_ratatui()));
-        textarea.set_cursor_style(Style::default()
-            .fg(self.theme.colors.cursor_fg.to_ratatui())
-            .bg(self.theme.colors.cursor_bg.to_ratatui()));
+        textarea.set_cursor_style(
+            Style::default()
+                .fg(self.theme.colors.cursor_fg.to_ratatui())
+                .bg(self.theme.colors.cursor_bg.to_ratatui()),
+        );
         textarea.set_cursor_line_style(Style::default());
         textarea.remove_line_number();
-        
+
         // Placeholder
         let placeholder_text = self.placeholder.unwrap_or("");
         textarea.set_placeholder_text(placeholder_text);

@@ -70,7 +70,6 @@ impl SessionMeta {
         }
     }
 
-
     /// Branched from.
     pub fn branched_from(parent_id: Uuid, root_id: Option<Uuid>, branch_point: Uuid) -> Self {
         let now = Utc::now().timestamp_millis();
@@ -213,7 +212,7 @@ pub enum ContentBlock {
 pub enum AgentMessage {
     /// User.
     #[serde(rename = "user")]
-    User { 
+    User {
         /// The content.
         #[serde(flatten)]
         content: ContentValue,
@@ -330,9 +329,8 @@ impl AgentMessage {
                     .sum::<usize>();
                 let mut text = String::with_capacity(estimated_len.max(256));
                 for block in content {
-                    match block {
-                        AssistantContentBlock::Text { text: t } => text.push_str(t),
-                        _ => {}
+                    if let AssistantContentBlock::Text { text: t } = block {
+                        text.push_str(t)
                     }
                 }
                 text
@@ -768,7 +766,7 @@ fn generate_id(by_id: &HashSet<String>) -> String {
 // ============================================================================
 
 /// Migrate v1 to v2: add id/parent_id tree structure
-fn migrate_v1_to_v2(entries: &mut Vec<FileEntry>) {
+fn migrate_v1_to_v2(entries: &mut [FileEntry]) {
     let mut ids = HashSet::new();
     let mut prev_id: Option<String> = None;
 
@@ -850,7 +848,7 @@ fn migrate_v1_to_v2(entries: &mut Vec<FileEntry>) {
 }
 
 /// Migrate v2 to v3: rename hookMessage role to custom
-fn migrate_v2_to_v3(entries: &mut Vec<FileEntry>) {
+fn migrate_v2_to_v3(entries: &mut [FileEntry]) {
     for entry in entries.iter_mut() {
         match entry {
             FileEntry::Header(header) => {
@@ -864,7 +862,7 @@ fn migrate_v2_to_v3(entries: &mut Vec<FileEntry>) {
 }
 
 /// Run all necessary migrations to bring entries to current version
-fn migrate_to_current_version(entries: &mut Vec<FileEntry>) -> bool {
+fn migrate_to_current_version(entries: &mut [FileEntry]) -> bool {
     let header = entries.iter().find_map(|e| match e {
         FileEntry::Header(h) => Some(h),
         _ => None,
@@ -953,10 +951,18 @@ impl SessionManager {
         let cwd = cwd_override
             .map(|s| s.to_string())
             .or_else(|| header.as_ref().map(|h| h.cwd.clone()))
-            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).to_string_lossy().to_string());
-        let dir = session_dir
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| Path::new(path).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|| ".".to_string()));
+            .unwrap_or_else(|| {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .to_string_lossy()
+                    .to_string()
+            });
+        let dir = session_dir.map(|s| s.to_string()).unwrap_or_else(|| {
+            Path::new(path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| ".".to_string())
+        });
 
         let mut manager = Self::new_internal(&cwd, &dir, Some(path), true);
         manager.persist = true;
@@ -981,7 +987,12 @@ impl SessionManager {
         Self::new_internal(&cwd, "", None, false)
     }
 
-    fn new_internal(cwd: &str, session_dir: &str, session_file: Option<&str>, persist: bool) -> Self {
+    fn new_internal(
+        cwd: &str,
+        session_dir: &str,
+        session_file: Option<&str>,
+        persist: bool,
+    ) -> Self {
         let cwd = cwd.to_string();
         let session_dir = session_dir.to_string();
 
@@ -1015,7 +1026,9 @@ impl SessionManager {
 
     /// Switch to a different session file
     pub fn set_session_file(&mut self, session_file: &str) {
-        let path = Path::new(session_file).canonicalize().unwrap_or_else(|_| PathBuf::from(session_file));
+        let path = Path::new(session_file)
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(session_file));
         let path_str = path.to_string_lossy().to_string();
         self.session_file = Some(path_str.clone());
 
@@ -1036,7 +1049,9 @@ impl SessionManager {
                 FileEntry::Header(h) => Some(h),
                 _ => None,
             });
-            self.session_id = header.map(|h| h.id.clone()).unwrap_or_else(|| Uuid::new_v4().to_string());
+            self.session_id = header
+                .map(|h| h.id.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
 
             if migrate_to_current_version(&mut entries) {
                 self._rewrite_file();
@@ -1076,7 +1091,10 @@ impl SessionManager {
         if self.persist {
             let file_timestamp = timestamp.replace([':', '.', 'T', '-', ':', '+'], "-");
             let short_id = &self.session_id[..8];
-            self.session_file = Some(format!("{}/{}_{}.jsonl", self.session_dir, file_timestamp, short_id));
+            self.session_file = Some(format!(
+                "{}/{}_{}.jsonl",
+                self.session_dir, file_timestamp, short_id
+            ));
         }
     }
 
@@ -1193,11 +1211,7 @@ impl SessionManager {
             return;
         }
 
-        let mut handle = match fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(file)
-        {
+        let mut handle = match fs::OpenOptions::new().create(true).append(true).open(file) {
             Ok(h) => h,
             Err(e) => {
                 tracing::warn!("Failed to open session file for append {}: {}", file, e);
@@ -1312,7 +1326,11 @@ impl SessionManager {
     }
 
     /// Append a custom entry (for extensions)
-    pub fn append_custom_entry(&mut self, custom_type: &str, data: Option<serde_json::Value>) -> String {
+    pub fn append_custom_entry(
+        &mut self,
+        custom_type: &str,
+        data: Option<serde_json::Value>,
+    ) -> String {
         let leaf = self.leaf_id.read().clone();
         let id = Uuid::new_v4().to_string();
         let entry = SessionEntry {
@@ -1321,7 +1339,10 @@ impl SessionManager {
             timestamp: Utc::now().timestamp_millis(),
             message: AgentMessage::Custom {
                 custom_type: custom_type.to_string(),
-                content: data.as_ref().map(|d| ContentValue::String(d.to_string())).unwrap_or(ContentValue::String(String::new())),
+                content: data
+                    .as_ref()
+                    .map(|d| ContentValue::String(d.to_string()))
+                    .unwrap_or(ContentValue::String(String::new())),
                 display: false,
                 details: data.clone(),
                 timestamp: Utc::now().timestamp_millis(),
@@ -1355,7 +1376,12 @@ impl SessionManager {
     pub fn get_session_name(&self) -> Option<String> {
         let entries = self.get_entries();
         for entry in entries.iter().rev() {
-            if let AgentMessage::Custom { custom_type, content, .. } = &entry.message {
+            if let AgentMessage::Custom {
+                custom_type,
+                content,
+                ..
+            } = &entry.message
+            {
                 if custom_type == "session_info" {
                     return Some(content.as_str().trim().to_string()).filter(|s| !s.is_empty());
                 }
@@ -1401,7 +1427,10 @@ impl SessionManager {
 
     /// Get the current leaf entry
     pub fn get_leaf_entry(&self) -> Option<SessionEntry> {
-        self.leaf_id.read().as_ref().and_then(|id| self.by_id.read().get(id).cloned())
+        self.leaf_id
+            .read()
+            .as_ref()
+            .and_then(|id| self.by_id.read().get(id).cloned())
     }
 
     /// Get an entry by ID
@@ -1434,7 +1463,11 @@ impl SessionManager {
     }
 
     /// Set or clear a label on an entry
-    pub fn append_label_change(&mut self, target_id: &str, label: Option<&str>) -> Result<String, String> {
+    pub fn append_label_change(
+        &mut self,
+        target_id: &str,
+        label: Option<&str>,
+    ) -> Result<String, String> {
         if !self.by_id.read().contains_key(target_id) {
             return Err(format!("Entry {} not found", target_id));
         }
@@ -1457,8 +1490,12 @@ impl SessionManager {
         self._append_entry(entry);
 
         if let Some(l) = label {
-            self.labels_by_id.write().insert(target_id.to_string(), l.to_string());
-            self.label_timestamps_by_id.write().insert(target_id.to_string(), Utc::now().to_rfc3339());
+            self.labels_by_id
+                .write()
+                .insert(target_id.to_string(), l.to_string());
+            self.label_timestamps_by_id
+                .write()
+                .insert(target_id.to_string(), Utc::now().to_rfc3339());
         } else {
             self.labels_by_id.write().remove(target_id);
             self.label_timestamps_by_id.write().remove(target_id);
@@ -1471,7 +1508,7 @@ impl SessionManager {
     pub fn get_branch(&self, from_id: Option<&str>) -> Vec<SessionEntry> {
         let mut path = Vec::new();
         let leaf_fallback = self.leaf_id.read().clone();
-        let start_id = from_id.or_else(|| leaf_fallback.as_deref());
+        let start_id = from_id.or(leaf_fallback.as_deref());
         let Some(start_id) = start_id else {
             return path;
         };
@@ -1481,7 +1518,9 @@ impl SessionManager {
         let mut current = by_id.get(start_id).cloned();
         while let Some(entry) = current {
             path.insert(0, entry.clone());
-            current = entry.parent_id.as_ref()
+            current = entry
+                .parent_id
+                .as_ref()
                 .and_then(|pid| by_id.get(pid).cloned());
         }
         path
@@ -1503,7 +1542,10 @@ impl SessionManager {
         let mut current = self.by_id.read().get(id).cloned();
         while let Some(entry) = current {
             depth += 1;
-            current = entry.parent_id.as_ref().and_then(|pid| self.by_id.read().get(pid).cloned());
+            current = entry
+                .parent_id
+                .as_ref()
+                .and_then(|pid| self.by_id.read().get(pid).cloned());
         }
         depth - 1 // Root has depth 0
     }
@@ -1561,9 +1603,8 @@ impl SessionManager {
         }
 
         // Build entries map
-        let entries_map: HashMap<String, SessionEntry> = entries.into_iter()
-            .map(|e| (e.id.clone(), e))
-            .collect();
+        let entries_map: HashMap<String, SessionEntry> =
+            entries.into_iter().map(|e| (e.id.clone(), e)).collect();
 
         // Recursively build tree nodes
         fn build(
@@ -1573,11 +1614,15 @@ impl SessionManager {
             labels: &HashMap<String, String>,
             label_timestamps: &HashMap<String, String>,
         ) -> anyhow::Result<SessionTreeNode> {
-            let entry = entries_map.get(id).ok_or_else(|| anyhow::anyhow!("Corrupted session: entry {} not found", id))?.clone();
+            let entry = entries_map
+                .get(id)
+                .ok_or_else(|| anyhow::anyhow!("Corrupted session: entry {} not found", id))?
+                .clone();
             let child_ids = adj.get(id).cloned().unwrap_or_default();
-            let children: Vec<SessionTreeNode> = child_ids.iter().map(|cid| {
-                build(cid, adj, entries_map, labels, label_timestamps)
-            }).collect::<Result<Vec<_>, _>>()?;
+            let children: Vec<SessionTreeNode> = child_ids
+                .iter()
+                .map(|cid| build(cid, adj, entries_map, labels, label_timestamps))
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(SessionTreeNode {
                 entry,
                 children,
@@ -1586,9 +1631,10 @@ impl SessionManager {
             })
         }
 
-        let mut roots = root_ids.into_iter().map(|rid| {
-            build(&rid, &adj, &entries_map, &labels, &label_timestamps)
-        }).collect::<anyhow::Result<Vec<_>>>()?;
+        let mut roots = root_ids
+            .into_iter()
+            .map(|rid| build(&rid, &adj, &entries_map, &labels, &label_timestamps))
+            .collect::<anyhow::Result<Vec<_>>>()?;
 
         sort_tree_by_timestamp(&mut roots);
         Ok(roots)
@@ -1755,10 +1801,17 @@ impl SessionManager {
     }
 
     /// Fork a session from another project directory into the current project
-    pub fn fork_from(source_path: &str, target_cwd: &str, session_dir: Option<&str>) -> Result<Self, String> {
+    pub fn fork_from(
+        source_path: &str,
+        target_cwd: &str,
+        session_dir: Option<&str>,
+    ) -> Result<Self, String> {
         let source_entries = load_entries_from_file(source_path);
         if source_entries.is_empty() {
-            return Err(format!("Cannot fork: source session file is empty or invalid: {}", source_path));
+            return Err(format!(
+                "Cannot fork: source session file is empty or invalid: {}",
+                source_path
+            ));
         }
 
         let source_header = source_entries.iter().find_map(|e| match e {
@@ -1766,7 +1819,10 @@ impl SessionManager {
             _ => None,
         });
         if source_header.is_none() {
-            return Err(format!("Cannot fork: source session has no header: {}", source_path));
+            return Err(format!(
+                "Cannot fork: source session has no header: {}",
+                source_path
+            ));
         }
 
         let dir = session_dir
@@ -1795,16 +1851,26 @@ impl SessionManager {
 
         let mut handle = fs::OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&new_session_file)
             .map_err(|e| e.to_string())?;
-        writeln!(&mut handle, "{}", serde_json::to_string(&new_header).expect("session header serializable")).map_err(|e| e.to_string())?;
+        writeln!(
+            &mut handle,
+            "{}",
+            serde_json::to_string(&new_header).expect("session header serializable")
+        )
+        .map_err(|e| e.to_string())?;
 
         // Copy all non-header entries from source
         for file_entry in &source_entries {
             if let FileEntry::Entry(_) = file_entry {
-                writeln!(&mut handle, "{}", serde_json::to_string(file_entry).expect("session entry serializable"))
-                    .map_err(|e| e.to_string())?;
+                writeln!(
+                    &mut handle,
+                    "{}",
+                    serde_json::to_string(file_entry).expect("session entry serializable")
+                )
+                .map_err(|e| e.to_string())?;
             }
         }
 
@@ -1837,7 +1903,10 @@ impl SessionManager {
         let base_dir = home.join(".oxi");
         let sessions_dir = base_dir.join("sessions");
         tokio::fs::create_dir_all(&sessions_dir).await?;
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).to_string_lossy().to_string();
+        let cwd = std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .to_string_lossy()
+            .to_string();
         Ok(Self::in_memory(&cwd))
     }
 
@@ -1863,9 +1932,13 @@ impl SessionManager {
             let entry = entry?;
             let path = entry.path();
             if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                let file_name = path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new("")).to_string_lossy().to_string();
+                let file_name = path
+                    .file_stem()
+                    .unwrap_or_else(|| std::ffi::OsStr::new(""))
+                    .to_string_lossy()
+                    .to_string();
                 // Try to extract uuid from filename
-                if let Some(uuid_part) = file_name.split('_').last() {
+                if let Some(uuid_part) = file_name.split('_').next_back() {
                     if let Ok(uuid) = Uuid::parse_str(uuid_part) {
                         let mtime = entry.metadata().ok().and_then(|m| m.modified().ok());
                         let now_ts = Utc::now().timestamp_millis();
@@ -1875,10 +1948,12 @@ impl SessionManager {
                             root_id: None,
                             branch_point: None,
                             created_at: now_ts,
-                            updated_at: mtime.map(|t| {
-                                let dt: DateTime<Utc> = DateTime::from(t);
-                                dt.timestamp_millis()
-                            }).unwrap_or(now_ts),
+                            updated_at: mtime
+                                .map(|t| {
+                                    let dt: DateTime<Utc> = DateTime::from(t);
+                                    dt.timestamp_millis()
+                                })
+                                .unwrap_or(now_ts),
                             name: None,
                         });
                     }
@@ -1917,17 +1992,20 @@ impl SessionManager {
     ) -> Result<(Uuid, Vec<SessionEntry>)> {
         let _entry_id_str = entry_id.to_string();
         let _parent_id_str = parent_id.to_string();
-        
+
         // Get entries up to the branch point
         let _entries = self.get_entries();
         let path = self.get_branch(Some(&entry_id.to_string()));
-        
+
         let new_id = Uuid::new_v4();
-        let new_entries: Vec<SessionEntry> = path.into_iter().map(|e| {
-            let mut new_entry = e.clone();
-            new_entry.id = Uuid::new_v4().to_string();
-            new_entry
-        }).collect();
+        let new_entries: Vec<SessionEntry> = path
+            .into_iter()
+            .map(|e| {
+                let mut new_entry = e.clone();
+                new_entry.id = Uuid::new_v4().to_string();
+                new_entry
+            })
+            .collect();
 
         // Update the last entry to have parent reference
         // (simplified version of the original branch_from)
@@ -1942,7 +2020,7 @@ impl SessionManager {
 
     /// Get tree for a specific session (backward compat)
     pub async fn get_tree_async(&self, _id: Uuid) -> Result<Vec<SessionTreeNode>> {
-        Ok(self.get_tree(Uuid::nil())?)
+        self.get_tree(Uuid::nil())
     }
 
     /// Save metadata (backward compat)
@@ -1972,10 +2050,13 @@ impl SessionManager {
             return Err("Cannot fork: source session is empty".to_string());
         }
         // Validate header exists (content will be replaced with fresh header below)
-        let _header = source_entries.iter().find_map(|e| match e {
-            FileEntry::Header(h) => Some(h),
-            _ => None,
-        }).ok_or_else(|| "Missing session header".to_string())?;
+        let _header = source_entries
+            .iter()
+            .find_map(|e| match e {
+                FileEntry::Header(h) => Some(h),
+                _ => None,
+            })
+            .ok_or_else(|| "Missing session header".to_string())?;
         let new_id = Uuid::new_v4().to_string();
         let timestamp = chrono::Utc::now().to_rfc3339();
         let file_timestamp = timestamp.replace([':', '.', 'T', '-', ':', '+'], "-");
@@ -2020,6 +2101,7 @@ impl SessionManager {
         }
         let mut handle = std::fs::OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&new_file)
             .map_err(|e| e.to_string())?;
@@ -2055,7 +2137,7 @@ fn convert_from_session_entry(entry: &SessionEntry) -> SessionEntryEnum {
     let timestamp = DateTime::from_timestamp_millis(entry.timestamp)
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_else(|| Utc::now().to_rfc3339());
-    
+
     SessionEntryEnum::Message(SessionMessageEntry {
         base: SessionEntryBase {
             entry_type: "message".to_string(),
@@ -2106,7 +2188,7 @@ pub struct NewSessionOptions {
 /// Get default session dir.
 pub fn get_default_session_dir(cwd: &str) -> String {
     let agent_dir = get_agent_dir();
-    let safe_path = format!("--{}--", cwd.replace('/', "-").replace('\\', "-").replace(':', "-"));
+    let safe_path = format!("--{}--", cwd.replace(['/', '\\', ':'], "-"));
     let session_dir = format!("{}/sessions/{}", agent_dir, safe_path);
 
     if !Path::new(&session_dir).exists() {
@@ -2228,8 +2310,7 @@ pub fn resolve_session_path(input: &str, cwd: &str) -> Result<String, String> {
         return Err("Empty path".to_string());
     }
     let resolved = if path.starts_with("~") || path == "~" {
-        let home =
-            dirs::home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
+        let home = dirs::home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
         if path == "~" {
             home.to_string_lossy().into_owned()
         } else {
@@ -2238,8 +2319,8 @@ pub fn resolve_session_path(input: &str, cwd: &str) -> Result<String, String> {
     } else if path.starts_with('/') || path.contains(':') {
         path.to_string()
     } else {
-        if path.starts_with("./") {
-            format!("{}/{}", cwd.trim_end_matches('/'), &path[2..])
+        if let Some(stripped) = path.strip_prefix("./") {
+            format!("{}/{}", cwd.trim_end_matches('/'), stripped)
         } else {
             format!("{}/{}", cwd.trim_end_matches('/'), path)
         }
@@ -2247,9 +2328,8 @@ pub fn resolve_session_path(input: &str, cwd: &str) -> Result<String, String> {
     let p = std::path::Path::new(&resolved);
     p.canonicalize()
         .map(|c| c.to_string_lossy().into_owned())
-        .or_else(|_| Ok(resolved))
+        .or(Ok(resolved))
 }
-
 
 /// Build session context from entries using tree traversal
 fn build_session_context_internal(
@@ -2277,7 +2357,10 @@ fn build_session_context_internal(
     let mut current: Option<&SessionEntry> = Some(leaf);
     while let Some(entry) = current {
         path.insert(0, entry);
-        current = entry.parent_id.as_ref().and_then(|pid| entries.iter().find(|e| e.id == *pid));
+        current = entry
+            .parent_id
+            .as_ref()
+            .and_then(|pid| entries.iter().find(|e| e.id == *pid));
     }
 
     // Extract settings
@@ -2285,13 +2368,21 @@ fn build_session_context_internal(
     let mut model: Option<ModelInfo> = None;
 
     for entry in &path {
-        if let AgentMessage::Assistant { provider, model_id, .. } = &entry.message {
+        if let AgentMessage::Assistant {
+            provider, model_id, ..
+        } = &entry.message
+        {
             model = Some(ModelInfo {
                 provider: provider.clone().unwrap_or_default(),
                 model_id: model_id.clone().unwrap_or_default(),
             });
         }
-        if let AgentMessage::Custom { custom_type, content, .. } = &entry.message {
+        if let AgentMessage::Custom {
+            custom_type,
+            content,
+            ..
+        } = &entry.message
+        {
             if custom_type == "thinking_level_change" {
                 thinking_level = content.as_str().to_string();
             }
@@ -2301,9 +2392,12 @@ fn build_session_context_internal(
     // Build messages - include all messages in the path
     let messages: Vec<AgentMessage> = path
         .iter()
-        .filter(|e| e.message.is_user() || e.message.is_assistant() 
-            || matches!(&e.message, AgentMessage::BranchSummary { .. })
-            || matches!(&e.message, AgentMessage::CompactionSummary { .. }))
+        .filter(|e| {
+            e.message.is_user()
+                || e.message.is_assistant()
+                || matches!(&e.message, AgentMessage::BranchSummary { .. })
+                || matches!(&e.message, AgentMessage::CompactionSummary { .. })
+        })
         .map(|e| e.message.clone())
         .collect();
 
@@ -2334,7 +2428,12 @@ async fn list_sessions_from_dir(dir: &str) -> Result<Vec<SessionInfo>> {
     let entries = fs::read_dir(dir)?;
     let files: Vec<String> = entries
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|ext| ext == "jsonl").unwrap_or(false))
+        .filter(|e| {
+            e.path()
+                .extension()
+                .map(|ext| ext == "jsonl")
+                .unwrap_or(false)
+        })
         .filter_map(|e| e.path().to_str().map(|s| s.to_string()))
         .collect();
 
@@ -2371,7 +2470,11 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
         if let FileEntry::Entry(e) = entry {
             // Check for session_info
             if let SessionEntryEnum::SessionInfo(si) = e {
-                name = si.name.clone().map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+                name = si
+                    .name
+                    .clone()
+                    .map(|n| n.trim().to_string())
+                    .filter(|n| !n.is_empty());
             }
             // Check for messages
             if let SessionEntryEnum::Message(m) = e {
@@ -2405,7 +2508,11 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
         created,
         modified,
         message_count,
-        first_message: if first_message.is_empty() { "(no messages)".to_string() } else { first_message },
+        first_message: if first_message.is_empty() {
+            "(no messages)".to_string()
+        } else {
+            first_message
+        },
         all_messages_text: all_messages.join(" "),
     })
 }
@@ -2466,7 +2573,10 @@ fn get_last_activity_time(entries: &[FileEntry]) -> Option<i64> {
 
         if let SessionEntryEnum::Message(m) = entry {
             if m.message.is_user() || m.message.is_assistant() {
-                last_activity = Some(std::cmp::max(last_activity.unwrap_or(0), m.base.timestamp.parse().unwrap_or(0)));
+                last_activity = Some(std::cmp::max(
+                    last_activity.unwrap_or(0),
+                    m.base.timestamp.parse().unwrap_or(0),
+                ));
             }
         }
     }
@@ -2492,7 +2602,9 @@ mod tests {
     #[test]
     fn test_append_message() {
         let mut manager = SessionManager::in_memory("/tmp");
-        let id = manager.append_message(AgentMessage::User { content: ContentValue::String("Hello".to_string()) });
+        let id = manager.append_message(AgentMessage::User {
+            content: ContentValue::String("Hello".to_string()),
+        });
         assert!(!id.is_empty());
         assert_eq!(manager.get_entries().len(), 1);
         assert_eq!(manager.get_leaf_id(), Some(id));
@@ -2501,8 +2613,16 @@ mod tests {
     #[test]
     fn test_tree_traversal() {
         let mut manager = SessionManager::in_memory("/tmp");
-        let id1 = manager.append_message(AgentMessage::User { content: ContentValue::String("Hello".to_string()) });
-        let id2 = manager.append_message(AgentMessage::Assistant { content: vec![], provider: None, model_id: None, usage: None, stop_reason: None });
+        let id1 = manager.append_message(AgentMessage::User {
+            content: ContentValue::String("Hello".to_string()),
+        });
+        let id2 = manager.append_message(AgentMessage::Assistant {
+            content: vec![],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
+        });
 
         // Get branch from root
         let branch = manager.get_branch(None);
@@ -2525,16 +2645,32 @@ mod tests {
     #[test]
     fn test_branching() {
         let mut manager = SessionManager::in_memory("/tmp");
-        let id1 = manager.append_message(AgentMessage::User { content: ContentValue::String("Hello".to_string()) });
-        let _id2 = manager.append_message(AgentMessage::Assistant { content: vec![], provider: None, model_id: None, usage: None, stop_reason: None });
-        let _id3 = manager.append_message(AgentMessage::User { content: ContentValue::String("How are you?".to_string()) });
+        let id1 = manager.append_message(AgentMessage::User {
+            content: ContentValue::String("Hello".to_string()),
+        });
+        let _id2 = manager.append_message(AgentMessage::Assistant {
+            content: vec![],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
+        });
+        let _id3 = manager.append_message(AgentMessage::User {
+            content: ContentValue::String("How are you?".to_string()),
+        });
 
         // Branch from first message
         manager.branch(&id1).unwrap();
         assert_eq!(manager.get_leaf_id(), Some(id1.clone()));
 
         // Add new message on branch
-        let id4 = manager.append_message(AgentMessage::Assistant { content: vec![], provider: None, model_id: None, usage: None, stop_reason: None });
+        let id4 = manager.append_message(AgentMessage::Assistant {
+            content: vec![],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
+        });
 
         // Should have 4 entries total (3 original + 1 new branch)
         assert_eq!(manager.get_entries().len(), 4);
@@ -2551,9 +2687,13 @@ mod tests {
     #[test]
     fn test_session_context() {
         let mut manager = SessionManager::in_memory("/tmp");
-        manager.append_message(AgentMessage::User { content: ContentValue::String("Hello".to_string()) });
-        manager.append_message(AgentMessage::Assistant { 
-            content: vec![AssistantContentBlock::Text { text: "Hi there!".to_string() }],
+        manager.append_message(AgentMessage::User {
+            content: ContentValue::String("Hello".to_string()),
+        });
+        manager.append_message(AgentMessage::Assistant {
+            content: vec![AssistantContentBlock::Text {
+                text: "Hi there!".to_string(),
+            }],
             provider: Some("test".to_string()),
             model_id: Some("model".to_string()),
             usage: None,
@@ -2568,16 +2708,18 @@ mod tests {
     #[test]
     fn test_compaction_entry() {
         let mut manager = SessionManager::in_memory("/tmp");
-        let id1 = manager.append_message(AgentMessage::User { content: ContentValue::String("First message".to_string()) });
-        let _id2 = manager.append_message(AgentMessage::Assistant { content: vec![], provider: None, model_id: None, usage: None, stop_reason: None });
+        let id1 = manager.append_message(AgentMessage::User {
+            content: ContentValue::String("First message".to_string()),
+        });
+        let _id2 = manager.append_message(AgentMessage::Assistant {
+            content: vec![],
+            provider: None,
+            model_id: None,
+            usage: None,
+            stop_reason: None,
+        });
 
-        let id3 = manager.append_compaction(
-            "Summarized conversation",
-            &id1,
-            1000,
-            None,
-            None,
-        );
+        let id3 = manager.append_compaction("Summarized conversation", &id1, 1000, None, None);
         assert!(!id3.is_empty());
 
         let latest = manager.get_latest_compaction_entry();
@@ -2587,7 +2729,9 @@ mod tests {
     #[test]
     fn test_labels() {
         let mut manager = SessionManager::in_memory("/tmp");
-        let id1 = manager.append_message(AgentMessage::User { content: ContentValue::String("Hello".to_string()) });
+        let id1 = manager.append_message(AgentMessage::User {
+            content: ContentValue::String("Hello".to_string()),
+        });
 
         manager.add_label(&id1, "important").unwrap();
         assert_eq!(manager.get_label(&id1), Some("important".to_string()));
@@ -2602,13 +2746,17 @@ mod tests {
 
     /// Helper: create a user message
     fn user_msg(text: &str) -> AgentMessage {
-        AgentMessage::User { content: ContentValue::String(text.to_string()) }
+        AgentMessage::User {
+            content: ContentValue::String(text.to_string()),
+        }
     }
 
     /// Helper: create an assistant message
     fn assistant_msg(text: &str) -> AgentMessage {
         AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text { text: text.to_string() }],
+            content: vec![AssistantContentBlock::Text {
+                text: text.to_string(),
+            }],
             provider: Some("anthropic".to_string()),
             model_id: Some("claude-test".to_string()),
             usage: None,
@@ -2680,7 +2828,12 @@ mod tests {
         assert_eq!(msg3.parent_id, Some(compaction_id));
 
         // Verify compaction content
-        if let AgentMessage::CompactionSummary { summary, tokens_before, .. } = &compaction.message {
+        if let AgentMessage::CompactionSummary {
+            summary,
+            tokens_before,
+            ..
+        } = &compaction.message
+        {
             assert_eq!(summary, "summary");
             assert_eq!(*tokens_before, 1000);
         } else {
@@ -2795,7 +2948,8 @@ mod tests {
         assert_eq!(node2.entry.id, id2);
         assert_eq!(node2.children.len(), 3);
 
-        let mut branch_ids: Vec<String> = node2.children.iter().map(|c| c.entry.id.clone()).collect();
+        let mut branch_ids: Vec<String> =
+            node2.children.iter().map(|c| c.entry.id.clone()).collect();
         branch_ids.sort();
         let mut expected = vec![id_a, id_b, id_c];
         expected.sort();
@@ -2849,12 +3003,8 @@ mod tests {
         manager.append_message(bare_assistant_msg());
         manager.append_message(user_msg("3"));
 
-        let summary_id = manager.branch_with_summary(
-            Some(&id1),
-            "Summary of abandoned work",
-            None,
-            None,
-        );
+        let summary_id =
+            manager.branch_with_summary(Some(&id1), "Summary of abandoned work", None, None);
         assert!(!summary_id.is_empty());
         assert_eq!(manager.get_leaf_id(), Some(summary_id.clone()));
 
@@ -3049,7 +3199,8 @@ mod tests {
     fn test_custom_entry_integrates_into_tree() {
         let mut manager = SessionManager::in_memory("/tmp");
         let msg_id = manager.append_message(user_msg("hello"));
-        let custom_id = manager.append_custom_entry("my_data", Some(serde_json::json!({"foo": "bar"})));
+        let custom_id =
+            manager.append_custom_entry("my_data", Some(serde_json::json!({"foo": "bar"})));
         let msg2_id = manager.append_message(assistant_msg("response"));
 
         let entries = manager.get_entries();

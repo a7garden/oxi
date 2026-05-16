@@ -7809,7 +7809,7 @@ static ZAI_MODELS: &[ModelEntry] = &[
 ];
 
 /// All model arrays indexed by provider
-static ALL_PROVIDER_MODELS: &[(&'static str, &'static [ModelEntry])] = &[
+static ALL_PROVIDER_MODELS: &[(&str, &[ModelEntry])] = &[
     ("amazon-bedrock", AMAZON_BEDROCK_MODELS),
     ("anthropic", ANTHROPIC_MODELS),
     ("azure-openai-responses", AZURE_OPENAI_RESPONSES_MODELS),

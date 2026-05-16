@@ -289,6 +289,7 @@ pub fn get_all_env_keys() -> HashMap<String, String> {
     let mut result = HashMap::new();
 
     // Map provider names to their possible env vars
+    #[allow(clippy::type_complexity)]
     let mappings: [(&str, fn() -> Option<String>); 17] = [
         ("anthropic", || {
             first_of(&["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"])

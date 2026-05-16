@@ -1,8 +1,7 @@
 /// Helper functions for agent loop
-
-use oxi_ai::{ContentBlock, ToolCall, TextContent, ToolResultMessage};
-use std::sync::Arc;
+use oxi_ai::{ContentBlock, TextContent, ToolCall, ToolResultMessage};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Extract tool calls from an assistant message.
 pub fn extract_tool_calls(message: &oxi_ai::AssistantMessage) -> Vec<ToolCall> {
@@ -22,7 +21,9 @@ pub fn create_tool_result_message(finalized: &FinalizedToolCall) -> ToolResultMe
     let content_blocks = if let Some(ref blocks) = finalized.result.content_blocks {
         blocks.clone()
     } else {
-        vec![ContentBlock::Text(TextContent::new(finalized.result.output.clone()))]
+        vec![ContentBlock::Text(TextContent::new(
+            finalized.result.output.clone(),
+        ))]
     };
 
     ToolResultMessage::new(
@@ -76,10 +77,10 @@ use crate::AgentToolResult;
 
 /// Finalized tool call with result.
 pub struct FinalizedToolCall {
-/// pub.
+    /// pub.
     pub tool_call: oxi_ai::ToolCall,
-/// pub.
+    /// pub.
     pub result: AgentToolResult,
-/// pub.
+    /// pub.
     pub is_error: bool,
 }

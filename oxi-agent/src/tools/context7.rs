@@ -13,12 +13,12 @@
 //!
 //! Anonymous access works without a key but has lower rate limits.
 
-use crate::tools::{AgentTool, AgentToolResult, ToolContext};
 use crate::tools::http_client::shared_http_client;
+use crate::tools::{AgentTool, AgentToolResult, ToolContext};
 use async_trait::async_trait;
-use std::sync::OnceLock;
 use serde::Deserialize;
 use serde_json::Value;
+use std::sync::OnceLock;
 use tokio::sync::oneshot;
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -85,7 +85,7 @@ fn api_key() -> &'static Option<String> {
 /// Where the user should put their key (for error messages).
 fn key_location_hint() -> String {
     match dirs::config_dir() {
-        Some(_) => format!("~/.config/oxi/keys/context7 or CONTEXT7_API_KEY env var"),
+        Some(_) => "~/.config/oxi/keys/context7 or CONTEXT7_API_KEY env var".to_string(),
         None => "CONTEXT7_API_KEY env var".to_string(),
     }
 }
@@ -221,7 +221,9 @@ impl AgentTool for Context7ResolveLibraryIdTool {
             )));
         }
 
-        Ok(AgentToolResult::success(format_search_results(&search.results)))
+        Ok(AgentToolResult::success(format_search_results(
+            &search.results,
+        )))
     }
 }
 

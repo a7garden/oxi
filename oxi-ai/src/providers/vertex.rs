@@ -114,7 +114,7 @@ impl VertexProvider {
         let token_response: TokenResponse = response
             .json()
             .await
-            .map_err(|e| ProviderError::RequestFailed(e))?;
+            .map_err(ProviderError::RequestFailed)?;
         sleep(Duration::from_secs(60 * 55)).await;
         Ok(token_response.access_token)
     }
@@ -178,31 +178,34 @@ impl Provider for VertexProvider {
         }
         let model_name = model.id.clone();
         // Use split_complete_lines for safe UTF-8 boundary handling
-        let stream = response.bytes_stream().scan(
-            Vec::new(), // pending_bytes
-            move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
-                let events = match chunk {
-                    Ok(bytes) => {
-                        let mut combined = Vec::with_capacity(pending_bytes.len() + bytes.len());
-                        combined.extend_from_slice(pending_bytes);
-                        combined.extend_from_slice(&bytes);
-                        let (text, trailing) = split_complete_lines(&combined);
-                        *pending_bytes = trailing;
-                        parse_google_events(
-                            &text,
-                            Api::GoogleVertex,
-                            "vertex",
-                            &model_name,
-                        )
-                    }
-                    Err(e) => vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(Api::GoogleVertex, "vertex", &e.to_string()),
-                    }],
-                };
-                async move { Some(futures::stream::iter(events)) }
-            },
-        ).flatten();
+        let stream = response
+            .bytes_stream()
+            .scan(
+                Vec::new(), // pending_bytes
+                move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                    let events = match chunk {
+                        Ok(bytes) => {
+                            let mut combined =
+                                Vec::with_capacity(pending_bytes.len() + bytes.len());
+                            combined.extend_from_slice(pending_bytes);
+                            combined.extend_from_slice(&bytes);
+                            let (text, trailing) = split_complete_lines(&combined);
+                            *pending_bytes = trailing;
+                            parse_google_events(&text, Api::GoogleVertex, "vertex", &model_name)
+                        }
+                        Err(e) => vec![ProviderEvent::Error {
+                            reason: StopReason::Error,
+                            error: create_error_message(
+                                Api::GoogleVertex,
+                                "vertex",
+                                &e.to_string(),
+                            ),
+                        }],
+                    };
+                    async move { Some(futures::stream::iter(events)) }
+                },
+            )
+            .flatten();
         Ok(Box::pin(stream))
     }
 
@@ -229,7 +232,8 @@ fn sign_rs256(
     use sha2::Sha256;
     use signature::{SignatureEncoding, Signer};
     let message = format!("{}.{}", header_b64, claims_b64);
-    let key = RsaPrivateKey::from_pkcs8_pem(private_key_pem).map_err(|_| ProviderError::InvalidApiKey)?;
+    let key =
+        RsaPrivateKey::from_pkcs8_pem(private_key_pem).map_err(|_| ProviderError::InvalidApiKey)?;
     let signing_key = SigningKey::<Sha256>::new_unprefixed(key);
     let signature = signing_key.sign(message.as_bytes());
     let sig_bytes = signature.to_bytes();
@@ -238,7 +242,7 @@ fn sign_rs256(
 }
 
 #[derive(Debug, serde::Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct TokenResponse {
     access_token: String,
     _expires_in: usize,
@@ -246,7 +250,7 @@ struct TokenResponse {
 }
 
 #[derive(Debug, serde::Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct ServiceAccountCreds {
     #[serde(rename = "type")]
     _type: String,

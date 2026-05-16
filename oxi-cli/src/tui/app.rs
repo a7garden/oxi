@@ -4,15 +4,15 @@ use super::handlers;
 use super::render;
 use super::slash;
 use crate::app::agent_session::SessionEvent;
-use crate::context::auto_compaction::CompactionReason;
 use crate::app::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
 };
-use oxi_store::session::SessionManager;
+use crate::context::auto_compaction::CompactionReason;
 use crate::util::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
+use oxi_store::session::SessionManager;
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{
     chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},
@@ -21,22 +21,19 @@ use oxi_tui::widgets::{
 };
 use std::io::{self, Write};
 use std::panic;
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::{atomic::Ordering, Arc};
 use tokio::sync::mpsc;
 
 use crossterm::{
     cursor::Hide,
     event::{
-        self, DisableBracketedPaste, EnableBracketedPaste,
-        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self, DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    backend::CrosstermBackend,
-    Terminal,
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 
 // ── Terminal Lifecycle ───────────────────────────────────────────────────
 
@@ -61,9 +58,7 @@ impl Tui {
                 EnterAlternateScreen,
                 Hide,
                 EnableBracketedPaste,
-                PushKeyboardEnhancementFlags(
-                    KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                )
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::REPORT_EVENT_TYPES)
             );
             // Enable mouse scroll tracking without drag tracking.
             // ?1000h = click/release/scroll, ?1006h = SGR extended coords.
@@ -117,11 +112,15 @@ impl Tui {
 
 impl std::ops::Deref for Tui {
     type Target = Terminal<CrosstermBackend<io::Stdout>>;
-    fn deref(&self) -> &Self::Target { &self.terminal }
+    fn deref(&self) -> &Self::Target {
+        &self.terminal
+    }
 }
 
 impl std::ops::DerefMut for Tui {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.terminal }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.terminal
+    }
 }
 
 impl Drop for Tui {
@@ -129,7 +128,6 @@ impl Drop for Tui {
         let _ = self.exit();
     }
 }
-
 
 // ── UI Events (agent → TUI) ──────────────────────────────────────────────
 
@@ -251,10 +249,7 @@ pub(crate) enum SetupStep {
         selected: usize,
     },
     /// Done — show success
-    Done {
-        provider: String,
-        model: String,
-    },
+    Done { provider: String, model: String },
 }
 
 /// Overlay types for interactive TUI dialogs.
@@ -339,7 +334,8 @@ pub(crate) struct AppState {
     /// block exists.
     snapshot_text_block_created: bool,
     /// Questionnaire bridge — set by run_tui_interactive_impl() from App::questionnaire_bridge().
-    questionnaire_bridge: Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
+    questionnaire_bridge:
+        Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
 }
 
 impl AppState {
@@ -401,7 +397,11 @@ impl AppState {
             return;
         }
         let cmd_part = text.split_whitespace().next().unwrap_or("");
-        let query = if cmd_part.len() > 1 { &cmd_part[1..] } else { "" };
+        let query = if cmd_part.len() > 1 {
+            &cmd_part[1..]
+        } else {
+            ""
+        };
         let mut matches: Vec<slash::SlashCompletion> = BUILTIN_SLASH_COMMANDS
             .iter()
             .filter(|cmd| query.is_empty() || cmd.name.starts_with(query))
@@ -415,8 +415,6 @@ impl AppState {
         self.slash_completion_index = 0;
         self.slash_completion_active = !self.slash_completions.is_empty();
     }
-
-    
 
     /// Get the currently selected slash command (for direct execution).
     pub fn selected_slash_command(&self) -> Option<&slash::SlashCompletion> {
@@ -500,7 +498,8 @@ impl AppState {
                             // Use char_indices to find the safe byte boundary
                             // closest to snapshot_text_rendered (multi-byte chars
                             // like Korean are 3 bytes each in UTF-8).
-                            let byte_off = text.char_indices()
+                            let byte_off = text
+                                .char_indices()
                                 .map(|(i, _)| i)
                                 .find(|&i| i >= self.snapshot_text_rendered)
                                 .unwrap_or(text.len());
@@ -536,7 +535,8 @@ impl AppState {
                         }
                         if thinking.len() > self.snapshot_thinking_rendered[thinking_block_idx] {
                             let prev = self.snapshot_thinking_rendered[thinking_block_idx];
-                            let byte_off = thinking.char_indices()
+                            let byte_off = thinking
+                                .char_indices()
                                 .map(|(i, _)| i)
                                 .find(|&i| i >= prev)
                                 .unwrap_or(thinking.len());
@@ -549,7 +549,8 @@ impl AppState {
                         thinking_block_idx += 1;
                     }
                     oxi_ai::ContentBlock::Image(img) => {
-                        self.chat.stream_image(img.mime_type.clone(), img.data.clone());
+                        self.chat
+                            .stream_image(img.mime_type.clone(), img.data.clone());
                     }
                     oxi_ai::ContentBlock::Unknown(_) => {}
                 }
@@ -689,21 +690,20 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             None => SessionManager::create(&cwd, None),
         };
 
-        let services = create_agent_session_services(
-            CreateAgentSessionServicesOptions::new(cwd_path.clone()),
-        )?;
+        let services = create_agent_session_services(CreateAgentSessionServicesOptions::new(
+            cwd_path.clone(),
+        ))?;
         let services = Arc::new(services);
 
-        let create_result = create_agent_session_from_services(
-            CreateAgentSessionFromServicesOptions {
+        let create_result =
+            create_agent_session_from_services(CreateAgentSessionFromServicesOptions {
                 services: services.clone(),
                 session_manager,
                 model_id: Some(model_id.clone()),
                 thinking_level: Some(settings.thinking_level),
                 scoped_models: Vec::new(),
                 tool_registry: Some(tools.clone()),
-            },
-        )?;
+            })?;
 
         let agent_session = create_result.session;
         if let Some(msg) = create_result.model_fallback_message {
@@ -739,40 +739,70 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                 tracing::info!("[FORWARDER] Thread started, waiting for events");
                                 while let Ok(event) = event_rx.recv() {
                                     event_count += 1;
-                                    tracing::info!("[FORWARDER] Event #{}: {:?}", event_count, std::mem::discriminant(&event));
+                                    tracing::info!(
+                                        "[FORWARDER] Event #{}: {:?}",
+                                        event_count,
+                                        std::mem::discriminant(&event)
+                                    );
                                     let ui_event = match event {
                                         // ── Agent lifecycle ─────────────────────────
                                         AgentEvent::AgentStart { .. } => UiEvent::AgentStart,
                                         AgentEvent::AgentEnd { .. } => UiEvent::AgentEnd,
 
                                         // ── Turn lifecycle ───────────────────────────
-                                        AgentEvent::TurnStart { turn_number } => UiEvent::TurnStart { turn_number },
-                                        AgentEvent::TurnEnd { turn_number, .. } => UiEvent::TurnEnd { turn_number },
+                                        AgentEvent::TurnStart { turn_number } => {
+                                            UiEvent::TurnStart { turn_number }
+                                        }
+                                        AgentEvent::TurnEnd { turn_number, .. } => {
+                                            UiEvent::TurnEnd { turn_number }
+                                        }
 
                                         // ── Message lifecycle (pi-mono pattern) ─────
                                         // These carry full message snapshots with properly
                                         // separated content blocks from the provider.
-                                        AgentEvent::MessageStart { message } => UiEvent::MessageStart { message },
-                                        AgentEvent::MessageUpdate { message, delta } => UiEvent::MessageUpdate { message, delta },
-                                        AgentEvent::MessageEnd { message } => UiEvent::MessageEnd { message },
+                                        AgentEvent::MessageStart { message } => {
+                                            UiEvent::MessageStart { message }
+                                        }
+                                        AgentEvent::MessageUpdate { message, delta } => {
+                                            UiEvent::MessageUpdate { message, delta }
+                                        }
+                                        AgentEvent::MessageEnd { message } => {
+                                            UiEvent::MessageEnd { message }
+                                        }
 
                                         // ── Tool execution (structured events) ──────
-                                        AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => {
-                                            UiEvent::ToolExecutionStart { tool_call_id, tool_name, args }
-                                        }
-                                        AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
-                                            UiEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error }
-                                        }
+                                        AgentEvent::ToolExecutionStart {
+                                            tool_call_id,
+                                            tool_name,
+                                            args,
+                                        } => UiEvent::ToolExecutionStart {
+                                            tool_call_id,
+                                            tool_name,
+                                            args,
+                                        },
+                                        AgentEvent::ToolExecutionEnd {
+                                            tool_call_id,
+                                            tool_name,
+                                            result,
+                                            is_error,
+                                        } => UiEvent::ToolExecutionEnd {
+                                            tool_call_id,
+                                            tool_name,
+                                            result,
+                                            is_error,
+                                        },
 
                                         // ── Legacy tool events (from Agent::run_with_channel) ──
                                         // Map to the same structured UiEvents.
-                                        AgentEvent::ToolStart { tool_call_id, tool_name, arguments } => {
-                                            UiEvent::ToolExecutionStart {
-                                                tool_call_id,
-                                                tool_name,
-                                                args: arguments,
-                                            }
-                                        }
+                                        AgentEvent::ToolStart {
+                                            tool_call_id,
+                                            tool_name,
+                                            arguments,
+                                        } => UiEvent::ToolExecutionStart {
+                                            tool_call_id,
+                                            tool_name,
+                                            args: arguments,
+                                        },
                                         AgentEvent::ToolComplete { result } => {
                                             UiEvent::ToolExecutionEnd {
                                                 tool_call_id: result.tool_call_id.clone(),
@@ -781,18 +811,19 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                                 is_error: false, // status checked in handler
                                             }
                                         }
-                                        AgentEvent::ToolError { tool_call_id, error } => {
-                                            UiEvent::ToolExecutionEnd {
-                                                tool_call_id,
-                                                tool_name: String::new(),
-                                                result: oxi_ai::ToolResult {
-                                                    tool_call_id: String::new(),
-                                                    content: error,
-                                                    status: "error".to_string(),
-                                                },
-                                                is_error: true,
-                                            }
-                                        }
+                                        AgentEvent::ToolError {
+                                            tool_call_id,
+                                            error,
+                                        } => UiEvent::ToolExecutionEnd {
+                                            tool_call_id,
+                                            tool_name: String::new(),
+                                            result: oxi_ai::ToolResult {
+                                                tool_call_id: String::new(),
+                                                content: error,
+                                                status: "error".to_string(),
+                                            },
+                                            is_error: true,
+                                        },
 
                                         // ── Legacy streaming events ─────────────────
                                         // Still emitted by agent.rs alongside MessageUpdate.
@@ -803,7 +834,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             continue;
                                         }
                                         AgentEvent::Thinking => UiEvent::Thinking,
-                                        AgentEvent::ThinkingDelta { text } => UiEvent::ThinkingDelta(text),
+                                        AgentEvent::ThinkingDelta { text } => {
+                                            UiEvent::ThinkingDelta(text)
+                                        }
                                         AgentEvent::TextChunk { .. } => {
                                             // SKIP: TUI now renders from MessageUpdate snapshots,
                                             // not incremental text deltas. This prevents raw
@@ -818,10 +851,15 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
                                         // ── Completion & errors ──────────────────────
                                         AgentEvent::Complete { .. } => UiEvent::Complete,
-                                        AgentEvent::Error { message, .. } => UiEvent::Error(message),
+                                        AgentEvent::Error { message, .. } => {
+                                            UiEvent::Error(message)
+                                        }
 
                                         // ── Usage ────────────────────────────────────
-                                        AgentEvent::Usage { input_tokens, output_tokens } => {
+                                        AgentEvent::Usage {
+                                            input_tokens,
+                                            output_tokens,
+                                        } => {
                                             let _ = ui_fwd.send(UiEvent::TokenUsage {
                                                 input_tokens: input_tokens as u32,
                                                 output_tokens: output_tokens as u32,
@@ -839,14 +877,16 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             // → emit queue update so TUI shows current count
                                             let steering_q = session_h.steering_queue();
                                             let follow_up_q = session_h.follow_up_queue();
-                                            let pending = steering_q.read().len() + follow_up_q.read().len();
+                                            let pending =
+                                                steering_q.read().len() + follow_up_q.read().len();
                                             let _ = ui_fwd.send(UiEvent::QueueUpdate { pending });
                                             continue;
                                         }
                                         AgentEvent::FollowUpMessage { .. } => {
                                             let steering_q = session_h.steering_queue();
                                             let follow_up_q = session_h.follow_up_queue();
-                                            let pending = steering_q.read().len() + follow_up_q.read().len();
+                                            let pending =
+                                                steering_q.read().len() + follow_up_q.read().len();
                                             let _ = ui_fwd.send(UiEvent::QueueUpdate { pending });
                                             continue;
                                         }
@@ -886,12 +926,17 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             let agent_clone = Arc::clone(&agent);
                             tracing::info!("[AGENT-WORKER] Spawning agent task");
                             let agent_handle = tokio::task::spawn_local(async move {
-                                tracing::info!("[AGENT-WORKER] Agent task started, calling run_with_channel");
+                                tracing::info!(
+                                    "[AGENT-WORKER] Agent task started, calling run_with_channel"
+                                );
                                 let result = agent_clone.run_with_channel(prompt, event_tx).await;
                                 if let Err(ref e) = result {
                                     tracing::error!("Agent run_with_channel error: {:?}", e);
                                 }
-                                tracing::info!("[AGENT-WORKER] Agent run_with_channel completed: {:?}", result);
+                                tracing::info!(
+                                    "[AGENT-WORKER] Agent run_with_channel completed: {:?}",
+                                    result
+                                );
                                 result
                             });
                             // Agent runs on LocalSet, forwarder on its own thread.
@@ -907,11 +952,11 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             // for it before session teardown, the outer loop handles
                             // that via drop(prompt_tx) + agent_handle.join().
                             let _ = forwarder_handle; // move ownership, don't block
-                            // NOTE: No post-run queue drain needed.
-                            // The agent's agentic loop (run_with_channel) already processes
-                            // all steering and follow-up messages via the hooks configured
-                            // above. This matches pi-mono's architecture where the agent
-                            // loop handles everything internally before emitting Complete.
+                                                      // NOTE: No post-run queue drain needed.
+                                                      // The agent's agentic loop (run_with_channel) already processes
+                                                      // all steering and follow-up messages via the hooks configured
+                                                      // above. This matches pi-mono's architecture where the agent
+                                                      // loop handles everything internally before emitting Complete.
                         }
                     })
                     .await;
@@ -933,9 +978,12 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             state.add_user_message(content.as_str().to_string());
                         }
                         oxi_store::session::AgentMessage::Assistant { content, .. } => {
-                            let text: String = content.iter()
+                            let text: String = content
+                                .iter()
                                 .filter_map(|b| match b {
-                                    oxi_store::session::AssistantContentBlock::Text { text } => Some(text.as_str()),
+                                    oxi_store::session::AssistantContentBlock::Text { text } => {
+                                        Some(text.as_str())
+                                    }
                                     _ => None,
                                 })
                                 .collect::<Vec<_>>()
@@ -954,9 +1002,11 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         state.footer_state.data.pwd = Some(cwd.clone());
         state.footer_state.data.model_name = model_id.clone();
         state.footer_state.data.git_branch = git_branch.clone();
-        state.footer_state.data.provider_name = model_id.split('/').next().unwrap_or("").to_string();
+        state.footer_state.data.provider_name =
+            model_id.split('/').next().unwrap_or("").to_string();
         state.footer_state.data.version = env!("CARGO_PKG_VERSION").to_string();
-        state.footer_state.data.thinking_level = Some(format!("{:?}", settings.thinking_level).to_lowercase());
+        state.footer_state.data.thinking_level =
+            Some(format!("{:?}", settings.thinking_level).to_lowercase());
         state.wasm_ext = wasm_ext.clone();
         state.questionnaire_bridge = questionnaire_bridge.clone();
 
@@ -967,9 +1017,16 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
                 .iter()
                 .map(|builtin| {
-                    (builtin.name.to_string(), auth.get_api_key(builtin.name).is_some())
-                }).collect();
-            state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider { providers, selected: 0 }));
+                    (
+                        builtin.name.to_string(),
+                        auth.get_api_key(builtin.name).is_some(),
+                    )
+                })
+                .collect();
+            state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider {
+                providers,
+                selected: 0,
+            }));
         }
 
         // ── Inner TUI loop ──
@@ -988,15 +1045,32 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
 
             if event::poll(poll_timeout)? {
-                if let Some(action) =
-                    handlers::handle_input(event::read()?, &mut state, &agent_session, &ui_tx, &prompt_tx, &mut running).await
+                if let Some(action) = handlers::handle_input(
+                    event::read()?,
+                    &mut state,
+                    &agent_session,
+                    &ui_tx,
+                    &prompt_tx,
+                    &mut running,
+                )
+                .await
                 {
                     match action {
                         handlers::Action::SendPrompt(value) => {
-                            tracing::info!("[TUI] SendPrompt action triggered: {:?}", &value[..value.char_indices().take(50).last().map(|(i,c)| i + c.len_utf8()).unwrap_or(0)]);
+                            tracing::info!(
+                                "[TUI] SendPrompt action triggered: {:?}",
+                                &value[..value
+                                    .char_indices()
+                                    .take(50)
+                                    .last()
+                                    .map(|(i, c)| i + c.len_utf8())
+                                    .unwrap_or(0)]
+                            );
                             state.add_user_message(value.clone());
                             state.input_history.insert(0, value.clone());
-                            if state.input_history.len() > 100 { state.input_history.remove(0); }
+                            if state.input_history.len() > 100 {
+                                state.input_history.remove(0);
+                            }
                             state.history_index = 0;
                             state.start_streaming();
                             agent_session.reset_should_stop();
@@ -1007,7 +1081,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                         }
                         handlers::Action::ExecuteSlashCommand(cmd) => {
                             slash::handle_slash_command(
-                                &cmd, &agent_session, &mut state, &mut running,
+                                &cmd,
+                                &agent_session,
+                                &mut state,
+                                &mut running,
                             );
                         }
                     }

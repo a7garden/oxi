@@ -5,9 +5,9 @@
 
 use crate::env_api_keys;
 use chrono::Utc;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use parking_lot::RwLock;
 
 /// Information about an OAuth token
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,13 +81,13 @@ pub struct ApiKeyAuth {
 #[derive(Debug, Clone, PartialEq)]
 /// AuthSource.
 pub enum AuthSource {
-/// stored variant.
+    /// stored variant.
     Stored,
-/// runtime variant.
+    /// runtime variant.
     Runtime,
-/// environment variant.
+    /// environment variant.
     Environment,
-/// ambient variant.
+    /// ambient variant.
     Ambient,
 }
 
@@ -133,6 +133,7 @@ impl ProviderAuth for ApiKeyAuth {
 pub struct OAuthAuth {
     provider_name: String,
     token: Option<OAuthTokenInfo>,
+    #[allow(clippy::type_complexity)]
     on_refresh: Option<Box<dyn Fn(&OAuthTokenInfo) + Send + Sync>>,
 }
 
@@ -267,6 +268,7 @@ impl ProviderAuth for AmbientAuth {
 pub struct ProviderAuthRegistry {
     providers: HashMap<String, Box<dyn ProviderAuth>>,
     runtime_overrides: RwLock<HashMap<String, String>>,
+    #[allow(clippy::type_complexity)]
     fallback_resolver: RwLock<Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>>,
 }
 
@@ -296,11 +298,11 @@ impl ProviderAuthRegistry {
     /// Register default providers
     pub fn register_defaults(&mut self) {
         // Register ambient auth providers
-        self.register_ambient("vertex", || env_api_keys::has_vertex_adc_full());
-        self.register_ambient("google-vertex", || env_api_keys::has_vertex_adc_full());
-        self.register_ambient("bedrock", || env_api_keys::has_bedrock_creds());
-        self.register_ambient("amazon-bedrock", || env_api_keys::has_bedrock_creds());
-        self.register_ambient("aws-bedrock", || env_api_keys::has_bedrock_creds());
+        self.register_ambient("vertex", env_api_keys::has_vertex_adc_full);
+        self.register_ambient("google-vertex", env_api_keys::has_vertex_adc_full);
+        self.register_ambient("bedrock", env_api_keys::has_bedrock_creds);
+        self.register_ambient("amazon-bedrock", env_api_keys::has_bedrock_creds);
+        self.register_ambient("aws-bedrock", env_api_keys::has_bedrock_creds);
     }
 
     /// Register an API key provider
@@ -406,11 +408,7 @@ impl ProviderAuthRegistry {
     /// credentials properly in auth.json for persistent authentication.
     pub fn has_auth(&self, provider: &str) -> bool {
         // Check runtime override
-        if self
-            .runtime_overrides
-            .read()
-            .contains_key(provider)
-        {
+        if self.runtime_overrides.read().contains_key(provider) {
             return true;
         }
 
@@ -462,12 +460,7 @@ impl ProviderAuthRegistry {
             .collect();
 
         // Add runtime overrides
-        let overrides: Vec<String> = self
-            .runtime_overrides
-            .read()
-            .keys()
-            .cloned()
-            .collect();
+        let overrides: Vec<String> = self.runtime_overrides.read().keys().cloned().collect();
 
         for key in overrides {
             if !providers.contains(&key) {
@@ -482,11 +475,7 @@ impl ProviderAuthRegistry {
 
     /// Get auth status for a provider
     pub fn get_auth_status(&self, provider: &str) -> AuthStatus {
-        if self
-            .runtime_overrides
-            .read()
-            .contains_key(provider)
-        {
+        if self.runtime_overrides.read().contains_key(provider) {
             return AuthStatus {
                 configured: true,
                 source: AuthSource::Runtime,

@@ -141,8 +141,8 @@ impl Context {
         serde_json::from_str(json)
     }
 
-    /// Clone the context
-    pub fn clone(&self) -> Self {
+    /// Duplicate this context
+    pub fn duplicate(&self) -> Self {
         Self {
             system_prompt: self.system_prompt.clone(),
             messages: self.messages.clone(),

@@ -1,3 +1,4 @@
+use super::search_cache::{SearchCache, SearchResult};
 /// Web search tool — searches via a3s-search library (DuckDuckGo, Wikipedia, Bing, Brave).
 ///
 /// Uses a3s-search as a Rust library (not CLI), so no external binary is needed.
@@ -8,9 +9,7 @@
 /// - Result caching with search IDs for later retrieval via `get_search_results`
 /// - Configurable engine selection and result count
 /// - Zero-config: no API keys, no external binary needed
-
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use super::search_cache::{SearchCache, SearchResult};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -66,7 +65,7 @@ impl WebSearchTool {
 
         if search.engine_count() == 0 {
             return Err(
-                "No valid engines specified. Available: ddg, wiki, bing, brave".to_string()
+                "No valid engines specified. Available: ddg, wiki, bing, brave".to_string(),
             );
         }
 
@@ -117,13 +116,7 @@ fn format_results(results: &[SearchResult]) -> String {
             } else {
                 r.snippet.clone()
             };
-            format!(
-                "{}. **{}**\n   {}\n   {}",
-                i + 1,
-                r.title,
-                r.url,
-                snippet
-            )
+            format!("{}. **{}**\n   {}\n   {}", i + 1, r.title, r.url, snippet)
         })
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -179,9 +172,7 @@ impl AgentTool for WebSearchTool {
             .as_str()
             .ok_or_else(|| "Missing required parameter: query".to_string())?;
 
-        let engines = params["engines"]
-            .as_str()
-            .unwrap_or(DEFAULT_ENGINES);
+        let engines = params["engines"].as_str().unwrap_or(DEFAULT_ENGINES);
 
         let limit = params["limit"]
             .as_u64()
@@ -286,6 +277,9 @@ mod tests {
         assert!(schema["properties"]["query"].is_object());
         assert!(schema["properties"]["engines"].is_object());
         assert!(schema["properties"]["limit"].is_object());
-        assert!(schema["required"].as_array().unwrap().contains(&json!("query")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("query")));
     }
 }

@@ -5,17 +5,17 @@ use serde_json::Value;
 use std::sync::Arc;
 
 /// Handler function type for ClosureTool.
-pub type ToolHandler = Arc<
-    dyn Fn(Value, &ToolContext) -> Result<AgentToolResult, ToolError>
-        + Send
-        + Sync,
->;
+pub type ToolHandler =
+    Arc<dyn Fn(Value, &ToolContext) -> Result<AgentToolResult, ToolError> + Send + Sync>;
 
 /// Async handler function type for ClosureTool.
 pub type AsyncToolHandler = Arc<
-    dyn Fn(Value, &ToolContext) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>
-    > + Send
+    dyn Fn(
+            Value,
+            &ToolContext,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
+        > + Send
         + Sync,
 >;
 
@@ -68,10 +68,7 @@ impl ClosureTool {
                 Value,
                 &ToolContext,
             ) -> std::pin::Pin<
-                Box<
-                    dyn std::future::Future<Output = Result<AgentToolResult, ToolError>>
-                        + Send,
-                >,
+                Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
             > + Send
             + Sync
             + 'static,

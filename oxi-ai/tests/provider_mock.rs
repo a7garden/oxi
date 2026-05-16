@@ -10,8 +10,8 @@ use std::pin::Pin;
 
 use futures::Stream;
 use oxi_ai::{
-    get_model, Context, Message, Model, OpenAiProvider, Provider, ProviderEvent, StreamOptions,
-    UserMessage, ProviderError,
+    get_model, Context, Message, Model, OpenAiProvider, Provider, ProviderError, ProviderEvent,
+    StreamOptions, UserMessage,
 };
 
 /// Helper to create a minimal context for testing
@@ -149,7 +149,10 @@ data: [DONE]
     }
 
     // Verify we got tool call delta events
-    assert!(saw_tool_call_delta, "should have received tool call delta events");
+    assert!(
+        saw_tool_call_delta,
+        "should have received tool call delta events"
+    );
     // Delta should contain JSON arguments
     let all_deltas: String = tool_call_parts.join("");
     assert!(
@@ -293,7 +296,10 @@ async fn test_empty_stream() {
 
     // Should complete without error. An empty stream still emits exactly one
     // ProviderEvent::Start event at the beginning (empty = no content chunks).
-    assert_eq!(event_count, 1, "empty stream should have exactly one Start event");
+    assert_eq!(
+        event_count, 1,
+        "empty stream should have exactly one Start event"
+    );
 
     mock.assert();
 }

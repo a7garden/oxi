@@ -1,7 +1,6 @@
 /// Agent event system
 /// Defines all events emitted during an agent run, including lifecycle,
 /// streaming, tool execution, compaction, retry, and steering events.
-
 use crate::compaction::CompactionEvent;
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +13,6 @@ use serde::{Deserialize, Serialize};
 #[non_exhaustive]
 pub enum AgentEvent {
     // ── Lifecycle events ──────────────────────────────────────────────
-
     /// Emitted when the agent begins processing a batch of prompts.
     AgentStart {
         /// The initial prompt messages sent to the agent.
@@ -50,7 +48,6 @@ pub enum AgentEvent {
     },
 
     // ── Message events ────────────────────────────────────────────────
-
     /// A new message has been created in the conversation.
     MessageStart {
         /// The message that started.
@@ -72,7 +69,6 @@ pub enum AgentEvent {
     },
 
     // ── Tool execution events ────────────────────────────────────────
-
     /// A tool is about to be executed.
     ToolExecutionStart {
         /// Unique identifier for this tool call.
@@ -106,7 +102,6 @@ pub enum AgentEvent {
     },
 
     // ── Legacy events (kept for backward compatibility) ──────────
-
     /// Legacy: agent started processing a prompt.
     #[serde(rename = "start")]
     Start {
@@ -236,7 +231,6 @@ pub enum AgentEvent {
     },
 
     // ── Auto-retry events ─────────────────────────────────────────
-
     /// An automatic retry attempt is starting.
     AutoRetryStart {
         /// Current retry attempt (1-based).
@@ -260,7 +254,6 @@ pub enum AgentEvent {
     },
 
     // ── Loop-specific steering events ─────────────────────────────
-
     /// A system-level steering message injected into the conversation.
     SteeringMessage {
         /// The steering message to add to the context.

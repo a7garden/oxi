@@ -1,21 +1,20 @@
 /// Core types for oxi-agent
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Tool definition
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
-/// pub.
+    /// pub.
     pub name: String,
-/// pub.
+    /// pub.
     pub description: String,
-/// pub.
+    /// pub.
     pub input_schema: HashMap<String, serde_json::Value>,
 }
 
 impl ToolDefinition {
-/// TODO.
+    /// TODO.
     pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -32,16 +31,16 @@ impl ToolDefinition {
 /// Tool call
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
-/// pub.
+    /// pub.
     pub id: String,
-/// pub.
+    /// pub.
     pub name: String,
-/// pub.
+    /// pub.
     pub arguments: String,
 }
 
 impl ToolCall {
-/// TODO.
+    /// TODO.
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -58,16 +57,16 @@ impl ToolCall {
 /// Tool result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
-/// pub.
+    /// pub.
     pub tool_call_id: String,
-/// pub.
+    /// pub.
     pub content: String,
-/// pub.
+    /// pub.
     pub is_error: bool,
 }
 
 impl ToolResult {
-/// TODO.
+    /// TODO.
     pub fn success(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             tool_call_id: tool_call_id.into(),
@@ -76,7 +75,7 @@ impl ToolResult {
         }
     }
 
-/// TODO.
+    /// TODO.
     pub fn error(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             tool_call_id: tool_call_id.into(),
@@ -89,9 +88,9 @@ impl ToolResult {
 /// Response message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Response {
-/// pub.
+    /// pub.
     pub content: String,
-/// pub.
+    /// pub.
     pub stop_reason: StopReason,
 }
 
@@ -99,14 +98,14 @@ pub struct Response {
 #[serde(rename_all = "camelCase")]
 /// StopReason.
 pub enum StopReason {
-/// stop variant.
+    /// stop variant.
     Stop,
-/// length variant.
+    /// length variant.
     Length,
-/// tool use variant.
+    /// tool use variant.
     ToolUse,
-/// error variant.
+    /// error variant.
     Error,
-/// aborted variant.
+    /// aborted variant.
     Aborted,
 }

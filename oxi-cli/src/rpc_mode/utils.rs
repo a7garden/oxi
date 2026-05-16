@@ -68,7 +68,7 @@ impl PasteHandler {
                 if self.buffer.is_empty() && byte == 0x1B {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 1 && self.buffer[0] == 0x1B && byte == 0x5B {
+                } else if !self.buffer.is_empty() && self.buffer[0] == 0x1B && byte == 0x5B {
                     self.buffer.push(byte);
                     None
                 } else if self.buffer.len() >= 2
@@ -117,7 +117,7 @@ impl PasteHandler {
                 if self.buffer.is_empty() && byte == 0x1B {
                     self.buffer.push(byte);
                     None
-                } else if self.buffer.len() >= 1 && self.buffer[0] == 0x1B && byte == 0x5B {
+                } else if !self.buffer.is_empty() && self.buffer[0] == 0x1B && byte == 0x5B {
                     self.buffer.push(byte);
                     None
                 } else if self.buffer.len() >= 2
@@ -592,7 +592,8 @@ impl RpcClient {
                                 if let Some(obj) = value.as_object() {
                                     // Check if it's our response
                                     if obj.get("type").and_then(|v| v.as_str()) == Some("response")
-                                        && obj.get("id").and_then(|v| v.as_str()) == Some(id.as_str())
+                                        && obj.get("id").and_then(|v| v.as_str())
+                                            == Some(id.as_str())
                                     {
                                         let success = obj
                                             .get("success")
@@ -680,11 +681,7 @@ impl RpcClient {
 
     /// Handle an incoming JSON value during send_and_wait.
     /// Returns Ok(response) if it matches our request ID, otherwise processes as event.
-    fn handle_incoming_value(
-        &mut self,
-        expected_id: &str,
-        value: Value,
-    ) -> Result<RpcResponse> {
+    fn handle_incoming_value(&mut self, expected_id: &str, value: Value) -> Result<RpcResponse> {
         if let Some(obj) = value.as_object() {
             // Check if it's our response
             if obj.get("type").and_then(|v| v.as_str()) == Some("response")

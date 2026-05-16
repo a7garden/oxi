@@ -94,10 +94,7 @@ impl RpcServer {
         id: String,
     ) -> oneshot::Receiver<RpcExtensionUiResponse> {
         let (tx, rx) = oneshot::channel();
-        self.pending_extension_requests
-            .lock()
-            .await
-            .push((id, tx));
+        self.pending_extension_requests.lock().await.push((id, tx));
         rx
     }
 

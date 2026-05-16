@@ -5,15 +5,15 @@
 
 #![allow(unexpected_cfgs)]
 
-pub mod session;
-pub mod session_navigation;
-pub mod session_cwd;
-pub mod settings;
-pub mod settings_validation;
+pub mod auth_guidance;
+pub mod auth_storage;
 pub mod model_registry;
 pub mod model_resolver;
-pub mod auth_storage;
-pub mod auth_guidance;
+pub mod session;
+pub mod session_cwd;
+pub mod session_navigation;
+pub mod settings;
+pub mod settings_validation;
 
 // Public re-exports
 
@@ -27,7 +27,10 @@ pub use model_registry::CliModelRegistry;
 pub use model_registry::ModelRegistry;
 
 /// Session persistence, navigation, and message types.
-pub use session::{SessionEntry, SessionManager, SessionTreeNode, AgentMessage, ContentValue, ContentBlock, AssistantContentBlock};
+pub use session::{
+    AgentMessage, AssistantContentBlock, ContentBlock, ContentValue, SessionEntry, SessionManager,
+    SessionTreeNode,
+};
 
 /// User-configurable settings (model, theme, keybindings, etc.).
 pub use settings::Settings;

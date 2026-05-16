@@ -49,15 +49,15 @@ impl Default for HtmlExportOptions {
 /// Metadata attached to an export (optional but encouraged).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportMeta {
-/// pub.
+    /// pub.
     pub model: Option<String>,
-/// pub.
+    /// pub.
     pub provider: Option<String>,
-/// pub.
+    /// pub.
     pub exported_at: i64,
-/// pub.
+    /// pub.
     pub total_user_tokens: Option<u64>,
-/// pub.
+    /// pub.
     pub total_assistant_tokens: Option<u64>,
 }
 
@@ -76,13 +76,13 @@ impl Default for ExportMeta {
 /// A single rendered node in the session tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TreeNode {
-/// pub.
+    /// pub.
     pub session_id: Uuid,
-/// pub.
+    /// pub.
     pub name: Option<String>,
-/// pub.
+    /// pub.
     pub is_current: bool,
-/// pub.
+    /// pub.
     pub children: Vec<TreeNode>,
 }
 
@@ -473,7 +473,7 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
     while let Some(line) = lines.next() {
         // Detect bash tool call: 🔧 followed by bash command in code block
         if (line.starts_with("🔧 Running bash") || line.starts_with("🔧 bash"))
-            && lines.peek().map_or(false, |l| l.starts_with("```"))
+            && lines.peek().is_some_and(|l| l.starts_with("```"))
         {
             found = true;
             // Consume the ``` line
@@ -488,7 +488,7 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
             }
 
             // Look for output section
-            while let Some(line) = lines.next() {
+            for line in lines.by_ref() {
                 if line.starts_with("```") {
                     // End of code block
                     break;
@@ -512,14 +512,14 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
 
         // Detect file read: lines with "📄" or "read" + path + code block
         if (line.starts_with("📄 Reading") || line.starts_with("📄 read"))
-            && lines.peek().map_or(false, |l| l.starts_with("```"))
+            && lines.peek().is_some_and(|l| l.starts_with("```"))
         {
             found = true;
             let path = extract_path_from_line(line);
             let _fence = lines.next(); // ```
             let _lang = "";
             let mut content_buf = String::new();
-            while let Some(line) = lines.next() {
+            for line in lines.by_ref() {
                 if line.starts_with("```") {
                     break;
                 }
@@ -532,13 +532,13 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
 
         // Detect file write: "📝 Writing" or "📝 write" + path + code block
         if (line.starts_with("📝 Writing") || line.starts_with("📝 write"))
-            && lines.peek().map_or(false, |l| l.starts_with("```"))
+            && lines.peek().is_some_and(|l| l.starts_with("```"))
         {
             found = true;
             let path = extract_path_from_line(line);
             let _fence = lines.next();
             let mut content_buf = String::new();
-            while let Some(line) = lines.next() {
+            for line in lines.by_ref() {
                 if line.starts_with("```") {
                     break;
                 }
@@ -558,7 +558,9 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
 
             // Consume lines looking for old/new sections
             while let Some(next) = lines.peek() {
-                if next.starts_with("🔧") || next.starts_with("📄") || next.starts_with("📝")
+                if next.starts_with("🔧")
+                    || next.starts_with("📄")
+                    || next.starts_with("📝")
                     || next.starts_with("✏️")
                     || next.starts_with("📤")
                 {
@@ -608,11 +610,13 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
         }
 
         // Detect search: "🔍" or "grep"/"find"
-        if line.starts_with("🔍 Searching") || line.starts_with("🔍 grep")
+        if line.starts_with("🔍 Searching")
+            || line.starts_with("🔍 grep")
             || line.starts_with("🔍 find")
         {
             found = true;
-            let query = line.trim_start_matches(|c: char| !c.is_alphanumeric())
+            let query = line
+                .trim_start_matches(|c: char| !c.is_alphanumeric())
                 .trim()
                 .to_string();
             let mut results = Vec::new();
@@ -791,7 +795,13 @@ pub fn export_html(
     session_meta: Option<&SessionMeta>,
     tree: Option<&TreeNode>,
 ) -> Result<String> {
-    export_html_with_options(entries, meta, session_meta, tree, &HtmlExportOptions::default())
+    export_html_with_options(
+        entries,
+        meta,
+        session_meta,
+        tree,
+        &HtmlExportOptions::default(),
+    )
 }
 
 /// Render a flat list of session entries into a self-contained HTML string
@@ -815,7 +825,7 @@ pub fn export_html_with_options(
         .as_deref()
         .or(session_meta.and_then(|m| m.name.as_deref()))
         .unwrap_or("oxi session export");
-    write!(html, "<title>{}</title>\n", html_escape(title))?;
+    writeln!(html, "<title>{}</title>", html_escape(title))?;
 
     // highlight.js CDN for syntax highlighting
     html.push_str(
@@ -835,12 +845,8 @@ pub fn export_html_with_options(
     html.push_str("</head>\n");
 
     // ── Body ──────────────────────────────────────────────────────
-    let theme_class = if options.dark_theme {
-        "dark"
-    } else {
-        "light"
-    };
-    write!(html, "<body class=\"{}\">\n", theme_class)?;
+    let theme_class = if options.dark_theme { "dark" } else { "light" };
+    writeln!(html, "<body class=\"{}\">", theme_class)?;
 
     // Theme toggle button
     html.push_str(
@@ -931,19 +937,23 @@ fn render_meta_header(
 }
 
 fn render_meta_row(html: &mut String, label: &str, value: &str) -> Result<()> {
-    write!(
+    writeln!(
         html,
-        "<tr><td class=\"meta-label\">{}</td><td class=\"meta-value\">{}</td></tr>\n",
+        "<tr><td class=\"meta-label\">{}</td><td class=\"meta-value\">{}</td></tr>",
         html_escape(label),
         html_escape(value)
     )?;
     Ok(())
 }
 
-fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOptions) -> Result<()> {
+fn render_entry(
+    html: &mut String,
+    entry: &SessionEntry,
+    options: &HtmlExportOptions,
+) -> Result<()> {
     let ts = DateTime::from_timestamp_millis(entry.timestamp)
         .map(|dt| dt.format("%H:%M:%S").to_string())
-        .unwrap_or_else(|| "".to_string());
+        .unwrap_or_default();
 
     match &entry.message {
         AgentMessage::User { content } => {
@@ -985,7 +995,6 @@ fn render_entry(html: &mut String, entry: &SessionEntry, options: &HtmlExportOpt
             }
 
             let text_str = text_content.trim().to_string();
-
 
             // Try tool rendering first for assistant messages
             if let Some(tool_html) = render_tool_blocks(&text_str, options.include_tool_calls) {
@@ -1044,9 +1053,9 @@ fn render_tree_node(html: &mut String, node: &TreeNode, depth: usize) -> Result<
     let fallback = node.session_id.to_string();
     let short_id = &fallback[..8.min(fallback.len())];
     let name = node.name.as_deref().unwrap_or(short_id);
-    write!(
+    writeln!(
         html,
-        "<div class=\"tree-node{}\">{}<a href=\"#\">{}</a></div>\n",
+        "<div class=\"tree-node{}\">{}<a href=\"#\">{}</a></div>",
         current,
         indent,
         html_escape(name)
@@ -1115,7 +1124,7 @@ fn render_markdown_with_options(input: &str, options: &HtmlExportOptions) -> Str
         if line.trim().starts_with("<think") || line.trim() == "<thinking>" {
             if !options.include_thinking {
                 // Skip thinking blocks if not included
-                while let Some(l) = lines.next() {
+                for l in lines.by_ref() {
                     if l.trim() == "</think" || l.trim() == "</thinking>" {
                         break;
                     }
@@ -1673,7 +1682,9 @@ mod tests {
                 content: "Hello".into(),
             }),
             make_entry(AgentMessage::Assistant {
-                content: vec![AssistantContentBlock::Text { text: "Hi there!".into() }],
+                content: vec![AssistantContentBlock::Text {
+                    text: "Hi there!".into(),
+                }],
                 provider: None,
                 model_id: None,
                 usage: None,
@@ -1701,7 +1712,9 @@ mod tests {
     #[test]
     fn export_renders_thinking_block_collapsible() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text { text: "<think\nLet me reason step by step.\n</think\n\nThe answer is 42.".into() }],
+            content: vec![AssistantContentBlock::Text {
+                text: "<think\nLet me reason step by step.\n</think\n\nThe answer is 42.".into(),
+            }],
             provider: None,
             model_id: None,
             usage: None,
@@ -1738,15 +1751,16 @@ mod tests {
 
     #[test]
     fn export_renders_code_block_with_language_class() {
-        let entries = vec![make_entry(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text { text:
+        let entries =
+            vec![make_entry(AgentMessage::Assistant {
+                content: vec![AssistantContentBlock::Text { text:
                 "Here is some code:\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```\nDone."
                     .into() }],
-            provider: None,
-            model_id: None,
-            usage: None,
-            stop_reason: None,
-        })];
+                provider: None,
+                model_id: None,
+                usage: None,
+                stop_reason: None,
+            })];
         let meta = ExportMeta::default();
         let html = export_html(&entries, &meta, None, None).unwrap();
 
@@ -1758,7 +1772,9 @@ mod tests {
     #[test]
     fn export_renders_tool_calls_and_results() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text { text: "🔧 Running bash\n```\nls -la\n```\n📤 result:\nfile1.txt\nfile2.txt".into() }],
+            content: vec![AssistantContentBlock::Text {
+                text: "🔧 Running bash\n```\nls -la\n```\n📤 result:\nfile1.txt\nfile2.txt".into(),
+            }],
             provider: None,
             model_id: None,
             usage: None,
@@ -1812,8 +1828,7 @@ mod tests {
             ..Default::default()
         };
         let meta = ExportMeta::default();
-        let html =
-            export_html_with_options(&[], &meta, None, None, &options).unwrap();
+        let html = export_html_with_options(&[], &meta, None, None, &options).unwrap();
         assert!(html.contains("class=\"light\""));
     }
 
@@ -1824,15 +1839,16 @@ mod tests {
             ..Default::default()
         };
         let meta = ExportMeta::default();
-        let html =
-            export_html_with_options(&[], &meta, None, None, &options).unwrap();
+        let html = export_html_with_options(&[], &meta, None, None, &options).unwrap();
         assert!(html.contains("<title>My Session</title>"));
     }
 
     #[test]
     fn export_options_skip_thinking() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text { text: "<thinking>\nSecret thoughts\n</thinking>\n\nVisible answer.".into() }],
+            content: vec![AssistantContentBlock::Text {
+                text: "<thinking>\nSecret thoughts\n</thinking>\n\nVisible answer.".into(),
+            }],
             provider: None,
             model_id: None,
             usage: None,
@@ -1843,8 +1859,7 @@ mod tests {
             ..Default::default()
         };
         let meta = ExportMeta::default();
-        let html =
-            export_html_with_options(&entries, &meta, None, None, &options).unwrap();
+        let html = export_html_with_options(&entries, &meta, None, None, &options).unwrap();
         // Check that thinking content is not rendered (specific element check)
         assert!(!html.contains("<details class=\"thinking-block\">"));
         assert!(!html.contains("Secret thoughts"));
@@ -1854,7 +1869,9 @@ mod tests {
     #[test]
     fn export_options_skip_tool_calls() {
         let entries = vec![make_entry(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text { text: "Here is my response with tool calls that should be hidden.".into() }],
+            content: vec![AssistantContentBlock::Text {
+                text: "Here is my response with tool calls that should be hidden.".into(),
+            }],
             provider: None,
             model_id: None,
             usage: None,
@@ -1865,8 +1882,7 @@ mod tests {
             ..Default::default()
         };
         let meta = ExportMeta::default();
-        let html =
-            export_html_with_options(&entries, &meta, None, None, &options).unwrap();
+        let html = export_html_with_options(&entries, &meta, None, None, &options).unwrap();
         // With include_tool_calls: false, lines starting with 🔧 or 📤 are skipped
         // The response content is still rendered
         assert!(html.contains("Here is my response"));

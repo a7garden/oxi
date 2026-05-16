@@ -39,7 +39,10 @@ fn test_settings_save_and_reload_json() {
     let content = fs::read_to_string(&settings_path).expect("read settings");
     let loaded: Settings = serde_json::from_str(&content).expect("parse settings JSON");
 
-    assert_eq!(loaded.default_model, Some("claude-sonnet-4-20250514".to_string()));
+    assert_eq!(
+        loaded.default_model,
+        Some("claude-sonnet-4-20250514".to_string())
+    );
     assert_eq!(loaded.default_provider, Some("anthropic".to_string()));
     assert_eq!(loaded.theme, "monokai");
     assert!(!loaded.stream_responses);
@@ -55,7 +58,9 @@ fn test_settings_save_and_reload_toml() {
     settings.default_model = Some("gpt-4o".to_string());
     settings.default_provider = Some("openai".to_string());
 
-    settings.save_to(&settings_path).expect("save settings TOML");
+    settings
+        .save_to(&settings_path)
+        .expect("save settings TOML");
 
     assert!(settings_path.exists());
 
@@ -138,7 +143,10 @@ stream_responses = false
     let parsed: Settings = toml::from_str(toml_content).expect("parse TOML");
 
     // These should be overridden
-    assert_eq!(parsed.default_model, Some("claude-sonnet-4-20250514".to_string()));
+    assert_eq!(
+        parsed.default_model,
+        Some("claude-sonnet-4-20250514".to_string())
+    );
     assert_eq!(parsed.default_provider, Some("anthropic".to_string()));
     assert_eq!(parsed.theme, "dracula");
     assert!(!parsed.stream_responses);
@@ -181,7 +189,10 @@ default_provider = "anthropic"
 
     let content = fs::read_to_string(&found_path).expect("read project settings");
     let project: Settings = toml::from_str(&content).expect("parse project");
-    assert_eq!(project.default_model, Some("claude-sonnet-4-20250514".to_string()));
+    assert_eq!(
+        project.default_model,
+        Some("claude-sonnet-4-20250514".to_string())
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -221,19 +232,28 @@ fn test_settings_from_env_returns_defaults() {
 #[test]
 fn test_settings_detect_format_json() {
     let path = std::path::Path::new("/tmp/test/settings.json");
-    assert!(matches!(Settings::detect_format(path), SettingsFormat::Json));
+    assert!(matches!(
+        Settings::detect_format(path),
+        SettingsFormat::Json
+    ));
 }
 
 #[test]
 fn test_settings_detect_format_toml() {
     let path = std::path::Path::new("/tmp/test/settings.toml");
-    assert!(matches!(Settings::detect_format(path), SettingsFormat::Toml));
+    assert!(matches!(
+        Settings::detect_format(path),
+        SettingsFormat::Toml
+    ));
 }
 
 #[test]
 fn test_settings_detect_format_unknown_defaults_json() {
     let path = std::path::Path::new("/tmp/test/settings.yaml");
-    assert!(matches!(Settings::detect_format(path), SettingsFormat::Json));
+    assert!(matches!(
+        Settings::detect_format(path),
+        SettingsFormat::Json
+    ));
 }
 
 #[test]
@@ -280,10 +300,7 @@ fn test_settings_effective_model() {
 
     // Only model, no provider
     settings.default_provider = None;
-    assert_eq!(
-        settings.effective_model(None),
-        Some("gpt-4o".to_string())
-    );
+    assert_eq!(settings.effective_model(None), Some("gpt-4o".to_string()));
 }
 
 #[test]
@@ -349,19 +366,24 @@ fn test_settings_default_values() {
 #[test]
 fn test_settings_custom_provider_serialization() {
     let mut settings = Settings::default();
-    settings.custom_providers.push(oxi_store::settings::CustomProvider {
-        name: "minimax".to_string(),
-        base_url: "https://api.minimax.chat/v1".to_string(),
-        api_key_env: "MINIMAX_API_KEY".to_string(),
-        api: "openai-completions".to_string(),
-    });
+    settings
+        .custom_providers
+        .push(oxi_store::settings::CustomProvider {
+            name: "minimax".to_string(),
+            base_url: "https://api.minimax.chat/v1".to_string(),
+            api_key_env: "MINIMAX_API_KEY".to_string(),
+            api: "openai-completions".to_string(),
+        });
 
     let json = serde_json::to_string(&settings).expect("serialize");
     let loaded: Settings = serde_json::from_str(&json).expect("deserialize");
 
     assert_eq!(loaded.custom_providers.len(), 1);
     assert_eq!(loaded.custom_providers[0].name, "minimax");
-    assert_eq!(loaded.custom_providers[0].base_url, "https://api.minimax.chat/v1");
+    assert_eq!(
+        loaded.custom_providers[0].base_url,
+        "https://api.minimax.chat/v1"
+    );
     assert_eq!(loaded.custom_providers[0].api_key_env, "MINIMAX_API_KEY");
     assert_eq!(loaded.custom_providers[0].api, "openai-completions");
 }
@@ -391,7 +413,8 @@ fn test_thinking_level_serialization() {
 
     for level in &levels {
         let json = serde_json::to_string(&level).expect("serialize thinking level");
-        let parsed: ThinkingLevel = serde_json::from_str(&json).expect("deserialize thinking level");
+        let parsed: ThinkingLevel =
+            serde_json::from_str(&json).expect("deserialize thinking level");
         assert_eq!(*level, parsed);
     }
 }
@@ -443,14 +466,18 @@ fn test_settings_get_theme_name() {
 #[test]
 fn test_settings_effective_session_dir() {
     let settings = Settings::default();
-    let dir = settings.effective_session_dir().expect("effective session dir");
+    let dir = settings
+        .effective_session_dir()
+        .expect("effective session dir");
     assert!(dir.to_string_lossy().contains(".oxi"));
     assert!(dir.to_string_lossy().contains("sessions"));
 
     // With explicit session_dir
     let mut settings = Settings::default();
     settings.session_dir = Some("/custom/session/path".into());
-    let dir = settings.effective_session_dir().expect("effective session dir");
+    let dir = settings
+        .effective_session_dir()
+        .expect("effective session dir");
     assert_eq!(dir, std::path::PathBuf::from("/custom/session/path"));
 }
 
@@ -461,7 +488,8 @@ fn test_settings_effective_session_dir() {
 #[test]
 fn test_settings_serialize_for_format_json() {
     let settings = Settings::default();
-    let json = Settings::serialize_for_format(&settings, SettingsFormat::Json).expect("serialize JSON");
+    let json =
+        Settings::serialize_for_format(&settings, SettingsFormat::Json).expect("serialize JSON");
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
     assert!(parsed.is_object());
 }
@@ -469,7 +497,8 @@ fn test_settings_serialize_for_format_json() {
 #[test]
 fn test_settings_serialize_for_format_toml() {
     let settings = Settings::default();
-    let toml_str = Settings::serialize_for_format(&settings, SettingsFormat::Toml).expect("serialize TOML");
+    let toml_str =
+        Settings::serialize_for_format(&settings, SettingsFormat::Toml).expect("serialize TOML");
     let parsed: toml::Value = toml::from_str(&toml_str).expect("valid TOML");
     assert!(parsed.is_table());
 }

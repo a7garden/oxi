@@ -29,7 +29,9 @@ pub struct QuestionnaireBridge {
 impl QuestionnaireBridge {
     /// Create a new empty bridge.
     pub fn new() -> Self {
-        Self { inner: Arc::new(parking_lot::Mutex::new(None)) }
+        Self {
+            inner: Arc::new(parking_lot::Mutex::new(None)),
+        }
     }
 
     /// Store a pending questionnaire. Called by `QuestionnaireTool::execute`.
@@ -51,7 +53,7 @@ impl QuestionnaireBridge {
     }
 
     /// Returns `true` if a questionnaire is currently pending.
-
+    ///
     pub fn has_pending(&self) -> bool {
         self.inner.lock().is_some()
     }
@@ -152,7 +154,9 @@ impl QuestionnaireTool {
 // `QuestionnaireTool` is cheap to clone (only copies the Arc).
 impl Clone for QuestionnaireTool {
     fn clone(&self) -> Self {
-        Self { bridge: self.bridge.clone() }
+        Self {
+            bridge: self.bridge.clone(),
+        }
     }
 }
 
@@ -312,7 +316,7 @@ fn parse_questions(params: &serde_json::Value) -> Result<Vec<Question>, ToolErro
     let questions = params
         .get("questions")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.clone())
+        .cloned()
         .ok_or_else(|| "Missing or invalid 'questions' field".to_string())?;
 
     let questions: Vec<Question> = questions
@@ -452,30 +456,26 @@ mod tests {
 
     #[test]
     fn test_format_answers_selected() {
-        let answers = vec![
-            Answer {
-                id: "lang".into(),
-                value: "rust".into(),
-                label: "Rust".into(),
-                was_custom: false,
-                index: Some(1),
-            },
-        ];
+        let answers = vec![Answer {
+            id: "lang".into(),
+            value: "rust".into(),
+            label: "Rust".into(),
+            was_custom: false,
+            index: Some(1),
+        }];
         let text = format_answers(&answers);
         assert_eq!(text, "lang: user selected: 1. Rust");
     }
 
     #[test]
     fn test_format_answers_custom() {
-        let answers = vec![
-            Answer {
-                id: "name".into(),
-                value: "myproj".into(),
-                label: "myproj".into(),
-                was_custom: true,
-                index: None,
-            },
-        ];
+        let answers = vec![Answer {
+            id: "name".into(),
+            value: "myproj".into(),
+            label: "myproj".into(),
+            was_custom: true,
+            index: None,
+        }];
         let text = format_answers(&answers);
         assert_eq!(text, "name: user wrote: myproj");
     }
@@ -506,7 +506,10 @@ mod tests {
             },
         ];
         let text = format_answers(&answers);
-        assert_eq!(text, "lang: user selected: 1. Rust\ndb: user selected: 2. PostgreSQL\nauth: user wrote: jwt");
+        assert_eq!(
+            text,
+            "lang: user selected: 1. Rust\ndb: user selected: 2. PostgreSQL\nauth: user wrote: jwt"
+        );
     }
 
     #[test]
@@ -536,7 +539,13 @@ mod tests {
         let (tx1, _rx1) = oneshot::channel();
         let (tx2, _rx2) = oneshot::channel();
 
-        bridge.set(PendingQuestionnaire { questions: vec![], responder: tx1 });
-        assert!(!bridge.set(PendingQuestionnaire { questions: vec![], responder: tx2 }));
+        bridge.set(PendingQuestionnaire {
+            questions: vec![],
+            responder: tx1,
+        });
+        assert!(!bridge.set(PendingQuestionnaire {
+            questions: vec![],
+            responder: tx2
+        }));
     }
 }

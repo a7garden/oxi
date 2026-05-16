@@ -4,15 +4,14 @@
 /// - Line ending normalization (CRLF → LF)
 /// - BOM detection and preservation
 /// - Fuzzy matching fallback
-
 use std::fmt;
 
 /// A single edit operation
 #[derive(Debug, Clone)]
 pub struct Edit {
-/// pub.
+    /// pub.
     pub old_text: String,
-/// pub.
+    /// pub.
     pub new_text: String,
 }
 
@@ -28,7 +27,7 @@ pub struct EditDiffResult {
 /// Error during diff computation
 #[derive(Debug, Clone)]
 pub struct EditDiffError {
-/// pub.
+    /// pub.
     pub message: String,
 }
 
@@ -52,11 +51,11 @@ pub fn detect_line_ending(content: &str) -> LineEnding {
 /// Line ending type
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineEnding {
-/// lf variant.
+    /// lf variant.
     Lf,
-/// crlf variant.
+    /// crlf variant.
     Crlf,
-/// cr variant.
+    /// cr variant.
     Cr,
 }
 
@@ -107,9 +106,7 @@ pub fn apply_edits_to_normalized_content(
 
         // Check for multiple occurrences of this edit's old_text
         let first_pos = content.find(&edit.old_text).ok_or_else(|| EditDiffError {
-            message: format!(
-                "Text to replace not found in file. Make sure to match the exact text including whitespace and newlines."
-            ),
+            message: "Text to replace not found in file. Make sure to match the exact text including whitespace and newlines.".to_string(),
         })?;
 
         // Count total occurrences

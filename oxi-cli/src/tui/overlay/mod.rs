@@ -5,8 +5,8 @@
 //! This follows ratatui's StatefulWidget philosophy at the overlay level.
 
 use crossterm::event::KeyEvent;
-use ratatui::{Frame, layout::Rect};
 use oxi_tui::Theme;
+use ratatui::{layout::Rect, Frame};
 
 pub mod factories;
 pub mod questionnaire;

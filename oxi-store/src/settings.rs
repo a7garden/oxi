@@ -155,7 +155,7 @@ pub struct Settings {
     #[serde(default)]
     pub themes: Vec<String>,
 
-       // ── Custom OpenAI-compatible providers ──────────────────────────────
+    // ── Custom OpenAI-compatible providers ──────────────────────────────
     /// Registered custom providers (loaded from `[[custom_provider]]` TOML sections).
     #[serde(default)]
     pub custom_providers: Vec<CustomProvider>,
@@ -601,7 +601,8 @@ impl Settings {
             .map(String::from)
             .or_else(|| {
                 // Combine provider + model when both are present
-                if let (Some(provider), Some(model)) = (&self.default_provider, &self.default_model) {
+                if let (Some(provider), Some(model)) = (&self.default_provider, &self.default_model)
+                {
                     Some(format!("{}/{}", provider, model))
                 } else {
                     self.default_model.clone()
@@ -644,7 +645,6 @@ impl Settings {
             let _ = settings.save();
         }
     }
-
 
     /// Save the current theme to settings and persist to disk.
     pub fn save_theme(&mut self, name: &str) -> Result<()> {
@@ -690,7 +690,8 @@ impl Settings {
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
                     "Migrated settings from version {} to {}",
-                    settings.version, SETTINGS_VERSION
+                    settings.version,
+                    SETTINGS_VERSION
                 );
             }
             3 => {
@@ -955,14 +956,8 @@ theme = "dracula"
 
         let settings = Settings::load_from(tmp.path()).unwrap();
         // Migration splits provider from model
-        assert_eq!(
-            settings.default_model,
-            Some("gemini-2.0-flash".to_string())
-        );
-        assert_eq!(
-            settings.default_provider,
-            Some("google".to_string())
-        );
+        assert_eq!(settings.default_model, Some("gemini-2.0-flash".to_string()));
+        assert_eq!(settings.default_provider, Some("google".to_string()));
     }
 
     #[test]
@@ -991,9 +986,13 @@ theme = "dracula"
     fn test_from_env() {
         // NOTE: Environment variable overrides are disabled.
         // from_env() returns defaults only.
-        let _guard = EnvGuard::new(&[ // no env vars to clear
-            "OXI_MODEL", "OXI_THEME", "OXI_TOOL_TIMEOUT",
-            "OXI_PROVIDER", "OXI_DEFAULT_MODEL",
+        let _guard = EnvGuard::new(&[
+            // no env vars to clear
+            "OXI_MODEL",
+            "OXI_THEME",
+            "OXI_TOOL_TIMEOUT",
+            "OXI_PROVIDER",
+            "OXI_DEFAULT_MODEL",
         ]);
 
         let settings = Settings::from_env();
@@ -1032,9 +1031,7 @@ theme = "dracula"
 
     #[test]
     fn test_env_does_not_override_when_unset() {
-        let _guard = EnvGuard::new(&[
-            "OXI_MODEL", "OXI_PROVIDER", "OXI_THEME", "OXI_TEMPERATURE",
-        ]);
+        let _guard = EnvGuard::new(&["OXI_MODEL", "OXI_PROVIDER", "OXI_THEME", "OXI_TEMPERATURE"]);
         let settings = Settings::from_env();
         assert!(settings.default_model.is_none());
         assert!(settings.default_provider.is_none());
@@ -1050,34 +1047,16 @@ theme = "dracula"
             parse_thinking_level("MINIMAL"),
             Some(ThinkingLevel::Minimal)
         );
-        assert_eq!(
-            parse_thinking_level("Low"),
-            Some(ThinkingLevel::Low)
-        );
-        assert_eq!(
-            parse_thinking_level("medium"),
-            Some(ThinkingLevel::Medium)
-        );
-        assert_eq!(
-            parse_thinking_level("Medium"),
-            Some(ThinkingLevel::Medium)
-        );
+        assert_eq!(parse_thinking_level("Low"), Some(ThinkingLevel::Low));
+        assert_eq!(parse_thinking_level("medium"), Some(ThinkingLevel::Medium));
+        assert_eq!(parse_thinking_level("Medium"), Some(ThinkingLevel::Medium));
         assert_eq!(
             parse_thinking_level("Standard"),
             Some(ThinkingLevel::Medium)
         );
-        assert_eq!(
-            parse_thinking_level("High"),
-            Some(ThinkingLevel::High)
-        );
-        assert_eq!(
-            parse_thinking_level("thorough"),
-            Some(ThinkingLevel::High)
-        );
-        assert_eq!(
-            parse_thinking_level("xhigh"),
-            Some(ThinkingLevel::XHigh)
-        );
+        assert_eq!(parse_thinking_level("High"), Some(ThinkingLevel::High));
+        assert_eq!(parse_thinking_level("thorough"), Some(ThinkingLevel::High));
+        assert_eq!(parse_thinking_level("xhigh"), Some(ThinkingLevel::XHigh));
         assert_eq!(parse_thinking_level("invalid"), None);
     }
 
@@ -1101,7 +1080,10 @@ theme = "dracula"
         let mut settings = Settings::default();
         settings.default_provider = Some("openai".to_string());
         settings.default_model = Some("gpt-4o".to_string());
-        assert_eq!(settings.effective_model(None), Some("openai/gpt-4o".to_string()));
+        assert_eq!(
+            settings.effective_model(None),
+            Some("openai/gpt-4o".to_string())
+        );
     }
 
     #[test]
@@ -1109,7 +1091,10 @@ theme = "dracula"
         let mut settings = Settings::default();
         settings.default_provider = Some("openai".to_string());
         settings.default_model = Some("gpt-4o".to_string());
-        assert_eq!(settings.effective_model(Some("anthropic/claude-3")), Some("anthropic/claude-3".to_string()));
+        assert_eq!(
+            settings.effective_model(Some("anthropic/claude-3")),
+            Some("anthropic/claude-3".to_string())
+        );
     }
 
     #[test]
@@ -1123,7 +1108,10 @@ theme = "dracula"
     fn test_effective_model_falls_back_to_last_used() {
         let mut settings = Settings::default();
         settings.last_used_model = Some("anthropic/claude-3".to_string());
-        assert_eq!(settings.effective_model(None), Some("anthropic/claude-3".to_string()));
+        assert_eq!(
+            settings.effective_model(None),
+            Some("anthropic/claude-3".to_string())
+        );
     }
 
     #[test]
@@ -1186,7 +1174,11 @@ theme = "dracula"
         let settings = Settings::default();
         // Env is ignored, so it should use the default path, not /tmp/env-sessions
         let dir = settings.effective_session_dir().unwrap();
-        assert!(dir.ends_with("sessions"), "expected default sessions dir, got: {:?}", dir);
+        assert!(
+            dir.ends_with("sessions"),
+            "expected default sessions dir, got: {:?}",
+            dir
+        );
     }
 
     // ── Migration ────────────────────────────────────────────────────
@@ -1364,10 +1356,7 @@ tool_timeout_seconds = 45
 "#;
 
         let settings = Settings::parse_from_str(toml_content, SettingsFormat::Toml).unwrap();
-        assert_eq!(
-            settings.default_model,
-            Some("claude-opus".to_string())
-        );
+        assert_eq!(settings.default_model, Some("claude-opus".to_string()));
         assert_eq!(settings.default_provider, Some("anthropic".to_string()));
         assert_eq!(settings.theme, "monokai");
         assert_eq!(settings.tool_timeout_seconds, 45);
@@ -1477,14 +1466,8 @@ tool_timeout_seconds = 45
 
         let settings = Settings::load_from(tmp.path()).unwrap();
         // Migration splits provider from model
-        assert_eq!(
-            settings.default_model,
-            Some("gemini-2.0-flash".to_string())
-        );
-        assert_eq!(
-            settings.default_provider,
-            Some("google".to_string())
-        );
+        assert_eq!(settings.default_model, Some("gemini-2.0-flash".to_string()));
+        assert_eq!(settings.default_provider, Some("google".to_string()));
     }
 
     #[test]
@@ -1702,7 +1685,10 @@ api = "openai-responses"
         let settings: Settings = toml::from_str(toml_content).unwrap();
         assert_eq!(settings.custom_providers.len(), 2);
         assert_eq!(settings.custom_providers[0].name, "minimax");
-        assert_eq!(settings.custom_providers[0].base_url, "https://api.minimax.chat/v1");
+        assert_eq!(
+            settings.custom_providers[0].base_url,
+            "https://api.minimax.chat/v1"
+        );
         assert_eq!(settings.custom_providers[0].api_key_env, "MINIMAX_API_KEY");
         assert_eq!(settings.custom_providers[0].api, "openai-completions");
         assert_eq!(settings.custom_providers[1].name, "zai");
@@ -1740,7 +1726,10 @@ api = "openai-responses"
         let parsed: Settings = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.custom_providers.len(), 1);
         assert_eq!(parsed.custom_providers[0].name, "test");
-        assert_eq!(parsed.custom_providers[0].base_url, "https://api.test.com/v1");
+        assert_eq!(
+            parsed.custom_providers[0].base_url,
+            "https://api.test.com/v1"
+        );
     }
 
     #[test]

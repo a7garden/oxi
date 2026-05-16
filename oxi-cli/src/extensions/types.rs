@@ -79,18 +79,31 @@ impl ExtensionManifest {
         }
     }
     /// Set the description.
-    pub fn with_description(mut self, desc: impl Into<String>) -> Self { self.description = desc.into(); self }
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = desc.into();
+        self
+    }
     /// Set the author.
-    pub fn with_author(mut self, author: impl Into<String>) -> Self { self.author = author.into(); self }
+    pub fn with_author(mut self, author: impl Into<String>) -> Self {
+        self.author = author.into();
+        self
+    }
     /// Add a permission.
     pub fn with_permission(mut self, perm: ExtensionPermission) -> Self {
-        if !self.permissions.contains(&perm) { self.permissions.push(perm); }
+        if !self.permissions.contains(&perm) {
+            self.permissions.push(perm);
+        }
         self
     }
     /// Set the configuration JSON Schema.
-    pub fn with_config_schema(mut self, schema: Value) -> Self { self.config_schema = Some(schema); self }
+    pub fn with_config_schema(mut self, schema: Value) -> Self {
+        self.config_schema = Some(schema);
+        self
+    }
     /// Check whether the manifest includes a specific permission.
-    pub fn has_permission(&self, perm: ExtensionPermission) -> bool { self.permissions.contains(&perm) }
+    pub fn has_permission(&self, perm: ExtensionPermission) -> bool {
+        self.permissions.contains(&perm)
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -174,8 +187,18 @@ pub struct ExtensionErrorRecord {
 
 impl ExtensionErrorRecord {
     /// Create a new error record.
-    pub fn new(extension_name: impl Into<String>, event: impl Into<String>, error: impl Into<String>) -> Self {
-        Self { extension_name: extension_name.into(), event: event.into(), error: error.into(), stack: None, timestamp: chrono::Utc::now().timestamp_millis() }
+    pub fn new(
+        extension_name: impl Into<String>,
+        event: impl Into<String>,
+        error: impl Into<String>,
+    ) -> Self {
+        Self {
+            extension_name: extension_name.into(),
+            event: event.into(),
+            error: error.into(),
+            stack: None,
+            timestamp: chrono::Utc::now().timestamp_millis(),
+        }
     }
 }
 
@@ -422,7 +445,7 @@ impl fmt::Display for ExtensionState {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Result of emitting a tool-call event to extensions.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ToolCallEmitResult {
     /// Whether the tool call was blocked by an extension.
     pub blocked: bool,
@@ -431,10 +454,9 @@ pub struct ToolCallEmitResult {
     /// Per-extension errors encountered.
     pub errors: Vec<(String, String)>,
 }
-impl Default for ToolCallEmitResult { fn default() -> Self { Self { blocked: false, block_reason: None, errors: Vec::new() } } }
 
 /// Result of emitting a tool-result event to extensions.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ToolResultEmitResult {
     /// Optional replacement output from an extension.
     pub output: Option<String>,
@@ -443,7 +465,6 @@ pub struct ToolResultEmitResult {
     /// Per-extension errors encountered.
     pub errors: Vec<(String, String)>,
 }
-impl Default for ToolResultEmitResult { fn default() -> Self { Self { output: None, success: None, errors: Vec::new() } } }
 
 /// Result of emitting a context event to extensions.
 #[derive(Debug)]
@@ -468,7 +489,7 @@ pub struct ProviderRequestEmitResult {
 }
 
 /// Result of emitting a session-before event to extensions.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SessionBeforeEmitResult {
     /// Whether the operation was cancelled by an extension.
     pub cancelled: bool,
@@ -477,7 +498,6 @@ pub struct SessionBeforeEmitResult {
     /// Per-extension errors encountered.
     pub errors: Vec<(String, String)>,
 }
-impl Default for SessionBeforeEmitResult { fn default() -> Self { Self { cancelled: false, cancelled_by: None, errors: Vec::new() } } }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Commands
@@ -495,7 +515,17 @@ pub struct Command {
 }
 impl Command {
     /// Create a new command descriptor.
-    pub fn new(name: impl Into<String>, description: impl Into<String>, usage: impl Into<String>) -> Self { Self { name: name.into(), description: description.into(), usage: usage.into() } }
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        usage: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            usage: usage.into(),
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

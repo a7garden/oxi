@@ -31,13 +31,13 @@
 //! ```
 
 use crate::app::agent_session::{AgentSession, AgentSessionHandle, ScopedModel};
+use crate::storage::resource_loader::ResourceLoader;
+use anyhow::Result;
 use oxi_store::auth_storage::AuthStorage;
 use oxi_store::model_registry::ModelRegistry;
-use crate::storage::resource_loader::ResourceLoader;
 use oxi_store::session::SessionManager;
 use oxi_store::session_cwd::{assert_session_cwd_exists, SessionCwdSource};
 use oxi_store::settings::{Settings, ThinkingLevel};
-use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -62,11 +62,11 @@ pub struct AgentSessionRuntimeDiagnostic {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum DiagnosticSeverity {
-/// info variant.
+    /// info variant.
     Info,
-/// warning variant.
+    /// warning variant.
     Warning,
-/// error variant.
+    /// error variant.
     Error,
 }
 
@@ -160,7 +160,7 @@ pub fn create_agent_session_services(
     // instances (they both read from the same underlying file).
     let auth_storage = options
         .auth_storage
-        .unwrap_or_else(|| oxi_store::auth_storage::shared_auth_storage());
+        .unwrap_or_else(oxi_store::auth_storage::shared_auth_storage);
 
     // Settings — load from cwd + agent_dir
     let settings = options.settings.unwrap_or_else(|| {
@@ -178,9 +178,9 @@ pub fn create_agent_session_services(
     });
 
     // Resource loader
-    let resource_loader = options.resource_loader.unwrap_or_else(|| {
-        Arc::new(ResourceLoader::with_paths(agent_dir.clone(), cwd.clone()))
-    });
+    let resource_loader = options
+        .resource_loader
+        .unwrap_or_else(|| Arc::new(ResourceLoader::with_paths(agent_dir.clone(), cwd.clone())));
 
     Ok(AgentSessionServices {
         cwd,
@@ -216,9 +216,9 @@ pub struct CreateAgentSessionFromServicesOptions {
 
 /// Result of creating an agent session.
 pub struct CreateAgentSessionResult {
-/// pub.
+    /// pub.
     pub session: AgentSession,
-/// pub.
+    /// pub.
     pub model_fallback_message: Option<String>,
 }
 
@@ -235,16 +235,21 @@ pub fn create_agent_session_from_services(
     let cwd = services.cwd.to_string_lossy().to_string();
 
     // Resolve model — no hardcoded default, must be configured
-    let model_id = match options
-        .model_id
-        .or_else(|| settings.effective_model(None))
-    {
+    let model_id = match options.model_id.or_else(|| settings.effective_model(None)) {
         Some(id) if !id.is_empty() => {
-            tracing::debug!("Model resolved: {} (default_model={:?}, last_used={:?})", id, settings.default_model, settings.last_used_model);
+            tracing::debug!(
+                "Model resolved: {} (default_model={:?}, last_used={:?})",
+                id,
+                settings.default_model,
+                settings.last_used_model
+            );
             id
         }
         other => {
-            tracing::warn!("No model configured: effective_model={:?}", settings.effective_model(None));
+            tracing::warn!(
+                "No model configured: effective_model={:?}",
+                settings.effective_model(None)
+            );
             match other {
                 Some(id) => id,
                 None => String::new(),
@@ -281,7 +286,11 @@ pub fn create_agent_session_from_services(
         // Use anthropic as a placeholder provider so the session can be created
         let provider = oxi_ai::get_provider("anthropic")
             .ok_or_else(|| anyhow::anyhow!("No provider available"))?;
-        let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config, Arc::new(oxi_agent::ToolRegistry::new())));
+        let agent = Arc::new(oxi_agent::Agent::new(
+            Arc::from(provider),
+            config,
+            Arc::new(oxi_agent::ToolRegistry::new()),
+        ));
         let session = AgentSession::new(agent, settings.clone(), options.session_manager, cwd);
         return Ok(CreateAgentSessionResult {
             session,
@@ -322,7 +331,11 @@ pub fn create_agent_session_from_services(
         output_mode: None,
     };
 
-    let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config, Arc::new(oxi_agent::ToolRegistry::new())));
+    let agent = Arc::new(oxi_agent::Agent::new(
+        Arc::from(provider),
+        config,
+        Arc::new(oxi_agent::ToolRegistry::new()),
+    ));
 
     // Register tools: use provided registry or fallback to builtins
     let registry = options.tool_registry.unwrap_or_else(|| {
@@ -490,11 +503,7 @@ impl AgentSessionRuntime {
     ///
     /// Validates that the session's cwd matches (or can be overridden),
     /// tears down the current session, and creates a new runtime.
-    pub fn switch_session(
-        &mut self,
-        session_path: &str,
-        cwd_override: Option<&str>,
-    ) -> Result<()> {
+    pub fn switch_session(&mut self, session_path: &str, cwd_override: Option<&str>) -> Result<()> {
         // Open the target session
         let session_manager = SessionManager::open(session_path, None, cwd_override);
 
@@ -518,10 +527,8 @@ impl AgentSessionRuntime {
     /// Create a new empty session.
     pub fn new_session(&mut self) -> Result<()> {
         let session_dir = get_default_session_dir();
-        let session_manager = SessionManager::create(
-            &self.services.cwd.to_string_lossy(),
-            Some(&session_dir),
-        );
+        let session_manager =
+            SessionManager::create(&self.services.cwd.to_string_lossy(), Some(&session_dir));
 
         self.teardown_current(SessionSwitchReason::New);
 
@@ -547,8 +554,8 @@ impl AgentSessionRuntime {
         // Create a forked session from the current session file
         let mut session_manager = {
             // For an in-memory session, just create a new one
-            let sm = SessionManager::create(&cwd_str, Some(&session_dir));
-            sm
+
+            SessionManager::create(&cwd_str, Some(&session_dir))
         };
 
         // Branch to the specified entry within the new session
@@ -746,9 +753,9 @@ fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
         ThinkingLevel::Minimal => {
             Some("You are a helpful AI assistant. Provide clear and helpful answers.".to_string())
         }
-        ThinkingLevel::Low => Some(
-            "You are a helpful AI assistant. Provide brief, actionable responses.".to_string(),
-        ),
+        ThinkingLevel::Low => {
+            Some("You are a helpful AI assistant. Provide brief, actionable responses.".to_string())
+        }
         ThinkingLevel::Medium => Some(
             "You are a helpful AI coding assistant. Think through problems \
              step by step when helpful, but keep responses focused and actionable."
@@ -771,12 +778,18 @@ fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
     let mut tool_snippets = std::collections::HashMap::new();
     tool_snippets.insert("read".into(), "Read file contents (text or image)".into());
     tool_snippets.insert("bash".into(), "Execute bash commands".into());
-    tool_snippets.insert("edit".into(), "Edit files with exact text replacement".into());
+    tool_snippets.insert(
+        "edit".into(),
+        "Edit files with exact text replacement".into(),
+    );
     tool_snippets.insert("write".into(), "Write content to files".into());
     tool_snippets.insert("grep".into(), "Search file contents with regex".into());
     tool_snippets.insert("find".into(), "Find files by name/pattern".into());
     tool_snippets.insert("ls".into(), "List directory contents".into());
-    tool_snippets.insert("web_search".into(), "Search the web (DuckDuckGo, Wikipedia, Bing, Brave)".into());
+    tool_snippets.insert(
+        "web_search".into(),
+        "Search the web (DuckDuckGo, Wikipedia, Bing, Brave)".into(),
+    );
 
     let options = crate::prompt::system_prompt::BuildSystemPromptOptions {
         custom_prompt,
@@ -784,8 +797,14 @@ fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
         selected_tools: vec![
-            "read".into(), "bash".into(), "edit".into(), "write".into(),
-            "grep".into(), "find".into(), "ls".into(), "web_search".into(),
+            "read".into(),
+            "bash".into(),
+            "edit".into(),
+            "write".into(),
+            "grep".into(),
+            "find".into(),
+            "ls".into(),
+            "web_search".into(),
         ],
         tool_snippets,
         ..Default::default()
@@ -796,10 +815,7 @@ fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
 
 /// Get the default sessions directory.
 fn get_default_session_dir() -> String {
-    format!(
-        "{}/sessions",
-        get_default_agent_dir().to_string_lossy()
-    )
+    format!("{}/sessions", get_default_agent_dir().to_string_lossy())
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -815,28 +831,24 @@ fn get_default_session_dir() -> String {
 pub fn default_create_runtime_factory() -> Arc<CreateRuntimeFactory> {
     Arc::new(|options: CreateRuntimeOptions| {
         // Create services for the target cwd
-        let services = create_agent_session_services(
-            CreateAgentSessionServicesOptions {
-                cwd: options.cwd.clone(),
-                agent_dir: Some(options.agent_dir.clone()),
-                auth_storage: None,
-                settings: None,
-                model_registry: None,
-                resource_loader: None,
-            },
-        )?;
+        let services = create_agent_session_services(CreateAgentSessionServicesOptions {
+            cwd: options.cwd.clone(),
+            agent_dir: Some(options.agent_dir.clone()),
+            auth_storage: None,
+            settings: None,
+            model_registry: None,
+            resource_loader: None,
+        })?;
         let services = Arc::new(services);
 
-        let result = create_agent_session_from_services(
-            CreateAgentSessionFromServicesOptions {
-                services: services.clone(),
-                session_manager: options.session_manager,
-                model_id: None,
-                thinking_level: None,
-                scoped_models: Vec::new(),
-                tool_registry: None,
-            },
-        )?;
+        let result = create_agent_session_from_services(CreateAgentSessionFromServicesOptions {
+            services: services.clone(),
+            session_manager: options.session_manager,
+            model_id: None,
+            thinking_level: None,
+            scoped_models: Vec::new(),
+            tool_registry: None,
+        })?;
 
         Ok(CreateAgentSessionRuntimeResult {
             session: result.session,

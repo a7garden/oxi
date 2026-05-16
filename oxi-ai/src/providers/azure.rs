@@ -21,7 +21,8 @@ use super::shared_client;
 /// https://{resource}.openai.azure.com/openai/deployments/{deployment}/chat/completions
 ///
 /// Supports the following environment variables:
-/// - AZURE_OPENAI_API_KEY: API key for authentication
+///   - AZURE_OPENAI_API_KEY: API key for authentication
+///
 /// Azure OpenAI provider
 ///
 /// Configuration is resolved at runtime from:

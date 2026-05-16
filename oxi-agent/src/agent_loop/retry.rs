@@ -1,14 +1,12 @@
-/// Retry logic for agent loop
-
-use crate::{AgentError, AgentEvent};
 use crate::stream_retry::{self, RetryCallback};
+/// Retry logic for agent loop
+use crate::{AgentError, AgentEvent};
 use anyhow::Result;
-use oxi_ai::{Context, Model, ProviderEvent, StreamOptions, StopReason, Message};
+use oxi_ai::{Context, Message, Model, ProviderEvent, StopReason, StreamOptions};
 use regex::Regex;
 use std::sync::atomic::Ordering;
 
-
-pub use crate::stream_retry::{MAX_RETRIES, BACKOFF_BASE_SECS};
+pub use crate::stream_retry::{BACKOFF_BASE_SECS, MAX_RETRIES};
 
 /// [`RetryCallback`] that emits [`AgentEvent::Retry`] through the AgentLoop emit function.
 struct EmitRetryCallback<'a> {
@@ -65,8 +63,12 @@ pub(crate) async fn stream_with_retry(
         options,
         &cb,
         max_delay,
-        || { cb_ref.record_success(); },
-        || { cb_ref.record_failure(); },
+        || {
+            cb_ref.record_success();
+        },
+        || {
+            cb_ref.record_failure();
+        },
     )
     .await;
 
@@ -129,10 +131,16 @@ pub(crate) async fn handle_retryable_error(
         attempt,
         max_attempts,
         delay_ms,
-        error_message: message.error_message.clone().unwrap_or_else(|| "Unknown error".into()),
+        error_message: message
+            .error_message
+            .clone()
+            .unwrap_or_else(|| "Unknown error".into()),
     });
 
-    if messages.last().map_or(false, |m| matches!(m, Message::Assistant(_))) {
+    if messages
+        .last()
+        .is_some_and(|m| matches!(m, Message::Assistant(_)))
+    {
         messages.pop();
     }
 

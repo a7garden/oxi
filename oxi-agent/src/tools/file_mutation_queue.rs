@@ -1,7 +1,6 @@
 /// File mutation queue - serializes concurrent writes to the same file
 /// Prevents race conditions when multiple edit operations target the same file.
 /// Operations on *different* files run in parallel; operations on the *same* file are serialized.
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -24,7 +23,7 @@ pub struct FileMutationQueue {
 }
 
 impl FileMutationQueue {
-/// TODO.
+    /// TODO.
     pub fn new() -> Self {
         Self {
             queues: Arc::new(Mutex::new(HashMap::new())),

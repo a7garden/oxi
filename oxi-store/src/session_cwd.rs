@@ -70,7 +70,7 @@ pub fn format_missing_session_cwd_prompt(issue: &SessionCwdIssue) -> String {
 /// Error when the session's working directory no longer exists.
 #[derive(Debug)]
 pub struct MissingSessionCwdError {
-/// pub.
+    /// pub.
     pub issue: SessionCwdIssue,
 }
 

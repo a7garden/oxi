@@ -75,12 +75,7 @@ pub async fn run_rpc_mode(app: App) -> Result<()> {
 }
 
 /// Process a single JSONL input line.
-async fn process_line(
-    line: &str,
-    server: &Arc<RpcServer>,
-    app: &App,
-    output: &RpcOutput,
-) {
+async fn process_line(line: &str, server: &Arc<RpcServer>, app: &App, output: &RpcOutput) {
     let value = match parse_json_line(line) {
         Ok(v) => v,
         Err(e) => {
@@ -471,7 +466,9 @@ fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> 
                 id,
                 command: "compact".to_string(),
                 success: true,
-                data: Some(serde_json::to_value(&result).expect("compact result should be serializable")),
+                data: Some(
+                    serde_json::to_value(&result).expect("compact result should be serializable"),
+                ),
                 error: None,
             }
         }
@@ -510,10 +507,7 @@ fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> 
         // ── Bash ───────────────────────────────────────────────────
         RpcCommand::Bash { id, command } => {
             if is_dangerous_rpc_command(&command) {
-                tracing::warn!(
-                    "RPC bash command contains dangerous pattern: {:?}",
-                    command
-                );
+                tracing::warn!("RPC bash command contains dangerous pattern: {:?}", command);
             }
             let output_result = std::process::Command::new("sh")
                 .arg("-c")
@@ -563,7 +557,9 @@ fn execute_command(server: &Arc<RpcServer>, _app: &App, command: RpcCommand) -> 
                 id,
                 command: "get_session_stats".to_string(),
                 success: true,
-                data: Some(serde_json::to_value(&stats).expect("session stats should be serializable")),
+                data: Some(
+                    serde_json::to_value(&stats).expect("session stats should be serializable"),
+                ),
                 error: None,
             }
         }

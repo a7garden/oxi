@@ -1,6 +1,5 @@
 /// Path resolution utilities
 /// Provides path normalization, home expansion, and macOS-specific path handling.
-
 use std::path::{Path, PathBuf};
 
 use unicode_normalization::UnicodeNormalization;
@@ -9,7 +8,7 @@ use unicode_normalization::UnicodeNormalization;
 /// Also strips a leading `@` prefix (used by some tool interfaces).
 pub fn expand_path(path: &str) -> PathBuf {
     let normalized = normalize_at_prefix(path);
-    let normalized = normalize_unicode_spaces(&normalized);
+    let normalized = normalize_unicode_spaces(normalized);
 
     if normalized == "~" {
         return dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
@@ -95,10 +94,11 @@ fn is_unicode_space(ch: char) -> bool {
     matches!(
         ch,
         '\u{00A0}'      // No-Break Space (NBSP)
-        | '\u{2000}'..='\u{200A}' // Various spaces (En Quad through Hair Space)
+        | '\u{2000}'
+            ..='\u{200A}' // Various spaces (En Quad through Hair Space)
         | '\u{202F}'     // Narrow No-Break Space
         | '\u{205F}'     // Medium Mathematical Space
-        | '\u{3000}'     // Ideographic Space
+        | '\u{3000}' // Ideographic Space
     )
 }
 
@@ -106,7 +106,9 @@ fn is_unicode_space(ch: char) -> bool {
 /// (macOS screenshot naming convention).
 fn try_macos_screenshot_path(path: &PathBuf) -> PathBuf {
     let path_str = path.to_string_lossy();
-    let replaced = path_str.replace(" AM.", "\u{202F}AM.").replace(" PM.", "\u{202F}PM.");
+    let replaced = path_str
+        .replace(" AM.", "\u{202F}AM.")
+        .replace(" PM.", "\u{202F}PM.");
     let replaced = replaced
         .replace(" am.", "\u{202F}AM.")
         .replace(" pm.", "\u{202F}PM.");
@@ -212,8 +214,14 @@ mod tests {
 
     #[test]
     fn test_normalize_unicode_spaces() {
-        assert_eq!(normalize_unicode_spaces("hello\u{00A0}world"), "hello world");
-        assert_eq!(normalize_unicode_spaces("hello\u{202F}world"), "hello world");
+        assert_eq!(
+            normalize_unicode_spaces("hello\u{00A0}world"),
+            "hello world"
+        );
+        assert_eq!(
+            normalize_unicode_spaces("hello\u{202F}world"),
+            "hello world"
+        );
         assert_eq!(normalize_unicode_spaces("hello world"), "hello world");
     }
 

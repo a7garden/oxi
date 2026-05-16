@@ -1,10 +1,10 @@
 //! Concurrency tests for SharedState and ToolRegistry.
 //! Verifies thread-safety of shared mutable state under concurrent access.
 
+use async_trait::async_trait;
 use oxi_agent::state::SharedState;
 use oxi_agent::tools::ToolRegistry;
 use oxi_agent::AgentTool;
-use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::thread;
@@ -18,15 +18,23 @@ struct TestTool {
 
 impl TestTool {
     fn new(name: &str) -> Self {
-        Self { name: name.to_string() }
+        Self {
+            name: name.to_string(),
+        }
     }
 }
 
 #[async_trait]
 impl AgentTool for TestTool {
-    fn name(&self) -> &str { &self.name }
-    fn label(&self) -> &str { "Test Tool" }
-    fn description(&self) -> &str { "A test tool" }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn label(&self) -> &str {
+        "Test Tool"
+    }
+    fn description(&self) -> &str {
+        "A test tool"
+    }
     fn parameters_schema(&self) -> Value {
         json!({ "type": "object", "properties": {} })
     }
@@ -64,7 +72,12 @@ fn test_shared_state_concurrent_reads() {
             // Each thread reads the state multiple times
             for _ in 0..100 {
                 let state = shared_clone.get_state();
-                assert_eq!(state.messages.len(), 50, "thread {} sees all messages", thread_id);
+                assert_eq!(
+                    state.messages.len(),
+                    50,
+                    "thread {} sees all messages",
+                    thread_id
+                );
                 assert_eq!(state.iteration, 0);
             }
         }));
@@ -325,10 +338,18 @@ fn test_tool_registry_concurrent_unregister() {
     // Verify final state
     let names = registry.names();
     for i in 0..10 {
-        assert!(!names.contains(&format!("tool_{}", i)), "tool_{} should be gone", i);
+        assert!(
+            !names.contains(&format!("tool_{}", i)),
+            "tool_{} should be gone",
+            i
+        );
     }
     for i in 10..20 {
-        assert!(names.contains(&format!("tool_{}", i)), "tool_{} should remain", i);
+        assert!(
+            names.contains(&format!("tool_{}", i)),
+            "tool_{} should remain",
+            i
+        );
     }
 }
 

@@ -9,19 +9,21 @@
 
 #[cfg(test)]
 mod tests {
-    use oxi_agent::{
-        AgentLoop, AgentLoopConfig, AgentEvent, ToolExecutionMode, SharedState,
-        tools::{AgentTool, AgentToolResult, ToolRegistry},
-        CompactionStrategy,
-    };
-    use oxi_ai::{
-        ContentBlock, Provider, ProviderEvent, StopReason,
-        TextContent, ToolCall, AssistantMessage, Message, UserMessage,
-    };
     use async_trait::async_trait;
     use futures::Stream;
+    use oxi_agent::{
+        tools::{AgentTool, AgentToolResult, ToolRegistry},
+        AgentEvent, AgentLoop, AgentLoopConfig, CompactionStrategy, SharedState, ToolExecutionMode,
+    };
+    use oxi_ai::{
+        AssistantMessage, ContentBlock, Message, Provider, ProviderEvent, StopReason, TextContent,
+        ToolCall, UserMessage,
+    };
     use std::pin::Pin;
-    use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
     use std::task::{Context as TaskContext, Poll};
 
     // ── Mock Providers ────────────────────────────────────────────────────
@@ -57,7 +59,8 @@ mod tests {
             _model: &oxi_ai::Model,
             _context: &oxi_ai::Context,
             _options: Option<oxi_ai::StreamOptions>,
-        ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, oxi_ai::ProviderError> {
+        ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, oxi_ai::ProviderError>
+        {
             let idx = self.call_count.fetch_add(1, Ordering::Relaxed) % self.responses.len();
             let response = self.responses[idx].content.clone();
 
@@ -81,17 +84,17 @@ mod tests {
     impl Stream for MockStream {
         type Item = ProviderEvent;
 
-        fn poll_next(mut self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
+        fn poll_next(
+            mut self: Pin<&mut Self>,
+            _cx: &mut TaskContext<'_>,
+        ) -> Poll<Option<Self::Item>> {
             if self.done {
                 return Poll::Ready(None);
             }
             self.done = true;
 
-            let mut assistant = AssistantMessage::new(
-                oxi_ai::Api::AnthropicMessages,
-                "mock",
-                "mock-model",
-            );
+            let mut assistant =
+                AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
             assistant.content = vec![ContentBlock::Text(TextContent::new(self.text.clone()))];
 
             Poll::Ready(Some(ProviderEvent::Done {
@@ -133,15 +136,16 @@ mod tests {
             _model: &oxi_ai::Model,
             _context: &oxi_ai::Context,
             _options: Option<oxi_ai::StreamOptions>,
-        ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, oxi_ai::ProviderError> {
-            let idx = self.call_count.fetch_add(1, Ordering::Relaxed).min(self.responses.len() - 1);
+        ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, oxi_ai::ProviderError>
+        {
+            let idx = self
+                .call_count
+                .fetch_add(1, Ordering::Relaxed)
+                .min(self.responses.len() - 1);
             let response = self.responses[idx].clone();
 
-            let mut assistant = AssistantMessage::new(
-                oxi_ai::Api::AnthropicMessages,
-                "mock",
-                "mock-model",
-            );
+            let mut assistant =
+                AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
 
             let mut content_blocks: Vec<ContentBlock> = Vec::new();
             if let Some(text) = &response.text {
@@ -319,18 +323,21 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Hi there".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Hi there".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
         let events = events.lock().unwrap();
 
         // Verify AgentStart and AgentEnd events
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentStart { .. })));
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentStart { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
 
         // Should have exactly 1 turn
         let turn_starts = events
@@ -340,8 +347,12 @@ mod tests {
         assert_eq!(turn_starts, 1);
 
         // No tool executions
-        assert!(!events.iter().any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
-        assert!(!events.iter().any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
 
         // Provider was called exactly once
         assert_eq!(provider.call_count(), 1);
@@ -364,10 +375,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "What can you do?".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("What can you do?".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -406,10 +416,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Please echo 'hello world'".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Please echo 'hello world'".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -488,10 +497,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Echo two messages".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Echo two messages".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -549,10 +557,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Run two tools in parallel".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Run two tools in parallel".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -603,10 +610,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Echo three messages".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Echo three messages".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -667,10 +673,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Hello".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Hello".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -725,10 +730,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Hello".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Hello".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -772,18 +776,21 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Run tool".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Run tool".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
         let events = events.lock().unwrap();
 
         // Should have both steering and tool execution
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::SteeringMessage { .. })));
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::SteeringMessage { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -848,10 +855,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Start".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Start".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -899,10 +905,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Start".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Start".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -916,7 +921,9 @@ mod tests {
         assert_eq!(turn_starts, 2);
 
         // Should complete normally (AgentEnd)
-        assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -945,10 +952,9 @@ mod tests {
         let events1 = Arc::new(std::sync::Mutex::new(Vec::new()));
         let events1_clone = events1.clone();
         agent_loop
-            .run(
-                "Hello".to_string(),
-                move |e| events1_clone.lock().unwrap().push(e),
-            )
+            .run("Hello".to_string(), move |e| {
+                events1_clone.lock().unwrap().push(e)
+            })
             .await
             .unwrap();
 
@@ -966,7 +972,9 @@ mod tests {
 
         // Verify events from continue
         let events2 = events2.lock().unwrap();
-        assert!(events2.iter().any(|e| matches!(e, AgentEvent::TurnStart { .. })));
+        assert!(events2
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnStart { .. })));
     }
 
     #[tokio::test]
@@ -981,18 +989,15 @@ mod tests {
         let agent_loop = AgentLoop::new(provider, config, tools, state);
 
         // Add follow-up message
-        agent_loop.follow_up(Message::User(UserMessage::new(
-            "Follow-up".to_string(),
-        )));
+        agent_loop.follow_up(Message::User(UserMessage::new("Follow-up".to_string())));
 
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Initial".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Initial".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -1031,10 +1036,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Test".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Test".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -1075,10 +1079,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Test".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Test".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         // Should succeed even if tool has issues
@@ -1111,16 +1114,10 @@ mod tests {
         let agent_loop = AgentLoop::new(provider, config, tools, state);
 
         // First run
-        agent_loop
-            .run("First".to_string(), |_| {})
-            .await
-            .unwrap();
+        agent_loop.run("First".to_string(), |_| {}).await.unwrap();
 
         // Second run (should work without errors)
-        agent_loop
-            .run("Second".to_string(), |_| {})
-            .await
-            .unwrap();
+        agent_loop.run("Second".to_string(), |_| {}).await.unwrap();
     }
 
     #[tokio::test]
@@ -1138,10 +1135,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         // Empty prompt should still work
@@ -1174,10 +1170,9 @@ mod tests {
         let events_clone = events.clone();
 
         let result = agent_loop
-            .run(
-                "Test special chars".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Test special chars".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await;
 
         assert!(result.is_ok());
@@ -1213,18 +1208,21 @@ mod tests {
         let events_clone = events.clone();
 
         agent_loop
-            .run(
-                "Test".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Test".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await
             .unwrap();
 
         let events = events.lock().unwrap();
 
         // Verify event order: AgentStart -> TurnStart -> ... -> TurnEnd -> AgentEnd
-        let agent_start_idx = events.iter().position(|e| matches!(e, AgentEvent::AgentStart { .. }));
-        let agent_end_idx = events.iter().position(|e| matches!(e, AgentEvent::AgentEnd { .. }));
+        let agent_start_idx = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::AgentStart { .. }));
+        let agent_end_idx = events
+            .iter()
+            .position(|e| matches!(e, AgentEvent::AgentEnd { .. }));
 
         assert!(agent_start_idx.is_some());
         assert!(agent_end_idx.is_some());
@@ -1266,17 +1264,20 @@ mod tests {
         let events_clone = events.clone();
 
         agent_loop
-            .run(
-                "Test".to_string(),
-                move |e| events_clone.lock().unwrap().push(e),
-            )
+            .run("Test".to_string(), move |e| {
+                events_clone.lock().unwrap().push(e)
+            })
             .await
             .unwrap();
 
         let events = events.lock().unwrap();
 
         // Should NOT have ToolExecutionStart or ToolExecutionEnd
-        assert!(!events.iter().any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
-        assert!(!events.iter().any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
     }
 }

@@ -23,7 +23,9 @@ async fn cleanup(path: &str) {
 }
 
 async fn execute_tool(tool: &dyn AgentTool, params: serde_json::Value) -> AgentToolResult {
-    tool.execute("test_call", params, None, &ToolContext::default()).await.unwrap()
+    tool.execute("test_call", params, None, &ToolContext::default())
+        .await
+        .unwrap()
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -85,7 +87,12 @@ async fn test_read_directory_error() {
     let dir = create_temp_dir("read_dir_error").await;
     let tool = ReadTool::new();
     let result = tool
-        .execute("test_call", json!({ "path": dir }), None, &ToolContext::default())
+        .execute(
+            "test_call",
+            json!({ "path": dir }),
+            None,
+            &ToolContext::default(),
+        )
         .await;
     // ReadTool returns Err for directory
     assert!(result.is_err());
@@ -99,7 +106,12 @@ async fn test_read_directory_error() {
 async fn test_read_path_traversal_blocked() {
     let tool = ReadTool::new();
     let result = tool
-        .execute("test_call", json!({ "path": "../../etc/passwd" }), None, &ToolContext::default())
+        .execute(
+            "test_call",
+            json!({ "path": "../../etc/passwd" }),
+            None,
+            &ToolContext::default(),
+        )
         .await;
     // ReadTool returns Err for path traversal
     assert!(result.is_err());
@@ -109,7 +121,9 @@ async fn test_read_path_traversal_blocked() {
 #[tokio::test]
 async fn test_read_missing_path_param() {
     let tool = ReadTool::new();
-    let result = tool.execute("test_call", json!({}), None, &ToolContext::default()).await;
+    let result = tool
+        .execute("test_call", json!({}), None, &ToolContext::default())
+        .await;
     assert!(result.is_err());
 }
 
@@ -467,7 +481,9 @@ async fn test_bash_empty_output() {
 #[tokio::test]
 async fn test_bash_missing_command_param() {
     let tool = BashTool::new();
-    let result = tool.execute("test_call", json!({}), None, &ToolContext::default()).await;
+    let result = tool
+        .execute("test_call", json!({}), None, &ToolContext::default())
+        .await;
     assert!(result.is_err());
 }
 
@@ -873,7 +889,11 @@ async fn test_find_path_not_found() {
         }),
     )
     .await;
-    assert!(!result.success, "find should fail for non-existent path: {}", result.output);
+    assert!(
+        !result.success,
+        "find should fail for non-existent path: {}",
+        result.output
+    );
     // Error message should indicate path issue (not found, not a directory, or outside workspace)
     assert!(
         result.output.contains("not found")

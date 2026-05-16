@@ -38,8 +38,8 @@
 //!
 //! An `oxi-lock.json` file records exact versions/refs for reproducibility.
 
-use anyhow::{bail, Context, Result};
 use crate::util::http_client::shared_http_client;
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -64,13 +64,13 @@ const NPM_MANIFEST_NAME: &str = "package.json";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceKind {
-/// extension variant.
+    /// extension variant.
     Extension,
-/// skill variant.
+    /// skill variant.
     Skill,
-/// prompt variant.
+    /// prompt variant.
     Prompt,
-/// theme variant.
+    /// theme variant.
     Theme,
 }
 
@@ -142,9 +142,9 @@ pub struct PathMetadata {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResourceOrigin {
-/// package variant.
+    /// package variant.
     Package,
-/// top level variant.
+    /// top level variant.
     TopLevel,
 }
 
@@ -152,9 +152,9 @@ pub enum ResourceOrigin {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceScope {
-/// user variant.
+    /// user variant.
     User,
-/// project variant.
+    /// project variant.
     Project,
 }
 
@@ -181,26 +181,26 @@ pub struct ResolvedResource {
 /// Resolved paths for all resource types
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResolvedPaths {
-/// pub.
+    /// pub.
     pub extensions: Vec<ResolvedResource>,
-/// pub.
+    /// pub.
     pub skills: Vec<ResolvedResource>,
-/// pub.
+    /// pub.
     pub prompts: Vec<ResolvedResource>,
-/// pub.
+    /// pub.
     pub themes: Vec<ResolvedResource>,
 }
 
 /// Progress events for package operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProgressEvent {
-/// pub.
+    /// pub.
     pub event_type: ProgressEventType,
-/// pub.
+    /// pub.
     pub action: ProgressAction,
-/// pub.
+    /// pub.
     pub source: String,
-/// pub.
+    /// pub.
     pub message: Option<String>,
 }
 
@@ -208,13 +208,13 @@ pub struct ProgressEvent {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgressEventType {
-/// start variant.
+    /// start variant.
     Start,
-/// progress variant.
+    /// progress variant.
     Progress,
-/// complete variant.
+    /// complete variant.
     Complete,
-/// error variant.
+    /// error variant.
     Error,
 }
 
@@ -222,15 +222,15 @@ pub enum ProgressEventType {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProgressAction {
-/// install variant.
+    /// install variant.
     Install,
-/// remove variant.
+    /// remove variant.
     Remove,
-/// update variant.
+    /// update variant.
     Update,
-/// clone variant.
+    /// clone variant.
     Clone,
-/// pull variant.
+    /// pull variant.
     Pull,
 }
 
@@ -255,7 +255,7 @@ pub type ProgressCallback = Box<dyn Fn(ProgressEvent) + Send + Sync>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ParsedSource {
-/// Variant.
+    /// Variant.
     Npm {
         /// Full spec (e.g. "express@4.18.0")
         spec: String,
@@ -264,7 +264,7 @@ pub enum ParsedSource {
         /// Whether a version was pinned
         pinned: bool,
     },
-/// Variant.
+    /// Variant.
     Git {
         /// Full repository URL
         repo: String,
@@ -275,12 +275,12 @@ pub enum ParsedSource {
         /// Optional ref (branch / tag / commit)
         ref_: Option<String>,
     },
-/// Variant.
+    /// Variant.
     Local {
         /// Local path
         path: String,
     },
-/// Variant.
+    /// Variant.
     Url {
         /// URL to archive
         url: String,
@@ -313,13 +313,17 @@ impl ParsedSource {
             }
         }
 
-        if source.starts_with("git+") || source.starts_with("git://") || source.starts_with("git@") {
+        if source.starts_with("git+") || source.starts_with("git://") || source.starts_with("git@")
+        {
             return parse_git_source(source);
         }
 
         if source.starts_with("https://") || source.starts_with("http://") {
             // Distinguish git URLs from plain archive URLs
-            if source.ends_with(".git") || source.contains("github.com") || source.contains("gitlab.com") {
+            if source.ends_with(".git")
+                || source.contains("github.com")
+                || source.contains("gitlab.com")
+            {
                 return parse_git_source(source);
             }
             // Archive URL (.tar.gz, .zip, .tgz)
@@ -423,12 +427,7 @@ fn parse_git_source(source: &str) -> ParsedSource {
         .unwrap_or(source)
         .strip_prefix("git://")
         .map(|s| format!("https://{}", s))
-        .unwrap_or_else(|| {
-            source
-                .strip_prefix("git+")
-                .unwrap_or(source)
-                .to_string()
-        });
+        .unwrap_or_else(|| source.strip_prefix("git+").unwrap_or(source).to_string());
 
     // Parse URL to extract host and path
     let url = match url::Url::parse(&url_str) {
@@ -468,11 +467,11 @@ fn parse_git_source(source: &str) -> ParsedSource {
 /// Information fetched from the npm registry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NpmPackageInfo {
-/// pub.
+    /// pub.
     pub name: String,
-/// pub.
+    /// pub.
     pub versions: BTreeMap<String, serde_json::Value>,
-/// pub.
+    /// pub.
     #[serde(rename = "dist-tags")]
     pub dist_tags: BTreeMap<String, String>,
 }
@@ -491,11 +490,7 @@ impl NpmPackageInfo {
             .with_context(|| format!("Failed to fetch npm info for '{}'", name))?;
 
         if !resp.status().is_success() {
-            bail!(
-                "npm registry returned {} for '{}'",
-                resp.status(),
-                name
-            );
+            bail!("npm registry returned {} for '{}'", resp.status(), name);
         }
 
         let info: NpmPackageInfo = resp
@@ -624,7 +619,10 @@ pub fn git_clone(repo_url: &str, target_dir: &Path, ref_: Option<&str>) -> Resul
 /// Pull/update a git repository in place
 pub fn git_update(repo_dir: &Path, ref_: Option<&str>) -> Result<bool> {
     if !repo_dir.exists() {
-        bail!("Repository directory does not exist: {}", repo_dir.display());
+        bail!(
+            "Repository directory does not exist: {}",
+            repo_dir.display()
+        );
     }
 
     // Get current HEAD
@@ -640,8 +638,7 @@ pub fn git_update(repo_dir: &Path, ref_: Option<&str>) -> Result<bool> {
             Some(repo_dir),
         ) {
             Ok(upstream) => {
-                if upstream.starts_with("origin/") {
-                    let branch = &upstream["origin/".len()..];
+                if let Some(branch) = upstream.strip_prefix("origin/") {
                     format!("+refs/heads/{branch}:refs/remotes/origin/{branch}")
                 } else {
                     "+HEAD:refs/remotes/origin/HEAD".to_string()
@@ -651,7 +648,10 @@ pub fn git_update(repo_dir: &Path, ref_: Option<&str>) -> Result<bool> {
         }
     };
 
-    git_command_silent(&["fetch", "--prune", "--no-tags", "origin", &fetch_ref], Some(repo_dir))?;
+    git_command_silent(
+        &["fetch", "--prune", "--no-tags", "origin", &fetch_ref],
+        Some(repo_dir),
+    )?;
 
     // Determine what to reset to
     let target_ref = ref_.unwrap_or("origin/HEAD");
@@ -684,10 +684,7 @@ pub fn git_has_update(repo_dir: &Path) -> Result<bool> {
     };
 
     // Fetch quietly and check remote
-    let _ = git_command_silent(
-        &["fetch", "--prune", "--no-tags", "origin"],
-        Some(repo_dir),
-    );
+    let _ = git_command_silent(&["fetch", "--prune", "--no-tags", "origin"], Some(repo_dir));
 
     let remote_head = git_command(&["ls-remote", "origin", &upstream_ref], None)?;
 
@@ -793,13 +790,13 @@ impl Default for Lockfile {
 /// Counts of each resource type in a package
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResourceCounts {
-/// pub.
+    /// pub.
     pub extensions: usize,
-/// pub.
+    /// pub.
     pub skills: usize,
-/// pub.
+    /// pub.
     pub prompts: usize,
-/// pub.
+    /// pub.
     pub themes: usize,
 }
 
@@ -832,26 +829,26 @@ impl std::fmt::Display for ResourceCounts {
 /// Information about an available package update
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageUpdateInfo {
-/// pub.
+    /// pub.
     pub source: String,
-/// pub.
+    /// pub.
     pub display_name: String,
-/// pub.
+    /// pub.
     pub source_type: String, // "npm" or "git"
-/// pub.
+    /// pub.
     pub scope: SourceScope,
 }
 
 /// A configured package
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfiguredPackage {
-/// pub.
+    /// pub.
     pub source: String,
-/// pub.
+    /// pub.
     pub scope: SourceScope,
-/// pub.
+    /// pub.
     pub filtered: bool,
-/// pub.
+    /// pub.
     pub installed_path: Option<PathBuf>,
 }
 
@@ -991,7 +988,12 @@ impl PackageManager {
     /// Get install dir for a git source
     fn git_install_path(&self, host: &str, path: &str, scope: SourceScope) -> PathBuf {
         match scope {
-            SourceScope::Project => self.project_dir.join(".oxi").join("git").join(host).join(path),
+            SourceScope::Project => self
+                .project_dir
+                .join(".oxi")
+                .join("git")
+                .join(host)
+                .join(path),
             SourceScope::User => self.packages_dir.join("git").join(host).join(path),
         }
     }
@@ -1000,9 +1002,7 @@ impl PackageManager {
     fn npm_install_path(&self, name: &str, scope: SourceScope) -> PathBuf {
         let safe_name = name.replace('@', "").replace('/', "-");
         match scope {
-            SourceScope::Project => {
-                self.project_dir.join(".oxi").join("npm").join(safe_name)
-            }
+            SourceScope::Project => self.project_dir.join(".oxi").join("npm").join(safe_name),
             SourceScope::User => self.packages_dir.join("npm").join(safe_name),
         }
     }
@@ -1064,11 +1064,7 @@ impl PackageManager {
         }
 
         copy_dir_recursive(source_path, &dest).with_context(|| {
-            format!(
-                "Failed to copy package from {} to {}",
-                path,
-                dest.display()
-            )
+            format!("Failed to copy package from {} to {}", path, dest.display())
         })?;
 
         let integrity = compute_dir_hash(&dest);
@@ -1150,15 +1146,14 @@ impl PackageManager {
             // Extract version from spec
             let (_, ver) = parse_npm_spec(&spec);
             if ver {
-                spec.rsplit('@')
-                    .next()
-                    .unwrap_or("latest")
-                    .to_string()
+                spec.rsplit('@').next().unwrap_or("latest").to_string()
             } else {
                 "latest".to_string()
             }
         } else {
-            get_latest_npm_version(&name).await.unwrap_or_else(|_| "latest".to_string())
+            get_latest_npm_version(&name)
+                .await
+                .unwrap_or_else(|_| "latest".to_string())
         };
 
         // Use npm pack approach
@@ -1166,12 +1161,9 @@ impl PackageManager {
     }
 
     /// Install npm package using `npm pack`
-    fn install_npm_pack(
-        &mut self,
-        spec: &str,
-        scope: SourceScope,
-    ) -> Result<PackageManifest> {
-        let tmp_dir = tempfile::tempdir().context("Failed to create temp directory for npm install")?;
+    fn install_npm_pack(&mut self, spec: &str, scope: SourceScope) -> Result<PackageManifest> {
+        let tmp_dir =
+            tempfile::tempdir().context("Failed to create temp directory for npm install")?;
 
         let output = std::process::Command::new("npm")
             .args(["pack", spec, "--pack-destination"])
@@ -1317,7 +1309,10 @@ impl PackageManager {
         }
 
         let Some(parent) = target_dir.parent() else {
-            bail!("Invalid install path: no parent directory for {}", target_dir.display());
+            bail!(
+                "Invalid install path: no parent directory for {}",
+                target_dir.display()
+            );
         };
         fs::create_dir_all(parent)
             .with_context(|| format!("Failed to create parent dir for {}", target_dir.display()))?;
@@ -1380,11 +1375,7 @@ impl PackageManager {
     }
 
     /// Install from a URL (archive)
-    async fn install_url(
-        &mut self,
-        url: &str,
-        scope: SourceScope,
-    ) -> Result<PackageManifest> {
+    async fn install_url(&mut self, url: &str, scope: SourceScope) -> Result<PackageManifest> {
         let client = shared_http_client();
 
         let resp = client.get(url).send().await?;
@@ -1395,7 +1386,7 @@ impl PackageManager {
         let bytes = resp.bytes().await?;
 
         let tmp_dir = tempfile::tempdir()?;
-        let archive_name = url.split('/').last().unwrap_or("archive");
+        let archive_name = url.split('/').next_back().unwrap_or("archive");
         let archive_path = tmp_dir.path().join(archive_name);
         fs::write(&archive_path, &bytes)?;
 
@@ -1435,7 +1426,7 @@ impl PackageManager {
         } else {
             let name = url
                 .split('/')
-                .last()
+                .next_back()
                 .unwrap_or("url-package")
                 .trim_end_matches(".tar.gz")
                 .trim_end_matches(".tgz")
@@ -1534,7 +1525,11 @@ impl PackageManager {
         result
     }
 
-    fn do_uninstall_from_source(&mut self, parsed: &ParsedSource, scope: SourceScope) -> Result<()> {
+    fn do_uninstall_from_source(
+        &mut self,
+        parsed: &ParsedSource,
+        scope: SourceScope,
+    ) -> Result<()> {
         match parsed {
             ParsedSource::Npm { name, .. } => {
                 let dest = self.npm_install_path(name, scope);
@@ -1566,9 +1561,9 @@ impl PackageManager {
             ParsedSource::Local { .. } => Ok(()),
             ParsedSource::Url { .. } => {
                 let identity = parsed.identity();
-                self.lockfile.packages.retain(|_, e| {
-                    ParsedSource::parse(&e.source).identity() != identity
-                });
+                self.lockfile
+                    .packages
+                    .retain(|_, e| ParsedSource::parse(&e.source).identity() != identity);
                 let _ = self.save_lockfile();
                 Ok(())
             }
@@ -1620,22 +1615,15 @@ impl PackageManager {
                     };
                     if target_dir.exists() {
                         let updated = git_update(&target_dir, ref_.as_deref())?;
-                        if updated {
-                            if target_dir.join(NPM_MANIFEST_NAME).exists() {
-                                let _ = std::process::Command::new("npm")
-                                    .args(["install", "--omit=dev"])
-                                    .current_dir(&target_dir)
-                                    .output();
-                            }
+                        if updated && target_dir.join(NPM_MANIFEST_NAME).exists() {
+                            let _ = std::process::Command::new("npm")
+                                .args(["install", "--omit=dev"])
+                                .current_dir(&target_dir)
+                                .output();
                         }
                         self.load_manifest_from_dir(&target_dir, &entry.source, entry.scope)
                     } else {
-                        self.install_git_sync(
-                            &entry.source,
-                            repo,
-                            ref_.as_deref(),
-                            entry.scope,
-                        )
+                        self.install_git_sync(&entry.source, repo, ref_.as_deref(), entry.scope)
                     }
                 }
                 ParsedSource::Local { path } => self.install_local(path),
@@ -1669,7 +1657,7 @@ impl PackageManager {
     pub async fn check_for_updates(&self) -> Vec<PackageUpdateInfo> {
         let mut updates = Vec::new();
 
-        for (_name, lock_entry) in &self.lockfile.packages {
+        for lock_entry in self.lockfile.packages.values() {
             let parsed = ParsedSource::parse(&lock_entry.source);
 
             match &parsed {
@@ -1724,16 +1712,14 @@ impl PackageManager {
     /// List configured packages with metadata
     pub fn list_configured(&self) -> Vec<ConfiguredPackage> {
         let mut result = Vec::new();
-        for (name, _manifest) in &self.installed {
+        for name in self.installed.keys() {
             let installed_path = self.get_install_dir(name);
             let lock_entry = self.lockfile.get(name);
             result.push(ConfiguredPackage {
                 source: lock_entry
                     .map(|e| e.source.clone())
                     .unwrap_or_else(|| name.clone()),
-                scope: lock_entry
-                    .map(|e| e.scope)
-                    .unwrap_or(SourceScope::User),
+                scope: lock_entry.map(|e| e.scope).unwrap_or(SourceScope::User),
                 filtered: false,
                 installed_path,
             });
@@ -1886,7 +1872,7 @@ impl PackageManager {
         let mut prompts = Vec::new();
         let mut themes = Vec::new();
 
-        for (name, _manifest) in &self.installed {
+        for name in self.installed.keys() {
             let install_dir = self.pkg_install_dir(name);
             if !install_dir.exists() {
                 continue;
@@ -1942,8 +1928,7 @@ impl PackageManager {
     /// Returns a list of (package, missing_dependencies) tuples.
     pub fn resolve_dependencies(&self) -> Vec<(String, Vec<String>)> {
         let mut result = Vec::new();
-        let installed_names: HashSet<&str> =
-            self.installed.keys().map(|s| s.as_str()).collect();
+        let installed_names: HashSet<&str> = self.installed.keys().map(|s| s.as_str()).collect();
 
         for (name, manifest) in &self.installed {
             let missing: Vec<String> = manifest
@@ -1984,10 +1969,7 @@ impl PackageManager {
                         warnings.push("Package version is empty".to_string());
                     }
                     if semver::Version::parse(&m.version).is_err() {
-                        warnings.push(format!(
-                            "Version '{}' is not valid semver",
-                            m.version
-                        ));
+                        warnings.push(format!("Version '{}' is not valid semver", m.version));
                     }
                     let has_resources = !m.extensions.is_empty()
                         || !m.skills.is_empty()
@@ -2536,15 +2518,43 @@ mod tests {
 
         let resources = mgr.discover_resources("auto-pkg").unwrap();
 
-        let ext_count = resources.iter().filter(|r| r.kind == ResourceKind::Extension).count();
-        let skill_count = resources.iter().filter(|r| r.kind == ResourceKind::Skill).count();
-        let prompt_count = resources.iter().filter(|r| r.kind == ResourceKind::Prompt).count();
-        let theme_count = resources.iter().filter(|r| r.kind == ResourceKind::Theme).count();
+        let ext_count = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Extension)
+            .count();
+        let skill_count = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Skill)
+            .count();
+        let prompt_count = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Prompt)
+            .count();
+        let theme_count = resources
+            .iter()
+            .filter(|r| r.kind == ResourceKind::Theme)
+            .count();
 
-        assert!(ext_count >= 1, "Expected at least 1 extension, got {}", ext_count);
-        assert!(skill_count >= 1, "Expected at least 1 skill, got {}", skill_count);
-        assert!(prompt_count >= 1, "Expected at least 1 prompt, got {}", prompt_count);
-        assert!(theme_count >= 1, "Expected at least 1 theme, got {}", theme_count);
+        assert!(
+            ext_count >= 1,
+            "Expected at least 1 extension, got {}",
+            ext_count
+        );
+        assert!(
+            skill_count >= 1,
+            "Expected at least 1 skill, got {}",
+            skill_count
+        );
+        assert!(
+            prompt_count >= 1,
+            "Expected at least 1 prompt, got {}",
+            prompt_count
+        );
+        assert!(
+            theme_count >= 1,
+            "Expected at least 1 theme, got {}",
+            theme_count
+        );
     }
 
     #[test]
@@ -2645,7 +2655,9 @@ mod tests {
     fn test_parse_git_source() {
         let parsed = ParsedSource::parse("https://github.com/org/repo.git");
         match parsed {
-            ParsedSource::Git { host, path, ref_, .. } => {
+            ParsedSource::Git {
+                host, path, ref_, ..
+            } => {
                 assert_eq!(host, "github.com");
                 assert_eq!(path, "org/repo");
                 assert!(ref_.is_none());
@@ -2667,7 +2679,9 @@ mod tests {
     fn test_parse_github_shorthand() {
         let parsed = ParsedSource::parse("github:org/repo@main");
         match parsed {
-            ParsedSource::Git { host, path, ref_, .. } => {
+            ParsedSource::Git {
+                host, path, ref_, ..
+            } => {
                 assert_eq!(host, "github.com");
                 assert_eq!(path, "org/repo");
                 assert_eq!(ref_.as_deref(), Some("main"));
@@ -2756,7 +2770,10 @@ mod tests {
         let loaded = Lockfile::read(&lock_path).unwrap().unwrap();
         assert_eq!(loaded.packages.len(), 1);
         assert_eq!(loaded.packages["express"].version, "4.18.0");
-        assert_eq!(loaded.packages["express"].integrity.as_deref(), Some("sha256-abc123"));
+        assert_eq!(
+            loaded.packages["express"].integrity.as_deref(),
+            Some("sha256-abc123")
+        );
     }
 
     #[test]
@@ -2785,7 +2802,11 @@ mod tests {
         let pkg_dir = create_test_package(tmp.path(), "valid-pkg", "1.0.0");
         let warnings = PackageManager::validate_package(&pkg_dir).unwrap();
         // Should have minimal warnings (maybe just about .gitignore)
-        assert!(warnings.len() <= 1, "Expected <= 1 warning, got {:?}", warnings);
+        assert!(
+            warnings.len() <= 1,
+            "Expected <= 1 warning, got {:?}",
+            warnings
+        );
     }
 
     #[test]
@@ -2832,8 +2853,10 @@ mod tests {
         let missing = mgr.resolve_dependencies();
         assert_eq!(missing.len(), 1);
         assert_eq!(missing[0].0, "dep-pkg");
-        assert!(missing[0].1.contains(&"lodash".to_string())
-            || missing[0].1.contains(&"nonexistent-pkg".to_string()));
+        assert!(
+            missing[0].1.contains(&"lodash".to_string())
+                || missing[0].1.contains(&"nonexistent-pkg".to_string())
+        );
     }
 
     // ── Version tests ─────────────────────────────────────────────────

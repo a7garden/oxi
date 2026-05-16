@@ -1,3 +1,4 @@
+use super::search_cache::{SearchCache, SearchResult};
 /// GitHub tool — unified GitHub integration via `gh` CLI.
 ///
 /// Sub-commands:
@@ -9,9 +10,7 @@
 ///
 /// Prerequisites: `gh` CLI installed and authenticated (`gh auth status`).
 /// Disable via `disabled_tools = ["github"]` or `OXI_DISABLED_TOOLS=github`.
-
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use super::search_cache::{SearchCache, SearchResult};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -28,7 +27,12 @@ async fn check_gh_auth() -> Result<(), ToolError> {
         .args(["auth", "status"])
         .output()
         .await
-        .map_err(|e| format!("gh CLI not found: {}. Install from https://cli.github.com", e))?;
+        .map_err(|e| {
+            format!(
+                "gh CLI not found: {}. Install from https://cli.github.com",
+                e
+            )
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -91,18 +95,26 @@ async fn gh_search(params: &Value) -> Result<AgentToolResult, ToolError> {
     };
 
     let output = gh_exec(&[
-        "search", kind,
+        "search",
+        kind,
         query,
-        "--limit", &limit.to_string(),
+        "--limit",
+        &limit.to_string(),
         json_fields,
-    ]).await?;
+    ])
+    .await?;
 
-    let items: Vec<Value> = serde_json::from_str(&output)
-        .unwrap_or_else(|_| {
-            serde_json::from_str::<Value>(&output)
-                .map(|v| if v.is_array() { v.as_array().unwrap_or(&Vec::new()).clone() } else { vec![v] })
-                .unwrap_or_default()
-        });
+    let items: Vec<Value> = serde_json::from_str(&output).unwrap_or_else(|_| {
+        serde_json::from_str::<Value>(&output)
+            .map(|v| {
+                if v.is_array() {
+                    v.as_array().unwrap_or(&Vec::new()).clone()
+                } else {
+                    vec![v]
+                }
+            })
+            .unwrap_or_default()
+    });
 
     let text = format_search_results(kind, &items, query);
 
@@ -125,25 +137,54 @@ fn format_search_results(kind: &str, items: &[Value], query: &str) -> String {
     match kind {
         "repos" => {
             for (i, item) in items.iter().enumerate() {
-                let name = item["fullName"].as_str().or_else(|| item["name"].as_str()).unwrap_or("?");
+                let name = item["fullName"]
+                    .as_str()
+                    .or_else(|| item["name"].as_str())
+                    .unwrap_or("?");
                 let url = item["url"].as_str().unwrap_or("");
-                let desc = item["description"].as_str().unwrap_or("").chars().take(150).collect::<String>();
+                let desc = item["description"]
+                    .as_str()
+                    .unwrap_or("")
+                    .chars()
+                    .take(150)
+                    .collect::<String>();
                 let stars = item["stargazersCount"].as_u64().unwrap_or(0);
                 let lang = item["language"].as_str().unwrap_or("Unknown");
                 let forks = item["forksCount"].as_u64().unwrap_or(0);
-                let stars_str = if stars >= 1000 { format!("{:.1}k", stars as f64 / 1000.0) } else { stars.to_string() };
-                let topics = item["repositoryTopics"].as_array()
-                    .map(|arr| arr.iter().filter_map(|t| t["name"].as_str().or(t.as_str())).collect::<Vec<_>>().join(", "))
+                let stars_str = if stars >= 1000 {
+                    format!("{:.1}k", stars as f64 / 1000.0)
+                } else {
+                    stars.to_string()
+                };
+                let topics = item["repositoryTopics"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|t| t["name"].as_str().or(t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
                     .unwrap_or_default();
                 let license = item["licenseInfo"]["spdxId"].as_str().unwrap_or("");
 
                 out.push_str(&format!(
                     "{}. **{}** ⭐{}\n   {}\n   {} | 🔀 {} forks\n",
-                    i + 1, name, stars_str, url, lang, forks
+                    i + 1,
+                    name,
+                    stars_str,
+                    url,
+                    lang,
+                    forks
                 ));
-                if !desc.is_empty() { out.push_str(&format!("   {}\n", desc)); }
-                if !topics.is_empty() { out.push_str(&format!("   Topics: {}\n", topics)); }
-                if !license.is_empty() { out.push_str(&format!("   License: {}\n", license)); }
+                if !desc.is_empty() {
+                    out.push_str(&format!("   {}\n", desc));
+                }
+                if !topics.is_empty() {
+                    out.push_str(&format!("   Topics: {}\n", topics));
+                }
+                if !license.is_empty() {
+                    out.push_str(&format!("   License: {}\n", license));
+                }
                 out.push('\n');
             }
         }
@@ -153,26 +194,44 @@ fn format_search_results(kind: &str, items: &[Value], query: &str) -> String {
                 let url = item["url"].as_str().unwrap_or("");
                 let state = item["state"].as_str().unwrap_or("OPEN");
                 let number = item["number"].as_u64().unwrap_or(0);
-                let labels = item["labels"].as_array()
-                    .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().or(l.as_str())).collect::<Vec<_>>().join(", "))
+                let labels = item["labels"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|l| l["name"].as_str().or(l.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    })
                     .unwrap_or_default();
                 out.push_str(&format!(
                     "{}. #{} {} [{}] {}\n",
-                    i + 1, number, title, state, url
+                    i + 1,
+                    number,
+                    title,
+                    state,
+                    url
                 ));
-                if !labels.is_empty() { out.push_str(&format!("   Labels: {}\n", labels)); }
+                if !labels.is_empty() {
+                    out.push_str(&format!("   Labels: {}\n", labels));
+                }
                 out.push('\n');
             }
         }
         "code" => {
             for (i, item) in items.iter().enumerate() {
                 let path = item["path"].as_str().unwrap_or("?");
-                let repo = item["repository"]["fullName"].as_str().or_else(|| item["repository"].as_str()).unwrap_or("?");
+                let repo = item["repository"]["fullName"]
+                    .as_str()
+                    .or_else(|| item["repository"].as_str())
+                    .unwrap_or("?");
                 out.push_str(&format!("{}. {} in {}\n", i + 1, path, repo));
                 if let Some(matches) = item["textMatches"].as_array() {
                     for m in matches.iter().take(3) {
                         if let Some(frag) = m["fragment"].as_str() {
-                            out.push_str(&format!("   > {}\n", frag.chars().take(120).collect::<String>()));
+                            out.push_str(&format!(
+                                "   > {}\n",
+                                frag.chars().take(120).collect::<String>()
+                            ));
                         }
                     }
                 }
@@ -182,8 +241,16 @@ fn format_search_results(kind: &str, items: &[Value], query: &str) -> String {
         "commits" => {
             for (i, item) in items.iter().enumerate() {
                 let sha = item["sha"].as_str().unwrap_or("?").get(..7).unwrap_or("?");
-                let msg = item["message"].as_str().unwrap_or("").lines().next().unwrap_or("");
-                let author = item["author"]["name"].as_str().or_else(|| item["author"].as_str()).unwrap_or("?");
+                let msg = item["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .lines()
+                    .next()
+                    .unwrap_or("");
+                let author = item["author"]["name"]
+                    .as_str()
+                    .or_else(|| item["author"].as_str())
+                    .unwrap_or("?");
                 out.push_str(&format!("{}. {} {} — {}\n", i + 1, sha, msg, author));
                 out.push('\n');
             }
@@ -212,8 +279,16 @@ async fn gh_issue(params: &Value) -> Result<AgentToolResult, ToolError> {
             let label = params["label"].as_str();
 
             let limit_str = limit.to_string();
-            let mut args = vec!["issue", "list", "--state", state, "--limit", &limit_str,
-                "--json", "number,title,url,state,labels,createdAt,updatedAt,author"];
+            let mut args = vec![
+                "issue",
+                "list",
+                "--state",
+                state,
+                "--limit",
+                &limit_str,
+                "--json",
+                "number,title,url,state,labels,createdAt,updatedAt,author",
+            ];
             let label_arg;
             if let Some(l) = label {
                 label_arg = format!("--label={}", l);
@@ -223,20 +298,30 @@ async fn gh_issue(params: &Value) -> Result<AgentToolResult, ToolError> {
             let output = gh_exec(&args).await?;
             let items: Vec<Value> = serde_json::from_str(&output).unwrap_or_default();
             let text = format_issue_list(&items);
-            Ok(AgentToolResult::success(text).with_metadata(json!({ "action": "issue", "sub": "list", "results": items })))
+            Ok(AgentToolResult::success(text)
+                .with_metadata(json!({ "action": "issue", "sub": "list", "results": items })))
         }
         "view" => {
-            let number = params["number"].as_u64()
+            let number = params["number"]
+                .as_u64()
                 .ok_or_else(|| "Missing parameter: number".to_string())?;
-            let output = gh_exec(&["issue", "view", &number.to_string(),
-                "--json", "number,title,body,state,author,labels,comments,createdAt,updatedAt"]).await?;
-            let issue: Value = serde_json::from_str(&output)
-                .map_err(|e| format!("Parse error: {}", e))?;
+            let output = gh_exec(&[
+                "issue",
+                "view",
+                &number.to_string(),
+                "--json",
+                "number,title,body,state,author,labels,comments,createdAt,updatedAt",
+            ])
+            .await?;
+            let issue: Value =
+                serde_json::from_str(&output).map_err(|e| format!("Parse error: {}", e))?;
             let text = format_issue_view(&issue);
-            Ok(AgentToolResult::success(text).with_metadata(json!({ "action": "issue", "sub": "view", "issue": issue })))
+            Ok(AgentToolResult::success(text)
+                .with_metadata(json!({ "action": "issue", "sub": "view", "issue": issue })))
         }
         "create" => {
-            let title = params["title"].as_str()
+            let title = params["title"]
+                .as_str()
                 .ok_or_else(|| "Missing parameter: title".to_string())?;
             let body = params["body"].as_str().unwrap_or("");
             let mut args = vec!["issue", "create", "--title", title];
@@ -246,31 +331,58 @@ async fn gh_issue(params: &Value) -> Result<AgentToolResult, ToolError> {
                 args.push(&body_arg);
             }
             let output = gh_exec(&args).await?;
-            Ok(AgentToolResult::success(format!("Created issue: {}", output)))
+            Ok(AgentToolResult::success(format!(
+                "Created issue: {}",
+                output
+            )))
         }
         "close" => {
-            let number = params["number"].as_u64()
+            let number = params["number"]
+                .as_u64()
                 .ok_or_else(|| "Missing parameter: number".to_string())?;
             let output = gh_exec(&["issue", "close", &number.to_string()]).await?;
-            Ok(AgentToolResult::success(format!("Closed issue: {}", output)))
+            Ok(AgentToolResult::success(format!(
+                "Closed issue: {}",
+                output
+            )))
         }
-        other => Err(format!("Unknown issue action '{}'. Use: list, view, create, close", other)),
+        other => Err(format!(
+            "Unknown issue action '{}'. Use: list, view, create, close",
+            other
+        )),
     }
 }
 
 fn format_issue_list(items: &[Value]) -> String {
-    if items.is_empty() { return "No issues found.".to_string(); }
+    if items.is_empty() {
+        return "No issues found.".to_string();
+    }
     let mut out = format!("{} issues:\n\n", items.len());
     for (i, item) in items.iter().enumerate() {
         let num = item["number"].as_u64().unwrap_or(0);
         let title = item["title"].as_str().unwrap_or("?");
         let state = item["state"].as_str().unwrap_or("OPEN");
         let url = item["url"].as_str().unwrap_or("");
-        let labels = item["labels"].as_array()
-            .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().or(l.as_str())).collect::<Vec<_>>().join(", "))
+        let labels = item["labels"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|l| l["name"].as_str().or(l.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            })
             .unwrap_or_default();
-        out.push_str(&format!("{}. #{} {} [{}] {}\n", i + 1, num, title, state, url));
-        if !labels.is_empty() { out.push_str(&format!("   Labels: {}\n", labels)); }
+        out.push_str(&format!(
+            "{}. #{} {} [{}] {}\n",
+            i + 1,
+            num,
+            title,
+            state,
+            url
+        ));
+        if !labels.is_empty() {
+            out.push_str(&format!("   Labels: {}\n", labels));
+        }
         out.push('\n');
     }
     out
@@ -282,14 +394,27 @@ fn format_issue_view(issue: &Value) -> String {
     let state = issue["state"].as_str().unwrap_or("OPEN");
     let body = issue["body"].as_str().unwrap_or("");
     let url = issue["url"].as_str().unwrap_or("");
-    let labels = issue["labels"].as_array()
-        .map(|arr| arr.iter().filter_map(|l| l["name"].as_str().or(l.as_str())).collect::<Vec<_>>().join(", "))
+    let labels = issue["labels"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|l| l["name"].as_str().or(l.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
         .unwrap_or_default();
     let comments = issue["comments"].as_array().map(|a| a.len()).unwrap_or(0);
 
     let mut out = format!("#{} {} [{}]\n{}\n\n", num, title, state, url);
-    if !labels.is_empty() { out.push_str(&format!("Labels: {}\n\n", labels)); }
-    if !body.is_empty() { out.push_str(&format!("{}\n\n", body.chars().take(1000).collect::<String>())); }
+    if !labels.is_empty() {
+        out.push_str(&format!("Labels: {}\n\n", labels));
+    }
+    if !body.is_empty() {
+        out.push_str(&format!(
+            "{}\n\n",
+            body.chars().take(1000).collect::<String>()
+        ));
+    }
     out.push_str(&format!("Comments: {}\n", comments));
     out
 }
@@ -305,24 +430,37 @@ async fn gh_pr(params: &Value) -> Result<AgentToolResult, ToolError> {
         "list" => {
             let limit = params["limit"].as_u64().unwrap_or(10).min(30);
             let state = params["state"].as_str().unwrap_or("open");
-            let output = gh_exec(&["pr", "list", "--state", state, "--limit", &limit.to_string(),
-                "--json", "number,title,url,state,author,createdAt,updatedAt,labels"]).await?;
+            let output = gh_exec(&[
+                "pr",
+                "list",
+                "--state",
+                state,
+                "--limit",
+                &limit.to_string(),
+                "--json",
+                "number,title,url,state,author,createdAt,updatedAt,labels",
+            ])
+            .await?;
             let items: Vec<Value> = serde_json::from_str(&output).unwrap_or_default();
             let text = format_pr_list(&items);
-            Ok(AgentToolResult::success(text).with_metadata(json!({ "action": "pr", "sub": "list", "results": items })))
+            Ok(AgentToolResult::success(text)
+                .with_metadata(json!({ "action": "pr", "sub": "list", "results": items })))
         }
         "view" => {
-            let number = params["number"].as_u64()
+            let number = params["number"]
+                .as_u64()
                 .ok_or_else(|| "Missing parameter: number".to_string())?;
             let output = gh_exec(&["pr", "view", &number.to_string(),
                 "--json", "number,title,body,state,author,labels,additions,deletions,commits,reviews,createdAt"]).await?;
-            let pr: Value = serde_json::from_str(&output)
-                .map_err(|e| format!("Parse error: {}", e))?;
+            let pr: Value =
+                serde_json::from_str(&output).map_err(|e| format!("Parse error: {}", e))?;
             let text = format_pr_view(&pr);
-            Ok(AgentToolResult::success(text).with_metadata(json!({ "action": "pr", "sub": "view", "pr": pr })))
+            Ok(AgentToolResult::success(text)
+                .with_metadata(json!({ "action": "pr", "sub": "view", "pr": pr })))
         }
         "create" => {
-            let title = params["title"].as_str()
+            let title = params["title"]
+                .as_str()
                 .ok_or_else(|| "Missing parameter: title".to_string())?;
             let body = params["body"].as_str().unwrap_or("");
             let base = params["base"].as_str().unwrap_or("main");
@@ -342,25 +480,38 @@ async fn gh_pr(params: &Value) -> Result<AgentToolResult, ToolError> {
             Ok(AgentToolResult::success(format!("Created PR: {}", output)))
         }
         "merge" => {
-            let number = params["number"].as_u64()
+            let number = params["number"]
+                .as_u64()
                 .ok_or_else(|| "Missing parameter: number".to_string())?;
             let strategy = params["strategy"].as_str().unwrap_or("merge");
             let output = gh_exec(&["pr", "merge", &number.to_string(), "--", strategy]).await?;
             Ok(AgentToolResult::success(format!("Merged PR: {}", output)))
         }
-        other => Err(format!("Unknown PR action '{}'. Use: list, view, create, merge", other)),
+        other => Err(format!(
+            "Unknown PR action '{}'. Use: list, view, create, merge",
+            other
+        )),
     }
 }
 
 fn format_pr_list(items: &[Value]) -> String {
-    if items.is_empty() { return "No pull requests found.".to_string(); }
+    if items.is_empty() {
+        return "No pull requests found.".to_string();
+    }
     let mut out = format!("{} pull requests:\n\n", items.len());
     for (i, item) in items.iter().enumerate() {
         let num = item["number"].as_u64().unwrap_or(0);
         let title = item["title"].as_str().unwrap_or("?");
         let state = item["state"].as_str().unwrap_or("OPEN");
         let url = item["url"].as_str().unwrap_or("");
-        out.push_str(&format!("{}. #{} {} [{}] {}\n\n", i + 1, num, title, state, url));
+        out.push_str(&format!(
+            "{}. #{} {} [{}] {}\n\n",
+            i + 1,
+            num,
+            title,
+            state,
+            url
+        ));
     }
     out
 }
@@ -376,9 +527,15 @@ fn format_pr_view(pr: &Value) -> String {
     let commits = pr["commits"].as_u64().unwrap_or(0);
 
     let mut out = format!("#{} {} [{}]\n{}\n\n", num, title, state, url);
-    out.push_str(&format!("+{} / -{} across {} commits\n\n", additions, deletions, commits));
+    out.push_str(&format!(
+        "+{} / -{} across {} commits\n\n",
+        additions, deletions, commits
+    ));
     if !body.is_empty() {
-        out.push_str(&format!("{}\n\n", body.chars().take(1000).collect::<String>()));
+        out.push_str(&format!(
+            "{}\n\n",
+            body.chars().take(1000).collect::<String>()
+        ));
     }
     out
 }
@@ -394,8 +551,7 @@ async fn gh_repo(params: &Value) -> Result<AgentToolResult, ToolError> {
         "--json", "name,fullName,url,description,language,stargazersCount,forksCount,issues,defaultBranchRef,createdAt,updatedAt,repositoryTopics,licenseInfo",
     ]).await?;
 
-    let info: Value = serde_json::from_str(&output)
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let info: Value = serde_json::from_str(&output).map_err(|e| format!("Parse error: {}", e))?;
 
     let text = format_repo_view(&info);
     Ok(AgentToolResult::success(text).with_metadata(json!({ "action": "repo", "repo": info })))
@@ -409,17 +565,34 @@ fn format_repo_view(info: &Value) -> String {
     let forks = info["forksCount"].as_u64().unwrap_or(0);
     let lang = info["language"].as_str().unwrap_or("Unknown");
     let default_branch = info["defaultBranchRef"]["name"].as_str().unwrap_or("main");
-    let topics = info["repositoryTopics"].as_array()
-        .map(|arr| arr.iter().filter_map(|t| t["name"].as_str().or(t.as_str())).collect::<Vec<_>>().join(", "))
+    let topics = info["repositoryTopics"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| t["name"].as_str().or(t.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
         .unwrap_or_default();
     let license = info["licenseInfo"]["spdxId"].as_str().unwrap_or("None");
 
-    let stars_str = if stars >= 1000 { format!("{:.1}k", stars as f64 / 1000.0) } else { stars.to_string() };
+    let stars_str = if stars >= 1000 {
+        format!("{:.1}k", stars as f64 / 1000.0)
+    } else {
+        stars.to_string()
+    };
 
     let mut out = format!("**{}** ⭐{}\n{}\n\n", name, stars_str, url);
-    if !desc.is_empty() { out.push_str(&format!("{}\n\n", desc)); }
-    out.push_str(&format!("Language: {} | Forks: {} | Branch: {} | License: {}\n", lang, forks, default_branch, license));
-    if !topics.is_empty() { out.push_str(&format!("Topics: {}\n", topics)); }
+    if !desc.is_empty() {
+        out.push_str(&format!("{}\n\n", desc));
+    }
+    out.push_str(&format!(
+        "Language: {} | Forks: {} | Branch: {} | License: {}\n",
+        lang, forks, default_branch, license
+    ));
+    if !topics.is_empty() {
+        out.push_str(&format!("Topics: {}\n", topics));
+    }
     out
 }
 
@@ -433,28 +606,46 @@ async fn gh_run(params: &Value) -> Result<AgentToolResult, ToolError> {
     match action {
         "list" => {
             let limit = params["limit"].as_u64().unwrap_or(5).min(20);
-            let output = gh_exec(&["run", "list", "--limit", &limit.to_string(),
-                "--json", "databaseId,name,status,conclusion,headBranch,createdAt,event"]).await?;
+            let output = gh_exec(&[
+                "run",
+                "list",
+                "--limit",
+                &limit.to_string(),
+                "--json",
+                "databaseId,name,status,conclusion,headBranch,createdAt,event",
+            ])
+            .await?;
             let items: Vec<Value> = serde_json::from_str(&output).unwrap_or_default();
             let text = format_run_list(&items);
-            Ok(AgentToolResult::success(text).with_metadata(json!({ "action": "run", "sub": "list", "results": items })))
+            Ok(AgentToolResult::success(text)
+                .with_metadata(json!({ "action": "run", "sub": "list", "results": items })))
         }
         "view" => {
-            let id = params["id"].as_u64()
+            let id = params["id"]
+                .as_u64()
                 .ok_or_else(|| "Missing parameter: id".to_string())?;
-            let output = gh_exec(&["run", "view", &id.to_string(),
-                "--json", "databaseId,name,status,conclusion,headBranch,createdAt,jobs"]).await?;
-            let run: Value = serde_json::from_str(&output)
-                .map_err(|e| format!("Parse error: {}", e))?;
+            let output = gh_exec(&[
+                "run",
+                "view",
+                &id.to_string(),
+                "--json",
+                "databaseId,name,status,conclusion,headBranch,createdAt,jobs",
+            ])
+            .await?;
+            let run: Value =
+                serde_json::from_str(&output).map_err(|e| format!("Parse error: {}", e))?;
             let text = format_run_view(&run);
-            Ok(AgentToolResult::success(text).with_metadata(json!({ "action": "run", "sub": "view", "run": run })))
+            Ok(AgentToolResult::success(text)
+                .with_metadata(json!({ "action": "run", "sub": "view", "run": run })))
         }
         other => Err(format!("Unknown run action '{}'. Use: list, view", other)),
     }
 }
 
 fn format_run_list(items: &[Value]) -> String {
-    if items.is_empty() { return "No workflow runs found.".to_string(); }
+    if items.is_empty() {
+        return "No workflow runs found.".to_string();
+    }
     let mut out = format!("{} workflow runs:\n\n", items.len());
     for (i, item) in items.iter().enumerate() {
         let name = item["name"].as_str().unwrap_or("?");
@@ -462,8 +653,15 @@ fn format_run_list(items: &[Value]) -> String {
         let conclusion = item["conclusion"].as_str().unwrap_or("in progress");
         let branch = item["headBranch"].as_str().unwrap_or("?");
         let id = item["databaseId"].as_u64().unwrap_or(0);
-        out.push_str(&format!("{}. {} — {} ({}) branch: {} id: {}\n",
-            i + 1, name, status, conclusion, branch, id));
+        out.push_str(&format!(
+            "{}. {} — {} ({}) branch: {} id: {}\n",
+            i + 1,
+            name,
+            status,
+            conclusion,
+            branch,
+            id
+        ));
     }
     out
 }
@@ -475,7 +673,10 @@ fn format_run_view(run: &Value) -> String {
     let branch = run["headBranch"].as_str().unwrap_or("?");
     let id = run["databaseId"].as_u64().unwrap_or(0);
 
-    let mut out = format!("**{}** — {} ({})\nBranch: {} | ID: {}\n\n", name, status, conclusion, branch, id);
+    let mut out = format!(
+        "**{}** — {} ({})\nBranch: {} | ID: {}\n\n",
+        name, status, conclusion, branch, id
+    );
     if let Some(jobs) = run["jobs"].as_array() {
         out.push_str(&format!("Jobs ({}):\n", jobs.len()));
         for job in jobs {

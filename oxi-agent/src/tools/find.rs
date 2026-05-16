@@ -1,7 +1,6 @@
-/// Find tool - find files by name or pattern
-
-use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use super::path_security::PathGuard;
+/// Find tool - find files by name or pattern
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use glob::Pattern;
 use serde_json::{json, Value};
@@ -15,14 +14,16 @@ pub struct FindTool {
 }
 
 impl FindTool {
-/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
+    /// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
         Self { root_dir: None }
     }
 
     /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self { root_dir: Some(cwd) }
+        Self {
+            root_dir: Some(cwd),
+        }
     }
 
     /// Check if a filename matches a simple glob pattern
@@ -113,7 +114,8 @@ impl FindTool {
     ) -> Result<String, ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(root_dir);
-        let root = guard.validate_traversal(Path::new(path))
+        let root = guard
+            .validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
         if !root.is_dir() {
@@ -291,11 +293,12 @@ impl AgentTool for FindTool {
     }
 
     fn label(&self) -> &str {
-
         "Find"
     }
 
-    fn essential(&self) -> bool { true }
+    fn essential(&self) -> bool {
+        true
+    }
     fn description(&self) -> &str {
         "Find files and directories by name pattern and type. Searches recursively from the given path."
     }

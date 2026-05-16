@@ -1,5 +1,4 @@
 /// Agent state management
-
 use crate::types::{StopReason, ToolResult};
 use oxi_ai::{ContentBlock, Message, TextContent};
 use parking_lot::RwLock;
@@ -13,7 +12,7 @@ use std::sync::Arc;
 ///
 /// Derives `Serialize`/`Deserialize` for session persistence and
 /// cross-process state transfer (e.g. oxios supervisor serialization).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentState {
     /// Conversation message history (user, assistant, and tool-result messages).
     pub messages: Vec<Message>,
@@ -29,20 +28,6 @@ pub struct AgentState {
     pub input_tokens: usize,
     /// Cumulative completion / output tokens across all turns.
     pub output_tokens: usize,
-}
-
-impl Default for AgentState {
-    fn default() -> Self {
-        Self {
-            messages: Vec::new(),
-            iteration: 0,
-            stop_reason: None,
-            tool_results: Vec::new(),
-            total_tokens: 0,
-            input_tokens: 0,
-            output_tokens: 0,
-        }
-    }
 }
 
 impl AgentState {

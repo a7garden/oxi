@@ -3,9 +3,9 @@
 //! Provides `AgentGroup` for running multiple agents with different
 //! strategies: pipeline (sequential), parallel, or orchestrated.
 
-use std::sync::Arc;
-use oxi_agent::Agent;
 use anyhow::Result;
+use oxi_agent::Agent;
+use std::sync::Arc;
 
 /// Multi-agent execution strategy.
 #[derive(Debug, Clone)]
@@ -222,7 +222,11 @@ impl AgentGroup {
         leader_idx: usize,
     ) -> Result<Vec<AgentGroupOutput>> {
         if leader_idx >= self.agents.len() {
-            anyhow::bail!("Leader index {} out of range ({} agents)", leader_idx, self.agents.len());
+            anyhow::bail!(
+                "Leader index {} out of range ({} agents)",
+                leader_idx,
+                self.agents.len()
+            );
         }
 
         let leader = &self.agents[leader_idx];

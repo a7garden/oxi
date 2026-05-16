@@ -70,21 +70,12 @@ pub enum ToolPrefix {
 }
 
 /// Root MCP configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct McpConfig {
     /// Map of server name → server definition.
     pub mcp_servers: HashMap<String, ServerEntry>,
     /// Global settings override.
     pub settings: Option<McpSettings>,
-}
-
-impl Default for McpConfig {
-    fn default() -> Self {
-        Self {
-            mcp_servers: HashMap::new(),
-            settings: None,
-        }
-    }
 }
 
 // ── MCP protocol types ───────────────────────────────────────────────
@@ -194,7 +185,6 @@ pub struct JsonRpcNotification {
 /// Raw JSON-RPC message (can be request, response, or notification).
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawJsonRpcMessage {
-
     pub jsonrpc: String,
     pub id: Option<u64>,
 

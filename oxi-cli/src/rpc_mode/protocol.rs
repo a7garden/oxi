@@ -25,9 +25,7 @@ pub fn serialize_json_line_obj<T: Serialize>(value: &T) -> String {
         Ok(s) => format!("{}\n", s),
         Err(e) => {
             tracing::error!("Failed to serialize JSONL: {}", e);
-            format!(
-                "{{\"type\":\"response\",\"command\":\"internal\",\"success\":false,\"error\":\"Serialization error\"}}\n"
-            )
+            "{\"type\":\"response\",\"command\":\"internal\",\"success\":false,\"error\":\"Serialization error\"}\n".to_string()
         }
     }
 }
@@ -674,13 +672,17 @@ pub fn jsonrpc_to_command(method: &str, params: Option<Value>, id: Option<Value>
             "model_id": params.as_ref().and_then(|p| p.get("modelId")).and_then(|v| v.as_str()).unwrap_or(""),
         }),
         "cycle_model" => serde_json::json!({ "type": "cycle_model", "id": id_str }),
-        "get_available_models" => serde_json::json!({ "type": "get_available_models", "id": id_str }),
+        "get_available_models" => {
+            serde_json::json!({ "type": "get_available_models", "id": id_str })
+        }
         "set_thinking_level" => serde_json::json!({
             "type": "set_thinking_level",
             "id": id_str,
             "level": params.as_ref().and_then(|p| p.get("level")).and_then(|v| v.as_str()).unwrap_or("default"),
         }),
-        "cycle_thinking_level" => serde_json::json!({ "type": "cycle_thinking_level", "id": id_str }),
+        "cycle_thinking_level" => {
+            serde_json::json!({ "type": "cycle_thinking_level", "id": id_str })
+        }
         "set_steering_mode" => serde_json::json!({
             "type": "set_steering_mode",
             "id": id_str,
@@ -731,7 +733,9 @@ pub fn jsonrpc_to_command(method: &str, params: Option<Value>, id: Option<Value>
         }),
         "clone" => serde_json::json!({ "type": "clone", "id": id_str }),
         "get_fork_messages" => serde_json::json!({ "type": "get_fork_messages", "id": id_str }),
-        "get_last_assistant_text" => serde_json::json!({ "type": "get_last_assistant_text", "id": id_str }),
+        "get_last_assistant_text" => {
+            serde_json::json!({ "type": "get_last_assistant_text", "id": id_str })
+        }
         "set_session_name" => serde_json::json!({
             "type": "set_session_name",
             "id": id_str,
@@ -942,7 +946,10 @@ impl SessionHandoff {
             session_file: state.session_file.clone(),
             session_name: state.session_name.clone(),
             parent_session_id: None,
-            model_id: state.model.as_ref().map(|m| format!("{}/{}", m.provider, m.id)),
+            model_id: state
+                .model
+                .as_ref()
+                .map(|m| format!("{}/{}", m.provider, m.id)),
             thinking_level: Some(state.thinking_level.clone()),
             message_count: state.message_count,
             timestamp: chrono::Utc::now().timestamp(),

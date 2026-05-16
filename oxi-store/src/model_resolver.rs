@@ -13,9 +13,8 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 /// Cached regex for date pattern matching (-YYYYMMDD)
-static DATE_PATTERN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r"-\d{8}$").expect("date pattern regex should compile")
-});
+static DATE_PATTERN_RE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"-\d{8}$").expect("date pattern regex should compile"));
 
 /// Cached regex for date pattern stripping
 static DATE_PATTERN_STRIP_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -39,7 +38,7 @@ pub const THINKING_LEVELS: &[&str] = &["off", "minimal", "low", "medium", "high"
 /// Known AI providers
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Provider {
-/// Unique provider identifier (e.g. "anthropic", "openai").
+    /// Unique provider identifier (e.g. "anthropic", "openai").
     pub id: String,
     /// Human-readable provider name.
     pub name: String,
@@ -48,7 +47,7 @@ pub struct Provider {
 }
 
 impl Provider {
-/// Create a new provider with the given identifier and display name.
+    /// Create a new provider with the given identifier and display name.
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -57,7 +56,7 @@ impl Provider {
         }
     }
 
-/// Attach a website URL to this provider (builder-style).
+    /// Attach a website URL to this provider (builder-style).
     pub fn with_website(mut self, website: impl Into<String>) -> Self {
         self.website = Some(website.into());
         self
@@ -67,7 +66,7 @@ impl Provider {
 /// A discovered model
 #[derive(Debug, Clone)]
 pub struct Model {
-/// Provider that hosts this model.
+    /// Provider that hosts this model.
     pub provider: String,
     /// Model identifier (e.g. "claude-sonnet-4-5").
     pub id: String,
@@ -145,7 +144,7 @@ impl Model {
 /// Result of parsing a model pattern
 #[derive(Debug)]
 pub struct ParsedModelResult {
-/// Resolved provider name, if identified.
+    /// Resolved provider name, if identified.
     pub provider: Option<String>,
     /// Model ID extracted from the pattern.
     pub model_id: String,
@@ -158,7 +157,7 @@ pub struct ParsedModelResult {
 /// Result of resolving a CLI model
 #[derive(Debug)]
 pub struct ResolveCliModelResult {
-/// The resolved model, if found.
+    /// The resolved model, if found.
     pub model: Option<Model>,
     /// Requested thinking level.
     pub thinking_level: Option<String>,
@@ -171,7 +170,7 @@ pub struct ResolveCliModelResult {
 /// Result of finding initial model
 #[derive(Debug)]
 pub struct InitialModelResult {
-/// The selected model.
+    /// The selected model.
     pub model: Option<Model>,
     /// Thinking level applied.
     pub thinking_level: String,
@@ -182,7 +181,7 @@ pub struct InitialModelResult {
 /// Result of restore model from session
 #[derive(Debug)]
 pub struct RestoreModelResult {
-/// The restored model, if available.
+    /// The restored model, if available.
     pub model: Option<Model>,
     /// Message explaining why a fallback was used.
     pub fallback_message: Option<String>,
@@ -223,9 +222,9 @@ pub fn match_glob(pattern: &str, text: &str) -> bool {
     // Simple implementation: convert glob to regex
     let mut regex_pattern = String::new();
     let mut in_class = false;
-    let mut chars = pattern.chars().peekable();
+    let chars = pattern.chars().peekable();
 
-    while let Some(c) = chars.next() {
+    for c in chars {
         match c {
             '*' => {
                 if in_class {
@@ -720,7 +719,7 @@ pub fn find_initial_model(
     }
 
     // 3. Try saved default from settings
-    if let Some(ref s) = settings {
+    if let Some(s) = settings {
         if let Some(default_model) = &s.default_model {
             let parsed = parse_model_pattern(default_model, available_models);
             if let Some(ref p) = parsed.provider {

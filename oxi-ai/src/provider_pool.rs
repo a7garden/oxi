@@ -4,13 +4,13 @@
 //! a simple sliding-window rate limiter (RPM). Used when multiple agents
 //! share a single API key and need coordinated access.
 
+use crate::{Context, Model, Provider, ProviderError, ProviderEvent, StreamOptions};
+use async_trait::async_trait;
+use futures::Stream;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use async_trait::async_trait;
 use tokio::sync::Semaphore;
-use std::pin::Pin;
-use crate::{Model, Context, StreamOptions, Provider, ProviderError, ProviderEvent};
-use futures::Stream;
 
 /// Rate-limiting and concurrency policy for a provider pool.
 #[derive(Debug, Clone)]
@@ -127,7 +127,10 @@ impl Provider for ProviderPool {
         options: Option<StreamOptions>,
     ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
         // 1. Acquire concurrency permit
-        let _permit = self.semaphore.acquire().await
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
             .map_err(|_| ProviderError::RateLimited {
                 retry_after: Some(Duration::from_secs(5)),
             })?;

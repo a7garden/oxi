@@ -429,8 +429,7 @@ fn merge_adjacent_text_blocks(blocks: Vec<ContentBlock>) -> Vec<ContentBlock> {
 // Message normalization (ported from transform-messages.ts)
 // ---------------------------------------------------------------------------
 
-const NON_VISION_USER_IMAGE_PLACEHOLDER: &str =
-    "(image omitted: model does not support images)";
+const NON_VISION_USER_IMAGE_PLACEHOLDER: &str = "(image omitted: model does not support images)";
 const NON_VISION_TOOL_IMAGE_PLACEHOLDER: &str =
     "(tool image omitted: model does not support images)";
 
@@ -541,9 +540,8 @@ pub fn transform_messages_for_model(messages: &[Message], model: &Model) -> Vec<
             }
 
             Message::Assistant(a) => {
-                let is_same_model = a.provider == model.provider
-                    && a.api == model.api
-                    && a.model == model.id;
+                let is_same_model =
+                    a.provider == model.provider && a.api == model.api && a.model == model.id;
 
                 let new_content: Vec<ContentBlock> = a
                     .content
@@ -584,8 +582,7 @@ pub fn transform_messages_for_model(messages: &[Message], model: &Model) -> Vec<
                             if !is_same_model {
                                 let normalized = normalize_tool_call_id(&tc.id);
                                 if normalized != tc.id {
-                                    tool_call_id_map
-                                        .insert(tc.id.clone(), normalized.clone());
+                                    tool_call_id_map.insert(tc.id.clone(), normalized.clone());
                                     new_tc.id = normalized;
                                 }
                             }
@@ -612,27 +609,24 @@ pub fn transform_messages_for_model(messages: &[Message], model: &Model) -> Vec<
     let mut existing_tool_result_ids: std::collections::HashSet<String> =
         std::collections::HashSet::new();
 
-    let insert_synthetic_results =
-        |pending: &mut Vec<ToolCall>,
-         existing: &mut std::collections::HashSet<String>,
-         out: &mut Vec<Message>| {
-            for tc in pending.drain(..) {
-                if !existing.contains(&tc.id) {
-                    out.push(Message::ToolResult(ToolResultMessage {
-                        role: crate::ToolResultRole::ToolResult,
-                        tool_call_id: tc.id.clone(),
-                        tool_name: tc.name.clone(),
-                        content: vec![ContentBlock::Text(TextContent::new(
-                            "No result provided",
-                        ))],
-                        details: None,
-                        is_error: true,
-                        timestamp: chrono::Utc::now().timestamp_millis(),
-                    }));
-                }
+    let insert_synthetic_results = |pending: &mut Vec<ToolCall>,
+                                    existing: &mut std::collections::HashSet<String>,
+                                    out: &mut Vec<Message>| {
+        for tc in pending.drain(..) {
+            if !existing.contains(&tc.id) {
+                out.push(Message::ToolResult(ToolResultMessage {
+                    role: crate::ToolResultRole::ToolResult,
+                    tool_call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    content: vec![ContentBlock::Text(TextContent::new("No result provided"))],
+                    details: None,
+                    is_error: true,
+                    timestamp: chrono::Utc::now().timestamp_millis(),
+                }));
             }
-            existing.clear();
-        };
+        }
+        existing.clear();
+    };
 
     for msg in &transformed {
         match msg {
@@ -650,11 +644,8 @@ pub fn transform_messages_for_model(messages: &[Message], model: &Model) -> Vec<
                 }
 
                 // Track tool calls from this assistant message
-                let tool_calls: Vec<&ToolCall> = a
-                    .content
-                    .iter()
-                    .filter_map(|b| b.as_tool_call())
-                    .collect();
+                let tool_calls: Vec<&ToolCall> =
+                    a.content.iter().filter_map(|b| b.as_tool_call()).collect();
                 if !tool_calls.is_empty() {
                     pending_tool_calls = tool_calls.into_iter().cloned().collect();
                     existing_tool_result_ids.clear();

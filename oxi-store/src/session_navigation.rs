@@ -204,7 +204,7 @@ pub struct CollectEntriesResult {
 }
 
 /// Navigation target options
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NavigationOptions {
     /// If true, generate a summary of the branch being left
     pub summarize: bool,
@@ -214,17 +214,6 @@ pub struct NavigationOptions {
     pub replace_instructions: bool,
     /// Label to attach to the branch summary entry
     pub label: Option<String>,
-}
-
-impl Default for NavigationOptions {
-    fn default() -> Self {
-        Self {
-            summarize: false,
-            custom_instructions: None,
-            replace_instructions: false,
-            label: None,
-        }
-    }
 }
 
 /// Result of tree navigation
@@ -613,7 +602,8 @@ impl SessionNavigator {
 
         let has_summary = summary_text.is_some();
         let summary_entry_id = if let Some(text) = summary_text {
-            let summary_id = self.branch_with_summary(new_leaf_id, text, summary_details, from_extension);
+            let summary_id =
+                self.branch_with_summary(new_leaf_id, text, summary_details, from_extension);
 
             if let Some(l) = &label {
                 self.append_label_change(summary_id, Some(l.clone()));
@@ -826,7 +816,13 @@ mod tests {
             _entries: &[SessionEntryType],
             _custom_instructions: Option<&str>,
             _replace_instructions: bool,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<BranchSummaryResult, SummarizationError>> + Send + 'static>> {
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<BranchSummaryResult, SummarizationError>>
+                    + Send
+                    + 'static,
+            >,
+        > {
             Box::pin(async {
                 Ok(BranchSummaryResult {
                     summary: None,
@@ -839,7 +835,12 @@ mod tests {
         }
     }
 
-    fn create_message(id: Uuid, parent_id: Option<Uuid>, role: MessageRole, content: &str) -> SessionEntryType {
+    fn create_message(
+        id: Uuid,
+        parent_id: Option<Uuid>,
+        role: MessageRole,
+        content: &str,
+    ) -> SessionEntryType {
         SessionEntryType::Message(MessageEntry {
             id,
             parent_id,
@@ -874,12 +875,27 @@ mod tests {
         let assistant_id = Uuid::new_v4();
 
         nav.add_entry(create_message(root_id, None, MessageRole::User, "Hello"));
-        nav.add_entry(create_message(user_id, Some(root_id), MessageRole::User, "How are you?"));
-        nav.add_entry(create_message(assistant_id, Some(user_id), MessageRole::Assistant, "I'm fine"));
+        nav.add_entry(create_message(
+            user_id,
+            Some(root_id),
+            MessageRole::User,
+            "How are you?",
+        ));
+        nav.add_entry(create_message(
+            assistant_id,
+            Some(user_id),
+            MessageRole::Assistant,
+            "I'm fine",
+        ));
 
         nav.branch(assistant_id);
 
-        let result = nav.navigate_tree(user_id, NavigationOptions::default(), None as Option<&NoOpSummarizer>, None);
+        let result = nav.navigate_tree(
+            user_id,
+            NavigationOptions::default(),
+            None as Option<&NoOpSummarizer>,
+            None,
+        );
 
         assert!(!result.cancelled);
         assert!(!result.aborted);
@@ -896,12 +912,27 @@ mod tests {
         let assistant_id = Uuid::new_v4();
 
         nav.add_entry(create_message(root_id, None, MessageRole::User, "Hello"));
-        nav.add_entry(create_message(user_id, Some(root_id), MessageRole::User, "How are you?"));
-        nav.add_entry(create_message(assistant_id, Some(user_id), MessageRole::Assistant, "I'm fine"));
+        nav.add_entry(create_message(
+            user_id,
+            Some(root_id),
+            MessageRole::User,
+            "How are you?",
+        ));
+        nav.add_entry(create_message(
+            assistant_id,
+            Some(user_id),
+            MessageRole::Assistant,
+            "I'm fine",
+        ));
 
         nav.branch(assistant_id);
 
-        let result = nav.navigate_tree(assistant_id, NavigationOptions::default(), None as Option<&NoOpSummarizer>, None);
+        let result = nav.navigate_tree(
+            assistant_id,
+            NavigationOptions::default(),
+            None as Option<&NoOpSummarizer>,
+            None,
+        );
 
         assert!(!result.cancelled);
         assert_eq!(nav.get_leaf_id(), Some(assistant_id));
@@ -915,7 +946,12 @@ mod tests {
         nav.add_entry(create_message(entry_id, None, MessageRole::User, "Test"));
         nav.branch(entry_id);
 
-        let result = nav.navigate_tree(entry_id, NavigationOptions::default(), None as Option<&NoOpSummarizer>, None);
+        let result = nav.navigate_tree(
+            entry_id,
+            NavigationOptions::default(),
+            None as Option<&NoOpSummarizer>,
+            None,
+        );
 
         assert!(!result.cancelled);
         assert_eq!(result.editor_text, None);
@@ -932,9 +968,24 @@ mod tests {
         let entries = vec![
             create_message(root_id, None, MessageRole::User, "Root"),
             create_message(user_id, Some(root_id), MessageRole::User, "User"),
-            create_message(assistant_id, Some(user_id), MessageRole::Assistant, "Assistant"),
-            create_message(branch_user_id, Some(user_id), MessageRole::User, "Branch User"),
-            create_message(branch_assistant_id, Some(branch_user_id), MessageRole::Assistant, "Branch Assistant"),
+            create_message(
+                assistant_id,
+                Some(user_id),
+                MessageRole::Assistant,
+                "Assistant",
+            ),
+            create_message(
+                branch_user_id,
+                Some(user_id),
+                MessageRole::User,
+                "Branch User",
+            ),
+            create_message(
+                branch_assistant_id,
+                Some(branch_user_id),
+                MessageRole::Assistant,
+                "Branch Assistant",
+            ),
         ];
 
         let nav = SessionNavigator::from_entries(entries, Some(branch_assistant_id));
@@ -971,12 +1022,8 @@ mod tests {
 
         nav.branch(entry_id);
 
-        let summary_id = nav.branch_with_summary(
-            Some(entry_id),
-            "This is a summary".to_string(),
-            None,
-            false,
-        );
+        let summary_id =
+            nav.branch_with_summary(Some(entry_id), "This is a summary".to_string(), None, false);
 
         assert!(nav.get_entry(summary_id).is_some());
         assert_eq!(nav.get_leaf_id(), Some(entry_id));
@@ -1025,8 +1072,18 @@ mod tests {
         let leaf_id = Uuid::new_v4();
 
         nav.add_entry(create_message(root_id, None, MessageRole::User, "Root"));
-        nav.add_entry(create_message(mid_id, Some(root_id), MessageRole::Assistant, "Mid"));
-        nav.add_entry(create_message(leaf_id, Some(mid_id), MessageRole::User, "Leaf"));
+        nav.add_entry(create_message(
+            mid_id,
+            Some(root_id),
+            MessageRole::Assistant,
+            "Mid",
+        ));
+        nav.add_entry(create_message(
+            leaf_id,
+            Some(mid_id),
+            MessageRole::User,
+            "Leaf",
+        ));
         nav.branch(leaf_id);
 
         let branch = nav.get_branch(None);
@@ -1044,8 +1101,18 @@ mod tests {
         let child_b = Uuid::new_v4();
 
         nav.add_entry(create_message(parent_id, None, MessageRole::User, "Parent"));
-        nav.add_entry(create_message(child_a, Some(parent_id), MessageRole::Assistant, "A"));
-        nav.add_entry(create_message(child_b, Some(parent_id), MessageRole::Assistant, "B"));
+        nav.add_entry(create_message(
+            child_a,
+            Some(parent_id),
+            MessageRole::Assistant,
+            "A",
+        ));
+        nav.add_entry(create_message(
+            child_b,
+            Some(parent_id),
+            MessageRole::Assistant,
+            "B",
+        ));
 
         let children = nav.get_children(parent_id);
         assert_eq!(children.len(), 2);
@@ -1123,7 +1190,12 @@ mod tests {
         let child_id = Uuid::new_v4();
 
         nav.add_entry(create_message(root_id, None, MessageRole::User, "Root"));
-        nav.add_entry(create_message(child_id, Some(root_id), MessageRole::Assistant, "Child"));
+        nav.add_entry(create_message(
+            child_id,
+            Some(root_id),
+            MessageRole::Assistant,
+            "Child",
+        ));
         nav.branch(child_id);
 
         let result = nav.navigate_tree(
@@ -1230,7 +1302,12 @@ mod tests {
         let root_id = Uuid::new_v4();
         let child_id = Uuid::new_v4();
         nav.add_entry(create_message(root_id, None, MessageRole::User, "R"));
-        nav.add_entry(create_message(child_id, Some(root_id), MessageRole::Assistant, "C"));
+        nav.add_entry(create_message(
+            child_id,
+            Some(root_id),
+            MessageRole::Assistant,
+            "C",
+        ));
         nav.branch(child_id);
 
         let hook = |_: TreePreparation| -> BeforeTreeHookResult {
@@ -1258,7 +1335,12 @@ mod tests {
         let root_id = Uuid::new_v4();
         let child_id = Uuid::new_v4();
         nav.add_entry(create_message(root_id, None, MessageRole::User, "R"));
-        nav.add_entry(create_message(child_id, Some(root_id), MessageRole::Assistant, "C"));
+        nav.add_entry(create_message(
+            child_id,
+            Some(root_id),
+            MessageRole::Assistant,
+            "C",
+        ));
         nav.branch(child_id);
 
         let hook = |_: TreePreparation| -> BeforeTreeHookResult {

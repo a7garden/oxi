@@ -11,11 +11,11 @@ use extism::{CurrentPlugin, Function, UserData, Val, PTR};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::cell::RefCell;
-use std::io::Read as _;
 use std::time::{Duration, Instant};
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -85,10 +85,14 @@ fn host_oxi_http_request(
             body: Option<String>,
         }
 
-        let req: HttpReq = serde_json::from_str(&input_json)
-            .context("oxi_http_request: invalid request JSON")?;
+        let req: HttpReq =
+            serde_json::from_str(&input_json).context("oxi_http_request: invalid request JSON")?;
 
-        let method = if req.method.is_empty() { "GET" } else { &req.method };
+        let method = if req.method.is_empty() {
+            "GET"
+        } else {
+            &req.method
+        };
 
         // SSRF protection: block internal/private network addresses
         if let Err(e) = validate_url(&req.url) {
@@ -118,21 +122,27 @@ fn host_oxi_http_request(
         }
 
         // Execute HTTP request (blocking — called from spawn_blocking in wasm_tool.rs)
-        let resp = rb.send().map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
+        let resp = rb
+            .send()
+            .map_err(|e| anyhow::anyhow!("HTTP request failed: {}", e))?;
         let status = resp.status().as_u16();
         let resp_headers: HashMap<String, String> = resp
             .headers()
             .iter()
-            .map(|(k, v)| {
-                (k.to_string(), v.to_str().unwrap_or("").to_string())
-            })
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
         // Limit response body to 1MB to prevent memory exhaustion
         let resp_body = {
             let max_body = 1024 * 1024; // 1MB
-            let body_bytes = resp.bytes().map_err(|e| anyhow::anyhow!("Failed to read response: {}", e))?;
+            let body_bytes = resp
+                .bytes()
+                .map_err(|e| anyhow::anyhow!("Failed to read response: {}", e))?;
             if body_bytes.len() > max_body {
-                tracing::warn!("HTTP response truncated: {} bytes > {} limit", body_bytes.len(), max_body);
+                tracing::warn!(
+                    "HTTP response truncated: {} bytes > {} limit",
+                    body_bytes.len(),
+                    max_body
+                );
                 String::from_utf8_lossy(&body_bytes[..max_body]).to_string()
             } else {
                 String::from_utf8_lossy(&body_bytes).to_string()
@@ -153,7 +163,7 @@ fn host_oxi_http_request(
         Ok(())
     })();
 
-    result.map_err(|e| extism::Error::from(e))
+    result
 }
 
 /// Host function: `oxi_log(message)` — logs a debug message from WASM.
@@ -192,10 +202,12 @@ fn host_oxi_read_file(
             #[serde(default = "default_limit")]
             limit: usize,
         }
-        fn default_limit() -> usize { 2000 }
+        fn default_limit() -> usize {
+            2000
+        }
 
-        let req: ReadReq = serde_json::from_str(&input_json)
-            .context("oxi_read_file: invalid request JSON")?;
+        let req: ReadReq =
+            serde_json::from_str(&input_json).context("oxi_read_file: invalid request JSON")?;
 
         // Validate path is not outside cwd
         validate_path_allowed(&req.path)?;
@@ -250,7 +262,7 @@ fn host_oxi_read_file(
         }
         Ok(())
     })();
-    result.map_err(extism::Error::from)
+    result
 }
 
 /// Host function: `oxi_write_file(path_json) → result_json`
@@ -273,10 +285,12 @@ fn host_oxi_write_file(
             #[serde(default = "default_true")]
             create_dirs: bool,
         }
-        fn default_true() -> bool { true }
+        fn default_true() -> bool {
+            true
+        }
 
-        let req: WriteReq = serde_json::from_str(&input_json)
-            .context("oxi_write_file: invalid request JSON")?;
+        let req: WriteReq =
+            serde_json::from_str(&input_json).context("oxi_write_file: invalid request JSON")?;
 
         validate_path_allowed(&req.path)?;
 
@@ -302,7 +316,7 @@ fn host_oxi_write_file(
         }
         Ok(())
     })();
-    result.map_err(extism::Error::from)
+    result
 }
 
 /// Host function: `oxi_exec(exec_json) → result_json`
@@ -328,12 +342,12 @@ fn host_oxi_exec(
             #[serde(default = "default_timeout")]
             timeout: u64,
         }
-        fn default_timeout() -> u64 { 30 }
+        fn default_timeout() -> u64 {
+            30
+        }
 
-        let req: ExecReq = serde_json::from_str(&input_json)
-            .context("oxi_exec: invalid request JSON")?;
-
-
+        let req: ExecReq =
+            serde_json::from_str(&input_json).context("oxi_exec: invalid request JSON")?;
 
         let cwd = req.cwd.as_deref().unwrap_or(".");
 
@@ -346,10 +360,19 @@ fn host_oxi_exec(
 
         // Block dangerous commands — deny-list (checks combined command+args)
         let blocked_patterns = [
-            "rm -rf /", "rm -rf /*", "mkfs", "dd if=", "format ",
-            ":(){ :|:& };:", "chmod 777 /", "chown root",
-            "> /etc/", "> /boot/", "> /dev/",
-            "dd of=/dev/", "mv / /",
+            "rm -rf /",
+            "rm -rf /*",
+            "mkfs",
+            "dd if=",
+            "format ",
+            ":(){ :|:& };:",
+            "chmod 777 /",
+            "chown root",
+            "> /etc/",
+            "> /boot/",
+            "> /dev/",
+            "dd of=/dev/",
+            "mv / /",
         ];
         for blocked in &blocked_patterns {
             if full_cmd.contains(blocked) {
@@ -359,8 +382,12 @@ fn host_oxi_exec(
 
         // Block obvious privilege escalation
         let cmd_lower = req.command.to_lowercase();
-        if cmd_lower == "sudo" || cmd_lower == "su" || cmd_lower == "doas"
-            || cmd_lower.starts_with("sudo ") || cmd_lower.starts_with("su ") || cmd_lower.starts_with("doas ")
+        if cmd_lower == "sudo"
+            || cmd_lower == "su"
+            || cmd_lower == "doas"
+            || cmd_lower.starts_with("sudo ")
+            || cmd_lower.starts_with("su ")
+            || cmd_lower.starts_with("doas ")
         {
             anyhow::bail!("oxi_exec: privilege escalation commands are blocked");
         }
@@ -386,7 +413,9 @@ fn host_oxi_exec(
                 });
                 let out = serde_json::to_string(&response)?;
                 let handle = plugin.memory_new(&out)?;
-                if !outputs.is_empty() { outputs[0] = plugin.memory_to_val(handle); }
+                if !outputs.is_empty() {
+                    outputs[0] = plugin.memory_to_val(handle);
+                }
                 return Ok(());
             }
         };
@@ -407,7 +436,8 @@ fn host_oxi_exec(
                         // Timeout reached — kill the process and clean up
                         tracing::warn!(
                             "oxi_exec: command '{}' timed out after {}ms",
-                            req.command, timeout_ms
+                            req.command,
+                            timeout_ms
                         );
                         let _ = child.kill();
                         let _ = child.wait(); // reap zombie
@@ -419,8 +449,12 @@ fn host_oxi_exec(
                 Err(_) => {
                     // try_wait failed — fall back to blocking wait
                     match child.wait() {
-                        Ok(status) => { exit_status = Some(status); }
-                        Err(_) => { timed_out = true; }
+                        Ok(status) => {
+                            exit_status = Some(status);
+                        }
+                        Err(_) => {
+                            timed_out = true;
+                        }
                     }
                     break;
                 }
@@ -442,8 +476,16 @@ fn host_oxi_exec(
         let max_output = 50 * 1024; // 50KB
         let stdout_truncated = stdout.len() > max_output;
         let stderr_truncated = stderr.len() > max_output;
-        let stdout_str: String = if stdout_truncated { stdout.chars().take(max_output).collect() } else { stdout.to_string() };
-        let stderr_str: String = if stderr_truncated { stderr.chars().take(max_output).collect() } else { stderr.to_string() };
+        let stdout_str: String = if stdout_truncated {
+            stdout.chars().take(max_output).collect()
+        } else {
+            stdout.to_string()
+        };
+        let stderr_str: String = if stderr_truncated {
+            stderr.chars().take(max_output).collect()
+        } else {
+            stderr.to_string()
+        };
 
         let response = serde_json::json!({
             "success": !timed_out && exit_status.map(|s| s.success()).unwrap_or(false),
@@ -461,7 +503,7 @@ fn host_oxi_exec(
         }
         Ok(())
     })();
-    result.map_err(extism::Error::from)
+    result
 }
 
 /// Host function: `oxi_get_env(key_json) → result_json`
@@ -482,8 +524,8 @@ fn host_oxi_get_env(
             key: String,
         }
 
-        let req: EnvReq = serde_json::from_str(&input_json)
-            .context("oxi_get_env: invalid request JSON")?;
+        let req: EnvReq =
+            serde_json::from_str(&input_json).context("oxi_get_env: invalid request JSON")?;
 
         // Block sensitive env vars
         let blocked_keys = ["AWS_SECRET", "PRIVATE_KEY", "PASSWORD", "TOKEN", "SECRET"];
@@ -506,7 +548,7 @@ fn host_oxi_get_env(
         }
         Ok(())
     })();
-    result.map_err(extism::Error::from)
+    result
 }
 
 // ── KV Store Host Functions ─────────────────────────────────────────
@@ -531,8 +573,8 @@ fn host_oxi_kv_get(
             key: String,
         }
 
-        let req: KvReq = serde_json::from_str(&input_json)
-            .context("oxi_kv_get: invalid request JSON")?;
+        let req: KvReq =
+            serde_json::from_str(&input_json).context("oxi_kv_get: invalid request JSON")?;
 
         // Namespace the key with the current extension identity
         let ext_name = current_extension_name();
@@ -548,7 +590,7 @@ fn host_oxi_kv_get(
         }
         Ok(())
     })();
-    result.map_err(extism::Error::from)
+    result
 }
 
 /// Host function: `oxi_kv_set(set_json)`
@@ -569,15 +611,15 @@ fn host_oxi_kv_set(
             value: String,
         }
 
-        let req: KvSetReq = serde_json::from_str(&input_json)
-            .context("oxi_kv_set: invalid request JSON")?;
+        let req: KvSetReq =
+            serde_json::from_str(&input_json).context("oxi_kv_set: invalid request JSON")?;
 
         // Namespace the key with the current extension identity
         let ext_name = current_extension_name();
         kv_namespaced_set(&ext_name, &req.key, &req.value);
         Ok(())
     })();
-    result.map_err(extism::Error::from)
+    result
 }
 
 // ── KV Store Implementation ─────────────────────────────────────────
@@ -591,7 +633,7 @@ static KV_STORE: LazyLock<parking_lot::RwLock<HashMap<String, String>>> =
 // Set by `execute_tool` / `execute_command` / `load` before invoking plugin
 // calls, read by KV host functions to namespace keys.
 thread_local! {
-    static CURRENT_EXTENSION: RefCell<Option<String>> = RefCell::new(None);
+    static CURRENT_EXTENSION: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// Run a closure with the current extension name set in thread-local storage.
@@ -610,7 +652,9 @@ where
 /// Returns `"__unknown__"` if not set (e.g., during `load()` before `init()`).
 fn current_extension_name() -> String {
     CURRENT_EXTENSION.with(|cell| {
-        cell.borrow().clone().unwrap_or_else(|| "__unknown__".to_string())
+        cell.borrow()
+            .clone()
+            .unwrap_or_else(|| "__unknown__".to_string())
     })
 }
 
@@ -655,7 +699,9 @@ fn validate_path_allowed(path: &str) -> Result<()> {
         // For new files, resolve parent if it exists
         if let Some(parent) = abs.parent() {
             if parent.exists() {
-                let canon_parent = parent.canonicalize().unwrap_or_else(|_| parent.to_path_buf());
+                let canon_parent = parent
+                    .canonicalize()
+                    .unwrap_or_else(|_| parent.to_path_buf());
                 canon_parent.join(abs.file_name().unwrap_or_default())
             } else {
                 abs
@@ -669,9 +715,18 @@ fn validate_path_allowed(path: &str) -> Result<()> {
 
     // Block sensitive system paths
     let blocked_prefixes = [
-        "/etc", "/sys", "/proc", "/dev", "/boot", "/root",
-        "/System", "/Library/System",
-        "/usr/bin", "/usr/sbin", "/bin", "/sbin",
+        "/etc",
+        "/sys",
+        "/proc",
+        "/dev",
+        "/boot",
+        "/root",
+        "/System",
+        "/Library/System",
+        "/usr/bin",
+        "/usr/sbin",
+        "/bin",
+        "/sbin",
     ];
     for prefix in &blocked_prefixes {
         if abs_str.starts_with(prefix) {
@@ -684,8 +739,14 @@ fn validate_path_allowed(path: &str) -> Result<()> {
         let home_str = home.to_string_lossy();
         if abs_str.starts_with(&*home_str) {
             let blocked_home_suffixes = [
-                "/.ssh/", "/.gnupg/", "/.aws/", "/.config/gcloud/",
-                "/.kube/", "/.docker/", "/.npmrc", "/.netrc",
+                "/.ssh/",
+                "/.gnupg/",
+                "/.aws/",
+                "/.config/gcloud/",
+                "/.kube/",
+                "/.docker/",
+                "/.npmrc",
+                "/.netrc",
             ];
             for suffix in &blocked_home_suffixes {
                 if abs_str.contains(suffix) {
@@ -722,10 +783,7 @@ fn validate_url(url: &str) -> Result<(), String> {
     }
 
     // Block private IP ranges (10.x, 172.16-31.x, 192.168.x)
-    if host.starts_with("10.")
-        || host.starts_with("192.168.")
-        || is_172_private(&host)
-    {
+    if host.starts_with("10.") || host.starts_with("192.168.") || is_172_private(&host) {
         return Err(format!("Blocked private address: {}", host));
     }
 
@@ -734,9 +792,13 @@ fn validate_url(url: &str) -> Result<(), String> {
 
 /// Check if host is in 172.16.0.0/12 range.
 fn is_172_private(host: &str) -> bool {
-    if !host.starts_with("172.") { return false; }
+    if !host.starts_with("172.") {
+        return false;
+    }
     let parts: Vec<&str> = host.split('.').collect();
-    if parts.len() < 2 { return false; }
+    if parts.len() < 2 {
+        return false;
+    }
     if let Ok(second) = parts[1].parse::<u8>() {
         (16..=31).contains(&second)
     } else {
@@ -781,7 +843,7 @@ impl WasmExtensionManager {
                     .connect_timeout(std::time::Duration::from_secs(10))
                     .no_proxy() // Prevent proxy-based SSRF
                     .build()
-                    .expect("Failed to build HTTP client")
+                    .expect("Failed to build HTTP client"),
             ),
             permissions: HashMap::new(),
         }
@@ -824,7 +886,9 @@ impl WasmExtensionManager {
     }
 
     fn discover_in_dir(dir: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("wasm") {
@@ -845,13 +909,7 @@ impl WasmExtensionManager {
             host_oxi_http_request,
         );
 
-        let log_fn = Function::new(
-            "oxi_log",
-            [PTR],
-            [],
-            UserData::new(()),
-            host_oxi_log,
-        );
+        let log_fn = Function::new("oxi_log", [PTR], [], UserData::new(()), host_oxi_log);
 
         let read_fn = Function::new(
             "oxi_read_file",
@@ -869,13 +927,7 @@ impl WasmExtensionManager {
             host_oxi_write_file,
         );
 
-        let exec_fn = Function::new(
-            "oxi_exec",
-            [PTR],
-            [PTR],
-            UserData::new(()),
-            host_oxi_exec,
-        );
+        let exec_fn = Function::new("oxi_exec", [PTR], [PTR], UserData::new(()), host_oxi_exec);
 
         let get_env_fn = Function::new(
             "oxi_get_env",
@@ -893,15 +945,11 @@ impl WasmExtensionManager {
             host_oxi_kv_get,
         );
 
-        let kv_set_fn = Function::new(
-            "oxi_kv_set",
-            [PTR],
-            [],
-            UserData::new(()),
-            host_oxi_kv_set,
-        );
+        let kv_set_fn = Function::new("oxi_kv_set", [PTR], [], UserData::new(()), host_oxi_kv_set);
 
-        vec![http_fn, log_fn, read_fn, write_fn, exec_fn, get_env_fn, kv_get_fn, kv_set_fn]
+        vec![
+            http_fn, log_fn, read_fn, write_fn, exec_fn, get_env_fn, kv_get_fn, kv_set_fn,
+        ]
     }
 
     /// Load a single `.wasm` extension.
@@ -923,10 +971,8 @@ impl WasmExtensionManager {
 
         // Call init()
         let info: ExtensionInfo = match plugin.call::<&str, &str>("init", "{}") {
-            Ok(output) => {
-                serde_json::from_str(output)
-                    .with_context(|| format!("init() returned invalid JSON: {}", output))?
-            }
+            Ok(output) => serde_json::from_str(output)
+                .with_context(|| format!("init() returned invalid JSON: {}", output))?,
             Err(_) => {
                 // No init function — derive name from filename
                 let name = path
@@ -966,23 +1012,24 @@ impl WasmExtensionManager {
         };
 
         // Call register_commands() — optional
-        let commands: Vec<WasmCommandDef> = match plugin.call::<&str, &str>("register_commands", "{}") {
-            Ok(output) => {
-                let resp: Value = serde_json::from_str(output)
-                    .with_context(|| format!("register_commands() invalid JSON: {}", output))?;
-                resp.get("commands")
-                    .cloned()
-                    .unwrap_or(Value::Array(vec![]))
-                    .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| serde_json::from_value(v.clone()).ok())
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            }
-            Err(_) => vec![], // No commands
-        };
+        let commands: Vec<WasmCommandDef> =
+            match plugin.call::<&str, &str>("register_commands", "{}") {
+                Ok(output) => {
+                    let resp: Value = serde_json::from_str(output)
+                        .with_context(|| format!("register_commands() invalid JSON: {}", output))?;
+                    resp.get("commands")
+                        .cloned()
+                        .unwrap_or(Value::Array(vec![]))
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                }
+                Err(_) => vec![], // No commands
+            };
 
         // Clear extension context set during register_tools/register_commands
         CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = None);
@@ -993,7 +1040,8 @@ impl WasmExtensionManager {
         if self.extensions.contains_key(&ext_name) {
             tracing::warn!(
                 "Extension '{}' already loaded, replacing with '{}'",
-                ext_name, path_display
+                ext_name,
+                path_display
             );
             // Remove old tool mappings
             self.tool_to_ext.retain(|_, v| v != &ext_name);
@@ -1082,7 +1130,8 @@ impl WasmExtensionManager {
 
     /// Get all tool definitions from all loaded extensions.
     pub fn all_tool_defs(&self) -> Vec<&WasmToolDef> {
-        self.extensions.values()
+        self.extensions
+            .values()
             .flat_map(|e| e.tools.iter())
             .collect()
     }
@@ -1129,13 +1178,16 @@ impl WasmExtensionManager {
     /// Returns the output text to display to the user.
     pub fn execute_command(&self, command_name: &str, args: &str) -> Result<String> {
         // Find which extension owns this command
-        let ext_name = self.extensions.iter()
+        let ext_name = self
+            .extensions
+            .iter()
             .find(|(_, ext)| ext.commands.iter().any(|c| c.name == command_name))
             .map(|(name, _)| name.clone())
             .with_context(|| format!("No extension registered for command: /{}", command_name))?;
 
         let mut plugins = self.plugins.lock();
-        let plugin = plugins.get_mut(&ext_name)
+        let plugin = plugins
+            .get_mut(&ext_name)
             .with_context(|| format!("Extension '{}' not loaded", ext_name))?;
 
         let input = serde_json::json!({
@@ -1150,13 +1202,19 @@ impl WasmExtensionManager {
             CURRENT_EXTENSION.with(|cell| *cell.borrow_mut() = None);
             result
         }
-        .with_context(|| format!("execute_command('/{}') failed in '{}'", command_name, ext_name))?;
+        .with_context(|| {
+            format!(
+                "execute_command('/{}') failed in '{}'",
+                command_name, ext_name
+            )
+        })?;
 
         // Parse response — extension returns {"output": "..."} or plain string
-        let result: Value = serde_json::from_str(output)
-            .unwrap_or_else(|_| serde_json::json!({"output": output}));
+        let result: Value =
+            serde_json::from_str(output).unwrap_or_else(|_| serde_json::json!({"output": output}));
 
-        Ok(result.get("output")
+        Ok(result
+            .get("output")
             .and_then(|v| v.as_str())
             .unwrap_or(output)
             .to_string())

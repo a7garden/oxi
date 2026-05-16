@@ -85,10 +85,7 @@ mod tests {
 
     #[test]
     fn test_multiple_emoji_preserved() {
-        assert_eq!(
-            sanitize_surrogates("🎉🚀✨🔥"),
-            "🎉🚀✨🔥"
-        );
+        assert_eq!(sanitize_surrogates("🎉🚀✨🔥"), "🎉🚀✨🔥");
     }
 
     #[test]

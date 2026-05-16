@@ -227,10 +227,7 @@ mod tests {
 
     #[test]
     fn test_fuzzy_rank_excludes_non_matches() {
-        let candidates = vec![
-            "hello".to_string(),
-            "world".to_string(),
-        ];
+        let candidates = vec!["hello".to_string(), "world".to_string()];
         let ranked = fuzzy_rank("xyz", &candidates);
         assert!(ranked.is_empty());
     }

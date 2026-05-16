@@ -60,7 +60,7 @@ pub(crate) fn handle_slash_command(
                 // Only show models from providers that have API keys configured
                 let auth = oxi_store::auth_storage::shared_auth_storage();
                 let all_models: Vec<String> = oxi_ai::model_db::get_all_models()
-                    .filter(|entry| auth.get_api_key(&entry.provider).is_some())
+                    .filter(|entry| auth.get_api_key(entry.provider).is_some())
                     .map(|entry| format!("{}/{}", entry.provider, entry.id))
                     .collect();
                 if all_models.is_empty() {
@@ -70,7 +70,8 @@ pub(crate) fn handle_slash_command(
                     ));
                 } else {
                     state.overlay = None;
-                    state.overlay_state = Some(super::overlay::model_select(all_models, session, state));
+                    state.overlay_state =
+                        Some(super::overlay::model_select(all_models, session, state));
                 }
             }
             true
@@ -135,9 +136,20 @@ pub(crate) fn handle_slash_command(
             let mut optional_lines = Vec::new();
             let mut wasm_lines = Vec::new();
             let builtin_names: std::collections::HashSet<&str> = [
-                "read", "write", "edit", "bash", "grep", "find", "ls",
-                "web_search", "get_search_results", "github", "subagent",
-            ].into_iter().collect();
+                "read",
+                "write",
+                "edit",
+                "bash",
+                "grep",
+                "find",
+                "ls",
+                "web_search",
+                "get_search_results",
+                "github",
+                "subagent",
+            ]
+            .into_iter()
+            .collect();
             for name in &names {
                 if let Some(tool) = registry.get(name) {
                     let line = format!("  {} — {}", name, tool.label());
@@ -151,12 +163,21 @@ pub(crate) fn handle_slash_command(
                 }
             }
             let mut out = "Essential (always on):\n\n".to_string();
-            for line in &essential_lines { out.push_str(line); out.push('\n'); }
+            for line in &essential_lines {
+                out.push_str(line);
+                out.push('\n');
+            }
             out.push_str("\nOptional (toggle with /tools <name>):\n\n");
-            for line in &optional_lines { out.push_str(line); out.push('\n'); }
+            for line in &optional_lines {
+                out.push_str(line);
+                out.push('\n');
+            }
             if !wasm_lines.is_empty() {
                 out.push_str("\nWASM Extensions:\n\n");
-                for line in &wasm_lines { out.push_str(line); out.push('\n'); }
+                for line in &wasm_lines {
+                    out.push_str(line);
+                    out.push('\n');
+                }
             }
             // if !wasm_paths.is_empty() {
             //     out.push_str(&format!("\nDiscovered .wasm files: {}", wasm_paths.len()));
@@ -178,7 +199,9 @@ pub(crate) fn handle_slash_command(
             // Prefer last code block if available, otherwise full last reply
             if let Some(ref code) = state.chat.last_code_block {
                 match clipboard_write::copy_to_clipboard(code) {
-                    Ok(()) => state.add_system_message("OK: Code block copied to clipboard".to_string()),
+                    Ok(()) => {
+                        state.add_system_message("OK: Code block copied to clipboard".to_string())
+                    }
                     Err(e) => state.add_system_message(format!("Error: Copy failed: {}", e)),
                 }
             } else {
@@ -208,7 +231,10 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/changelog" => {
-            let paths = vec![PathBuf::from("CHANGELOG.md"), PathBuf::from("../CHANGELOG.md")];
+            let paths = vec![
+                PathBuf::from("CHANGELOG.md"),
+                PathBuf::from("../CHANGELOG.md"),
+            ];
             let mut entries: Vec<crate::ui::changelog::ChangelogEntry> = Vec::new();
             for path in &paths {
                 let parsed = crate::ui::changelog::parse_changelog(path);
@@ -280,9 +306,8 @@ pub(crate) fn handle_slash_command(
                 Ok(html) => {
                     if let Some(path) = export_path {
                         match std::fs::write(&path, &html) {
-                            Ok(()) => {
-                                state.add_system_message(format!("OK: Exported: {}", path.display()))
-                            }
+                            Ok(()) => state
+                                .add_system_message(format!("OK: Exported: {}", path.display())),
                             Err(e) => {
                                 state.add_system_message(format!("Error: Write failed: {}", e))
                             }
@@ -308,8 +333,12 @@ pub(crate) fn handle_slash_command(
                         if !std::path::Path::new(&resolved).exists() {
                             state.add_system_message(format!("File not found: {}", resolved));
                         } else {
-                            state.next_action = Some(super::app::TuiNextAction::SwitchSession(resolved.clone()));
-                            state.add_system_message(format!("Importing session from {}...", resolved));
+                            state.next_action =
+                                Some(super::app::TuiNextAction::SwitchSession(resolved.clone()));
+                            state.add_system_message(format!(
+                                "Importing session from {}...",
+                                resolved
+                            ));
                         }
                     }
                     Err(e) => {
@@ -334,8 +363,12 @@ pub(crate) fn handle_slash_command(
                     let sm = oxi_store::session::SessionManager::open(path, None, None);
                     match sm.branch_from_entry(entry_id) {
                         Ok(new_path) => {
-                            state.next_action = Some(super::app::TuiNextAction::SwitchSession(new_path));
-                            state.add_system_message(format!("Forked from [{}]\nStarting new session...", &entry_id[..8.min(entry_id.len())]));
+                            state.next_action =
+                                Some(super::app::TuiNextAction::SwitchSession(new_path));
+                            state.add_system_message(format!(
+                                "Forked from [{}]\nStarting new session...",
+                                &entry_id[..8.min(entry_id.len())]
+                            ));
                         }
                         Err(e) => {
                             state.add_system_message(format!("Error forking: {}", e));
@@ -344,7 +377,8 @@ pub(crate) fn handle_slash_command(
                 } else {
                     let sm = oxi_store::session::SessionManager::open(path, None, None);
                     let branch = sm.get_branch(None);
-                    let user_entries: Vec<_> = branch.iter()
+                    let user_entries: Vec<_> = branch
+                        .iter()
                         .filter(|e| e.message.is_user())
                         .enumerate()
                         .collect();
@@ -375,10 +409,13 @@ pub(crate) fn handle_slash_command(
                     Ok(new_sm) => {
                         if let Some(new_path) = new_sm.get_session_file() {
                             state.add_system_message(format!(
-                                "Cloned session: {}\nUse /resume to open it.", new_path
+                                "Cloned session: {}\nUse /resume to open it.",
+                                new_path
                             ));
                         } else {
-                            state.add_system_message("Session cloned. Use /resume to open it.".to_string());
+                            state.add_system_message(
+                                "Session cloned. Use /resume to open it.".to_string(),
+                            );
                         }
                     }
                     Err(e) => {
@@ -399,17 +436,29 @@ pub(crate) fn handle_slash_command(
                             state.add_system_message("Empty session.".to_string());
                         } else {
                             let mut out = "Session tree:\n\n".to_string();
-                            fn render_node(node: &oxi_store::session::SessionTreeNode, depth: usize, out: &mut String) {
+                            fn render_node(
+                                node: &oxi_store::session::SessionTreeNode,
+                                depth: usize,
+                                out: &mut String,
+                            ) {
                                 let indent = "  ".repeat(depth);
                                 let role = match &node.entry.message {
                                     oxi_store::session::AgentMessage::User { .. } => "U",
                                     oxi_store::session::AgentMessage::Assistant { .. } => "A",
                                     _ => "-",
                                 };
-                                let preview: String = node.entry.content().chars().take(50).collect();
-                                let label = node.label.as_ref().map(|l| format!(" [{}]", l)).unwrap_or_default();
+                                let preview: String =
+                                    node.entry.content().chars().take(50).collect();
+                                let label = node
+                                    .label
+                                    .as_ref()
+                                    .map(|l| format!(" [{}]", l))
+                                    .unwrap_or_default();
                                 let short_id = &node.entry.id[..8.min(node.entry.id.len())];
-                                out.push_str(&format!("{}{} [{}] {}{}\n", indent, role, short_id, preview, label));
+                                out.push_str(&format!(
+                                    "{}{} [{}] {}{}\n",
+                                    indent, role, short_id, preview, label
+                                ));
                                 for child in &node.children {
                                     render_node(child, depth + 1, out);
                                 }
@@ -565,9 +614,10 @@ pub(crate) fn handle_slash_command(
             // Check WASM extension commands
             if let Some(ref wasm_ext) = state.wasm_ext {
                 let commands = wasm_ext.all_command_defs();
-                let name = cmd.strip_prefix('/').unwrap_or(&cmd);
+                let name = cmd.strip_prefix('/').unwrap_or(cmd);
                 if let Some((ext_name, _cmd)) = commands.iter().find(|(_, c)| c.name == name) {
-                    let output = wasm_ext.execute_command(name, arg.unwrap_or(""))
+                    let output = wasm_ext
+                        .execute_command(name, arg.unwrap_or(""))
                         .unwrap_or_else(|e| format!("Error: {}", e));
                     state.add_system_message(format!("[{}] {}", ext_name, output));
                     return true;
@@ -667,10 +717,7 @@ fn try_provider_with_key(provider: &str, key: &str, state: &mut AppState) -> boo
     }
     let auth = oxi_store::auth_storage::shared_auth_storage();
     auth.set_api_key(provider, key.to_string());
-    state.add_system_message(format!(
-        "API key for {} saved.",
-        provider
-    ));
+    state.add_system_message(format!("API key for {} saved.", provider));
     true
 }
 
@@ -680,7 +727,7 @@ fn mask_key(key: &str) -> String {
     if key.len() <= 12 {
         return "***".to_string();
     }
-    format!("{}...{}", &key[..6], &key[key.len()-4..])
+    format!("{}...{}", &key[..6], &key[key.len() - 4..])
 }
 
 // ── Tool toggle ─────────────────────────────────────────────────────────
@@ -709,8 +756,8 @@ fn handle_tool_command(
     let tool_name = action.trim().to_lowercase();
 
     // Check if the tool name is known
-    let is_known = BUILTIN_TOOL_NAMES.contains(&tool_name.as_str())
-        || registry.get(&tool_name).is_some();
+    let is_known =
+        BUILTIN_TOOL_NAMES.contains(&tool_name.as_str()) || registry.get(&tool_name).is_some();
 
     if !is_known {
         state.add_system_message(format!(
@@ -724,10 +771,7 @@ fn handle_tool_command(
         // Check if essential — cannot disable
         if let Some(tool) = registry.get(&tool_name) {
             if tool.essential() {
-                state.add_system_message(format!(
-                    "Cannot disable essential tool: {}",
-                    tool_name
-                ));
+                state.add_system_message(format!("Cannot disable essential tool: {}", tool_name));
                 return;
             }
         }

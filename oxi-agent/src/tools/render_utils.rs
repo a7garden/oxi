@@ -1,6 +1,6 @@
 /// Tool output rendering utilities
 /// Provides helpers for formatting tool results for display.
-
+///
 /// Shorten a file path by replacing the home directory prefix with `~`.
 pub fn shorten_path(path: &str) -> String {
     if let Some(home) = dirs::home_dir() {

@@ -7,7 +7,6 @@
 /// - Output truncation (2000 lines / 50KB defaults via truncate module)
 /// - Separate stdout/stderr capture combined at end
 /// - Process tree kill on abort/cancel via signal
-
 use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
 use async_trait::async_trait;
@@ -72,7 +71,10 @@ fn is_dangerous_command(command: &str) -> Option<String> {
     }
 
     // Privilege escalation
-    if cmd_lower.starts_with("sudo ") || cmd_lower.contains("\nsudo ") || cmd_lower.contains("&&sudo ") {
+    if cmd_lower.starts_with("sudo ")
+        || cmd_lower.contains("\nsudo ")
+        || cmd_lower.contains("&&sudo ")
+    {
         warnings.push("sudo detected (privilege escalation)".to_string());
     }
     if cmd_lower.contains("su -") || cmd_lower.contains("su root") {
@@ -111,7 +113,11 @@ fn is_dangerous_command(command: &str) -> Option<String> {
     } else {
         Some(format!(
             "⚠️  SECURITY WARNING: {}",
-            warnings.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            warnings
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         ))
     }
 }
@@ -165,7 +171,7 @@ pub struct BashTool {
 }
 
 impl BashTool {
-/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
+    /// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
         Self {
             root_dir: None,
@@ -291,7 +297,10 @@ impl BashTool {
 
         if let Some(env_map) = env {
             for (key, val) in env_map {
-                if BLOCKED_ENV_VARS.iter().any(|blocked| blocked.eq_ignore_ascii_case(key)) {
+                if BLOCKED_ENV_VARS
+                    .iter()
+                    .any(|blocked| blocked.eq_ignore_ascii_case(key))
+                {
                     continue;
                 }
                 if let Some(val_str) = val.as_str() {
@@ -309,7 +318,9 @@ impl BashTool {
         {
             if let Some(pid) = child.id() {
                 let pgid = -(pid as i32);
-                unsafe { libc::kill(pgid, libc::SIGKILL); }
+                unsafe {
+                    libc::kill(pgid, libc::SIGKILL);
+                }
             }
         }
         let _ = child.kill().await;
@@ -401,9 +412,7 @@ impl BashTool {
         });
 
         // Wait for the process with timeout and signal handling
-        let result = Self::wait_with_timeout_and_signal(
-            &mut child, timeout, &mut signal,
-        ).await;
+        let result = Self::wait_with_timeout_and_signal(&mut child, timeout, &mut signal).await;
 
         let elapsed = start.elapsed();
 
@@ -461,9 +470,7 @@ impl BashTool {
                 }
             }
             Err(e) => {
-                let output = Self::format_error_output(
-                    &stdout_str, &stderr_str, &e, elapsed,
-                );
+                let output = Self::format_error_output(&stdout_str, &stderr_str, &e, elapsed);
                 Ok(AgentToolResult::error(output))
             }
         }
@@ -483,11 +490,12 @@ impl AgentTool for BashTool {
     }
 
     fn label(&self) -> &str {
-
         "Bash"
     }
 
-    fn essential(&self) -> bool { true }
+    fn essential(&self) -> bool {
+        true
+    }
     fn description(&self) -> &str {
         "Execute a bash command in a shell. Returns stdout and stderr. \
          Output is truncated to 2000 lines or 50KB (whichever is hit first). \
@@ -539,7 +547,11 @@ impl AgentTool for BashTool {
         let timeout = params.get("timeout").and_then(|v: &Value| v.as_u64());
         let env = params.get("env").and_then(|v: &Value| v.as_object());
 
-        let progress_cb = self.progress_callback.lock().expect("progress callback lock poisoned").clone();
+        let progress_cb = self
+            .progress_callback
+            .lock()
+            .expect("progress callback lock poisoned")
+            .clone();
 
         // Use root_dir if set, else ctx.root()
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
@@ -578,7 +590,12 @@ mod tests {
     async fn test_simple_command() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-1", make_params("echo hello"), None, &ToolContext::default())
+            .execute(
+                "test-1",
+                make_params("echo hello"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -589,7 +606,12 @@ mod tests {
     async fn test_command_with_args() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-2", make_params("echo hello world"), None, &ToolContext::default())
+            .execute(
+                "test-2",
+                make_params("echo hello world"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -600,7 +622,12 @@ mod tests {
     async fn test_failed_command() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-3", make_params("exit 1"), None, &ToolContext::default())
+            .execute(
+                "test-3",
+                make_params("exit 1"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -610,7 +637,9 @@ mod tests {
     #[tokio::test]
     async fn test_missing_command_param() {
         let tool = BashTool::new();
-        let result = tool.execute("test-4", json!({}), None, &ToolContext::default()).await;
+        let result = tool
+            .execute("test-4", json!({}), None, &ToolContext::default())
+            .await;
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -632,7 +661,12 @@ mod tests {
     async fn test_stderr_capture() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-6", make_params("echo error_msg >&2"), None, &ToolContext::default())
+            .execute(
+                "test-6",
+                make_params("echo error_msg >&2"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -643,7 +677,12 @@ mod tests {
     async fn test_timeout_kills_process() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-7", make_params_with_timeout("sleep 300", 1), None, &ToolContext::default())
+            .execute(
+                "test-7",
+                make_params_with_timeout("sleep 300", 1),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -662,7 +701,12 @@ mod tests {
     async fn test_working_directory() {
         let tool = BashTool::with_cwd(PathBuf::from("/tmp"));
         let result = tool
-            .execute("test-8", make_params_with_cwd("pwd", "/tmp"), None, &ToolContext::default())
+            .execute(
+                "test-8",
+                make_params_with_cwd("pwd", "/tmp"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -709,7 +753,8 @@ mod tests {
                     "echo $OXI_TEST_VAR",
                     json!({ "OXI_TEST_VAR": "hello_from_env" }),
                 ),
-                None, &ToolContext::default(),
+                None,
+                &ToolContext::default(),
             )
             .await
             .unwrap();
@@ -727,7 +772,8 @@ mod tests {
                     "echo $OXI_A $OXI_B",
                     json!({ "OXI_A": "first", "OXI_B": "second" }),
                 ),
-                None, &ToolContext::default(),
+                None,
+                &ToolContext::default(),
             )
             .await
             .unwrap();
@@ -739,7 +785,12 @@ mod tests {
     async fn test_duration_timing() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test-13", make_params("sleep 0.1 && echo done"), None, &ToolContext::default())
+            .execute(
+                "test-13",
+                make_params("sleep 0.1 && echo done"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -751,7 +802,12 @@ mod tests {
     async fn test_combined_stdout_stderr() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test", make_params("echo stdout_msg; echo stderr_msg >&2"), None, &ToolContext::default())
+            .execute(
+                "test",
+                make_params("echo stdout_msg; echo stderr_msg >&2"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -764,7 +820,12 @@ mod tests {
         let tool = BashTool::new();
         // Generate more than 2000 lines to trigger truncation
         let result = tool
-            .execute("test-15", make_params("seq 1 3000"), None, &ToolContext::default())
+            .execute(
+                "test-15",
+                make_params("seq 1 3000"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);
@@ -783,7 +844,12 @@ mod tests {
         });
 
         let result = tool
-            .execute("test-16", make_params("sleep 300"), Some(rx), &ToolContext::default())
+            .execute(
+                "test-16",
+                make_params("sleep 300"),
+                Some(rx),
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(!result.success);
@@ -817,7 +883,12 @@ mod tests {
     async fn test_multiline_output() {
         let tool = BashTool::new();
         let result = tool
-            .execute("test", make_params("echo line1 && echo line2 && echo line3"), None, &ToolContext::default())
+            .execute(
+                "test",
+                make_params("echo line1 && echo line2 && echo line3"),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
         assert!(result.success);

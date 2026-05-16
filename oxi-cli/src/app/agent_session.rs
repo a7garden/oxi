@@ -27,12 +27,15 @@
 //! ```
 
 use crate::context::auto_compaction::{CompactionConfig, CompactionReason};
-use crate::extensions::{ExtensionContext, ExtensionContextBuilder, ExtensionRunner, InputEvent as ExtInputEvent, InputEventResult as ExtInputEventResult, SessionShutdownEvent, SessionShutdownReason};
-use oxi_store::session::{AgentMessage, SessionManager};
-use oxi_store::settings::{Settings, ThinkingLevel};
+use crate::extensions::{
+    ExtensionContext, ExtensionContextBuilder, ExtensionRunner, InputEvent as ExtInputEvent,
+    InputEventResult as ExtInputEventResult, SessionShutdownEvent, SessionShutdownReason,
+};
 use anyhow::{Context, Result};
 use oxi_agent::{Agent, AgentEvent, AgentState};
 use oxi_ai::Message;
+use oxi_store::session::{AgentMessage, SessionManager};
+use oxi_store::settings::{Settings, ThinkingLevel};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -141,19 +144,15 @@ pub enum StreamingBehavior {
 /// Source of user input (for extension hooks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
+#[derive(Default)]
 pub enum InputSource {
     /// User typed at the interactive prompt.
+    #[default]
     Interactive,
     /// Input from an extension.
     Extension,
     /// Input from an RPC call.
     Rpc,
-}
-
-impl Default for InputSource {
-    fn default() -> Self {
-        Self::Interactive
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -309,8 +308,8 @@ impl AgentSession {
         // held by the compaction task, so try_lock fails → return true.
         // If try_lock succeeds, the mutex was uncontended; check the handle.
         match self.compaction_abort.try_lock() {
-            Ok(guard) => guard.is_some(),  // lock acquired: check if handle present
-            Err(_) => true,                 // lock contested → compaction is running
+            Ok(guard) => guard.is_some(), // lock acquired: check if handle present
+            Err(_) => true,               // lock contested → compaction is running
         }
     }
 
@@ -411,7 +410,10 @@ impl AgentSession {
     ///
     /// **Note:** The listener is called synchronously on the event-processing
     /// thread; keep it fast. For async processing, forward to a channel.
-    pub fn subscribe(&self, listener: Box<dyn Fn(&SessionEvent) + Send + Sync>) -> SessionListenerGuard {
+    pub fn subscribe(
+        &self,
+        listener: Box<dyn Fn(&SessionEvent) + Send + Sync>,
+    ) -> SessionListenerGuard {
         let key = {
             let mut listeners = self.listeners.write();
             listeners.push(listener);
@@ -467,12 +469,8 @@ impl AgentSession {
         // When streaming, queue the message instead
         if self.is_streaming() {
             return match options.streaming_behavior {
-                Some(StreamingBehavior::Steer) => {
-                    self.steer(text).await
-                }
-                Some(StreamingBehavior::FollowUp) => {
-                    self.follow_up(text).await
-                }
+                Some(StreamingBehavior::Steer) => self.steer(text).await,
+                Some(StreamingBehavior::FollowUp) => self.follow_up(text).await,
                 None => {
                     anyhow::bail!(
                         "Agent is already processing. Specify streaming_behavior to queue the message."
@@ -523,10 +521,7 @@ impl AgentSession {
     /// (contains `GuardNoSend`). We use `spawn_blocking` + `LocalSet` to
     /// run it on a dedicated thread.
     #[allow(dead_code)]
-    pub fn prompt_streaming(
-        &self,
-        text: String,
-    ) -> mpsc::UnboundedReceiver<AgentEvent> {
+    pub fn prompt_streaming(&self, text: String) -> mpsc::UnboundedReceiver<AgentEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
 
         // Mark streaming as active
@@ -802,7 +797,10 @@ impl AgentSession {
     }
 
     /// Internal compaction execution.
-    async fn run_compaction(&self, _custom_instructions: Option<String>) -> Result<CompactionResult> {
+    async fn run_compaction(
+        &self,
+        _custom_instructions: Option<String>,
+    ) -> Result<CompactionResult> {
         let state = self.agent.state();
         let messages = state.messages.clone();
 
@@ -823,14 +821,14 @@ impl AgentSession {
                 let tokens_before = state.estimate_tokens();
 
                 // Replace messages in agent state
-                self.agent.state().replace_messages(ctx.kept_messages.clone());
+                self.agent
+                    .state()
+                    .replace_messages(ctx.kept_messages.clone());
 
                 // Persist to session
                 self.persist_session();
 
-                Ok(CompactionResult {
-                    tokens_before,
-                })
+                Ok(CompactionResult { tokens_before })
             }
             None => {
                 anyhow::bail!("Nothing to compact");
@@ -885,13 +883,11 @@ impl AgentSession {
                 Message::User(u) => {
                     let content = match &u.content {
                         oxi_ai::MessageContent::Text(t) => t.clone(),
-                        oxi_ai::MessageContent::Blocks(blocks) => {
-                            blocks
-                                .iter()
-                                .filter_map(|b| b.as_text())
-                                .collect::<Vec<_>>()
-                                .join("")
-                        }
+                        oxi_ai::MessageContent::Blocks(blocks) => blocks
+                            .iter()
+                            .filter_map(|b| b.as_text())
+                            .collect::<Vec<_>>()
+                            .join(""),
                     };
                     sm.append_message(AgentMessage::User {
                         content: oxi_store::session::ContentValue::String(content),
@@ -984,10 +980,14 @@ impl AgentSession {
                     AgentEvent::ToolCall { tool_call } => {
                         runner.emit_tool_call(&tool_call.name, &tool_call.arguments);
                     }
-                    AgentEvent::ToolExecutionStart { tool_name, args, .. } => {
+                    AgentEvent::ToolExecutionStart {
+                        tool_name, args, ..
+                    } => {
                         runner.emit_tool_call(tool_name, args);
                     }
-                    AgentEvent::ToolExecutionEnd { tool_name, result, .. } => {
+                    AgentEvent::ToolExecutionEnd {
+                        tool_name, result, ..
+                    } => {
                         let tool_result = oxi_agent::AgentToolResult::success(&result.content);
                         runner.emit_tool_result_event(tool_name, &tool_result);
                     }
@@ -1001,12 +1001,9 @@ impl AgentSession {
         }
 
         // Check auto-compaction after successful completion
-        let has_complete = events.iter().any(|e| {
-            matches!(
-                e,
-                AgentEvent::AgentEnd { .. } | AgentEvent::Complete { .. }
-            )
-        });
+        let has_complete = events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd { .. } | AgentEvent::Complete { .. }));
         if has_complete {
             self.check_auto_compaction().await;
 
@@ -1187,10 +1184,14 @@ impl AgentSession {
                 AgentEvent::ToolCall { tool_call } => {
                     runner.emit_tool_call(&tool_call.name, &tool_call.arguments);
                 }
-                AgentEvent::ToolExecutionStart { tool_name, args, .. } => {
+                AgentEvent::ToolExecutionStart {
+                    tool_name, args, ..
+                } => {
                     runner.emit_tool_call(tool_name, args);
                 }
-                AgentEvent::ToolExecutionEnd { tool_name, result, .. } => {
+                AgentEvent::ToolExecutionEnd {
+                    tool_name, result, ..
+                } => {
                     let tool_result = oxi_agent::AgentToolResult::success(&result.content);
                     runner.emit_tool_result_event(tool_name, &tool_result);
                 }
@@ -1386,10 +1387,7 @@ mod tests {
 
     impl Stream for EmptyStream {
         type Item = ProviderEvent;
-        fn poll_next(
-            self: Pin<&mut Self>,
-            _cx: &mut TaskContext<'_>,
-        ) -> Poll<Option<Self::Item>> {
+        fn poll_next(self: Pin<&mut Self>, _cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {
             Poll::Ready(None)
         }
     }
@@ -1415,7 +1413,11 @@ mod tests {
     fn make_session() -> AgentSession {
         let provider = Arc::new(MockProvider);
         let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
-        let agent = Arc::new(Agent::new(provider, config, Arc::new(oxi_agent::ToolRegistry::new())));
+        let agent = Arc::new(Agent::new(
+            provider,
+            config,
+            Arc::new(oxi_agent::ToolRegistry::new()),
+        ));
         let settings = Settings::default();
         let session_manager = SessionManager::in_memory("/tmp/test");
         AgentSession::new(agent, settings, session_manager, "/tmp/test".to_string())
@@ -1803,7 +1805,10 @@ mod tests {
         session.set_thinking_level(ThinkingLevel::High);
 
         let events = received.read();
-        assert!(!events.is_empty(), "Listener should receive at least one event");
+        assert!(
+            !events.is_empty(),
+            "Listener should receive at least one event"
+        );
         assert!(events.iter().any(|e| e.contains("ThinkingLevelChanged")));
     }
 
@@ -1822,7 +1827,9 @@ mod tests {
         // Trigger event: Standard → None
         session.set_thinking_level(ThinkingLevel::Off);
 
-        let event = rx.try_recv().expect("Should receive event via subscribed channel");
+        let event = rx
+            .try_recv()
+            .expect("Should receive event via subscribed channel");
         match event {
             SessionEvent::ThinkingLevelChanged { level } => {
                 assert_eq!(level, ThinkingLevel::Off);

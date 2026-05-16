@@ -1,7 +1,6 @@
 #![allow(unused_doc_comments)]
 /// Agent tools system
 /// This module provides the tool abstraction layer and built-in tools.
-
 use crate::types::ToolDefinition;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -71,11 +70,11 @@ pub type ToolError = String;
 /// Result of tool execution
 #[derive(Debug)]
 pub struct AgentToolResult {
-/// pub.
+    /// pub.
     pub success: bool,
-/// pub.
+    /// pub.
     pub output: String,
-/// pub.
+    /// pub.
     pub metadata: Option<serde_json::Value>,
     /// Optional content blocks (e.g., image blocks) to include in the tool result message.
     /// When present, these are used as the content of the ToolResultMessage instead of
@@ -88,7 +87,7 @@ pub struct AgentToolResult {
 }
 
 impl AgentToolResult {
-/// TODO.
+    /// TODO.
     pub fn success(output: impl Into<String>) -> Self {
         Self {
             success: true,
@@ -99,7 +98,7 @@ impl AgentToolResult {
         }
     }
 
-/// TODO.
+    /// TODO.
     pub fn error(output: impl Into<String>) -> Self {
         Self {
             success: false,
@@ -110,13 +109,13 @@ impl AgentToolResult {
         }
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = Some(metadata);
         self
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn with_content_blocks(mut self, blocks: Vec<oxi_ai::ContentBlock>) -> Self {
         self.content_blocks = Some(blocks);
         self
@@ -218,6 +217,8 @@ pub trait AgentTool: Send + Sync {
 // Built-in tools
 /// Bash shell execution tool.
 pub mod bash;
+/// Context7 documentation tools.
+pub mod context7;
 /// In-place file edit tool.
 pub mod edit;
 /// Diff-based edit helpers.
@@ -226,40 +227,38 @@ pub mod edit_diff;
 pub mod file_mutation_queue;
 /// File-system find tool.
 pub mod find;
+/// GitHub integration tool (gh CLI-based).
+pub mod github;
+/// GitHub repository search tool (legacy REST API).
+pub mod github_search;
 /// Content search (grep) tool.
 pub mod grep;
+/// Shared HTTP client singleton.
+pub mod http_client;
 /// Directory listing tool.
 pub mod ls;
-/// Path manipulation utilities.
-pub mod path_utils;
 /// Path security (traversal protection).
 pub mod path_security;
+/// Path manipulation utilities.
+pub mod path_utils;
+/// Questionnaire tool — interactive multi-question TUI overlay.
+pub mod questionnaire;
 /// File reading tool.
 pub mod read;
 /// Rendering utilities for tool output.
 pub mod render_utils;
 /// Search result cache and get_search_results tool.
 pub mod search_cache;
+/// Sub-agent delegation tool.
+pub mod subagent;
 /// Tool definition wrapper helpers.
 pub mod tool_definition_wrapper;
-/// Shared HTTP client singleton.
-pub mod http_client;
 /// Output truncation helpers.
 pub mod truncate;
 /// Multi-engine web search tool (a3s-search library + DuckDuckGo fallback).
 pub mod web_search;
-/// GitHub integration tool (gh CLI-based).
-pub mod github;
-/// GitHub repository search tool (legacy REST API).
-pub mod github_search;
-/// Sub-agent delegation tool.
-pub mod subagent;
 /// File writing tool.
 pub mod write;
-/// Context7 documentation tools.
-pub mod context7;
-/// Questionnaire tool — interactive multi-question TUI overlay.
-pub mod questionnaire;
 
 // Re-export for convenience
 pub use bash::BashTool;
@@ -270,11 +269,11 @@ pub use ls::LsTool;
 pub use read::ReadTool;
 // pub use search_cache;
 
+pub use crate::mcp::McpTool;
+pub use context7::{Context7QueryDocsTool, Context7ResolveLibraryIdTool};
+pub use questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 pub use subagent::SubagentTool;
 pub use write::WriteTool;
-pub use crate::mcp::McpTool;
-pub use context7::{Context7ResolveLibraryIdTool, Context7QueryDocsTool};
-pub use questionnaire::{QuestionnaireBridge, QuestionnaireTool};
 
 /// Tool registry for managing available tools
 #[derive(Clone)]
@@ -289,7 +288,7 @@ impl Default for ToolRegistry {
 }
 
 impl ToolRegistry {
-/// TODO.
+    /// TODO.
     pub fn new() -> Self {
         Self {
             tools: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
@@ -365,13 +364,14 @@ impl ToolRegistry {
             disabled_tools.iter().map(|s| s.as_str()).collect();
 
         // Helper to create shared cache on demand
-        let cache_once: std::cell::OnceCell<Arc<search_cache::SearchCache>> = std::cell::OnceCell::new();
+        let cache_once: std::cell::OnceCell<Arc<search_cache::SearchCache>> =
+            std::cell::OnceCell::new();
 
         // MCP: use OnceCell to avoid re-creating McpManager on repeated calls
         let mcp_once: std::cell::OnceCell<Arc<crate::mcp::McpManager>> = std::cell::OnceCell::new();
-        let mcp_manager = mcp_once.get_or_init(|| {
-            Arc::new(crate::mcp::McpManager::new())
-        }).clone();
+        let mcp_manager = mcp_once
+            .get_or_init(|| Arc::new(crate::mcp::McpManager::new()))
+            .clone();
 
         // Register all builtin tools — essential ones ignore disabled list
         let mut all_tools: Vec<Box<dyn AgentTool>> = vec![
@@ -382,9 +382,21 @@ impl ToolRegistry {
             Box::new(GrepTool::with_cwd(cwd.clone())),
             Box::new(FindTool::with_cwd(cwd.clone())),
             Box::new(LsTool::with_cwd(cwd.clone())),
-            Box::new(web_search::WebSearchTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
-            Box::new(search_cache::GetSearchResultsTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
-            Box::new(github::GitHubTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
+            Box::new(web_search::WebSearchTool::new(
+                cache_once
+                    .get_or_init(|| Arc::new(search_cache::SearchCache::new()))
+                    .clone(),
+            )),
+            Box::new(search_cache::GetSearchResultsTool::new(
+                cache_once
+                    .get_or_init(|| Arc::new(search_cache::SearchCache::new()))
+                    .clone(),
+            )),
+            Box::new(github::GitHubTool::new(
+                cache_once
+                    .get_or_init(|| Arc::new(search_cache::SearchCache::new()))
+                    .clone(),
+            )),
             Box::new(SubagentTool::with_cwd(cwd)),
         ];
 

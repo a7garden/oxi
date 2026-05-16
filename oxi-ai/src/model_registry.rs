@@ -756,10 +756,7 @@ impl ModelRegistry {
     pub fn model_ids(&self) -> Vec<String> {
         let static_ids: Vec<String> = self.static_models.keys().cloned().collect();
         let dynamic_ids: Vec<String> = self.dynamic_models.read().keys().cloned().collect();
-        static_ids
-            .into_iter()
-            .chain(dynamic_ids.into_iter())
-            .collect()
+        static_ids.into_iter().chain(dynamic_ids).collect()
     }
 
     /// Search models by pattern (static only).
@@ -778,7 +775,7 @@ impl ModelRegistry {
 // ── Global registry instance ────────────────────────────────────────
 
 /// Global model registry instance (for convenience functions).
-static GLOBAL_REGISTRY: Lazy<ModelRegistry> = Lazy::new(|| ModelRegistry::from_static());
+static GLOBAL_REGISTRY: Lazy<ModelRegistry> = Lazy::new(ModelRegistry::from_static);
 
 // ── Convenience functions using global registry ─────────────────────
 

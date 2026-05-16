@@ -7,10 +7,7 @@
 /// Format a message when no API key is found for a provider
 pub fn format_no_api_key_found_message(provider: &str) -> String {
     let env_key_hint = oxi_ai::register_builtins::get_provider_env_key(provider)
-        .map(|k| format!(
-            "\n  For CI/CD: export {}=<key>",
-            k
-        ))
+        .map(|k| format!("\n  For CI/CD: export {}=<key>", k))
         .unwrap_or_default();
 
     match provider {

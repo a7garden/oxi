@@ -3,7 +3,10 @@
 //! Implements the MCP protocol with Content-Length framed JSON-RPC messages
 //! over a spawned child process's stdin/stdout.
 
-use super::types::{JsonRpcNotification, JsonRpcRequest, McpCallResult, McpContent, McpToolDef, RawJsonRpcMessage, ServerInfo};
+use super::types::{
+    JsonRpcNotification, JsonRpcRequest, McpCallResult, McpContent, McpToolDef, RawJsonRpcMessage,
+    ServerInfo,
+};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -22,7 +25,12 @@ const MAX_HEADER_LINES: usize = 64;
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
 /// Environment variables that servers must not override (security).
-const BLOCKED_ENV_VARS: &[&str] = &["LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DYLD_LIBRARY_PATH"];
+const BLOCKED_ENV_VARS: &[&str] = &[
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_LIBRARY_PATH",
+];
 
 /// An MCP client connected to a single server via stdio.
 pub struct McpClient {
@@ -69,10 +77,7 @@ impl McpClient {
         for (key, value) in env {
             let upper = key.to_uppercase();
             if BLOCKED_ENV_VARS.iter().any(|blocked| upper == *blocked) {
-                tracing::warn!(
-                    "MCP: blocked dangerous env override: {}",
-                    key
-                );
+                tracing::warn!("MCP: blocked dangerous env override: {}", key);
                 continue;
             }
             cmd.env(key, value);
@@ -136,7 +141,10 @@ impl McpClient {
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown")
                 .to_string();
-            self.server_info.version = info.get("version").and_then(|v| v.as_str()).map(String::from);
+            self.server_info.version = info
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(String::from);
         }
         if let Some(version) = result.get("protocolVersion").and_then(|v| v.as_str()) {
             self.server_info.protocol_version = version.to_string();
@@ -243,7 +251,12 @@ impl McpClient {
                 });
             } else if let Some(_blob) = item.get("blob").and_then(|b| b.as_str()) {
                 content.push(McpContent::Text {
-                    text: format!("[Binary data: {}]", item.get("mimeType").and_then(|m| m.as_str()).unwrap_or("unknown")),
+                    text: format!(
+                        "[Binary data: {}]",
+                        item.get("mimeType")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("unknown")
+                    ),
                 });
             }
         }
@@ -265,11 +278,7 @@ impl McpClient {
                     libc::kill(id as libc::pid_t, libc::SIGTERM);
                 }
             }
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                self._child.wait(),
-            )
-            .await
+            match tokio::time::timeout(std::time::Duration::from_secs(5), self._child.wait()).await
             {
                 Ok(Ok(_)) => return Ok(()),
                 _ => {
@@ -337,7 +346,11 @@ impl McpClient {
             Ok(inner) => inner.with_context(|| format!("MCP request '{}' failed", method)),
             Err(_) => {
                 // Timeout: drain orphaned responses to prevent future ID mismatch
-                tracing::warn!("MCP request '{}' timed out after {}s, draining orphaned responses", method, REQUEST_TIMEOUT_SECS);
+                tracing::warn!(
+                    "MCP request '{}' timed out after {}s, draining orphaned responses",
+                    method,
+                    REQUEST_TIMEOUT_SECS
+                );
                 self.drain_orphaned_responses(16).await;
                 Err(anyhow::anyhow!(
                     "MCP request '{}' timed out after {}s",
@@ -354,11 +367,8 @@ impl McpClient {
     /// being matched against future requests by ID.
     async fn drain_orphaned_responses(&mut self, max: usize) {
         for _ in 0..max {
-            match tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                self.read_message(),
-            )
-            .await
+            match tokio::time::timeout(std::time::Duration::from_millis(100), self.read_message())
+                .await
             {
                 Ok(Ok(_)) => continue,
                 _ => break,
@@ -436,10 +446,7 @@ impl McpClient {
         )
         .await
         .map_err(|_| {
-            anyhow::anyhow!(
-                "MCP read_message timed out after {}s",
-                REQUEST_TIMEOUT_SECS
-            )
+            anyhow::anyhow!("MCP read_message timed out after {}s", REQUEST_TIMEOUT_SECS)
         })?
     }
 }

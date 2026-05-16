@@ -22,7 +22,7 @@ pub(crate) mod prompt;
 pub(crate) mod rpc_mode;
 pub(crate) mod skills;
 pub mod storage; // public for main.rs (packages)
-// Re-exports from storage for main.rs
+                 // Re-exports from storage for main.rs
 pub use storage::packages::PackageManager;
 pub use storage::packages::ResourceKind;
 pub mod tui; // public for main.rs
@@ -31,11 +31,10 @@ pub(crate) mod util;
 
 // ─── oxi-store re-exports (shared persistent state) ─────────────────────────
 pub use oxi_store::{
-    auth_guidance, auth_storage, model_registry, model_resolver, session,
-    session_cwd, session_navigation, settings, settings_validation,
-    AuthStorage, ModelRegistry, SessionEntry, SessionManager, SessionTreeNode,
-    AgentMessage, ContentValue, ContentBlock, AssistantContentBlock,
-    Settings, ValidationReport,
+    auth_guidance, auth_storage, model_registry, model_resolver, session, session_cwd,
+    session_navigation, settings, settings_validation, AgentMessage, AssistantContentBlock,
+    AuthStorage, ContentBlock, ContentValue, ModelRegistry, SessionEntry, SessionManager,
+    SessionTreeNode, Settings, ValidationReport,
 };
 
 /// Context for compaction operations, passed to extension hooks
@@ -97,7 +96,8 @@ pub struct App {
     skills: RwLock<SkillManager>,
     active_skills: RwLock<Vec<String>>,
     wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
-    questionnaire_bridge: Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
+    questionnaire_bridge:
+        Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
 }
 
 /// Chat message for display
@@ -132,7 +132,7 @@ impl ChatMessage {
 }
 
 /// Interactive session state
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InteractiveSession {
     /// Chat messages exchanged so far.
     pub messages: Vec<ChatMessage>,
@@ -146,19 +146,6 @@ pub struct InteractiveSession {
     pub name: Option<String>,
     /// Raw session entries for persistence and tree navigation.
     pub entries: Vec<SessionEntry>,
-}
-
-impl Default for InteractiveSession {
-    fn default() -> Self {
-        Self {
-            messages: Vec::new(),
-            thinking: false,
-            current_response: String::new(),
-            session_id: None,
-            name: None,
-            entries: Vec::new(),
-        }
-    }
 }
 
 impl InteractiveSession {
@@ -230,14 +217,17 @@ impl InteractiveSession {
 // app/agent_session_runtime.rs. Both delegate to prompt::system_prompt::build_system_prompt
 // but with different options (this one passes skills; the other passes tool_snippets).
 // Unify into a single shared utility that accepts all options.
-fn build_system_prompt(thinking_level: oxi_store::settings::ThinkingLevel, skill_contents: &[String]) -> String {
+fn build_system_prompt(
+    thinking_level: oxi_store::settings::ThinkingLevel,
+    skill_contents: &[String],
+) -> String {
     let custom_prompt = match thinking_level {
-        oxi_store::settings::ThinkingLevel::Off => {
-            Some(String::from("You are a helpful AI assistant. Provide direct, concise answers."))
-        }
-        oxi_store::settings::ThinkingLevel::Minimal => {
-            Some(String::from("You are a helpful AI assistant. Provide clear and helpful answers."))
-        }
+        oxi_store::settings::ThinkingLevel::Off => Some(String::from(
+            "You are a helpful AI assistant. Provide direct, concise answers.",
+        )),
+        oxi_store::settings::ThinkingLevel::Minimal => Some(String::from(
+            "You are a helpful AI assistant. Provide clear and helpful answers.",
+        )),
         oxi_store::settings::ThinkingLevel::Low => Some(String::from(
             "You are a helpful AI assistant. Provide brief, actionable responses.",
         )),
@@ -307,10 +297,12 @@ impl App {
 
         // Resolve provider via SDK
         let provider: Arc<dyn oxi_ai::Provider> = if !provider_name.is_empty() {
-            engine.create_provider(&provider_name)
+            engine
+                .create_provider(&provider_name)
                 .map_err(|e| Error::msg(format!("{}", e)))?
         } else {
-            engine.create_provider("anthropic")
+            engine
+                .create_provider("anthropic")
                 .map_err(|e| Error::msg(format!("{}", e)))?
         };
 
@@ -347,15 +339,25 @@ impl App {
             compaction_instruction: None,
             context_window: 128_000,
             api_key,
-            workspace_dir: Some(std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+            workspace_dir: Some(
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            ),
             output_mode: None,
         };
 
-        let agent = Arc::new(Agent::new(Arc::from(provider), config, Arc::new(oxi_agent::ToolRegistry::new())));
+        let agent = Arc::new(Agent::new(
+            provider,
+            config,
+            Arc::new(oxi_agent::ToolRegistry::new()),
+        ));
 
-        let bridge = std::sync::Arc::new(oxi_agent::tools::questionnaire::QuestionnaireBridge::new());
-        let questionnaire_tool = oxi_agent::tools::questionnaire::QuestionnaireTool::new(bridge.clone());
-        agent.tools().register_arc(std::sync::Arc::new(questionnaire_tool));
+        let bridge =
+            std::sync::Arc::new(oxi_agent::tools::questionnaire::QuestionnaireBridge::new());
+        let questionnaire_tool =
+            oxi_agent::tools::questionnaire::QuestionnaireTool::new(bridge.clone());
+        agent
+            .tools()
+            .register_arc(std::sync::Arc::new(questionnaire_tool));
 
         Ok(Self {
             engine,
@@ -380,7 +382,10 @@ impl App {
     }
 
     /// Set the WASM extension manager
-    pub fn set_wasm_ext(&mut self, ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>) {
+    pub fn set_wasm_ext(
+        &mut self,
+        ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
+    ) {
         self.wasm_ext = ext;
     }
 
@@ -400,7 +405,9 @@ impl App {
     }
 
     /// Get the questionnaire bridge, if initialized.
-    pub fn questionnaire_bridge(&self) -> Option<&std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>> {
+    pub fn questionnaire_bridge(
+        &self,
+    ) -> Option<&std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>> {
         self.questionnaire_bridge.as_ref()
     }
 

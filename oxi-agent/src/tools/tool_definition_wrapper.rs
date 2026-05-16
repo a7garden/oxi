@@ -1,6 +1,5 @@
 /// Tool definition wrapping utilities
 /// Provides adapters for converting between tool representations.
-
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use crate::types::ToolDefinition;
 use async_trait::async_trait;
@@ -18,10 +17,14 @@ pub struct DynamicTool {
     description: String,
     parameters: Value,
     execute_fn: Arc<
-        dyn Fn(&str, Value, Option<oneshot::Receiver<()>>) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-        > + Send
-        + Sync,
+        dyn Fn(
+                &str,
+                Value,
+                Option<oneshot::Receiver<()>>,
+            ) -> std::pin::Pin<
+                Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
+            > + Send
+            + Sync,
     >,
 }
 
@@ -32,7 +35,11 @@ impl DynamicTool {
         label: impl Into<String>,
         description: impl Into<String>,
         parameters: Value,
-        execute_fn: impl Fn(&str, Value, Option<oneshot::Receiver<()>>) -> std::pin::Pin<
+        execute_fn: impl Fn(
+                &str,
+                Value,
+                Option<oneshot::Receiver<()>>,
+            ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
             > + Send
             + Sync
@@ -50,14 +57,19 @@ impl DynamicTool {
     /// Create a `DynamicTool` from a `ToolDefinition` with a simple execution function.
     pub fn from_definition(
         def: ToolDefinition,
-        execute_fn: impl Fn(&str, Value, Option<oneshot::Receiver<()>>) -> std::pin::Pin<
+        execute_fn: impl Fn(
+                &str,
+                Value,
+                Option<oneshot::Receiver<()>>,
+            ) -> std::pin::Pin<
                 Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
             > + Send
             + Sync
             + 'static,
     ) -> Self {
         let name_for_label = def.name.clone();
-        let schema = serde_json::to_value(&def.input_schema).unwrap_or(Value::Object(Default::default()));
+        let schema =
+            serde_json::to_value(&def.input_schema).unwrap_or(Value::Object(Default::default()));
         Self {
             name: def.name,
             label: name_for_label, // Use name as label fallback
@@ -99,15 +111,15 @@ impl AgentTool for DynamicTool {
 
 /// Trait for tool definitions that can be wrapped into `AgentTool`.
 pub trait ToolDefinitionLike: Send + Sync {
-/// TODO: document this function.
+    /// TODO: document this function.
     fn tool_name(&self) -> &str;
-/// TODO: document this function.
+    /// TODO: document this function.
     fn tool_label(&self) -> &str;
-/// TODO: document this function.
+    /// TODO: document this function.
     fn tool_description(&self) -> &str;
-/// TODO: document this function.
+    /// TODO: document this function.
     fn tool_parameters(&self) -> Value;
-/// TODO: document this function.
+    /// TODO: document this function.
     fn tool_execute(
         &self,
         tool_call_id: &str,
@@ -181,12 +193,18 @@ mod tests {
     #[test]
     fn test_create_tool_definition_from_agent_tool() {
         struct TestTool;
-        
+
         #[async_trait]
         impl AgentTool for TestTool {
-            fn name(&self) -> &str { "test_tool" }
-            fn label(&self) -> &str { "Test Tool" }
-            fn description(&self) -> &str { "A test tool" }
+            fn name(&self) -> &str {
+                "test_tool"
+            }
+            fn label(&self) -> &str {
+                "Test Tool"
+            }
+            fn description(&self) -> &str {
+                "A test tool"
+            }
             fn parameters_schema(&self) -> Value {
                 serde_json::json!({
                     "type": "object",
@@ -242,7 +260,14 @@ mod tests {
             },
         );
 
-        let result = tool.execute("call_1", serde_json::json!({"key": "value"}), None, &ToolContext::default()).await;
+        let result = tool
+            .execute(
+                "call_1",
+                serde_json::json!({"key": "value"}),
+                None,
+                &ToolContext::default(),
+            )
+            .await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().output, "got: {\"key\":\"value\"}");
     }
@@ -250,9 +275,15 @@ mod tests {
     struct MockDefLike;
 
     impl ToolDefinitionLike for MockDefLike {
-        fn tool_name(&self) -> &str { "mock_def" }
-        fn tool_label(&self) -> &str { "Mock Definition" }
-        fn tool_description(&self) -> &str { "Mock description" }
+        fn tool_name(&self) -> &str {
+            "mock_def"
+        }
+        fn tool_label(&self) -> &str {
+            "Mock Definition"
+        }
+        fn tool_description(&self) -> &str {
+            "Mock description"
+        }
         fn tool_parameters(&self) -> Value {
             serde_json::json!({"type": "object"})
         }
@@ -278,7 +309,9 @@ mod tests {
     #[tokio::test]
     async fn test_wrapped_tool_execution() {
         let wrapped = wrap_tool_definition(MockDefLike);
-        let result = wrapped.execute("call_1", Value::Null, None, &ToolContext::default()).await;
+        let result = wrapped
+            .execute("call_1", Value::Null, None, &ToolContext::default())
+            .await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().output, "mock result");
     }

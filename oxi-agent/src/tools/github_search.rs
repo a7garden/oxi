@@ -1,3 +1,5 @@
+use super::http_client::shared_http_client;
+use super::search_cache::{SearchCache, SearchResult};
 /// GitHub search tool — search GitHub repositories, issues, and code via the GitHub REST API.
 ///
 /// Features:
@@ -6,10 +8,7 @@
 /// - Optional GitHub token for higher rate limits (via GITHUB_TOKEN env var)
 /// - Structured JSON results — no HTML scraping
 /// - Result caching with the shared SearchCache
-
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use super::search_cache::{SearchCache, SearchResult};
-use super::http_client::shared_http_client;
 use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -220,7 +219,11 @@ fn format_github_results(total: u64, results: &[GitHubSearchResult]) -> String {
         return "No repositories found.".to_string();
     }
 
-    let mut output = format!("Found {} repositories (showing {}):\n\n", total, results.len());
+    let mut output = format!(
+        "Found {} repositories (showing {}):\n\n",
+        total,
+        results.len()
+    );
 
     for (i, r) in results.iter().enumerate() {
         let stars = if r.stars >= 1000 {
@@ -254,10 +257,7 @@ fn format_github_results(total: u64, results: &[GitHubSearchResult]) -> String {
         ));
 
         if !r.topics.is_empty() {
-            output.push_str(&format!(
-                "   Topics: {}\n",
-                r.topics.join(", ")
-            ));
+            output.push_str(&format!("   Topics: {}\n", r.topics.join(", ")));
         }
 
         if !r.license.is_empty() {
@@ -362,8 +362,7 @@ impl AgentTool for GitHubSearchTool {
             .unwrap_or(DEFAULT_MAX_RESULTS as u64)
             .min(MAX_RESULTS as u64) as usize;
 
-        let (total, results) =
-            search_github_repos(query, sort, order, limit, language).await?;
+        let (total, results) = search_github_repos(query, sort, order, limit, language).await?;
 
         if results.is_empty() {
             return Ok(AgentToolResult::success(format!(
@@ -431,7 +430,8 @@ mod tests {
         let results = vec![GitHubSearchResult {
             full_name: "rust-lang/rust".to_string(),
             url: "https://github.com/rust-lang/rust".to_string(),
-            description: "Empowering everyone to build reliable and efficient software.".to_string(),
+            description: "Empowering everyone to build reliable and efficient software."
+                .to_string(),
             language: "Rust".to_string(),
             stars: 95000,
             forks: 12000,
@@ -474,7 +474,10 @@ mod tests {
         assert!(schema["properties"]["query"].is_object());
         assert!(schema["properties"]["sort"].is_object());
         assert!(schema["properties"]["language"].is_object());
-        assert!(schema["required"].as_array().unwrap().contains(&json!("query")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("query")));
     }
 
     #[tokio::test]

@@ -4,11 +4,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::app::{AppOverlay, AppState, SetupStep, SPINNER};
 use oxi_tui::theme::Theme;
-use oxi_tui::widgets::{
-    chat::ChatView,
-    footer::Footer,
-    input::Input,
-};
+use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Modifier, Style},
@@ -20,7 +16,12 @@ use ratatui::{
 // ── Reusable UI components ──────────────────────────────────────────────
 
 /// Render a centered popup frame: clear + dimmed background + border.
-fn render_popup_frame(f: &mut Frame, area: Rect, bg: ratatui::style::Color, border: ratatui::style::Color) -> Rect {
+fn render_popup_frame(
+    f: &mut Frame,
+    area: Rect,
+    bg: ratatui::style::Color,
+    border: ratatui::style::Color,
+) -> Rect {
     f.render_widget(Clear, area);
     let dimmed = Block::default().style(Style::default().bg(bg));
     f.render_widget(dimmed, area);
@@ -45,13 +46,25 @@ fn centered_popup(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
 }
 
 /// Render a bold title line.
-fn render_title(f: &mut Frame, area: Rect, y_offset: u16, text: &str, fg: ratatui::style::Color, bg: ratatui::style::Color) {
+fn render_title(
+    f: &mut Frame,
+    area: Rect,
+    y_offset: u16,
+    text: &str,
+    fg: ratatui::style::Color,
+    bg: ratatui::style::Color,
+) {
     f.render_widget(
         Paragraph::new(Span::styled(
             text,
             Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
         )),
-        Rect { x: area.x, y: area.y + y_offset, width: area.width, height: 1 },
+        Rect {
+            x: area.x,
+            y: area.y + y_offset,
+            width: area.width,
+            height: 1,
+        },
     );
 }
 
@@ -60,7 +73,12 @@ fn render_hint(f: &mut Frame, area: Rect, text: &str, style: Style) {
     let y = area.y + area.height.saturating_sub(1);
     f.render_widget(
         Paragraph::new(Span::styled(text, style)),
-        Rect { x: area.x, y, width: area.width, height: 1 },
+        Rect {
+            x: area.x,
+            y,
+            width: area.width,
+            height: 1,
+        },
     );
 }
 
@@ -131,11 +149,23 @@ fn render_status_list(
     theme: &Theme,
     highlight_color: Option<ratatui::style::Color>,
 ) {
-    let strings: Vec<String> = items.iter().map(|(name, has_key)| {
-        let status = if *has_key { "*" } else { "o" };
-        format!("{} {}", status, name)
-    }).collect();
-    render_selectable_list(f, area, y_offset, &strings, selected, styles, theme, highlight_color);
+    let strings: Vec<String> = items
+        .iter()
+        .map(|(name, has_key)| {
+            let status = if *has_key { "*" } else { "o" };
+            format!("{} {}", status, name)
+        })
+        .collect();
+    render_selectable_list(
+        f,
+        area,
+        y_offset,
+        &strings,
+        selected,
+        styles,
+        theme,
+        highlight_color,
+    );
 }
 
 /// Render a text input field with label and cursor.
@@ -155,7 +185,12 @@ fn render_input_field(
 
     f.render_widget(
         Paragraph::new(Span::styled(input_line, styles.normal)),
-        Rect { x: area.x + 2, y: field_y, width: field_w, height: 1 },
+        Rect {
+            x: area.x + 2,
+            y: field_y,
+            width: field_w,
+            height: 1,
+        },
     );
 
     // Cursor
@@ -167,7 +202,12 @@ fn render_input_field(
                 .fg(theme.colors.cursor_fg.to_ratatui())
                 .bg(theme.colors.cursor_bg.to_ratatui()),
         )),
-        Rect { x: area.x + 2 + cursor_col, y: field_y, width: 1, height: 1 },
+        Rect {
+            x: area.x + 2 + cursor_col,
+            y: field_y,
+            width: 1,
+            height: 1,
+        },
     );
 }
 
@@ -225,9 +265,9 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
 
     // Separator line
     f.render_widget(
-        Block::default().borders(Borders::TOP).border_style(
-            Style::default().fg(theme.colors.border.to_ratatui()),
-        ),
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(theme.colors.border.to_ratatui())),
         top_row,
     );
 
@@ -239,7 +279,7 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
 }
 
 fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let spinner_ch = SPINNER[state.spinner_frame as usize % SPINNER.len()];
+    let spinner_ch = SPINNER[state.spinner_frame % SPINNER.len()];
 
     // Build spinner + queue-count prefix
     let prefix = if state.pending_steering > 0 {
@@ -258,7 +298,9 @@ fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
         let mut w = 0usize;
         for ch in user_text.chars() {
             let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-            if w + cw > max_text { break; }
+            if w + cw > max_text {
+                break;
+            }
             visible.push(ch);
             w += cw;
         }
@@ -292,12 +334,7 @@ fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme)
 
 // ── Slash popup overlay ─────────────────────────────────────────────────
 
-fn render_slash_popup_overlay(
-    f: &mut Frame,
-    input_area: Rect,
-    state: &AppState,
-    theme: &Theme,
-) {
+fn render_slash_popup_overlay(f: &mut Frame, input_area: Rect, state: &AppState, theme: &Theme) {
     if state.slash_completions.is_empty() {
         return;
     }
@@ -388,17 +425,23 @@ fn render_slash_popup_overlay(
 
     // Page indicator
     let page = window_start / max_show + 1;
-    let total_pages = (total + max_show - 1) / max_show;
+    let total_pages = total.div_ceil(max_show);
     if total_pages > 1 {
         let indicator = format!("({}/{})", page, total_pages);
         let indicator_area = Rect {
-            x: popup_area.x + popup_area.width.saturating_sub(indicator.chars().count() as u16 + 2),
+            x: popup_area.x
+                + popup_area
+                    .width
+                    .saturating_sub(indicator.chars().count() as u16 + 2),
             y: popup_area.y + popup_area.height.saturating_sub(1),
             width: indicator.chars().count() as u16 + 2,
             height: 1,
         };
         f.render_widget(
-            Paragraph::new(Span::styled(indicator, Style::default().fg(theme.colors.muted.to_ratatui()))),
+            Paragraph::new(Span::styled(
+                indicator,
+                Style::default().fg(theme.colors.muted.to_ratatui()),
+            )),
             indicator_area,
         );
     }
@@ -433,7 +476,13 @@ fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme
 
 // ── Setup wizard ────────────────────────────────────────────────────────
 
-fn render_setup_step(f: &mut Frame, area: Rect, _state: &mut AppState, theme: &Theme, step: &SetupStep) {
+fn render_setup_step(
+    f: &mut Frame,
+    area: Rect,
+    _state: &mut AppState,
+    theme: &Theme,
+    step: &SetupStep,
+) {
     let styles = theme.to_styles();
     let bg = theme.colors.background.to_ratatui();
     let fg = theme.colors.primary.to_ratatui();
@@ -446,27 +495,52 @@ fn render_setup_step(f: &mut Frame, area: Rect, _state: &mut AppState, theme: &T
                 " OAuth      Sign in with your account (coming soon)".to_string(),
             ];
             render_selectable_list(f, area, 4, &items, *selected, &styles, theme, None);
-            render_hint(f, area, " Up/Down select  |  Enter confirm  |  Esc cancel", styles.muted);
+            render_hint(
+                f,
+                area,
+                " Up/Down select  |  Enter confirm  |  Esc cancel",
+                styles.muted,
+            );
         }
 
-        SetupStep::SelectProvider { providers, selected } => {
+        SetupStep::SelectProvider {
+            providers,
+            selected,
+        } => {
             render_title(f, area, 2, " Select a provider to get started", fg, bg);
             render_status_list(f, area, 4, providers, *selected, &styles, theme, None);
-            render_hint(f, area, " Up/Down select  |  Enter confirm  |  q quit", styles.muted);
+            render_hint(
+                f,
+                area,
+                " Up/Down select  |  Enter confirm  |  q quit",
+                styles.muted,
+            );
         }
 
         SetupStep::EnterApiKey { provider, key, .. } => {
             let title = format!(" Enter API key for {}", provider);
             render_title(f, area, 3, &title, fg, bg);
             render_input_field(f, area, 5, "API Key", key, theme, &styles);
-            render_hint(f, area, " Type your key  |  Enter save  |  Esc back", styles.muted);
+            render_hint(
+                f,
+                area,
+                " Type your key  |  Enter save  |  Esc back",
+                styles.muted,
+            );
         }
 
-        SetupStep::SelectModel { provider, models, selected } => {
+        SetupStep::SelectModel {
+            provider,
+            models,
+            selected,
+        } => {
             let title = format!(" Select a model for {}", provider);
             render_title(f, area, 2, &title, fg, bg);
             render_selectable_list(f, area, 4, models, *selected, &styles, theme, None);
-            let hint = format!(" Up/Down select  |  Enter confirm  |  Esc back  ({} models)", models.len());
+            let hint = format!(
+                " Up/Down select  |  Enter confirm  |  Esc back  ({} models)",
+                models.len()
+            );
             render_hint(f, area, &hint, styles.muted);
         }
 
@@ -476,18 +550,36 @@ fn render_setup_step(f: &mut Frame, area: Rect, _state: &mut AppState, theme: &T
             f.render_widget(
                 Paragraph::new(Span::styled(
                     msg,
-                    Style::default().fg(theme.colors.success.to_ratatui()).bg(bg).bold(),
+                    Style::default()
+                        .fg(theme.colors.success.to_ratatui())
+                        .bg(bg)
+                        .bold(),
                 )),
-                Rect { x: area.x + 2, y: msg_y, width: area.width.saturating_sub(4), height: 1 },
+                Rect {
+                    x: area.x + 2,
+                    y: msg_y,
+                    width: area.width.saturating_sub(4),
+                    height: 1,
+                },
             );
             let model_line = format!(" Model: {}", model);
             f.render_widget(
                 Paragraph::new(Span::styled(model_line, styles.normal)),
-                Rect { x: area.x + 2, y: msg_y + 1, width: area.width.saturating_sub(4), height: 1 },
+                Rect {
+                    x: area.x + 2,
+                    y: msg_y + 1,
+                    width: area.width.saturating_sub(4),
+                    height: 1,
+                },
             );
             f.render_widget(
                 Paragraph::new(Span::styled(" Press Enter to start chatting", styles.muted)),
-                Rect { x: area.x + 2, y: msg_y + 3, width: area.width.saturating_sub(4), height: 1 },
+                Rect {
+                    x: area.x + 2,
+                    y: msg_y + 3,
+                    width: area.width.saturating_sub(4),
+                    height: 1,
+                },
             );
         }
     }
@@ -499,7 +591,11 @@ fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &
     let styles = theme.to_styles();
 
     let (models, filter, selected) = match &state.overlay {
-        Some(AppOverlay::ModelSelect { models, filter, selected }) => (models.clone(), filter.clone(), *selected),
+        Some(AppOverlay::ModelSelect {
+            models,
+            filter,
+            selected,
+        }) => (models.clone(), filter.clone(), *selected),
         _ => return,
     };
 
@@ -508,18 +604,30 @@ fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &
         models.clone()
     } else {
         let lower = filter.to_lowercase();
-        models.iter().filter(|m| m.to_lowercase().contains(&lower)).cloned().collect()
+        models
+            .iter()
+            .filter(|m| m.to_lowercase().contains(&lower))
+            .cloned()
+            .collect()
     };
 
     // Map selected index to filtered list
     let selected_in_filtered = if filter.is_empty() {
         selected
     } else {
-        filtered.iter().position(|m| m == &models[selected]).unwrap_or(0)
+        filtered
+            .iter()
+            .position(|m| m == &models[selected])
+            .unwrap_or(0)
     };
 
     let popup = centered_popup(area, 0.7, 0.7);
-    let inner = render_popup_frame(f, popup, theme.colors.background.to_ratatui(), theme.colors.border.to_ratatui());
+    let inner = render_popup_frame(
+        f,
+        popup,
+        theme.colors.background.to_ratatui(),
+        theme.colors.border.to_ratatui(),
+    );
 
     // Title + filter
     let title_line = if filter.is_empty() {
@@ -527,13 +635,32 @@ fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &
     } else {
         format!(" Filter: {} ", filter)
     };
-    render_title(f, inner, 0, &title_line, theme.colors.primary.to_ratatui(), theme.colors.background.to_ratatui());
+    render_title(
+        f,
+        inner,
+        0,
+        &title_line,
+        theme.colors.primary.to_ratatui(),
+        theme.colors.background.to_ratatui(),
+    );
 
     // List
-    render_selectable_list(f, inner, 2, &filtered, selected_in_filtered, &styles, theme, None);
+    render_selectable_list(
+        f,
+        inner,
+        2,
+        &filtered,
+        selected_in_filtered,
+        &styles,
+        theme,
+        None,
+    );
 
     // Hint
-    let hint = format!(" {} models  |  Up/Down  |  type to filter  |  Enter select  |  Esc cancel", filtered.len());
+    let hint = format!(
+        " {} models  |  Up/Down  |  type to filter  |  Enter select  |  Esc cancel",
+        filtered.len()
+    );
     render_hint(f, inner, &hint, styles.muted);
 }
 
@@ -543,16 +670,45 @@ fn render_logout_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
     let styles = theme.to_styles();
 
     let (providers, selected) = match &state.overlay {
-        Some(AppOverlay::LogoutSelect { providers, selected }) => (providers.clone(), *selected),
+        Some(AppOverlay::LogoutSelect {
+            providers,
+            selected,
+        }) => (providers.clone(), *selected),
         _ => return,
     };
 
     let popup = centered_popup(area, 0.5, 0.5);
-    let inner = render_popup_frame(f, popup, theme.colors.background.to_ratatui(), theme.colors.border.to_ratatui());
+    let inner = render_popup_frame(
+        f,
+        popup,
+        theme.colors.background.to_ratatui(),
+        theme.colors.border.to_ratatui(),
+    );
 
-    render_title(f, inner, 0, " Select provider to logout", theme.colors.error.to_ratatui(), theme.colors.background.to_ratatui());
-    render_selectable_list(f, inner, 2, &providers, selected, &styles, theme, Some(theme.colors.error.to_ratatui()));
-    render_hint(f, inner, " Up/Down select  |  Enter remove  |  Esc cancel", styles.muted);
+    render_title(
+        f,
+        inner,
+        0,
+        " Select provider to logout",
+        theme.colors.error.to_ratatui(),
+        theme.colors.background.to_ratatui(),
+    );
+    render_selectable_list(
+        f,
+        inner,
+        2,
+        &providers,
+        selected,
+        &styles,
+        theme,
+        Some(theme.colors.error.to_ratatui()),
+    );
+    render_hint(
+        f,
+        inner,
+        " Up/Down select  |  Enter remove  |  Esc cancel",
+        styles.muted,
+    );
 }
 
 fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
@@ -573,15 +729,38 @@ fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
     };
 
     // Build session labels
-    let items: Vec<String> = sessions.iter().map(|s| {
-        let name_or_id = s.name.clone().unwrap_or_else(|| s.id[..8.min(s.id.len())].to_string());
-        format!("{} — {} ({} messages)", name_or_id, s.cwd, s.message_count)
-    }).collect();
+    let items: Vec<String> = sessions
+        .iter()
+        .map(|s| {
+            let name_or_id = s
+                .name
+                .clone()
+                .unwrap_or_else(|| s.id[..8.min(s.id.len())].to_string());
+            format!("{} — {} ({} messages)", name_or_id, s.cwd, s.message_count)
+        })
+        .collect();
 
     let popup = centered_popup(area, 0.6, 0.6);
-    let inner = render_popup_frame(f, popup, theme.colors.background.to_ratatui(), theme.colors.border.to_ratatui());
+    let inner = render_popup_frame(
+        f,
+        popup,
+        theme.colors.background.to_ratatui(),
+        theme.colors.border.to_ratatui(),
+    );
 
-    render_title(f, inner, 0, " Resume session", theme.colors.primary.to_ratatui(), theme.colors.background.to_ratatui());
+    render_title(
+        f,
+        inner,
+        0,
+        " Resume session",
+        theme.colors.primary.to_ratatui(),
+        theme.colors.background.to_ratatui(),
+    );
     render_selectable_list(f, inner, 2, &items, selected, &styles, theme, None);
-    render_hint(f, inner, " Up/Down select  |  Enter resume  |  Esc cancel", styles.muted);
+    render_hint(
+        f,
+        inner,
+        " Up/Down select  |  Enter resume  |  Esc cancel",
+        styles.muted,
+    );
 }

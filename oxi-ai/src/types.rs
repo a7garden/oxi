@@ -185,8 +185,7 @@ impl Usage {
         output_cost_per_million: Option<f64>,
     ) {
         self.total_tokens = self.input + self.output + self.cache_read + self.cache_write;
-        self.cost.input =
-            input_cost_per_million.unwrap_or(1.0) * self.input as f64 / 1_000_000.0;
+        self.cost.input = input_cost_per_million.unwrap_or(1.0) * self.input as f64 / 1_000_000.0;
         self.cost.output =
             output_cost_per_million.unwrap_or(1.0) * self.output as f64 / 1_000_000.0;
         self.cost.cache_read = (self.cache_read as f64) / 1_000_000.0;
@@ -449,9 +448,18 @@ mod tests {
         assert_eq!(Api::AnthropicMessages.to_string(), "anthropic-messages");
         assert_eq!(Api::GoogleGenerativeAi.to_string(), "google-generative-ai");
         assert_eq!(Api::GoogleVertex.to_string(), "google-vertex");
-        assert_eq!(Api::MistralConversations.to_string(), "mistral-conversations");
-        assert_eq!(Api::AzureOpenAiResponses.to_string(), "azure-openai-responses");
-        assert_eq!(Api::BedrockConverseStream.to_string(), "bedrock-converse-stream");
+        assert_eq!(
+            Api::MistralConversations.to_string(),
+            "mistral-conversations"
+        );
+        assert_eq!(
+            Api::AzureOpenAiResponses.to_string(),
+            "azure-openai-responses"
+        );
+        assert_eq!(
+            Api::BedrockConverseStream.to_string(),
+            "bedrock-converse-stream"
+        );
     }
 
     #[test]
@@ -489,8 +497,14 @@ mod tests {
         // Verify default
         assert_eq!(ThinkingLevel::default(), ThinkingLevel::Off);
         // Verify rename values
-        assert_eq!(serde_json::to_string(&ThinkingLevel::High).unwrap(), "\"high\"");
-        assert_eq!(serde_json::to_string(&ThinkingLevel::Off).unwrap(), "\"off\"");
+        assert_eq!(
+            serde_json::to_string(&ThinkingLevel::High).unwrap(),
+            "\"high\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ThinkingLevel::Off).unwrap(),
+            "\"off\""
+        );
         // as_str
         assert!(ThinkingLevel::Off.as_str().is_none());
         assert_eq!(ThinkingLevel::High.as_str(), Some("high"));

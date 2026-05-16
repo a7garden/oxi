@@ -4,7 +4,6 @@
 /// The core retry loop (exponential back-off, rate-limit detection) is
 /// identical between the two agent implementations. This module factors
 /// that logic into a single place so it can be tested once and reused.
-
 use crate::error::AgentError;
 use oxi_ai::{Context, Model, ProviderEvent, StreamOptions};
 use std::time::Duration;
@@ -20,13 +19,7 @@ pub const BACKOFF_BASE_SECS: u64 = 2;
 /// The implementer can use this to emit events or log the retry.
 pub trait RetryCallback: Send {
     /// Called before sleeping for `delay_secs`.
-    fn on_retry(
-        &self,
-        attempt: usize,
-        max_retries: usize,
-        delay_secs: u64,
-        reason: String,
-    );
+    fn on_retry(&self, attempt: usize, max_retries: usize, delay_secs: u64, reason: String);
 }
 
 /// Attempt to open a streaming connection to the provider with retry and

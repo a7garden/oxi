@@ -123,7 +123,8 @@ impl McpManager {
         let servers = &config.mcp_servers;
 
         if servers.is_empty() {
-            return "MCP: No servers configured. Create ~/.config/oxi/mcp.json or .mcp.json".to_string();
+            return "MCP: No servers configured. Create ~/.config/oxi/mcp.json or .mcp.json"
+                .to_string();
         }
 
         let mut text = String::new();
@@ -133,11 +134,7 @@ impl McpManager {
         for name in servers.keys() {
             let (status_marker, tool_count) = if inner.clients.contains_key(name) {
                 connected_count += 1;
-                let count = inner
-                    .tool_metadata
-                    .get(name)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                let count = inner.tool_metadata.get(name).map(|m| m.len()).unwrap_or(0);
                 total_tools += count;
                 ("✓", count)
             } else if let Some(failed_at) = inner.failure_tracker.get(name) {
@@ -148,16 +145,15 @@ impl McpManager {
                     ("○", 0)
                 }
             } else {
-                let count = inner
-                    .tool_metadata
-                    .get(name)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                let count = inner.tool_metadata.get(name).map(|m| m.len()).unwrap_or(0);
                 total_tools += count;
                 ("○", count)
             };
 
-            text.push_str(&format!("{} {} ({} tools)\n", status_marker, name, tool_count));
+            text.push_str(&format!(
+                "{} {} ({} tools)\n",
+                status_marker, name, tool_count
+            ));
         }
 
         format!(
@@ -180,10 +176,9 @@ impl McpManager {
                 .get(server_name)
                 .ok_or_else(|| anyhow::anyhow!("Server '{}' not found", server_name))?;
 
-            let command = entry
-                .command
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("Server '{}' has no command configured", server_name))?;
+            let command = entry.command.clone().ok_or_else(|| {
+                anyhow::anyhow!("Server '{}' has no command configured", server_name)
+            })?;
             let args = entry.args.clone().unwrap_or_default();
             let env = entry.env.clone().unwrap_or_default();
             let cwd = entry.cwd.clone();
@@ -191,15 +186,9 @@ impl McpManager {
             (command, args, env, cwd, debug)
         };
 
-        let mut client = McpClient::connect(
-            &command,
-            &args,
-            &env,
-            cwd.as_deref(),
-            debug,
-        )
-        .await
-        .with_context(|| format!("Failed to connect to MCP server '{}'", server_name))?;
+        let mut client = McpClient::connect(&command, &args, &env, cwd.as_deref(), debug)
+            .await
+            .with_context(|| format!("Failed to connect to MCP server '{}'", server_name))?;
 
         // Discover tools
         let tools = client.list_tools().await.unwrap_or_default();
@@ -226,7 +215,10 @@ impl McpManager {
         inner.failure_tracker.remove(server_name);
 
         if tool_names.is_empty() {
-            Ok(format!("Connected to '{}' — no tools available.", server_name))
+            Ok(format!(
+                "Connected to '{}' — no tools available.",
+                server_name
+            ))
         } else {
             Ok(format!(
                 "Connected to '{}' ({} tools):\n\n{}",
@@ -316,10 +308,7 @@ impl McpManager {
         text.push_str(&format!("\n{}\n", tool_meta.description));
 
         if let Some(ref schema) = tool_meta.input_schema {
-            text.push_str(&format!(
-                "\nParameters:\n{}",
-                format_schema(schema, "  ")
-            ));
+            text.push_str(&format!("\nParameters:\n{}", format_schema(schema, "  ")));
         } else {
             text.push_str("\nNo parameters defined.");
         }
@@ -335,17 +324,13 @@ impl McpManager {
         server_filter: Option<&str>,
     ) -> Result<String> {
         let pattern = if regex {
-            regex::Regex::new(query)
-                .with_context(|| format!("Invalid regex: {}", query))?
+            regex::Regex::new(query).with_context(|| format!("Invalid regex: {}", query))?
         } else {
             let terms: Vec<&str> = query.split_whitespace().collect();
             if terms.is_empty() {
                 return Ok("Search query cannot be empty".to_string());
             }
-            let escaped: Vec<String> = terms
-                .iter()
-                .map(|t| regex::escape(t))
-                .collect();
+            let escaped: Vec<String> = terms.iter().map(|t| regex::escape(t)).collect();
             regex::Regex::new(&format!("(?i){}", escaped.join("|")))
                 .context("Invalid search pattern")?
         };
@@ -478,10 +463,7 @@ impl McpManager {
                         return Ok((server_name.to_string(), tool.clone()));
                     }
                     // Original (un-prefixed) name match
-                    if let Some(tool) = metadata
-                        .iter()
-                        .find(|t| t.original_name == tool_name)
-                    {
+                    if let Some(tool) = metadata.iter().find(|t| t.original_name == tool_name) {
                         return Ok((server_name.to_string(), tool.clone()));
                     }
                 }
@@ -494,7 +476,9 @@ impl McpManager {
         // Collect candidates while holding the config lock
         let candidates: Vec<String> = {
             let config = self.config.read();
-            config.mcp_servers.keys()
+            config
+                .mcp_servers
+                .keys()
                 .filter(|server_name: &&String| {
                     if let Some(server) = server_override {
                         server_name.as_str() == server

@@ -5,49 +5,44 @@
 //! use oxi_sdk::{OxiBuilder, AgentConfig};
 //!
 //! let oxi = OxiBuilder::new().with_builtins().build();
-//! let agent = oxi.agent(AgentConfig { 
-//!     model_id: "anthropic/claude-sonnet-4-20250514".into(), 
+//! let agent = oxi.agent(AgentConfig {
+//!     model_id: "anthropic/claude-sonnet-4-20250514".into(),
 //!     max_iterations: 20,
-//!     ..Default::default() 
+//!     ..Default::default()
 //! }).build().unwrap();
 //! ```
 
-pub mod builder;
 pub mod agent_builder;
-pub mod closure_tool;
-pub mod tool_factory;
-pub mod kernel_bridge;
 pub mod agent_group;
+pub mod builder;
+pub mod closure_tool;
+pub mod kernel_bridge;
 pub mod message_bus;
 pub mod metrics;
 pub mod prelude;
+pub mod tool_factory;
 
 // Re-export core SDK types
-pub use builder::{Oxi, OxiBuilder};
 pub use agent_builder::AgentBuilder;
+pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
+pub use builder::{Oxi, OxiBuilder};
 pub use closure_tool::ClosureTool;
-pub use kernel_bridge::{KernelToolProvider, KernelToolContext};
-pub use agent_group::{AgentGroup, GroupStrategy, GroupResult, AgentGroupOutput};
-pub use message_bus::{MessageBus, InterAgentMessage};
+pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
+pub use message_bus::{InterAgentMessage, MessageBus};
 pub use metrics::{AgentMetrics, MetricsSnapshot};
 
 // Re-export from oxi-ai
-pub use oxi_ai::{
-    Provider, ProviderRegistry, Model, ModelRegistry, Context, Message, ContentBlock,
-    ProviderEvent, StreamOptions, CompactionStrategy,
-    ProviderError, Api, Cost, InputModality,
-};
 pub use oxi_ai::provider_pool::{ProviderPool, RateLimitPolicy};
+pub use oxi_ai::{
+    Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, Model,
+    ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderRegistry, StreamOptions,
+};
 
-// Re-export from oxi-agent  
+// Re-export from oxi-agent
 pub use oxi_agent::{
-    Agent, AgentLoop, AgentLoopConfig, AgentConfig,
-    AgentEvent, AgentState, SharedState,
-    ToolRegistry, AgentTool, AgentToolResult, ToolError,
-    ToolContext,
-    AgentHooks, ToolExecutionMode, AgentError,
-    ProviderResolver,
-    StructuredOutput, OutputMode, StructuredOutputError,
+    Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
+    AgentTool, AgentToolResult, OutputMode, ProviderResolver, SharedState, StructuredOutput,
+    StructuredOutputError, ToolContext, ToolError, ToolExecutionMode, ToolRegistry,
 };
 
 #[cfg(test)]
@@ -57,21 +52,31 @@ mod tests {
 
     /// Helper to build a minimal Model for tests.
     fn test_model(id: &str, provider: &str) -> Model {
-        Model::new(id, id, Api::AnthropicMessages, provider, "https://api.example.com")
+        Model::new(
+            id,
+            id,
+            Api::AnthropicMessages,
+            provider,
+            "https://api.example.com",
+        )
     }
 
     #[test]
     fn test_oxi_builder_new() {
         let oxi = OxiBuilder::new().build();
         // Empty registry — no models
-        assert!(oxi.resolve_model("anthropic/claude-sonnet-4-20250514").is_err());
+        assert!(oxi
+            .resolve_model("anthropic/claude-sonnet-4-20250514")
+            .is_err());
     }
 
     #[test]
     fn test_oxi_builder_with_builtins() {
         let oxi = OxiBuilder::new().with_builtins().build();
         // Should have built-in models
-        assert!(oxi.resolve_model("anthropic/claude-sonnet-4-20250514").is_ok());
+        assert!(oxi
+            .resolve_model("anthropic/claude-sonnet-4-20250514")
+            .is_ok());
         assert!(oxi.resolve_model("openai/gpt-4o").is_ok());
     }
 
@@ -102,9 +107,7 @@ mod tests {
             ..Default::default()
         };
         // AgentBuilder with workspace — should not panic
-        let result = oxi.agent(config)
-            .workspace("/tmp/test-workspace")
-            .build();
+        let result = oxi.agent(config).workspace("/tmp/test-workspace").build();
         assert!(result.is_ok() || result.is_err());
     }
 
@@ -117,10 +120,7 @@ mod tests {
             timeout_seconds: 30,
             ..Default::default()
         };
-        let result = oxi.agent(config)
-            .workspace("/tmp")
-            .coding_tools()
-            .build();
+        let result = oxi.agent(config).workspace("/tmp").coding_tools().build();
         if let Ok(agent) = result {
             let tool_names = agent.tools().names();
             assert!(tool_names.contains(&"read".to_string()));
@@ -139,10 +139,7 @@ mod tests {
             timeout_seconds: 30,
             ..Default::default()
         };
-        let result = oxi.agent(config)
-            .workspace("/tmp")
-            .readonly_tools()
-            .build();
+        let result = oxi.agent(config).workspace("/tmp").readonly_tools().build();
         if let Ok(agent) = result {
             let tool_names = agent.tools().names();
             assert!(tool_names.contains(&"read".to_string()));
@@ -196,7 +193,9 @@ mod tests {
         let resolver: &dyn ProviderResolver = &oxi;
         assert!(resolver.resolve_provider("anthropic").is_some());
         assert!(resolver.resolve_provider("nonexistent").is_none());
-        assert!(resolver.resolve_model("anthropic/claude-sonnet-4-20250514").is_some());
+        assert!(resolver
+            .resolve_model("anthropic/claude-sonnet-4-20250514")
+            .is_some());
         assert!(resolver.resolve_model("nonexistent/model").is_none());
     }
 
@@ -224,7 +223,9 @@ mod tests {
     fn test_oxi_builder_without_builtins() {
         let oxi = OxiBuilder::new().build();
         // No models, no providers
-        assert!(oxi.resolve_model("anthropic/claude-sonnet-4-20250514").is_err());
+        assert!(oxi
+            .resolve_model("anthropic/claude-sonnet-4-20250514")
+            .is_err());
         assert!(oxi.create_provider("anthropic").is_err());
         assert!(!oxi.has_builtins());
     }
@@ -262,9 +263,14 @@ mod tests {
         assert_eq!(tool.description(), "A test tool");
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(
-            tool.execute("call_1", serde_json::json!({"input": "hello"}), None, &ToolContext::default())
-        ).unwrap();
+        let result = rt
+            .block_on(tool.execute(
+                "call_1",
+                serde_json::json!({"input": "hello"}),
+                None,
+                &ToolContext::default(),
+            ))
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("processed: hello"));
     }
@@ -278,14 +284,18 @@ mod tests {
             timeout_seconds: 30,
             ..Default::default()
         };
-        let result = oxi.agent(config)
+        let result = oxi
+            .agent(config)
             .workspace("/tmp")
             .custom_tool(
                 "my_tool",
                 "My custom tool",
                 serde_json::json!({"type": "object", "properties": {"query": {"type": "string"}}}),
                 |params, _ctx| {
-                    Ok(AgentToolResult::success(format!("result: {}", params["query"])))
+                    Ok(AgentToolResult::success(format!(
+                        "result: {}",
+                        params["query"]
+                    )))
                 },
             )
             .build();
@@ -308,7 +318,9 @@ mod tests {
 
         // Cross-contamination check
         assert!(oxi2.resolve_model("p1/unique-alpha").is_err());
-        assert!(oxi1.resolve_model("anthropic/claude-sonnet-4-20250514").is_err());
+        assert!(oxi1
+            .resolve_model("anthropic/claude-sonnet-4-20250514")
+            .is_err());
 
         // Provider isolation: oxi1 can't create anthropic (no builtins)
         assert!(oxi1.create_provider("anthropic").is_err());
@@ -325,7 +337,8 @@ mod tests {
             timeout_seconds: 5,
             ..Default::default()
         };
-        let agent = oxi.agent(config)
+        let agent = oxi
+            .agent(config)
             .workspace("/tmp")
             .system_prompt("You are a test agent.")
             .build()

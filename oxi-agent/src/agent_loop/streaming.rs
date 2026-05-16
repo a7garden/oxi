@@ -5,12 +5,10 @@
 /// Done carries the complete accumulated message.
 ///
 /// This module simply forwards events to the agent loop emit function.
-
 use anyhow::{Error, Result};
 use futures::StreamExt;
 use oxi_ai::{
-    ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions,
-    Tool as OxTool,
+    ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions, Tool as OxTool,
 };
 use std::collections::HashSet;
 
@@ -36,9 +34,8 @@ pub(crate) async fn stream_assistant_response(
     if !tool_defs.is_empty() {
         let mut oxi_tools = Vec::with_capacity(tool_defs.len());
         for def in &tool_defs {
-            let schema = serde_json::to_value(&def.input_schema).unwrap_or_else(|_| {
-                serde_json::json!({"type": "object", "properties": {}})
-            });
+            let schema = serde_json::to_value(&def.input_schema)
+                .unwrap_or_else(|_| serde_json::json!({"type": "object", "properties": {}}));
             oxi_tools.push(OxTool::new(&def.name, &def.description, schema));
         }
         context.set_tools(oxi_tools);
@@ -51,7 +48,9 @@ pub(crate) async fn stream_assistant_response(
         ..Default::default()
     };
 
-    let stream = super::retry::stream_with_retry(loop_ref, &model, &context, Some(stream_options), emit).await?;
+    let stream =
+        super::retry::stream_with_retry(loop_ref, &model, &context, Some(stream_options), emit)
+            .await?;
 
     // pi-mono pattern: track whether we've emitted MessageStart.
     // Start event initializes the stream. Subsequent deltas carry
@@ -150,7 +149,11 @@ pub(crate) async fn stream_assistant_response(
             }
 
             ProviderEvent::Done { message, .. } => {
-                tracing::info!("Stream event #{}: Done (stop_reason={:?})", event_count, message.stop_reason);
+                tracing::info!(
+                    "Stream event #{}: Done (stop_reason={:?})",
+                    event_count,
+                    message.stop_reason
+                );
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {

@@ -8,36 +8,36 @@ use crate::messages::AssistantMessage;
 /// Regex-like patterns to detect context overflow errors from different providers.
 /// Each entry is a substring pattern that indicates an overflow error.
 const OVERFLOW_PATTERNS: &[&str] = &[
-    "prompt is too long",              // Anthropic token overflow
-    "request_too_large",               // Anthropic request byte-size overflow (HTTP 413)
+    "prompt is too long",                    // Anthropic token overflow
+    "request_too_large",                     // Anthropic request byte-size overflow (HTTP 413)
     "input is too long for requested model", // Amazon Bedrock
-    "exceeds the context window",      // OpenAI (Completions & Responses API)
-    "exceeds the maximum number of tokens", // Google (Gemini)
-    "maximum prompt length",           // xAI (Grok)
-    "reduce the length of the messages", // Groq
-    "maximum context length",          // OpenRouter (all backends)
-    "exceeds the limit of",            // GitHub Copilot
-    "exceeds the available context size", // llama.cpp server
-    "greater than the context length", // LM Studio
-    "context window exceeds limit",    // MiniMax
-    "exceeded model token limit",      // Kimi For Coding
-    "too large for model with",        // Mistral
-    "model_context_window_exceeded",   // z.ai non-standard finish_reason
-    "prompt too long",                 // Ollama explicit overflow error
-    "context_length_exceeded",         // Generic (LiteLLM, etc.)
-    "context length exceeded",         // Generic fallback
-    "too many tokens",                 // Generic fallback
-    "token limit exceeded",            // Generic fallback
+    "exceeds the context window",            // OpenAI (Completions & Responses API)
+    "exceeds the maximum number of tokens",  // Google (Gemini)
+    "maximum prompt length",                 // xAI (Grok)
+    "reduce the length of the messages",     // Groq
+    "maximum context length",                // OpenRouter (all backends)
+    "exceeds the limit of",                  // GitHub Copilot
+    "exceeds the available context size",    // llama.cpp server
+    "greater than the context length",       // LM Studio
+    "context window exceeds limit",          // MiniMax
+    "exceeded model token limit",            // Kimi For Coding
+    "too large for model with",              // Mistral
+    "model_context_window_exceeded",         // z.ai non-standard finish_reason
+    "prompt too long",                       // Ollama explicit overflow error
+    "context_length_exceeded",               // Generic (LiteLLM, etc.)
+    "context length exceeded",               // Generic fallback
+    "too many tokens",                       // Generic fallback
+    "token limit exceeded",                  // Generic fallback
 ];
 
 /// Patterns that indicate non-overflow errors (e.g., rate limiting, server errors).
 /// Error messages matching any of these are excluded from overflow detection
 /// even if they also match an OVERFLOW_PATTERN.
 const NON_OVERFLOW_PATTERNS: &[&str] = &[
-    "Throttling error:",  // AWS Bedrock non-overflow
+    "Throttling error:",    // AWS Bedrock non-overflow
     "Service unavailable:", // AWS Bedrock non-overflow
-    "rate limit",         // Generic rate limiting
-    "too many requests",  // Generic HTTP 429 style
+    "rate limit",           // Generic rate limiting
+    "too many requests",    // Generic HTTP 429 style
 ];
 
 /// Check if an assistant message represents a context overflow error.
@@ -77,10 +77,10 @@ pub fn is_context_overflow(message: &AssistantMessage, context_window: Option<us
             }
 
             // Special case: Cerebras returns "400 status code (no body)" or "413 status code (no body)"
-            if error_msg.contains("400") || error_msg.contains("413") {
-                if error_msg.contains("no body") || error_msg.trim().len() < 50 {
-                    return true;
-                }
+            if (error_msg.contains("400") || error_msg.contains("413"))
+                && (error_msg.contains("no body") || error_msg.trim().len() < 50)
+            {
+                return true;
             }
         }
     }
@@ -117,22 +117,16 @@ mod tests {
     use crate::types::{Cost, StopReason, Usage};
 
     fn make_error_message(error: &str) -> AssistantMessage {
-        let mut msg = AssistantMessage::new(
-            crate::types::Api::OpenAiCompletions,
-            "test",
-            "test-model",
-        );
+        let mut msg =
+            AssistantMessage::new(crate::types::Api::OpenAiCompletions, "test", "test-model");
         msg.stop_reason = StopReason::Error;
         msg.error_message = Some(error.to_string());
         msg
     }
 
     fn make_success_message(input: usize, output: usize) -> AssistantMessage {
-        let mut msg = AssistantMessage::new(
-            crate::types::Api::OpenAiCompletions,
-            "test",
-            "test-model",
-        );
+        let mut msg =
+            AssistantMessage::new(crate::types::Api::OpenAiCompletions, "test", "test-model");
         msg.stop_reason = StopReason::Stop;
         msg.usage = Usage {
             input,
@@ -146,11 +140,8 @@ mod tests {
     }
 
     fn make_length_message(input: usize, output: usize) -> AssistantMessage {
-        let mut msg = AssistantMessage::new(
-            crate::types::Api::OpenAiCompletions,
-            "test",
-            "test-model",
-        );
+        let mut msg =
+            AssistantMessage::new(crate::types::Api::OpenAiCompletions, "test", "test-model");
         msg.stop_reason = StopReason::Length;
         msg.usage = Usage {
             input,
@@ -189,7 +180,9 @@ mod tests {
 
     #[test]
     fn test_xai_overflow() {
-        let msg = make_error_message("This model's maximum prompt length is 131072 but the request contains 537812 tokens");
+        let msg = make_error_message(
+            "This model's maximum prompt length is 131072 but the request contains 537812 tokens",
+        );
         assert!(is_context_overflow(&msg, None));
     }
 
@@ -201,7 +194,9 @@ mod tests {
 
     #[test]
     fn test_mistral_overflow() {
-        let msg = make_error_message("Prompt contains X tokens ... too large for model with Y maximum context length");
+        let msg = make_error_message(
+            "Prompt contains X tokens ... too large for model with Y maximum context length",
+        );
         assert!(is_context_overflow(&msg, None));
     }
 
@@ -269,7 +264,8 @@ mod tests {
 
     #[test]
     fn test_llamacpp_overflow() {
-        let msg = make_error_message("the request exceeds the available context size, try increasing it");
+        let msg =
+            make_error_message("the request exceeds the available context size, try increasing it");
         assert!(is_context_overflow(&msg, None));
     }
 
@@ -281,7 +277,9 @@ mod tests {
 
     #[test]
     fn test_kimi_overflow() {
-        let msg = make_error_message("Your request exceeded model token limit: 128000 (requested: 200000)");
+        let msg = make_error_message(
+            "Your request exceeded model token limit: 128000 (requested: 200000)",
+        );
         assert!(is_context_overflow(&msg, None));
     }
 

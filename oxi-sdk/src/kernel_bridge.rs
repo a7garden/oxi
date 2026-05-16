@@ -3,8 +3,8 @@
 //! oxios-kernel implements `KernelToolProvider` to register its tools
 //! (exec, memory, browser, persona, etc.) into the SDK's agent builder.
 
+use oxi_agent::ToolRegistry;
 use std::path::PathBuf;
-use oxi_agent::{ToolRegistry};
 
 /// Context provided to kernel tool providers during registration.
 ///
@@ -84,8 +84,8 @@ pub trait KernelToolProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxi_agent::{AgentTool, AgentToolResult, ToolContext, ToolError};
     use async_trait::async_trait;
+    use oxi_agent::{AgentTool, AgentToolResult, ToolContext, ToolError};
     use serde_json::Value;
 
     struct MockKernelTool {
@@ -94,9 +94,15 @@ mod tests {
 
     #[async_trait]
     impl AgentTool for MockKernelTool {
-        fn name(&self) -> &str { &self.name }
-        fn label(&self) -> &str { "mock" }
-        fn description(&self) -> &str { "A mock kernel tool" }
+        fn name(&self) -> &str {
+            &self.name
+        }
+        fn label(&self) -> &str {
+            "mock"
+        }
+        fn description(&self) -> &str {
+            "A mock kernel tool"
+        }
         fn parameters_schema(&self) -> Value {
             serde_json::json!({"type": "object", "properties": {}})
         }

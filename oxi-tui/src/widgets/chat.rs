@@ -22,13 +22,13 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
-use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 use tui_markdown;
+use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 
 use crate::table_renderer::render_markdown_table;
-use crate::Theme;
-use crate::theme::ThemeStyles;
 use crate::text::truncate_to_width as truncate_str;
+use crate::theme::ThemeStyles;
+use crate::Theme;
 
 // ── Limits (truncation at ingest) ──────────────────────────────────────
 
@@ -44,10 +44,7 @@ fn clamp_str(s: String, max_chars: usize, max_lines: usize) -> String {
     if n <= max_chars && lines <= max_lines {
         return s;
     }
-    let truncated: String = s
-        .chars()
-        .take(max_chars)
-        .collect();
+    let truncated: String = s.chars().take(max_chars).collect();
     let truncated_lines: Vec<&str> = truncated.lines().take(max_lines).collect();
     let mut result = truncated_lines.join("\n");
     // Add overflow marker if we cut anything
@@ -66,14 +63,24 @@ struct ToolCallTracker {
 
 impl ToolCallTracker {
     fn register(&mut self, id: String, index: usize) -> bool {
-        if self.active.contains_key(&id) { return false; }
+        if self.active.contains_key(&id) {
+            return false;
+        }
         self.active.insert(id, index);
         true
     }
-    fn find_and_remove(&mut self, id: &str) -> Option<usize> { self.active.remove(id) }
-    fn remove(&mut self, id: &str) { self.active.remove(id); }
-    fn get(&self, id: &str) -> Option<usize> { self.active.get(id).copied() }
-    fn clear(&mut self) { self.active.clear(); }
+    fn find_and_remove(&mut self, id: &str) -> Option<usize> {
+        self.active.remove(id)
+    }
+    fn remove(&mut self, id: &str) {
+        self.active.remove(id);
+    }
+    fn get(&self, id: &str) -> Option<usize> {
+        self.active.get(id).copied()
+    }
+    fn clear(&mut self) {
+        self.active.clear();
+    }
 }
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -94,8 +101,13 @@ pub enum MessageRole {
 
 #[derive(Debug, Clone)]
 pub enum ContentBlock {
-    Text { content: String },
-    Thinking { content: String, collapsed: bool },
+    Text {
+        content: String,
+    },
+    Thinking {
+        content: String,
+        collapsed: bool,
+    },
     ToolCall {
         id: String,
         name: String,
@@ -103,9 +115,20 @@ pub enum ContentBlock {
         result: Option<(String, bool)>,
         status: ToolCallStatus,
     },
-    ToolResult { tool_name: String, content: String, is_error: bool },
-    Error { title: String, message: String, retryable: bool },
-    Image { mime_type: String, base64_data: String },
+    ToolResult {
+        tool_name: String,
+        content: String,
+        is_error: bool,
+    },
+    Error {
+        title: String,
+        message: String,
+        retryable: bool,
+    },
+    Image {
+        mime_type: String,
+        base64_data: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +153,7 @@ pub struct StreamingState {
 //
 // Uses parking_lot::RwLock so multiple readers can access concurrently.
 
+#[derive(Default)]
 struct LayoutCache {
     /// Last known messages count
     msg_count: usize,
@@ -161,20 +185,6 @@ impl std::fmt::Debug for LayoutCache {
     }
 }
 
-impl Default for LayoutCache {
-    fn default() -> Self {
-        Self {
-            msg_count: 0,
-            streaming_len: 0,
-            streaming_text_len: 0,
-            spinner_frame: 0,
-            width: 0,
-            entries: None,
-            total_height: 0,
-        }
-    }
-}
-
 // ── ChatViewState ──────────────────────────────────────────────────────
 
 #[derive(Debug, Default)]
@@ -193,16 +203,22 @@ pub struct ChatViewState {
 }
 
 impl ChatViewState {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn scroll_to_bottom(&mut self, _visible: u16) {
         self.scroll_state.scroll_to_bottom();
     }
     pub fn scroll_up(&mut self, n: u16) {
-        for _ in 0..n { self.scroll_state.scroll_up(); }
+        for _ in 0..n {
+            self.scroll_state.scroll_up();
+        }
     }
     pub fn scroll_down(&mut self, n: u16) {
-        for _ in 0..n { self.scroll_state.scroll_down(); }
+        for _ in 0..n {
+            self.scroll_state.scroll_down();
+        }
     }
     pub fn scroll_to_top(&mut self) {
         self.scroll_state.scroll_to_top();
@@ -238,7 +254,9 @@ impl ChatViewState {
             // from providers around tool calls", but the proper fix is to
             // handle that at the provider layer, not at the TUI layer.
 
-            if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
+            if let Some(ContentBlock::Text { ref mut content }) =
+                s.message.content_blocks.first_mut()
+            {
                 // Clamp total text size to prevent unbounded growth
                 if content.chars().count() > MAX_TEXT_CHARS {
                     return;
@@ -259,12 +277,16 @@ impl ChatViewState {
                 } else {
                     text.to_string()
                 };
-                s.message.content_blocks.insert(0, ContentBlock::Text { content: truncated });
+                s.message
+                    .content_blocks
+                    .insert(0, ContentBlock::Text { content: truncated });
             }
         }
     }
 
-    pub fn is_streaming(&self) -> bool { self.streaming.is_some() }
+    pub fn is_streaming(&self) -> bool {
+        self.streaming.is_some()
+    }
 
     fn update_last_code_block(&mut self) {
         if let Some(ref s) = self.streaming {
@@ -289,17 +311,25 @@ impl ChatViewState {
     pub fn set_tool_status(&mut self, id: &str, status: ToolCallStatus) {
         if let Some(ref mut s) = self.streaming {
             if let Some(idx) = self.tool_tracker.get(id) {
-                if let Some(block) = s.message.content_blocks.get_mut(idx) {
-                    if let ContentBlock::ToolCall { status: ref mut curr, .. } = block {
-                        *curr = status;
-                    }
+                if let Some(ContentBlock::ToolCall {
+                    status: ref mut curr,
+                    ..
+                }) = s.message.content_blocks.get_mut(idx)
+                {
+                    *curr = status;
                 }
                 self.layout_cache.write().entries = None;
             }
         }
     }
 
-    pub fn stream_tool_call(&mut self, id: String, name: String, arguments: String, status: ToolCallStatus) {
+    pub fn stream_tool_call(
+        &mut self,
+        id: String,
+        name: String,
+        arguments: String,
+        status: ToolCallStatus,
+    ) {
         // If streaming has already finished (e.g., MessageEnd came before
         // ToolExecutionStart), start a new streaming message so the tool
         // call block is visible in the UI.
@@ -310,16 +340,19 @@ impl ChatViewState {
             // Check if this tool call was already registered (e.g., from
             // a prior MessageUpdate that included ToolCall blocks).
             if let Some(existing_idx) = self.tool_tracker.get(&id) {
-                if let Some(block) = s.message.content_blocks.get_mut(existing_idx) {
-                    if let ContentBlock::ToolCall { status: ref mut s, .. } = block {
-                        *s = status;
-                    }
+                if let Some(ContentBlock::ToolCall {
+                    status: ref mut s, ..
+                }) = s.message.content_blocks.get_mut(existing_idx)
+                {
+                    *s = status;
                 }
                 self.layout_cache.write().entries = None;
                 return;
             }
             let idx = s.message.content_blocks.len();
-            if !self.tool_tracker.register(id.clone(), idx) { return; }
+            if !self.tool_tracker.register(id.clone(), idx) {
+                return;
+            }
             s.message.content_blocks.push(ContentBlock::ToolCall {
                 id,
                 name,
@@ -331,37 +364,51 @@ impl ChatViewState {
         }
     }
 
-    pub fn stream_tool_result(&mut self, tool_call_id: Option<String>, tool_name: String, content: String, is_error: bool) {
+    pub fn stream_tool_result(
+        &mut self,
+        tool_call_id: Option<String>,
+        tool_name: String,
+        content: String,
+        is_error: bool,
+    ) {
         if self.streaming.is_none() {
             self.start_streaming();
         }
         if let Some(ref mut s) = self.streaming {
             if let Some(ref id) = tool_call_id {
                 if let Some(idx) = self.tool_tracker.find_and_remove(id) {
-                    if let Some(block) = s.message.content_blocks.get_mut(idx) {
-                        if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = block {
-                            *result = Some((
-                                clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
-                                is_error,
-                            ));
-                            *status = ToolCallStatus::Done;
-                            self.layout_cache.write().entries = None;
-                            return;
-                        }
+                    if let Some(ContentBlock::ToolCall {
+                        ref mut result,
+                        ref mut status,
+                        ..
+                    }) = s.message.content_blocks.get_mut(idx)
+                    {
+                        *result = Some((
+                            clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
+                            is_error,
+                        ));
+                        *status = ToolCallStatus::Done;
+                        self.layout_cache.write().entries = None;
+                        return;
                     }
                 }
             }
-            if let Some(last) = s.message.content_blocks.last_mut() {
-                if let ContentBlock::ToolCall { ref mut result, ref mut status, .. } = last {
-                    *result = Some((
-                        clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
-                        is_error,
-                    ));
-                    *status = ToolCallStatus::Done;
-                    if let Some(ref id) = tool_call_id { self.tool_tracker.remove(id); }
-                    self.layout_cache.write().entries = None;
-                    return;
+            if let Some(ContentBlock::ToolCall {
+                ref mut result,
+                ref mut status,
+                ..
+            }) = s.message.content_blocks.last_mut()
+            {
+                *result = Some((
+                    clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
+                    is_error,
+                ));
+                *status = ToolCallStatus::Done;
+                if let Some(ref id) = tool_call_id {
+                    self.tool_tracker.remove(id);
                 }
+                self.layout_cache.write().entries = None;
+                return;
             }
             s.message.content_blocks.push(ContentBlock::ToolResult {
                 tool_name,
@@ -385,7 +432,10 @@ impl ChatViewState {
 
     pub fn stream_thinking(&mut self, content: String, collapsed: bool) {
         if let Some(ref mut s) = self.streaming {
-            if let Some(ContentBlock::Thinking { content: existing, .. }) = s.message.content_blocks.last_mut() {
+            if let Some(ContentBlock::Thinking {
+                content: existing, ..
+            }) = s.message.content_blocks.last_mut()
+            {
                 existing.push_str(&content);
                 *existing = clamp_str(existing.clone(), 50_000, 200);
             } else {
@@ -401,8 +451,12 @@ impl ChatViewState {
     pub fn stream_image(&mut self, mime_type: String, base64_data: String) {
         if let Some(ref mut s) = self.streaming {
             // Track for Ctrl+I viewer
-            self.pending_images.push((base64_data.clone(), mime_type.clone()));
-            s.message.content_blocks.push(ContentBlock::Image { mime_type, base64_data });
+            self.pending_images
+                .push((base64_data.clone(), mime_type.clone()));
+            s.message.content_blocks.push(ContentBlock::Image {
+                mime_type,
+                base64_data,
+            });
             self.layout_cache.write().entries = None;
         }
     }
@@ -472,8 +526,14 @@ impl ChatViewState {
     /// Get cached layout entries, recomputing if needed.
     fn get_layout(&self, width: u16) -> Vec<LayoutEntry> {
         let msg_count = self.messages.len();
-        let streaming_len = self.streaming.as_ref().map(|s| s.message.content_blocks.len()).unwrap_or(0);
-        let streaming_text_len = self.streaming.as_ref()
+        let streaming_len = self
+            .streaming
+            .as_ref()
+            .map(|s| s.message.content_blocks.len())
+            .unwrap_or(0);
+        let streaming_text_len = self
+            .streaming
+            .as_ref()
             .and_then(|s| s.message.content_blocks.first())
             .map(|b| match b {
                 ContentBlock::Text { content } => content.len(),
@@ -484,20 +544,24 @@ impl ChatViewState {
 
         {
             let cache = self.layout_cache.read();
-            if cache.entries.is_some()
-                && cache.msg_count == msg_count
+            if cache.msg_count == msg_count
                 && cache.streaming_len == streaming_len
                 && cache.streaming_text_len == streaming_text_len
                 && cache.spinner_frame == spinner
                 && cache.width == width
             {
-                return cache.entries.clone().unwrap(); // SAFE: is_some() checked above
+                if let Some(ref entries) = cache.entries {
+                    return entries.clone();
+                }
             }
         }
 
         // Recompute outside the read lock
         let entries = compute_layout(self, width);
-        let total_height = entries.last().map(|e| e.y.saturating_add(e.height)).unwrap_or(0);
+        let total_height = entries
+            .last()
+            .map(|e| e.y.saturating_add(e.height))
+            .unwrap_or(0);
 
         {
             let mut cache = self.layout_cache.write();
@@ -525,7 +589,9 @@ fn extract_last_code_block(text: &str) -> Option<String> {
         if trimmed.starts_with("```") {
             if in_block {
                 let c = block_content.trim().to_string();
-                if !c.is_empty() { result = Some(c); }
+                if !c.is_empty() {
+                    result = Some(c);
+                }
                 block_content.clear();
                 in_block = false;
             } else {
@@ -533,7 +599,9 @@ fn extract_last_code_block(text: &str) -> Option<String> {
                 in_block = true;
             }
         } else if in_block {
-            if !block_content.is_empty() { block_content.push('\n'); }
+            if !block_content.is_empty() {
+                block_content.push('\n');
+            }
             block_content.push_str(line);
         }
     }
@@ -554,8 +622,7 @@ fn fix_bare_code_fences(content: &str) -> String {
                 in_code = false;
             } else {
                 // Opening fence
-                let lang = &trimmed[3..];
-                let lang = lang.trim();
+                let lang = trimmed.strip_prefix("```").unwrap_or(trimmed).trim();
                 if lang.is_empty() {
                     result.push_str("```text");
                 } else {
@@ -593,21 +660,27 @@ fn md_lines(content: &str, width: u16) -> Vec<Line<'static>> {
 fn render_markdown(content: &str) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
     let text: ratatui::text::Text<'_> = tui_markdown::from_str(&preprocessed);
-    text.lines.into_iter().map(|l| {
-        let line_style = l.style;
-        let spans: Vec<Span<'static>> = l.spans
-            .into_iter()
-            .map(|s| Span::styled(s.content.into_owned(), line_style.patch(s.style)))
-            .collect();
-        Line::from(spans)
-    }).collect()
+    text.lines
+        .into_iter()
+        .map(|l| {
+            let line_style = l.style;
+            let spans: Vec<Span<'static>> = l
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.into_owned(), line_style.patch(s.style)))
+                .collect();
+            Line::from(spans)
+        })
+        .collect()
 }
 
 // ── Layout calculation ────────────────────────────────────────────────
 
 /// Measure wrapped height using ratatui's Paragraph::line_count.
 fn measure_wrapped_height(lines: &[Line<'_>], width: u16) -> u16 {
-    if width < 1 { return lines.len() as u16; }
+    if width < 1 {
+        return lines.len() as u16;
+    }
     let text: ratatui::text::Text = lines.iter().cloned().collect();
     let para = Paragraph::new(text).wrap(Wrap { trim: false });
     para.line_count(width) as u16
@@ -626,8 +699,14 @@ enum LayoutKind {
     Spacer,
     Rule,
     #[allow(dead_code)]
-    Label { text: String, style: Style },
-    Text { lines: Vec<Line<'static>>, is_user: bool },
+    Label {
+        text: String,
+        style: Style,
+    },
+    Text {
+        lines: Vec<Line<'static>>,
+        is_user: bool,
+    },
     ToolBox {
         name: String,
         arguments: String,
@@ -644,18 +723,27 @@ enum LayoutKind {
         message: String,
         retryable: bool,
     },
-    Thinking { content: String, collapsed: bool },
-    Image { mime_type: String, size_str: String },
-    Spinner { frame: usize },
+    Thinking {
+        content: String,
+        collapsed: bool,
+    },
+    Image {
+        mime_type: String,
+        size_str: String,
+    },
+    Spinner {
+        frame: usize,
+    },
 }
 
 /// Check if a content block renders as a bordered box (tool calls, errors).
 /// Consecutive box blocks need spacers between them for visual separation.
 fn is_box_block(block: &ContentBlock) -> bool {
-    matches!(block,
+    matches!(
+        block,
         ContentBlock::ToolCall { .. }
-        | ContentBlock::ToolResult { .. }
-        | ContentBlock::Error { .. }
+            | ContentBlock::ToolResult { .. }
+            | ContentBlock::Error { .. }
     )
 }
 
@@ -678,14 +766,22 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
 
         if rendered_any_message {
             // Gap between messages — use a spacer for breathing room
-            entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
+            entries.push(LayoutEntry {
+                y,
+                height: 1,
+                kind: LayoutKind::Spacer,
+            });
             y += 1;
         }
         rendered_any_message = true;
 
         // User messages: left accent border, no label needed (single-user context)
         if msg.role == MessageRole::User {
-            entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Rule });
+            entries.push(LayoutEntry {
+                y,
+                height: 1,
+                kind: LayoutKind::Rule,
+            });
             y += 1;
         }
         let mut prev_was_box = false;
@@ -703,7 +799,11 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             // Insert spacer between consecutive box-type blocks (tool calls, errors)
             let is_box = is_box_block(block);
             if is_box && prev_was_box {
-                entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
+                entries.push(LayoutEntry {
+                    y,
+                    height: 1,
+                    kind: LayoutKind::Spacer,
+                });
                 y += 1;
             }
             prev_was_box = is_box;
@@ -718,7 +818,11 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     if let Some(ref streaming) = state.streaming {
         // Only add a spacer if we actually rendered any history messages.
         if rendered_any_message {
-            entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
+            entries.push(LayoutEntry {
+                y,
+                height: 1,
+                kind: LayoutKind::Spacer,
+            });
             y += 1;
         }
         let mut prev_was_box = false;
@@ -736,7 +840,11 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             // Insert spacer between consecutive box-type blocks (tool calls, errors)
             let is_box = is_box_block(block);
             if is_box && prev_was_box {
-                entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spacer });
+                entries.push(LayoutEntry {
+                    y,
+                    height: 1,
+                    kind: LayoutKind::Spacer,
+                });
                 y += 1;
             }
             prev_was_box = is_box;
@@ -746,7 +854,13 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
-        entries.push(LayoutEntry { y, height: 1, kind: LayoutKind::Spinner { frame: state.spinner_frame } });
+        entries.push(LayoutEntry {
+            y,
+            height: 1,
+            kind: LayoutKind::Spinner {
+                frame: state.spinner_frame,
+            },
+        });
         _ = y;
     }
 
@@ -757,40 +871,95 @@ fn block_to_layout_kind(block: &ContentBlock, role: MessageRole, width: u16) -> 
     match block {
         ContentBlock::Text { content } => {
             let lines = md_lines(content, width);
-            LayoutKind::Text { lines, is_user: role == MessageRole::User }
+            LayoutKind::Text {
+                lines,
+                is_user: role == MessageRole::User,
+            }
         }
-        ContentBlock::Thinking { content, collapsed } =>
-            LayoutKind::Thinking { content: content.clone(), collapsed: *collapsed },
-        ContentBlock::ToolCall { name, arguments, result, status, .. } =>
-            LayoutKind::ToolBox { name: name.clone(), arguments: arguments.clone(), result: result.clone(), status: *status },
-        ContentBlock::ToolResult { tool_name, content, is_error } =>
-            LayoutKind::ToolResultBox { tool_name: tool_name.clone(), content: content.clone(), is_error: *is_error },
-        ContentBlock::Error { title, message, retryable } =>
-            LayoutKind::ErrorBox { title: title.clone(), message: message.clone(), retryable: *retryable },
-        ContentBlock::Image { mime_type, base64_data } => {
+        ContentBlock::Thinking { content, collapsed } => LayoutKind::Thinking {
+            content: content.clone(),
+            collapsed: *collapsed,
+        },
+        ContentBlock::ToolCall {
+            name,
+            arguments,
+            result,
+            status,
+            ..
+        } => LayoutKind::ToolBox {
+            name: name.clone(),
+            arguments: arguments.clone(),
+            result: result.clone(),
+            status: *status,
+        },
+        ContentBlock::ToolResult {
+            tool_name,
+            content,
+            is_error,
+        } => LayoutKind::ToolResultBox {
+            tool_name: tool_name.clone(),
+            content: content.clone(),
+            is_error: *is_error,
+        },
+        ContentBlock::Error {
+            title,
+            message,
+            retryable,
+        } => LayoutKind::ErrorBox {
+            title: title.clone(),
+            message: message.clone(),
+            retryable: *retryable,
+        },
+        ContentBlock::Image {
+            mime_type,
+            base64_data,
+        } => {
             let sz = base64_data.len() * 3 / 4;
-            let sz_str = if sz >= 1_048_576 { format!("{:.1} MB", sz as f64 / 1_048_576.0) }
-                else if sz >= 1024 { format!("{:.1} KB", sz as f64 / 1024.0) }
-                else { format!("{} B", sz) };
-            LayoutKind::Image { mime_type: mime_type.clone(), size_str: sz_str }
+            let sz_str = if sz >= 1_048_576 {
+                format!("{:.1} MB", sz as f64 / 1_048_576.0)
+            } else if sz >= 1024 {
+                format!("{:.1} KB", sz as f64 / 1024.0)
+            } else {
+                format!("{} B", sz)
+            };
+            LayoutKind::Image {
+                mime_type: mime_type.clone(),
+                size_str: sz_str,
+            }
         }
     }
 }
 
 fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
     match kind {
-        LayoutKind::Spacer | LayoutKind::Rule | LayoutKind::Label { .. } | LayoutKind::Spinner { .. } => 1,
+        LayoutKind::Spacer
+        | LayoutKind::Rule
+        | LayoutKind::Label { .. }
+        | LayoutKind::Spinner { .. } => 1,
         LayoutKind::Text { lines, is_user } => {
             // User text: Block::borders(LEFT) takes 1 col, so inner = width-1
             // Assistant text: no block, renders at full width
-            let w = if *is_user { width.saturating_sub(1) } else { width };
+            let w = if *is_user {
+                width.saturating_sub(1)
+            } else {
+                width
+            };
             measure_wrapped_height(lines, w)
         }
-        LayoutKind::ToolBox { name, arguments, result, .. } => {
+        LayoutKind::ToolBox {
+            name,
+            arguments,
+            result,
+            ..
+        } => {
             use crate::widgets::tool_renderer::{measure_call_height, measure_result_height};
             let call_h = measure_call_height(name, arguments);
             let result_h = result.as_ref().map_or(0, |(r, is_err)| {
-                if *is_err { r.lines().count().min(4) as u16 } else { measure_result_height(name, r, false) }
+                if *is_err {
+                    r.lines().count().min(4) as u16
+                } else {
+                    measure_result_height(name, r, false)
+                }
             });
             // Block::ALL adds top + bottom border (2 rows) + separator if result exists
             let separator_h = if result.is_some() { 1 } else { 0 };
@@ -801,7 +970,9 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             let n = content.lines().count().min(4);
             1 + n as u16 + if content.lines().count() > 4 { 1 } else { 0 }
         }
-        LayoutKind::ErrorBox { message, retryable, .. } => {
+        LayoutKind::ErrorBox {
+            message, retryable, ..
+        } => {
             // Block::bordered() adds top + bottom border (2 rows)
             let n = message.lines().count().min(4);
             2 + n as u16 + if *retryable { 1 } else { 0 }
@@ -810,9 +981,12 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             if *collapsed {
                 // Use filtered content for preview — matches render
                 let filtered = filter_tool_json(content);
-                1 + if filtered.lines().next().is_some() { 1 } else { 0 }
-            }
-            else {
+                1 + if filtered.lines().next().is_some() {
+                    1
+                } else {
+                    0
+                }
+            } else {
                 // Use filtered content for measurement to match rendering
                 let filtered = filter_tool_json(content);
                 let md = md_lines(&filtered, width);
@@ -832,7 +1006,9 @@ struct EntryWidget<'a> {
 }
 
 impl<'a> EntryWidget<'a> {
-    fn new(entry: &'a LayoutKind, styles: &'a ThemeStyles) -> Self { Self { entry, styles } }
+    fn new(entry: &'a LayoutKind, styles: &'a ThemeStyles) -> Self {
+        Self { entry, styles }
+    }
 }
 
 impl Widget for EntryWidget<'_> {
@@ -854,30 +1030,37 @@ impl Widget for EntryWidget<'_> {
                         .border_style(self.styles.user_border);
                     let inner = block.inner(rect);
                     block.render(rect, buf);
-                    Paragraph::new(text).wrap(Wrap { trim: false }).render(inner, buf);
+                    Paragraph::new(text)
+                        .wrap(Wrap { trim: false })
+                        .render(inner, buf);
                 } else {
                     // Don't set .style() here — markdown Spans already carry
                     // their own styling (bold, italic, code, headings).
                     // Paragraph::style() would override all per-Span styles.
-                    Paragraph::new(text).wrap(Wrap { trim: false }).render(rect, buf);
+                    Paragraph::new(text)
+                        .wrap(Wrap { trim: false })
+                        .render(rect, buf);
                 }
             }
-            LayoutKind::ToolBox { name, arguments, result, status } => {
-                use crate::widgets::tool_renderer::{
-                    format_tool_call, format_tool_result,
-                };
+            LayoutKind::ToolBox {
+                name,
+                arguments,
+                result,
+                status,
+            } => {
+                use crate::widgets::tool_renderer::{format_tool_call, format_tool_result};
 
                 let (icon, border_style) = match status {
                     ToolCallStatus::Requested => (
-                        "\u{25CB}",  // ○ (hollow circle — universal)
+                        "\u{25CB}", // ○ (hollow circle — universal)
                         self.styles.muted,
                     ),
                     ToolCallStatus::Executing => (
-                        "\u{25CF}",  // ● (filled circle — running)
+                        "\u{25CF}", // ● (filled circle — running)
                         self.styles.warning,
                     ),
                     ToolCallStatus::Done => {
-                        let is_error = result.as_ref().map_or(false, |(_, e)| *e);
+                        let is_error = result.as_ref().is_some_and(|(_, e)| *e);
                         if is_error {
                             ("\u{2718}", self.styles.error)
                         } else {
@@ -910,7 +1093,10 @@ impl Widget for EntryWidget<'_> {
                         let spans = line.spans.into_iter().collect::<Vec<_>>();
                         let mut new_spans = vec![Span::styled(format!("{} ", icon), icon_style)];
                         for span in spans {
-                            new_spans.push(Span::styled(span.content.clone(), span.style.patch(name_style)));
+                            new_spans.push(Span::styled(
+                                span.content.clone(),
+                                span.style.patch(name_style),
+                            ));
                         }
                         content_lines.push(Line::from(new_spans));
                     } else {
@@ -928,7 +1114,8 @@ impl Widget for EntryWidget<'_> {
 
                 // Format result using new renderer
                 if let Some((result_content, is_err)) = result {
-                    let result_lines = format_tool_result(name, result_content, *is_err, max_w, self.styles);
+                    let result_lines =
+                        format_tool_result(name, result_content, *is_err, max_w, self.styles);
                     content_lines.extend(result_lines);
                 }
 
@@ -936,14 +1123,21 @@ impl Widget for EntryWidget<'_> {
                 let para = Paragraph::new(text).wrap(Wrap { trim: false });
                 para.render(inner, buf);
             }
-            LayoutKind::ToolResultBox { tool_name, content, is_error } => {
+            LayoutKind::ToolResultBox {
+                tool_name,
+                content,
+                is_error,
+            } => {
                 let (icon, border_style) = if *is_error {
                     ("\u{2718}", self.styles.error)
                 } else {
                     ("\u{2713}", self.styles.success)
                 };
-                let label = if tool_name.is_empty() { icon.to_string() } else { format!("{} {}", icon, tool_name) };
-
+                let label = if tool_name.is_empty() {
+                    icon.to_string()
+                } else {
+                    format!("{} {}", icon, tool_name)
+                };
 
                 let block = Block::default()
                     .borders(Borders::LEFT)
@@ -954,12 +1148,16 @@ impl Widget for EntryWidget<'_> {
                 Clear.render(inner, buf);
 
                 let max_w = inner.width as usize;
-                let mut lines: Vec<Line<'static>> = vec![
-                    Line::from(Span::styled(format!("  {}", label), border_style.add_modifier(Modifier::BOLD))),
-                ];
+                let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
+                    format!("  {}", label),
+                    border_style.add_modifier(Modifier::BOLD),
+                ))];
                 for l in content.lines().take(4) {
                     let display = truncate_str(l, max_w.saturating_sub(2));
-                    lines.push(Line::from(Span::styled(format!("  {}", display), self.styles.normal)));
+                    lines.push(Line::from(Span::styled(
+                        format!("  {}", display),
+                        self.styles.normal,
+                    )));
                 }
                 if content.lines().count() > 4 {
                     lines.push(Line::from(Span::styled("  \u{2026}", self.styles.muted)));
@@ -968,12 +1166,18 @@ impl Widget for EntryWidget<'_> {
                 Clear.render(inner, buf);
                 Paragraph::new(text).render(inner, buf);
             }
-            LayoutKind::ErrorBox { title, message, retryable } => {
+            LayoutKind::ErrorBox {
+                title,
+                message,
+                retryable,
+            } => {
                 let block = Block::bordered()
                     .border_style(self.styles.error)
                     .title(Span::styled(
                         format!(" error: {} ", title),
-                        Style::default().fg(ratatui::style::Color::White).add_modifier(Modifier::BOLD),
+                        Style::default()
+                            .fg(ratatui::style::Color::White)
+                            .add_modifier(Modifier::BOLD),
                     ));
                 let inner = block.inner(rect);
                 block.render(rect, buf);
@@ -985,7 +1189,10 @@ impl Widget for EntryWidget<'_> {
                     lines.push(Line::from(Span::styled(display, self.styles.normal)));
                 }
                 if *retryable {
-                    lines.push(Line::from(Span::styled("retry: this error may be temporary", self.styles.muted)));
+                    lines.push(Line::from(Span::styled(
+                        "retry: this error may be temporary",
+                        self.styles.muted,
+                    )));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 // No wrap — pre-truncated to exact width
@@ -998,16 +1205,26 @@ impl Widget for EntryWidget<'_> {
 
                 let header_style = self.styles.accent;
                 if *collapsed {
-                    lines.push(Line::from(Span::styled("\u{25B8} thinking".to_string(), header_style)));
+                    lines.push(Line::from(Span::styled(
+                        "\u{25B8} thinking".to_string(),
+                        header_style,
+                    )));
                     if let Some(first) = filtered.lines().next() {
-                        lines.push(Line::from(Span::styled(format!("  {}", first), self.styles.muted.add_modifier(Modifier::ITALIC))));
+                        lines.push(Line::from(Span::styled(
+                            format!("  {}", first),
+                            self.styles.muted.add_modifier(Modifier::ITALIC),
+                        )));
                     }
                 } else {
-                    lines.push(Line::from(Span::styled("\u{25BE} thinking".to_string(), header_style)));
+                    lines.push(Line::from(Span::styled(
+                        "\u{25BE} thinking".to_string(),
+                        header_style,
+                    )));
                     let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
                     let md_rendered = md_lines(&filtered, rect.width);
                     for md_line in md_rendered {
-                        let spans: Vec<Span<'static>> = md_line.spans
+                        let spans: Vec<Span<'static>> = md_line
+                            .spans
                             .into_iter()
                             .map(|s| {
                                 let combined = thinking_style.patch(s.style);
@@ -1020,10 +1237,19 @@ impl Widget for EntryWidget<'_> {
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 Paragraph::new(text).render(rect, buf);
             }
-            LayoutKind::Image { mime_type, size_str } => {
+            LayoutKind::Image {
+                mime_type,
+                size_str,
+            } => {
                 let lines = vec![
-                    Line::from(Span::styled(format!("[image: {}, {}]", mime_type, size_str), self.styles.normal)),
-                    Line::from(Span::styled("  Ctrl+I -> open in viewer", self.styles.muted)),
+                    Line::from(Span::styled(
+                        format!("[image: {}, {}]", mime_type, size_str),
+                        self.styles.normal,
+                    )),
+                    Line::from(Span::styled(
+                        "  Ctrl+I -> open in viewer",
+                        self.styles.muted,
+                    )),
                 ];
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 Clear.render(rect, buf);
@@ -1034,8 +1260,10 @@ impl Widget for EntryWidget<'_> {
                 let sp = ["\u{25D0}", "\u{25D3}", "\u{25D1}", "\u{25D2}"];
                 let ch = sp[frame % sp.len()];
                 Paragraph::new(Line::from(Span::styled(
-                    format!("  {} Working...", ch), self.styles.accent,
-                ))).render(rect, buf);
+                    format!("  {} Working...", ch),
+                    self.styles.accent,
+                )))
+                .render(rect, buf);
             }
         }
     }
@@ -1048,20 +1276,25 @@ pub struct ChatView<'a> {
 }
 
 impl<'a> ChatView<'a> {
-    pub fn new(theme: &'a Theme) -> Self { Self { theme } }
+    pub fn new(theme: &'a Theme) -> Self {
+        Self { theme }
+    }
 }
 
 impl StatefulWidget for ChatView<'_> {
     type State = ChatViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        if area.width < 4 || area.height < 1 { return; }
+        if area.width < 4 || area.height < 1 {
+            return;
+        }
         let styles = self.theme.to_styles();
         let width = area.width;
 
         // Get layout (from cache or recomputed)
         let layout = state.get_layout(width);
-        let total_height = layout.last()
+        let total_height = layout
+            .last()
             .map(|e| e.y.saturating_add(e.height))
             .unwrap_or(0);
         state.content_height = total_height;
@@ -1069,7 +1302,6 @@ impl StatefulWidget for ChatView<'_> {
         // Apply left/right padding to the inner content area
         let pad = self.theme.spacing.padding.max(1);
         let inner_width = width.saturating_sub(pad * 2);
-
 
         // Create ScrollView with virtual buffer sized to total content.
         // No scrollbar — scrolling via mouse wheel / keyboard.
@@ -1081,7 +1313,9 @@ impl StatefulWidget for ChatView<'_> {
         // Render each layout entry into the virtual buffer.
         // Use inner_width so content never overlaps the vertical scrollbar.
         for entry in &layout {
-            if entry.height == 0 { continue; }
+            if entry.height == 0 {
+                continue;
+            }
             let rect = Rect::new(0, entry.y, inner_width, entry.height);
             let widget = EntryWidget::new(&entry.kind, &styles);
             scroll_view.render_widget(widget, rect);
@@ -1121,7 +1355,12 @@ mod tests {
     fn tool_call_lifecycle() {
         let mut s = ChatViewState::new();
         s.start_streaming();
-        s.stream_tool_call("t1".into(), "bash".into(), "ls".into(), ToolCallStatus::Executing);
+        s.stream_tool_call(
+            "t1".into(),
+            "bash".into(),
+            "ls".into(),
+            ToolCallStatus::Executing,
+        );
         s.stream_tool_result(Some("t1".into()), "bash".into(), "file.txt".into(), false);
         s.finish_streaming();
         match &s.messages[0].content_blocks[0] {
@@ -1147,7 +1386,9 @@ mod tests {
         let mut s = ChatViewState::new();
         s.messages.push(ChatMessage {
             role: MessageRole::User,
-            content_blocks: vec![ContentBlock::Text { content: "Hello".into() }],
+            content_blocks: vec![ContentBlock::Text {
+                content: "Hello".into(),
+            }],
             timestamp: 0,
         });
         let layout = compute_layout(&s, 80);
@@ -1180,7 +1421,10 @@ mod tests {
 
     #[test]
     fn clamp_str_truncates_lines() {
-        let long = (0..20).map(|i| format!("line{}", i)).collect::<Vec<_>>().join("\n");
+        let long = (0..20)
+            .map(|i| format!("line{}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let result = clamp_str(long.clone(), 10000, 5);
         assert!(result.lines().count() <= 6); // 5 + "...\n"
         assert!(result.ends_with(" ..."));
@@ -1191,7 +1435,9 @@ mod tests {
         let mut s = ChatViewState::new();
         s.messages.push(ChatMessage {
             role: MessageRole::User,
-            content_blocks: vec![ContentBlock::Text { content: "Hello".into() }],
+            content_blocks: vec![ContentBlock::Text {
+                content: "Hello".into(),
+            }],
             timestamp: 0,
         });
         // First call — cache miss, recompute
@@ -1219,7 +1465,11 @@ mod tests {
             None => panic!("expected streaming"),
         };
         // Content should be clamped to MAX_TEXT_CHARS (with overflow marker)
-        assert!(content.chars().count() <= MAX_TEXT_CHARS + 10, "content len = {}", content.chars().count());
+        assert!(
+            content.chars().count() <= MAX_TEXT_CHARS + 10,
+            "content len = {}",
+            content.chars().count()
+        );
     }
 }
 
@@ -1283,8 +1533,10 @@ mod table_tests {
 |---|---|---|
 | Alice | | 100 |";
         let out = render_markdown_table(md, 60);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
-");
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
         assert!(text.contains("Alice"), "Has Alice");
         assert!(text.contains("┌"), "Has border");
     }
@@ -1296,12 +1548,17 @@ mod table_tests {
 | One |
 | Two |";
         let out = render_markdown_table(md, 30);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
-");
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
         assert!(text.contains("Only"), "Has header");
         assert!(text.contains("One"), "Has data");
         println!("text={}", text);
-        assert!(text.contains("└──────┘") || text.contains("└──┘"), "Has bottom border");
+        assert!(
+            text.contains("└──────┘") || text.contains("└──┘"),
+            "Has bottom border"
+        );
     }
 
     #[test]
@@ -1310,8 +1567,10 @@ mod table_tests {
 |---|---|---|
 | 앨리스 | 30 | 서울 |";
         let out = render_markdown_table(md, 60);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
-");
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
         assert!(text.contains("이름"), "Has CJK");
         assert!(text.contains("앨리스"), "Has CJK data");
     }
@@ -1322,8 +1581,10 @@ mod table_tests {
 |---|---|
 | Test | `code` |";
         let out = render_markdown_table(md, 50);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
-");
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
         assert!(text.contains("Test"), "Has Test");
     }
 
@@ -1343,16 +1604,20 @@ mod table_tests {
 |---|---|
 | X | Y |";
         let out = render_markdown_table(md, 30);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("
-");
+        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
+            "
+",
+        );
         // Check exact format
-        assert_eq!(text, "┌───┬───┐
+        assert_eq!(
+            text,
+            "┌───┬───┐
 │ A │ B │
 ├───┼───┤
 │ X │ Y │
-└───┴───┘");
+└───┴───┘"
+        );
     }
-
 }
 #[cfg(test)]
 mod complete_table_verification {
@@ -1362,7 +1627,11 @@ mod complete_table_verification {
     fn test_mixed_content_before_table() {
         let md = "Check out this table:\n\n| Name | Value |\n|---|---|\n| Alpha | 100 |";
         let out = render_markdown_table(md, 50);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains("Check out"), "Before table");
         assert!(text.contains('┌'), "Table top");
         assert!(text.contains("Alpha"), "Table data");
@@ -1372,7 +1641,11 @@ mod complete_table_verification {
     fn test_mixed_content_after_table() {
         let md = "| A | B |\n|---|---|\n| X | Y |\n\nThat was the table.";
         let out = render_markdown_table(md, 50);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains('┌'), "Table top");
         assert!(text.contains("That was the table"), "After table");
     }
@@ -1381,7 +1654,11 @@ mod complete_table_verification {
     fn test_mixed_content_both_sides() {
         let md = "Start\n\n| H1 | H2 | H3 |\n|---|---|---|\n| C1 | C2 | C3 |\n\nEnd";
         let out = render_markdown_table(md, 60);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains("Start"), "Before");
         assert!(text.contains("End"), "After");
         assert!(text.contains('┌'), "Table");
@@ -1392,7 +1669,11 @@ mod complete_table_verification {
         let md = "| Name | Age | City |\n|---|---|---|\n| Alice | 30 | Seoul |";
         let out = render_markdown_table(md, 20);
         assert!(!out.is_empty());
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains("Name") || text.contains("┌") || text.contains("Alice"));
     }
 
@@ -1400,7 +1681,11 @@ mod complete_table_verification {
     fn test_cell_wrapping() {
         let md = "| Short | Very Long Header Text Here |\n|---|---|\n| Data | Another long cell that needs wrapping |";
         let out = render_markdown_table(md, 50);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         assert!(text.contains('┌'), "Table rendered");
         assert!(text.contains('│'), "Has cell separators");
     }
@@ -1409,9 +1694,14 @@ mod complete_table_verification {
     fn test_multiple_rows_separators() {
         let md = "| A | B |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n| 5 | 6 |";
         let out = render_markdown_table(md, 40);
-        let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join("\n");
+        let text: String = out
+            .iter()
+            .map(|l| l.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         // Count separator lines (lines containing ├ or ┼)
-        let separator_lines: Vec<&str> = text.lines()
+        let separator_lines: Vec<&str> = text
+            .lines()
             .filter(|l| l.contains('├') || l.contains('┼'))
             .collect();
         // 4 data rows → 3 separators between them
@@ -1426,6 +1716,9 @@ mod complete_table_verification {
     fn test_header_bold_styling() {
         let md = "| Name | Value |\n|---|---|\n| X | Y |";
         let out = render_markdown_table(md, 50);
-        assert!(out.len() >= 4, "Should have top border + header + separator + body");
+        assert!(
+            out.len() >= 4,
+            "Should have top border + header + separator + body"
+        );
     }
 }

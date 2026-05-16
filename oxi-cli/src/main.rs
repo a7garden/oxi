@@ -12,8 +12,6 @@ use oxi_store::settings::Settings;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-
-
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize file-based logging
@@ -102,7 +100,11 @@ async fn main() -> Result<()> {
         };
         let options = oxi::print_mode::PrintModeOptions {
             mode,
-            initial_message: if prompt.is_empty() { None } else { Some(prompt) },
+            initial_message: if prompt.is_empty() {
+                None
+            } else {
+                Some(prompt)
+            },
             messages: vec![],
             no_stdin: args.print,
             no_session: args.print || args.no_session,
@@ -174,7 +176,8 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
     match action {
         PkgCommands::Install { source } => {
             if source.starts_with("npm:") {
-                let name = source.strip_prefix("npm:")
+                let name = source
+                    .strip_prefix("npm:")
                     .ok_or_else(|| anyhow::anyhow!("Invalid npm source format: {}", source))?;
                 let manifest = mgr.install_npm(name)?;
                 let counts = mgr.resource_counts(&manifest.name).unwrap_or_default();
@@ -197,8 +200,8 @@ fn handle_pkg_command(action: &PkgCommands) -> Result<()> {
                 println!("No packages installed.");
             } else {
                 println!(
-                    "{:<30} {:<10} {:<15} {}",
-                    "NAME", "VERSION", "RESOURCES", "INSTALL DIR"
+                    "{:<30} {:<10} {:<15} INSTALL DIR",
+                    "NAME", "VERSION", "RESOURCES"
                 );
                 println!("{:-<30} {:-<10} {:-<15} {:-<40}", "", "", "", "");
                 for pkg in packages {
@@ -296,7 +299,13 @@ async fn handle_ext_command(action: &oxi::cli::ExtCommands) -> Result<()> {
             } else {
                 println!("Installed extensions:\n");
                 for (name, entry) in &entries {
-                    println!("  {} v{} — {} ({})", name, entry.version, entry.source, entry.installed_at.split('T').next().unwrap_or("?"));
+                    println!(
+                        "  {} v{} — {} ({})",
+                        name,
+                        entry.version,
+                        entry.source,
+                        entry.installed_at.split('T').next().unwrap_or("?")
+                    );
                 }
                 println!("\n{} extension(s)", entries.len());
             }
@@ -326,11 +335,22 @@ fn handle_config_command(action: &ConfigCommands) -> Result<()> {
     match action {
         ConfigCommands::Show => config_show(),
         ConfigCommands::List { resource_type } => config_list(resource_type.as_ref()),
-        ConfigCommands::Enable { resource_type, name } => config_toggle_resource(resource_type, name, true),
-        ConfigCommands::Disable { resource_type, name } => config_toggle_resource(resource_type, name, false),
+        ConfigCommands::Enable {
+            resource_type,
+            name,
+        } => config_toggle_resource(resource_type, name, true),
+        ConfigCommands::Disable {
+            resource_type,
+            name,
+        } => config_toggle_resource(resource_type, name, false),
         ConfigCommands::Set { key, value } => config_set(key, value),
         ConfigCommands::Get { key } => config_get(key),
-        ConfigCommands::AddProvider { name, base_url, api_key_env, api } => config_add_provider(name, base_url, api_key_env, api),
+        ConfigCommands::AddProvider {
+            name,
+            base_url,
+            api_key_env,
+            api,
+        } => config_add_provider(name, base_url, api_key_env, api),
         ConfigCommands::RemoveProvider { name } => config_remove_provider(name),
         ConfigCommands::Reset { all } => handle_config_reset(*all),
     }
@@ -342,8 +362,18 @@ fn config_show() -> Result<()> {
     println!("oxi configuration:");
     println!("  Settings file: {}", Settings::settings_path()?.display());
     println!();
-    println!("  Model: {}", settings.effective_model(None).unwrap_or_else(|| "(not set)".to_string()));
-    println!("  Provider: {}", settings.effective_provider(None).unwrap_or_else(|| "(not set)".to_string()));
+    println!(
+        "  Model: {}",
+        settings
+            .effective_model(None)
+            .unwrap_or_else(|| "(not set)".to_string())
+    );
+    println!(
+        "  Provider: {}",
+        settings
+            .effective_provider(None)
+            .unwrap_or_else(|| "(not set)".to_string())
+    );
     println!("  Theme: {}", settings.theme);
     println!("  Thinking: {:?}", settings.thinking_level);
     println!("  Extensions enabled: {}", settings.extensions_enabled);
@@ -495,11 +525,12 @@ fn config_set(key: &str, value: &str) -> Result<()> {
             settings.default_provider = Some(value.to_string());
         }
         "thinking_level" | "thinking" => {
-            let level = oxi_store::settings::parse_thinking_level(value)
-                .ok_or_else(|| anyhow::anyhow!(
+            let level = oxi_store::settings::parse_thinking_level(value).ok_or_else(|| {
+                anyhow::anyhow!(
                     "Invalid thinking level: '{}'. Valid: off, minimal, low, medium, high, xhigh",
                     value
-                ))?;
+                )
+            })?;
             settings.thinking_level = level;
         }
         "extensions_enabled" => {
@@ -531,9 +562,9 @@ fn config_set(key: &str, value: &str) -> Result<()> {
             );
         }
         "session_history_size" => {
-            settings.session_history_size = value.parse().map_err(|_| {
-                anyhow::anyhow!("Invalid session_history_size: '{}'", value)
-            })?;
+            settings.session_history_size = value
+                .parse()
+                .map_err(|_| anyhow::anyhow!("Invalid session_history_size: '{}'", value))?;
         }
         _ => {
             anyhow::bail!(
@@ -562,9 +593,7 @@ fn config_get(key: &str) -> Result<()> {
             .default_provider
             .clone()
             .unwrap_or_else(|| "(not set)".to_string()),
-        "thinking_level" | "thinking" => {
-            format!("{:?}", settings.thinking_level).to_lowercase()
-        }
+        "thinking_level" | "thinking" => format!("{:?}", settings.thinking_level).to_lowercase(),
         "extensions_enabled" => settings.extensions_enabled.to_string(),
         "stream_responses" | "stream" => settings.stream_responses.to_string(),
         "auto_compaction" => settings.auto_compaction.to_string(),
@@ -585,7 +614,9 @@ fn config_get(key: &str) -> Result<()> {
         "prompts" => format!("{:?}", settings.prompts),
         "themes" => format!("{:?}", settings.themes),
         "custom_providers" => {
-            let items: Vec<String> = settings.custom_providers.iter()
+            let items: Vec<String> = settings
+                .custom_providers
+                .iter()
                 .map(|cp| format!("{} ({} @ {})", cp.name, cp.api, cp.base_url))
                 .collect();
             if items.is_empty() {
@@ -613,12 +644,19 @@ fn config_add_provider(name: &str, base_url: &str, api_key_env: &str, api: &str)
     let mut settings = Settings::load()?;
 
     // Update existing or add new
-    if let Some(cp) = settings.custom_providers.iter_mut().find(|cp| cp.name == name) {
+    if let Some(cp) = settings
+        .custom_providers
+        .iter_mut()
+        .find(|cp| cp.name == name)
+    {
         cp.base_url = base_url.to_string();
         cp.api_key_env = api_key_env.to_string();
         cp.api = api.to_string();
         settings.save()?;
-        println!("Updated custom provider '{}' -> {} ({})", name, base_url, api);
+        println!(
+            "Updated custom provider '{}' -> {} ({})",
+            name, base_url, api
+        );
     } else {
         settings.custom_providers.push(CustomProvider {
             name: name.to_string(),
@@ -695,7 +733,11 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
     // If a custom provider is specified, also try to fetch models dynamically
     if let Some(ref provider_name) = *provider {
         let settings = Settings::load().unwrap_or_default();
-        if let Some(cp) = settings.custom_providers.iter().find(|cp| cp.name == *provider_name) {
+        if let Some(cp) = settings
+            .custom_providers
+            .iter()
+            .find(|cp| cp.name == *provider_name)
+        {
             let auth = oxi_store::auth_storage::shared_auth_storage();
             let api_key = auth.get_api_key(&cp.name);
             if let Some(ref key) = api_key {
@@ -725,7 +767,11 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
                         if model_ids.is_empty() {
                             println!("No models found for provider '{}'.", provider_name);
                         } else {
-                            println!("Models from '{}' ({} fetched):", provider_name, model_ids.len());
+                            println!(
+                                "Models from '{}' ({} fetched):",
+                                provider_name,
+                                model_ids.len()
+                            );
                             for id in &model_ids {
                                 println!("  {}", id);
                             }
@@ -737,16 +783,26 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
                     }
                 }
             } else {
-                eprintln!("[oxi] API key not set for provider '{}' (expected: {})", provider_name, cp.api_key_env);
+                eprintln!(
+                    "[oxi] API key not set for provider '{}' (expected: {})",
+                    provider_name, cp.api_key_env
+                );
             }
         }
 
         // Fallback: show static models for this provider
         let models = get_provider_models(provider_name);
         if models.is_empty() {
-            println!("No models found for provider '{}' (static or dynamic).", provider_name);
+            println!(
+                "No models found for provider '{}' (static or dynamic).",
+                provider_name
+            );
         } else {
-            println!("Models for provider '{}' ({}):", provider_name, models.len());
+            println!(
+                "Models for provider '{}' ({}):",
+                provider_name,
+                models.len()
+            );
             for m in models {
                 println!("  {} ({})", m.id, m.name);
             }
@@ -757,7 +813,11 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
     // No provider filter: show everything
     let all: Vec<_> = get_all_models().collect();
     let static_count = model_count();
-    println!("Available models ({} static, {} total):", static_count, all.len());
+    println!(
+        "Available models ({} static, {} total):",
+        static_count,
+        all.len()
+    );
     for entry in &all {
         println!("  {}/{} — {}", entry.provider, entry.id, entry.name);
     }
@@ -773,7 +833,7 @@ async fn list_sessions(manager: &SessionManager) -> Result<()> {
     }
 
     println!("Sessions:");
-    println!("{:<36} {:<20} {}", "ID", "BRANCH", "UPDATED");
+    println!("{:<36} {:<20} UPDATED", "ID", "BRANCH");
     println!("{:-<36} {:-<20} {:-<20}", "", "", "");
 
     for meta in sessions {
@@ -876,8 +936,11 @@ async fn delete_session(manager: &SessionManager, session_id: &str) -> Result<()
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len { return s.to_string(); }
-    let boundary = s.char_indices()
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+    let boundary = s
+        .char_indices()
         .take_while(|(i, _)| *i <= max_len.saturating_sub(3))
         .last()
         .map(|(i, c)| i + c.len_utf8())
@@ -893,8 +956,7 @@ fn init_logging() {
     let _ = std::fs::create_dir_all(&log_dir);
     let log_path = log_dir.join("oxi.log");
 
-    let log_filter = std::env::var("RUST_LOG")
-        .unwrap_or_else(|_| "debug".to_string());
+    let log_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "debug".to_string());
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_filter));
 
@@ -921,12 +983,14 @@ fn register_custom_providers(settings: &Settings) {
 
         match api.as_str() {
             "openai-completions" | "openai" => {
-                let provider = oxi_ai::OpenAiProvider::with_base_url_and_key(
-                    &cp.base_url,
-                    api_key.clone(),
-                );
+                let provider =
+                    oxi_ai::OpenAiProvider::with_base_url_and_key(&cp.base_url, api_key.clone());
                 oxi_ai::register_provider(&cp.name, provider);
-                tracing::info!("Registered custom provider '{}' (openai-completions) -> {}", cp.name, cp.base_url);
+                tracing::info!(
+                    "Registered custom provider '{}' (openai-completions) -> {}",
+                    cp.name,
+                    cp.base_url
+                );
             }
             "openai-responses" | "responses" => {
                 let provider = oxi_ai::OpenAiResponsesProvider::with_base_url_and_key(
@@ -934,7 +998,11 @@ fn register_custom_providers(settings: &Settings) {
                     api_key.clone(),
                 );
                 oxi_ai::register_provider(&cp.name, provider);
-                tracing::info!("Registered custom provider '{}' (openai-responses) -> {}", cp.name, cp.base_url);
+                tracing::info!(
+                    "Registered custom provider '{}' (openai-responses) -> {}",
+                    cp.name,
+                    cp.base_url
+                );
             }
             _ => {
                 tracing::warn!(
@@ -944,12 +1012,16 @@ fn register_custom_providers(settings: &Settings) {
             }
         }
 
-        fetch_and_register_models(&cp, &api, &api_key);
+        fetch_and_register_models(cp, &api, &api_key);
     }
 }
 
 /// Fetch models from a custom provider's /v1/models endpoint and register them.
-fn fetch_and_register_models(cp: &oxi_store::settings::CustomProvider, api: &str, api_key: &Option<String>) {
+fn fetch_and_register_models(
+    cp: &oxi_store::settings::CustomProvider,
+    api: &str,
+    api_key: &Option<String>,
+) {
     if let Some(ref key) = api_key {
         match oxi_ai::fetch_models_blocking(&cp.base_url, key.as_str()) {
             Ok(model_ids) => {
@@ -977,14 +1049,13 @@ fn fetch_and_register_models(cp: &oxi_store::settings::CustomProvider, api: &str
                 }
                 tracing::info!(
                     "[oxi] auto-fetched {} models from '{}' ({})",
-                    count, cp.name, cp.base_url
+                    count,
+                    cp.name,
+                    cp.base_url
                 );
             }
             Err(e) => {
-                tracing::warn!(
-                    "[oxi] 경고: {} 모델 조회 실패: {}",
-                    cp.name, e
-                );
+                tracing::warn!("[oxi] 경고: {} 모델 조회 실패: {}", cp.name, e);
             }
         }
     }
@@ -1065,5 +1136,3 @@ async fn run_single_prompt(app: oxi::App, prompt: &str) -> Result<()> {
 
     Ok(())
 }
-
-

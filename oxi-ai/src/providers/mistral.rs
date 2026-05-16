@@ -142,7 +142,9 @@ impl Provider for MistralProvider {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_key).parse().expect("valid bearer header"),
+            format!("Bearer {}", api_key)
+                .parse()
+                .expect("valid bearer header"),
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -430,7 +432,7 @@ fn create_error_message(msg: &str, provider: &str, model_id: &str) -> AssistantM
 
 // SSE chunk structures (OpenAI-compatible)
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct SSEChunk {
     _id: Option<String>,
     #[serde(rename = "model")]
@@ -453,7 +455,7 @@ struct Delta {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct ToolCallDelta {
     _index: Option<usize>,
     id: Option<String>,
@@ -463,7 +465,7 @@ struct ToolCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct FunctionDelta {
     _name: Option<String>,
     arguments: Option<String>,

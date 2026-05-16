@@ -4,11 +4,11 @@
 //! with OS keyring integration and fallback to encrypted file storage.
 //! Supports multi-provider auth, credential validation, and session tokens.
 
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
-use parking_lot::RwLock;
 
 // ============================================================================
 // Credential Types
@@ -25,11 +25,11 @@ pub enum AuthCredential {
     },
     /// OAuth credential with token management
     OAuth {
-/// access_token.
+        /// access_token.
         access_token: String,
-/// refresh_token.
+        /// refresh_token.
         refresh_token: Option<String>,
-/// expires_at.
+        /// expires_at.
         expires_at: u64,
         /// Scopes granted (space-separated)
         #[serde(default)]
@@ -40,7 +40,7 @@ pub enum AuthCredential {
     },
     /// Session token credential (e.g. from browser-based login)
     Session {
-/// token.
+        /// token.
         token: String,
         /// When the session expires (unix timestamp, 0 = never)
         #[serde(default)]
@@ -122,7 +122,9 @@ impl AuthCredential {
                 ..
             } => {
                 if access_token.is_empty() {
-                    return Err(CredentialValidationError::EmptyField("access_token".to_string()));
+                    return Err(CredentialValidationError::EmptyField(
+                        "access_token".to_string(),
+                    ));
                 }
                 if *expires_at == 0 {
                     return Err(CredentialValidationError::InvalidExpiry);
@@ -143,13 +145,13 @@ impl AuthCredential {
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CredentialValidationError {
     #[error("Field '{0}' must not be empty")]
-/// empty field variant.
+    /// empty field variant.
     EmptyField(String),
     #[error("Placeholder value detected: '{0}'")]
-/// placeholder value variant.
+    /// placeholder value variant.
     PlaceholderValue(String),
     #[error("Invalid expiry timestamp")]
-/// invalid expiry variant.
+    /// invalid expiry variant.
     InvalidExpiry,
 }
 
@@ -190,22 +192,22 @@ pub type AuthResult<T> = Result<T, AuthError>;
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum AuthError {
     #[error("Failed to read auth storage: {0}")]
-/// read error variant.
+    /// read error variant.
     ReadError(String),
     #[error("Failed to write auth storage: {0}")]
-/// write error variant.
+    /// write error variant.
     WriteError(String),
     #[error("Credential not found: {0}")]
-/// not found variant.
+    /// not found variant.
     NotFound(String),
     #[error("Invalid credential format: {0}")]
-/// invalid format variant.
+    /// invalid format variant.
     InvalidFormat(String),
     #[error("Keyring error: {0}")]
-/// keyring error variant.
+    /// keyring error variant.
     KeyringError(String),
     #[error("Credential validation failed: {0}")]
-/// validation failed variant.
+    /// validation failed variant.
     ValidationFailed(String),
 }
 
@@ -565,7 +567,11 @@ impl AuthStorage {
     }
 
     /// Get API key with option to include/exclude fallback resolver
-    pub fn get_api_key_with_options(&self, provider: &str, include_fallback: bool) -> Option<String> {
+    pub fn get_api_key_with_options(
+        &self,
+        provider: &str,
+        include_fallback: bool,
+    ) -> Option<String> {
         // 1. Runtime override
         if let Some(key) = self.runtime_overrides.read().get(provider) {
             return Some(key.clone());
@@ -575,7 +581,11 @@ impl AuthStorage {
         if let Some(cred) = self.credentials.read().get(provider) {
             return match cred {
                 AuthCredential::ApiKey { key } => Some(key.clone()),
-                AuthCredential::OAuth { access_token, expires_at, .. } => {
+                AuthCredential::OAuth {
+                    access_token,
+                    expires_at,
+                    ..
+                } => {
                     if *expires_at > now_secs() {
                         Some(access_token.clone())
                     } else {
@@ -583,7 +593,9 @@ impl AuthStorage {
                         None
                     }
                 }
-                AuthCredential::Session { token, expires_at, .. } => {
+                AuthCredential::Session {
+                    token, expires_at, ..
+                } => {
                     if *expires_at == 0 || *expires_at > now_secs() {
                         Some(token.clone())
                     } else {
@@ -690,9 +702,9 @@ impl AuthStorage {
         new_expires_at: u64,
     ) -> AuthResult<()> {
         let mut creds = self.credentials.write();
-        let cred = creds.get_mut(provider).ok_or_else(|| {
-            AuthError::NotFound(provider.to_string())
-        })?;
+        let cred = creds
+            .get_mut(provider)
+            .ok_or_else(|| AuthError::NotFound(provider.to_string()))?;
 
         match cred {
             AuthCredential::OAuth {
@@ -706,15 +718,20 @@ impl AuthStorage {
                 *expires_at = new_expires_at;
             }
             _ => {
-                return Err(AuthError::InvalidFormat(
-                    format!("Provider '{}' does not have OAuth credentials", provider),
-                ));
+                return Err(AuthError::InvalidFormat(format!(
+                    "Provider '{}' does not have OAuth credentials",
+                    provider
+                )));
             }
         }
 
         drop(creds);
         if let Err(e) = self.persist() {
-            tracing::warn!("Failed to persist OAuth token update for '{}': {}", provider, e);
+            tracing::warn!(
+                "Failed to persist OAuth token update for '{}': {}",
+                provider,
+                e
+            );
         }
         Ok(())
     }
@@ -736,7 +753,13 @@ impl AuthStorage {
     /// Check if a provider has OAuth credentials that can be refreshed
     pub fn has_oauth_with_refresh(&self, provider: &str) -> bool {
         if let Some(cred) = self.credentials.read().get(provider) {
-            matches!(cred, AuthCredential::OAuth { refresh_token: Some(_), .. })
+            matches!(
+                cred,
+                AuthCredential::OAuth {
+                    refresh_token: Some(_),
+                    ..
+                }
+            )
         } else {
             false
         }
@@ -748,7 +771,9 @@ impl AuthStorage {
 
     /// Set a credential for a provider
     pub fn set(&self, provider: &str, credential: AuthCredential) {
-        self.credentials.write().insert(provider.to_string(), credential);
+        self.credentials
+            .write()
+            .insert(provider.to_string(), credential);
         if let Err(e) = self.persist() {
             tracing::warn!("Failed to persist credential for '{}': {}", provider, e);
         }
@@ -805,7 +830,9 @@ impl AuthStorage {
                 }
                 Err(e) => {
                     *self.load_error.write() = Some(e);
-                    self.record_error(AuthError::ReadError("Failed to reload auth storage".to_string()));
+                    self.record_error(AuthError::ReadError(
+                        "Failed to reload auth storage".to_string(),
+                    ));
                 }
             }
         }
@@ -877,7 +904,10 @@ impl AuthStorage {
     pub fn validate(&self, provider: &str) -> Result<(), CredentialValidationError> {
         let creds = self.credentials.read();
         let cred = creds.get(provider).ok_or_else(|| {
-            CredentialValidationError::EmptyField(format!("no credential for provider '{}'", provider))
+            CredentialValidationError::EmptyField(format!(
+                "no credential for provider '{}'",
+                provider
+            ))
         })?;
         cred.validate()
     }
@@ -907,9 +937,9 @@ impl AuthStorage {
     /// Migrate credentials from one provider to another
     pub fn migrate_provider(&self, from: &str, to: &str) -> AuthResult<()> {
         let mut creds = self.credentials.write();
-        let cred = creds.remove(from).ok_or_else(|| {
-            AuthError::NotFound(from.to_string())
-        })?;
+        let cred = creds
+            .remove(from)
+            .ok_or_else(|| AuthError::NotFound(from.to_string()))?;
         creds.insert(to.to_string(), cred);
         drop(creds);
         let _ = self.persist();
@@ -985,11 +1015,7 @@ pub mod keyring_support {
     /// Store a secret in the OS keyring.
     ///
     /// Returns an error when the keyring feature is not compiled in.
-    pub fn set_keyring_secret(
-        _service: &str,
-        _account: &str,
-        _secret: &str,
-    ) -> AuthResult<()> {
+    pub fn set_keyring_secret(_service: &str, _account: &str, _secret: &str) -> AuthResult<()> {
         Err(AuthError::KeyringError(
             "Keyring support not compiled".to_string(),
         ))
@@ -1370,15 +1396,21 @@ mod tests {
     #[test]
     fn test_credential_validation() {
         // Valid API key
-        let valid = AuthCredential::ApiKey { key: "sk-valid".to_string() };
+        let valid = AuthCredential::ApiKey {
+            key: "sk-valid".to_string(),
+        };
         assert!(valid.validate().is_ok());
 
         // Empty API key
-        let empty = AuthCredential::ApiKey { key: "".to_string() };
+        let empty = AuthCredential::ApiKey {
+            key: "".to_string(),
+        };
         assert!(empty.validate().is_err());
 
         // Placeholder
-        let placeholder = AuthCredential::ApiKey { key: "your-api-key-here".to_string() };
+        let placeholder = AuthCredential::ApiKey {
+            key: "your-api-key-here".to_string(),
+        };
         assert!(placeholder.validate().is_err());
 
         // Valid OAuth
@@ -1454,11 +1486,16 @@ mod tests {
     fn test_migrate_provider() {
         let storage = AuthStorage::in_memory();
         storage.set_api_key("old-provider", "key123".to_string());
-        storage.migrate_provider("old-provider", "new-provider").unwrap();
+        storage
+            .migrate_provider("old-provider", "new-provider")
+            .unwrap();
 
         assert!(!storage.has("old-provider"));
         assert!(storage.has("new-provider"));
-        assert_eq!(storage.get_api_key("new-provider"), Some("key123".to_string()));
+        assert_eq!(
+            storage.get_api_key("new-provider"),
+            Some("key123".to_string())
+        );
     }
 
     #[test]
@@ -1478,15 +1515,13 @@ mod tests {
     #[test]
     fn test_fallback_resolver() {
         let storage = AuthStorage::in_memory();
-        storage.set_fallback_resolver(Arc::new(FnFallbackResolver::new(
-            Box::new(|provider| {
-                if provider == "custom" {
-                    Some("custom-key-from-config".to_string())
-                } else {
-                    None
-                }
-            }),
-        )));
+        storage.set_fallback_resolver(Arc::new(FnFallbackResolver::new(Box::new(|provider| {
+            if provider == "custom" {
+                Some("custom-key-from-config".to_string())
+            } else {
+                None
+            }
+        }))));
 
         assert_eq!(
             storage.get_api_key("custom"),
@@ -1502,9 +1537,9 @@ mod tests {
     #[test]
     fn test_get_api_key_with_options() {
         let storage = AuthStorage::in_memory();
-        storage.set_fallback_resolver(Arc::new(FnFallbackResolver::new(
-            Box::new(|_| Some("fallback-key".to_string())),
-        )));
+        storage.set_fallback_resolver(Arc::new(FnFallbackResolver::new(Box::new(|_| {
+            Some("fallback-key".to_string())
+        }))));
 
         // With fallback
         assert_eq!(
@@ -1559,7 +1594,10 @@ mod tests {
     #[test]
     fn test_credential_type_name() {
         assert_eq!(
-            AuthCredential::ApiKey { key: "k".to_string() }.type_name(),
+            AuthCredential::ApiKey {
+                key: "k".to_string()
+            }
+            .type_name(),
             "api_key"
         );
         assert_eq!(

@@ -3,7 +3,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use oxi_agent::{Agent, AgentConfig, AgentTool, AgentToolResult, ToolContext, ToolRegistry, ProviderResolver};
+use oxi_agent::{
+    Agent, AgentConfig, AgentTool, AgentToolResult, ProviderResolver, ToolContext, ToolRegistry,
+};
 
 use crate::builder::Oxi;
 
@@ -66,7 +68,9 @@ impl<'a> AgentBuilder<'a> {
 
     /// Register the standard coding tools (read, write, edit, bash, grep, find, ls, ...).
     pub fn coding_tools(self) -> Self {
-        let cwd = self.workspace_dir.clone()
+        let cwd = self
+            .workspace_dir
+            .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let tools = crate::tool_factory::coding_tools(&cwd);
         for name in tools.names() {
@@ -79,7 +83,9 @@ impl<'a> AgentBuilder<'a> {
 
     /// Register read-only tools (read, ls).
     pub fn readonly_tools(self) -> Self {
-        let cwd = self.workspace_dir.clone()
+        let cwd = self
+            .workspace_dir
+            .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
         let tools = crate::tool_factory::readonly_tools(&cwd);
         for name in tools.names() {
@@ -206,12 +212,7 @@ impl<'a> AgentBuilder<'a> {
         });
 
         // 5. Create agent with the isolated resolver
-        let agent = Agent::new_with_resolver(
-            provider,
-            config,
-            Arc::new(self.tools),
-            resolver,
-        );
+        let agent = Agent::new_with_resolver(provider, config, Arc::new(self.tools), resolver);
 
         Ok(agent)
     }

@@ -12,8 +12,11 @@ use crate::{
 
 /// Safely truncate a string to a maximum number of characters, appending "..." if truncated.
 fn safe_truncate(s: &str, max_chars: usize) -> String {
-    if s.len() <= max_chars { return s.to_string(); }
-    let boundary = s.char_indices()
+    if s.len() <= max_chars {
+        return s.to_string();
+    }
+    let boundary = s
+        .char_indices()
         .take_while(|(i, _)| *i <= max_chars)
         .last()
         .map(|(i, c)| i + c.len_utf8())
@@ -287,7 +290,7 @@ impl CompactionStrategy {
                 let usage = context_tokens as f32 / context_window as f32;
                 usage >= *threshold
             }
-            CompactionStrategy::EveryNTurns(n) => iteration > 0 && iteration % n == 0,
+            CompactionStrategy::EveryNTurns(n) => iteration > 0 && iteration.is_multiple_of(*n),
             CompactionStrategy::AbsoluteTokens(max_tokens) => context_tokens >= *max_tokens,
         }
     }
@@ -1174,14 +1177,14 @@ mod tests {
         let provider = OpenAiProvider::new();
         let model = make_test_model();
         let compactor = LlmCompactor::new(model, Arc::new(provider));
-        
+
         // Just verify the method exists (runtime test would require async)
         let messages = vec![
             make_user_message("Test message 1"),
             make_assistant_message("Test response 1"),
             make_user_message("Test message 2"),
         ];
-        
+
         // The method exists and can be called (we can't test async in sync test)
         // We verify it compiles correctly
         let branch_name = "test-branch";
@@ -1196,10 +1199,10 @@ mod tests {
         let provider = OpenAiProvider::new();
         let model = make_test_model();
         let compactor = LlmCompactor::new(model, Arc::new(provider));
-        
+
         // Empty messages should return immediately
         let messages: Vec<Message> = vec![];
-        
+
         // This should not panic with empty messages
         // (We can't test the async result in a sync test, but compile-time check passes)
         let _future = compactor.summarize_branch(&messages, "empty-branch");

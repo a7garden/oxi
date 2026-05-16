@@ -347,12 +347,16 @@ pub fn create_builtin_provider(name: &str) -> Option<Box<dyn super::Provider>> {
     match canonical {
         "anthropic" => Some(Box::new(super::anthropic::AnthropicProvider::new())),
         "openai" => Some(Box::new(super::openai::OpenAiProvider::new())),
-        "openai-responses" => Some(Box::new(super::openai_responses::OpenAiResponsesProvider::new())),
+        "openai-responses" => Some(Box::new(
+            super::openai_responses::OpenAiResponsesProvider::new(),
+        )),
         "google" => Some(Box::new(super::google::GoogleProvider::new())),
         "vertex" => Some(Box::new(super::vertex::VertexProvider::new())),
         "mistral" => Some(Box::new(super::mistral::MistralProvider::new())),
         "azure" | "azure-openai" => Some(Box::new(super::azure::AzureProvider::new())),
-        "bedrock" | "amazon-bedrock" | "aws-bedrock" => Some(Box::new(super::bedrock::BedrockProvider::new())),
+        "bedrock" | "amazon-bedrock" | "aws-bedrock" => {
+            Some(Box::new(super::bedrock::BedrockProvider::new()))
+        }
         "deepseek" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
             "https://api.deepseek.com",
         ))),
@@ -371,15 +375,17 @@ pub fn create_builtin_provider(name: &str) -> Option<Box<dyn super::Provider>> {
         "fireworks" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
             "https://api.fireworks.ai/inference/v1",
         ))),
-        "cloudflare" | "workers-ai" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
-            "https://api.cloudflare.com/client/v4/accounts",
-        ))),
-        "copilot" | "github-copilot" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
-            "https://api.githubcopilot.com",
-        ))),
-        "codex" | "github-codex" | "copilot-codex" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
-            "https://api.githubcopilot.com",
-        ))),
+        "cloudflare" | "workers-ai" => {
+            Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+                "https://api.cloudflare.com/client/v4/accounts",
+            )))
+        }
+        "copilot" | "github-copilot" => Some(Box::new(
+            super::openai::OpenAiProvider::with_base_url("https://api.githubcopilot.com"),
+        )),
+        "codex" | "github-codex" | "copilot-codex" => Some(Box::new(
+            super::openai::OpenAiProvider::with_base_url("https://api.githubcopilot.com"),
+        )),
         "minimax" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
             "https://api.minimax.chat/v1",
         ))),

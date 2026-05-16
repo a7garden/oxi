@@ -10,8 +10,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-use super::McpManager;
 use super::content;
+use super::McpManager;
 
 /// The unified MCP gateway tool.
 ///
@@ -93,11 +93,14 @@ impl AgentTool for McpTool {
         _signal: Option<oneshot::Receiver<()>>,
         _ctx: &ToolContext,
     ) -> Result<AgentToolResult, String> {
-        let obj = params.as_object().ok_or("Parameters must be a JSON object")?;
+        let obj = params
+            .as_object()
+            .ok_or("Parameters must be a JSON object")?;
 
         // Parse optional args
         let parsed_args = if let Some(args_val) = obj.get("args").and_then(|v| v.as_str()) {
-            serde_json::from_str::<Value>(args_val).map_err(|e| format!("Invalid args JSON: {}", e))?
+            serde_json::from_str::<Value>(args_val)
+                .map_err(|e| format!("Invalid args JSON: {}", e))?
         } else {
             Value::Object(serde_json::Map::new())
         };
@@ -207,9 +210,9 @@ impl McpTool {
 
     async fn handle_action(&self, action: &str) -> Result<AgentToolResult, String> {
         match action {
-            "ui-messages" => {
-                Ok(AgentToolResult::success("No UI session messages available."))
-            }
+            "ui-messages" => Ok(AgentToolResult::success(
+                "No UI session messages available.",
+            )),
             _ => Ok(AgentToolResult::error(format!(
                 "Unknown action: '{}'. Supported: 'ui-messages'",
                 action

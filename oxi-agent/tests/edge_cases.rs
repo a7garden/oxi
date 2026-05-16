@@ -26,7 +26,14 @@ async fn cleanup(path: &str) {
 }
 
 async fn execute_tool(tool: &dyn AgentTool, params: serde_json::Value) -> AgentToolResult {
-    tool.execute("test_call", params, None, &oxi_agent::ToolContext::default()).await.unwrap()
+    tool.execute(
+        "test_call",
+        params,
+        None,
+        &oxi_agent::ToolContext::default(),
+    )
+    .await
+    .unwrap()
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -39,9 +46,7 @@ async fn test_grep_with_circular_symlink() {
     // Instead, test with a symlink to an external file to verify symlink handling.
     let dir = create_temp_dir("grep_symlink").await;
     let file_path = format!("{}/test.txt", dir);
-    fs::write(&file_path, "target pattern here")
-        .await
-        .unwrap();
+    fs::write(&file_path, "target pattern here").await.unwrap();
 
     // Create a symlink to an external file
     let external_dir = create_temp_dir("grep_symlink_ext").await;
@@ -62,7 +67,11 @@ async fn test_grep_with_circular_symlink() {
     )
     .await;
 
-    assert!(result.success, "grep should succeed with symlinks: {}", result.output);
+    assert!(
+        result.success,
+        "grep should succeed with symlinks: {}",
+        result.output
+    );
     assert!(
         result.output.contains("target pattern"),
         "should find the pattern in test.txt"
@@ -98,7 +107,11 @@ async fn test_find_with_circular_symlink() {
     )
     .await;
 
-    assert!(result.success, "find should succeed with symlinks: {}", result.output);
+    assert!(
+        result.success,
+        "find should succeed with symlinks: {}",
+        result.output
+    );
     assert!(result.output.contains("real_file.txt"));
 
     cleanup(&dir).await;
@@ -151,9 +164,7 @@ async fn test_grep_with_broken_symlink() {
 async fn test_find_with_broken_symlink() {
     let dir = create_temp_dir("find_broken_symlink").await;
 
-    fs::write(format!("{}/real.txt", dir), "")
-        .await
-        .unwrap();
+    fs::write(format!("{}/real.txt", dir), "").await.unwrap();
 
     let link_path = format!("{}/broken_link", dir);
     symlink("/tmp/nonexistent_target_12345", &link_path).expect("create broken symlink");
@@ -177,7 +188,9 @@ async fn test_read_large_file() {
     let file_path = format!("{}/large.txt", dir);
 
     // Create a file with many lines (~5000 lines)
-    let lines: Vec<String> = (0..5000).map(|i| format!("Line {}: Some content here with padding", i)).collect();
+    let lines: Vec<String> = (0..5000)
+        .map(|i| format!("Line {}: Some content here with padding", i))
+        .collect();
     let content = lines.join("\n");
     fs::write(&file_path, &content).await.unwrap();
 
@@ -195,14 +208,32 @@ async fn test_read_large_file() {
     )
     .await;
 
-    assert!(result.success, "read with offset/limit should succeed: {}", result.output);
+    assert!(
+        result.success,
+        "read with offset/limit should succeed: {}",
+        result.output
+    );
     // Output includes line number prefix. Check for the actual content text.
     // offset=101 with 1-indexed offset shows lines 100-109 (0-indexed indexes 100-109)
-    assert!(result.output.contains("Line 100:"), "should contain line 100: {}", result.output);
-    assert!(result.output.contains("Line 109:"), "should contain line 109: {}", result.output);
+    assert!(
+        result.output.contains("Line 100:"),
+        "should contain line 100: {}",
+        result.output
+    );
+    assert!(
+        result.output.contains("Line 109:"),
+        "should contain line 109: {}",
+        result.output
+    );
     // Should NOT contain line 110 or line 99
-    assert!(!result.output.contains("Line 110:"), "should not contain line 110");
-    assert!(!result.output.contains("Line 99:"), "should not contain line 99");
+    assert!(
+        !result.output.contains("Line 110:"),
+        "should not contain line 110"
+    );
+    assert!(
+        !result.output.contains("Line 99:"),
+        "should not contain line 99"
+    );
 
     cleanup(&dir).await;
 }
@@ -251,10 +282,21 @@ async fn test_read_file_with_binary_content() {
     fs::write(&file_path, &binary_content).await.unwrap();
 
     let tool = ReadTool::new();
-    let result = tool.execute("test_call", json!({ "path": file_path }), None, &oxi_agent::ToolContext::default()).await;
+    let result = tool
+        .execute(
+            "test_call",
+            json!({ "path": file_path }),
+            None,
+            &oxi_agent::ToolContext::default(),
+        )
+        .await;
 
     // Should detect binary and return an error or warning
-    assert!(result.is_err() || !result.as_ref().unwrap().success || result.unwrap().output.contains("binary"));
+    assert!(
+        result.is_err()
+            || !result.as_ref().unwrap().success
+            || result.unwrap().output.contains("binary")
+    );
     cleanup(&dir).await;
 }
 
@@ -262,7 +304,9 @@ async fn test_read_file_with_binary_content() {
 async fn test_read_offset_beyond_file() {
     let dir = create_temp_dir("read_offset_beyond").await;
     let file_path = format!("{}/short.txt", dir);
-    fs::write(&file_path, "only 3 lines\nline 2\nline 3").await.unwrap();
+    fs::write(&file_path, "only 3 lines\nline 2\nline 3")
+        .await
+        .unwrap();
 
     let tool = ReadTool::new();
     let result = tool
@@ -283,7 +327,11 @@ async fn test_read_offset_beyond_file() {
         Ok(r) => {
             // Success=false with error message about offset
             assert!(!r.success, "should fail when offset exceeds file length");
-            assert!(r.output.contains("Offset"), "should mention offset: {}", r.output);
+            assert!(
+                r.output.contains("Offset"),
+                "should mention offset: {}",
+                r.output
+            );
         }
         Err(e) => {
             // Tool returned an error string
@@ -433,7 +481,11 @@ async fn test_edit_multi_edits_non_overlapping() {
     )
     .await;
 
-    assert!(result.success, "multi-edit should succeed: {}", result.output);
+    assert!(
+        result.success,
+        "multi-edit should succeed: {}",
+        result.output
+    );
 
     let content = fs::read_to_string(&file_path).await.unwrap();
     assert!(content.contains("color = blue"));
@@ -500,7 +552,11 @@ async fn test_bash_blocked_env_ld_preload() {
     )
     .await;
 
-    assert!(result_blocked.success, "command should still run: {}", result_blocked.output);
+    assert!(
+        result_blocked.success,
+        "command should still run: {}",
+        result_blocked.output
+    );
     // The env var should have been stripped, so echo should output nothing
     // (or just the default $LD_PRELOAD which is empty)
     assert!(
@@ -572,7 +628,11 @@ async fn test_bash_allowed_env_var() {
     )
     .await;
 
-    assert!(result.success, "should allow non-blocked env vars: {}", result.output);
+    assert!(
+        result.success,
+        "should allow non-blocked env vars: {}",
+        result.output
+    );
 
     // Verify the env var was set correctly
     let content = fs::read_to_string(&file_path).await.unwrap_or_default();

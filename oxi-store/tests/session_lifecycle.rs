@@ -50,15 +50,26 @@ fn test_session_create_save_load() {
     let e1 = mgr.get_entry(&id1).expect("entry 1 exists");
     assert!(e1.parent_id.is_none(), "first entry has no parent");
     let e2 = mgr.get_entry(&id2).expect("entry 2 exists");
-    assert_eq!(e2.parent_id.as_deref(), Some(id1.as_str()), "second chains from first");
+    assert_eq!(
+        e2.parent_id.as_deref(),
+        Some(id1.as_str()),
+        "second chains from first"
+    );
     let e3 = mgr.get_entry(&id3).expect("entry 3 exists");
-    assert_eq!(e3.parent_id.as_deref(), Some(id2.as_str()), "third chains from second");
+    assert_eq!(
+        e3.parent_id.as_deref(),
+        Some(id2.as_str()),
+        "third chains from second"
+    );
 
     // Get the session file path before mgr drops
     let session_file = mgr.get_session_file().expect("session file was created");
 
     // 2. Verify file exists and contains valid JSONL
-    assert!(Path::new(&session_file).exists(), "session file should exist on disk");
+    assert!(
+        Path::new(&session_file).exists(),
+        "session file should exist on disk"
+    );
     let contents = fs::read_to_string(&session_file).expect("read session file");
     let line_count = contents.lines().filter(|l| !l.trim().is_empty()).count();
     // Note: user messages with ContentValue::String can fail to serialize
@@ -148,7 +159,11 @@ fn test_session_branch_and_fork() {
 
     // Get the full branch (path to root) for the new leaf
     let branch = mgr.get_branch(Some(&id6));
-    assert_eq!(branch.len(), 4, "branch should have 4 entries (id1→id2→id5→id6)");
+    assert_eq!(
+        branch.len(),
+        4,
+        "branch should have 4 entries (id1→id2→id5→id6)"
+    );
 
     // Fork from this session into a new directory.
     // Note: user messages with ContentValue::String may not persist to the JSONL
@@ -169,7 +184,10 @@ fn test_session_branch_and_fork() {
     );
 
     // Assistant messages should be present in the forked session
-    assert!(forked.get_entry(&id2).is_some(), "assistant entry id2 should be in fork");
+    assert!(
+        forked.get_entry(&id2).is_some(),
+        "assistant entry id2 should be in fork"
+    );
 }
 
 #[test]
@@ -213,7 +231,10 @@ fn test_session_atomic_write() {
     mgr.append_message(make_user_message("Follow-up"));
 
     let session_file = mgr.get_session_file().expect("session file");
-    assert!(Path::new(&session_file).exists(), "file should exist after flush");
+    assert!(
+        Path::new(&session_file).exists(),
+        "file should exist after flush"
+    );
 
     // Read and verify it's valid JSONL
     let contents = fs::read_to_string(&session_file).expect("read file");
@@ -223,8 +244,8 @@ fn test_session_atomic_write() {
         if line.trim().is_empty() {
             continue;
         }
-        let parsed: serde_json::Value =
-            serde_json::from_str(line).unwrap_or_else(|e| panic!("line {} is not valid JSONL: {} — content: {}", i, e, line));
+        let parsed: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("line {} is not valid JSONL: {} — content: {}", i, e, line));
 
         // First line should be a header
         if i == 0 {
@@ -288,10 +309,7 @@ fn test_session_concurrent_access() {
             // Append a new entry
             let new_id = {
                 let mut locked = mgr_clone.lock().expect("lock for write");
-                locked.append_message(make_user_message(&format!(
-                    "Thread {} message",
-                    i
-                )))
+                locked.append_message(make_user_message(&format!("Thread {} message", i)))
             };
             assert!(!new_id.is_empty(), "thread {} should get valid id", i);
 

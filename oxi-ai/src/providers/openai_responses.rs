@@ -43,7 +43,6 @@ impl OpenAiResponsesProvider {
     }
 
     /// Create a provider with a specific API key (public API for external consumers)
-
     pub fn with_api_key(api_key: impl Into<String>) -> Self {
         Self {
             client: shared_client(),
@@ -130,7 +129,9 @@ impl Provider for OpenAiResponsesProvider {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(
             reqwest::header::AUTHORIZATION,
-            format!("Bearer {}", api_key).parse().expect("valid bearer header"),
+            format!("Bearer {}", api_key)
+                .parse()
+                .expect("valid bearer header"),
         );
         headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -328,7 +329,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
 
         // Parse event line
         if line.starts_with("event: ") {
-            let event_name = line[7..].trim();
+            let event_name = line.strip_prefix("event: ").unwrap_or(line).trim();
             // Track current event type for data line processing
             match event_name {
                 "response.created"
@@ -570,7 +571,7 @@ enum ResponsesEvent {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct ResponseCreatedData {
     id: Option<String>,
     #[serde(rename = "object")]
@@ -582,7 +583,7 @@ struct ResponseCreatedData {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct OutputItem {
     index: usize,
     #[serde(rename = "type")]
@@ -599,7 +600,7 @@ struct ContentPart {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct TextDelta {
     content_index: Option<usize>,
     _output_index: Option<usize>,
@@ -607,7 +608,7 @@ struct TextDelta {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct FunctionCallDelta {
     content_index: Option<usize>,
     _output_index: Option<usize>,
@@ -617,7 +618,7 @@ struct FunctionCallDelta {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct OutputTextDone {
     _content_index: Option<usize>,
     _output_index: Option<usize>,
@@ -630,7 +631,7 @@ struct TextContent {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct ReasoningDone {
     _content_index: Option<usize>,
     _output_index: Option<usize>,
@@ -646,7 +647,7 @@ struct SummaryItem {
 
 /// Unified response data that can match both completed and incomplete responses
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct ResponseWithUsageData {
     _id: Option<String>,
     _status: Option<String>,
@@ -660,7 +661,7 @@ struct IncompleteDetails {
 }
 
 #[derive(Debug, Deserialize)]
- // serde deserialization structs
+// serde deserialization structs
 struct UsageData {
     input_tokens: usize,
     output_tokens: usize,

@@ -4,8 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use oxi_agent::{
+    tools::{EditTool, LsTool, ReadTool, WriteTool},
     ToolRegistry,
-    tools::{ReadTool, WriteTool, EditTool, LsTool},
 };
 
 /// Create the standard coding tools: read, write, edit, ls

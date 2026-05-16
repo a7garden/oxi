@@ -7,8 +7,8 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
-use super::shared_client;
 use super::openai::split_complete_lines;
+use super::shared_client;
 use crate::{
     error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
     ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent, Usage,
@@ -92,8 +92,14 @@ impl Provider for AnthropicProvider {
         // Build headers
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("x-api-key", api_key.parse().expect("valid header value"));
-        headers.insert("content-type", "application/json".parse().expect("valid header value"));
-        headers.insert("anthropic-version", "2023-06-01".parse().expect("valid header value"));
+        headers.insert(
+            "content-type",
+            "application/json".parse().expect("valid header value"),
+        );
+        headers.insert(
+            "anthropic-version",
+            "2023-06-01".parse().expect("valid header value"),
+        );
 
         for (k, v) in &options.headers {
             if let (Ok(name), Ok(value)) = (
@@ -127,26 +133,30 @@ impl Provider for AnthropicProvider {
         // safely.  Anthropic SSE lines can be split across HTTP chunks at
         // arbitrary byte boundaries; without reassembly, multi-byte characters
         // (Korean, emoji, etc.) get corrupted by `from_utf8_lossy`.
-        let stream = response.bytes_stream().scan(
-            Vec::new(), // pending_bytes
-            move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
-                let events = match chunk {
-                    Ok(bytes) => {
-                        let mut combined = Vec::with_capacity(pending_bytes.len() + bytes.len());
-                        combined.extend_from_slice(pending_bytes);
-                        combined.extend_from_slice(&bytes);
-                        let (text, trailing) = split_complete_lines(&combined);
-                        *pending_bytes = trailing;
-                        parse_anthropic_events(&text, &model_name)
-                    }
-                    Err(e) => vec![ProviderEvent::Error {
-                        reason: StopReason::Error,
-                        error: create_error_message(&e.to_string()),
-                    }],
-                };
-                async move { Some(futures::stream::iter(events)) }
-            },
-        ).flatten();
+        let stream = response
+            .bytes_stream()
+            .scan(
+                Vec::new(), // pending_bytes
+                move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                    let events = match chunk {
+                        Ok(bytes) => {
+                            let mut combined =
+                                Vec::with_capacity(pending_bytes.len() + bytes.len());
+                            combined.extend_from_slice(pending_bytes);
+                            combined.extend_from_slice(&bytes);
+                            let (text, trailing) = split_complete_lines(&combined);
+                            *pending_bytes = trailing;
+                            parse_anthropic_events(&text, &model_name)
+                        }
+                        Err(e) => vec![ProviderEvent::Error {
+                            reason: StopReason::Error,
+                            error: create_error_message(&e.to_string()),
+                        }],
+                    };
+                    async move { Some(futures::stream::iter(events)) }
+                },
+            )
+            .flatten();
 
         Ok(Box::pin(stream))
     }
@@ -342,13 +352,19 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                             if let Some(text) = &delta.text {
                                 // Accumulate into partial_message so the TUI
                                 // can diff against its snapshot tracker.
-                                let last_text_idx = partial_message.content.iter().rposition(|b| matches!(b, ContentBlock::Text(_)));
+                                let last_text_idx = partial_message
+                                    .content
+                                    .iter()
+                                    .rposition(|b| matches!(b, ContentBlock::Text(_)));
                                 if let Some(idx) = last_text_idx {
-                                    if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
+                                    if let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                                    {
                                         t.text.push_str(text);
                                     }
                                 } else {
-                                    partial_message.content.push(ContentBlock::Text(TextContent::new(text.clone())));
+                                    partial_message
+                                        .content
+                                        .push(ContentBlock::Text(TextContent::new(text.clone())));
                                 }
                                 events.push(ProviderEvent::TextDelta {
                                     content_index: event.index.unwrap_or(0),
@@ -360,13 +376,20 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                         Some("thinking_delta") => {
                             if let Some(text) = &delta.thinking {
                                 // Accumulate into partial_message
-                                let last_think_idx = partial_message.content.iter().rposition(|b| matches!(b, ContentBlock::Thinking(_)));
+                                let last_think_idx = partial_message
+                                    .content
+                                    .iter()
+                                    .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
                                 if let Some(idx) = last_think_idx {
-                                    if let ContentBlock::Thinking(t) = &mut partial_message.content[idx] {
+                                    if let ContentBlock::Thinking(t) =
+                                        &mut partial_message.content[idx]
+                                    {
                                         t.thinking.push_str(text);
                                     }
                                 } else {
-                                    partial_message.content.push(ContentBlock::Thinking(ThinkingContent::new(text.clone())));
+                                    partial_message.content.push(ContentBlock::Thinking(
+                                        ThinkingContent::new(text.clone()),
+                                    ));
                                 }
                                 events.push(ProviderEvent::ThinkingDelta {
                                     content_index: event.index.unwrap_or(0),
@@ -532,7 +555,11 @@ mod tests {
         let events = parse_anthropic_events(sse, MODEL);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            ProviderEvent::TextDelta { delta, content_index, .. } => {
+            ProviderEvent::TextDelta {
+                delta,
+                content_index,
+                ..
+            } => {
                 assert_eq!(delta, "Hello");
                 assert_eq!(*content_index, 0);
             }
@@ -557,7 +584,11 @@ mod tests {
         let events = parse_anthropic_events(sse, MODEL);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            ProviderEvent::ToolCallDelta { delta, content_index, .. } => {
+            ProviderEvent::ToolCallDelta {
+                delta,
+                content_index,
+                ..
+            } => {
                 assert_eq!(delta, "{\"city\":\"SF\"}");
                 assert_eq!(*content_index, 1);
             }
@@ -590,7 +621,8 @@ mod tests {
 
     #[test]
     fn parse_message_delta_stop_sequence() {
-        let sse = "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"stop_sequence\"}}\n";
+        let sse =
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"stop_sequence\"}}\n";
         let events = parse_anthropic_events(sse, MODEL);
         match &events[0] {
             ProviderEvent::Done { reason, .. } => assert!(matches!(reason, StopReason::Stop)),
@@ -622,10 +654,13 @@ mod tests {
         let events = parse_anthropic_events(sse, MODEL);
         assert_eq!(events.len(), 3);
         assert!(matches!(&events[0], ProviderEvent::ThinkingStart { .. }));
-        let thinking: Vec<&str> = events[1..].iter().filter_map(|e| match e {
-            ProviderEvent::ThinkingDelta { delta, .. } => Some(delta.as_str()),
-            _ => None,
-        }).collect();
+        let thinking: Vec<&str> = events[1..]
+            .iter()
+            .filter_map(|e| match e {
+                ProviderEvent::ThinkingDelta { delta, .. } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
         assert_eq!(thinking, vec!["I should", " check this."]);
     }
 
@@ -763,12 +798,21 @@ mod tests {
         assert!(matches!(&events[0], ProviderEvent::Start { .. }));
         assert!(matches!(&events[1], ProviderEvent::TextStart { .. }));
 
-        let texts: Vec<&str> = events[2..4].iter().filter_map(|e| match e {
-            ProviderEvent::TextDelta { delta, .. } => Some(delta.as_str()),
-            _ => None,
-        }).collect();
+        let texts: Vec<&str> = events[2..4]
+            .iter()
+            .filter_map(|e| match e {
+                ProviderEvent::TextDelta { delta, .. } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect();
         assert_eq!(texts, vec!["Hello", " world"]);
 
-        assert!(matches!(&events[4], ProviderEvent::Done { reason: StopReason::Stop, .. }));
+        assert!(matches!(
+            &events[4],
+            ProviderEvent::Done {
+                reason: StopReason::Stop,
+                ..
+            }
+        ));
     }
 }

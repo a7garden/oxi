@@ -65,10 +65,12 @@ impl StructuredOutput {
             let json_start = start + 7;
             if let Some(end) = content[json_start..].find("```") {
                 let json_str = content[json_start..json_start + end].trim();
-                return serde_json::from_str(json_str)
-                    .map_err(|e| StructuredOutputError::ParseError(format!(
-                        "JSON parse error in code block: {}", e
-                    )));
+                return serde_json::from_str(json_str).map_err(|e| {
+                    StructuredOutputError::ParseError(format!(
+                        "JSON parse error in code block: {}",
+                        e
+                    ))
+                });
             }
         }
 
@@ -85,7 +87,9 @@ impl StructuredOutput {
             }
         }
 
-        Err(StructuredOutputError::NotFound("No JSON found in response".into()))
+        Err(StructuredOutputError::NotFound(
+            "No JSON found in response".into(),
+        ))
     }
 
     /// Validate a JSON value against a JSON Schema.
@@ -121,7 +125,8 @@ impl StructuredOutput {
                     if let Some(name) = field.as_str() {
                         if !obj.contains_key(name) {
                             return Err(StructuredOutputError::ValidationError(format!(
-                                "Missing required field: '{}'", name
+                                "Missing required field: '{}'",
+                                name
                             )));
                         }
                     }
@@ -243,10 +248,8 @@ mod tests {
             "required": ["name"]
         });
         let content = r#"{"name": "test", "value": 42}"#;
-        let result = StructuredOutput::extract(
-            content,
-            &OutputMode::ValidatedJson { schema },
-        ).unwrap();
+        let result =
+            StructuredOutput::extract(content, &OutputMode::ValidatedJson { schema }).unwrap();
         assert_eq!(result["name"], "test");
     }
 
@@ -254,10 +257,7 @@ mod tests {
     fn test_validated_json_wrong_type() {
         let schema = json!({"type": "array"});
         let content = r#"{"name": "test"}"#;
-        let result = StructuredOutput::extract(
-            content,
-            &OutputMode::ValidatedJson { schema },
-        );
+        let result = StructuredOutput::extract(content, &OutputMode::ValidatedJson { schema });
         assert!(result.is_err());
     }
 
@@ -268,10 +268,7 @@ mod tests {
             "required": ["name", "age"]
         });
         let content = r#"{"name": "test"}"#;
-        let result = StructuredOutput::extract(
-            content,
-            &OutputMode::ValidatedJson { schema },
-        );
+        let result = StructuredOutput::extract(content, &OutputMode::ValidatedJson { schema });
         assert!(result.is_err());
     }
 

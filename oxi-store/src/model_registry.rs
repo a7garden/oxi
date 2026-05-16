@@ -9,14 +9,14 @@
 //! - Supports dynamic provider registration (extensions)
 //! - Provides model filtering by provider, capability, and modality
 
-use crate::auth_storage::{AuthStorage, AuthStatus};
+use crate::auth_storage::{AuthStatus, AuthStorage};
 use oxi_ai::model_db;
 use oxi_ai::register_builtins::get_builtin_provider;
 use oxi_ai::{Api, CompatSettings, Cost, InputModality, Model};
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use parking_lot::RwLock;
 
 // =============================================================================
 // JSON Schema types for models.json
@@ -26,23 +26,23 @@ use parking_lot::RwLock;
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelOverride {
-/// pub.
+    /// pub.
     pub name: Option<String>,
-/// pub.
+    /// pub.
     pub reasoning: Option<bool>,
-/// pub.
+    /// pub.
     pub thinking_level_map: Option<HashMap<String, Option<String>>>,
-/// pub.
+    /// pub.
     pub input: Option<Vec<InputModality>>,
-/// pub.
+    /// pub.
     pub cost: Option<PartialCost>,
-/// pub.
+    /// pub.
     pub context_window: Option<usize>,
-/// pub.
+    /// pub.
     pub max_tokens: Option<usize>,
-/// pub.
+    /// pub.
     pub headers: Option<HashMap<String, String>>,
-/// pub.
+    /// pub.
     pub compat: Option<CompatSettings>,
 }
 
@@ -50,13 +50,13 @@ pub struct ModelOverride {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialCost {
-/// pub.
+    /// pub.
     pub input: Option<f64>,
-/// pub.
+    /// pub.
     pub output: Option<f64>,
-/// pub.
+    /// pub.
     pub cache_read: Option<f64>,
-/// pub.
+    /// pub.
     pub cache_write: Option<f64>,
 }
 
@@ -64,29 +64,29 @@ pub struct PartialCost {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelDefinition {
-/// pub.
+    /// pub.
     pub id: String,
-/// pub.
+    /// pub.
     pub name: Option<String>,
-/// pub.
+    /// pub.
     pub api: Option<Api>,
-/// pub.
+    /// pub.
     pub base_url: Option<String>,
-/// pub.
+    /// pub.
     pub reasoning: Option<bool>,
-/// pub.
+    /// pub.
     pub thinking_level_map: Option<HashMap<String, Option<String>>>,
-/// pub.
+    /// pub.
     pub input: Option<Vec<InputModality>>,
-/// pub.
+    /// pub.
     pub cost: Option<Cost>,
-/// pub.
+    /// pub.
     pub context_window: Option<usize>,
-/// pub.
+    /// pub.
     pub max_tokens: Option<usize>,
-/// pub.
+    /// pub.
     pub headers: Option<HashMap<String, String>>,
-/// pub.
+    /// pub.
     pub compat: Option<CompatSettings>,
 }
 
@@ -94,30 +94,30 @@ pub struct ModelDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfig {
-/// pub.
+    /// pub.
     pub name: Option<String>,
-/// pub.
+    /// pub.
     pub base_url: Option<String>,
-/// pub.
+    /// pub.
     pub api_key: Option<String>,
-/// pub.
+    /// pub.
     pub api: Option<Api>,
-/// pub.
+    /// pub.
     pub headers: Option<HashMap<String, String>>,
-/// pub.
+    /// pub.
     pub compat: Option<CompatSettings>,
-/// pub.
+    /// pub.
     pub auth_header: Option<bool>,
-/// pub.
+    /// pub.
     pub models: Option<Vec<ModelDefinition>>,
-/// pub.
+    /// pub.
     pub model_overrides: Option<HashMap<String, ModelOverride>>,
 }
 
 /// Top-level models.json configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelsConfig {
-/// pub.
+    /// pub.
     pub providers: HashMap<String, ProviderConfig>,
 }
 
@@ -199,7 +199,10 @@ impl ResolvedRequestAuth {
 // =============================================================================
 
 /// Merge a base compat with an override compat. Override fields win.
-fn merge_compat(base: Option<&CompatSettings>, override_compat: Option<&CompatSettings>) -> Option<CompatSettings> {
+fn merge_compat(
+    base: Option<&CompatSettings>,
+    override_compat: Option<&CompatSettings>,
+) -> Option<CompatSettings> {
     match (base, override_compat) {
         (None, None) => None,
         (None, Some(ov)) => Some(ov.clone()),
@@ -273,11 +276,11 @@ fn apply_model_override(model: &Model, override_def: &ModelOverride) -> Model {
 /// Use `$ENV_VAR` references instead.
 fn resolve_config_value(value: &str) -> Option<String> {
     // Support environment variable references: $VAR or ${VAR}
-    if value.starts_with('$') {
+    if let Some(stripped) = value.strip_prefix('$') {
         let var_name = value
             .strip_prefix("${")
             .and_then(|s| s.strip_suffix('}'))
-            .unwrap_or(&value[1..]);
+            .unwrap_or(stripped);
         return std::env::var(var_name).ok().filter(|s| !s.is_empty());
     }
     // Command execution (! prefix) has been removed for security
@@ -296,17 +299,13 @@ fn resolve_config_value(value: &str) -> Option<String> {
 /// Supports `$VAR` / `${VAR}` environment variable references.
 /// The `!` command execution prefix has been removed for security.
 fn resolve_config_value_or_throw(value: &str, label: &str) -> Result<String, String> {
-    if value.starts_with('$') {
+    if let Some(stripped) = value.strip_prefix('$') {
         let var_name = value
             .strip_prefix("${")
             .and_then(|s| s.strip_suffix('}'))
-            .unwrap_or(&value[1..]);
-        std::env::var(var_name).map_err(|_| {
-            format!(
-                "Environment variable {} not set for {}",
-                var_name, label
-            )
-        })
+            .unwrap_or(stripped);
+        std::env::var(var_name)
+            .map_err(|_| format!("Environment variable {} not set for {}", var_name, label))
     } else if value.starts_with('!') {
         tracing::warn!(
             "Command execution in config values (! prefix) is no longer supported for security. Use $ENV_VAR instead. Value: {}",
@@ -387,8 +386,8 @@ impl CliModelRegistry {
     /// If `models_json_path` is `None`, falls back to
     /// `$HOME/.oxi/models.json` (or the XDG config dir equivalent).
     pub fn create(auth_storage: AuthStorage, models_json_path: Option<PathBuf>) -> Self {
-        let models_json_path =
-            models_json_path.or_else(|| dirs::config_dir().map(|p| p.join("oxi").join("models.json")));
+        let models_json_path = models_json_path
+            .or_else(|| dirs::config_dir().map(|p| p.join("oxi").join("models.json")));
 
         let registry = Self {
             models: RwLock::new(Vec::new()),
@@ -485,10 +484,7 @@ impl CliModelRegistry {
         }
 
         // Search by ID across all providers
-        let matches: Vec<_> = models
-            .iter()
-            .filter(|m| m.id == model_str)
-            .collect();
+        let matches: Vec<_> = models.iter().filter(|m| m.id == model_str).collect();
 
         if matches.len() == 1 {
             return Some(matches[0].clone());
@@ -500,7 +496,11 @@ impl CliModelRegistry {
                 tracing::warn!(
                     "Ambiguous model ID '{}' matches providers: {}. Using first match.",
                     model_str,
-                    matches.iter().map(|m| m.provider.as_str()).collect::<Vec<_>>().join(", ")
+                    matches
+                        .iter()
+                        .map(|m| m.provider.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
             }
             return Some(matches[0].clone());
@@ -511,8 +511,7 @@ impl CliModelRegistry {
         models
             .iter()
             .find(|m| {
-                m.id.to_lowercase().contains(&lower)
-                    || m.name.to_lowercase().contains(&lower)
+                m.id.to_lowercase().contains(&lower) || m.name.to_lowercase().contains(&lower)
             })
             .cloned()
     }
@@ -681,7 +680,10 @@ impl CliModelRegistry {
         ];
 
         for (provider, id) in &preferred {
-            if let Some(model) = available.iter().find(|m| m.provider == *provider && m.id == *id) {
+            if let Some(model) = available
+                .iter()
+                .find(|m| m.provider == *provider && m.id == *id)
+            {
                 return Some(model.clone());
             }
         }
@@ -697,16 +699,10 @@ impl CliModelRegistry {
 
     /// Unregister a previously registered provider.
     pub fn unregister_provider(&self, provider_name: &str) {
-        if !self
-            .registered_providers
-            .read()
-            .contains_key(provider_name)
-        {
+        if !self.registered_providers.read().contains_key(provider_name) {
             return;
         }
-        self.registered_providers
-            .write()
-            .remove(provider_name);
+        self.registered_providers.write().remove(provider_name);
         self.refresh();
     }
 
@@ -751,8 +747,7 @@ impl CliModelRegistry {
             .read()
             .iter()
             .filter(|m| {
-                m.id.to_lowercase().contains(&lower)
-                    || m.name.to_lowercase().contains(&lower)
+                m.id.to_lowercase().contains(&lower) || m.name.to_lowercase().contains(&lower)
             })
             .cloned()
             .collect()
@@ -774,7 +769,8 @@ impl CliModelRegistry {
             // Keep built-in models even if custom models failed to load
         }
 
-        let built_in = self.load_built_in_models(&custom_result.overrides, &custom_result.model_overrides);
+        let built_in =
+            self.load_built_in_models(&custom_result.overrides, &custom_result.model_overrides);
         let combined = self.merge_custom_models(built_in, &custom_result.models);
 
         *self.models.write() = combined;
@@ -896,7 +892,8 @@ impl CliModelRegistry {
         }
 
         let mut overrides = HashMap::new();
-        let mut model_overrides_map: HashMap<String, HashMap<String, ModelOverride>> = HashMap::new();
+        let mut model_overrides_map: HashMap<String, HashMap<String, ModelOverride>> =
+            HashMap::new();
 
         let built_in_providers: Vec<&str> = model_db::get_providers();
 
@@ -919,7 +916,11 @@ impl CliModelRegistry {
             if let Some(ref model_overrides) = provider_config.model_overrides {
                 model_overrides_map.insert(provider_name.clone(), model_overrides.clone());
                 for (model_id, model_override) in model_overrides {
-                    self.store_model_headers(provider_name, model_id, model_override.headers.as_ref());
+                    self.store_model_headers(
+                        provider_name,
+                        model_id,
+                        model_override.headers.as_ref(),
+                    );
                 }
             }
         }
@@ -1013,11 +1014,7 @@ impl CliModelRegistry {
         Ok(())
     }
 
-    fn parse_models(
-        &self,
-        config: &ModelsConfig,
-        built_in_providers: &[&str],
-    ) -> Vec<Model> {
+    fn parse_models(&self, config: &ModelsConfig, built_in_providers: &[&str]) -> Vec<Model> {
         let mut models = Vec::new();
 
         // Cache built-in defaults per provider
@@ -1038,7 +1035,10 @@ impl CliModelRegistry {
                     if let Some(first) = entries.first() {
                         defaults_cache.insert(
                             provider_name.clone(),
-                            (first.api, self.default_base_url_for_provider(provider_name.as_str())),
+                            (
+                                first.api,
+                                self.default_base_url_for_provider(provider_name.as_str()),
+                            ),
                         );
                     }
                 }
@@ -1063,20 +1063,17 @@ impl CliModelRegistry {
 
                 let Some(base_url) = base_url else { continue };
 
-                let compat = merge_compat(
-                    provider_config.compat.as_ref(),
-                    model_def.compat.as_ref(),
-                );
+                let compat =
+                    merge_compat(provider_config.compat.as_ref(), model_def.compat.as_ref());
 
-                self.store_model_headers(
-                    provider_name,
-                    &model_def.id,
-                    model_def.headers.as_ref(),
-                );
+                self.store_model_headers(provider_name, &model_def.id, model_def.headers.as_ref());
 
                 models.push(Model {
                     id: model_def.id.clone(),
-                    name: model_def.name.clone().unwrap_or_else(|| model_def.id.clone()),
+                    name: model_def
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| model_def.id.clone()),
                     api,
                     provider: provider_name.clone(),
                     base_url: base_url.to_string(),
@@ -1106,25 +1103,19 @@ impl CliModelRegistry {
     // Private: provider config helpers
     // =========================================================================
 
-    fn store_provider_request_config(
-        &self,
-        provider_name: &str,
-        config: &ProviderConfig,
-    ) {
+    fn store_provider_request_config(&self, provider_name: &str, config: &ProviderConfig) {
         if config.api_key.is_none() && config.headers.is_none() && config.auth_header.is_none() {
             return;
         }
 
-        self.provider_request_configs
-            .write()
-            .insert(
-                provider_name.to_string(),
-                ProviderRequestConfig {
-                    api_key: config.api_key.clone(),
-                    headers: config.headers.clone(),
-                    auth_header: config.auth_header.unwrap_or(false),
-                },
-            );
+        self.provider_request_configs.write().insert(
+            provider_name.to_string(),
+            ProviderRequestConfig {
+                api_key: config.api_key.clone(),
+                headers: config.headers.clone(),
+                auth_header: config.auth_header.unwrap_or(false),
+            },
+        );
     }
 
     fn store_model_headers(
@@ -1155,16 +1146,14 @@ impl CliModelRegistry {
             return;
         }
 
-        self.provider_request_configs
-            .write()
-            .insert(
-                provider_name.to_string(),
-                ProviderRequestConfig {
-                    api_key: config.api_key.clone(),
-                    headers: config.headers.clone(),
-                    auth_header: config.auth_header,
-                },
-            );
+        self.provider_request_configs.write().insert(
+            provider_name.to_string(),
+            ProviderRequestConfig {
+                api_key: config.api_key.clone(),
+                headers: config.headers.clone(),
+                auth_header: config.auth_header,
+            },
+        );
     }
 
     // =========================================================================
@@ -1184,18 +1173,16 @@ impl CliModelRegistry {
         // Try provider config from models.json
         let api_key = match api_key_from_storage {
             Some(key) => Some(key),
-            None => {
-                provider_config
-                    .as_ref()
-                    .and_then(|c| c.api_key.clone())
-                    .and_then(|raw| {
-                        resolve_config_value_or_throw(
-                            &raw,
-                            &format!("API key for provider \"{}\"", model.provider),
-                        )
-                        .ok()
-                    })
-            }
+            None => provider_config
+                .as_ref()
+                .and_then(|c| c.api_key.clone())
+                .and_then(|raw| {
+                    resolve_config_value_or_throw(
+                        &raw,
+                        &format!("API key for provider \"{}\"", model.provider),
+                    )
+                    .ok()
+                }),
         };
 
         // Resolve headers
@@ -1228,7 +1215,11 @@ impl CliModelRegistry {
         }
 
         // If authHeader is set, add Authorization: Bearer
-        if provider_config.as_ref().map(|c| c.auth_header).unwrap_or(false) {
+        if provider_config
+            .as_ref()
+            .map(|c| c.auth_header)
+            .unwrap_or(false)
+        {
             let Some(ref key) = api_key else {
                 return ResolvedRequestAuth::err(format!(
                     "No API key found for \"{}\"",
@@ -1276,7 +1267,10 @@ impl CliModelRegistry {
 
                     all_models.push(Model {
                         id: model_def.id.clone(),
-                        name: model_def.name.clone().unwrap_or_else(|| model_def.id.clone()),
+                        name: model_def
+                            .name
+                            .clone()
+                            .unwrap_or_else(|| model_def.id.clone()),
                         api: api.unwrap_or(Api::OpenAiCompletions),
                         provider: provider_name.to_string(),
                         base_url: base_url.to_string(),
@@ -1483,10 +1477,10 @@ mod tests {
         let registry = ModelRegistry::create(AuthStorage::in_memory(), None);
         let results = registry.search("claude");
         assert!(!results.is_empty());
-        assert!(results.iter().all(|m|
-            m.id.to_lowercase().contains("claude")
-            || m.name.to_lowercase().contains("claude")
-        ));
+        assert!(results
+            .iter()
+            .all(|m| m.id.to_lowercase().contains("claude")
+                || m.name.to_lowercase().contains("claude")));
     }
 
     #[test]
@@ -1525,7 +1519,9 @@ mod tests {
             std::env::remove_var(key);
         }
         let registry = ModelRegistry::create(AuthStorage::in_memory(), None);
-        let model = registry.find("anthropic", "claude-sonnet-4-20250514").unwrap();
+        let model = registry
+            .find("anthropic", "claude-sonnet-4-20250514")
+            .unwrap();
         // No auth configured in test
         assert!(!registry.has_configured_auth(&model));
     }
@@ -1535,7 +1531,9 @@ mod tests {
         let auth = AuthStorage::in_memory();
         auth.set_runtime_key("anthropic", "test-key".to_string());
         let registry = ModelRegistry::create(auth, None);
-        let model = registry.find("anthropic", "claude-sonnet-4-20250514").unwrap();
+        let model = registry
+            .find("anthropic", "claude-sonnet-4-20250514")
+            .unwrap();
         assert!(registry.has_configured_auth(&model));
     }
 
@@ -1568,7 +1566,9 @@ mod tests {
             std::env::remove_var(key);
         }
         let registry = ModelRegistry::create(AuthStorage::in_memory(), None);
-        let model = registry.find("anthropic", "claude-sonnet-4-20250514").unwrap();
+        let model = registry
+            .find("anthropic", "claude-sonnet-4-20250514")
+            .unwrap();
         let result = registry.get_api_key_and_headers(&model);
         assert!(result.ok);
         assert!(result.api_key.is_none());

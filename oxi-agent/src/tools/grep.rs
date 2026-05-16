@@ -1,7 +1,6 @@
-/// Grep tool - search files for patterns
-
-use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use super::path_security::PathGuard;
+/// Grep tool - search files for patterns
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use regex::RegexBuilder;
 use serde_json::{json, Value};
@@ -30,20 +29,21 @@ pub struct GrepTool {
 }
 
 impl GrepTool {
-/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
+    /// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
         Self { root_dir: None }
     }
 
     /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self { root_dir: Some(cwd) }
+        Self {
+            root_dir: Some(cwd),
+        }
     }
 
     /// Check if a filename matches a simple glob pattern like "*.rs", "*.ts"
     fn matches_glob(file_name: &str, pattern: &str) -> bool {
-        if pattern.starts_with("*.") {
-            let ext = &pattern[2..];
+        if let Some(ext) = pattern.strip_prefix("*.") {
             file_name.ends_with(ext)
         } else if pattern.contains('*') {
             // Simple wildcard matching
@@ -71,7 +71,8 @@ impl GrepTool {
     ) -> Result<(String, bool), ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(root_dir);
-        let root = guard.validate_traversal(Path::new(path))
+        let root = guard
+            .validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
         if !root.exists() {
@@ -142,7 +143,8 @@ impl GrepTool {
 
         // Detect and skip broken symlinks - they cause read_dir to fail
         // and should not cause the entire search to fail
-        if current.symlink_metadata()
+        if current
+            .symlink_metadata()
             .map(|m| m.file_type().is_symlink())
             .unwrap_or(false)
             && !current.exists()
@@ -315,11 +317,12 @@ impl AgentTool for GrepTool {
     }
 
     fn label(&self) -> &str {
-
         "Grep"
     }
 
-    fn essential(&self) -> bool { true }
+    fn essential(&self) -> bool {
+        true
+    }
     fn description(&self) -> &str {
         "Search files for a pattern. Returns matching lines with file paths and line numbers. Use literal=true to treat pattern as a literal string. Use context=n to show n lines before and after matches. Long lines are truncated to 500 chars."
     }

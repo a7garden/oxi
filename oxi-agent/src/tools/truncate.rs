@@ -1,7 +1,7 @@
 /// Output truncation utilities for tool results
 /// Limits tool output by two independent limits (lines + bytes), whichever hits first.
 /// UTF-8 safe: truncates at valid character boundaries.
-
+///
 /// Default max output lines
 pub const DEFAULT_MAX_LINES: usize = 2000;
 /// Default max output bytes (50KB)
@@ -187,7 +187,9 @@ pub fn truncate_tail(content: &str, options: &TruncationOptions) -> TruncationRe
     // If still over byte limit, trim from the front
     let mut last_line_partial = false;
     while output_bytes > max_bytes && !output_lines_vec.is_empty() {
-        let first = output_lines_vec.first().expect("output_lines_vec non-empty after is_empty check");
+        let first = output_lines_vec
+            .first()
+            .expect("output_lines_vec non-empty after is_empty check");
         let first_bytes = first.len() + 1;
 
         if output_bytes - first_bytes <= max_bytes {

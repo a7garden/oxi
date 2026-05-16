@@ -1,8 +1,8 @@
 //! Message types for oxi-ai
 
+use crate::Api;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use crate::Api;
 
 /// Text content block
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub struct TextContent {
 #[serde(rename = "text")]
 /// TextContentType.
 pub enum TextContentType {
-/// text variant.
+    /// text variant.
     Text,
 }
 
@@ -65,7 +65,7 @@ pub struct ThinkingContent {
 #[serde(rename = "thinking")]
 /// ThinkingContentType.
 pub enum ThinkingContentType {
-/// thinking variant.
+    /// thinking variant.
     Thinking,
 }
 
@@ -97,7 +97,7 @@ pub struct ImageContent {
 #[serde(rename = "image")]
 /// ImageContentType.
 pub enum ImageContentType {
-/// image variant.
+    /// image variant.
     Image,
 }
 
@@ -133,7 +133,7 @@ pub struct ToolCall {
 #[serde(rename = "toolCall")]
 /// ToolCallType.
 pub enum ToolCallType {
-/// tool call variant.
+    /// tool call variant.
     ToolCall,
 }
 
@@ -211,7 +211,7 @@ pub struct UserMessage {
 /// UserRole.
 pub enum UserRole {
     #[serde(rename = "user")]
-/// user variant.
+    /// user variant.
     User,
 }
 
@@ -258,7 +258,7 @@ pub struct AssistantMessage {
 /// AssistantRole.
 pub enum AssistantRole {
     #[serde(rename = "assistant")]
-/// assistant variant.
+    /// assistant variant.
     Assistant,
 }
 
@@ -323,7 +323,7 @@ pub struct ToolResultMessage {
 /// ToolResultRole.
 pub enum ToolResultRole {
     #[serde(rename = "toolResult")]
-/// tool result variant.
+    /// tool result variant.
     ToolResult,
 }
 
@@ -439,7 +439,11 @@ impl Message {
     }
 
     /// Convenience constructor for a tool result message.
-    pub fn tool_result(tool_call_id: impl Into<String>, tool_name: impl Into<String>, content: Vec<ContentBlock>) -> Self {
+    pub fn tool_result(
+        tool_call_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        content: Vec<ContentBlock>,
+    ) -> Self {
         Message::ToolResult(ToolResultMessage::new(tool_call_id, tool_name, content))
     }
 
@@ -753,8 +757,10 @@ mod tests {
     #[test]
     fn assistant_message_inner_roundtrip() {
         let mut msg = AssistantMessage::new(Api::AnthropicMessages, "anthropic", "claude-3");
-        msg.content.push(ContentBlock::Text(TextContent::new("Hi!")));
-        msg.content.push(ContentBlock::Thinking(ThinkingContent::new("hmm")));
+        msg.content
+            .push(ContentBlock::Text(TextContent::new("Hi!")));
+        msg.content
+            .push(ContentBlock::Thinking(ThinkingContent::new("hmm")));
         msg.usage = Usage {
             input: 100,
             output: 50,
@@ -832,9 +838,12 @@ mod tests {
     #[test]
     fn assistant_text_content() {
         let mut a = AssistantMessage::new(Api::OpenAiCompletions, "openai", "gpt-4");
-        a.content.push(ContentBlock::Text(TextContent::new("part A")));
-        a.content.push(ContentBlock::Thinking(ThinkingContent::new("hidden")));
-        a.content.push(ContentBlock::Text(TextContent::new("part B")));
+        a.content
+            .push(ContentBlock::Text(TextContent::new("part A")));
+        a.content
+            .push(ContentBlock::Thinking(ThinkingContent::new("hidden")));
+        a.content
+            .push(ContentBlock::Text(TextContent::new("part B")));
 
         let msg = Message::Assistant(a);
         let text = msg.text_content().unwrap();
@@ -862,11 +871,14 @@ mod tests {
     #[test]
     fn transform_openai_to_anthropic_keeps_thinking() {
         let mut a = AssistantMessage::new(Api::OpenAiCompletions, "openai", "gpt-4");
-        a.content.push(ContentBlock::Text(TextContent::new("Hello")));
-        a.content.push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
+        a.content
+            .push(ContentBlock::Text(TextContent::new("Hello")));
+        a.content
+            .push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
         let messages = vec![Message::Assistant(a)];
 
-        let transformed = transform_for_provider(&messages, &Api::OpenAiCompletions, &Api::AnthropicMessages);
+        let transformed =
+            transform_for_provider(&messages, &Api::OpenAiCompletions, &Api::AnthropicMessages);
         match &transformed[0] {
             Message::Assistant(a) => {
                 // Anthropic keeps thinking blocks as-is
@@ -880,11 +892,14 @@ mod tests {
     #[test]
     fn transform_anthropic_to_openai_converts_thinking() {
         let mut a = AssistantMessage::new(Api::AnthropicMessages, "anthropic", "claude-3");
-        a.content.push(ContentBlock::Text(TextContent::new("Hello")));
-        a.content.push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
+        a.content
+            .push(ContentBlock::Text(TextContent::new("Hello")));
+        a.content
+            .push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
         let messages = vec![Message::Assistant(a)];
 
-        let transformed = transform_for_provider(&messages, &Api::AnthropicMessages, &Api::OpenAiCompletions);
+        let transformed =
+            transform_for_provider(&messages, &Api::AnthropicMessages, &Api::OpenAiCompletions);
         match &transformed[0] {
             Message::Assistant(a) => {
                 // Thinking converted to text, then merged with adjacent text
@@ -901,15 +916,20 @@ mod tests {
     #[test]
     fn transform_roundtrip_openai_anthropic_openai() {
         let mut a = AssistantMessage::new(Api::OpenAiCompletions, "openai", "gpt-4");
-        a.content.push(ContentBlock::Text(TextContent::new("Hello")));
-        a.content.push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
-        a.content.push(ContentBlock::Text(TextContent::new("World")));
+        a.content
+            .push(ContentBlock::Text(TextContent::new("Hello")));
+        a.content
+            .push(ContentBlock::Thinking(ThinkingContent::new("pondering")));
+        a.content
+            .push(ContentBlock::Text(TextContent::new("World")));
         let original = vec![Message::Assistant(a)];
 
         // OpenAI -> Anthropic (keeps thinking)
-        let step1 = transform_for_provider(&original, &Api::OpenAiCompletions, &Api::AnthropicMessages);
+        let step1 =
+            transform_for_provider(&original, &Api::OpenAiCompletions, &Api::AnthropicMessages);
         // Anthropic -> OpenAI (converts thinking to text)
-        let step2 = transform_for_provider(&step1, &Api::AnthropicMessages, &Api::OpenAiCompletions);
+        let step2 =
+            transform_for_provider(&step1, &Api::AnthropicMessages, &Api::OpenAiCompletions);
 
         match &step2[0] {
             Message::Assistant(a) => {

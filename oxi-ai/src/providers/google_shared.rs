@@ -7,8 +7,11 @@
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
-use super::{ProviderEvent, ProviderError};
-use crate::{Api, AssistantMessage, ContentBlock, Context, StopReason, TextContent, ThinkingContent, Tool, Usage};
+use super::{ProviderError, ProviderEvent};
+use crate::{
+    Api, AssistantMessage, ContentBlock, Context, StopReason, TextContent, ThinkingContent, Tool,
+    Usage,
+};
 
 // ---------------------------------------------------------------------------
 // Google Thinking Level
@@ -78,9 +81,7 @@ pub fn convert_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderErr
                     crate::MessageContent::Text(s) => {
                         vec![serde_json::json!({ "text": s })]
                     }
-                    crate::MessageContent::Blocks(blocks) => {
-                        blocks_to_google_parts(blocks)?
-                    }
+                    crate::MessageContent::Blocks(blocks) => blocks_to_google_parts(blocks)?,
                 };
                 if parts.is_empty() {
                     continue;
@@ -102,11 +103,7 @@ pub fn convert_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderErr
             }
             crate::Message::ToolResult(t) => {
                 // Extract text content
-                let text_parts: Vec<&str> = t
-                    .content
-                    .iter()
-                    .filter_map(|b| b.as_text())
-                    .collect();
+                let text_parts: Vec<&str> = t.content.iter().filter_map(|b| b.as_text()).collect();
                 let text_result = text_parts.join("\n");
 
                 let has_text = !text_result.is_empty();
@@ -197,9 +194,7 @@ fn sanitize_for_openapi(schema: &JsonValue) -> JsonValue {
             }
             JsonValue::Object(result)
         }
-        JsonValue::Array(arr) => {
-            JsonValue::Array(arr.iter().map(sanitize_for_openapi).collect())
-        }
+        JsonValue::Array(arr) => JsonValue::Array(arr.iter().map(sanitize_for_openapi).collect()),
         other => other.clone(),
     }
 }
@@ -211,10 +206,7 @@ fn sanitize_for_openapi(schema: &JsonValue) -> JsonValue {
 /// When `use_parameters` is true, uses the legacy `parameters` field (OpenAPI 3.03)
 /// instead of `parametersJsonSchema` (full JSON Schema). This is needed for
 /// Cloud Code Assist with Claude models.
-pub fn convert_tools(
-    tools: &[Tool],
-    use_parameters: bool,
-) -> Option<JsonValue> {
+pub fn convert_tools(tools: &[Tool], use_parameters: bool) -> Option<JsonValue> {
     if tools.is_empty() {
         return None;
     }
@@ -378,13 +370,20 @@ pub fn parse_google_events(
                                 // Check if this is a thinking part
                                 if is_thinking_part(part) {
                                     // Accumulate into partial_message
-                                    let last_think_idx = partial_message.content.iter().rposition(|b| matches!(b, ContentBlock::Thinking(_)));
+                                    let last_think_idx = partial_message
+                                        .content
+                                        .iter()
+                                        .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
                                     if let Some(idx) = last_think_idx {
-                                        if let ContentBlock::Thinking(t) = &mut partial_message.content[idx] {
+                                        if let ContentBlock::Thinking(t) =
+                                            &mut partial_message.content[idx]
+                                        {
                                             t.thinking.push_str(text);
                                         }
                                     } else {
-                                        partial_message.content.push(ContentBlock::Thinking(ThinkingContent::new(text.clone())));
+                                        partial_message.content.push(ContentBlock::Thinking(
+                                            ThinkingContent::new(text.clone()),
+                                        ));
                                     }
                                     events.push(ProviderEvent::ThinkingDelta {
                                         content_index: index,
@@ -393,13 +392,20 @@ pub fn parse_google_events(
                                     });
                                 } else {
                                     // Accumulate into partial_message
-                                    let last_text_idx = partial_message.content.iter().rposition(|b| matches!(b, ContentBlock::Text(_)));
+                                    let last_text_idx = partial_message
+                                        .content
+                                        .iter()
+                                        .rposition(|b| matches!(b, ContentBlock::Text(_)));
                                     if let Some(idx) = last_text_idx {
-                                        if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
+                                        if let ContentBlock::Text(t) =
+                                            &mut partial_message.content[idx]
+                                        {
                                             t.text.push_str(text);
                                         }
                                     } else {
-                                        partial_message.content.push(ContentBlock::Text(TextContent::new(text.clone())));
+                                        partial_message.content.push(ContentBlock::Text(
+                                            TextContent::new(text.clone()),
+                                        ));
                                     }
                                     events.push(ProviderEvent::TextDelta {
                                         content_index: index,
@@ -551,7 +557,10 @@ mod tests {
         assert_eq!(map_stop_reason("SAFETY"), StopReason::Error);
         assert_eq!(map_stop_reason("OTHER"), StopReason::Error);
         assert_eq!(map_stop_reason("RECITATION"), StopReason::Error);
-        assert_eq!(map_stop_reason("MALFORMED_FUNCTION_CALL"), StopReason::Error);
+        assert_eq!(
+            map_stop_reason("MALFORMED_FUNCTION_CALL"),
+            StopReason::Error
+        );
         assert_eq!(map_stop_reason("UNKNOWN_REASON"), StopReason::Error);
     }
 
@@ -570,9 +579,11 @@ mod tests {
     fn test_convert_messages_with_assistant() {
         let mut ctx = Context::new();
         ctx.add_message(crate::Message::user("Hi"));
-        ctx.add_message(crate::Message::Assistant(
-            AssistantMessage::new(Api::GoogleGenerativeAi, "google", "gemini-1.5-pro"),
-        ));
+        ctx.add_message(crate::Message::Assistant(AssistantMessage::new(
+            Api::GoogleGenerativeAi,
+            "google",
+            "gemini-1.5-pro",
+        )));
 
         let contents = convert_messages(&ctx).unwrap();
         assert_eq!(contents.len(), 1);
@@ -629,7 +640,12 @@ mod tests {
     #[test]
     fn test_parse_google_events_basic_text() {
         let sse_data = r#"data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}"#;
-        let events = parse_google_events(sse_data, Api::GoogleGenerativeAi, "google", "gemini-1.5-pro");
+        let events = parse_google_events(
+            sse_data,
+            Api::GoogleGenerativeAi,
+            "google",
+            "gemini-1.5-pro",
+        );
         assert!(!events.is_empty());
         if let ProviderEvent::TextDelta { delta, .. } = &events[0] {
             assert_eq!(delta, "Hello");
@@ -642,7 +658,12 @@ mod tests {
     fn test_parse_google_events_thinking() {
         let sse_data =
             r#"data: {"candidates":[{"content":{"parts":[{"text":"hmm...","thought":true}]}}]}"#;
-        let events = parse_google_events(sse_data, Api::GoogleGenerativeAi, "google", "gemini-2.5-pro");
+        let events = parse_google_events(
+            sse_data,
+            Api::GoogleGenerativeAi,
+            "google",
+            "gemini-2.5-pro",
+        );
         assert!(!events.is_empty());
         if let ProviderEvent::ThinkingDelta { delta, .. } = &events[0] {
             assert_eq!(delta, "hmm...");
@@ -654,7 +675,12 @@ mod tests {
     #[test]
     fn test_parse_google_events_with_usage() {
         let sse_data = r#"data: {"candidates":[{"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":20,"totalTokenCount":30}}"#;
-        let events = parse_google_events(sse_data, Api::GoogleGenerativeAi, "google", "gemini-1.5-pro");
+        let events = parse_google_events(
+            sse_data,
+            Api::GoogleGenerativeAi,
+            "google",
+            "gemini-1.5-pro",
+        );
         let done_events: Vec<_> = events
             .iter()
             .filter(|e| matches!(e, ProviderEvent::Done { .. }))
@@ -665,7 +691,12 @@ mod tests {
     #[test]
     fn test_parse_google_events_with_function_call() {
         let sse_data = r#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"get_weather","args":{"location":"Boston"}}}]}}]}"#;
-        let events = parse_google_events(sse_data, Api::GoogleGenerativeAi, "google", "gemini-1.5-pro");
+        let events = parse_google_events(
+            sse_data,
+            Api::GoogleGenerativeAi,
+            "google",
+            "gemini-1.5-pro",
+        );
         let tool_call_events: Vec<_> = events
             .iter()
             .filter(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }))

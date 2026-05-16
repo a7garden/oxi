@@ -2,6 +2,7 @@
 //!
 //! Uses only ASCII-safe characters for broad terminal compatibility.
 
+use crate::Theme;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -10,7 +11,6 @@ use ratatui::{
     widgets::{Block, Borders, LineGauge, Paragraph, StatefulWidget, Widget},
 };
 use unicode_width::UnicodeWidthStr;
-use crate::Theme;
 
 /// Footer data — shared state for token counts and session info.
 #[derive(Debug, Clone)]
@@ -60,15 +60,23 @@ impl Default for FooterData {
 
 impl FooterData {
     pub fn fmt_count(count: u32) -> String {
-        if count < 1000 { count.to_string() }
-        else if count < 1_000_000 { format!("{:.1}k", count as f32 / 1000.0) }
-        else { format!("{:.1}M", count as f32 / 1_000_000.0) }
+        if count < 1000 {
+            count.to_string()
+        } else if count < 1_000_000 {
+            format!("{:.1}k", count as f32 / 1000.0)
+        } else {
+            format!("{:.1}M", count as f32 / 1_000_000.0)
+        }
     }
 
     pub fn format_duration(secs: u64) -> String {
-        if secs < 60 { format!("{}s", secs) }
-        else if secs < 3600 { format!("{}m", secs / 60) }
-        else { format!("{}h{}m", secs / 3600, (secs % 3600) / 60) }
+        if secs < 60 {
+            format!("{}s", secs)
+        } else if secs < 3600 {
+            format!("{}m", secs / 60)
+        } else {
+            format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+        }
     }
 }
 
@@ -82,14 +90,18 @@ pub struct Footer<'a> {
 }
 
 impl<'a> Footer<'a> {
-    pub fn new(theme: &'a Theme) -> Self { Self { theme } }
+    pub fn new(theme: &'a Theme) -> Self {
+        Self { theme }
+    }
 }
 
 impl StatefulWidget for Footer<'_> {
     type State = FooterState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        if area.height < 2 || area.width < 4 { return; }
+        if area.height < 2 || area.width < 4 {
+            return;
+        }
 
         let styles = self.theme.to_styles();
         let d = &state.data;
@@ -111,10 +123,13 @@ impl StatefulWidget for Footer<'_> {
 
         // ── Row 1: tokens + gauge ... model ──
         {
-            let total_tokens = d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_tokens;
+            let total_tokens =
+                d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_tokens;
             let pct = if d.context_window_max > 0 {
                 (total_tokens as f64 / d.context_window_max as f64).min(1.0)
-            } else { 0.0 };
+            } else {
+                0.0
+            };
             let pct_display = (pct * 100.0) as f32;
             let has_tokens = total_tokens > 0;
 
@@ -133,14 +148,19 @@ impl StatefulWidget for Footer<'_> {
             let model_display = if d.model_name.is_empty() {
                 "[no model]".to_string()
             } else {
-                let model_part = d.model_name.split('/').last().unwrap_or(&d.model_name);
+                let model_part = d.model_name.split('/').next_back().unwrap_or(&d.model_name);
                 let provider_part = d.model_name.split('/').next().unwrap_or("");
                 let thinking_part = d.thinking_level.as_ref().map(|l| format!(" • {}", l));
 
                 if provider_part.is_empty() {
                     format!("{}{}", model_part, thinking_part.unwrap_or_default())
                 } else {
-                    format!("({}) {}{}", provider_part, model_part, thinking_part.unwrap_or_default())
+                    format!(
+                        "({}) {}{}",
+                        provider_part,
+                        model_part,
+                        thinking_part.unwrap_or_default()
+                    )
                 }
             };
 
@@ -151,14 +171,15 @@ impl StatefulWidget for Footer<'_> {
             };
 
             // Build right_span with indicator + model name
-            let mut spans = vec![
-                Span::styled("*", Style::default().fg(indicator_color)),
-            ];
+            let mut spans = vec![Span::styled("*", Style::default().fg(indicator_color))];
 
             if d.model_name.is_empty() {
-                spans.push(Span::styled(" [no model]", Style::default()
-                    .fg(self.theme.colors.primary.to_ratatui())
-                    .add_modifier(Modifier::BOLD)));
+                spans.push(Span::styled(
+                    " [no model]",
+                    Style::default()
+                        .fg(self.theme.colors.primary.to_ratatui())
+                        .add_modifier(Modifier::BOLD),
+                ));
             } else {
                 let thinking_style = if d.thinking_level.is_some() {
                     // Style thinking level as muted (secondary info)
@@ -169,21 +190,25 @@ impl StatefulWidget for Footer<'_> {
                         .add_modifier(Modifier::BOLD)
                 };
 
-                let model_part = d.model_name.split('/').last().unwrap_or(&d.model_name);
+                let model_part = d.model_name.split('/').next_back().unwrap_or(&d.model_name);
                 let provider_part = d.model_name.split('/').next().unwrap_or("");
 
                 // Provider
                 if !provider_part.is_empty() {
-                    spans.push(Span::styled(format!(" ({})", provider_part),
+                    spans.push(Span::styled(
+                        format!(" ({})", provider_part),
                         Style::default()
                             .fg(self.theme.colors.primary.to_ratatui())
-                            .add_modifier(Modifier::BOLD)));
+                            .add_modifier(Modifier::BOLD),
+                    ));
                 }
                 // Model name
-                spans.push(Span::styled(format!(" {}", model_part),
+                spans.push(Span::styled(
+                    format!(" {}", model_part),
                     Style::default()
                         .fg(self.theme.colors.primary.to_ratatui())
-                        .add_modifier(Modifier::BOLD)));
+                        .add_modifier(Modifier::BOLD),
+                ));
                 // Thinking level
                 if let Some(ref level) = d.thinking_level {
                     spans.push(Span::styled(format!(" • {}", level), thinking_style));
@@ -194,7 +219,10 @@ impl StatefulWidget for Footer<'_> {
 
             let text_w = UnicodeWidthStr::width(left_text.as_str()) as u16 + 2;
             let model_display_w = UnicodeWidthStr::width(model_display.as_str()) as u16 + 4;
-            let gauge_w = rows[1].width.saturating_sub(text_w).saturating_sub(model_display_w);
+            let gauge_w = rows[1]
+                .width
+                .saturating_sub(text_w)
+                .saturating_sub(model_display_w);
 
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
@@ -205,9 +233,12 @@ impl StatefulWidget for Footer<'_> {
                 ])
                 .split(rows[1]);
 
-            Paragraph::new(Line::from(Span::styled(format!(" {}", left_text), styles.muted)))
-                .alignment(Alignment::Left)
-                .render(cols[0], buf);
+            Paragraph::new(Line::from(Span::styled(
+                format!(" {}", left_text),
+                styles.muted,
+            )))
+            .alignment(Alignment::Left)
+            .render(cols[0], buf);
 
             if has_tokens && gauge_w > 4 {
                 let label = format!("{:.0}%", pct_display);
@@ -221,7 +252,13 @@ impl StatefulWidget for Footer<'_> {
                 LineGauge::default()
                     .ratio(pct)
                     .label(label)
-                    .style(Style::default().fg(gauge_color).bg(self.theme.colors.background.to_ratatui()))
+                    .style(
+                        Style::default().fg(gauge_color).bg(self
+                            .theme
+                            .colors
+                            .background
+                            .to_ratatui()),
+                    )
                     .render(cols[1], buf);
             }
 
@@ -243,7 +280,9 @@ impl StatefulWidget for Footer<'_> {
                 } else {
                     format!(" {}", pwd)
                 }
-            } else { String::new() };
+            } else {
+                String::new()
+            };
             left_spans.push(Span::styled(pwd_display, styles.muted));
 
             if let Some(ref branch) = d.git_branch {
@@ -254,9 +293,15 @@ impl StatefulWidget for Footer<'_> {
                         Style::default().fg(self.theme.colors.accent.to_ratatui()),
                     ));
                     let (status_char, status_style) = if d.git_dirty {
-                        (" X", Style::default().fg(self.theme.colors.error.to_ratatui()))
+                        (
+                            " X",
+                            Style::default().fg(self.theme.colors.error.to_ratatui()),
+                        )
                     } else {
-                        (" ok", Style::default().fg(self.theme.colors.success.to_ratatui()))
+                        (
+                            " ok",
+                            Style::default().fg(self.theme.colors.success.to_ratatui()),
+                        )
                     };
                     left_spans.push(Span::styled(status_char, status_style));
                 }
@@ -264,7 +309,9 @@ impl StatefulWidget for Footer<'_> {
 
             let version_tag = if !d.version.is_empty() {
                 format!(" v{} ", d.version)
-            } else { String::new() };
+            } else {
+                String::new()
+            };
 
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
@@ -275,9 +322,12 @@ impl StatefulWidget for Footer<'_> {
                 .alignment(Alignment::Left)
                 .render(cols[0], buf);
 
-            Paragraph::new(Line::from(Span::styled(version_tag, Style::default().fg(self.theme.colors.muted.to_ratatui()))))
-                .alignment(Alignment::Right)
-                .render(cols[1], buf);
+            Paragraph::new(Line::from(Span::styled(
+                version_tag,
+                Style::default().fg(self.theme.colors.muted.to_ratatui()),
+            )))
+            .alignment(Alignment::Right)
+            .render(cols[1], buf);
         }
     }
 }

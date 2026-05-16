@@ -20,7 +20,7 @@ use std::time::Instant;
 use parking_lot::RwLock;
 
 // Re-export types from resource_loader_compat
-pub use super::resource_loader_compat::{Skill, Theme, Prompt};
+pub use super::resource_loader_compat::{Prompt, Skill, Theme};
 
 // ============================================================================
 // Context Files
@@ -648,14 +648,12 @@ impl ResourceLoader {
 
     /// Load all resources, returning default on error
     pub fn try_load_all(&self) -> LoadedResources {
-        self.load_all().unwrap_or_else(|e| {
-            LoadedResources {
-                errors: vec![LoadError {
-                    path: PathBuf::from("."),
-                    error: e.to_string(),
-                }],
-                ..LoadedResources::default()
-            }
+        self.load_all().unwrap_or_else(|e| LoadedResources {
+            errors: vec![LoadError {
+                path: PathBuf::from("."),
+                error: e.to_string(),
+            }],
+            ..LoadedResources::default()
         })
     }
 
@@ -724,7 +722,11 @@ impl ResourceLoader {
                 match fs::read_to_string(&path) {
                     Ok(content) => result.push(content),
                     Err(e) => {
-                        tracing::warn!("Failed to read append system prompt {}: {}", path.display(), e);
+                        tracing::warn!(
+                            "Failed to read append system prompt {}: {}",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
@@ -738,14 +740,18 @@ impl ResourceLoader {
     // -----------------------------------------------------------------------
 
     /// Load project context files (AGENTS.md, CLAUDE.md, etc.)
-    pub fn load_project_context_files(&self, cwd: &Path) -> Result<Vec<ContextFile>, anyhow::Error> {
+    pub fn load_project_context_files(
+        &self,
+        cwd: &Path,
+    ) -> Result<Vec<ContextFile>, anyhow::Error> {
         let mut context_files = Vec::new();
         let mut seen_paths: HashMap<String, bool> = HashMap::new();
 
         // 1. Check global agent dir for context files
         let global_context = load_context_file_from_dir(&self.options.agent_dir);
         if let Some((path, content)) = global_context {
-            let name = path.file_name()
+            let name = path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown")
                 .to_string();
@@ -767,7 +773,8 @@ impl ResourceLoader {
 
             if let Some(content) = self.read_context_file(&path)? {
                 seen_paths.insert(path_str, true);
-                let name = path.file_name()
+                let name = path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or("unknown")
                     .to_string();
@@ -890,7 +897,11 @@ impl ResourceLoader {
             }
         }
 
-        LoadResult { items, errors, diagnostics }
+        LoadResult {
+            items,
+            errors,
+            diagnostics,
+        }
     }
 
     /// Load themes from configured sources
@@ -930,7 +941,11 @@ impl ResourceLoader {
             }
         }
 
-        LoadResult { items, errors, diagnostics }
+        LoadResult {
+            items,
+            errors,
+            diagnostics,
+        }
     }
 
     /// Load prompts from configured sources
@@ -970,7 +985,11 @@ impl ResourceLoader {
             }
         }
 
-        LoadResult { items, errors, diagnostics }
+        LoadResult {
+            items,
+            errors,
+            diagnostics,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -1030,10 +1049,18 @@ impl ResourceLoader {
 
         let paths: Vec<PathBuf> = {
             let mut p = Vec::new();
-            for s in &result.skills { p.push(s.path.clone()); }
-            for t in &result.themes { p.push(t.path.clone()); }
-            for pr in &result.prompts { p.push(pr.path.clone()); }
-            for cf in &result.context_files { p.push(cf.path.clone()); }
+            for s in &result.skills {
+                p.push(s.path.clone());
+            }
+            for t in &result.themes {
+                p.push(t.path.clone());
+            }
+            for pr in &result.prompts {
+                p.push(pr.path.clone());
+            }
+            for cf in &result.context_files {
+                p.push(cf.path.clone());
+            }
             p
         };
 
@@ -1084,10 +1111,15 @@ impl ResourceLoader {
             return false;
         }
         match resource_type {
-            ResourceType::Skill => path.is_dir() || path.extension().map(|e| e == "md").unwrap_or(false),
+            ResourceType::Skill => {
+                path.is_dir() || path.extension().map(|e| e == "md").unwrap_or(false)
+            }
             ResourceType::Theme => path.extension().map(|e| e == "json").unwrap_or(false),
             ResourceType::Prompt => path.extension().map(|e| e == "md").unwrap_or(false),
-            ResourceType::Extension => path.extension().map(|e| e == "js" || e == "ts").unwrap_or(false),
+            ResourceType::Extension => path
+                .extension()
+                .map(|e| e == "js" || e == "ts")
+                .unwrap_or(false),
         }
     }
 
@@ -1238,7 +1270,12 @@ pub fn resolve_prompt_input(input: &str, description: &str) -> Option<String> {
         match fs::read_to_string(path) {
             Ok(content) => Some(content),
             Err(e) => {
-                tracing::warn!("Warning: Could not read {} file {}: {}", description, input, e);
+                tracing::warn!(
+                    "Warning: Could not read {} file {}: {}",
+                    description,
+                    input,
+                    e
+                );
                 Some(input.to_string())
             }
         }
@@ -1402,8 +1439,7 @@ fn dedupe_prompts(prompts: Vec<Prompt>) -> (Vec<Prompt>, Vec<ResourceCollision>)
 // ============================================================================
 
 pub use super::resource_loader_compat::{
-    ResourceType, LoadResult, LoadError,
-    ResourceDiagnostic, LoadAllResourcesResult,
+    LoadAllResourcesResult, LoadError, LoadResult, ResourceDiagnostic, ResourceType,
 };
 
 // ============================================================================
@@ -1469,10 +1505,7 @@ mod tests {
     #[test]
     fn test_resource_loader_with_paths() {
         let temp = tempdir().unwrap();
-        let loader = ResourceLoader::with_paths(
-            temp.path().join("oxi"),
-            temp.path().to_path_buf(),
-        );
+        let loader = ResourceLoader::with_paths(temp.path().join("oxi"), temp.path().to_path_buf());
         assert_eq!(loader.cwd(), temp.path());
     }
 
@@ -1493,10 +1526,7 @@ mod tests {
     #[test]
     fn test_load_all_empty() {
         let temp = tempdir().unwrap();
-        let loader = ResourceLoader::with_paths(
-            temp.path().join("oxi"),
-            temp.path().to_path_buf(),
-        );
+        let loader = ResourceLoader::with_paths(temp.path().join("oxi"), temp.path().to_path_buf());
 
         let result = loader.try_load_all();
         assert!(result.collisions.is_empty());
@@ -1529,10 +1559,7 @@ mod tests {
     #[test]
     fn test_load_system_prompt_not_found() {
         let temp = tempdir().unwrap();
-        let loader = ResourceLoader::with_paths(
-            temp.path().join("oxi"),
-            temp.path().to_path_buf(),
-        );
+        let loader = ResourceLoader::with_paths(temp.path().join("oxi"), temp.path().to_path_buf());
 
         let result = loader.load_system_prompt().unwrap();
         assert!(result.is_none());
@@ -1545,10 +1572,7 @@ mod tests {
         fs::create_dir_all(&agent_dir).unwrap();
         fs::write(agent_dir.join("SYSTEM.md"), "System prompt content").unwrap();
 
-        let loader = ResourceLoader::with_paths(
-            agent_dir.clone(),
-            temp.path().to_path_buf(),
-        );
+        let loader = ResourceLoader::with_paths(agent_dir.clone(), temp.path().to_path_buf());
 
         let result = loader.load_system_prompt().unwrap();
         assert!(result.is_some());
@@ -1575,10 +1599,7 @@ mod tests {
         fs::create_dir_all(&agent_dir).unwrap();
         fs::write(agent_dir.join("APPEND_SYSTEM.md"), "Append content").unwrap();
 
-        let loader = ResourceLoader::with_paths(
-            agent_dir.clone(),
-            temp.path().to_path_buf(),
-        );
+        let loader = ResourceLoader::with_paths(agent_dir.clone(), temp.path().to_path_buf());
 
         let result = loader.load_append_system_prompt().unwrap();
         assert_eq!(result, vec!["Append content".to_string()]);
@@ -1587,10 +1608,7 @@ mod tests {
     #[test]
     fn test_cache_round_trip() {
         let temp = tempdir().unwrap();
-        let loader = ResourceLoader::with_paths(
-            temp.path().join("oxi"),
-            temp.path().to_path_buf(),
-        );
+        let loader = ResourceLoader::with_paths(temp.path().join("oxi"), temp.path().to_path_buf());
 
         assert!(loader.cached().is_none());
 
@@ -1700,10 +1718,7 @@ mod tests {
     #[test]
     fn test_load_all_creates_cache() {
         let temp = tempdir().unwrap();
-        let loader = ResourceLoader::with_paths(
-            temp.path().join("oxi"),
-            temp.path().to_path_buf(),
-        );
+        let loader = ResourceLoader::with_paths(temp.path().join("oxi"), temp.path().to_path_buf());
 
         let result = loader.load_all().unwrap();
 
@@ -1723,7 +1738,10 @@ mod tests {
         let discovered = loader.discover_context_files(temp.path());
 
         let paths: Vec<_> = discovered.iter().map(|(p, _)| p.clone()).collect();
-        let unique: HashSet<_> = paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
+        let unique: HashSet<_> = paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
         assert_eq!(paths.len(), unique.len());
     }
 
@@ -1808,10 +1826,7 @@ mod tests {
         fs::write(temp.path().join("CLAUDE.md"), "# Claude").unwrap();
         fs::write(temp.path().join("AGENTS.md"), "# Agents").unwrap();
 
-        let loader = ResourceLoader::with_paths(
-            temp.path().join("oxi"),
-            temp.path().to_path_buf(),
-        );
+        let loader = ResourceLoader::with_paths(temp.path().join("oxi"), temp.path().to_path_buf());
 
         let files = loader.load_project_context_files(temp.path()).unwrap();
 

@@ -3,7 +3,6 @@
 /// - Text files with line numbers, offset/limit, and truncation
 /// - Image files (jpg/png/gif/webp) returned as base64-encoded content blocks
 /// - Binary file detection
-
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
@@ -35,7 +34,7 @@ pub struct ReadTool {
 }
 
 impl ReadTool {
-/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
+    /// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
         Self {
             root_dir: None,
@@ -269,11 +268,12 @@ impl AgentTool for ReadTool {
     }
 
     fn label(&self) -> &str {
-
         "Read File"
     }
 
-    fn essential(&self) -> bool { true }
+    fn essential(&self) -> bool {
+        true
+    }
     fn description(&self) -> &str {
         "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When reading with offset, line numbering starts from 1."
     }
@@ -324,7 +324,8 @@ impl AgentTool for ReadTool {
         // Security: validate path with PathGuard (use root_dir if set, else ctx)
         let root = self.root_dir.as_deref().unwrap_or(ctx.root());
         let guard = PathGuard::new(root);
-        let validated = guard.validate_traversal(Path::new(path_str))
+        let validated = guard
+            .validate_traversal(Path::new(path_str))
             .map_err(|e| e.to_string())?;
         let path = validated.as_path();
 
@@ -342,7 +343,11 @@ impl AgentTool for ReadTool {
             _ => {}
         }
 
-        let progress_cb = self.progress_callback.lock().expect("progress callback lock poisoned").clone();
+        let progress_cb = self
+            .progress_callback
+            .lock()
+            .expect("progress callback lock poisoned")
+            .clone();
 
         // Check if it's an image file
         if Self::image_mime_type(path).is_some() {
@@ -378,7 +383,10 @@ mod tests {
         let f = make_text_file("hello\nworld\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("hello"));
         assert!(result.output.contains("world"));
@@ -389,7 +397,10 @@ mod tests {
         let f = make_text_file("line1\nline2\nline3\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         // Should contain line numbers
         assert!(result.output.contains("1"));
@@ -405,7 +416,10 @@ mod tests {
         let f = make_text_file("line1\nline2\nline3\nline4\nline5\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap(), "offset": 3});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         // Should show lines 3 onwards
         assert!(result.output.contains("Showing lines 3-5 of 5"));
@@ -422,7 +436,10 @@ mod tests {
         let f = make_text_file("line1\nline2\nline3\nline4\nline5\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap(), "offset": 2, "limit": 2});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("\tline2"));
         assert!(result.output.contains("\tline3"));
@@ -434,7 +451,10 @@ mod tests {
         let f = make_text_file("line1\nline2\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap(), "offset": 999});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.output.contains("exceeds file length"));
     }
@@ -446,7 +466,10 @@ mod tests {
         let f = make_text_file(&content.join("\n"));
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("truncated"));
         assert!(result.output.contains("Use offset="));
@@ -456,7 +479,9 @@ mod tests {
     async fn test_read_path_traversal_rejected() {
         let tool = ReadTool::new();
         let params = json!({"path": "../../etc/passwd"});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await;
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Path traversal"));
     }
@@ -465,7 +490,9 @@ mod tests {
     async fn test_read_nonexistent_file() {
         let tool = ReadTool::new();
         let params = json!({"path": "/nonexistent/path/file.txt"});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await;
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await;
         assert!(result.is_err() || !result.unwrap().success);
     }
 
@@ -477,7 +504,10 @@ mod tests {
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(!result.success);
         assert!(result.output.contains("binary"));
     }
@@ -491,7 +521,10 @@ mod tests {
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("image/png"));
         // Should have content blocks with image
@@ -506,7 +539,10 @@ mod tests {
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("image/jpeg"));
         let blocks = result.content_blocks.unwrap();
@@ -520,7 +556,10 @@ mod tests {
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("image/webp"));
     }
@@ -530,7 +569,10 @@ mod tests {
         let f = make_text_file("");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
     }
 
@@ -538,7 +580,9 @@ mod tests {
     async fn test_read_file_not_found() {
         let tool = ReadTool::new();
         let params = json!({"path": "/tmp/nonexistent_oxi_test_file_12345.txt"});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await;
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await;
         match result {
             Err(e) => assert!(e.contains("File not found")),
             Ok(r) => assert!(!r.success),
@@ -549,7 +593,9 @@ mod tests {
     async fn test_read_directory_error() {
         let tool = ReadTool::new();
         let params = json!({"path": "/tmp"});
-        let result = tool.execute("test", params, None, &ToolContext::default()).await;
+        let result = tool
+            .execute("test", params, None, &ToolContext::default())
+            .await;
         match result {
             Err(e) => assert!(e.contains("directory")),
             Ok(r) => assert!(!r.success || r.output.contains("directory")),

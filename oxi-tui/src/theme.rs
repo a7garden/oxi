@@ -84,25 +84,25 @@ impl ColorScheme {
     /// Default dark color scheme (true black).
     pub fn dark() -> Self {
         Self {
-            foreground: Color::Rgb(205, 214, 244), // #cdd6f4
-            background: Color::Rgb(0, 0, 0),       // #000000 true black
-            primary: Color::Rgb(122, 162, 247),    // #7aa2f7
-            secondary: Color::Rgb(158, 206, 106),  // #9ece6a
-            error: Color::Rgb(247, 118, 142),      // #f7768e
-            warning: Color::Rgb(224, 175, 104),    // #e0af68
-            success: Color::Rgb(158, 206, 106),    // #9ece6a
-            muted: Color::Rgb(80, 80, 100),        // #505064
-            accent: Color::Rgb(187, 154, 247),     // #bb9af7
-            border: Color::Rgb(30, 30, 30),        // #1e1e1e
-            user_border: Color::Rgb(122, 162, 247), // #7aa2f7 (matches primary)
-            user_bg: Color::Rgb(18, 22, 38),        // #121626 subtle indigo tint
-            cursor_fg: Color::Rgb(0, 0, 0),        // #000000
-            cursor_bg: Color::Rgb(205, 214, 244),  // #cdd6f4
-            selection_bg: Color::Rgb(40, 40, 60),  // #28283c
-            tool_pending_bg: Color::Rgb(18, 20, 28),     // #12141c subtle
-            tool_executing_bg: Color::Rgb(28, 24, 14),   // #1c1810 amber tint
-            tool_success_bg: Color::Rgb(16, 26, 14),    // #101a0e green tint
-            tool_error_bg: Color::Rgb(32, 16, 18),       // #201012 red tint
+            foreground: Color::Rgb(205, 214, 244),     // #cdd6f4
+            background: Color::Rgb(0, 0, 0),           // #000000 true black
+            primary: Color::Rgb(122, 162, 247),        // #7aa2f7
+            secondary: Color::Rgb(158, 206, 106),      // #9ece6a
+            error: Color::Rgb(247, 118, 142),          // #f7768e
+            warning: Color::Rgb(224, 175, 104),        // #e0af68
+            success: Color::Rgb(158, 206, 106),        // #9ece6a
+            muted: Color::Rgb(80, 80, 100),            // #505064
+            accent: Color::Rgb(187, 154, 247),         // #bb9af7
+            border: Color::Rgb(30, 30, 30),            // #1e1e1e
+            user_border: Color::Rgb(122, 162, 247),    // #7aa2f7 (matches primary)
+            user_bg: Color::Rgb(18, 22, 38),           // #121626 subtle indigo tint
+            cursor_fg: Color::Rgb(0, 0, 0),            // #000000
+            cursor_bg: Color::Rgb(205, 214, 244),      // #cdd6f4
+            selection_bg: Color::Rgb(40, 40, 60),      // #28283c
+            tool_pending_bg: Color::Rgb(18, 20, 28),   // #12141c subtle
+            tool_executing_bg: Color::Rgb(28, 24, 14), // #1c1810 amber tint
+            tool_success_bg: Color::Rgb(16, 26, 14),   // #101a0e green tint
+            tool_error_bg: Color::Rgb(32, 16, 18),     // #201012 red tint
         }
     }
 
@@ -112,22 +112,22 @@ impl ColorScheme {
             foreground: Color::Rgb(76, 79, 105),   // #4c4f69
             background: Color::Rgb(239, 241, 245), // #eff1f5
             primary: Color::Rgb(30, 102, 240),     // #1e66f0
-            secondary: Color::Rgb(64, 160, 43),   // #40a02b
+            secondary: Color::Rgb(64, 160, 43),    // #40a02b
             error: Color::Rgb(210, 15, 57),        // #d20f39
-            warning: Color::Rgb(223, 142, 29),    // #df8e1d
-            success: Color::Rgb(64, 160, 43),    // #40a02b
+            warning: Color::Rgb(223, 142, 29),     // #df8e1d
+            success: Color::Rgb(64, 160, 43),      // #40a02b
             muted: Color::Indexed(8),
-            accent: Color::Rgb(136, 57, 239),     // #8839ef
+            accent: Color::Rgb(136, 57, 239), // #8839ef
             border: Color::Indexed(7),
             user_border: Color::Rgb(30, 102, 240), // #1e66f0 (matches primary)
-            user_bg: Color::Rgb(225, 236, 255),   // #e1ecff subtle blue tint
+            user_bg: Color::Rgb(225, 236, 255),    // #e1ecff subtle blue tint
             cursor_fg: Color::Rgb(239, 241, 245),
             cursor_bg: Color::Rgb(76, 79, 105),
             selection_bg: Color::Rgb(204, 208, 218),
-            tool_pending_bg: Color::Rgb(235, 238, 245),    // #ebeeff subtle blue tint
-            tool_executing_bg: Color::Rgb(255, 248, 230),  // #fff8e6 amber tint
-            tool_success_bg: Color::Rgb(230, 248, 230),    // #e6f8e6 green tint
-            tool_error_bg: Color::Rgb(255, 230, 235),     // #ffe6eb red tint
+            tool_pending_bg: Color::Rgb(235, 238, 245), // #ebeeff subtle blue tint
+            tool_executing_bg: Color::Rgb(255, 248, 230), // #fff8e6 amber tint
+            tool_success_bg: Color::Rgb(230, 248, 230), // #e6f8e6 green tint
+            tool_error_bg: Color::Rgb(255, 230, 235),   // #ffe6eb red tint
         }
     }
 
@@ -164,7 +164,7 @@ impl ColorScheme {
 }
 
 /// Pre-computed ratatui styles for all semantic colors in a ColorScheme.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ThemeStyles {
     /// Normal / default text style.
     pub normal: Style,
@@ -204,33 +204,7 @@ pub struct ThemeStyles {
     pub tool_error_bg: Style,
 }
 
-impl Default for ThemeStyles {
-    fn default() -> Self {
-        // Return muted styles that won't crash but aren't ideal for actual use
-        ThemeStyles {
-            normal: Style::default(),
-            primary: Style::default(),
-            secondary: Style::default(),
-            error: Style::default(),
-            warning: Style::default(),
-            success: Style::default(),
-            muted: Style::default(),
-            accent: Style::default(),
-            border: Style::default(),
-            cursor_fg: Style::default(),
-            cursor_bg: Style::default(),
-            selection_bg: Style::default(),
-            user_border: Style::default(),
-            user_bg: Style::default(),
-            tool_pending_bg: Style::default(),
-            tool_executing_bg: Style::default(),
-            tool_success_bg: Style::default(),
-            tool_error_bg: Style::default(),
-        }
-    }
-}
-
-
+// ThemeStyles derives Default
 
 // ---------------------------------------------------------------------------
 // Spacing
@@ -397,7 +371,8 @@ impl ThemeFile {
                     if let Some(ref v) = value {
                         tracing::warn!(
                             "Invalid theme color for '{}': '{}' - using default",
-                            field_name, v
+                            field_name,
+                            v
                         );
                     }
                     fallback
@@ -420,11 +395,31 @@ impl ThemeFile {
             user_bg: resolve(self.colors.user_bg, defaults.user_bg, "user_bg"),
             cursor_fg: resolve(self.colors.cursor_fg, defaults.cursor_fg, "cursor_fg"),
             cursor_bg: resolve(self.colors.cursor_bg, defaults.cursor_bg, "cursor_bg"),
-            selection_bg: resolve(self.colors.selection_bg, defaults.selection_bg, "selection_bg"),
-            tool_pending_bg: resolve(self.colors.tool_pending_bg, defaults.tool_pending_bg, "tool_pending_bg"),
-            tool_executing_bg: resolve(self.colors.tool_executing_bg, defaults.tool_executing_bg, "tool_executing_bg"),
-            tool_success_bg: resolve(self.colors.tool_success_bg, defaults.tool_success_bg, "tool_success_bg"),
-            tool_error_bg: resolve(self.colors.tool_error_bg, defaults.tool_error_bg, "tool_error_bg"),
+            selection_bg: resolve(
+                self.colors.selection_bg,
+                defaults.selection_bg,
+                "selection_bg",
+            ),
+            tool_pending_bg: resolve(
+                self.colors.tool_pending_bg,
+                defaults.tool_pending_bg,
+                "tool_pending_bg",
+            ),
+            tool_executing_bg: resolve(
+                self.colors.tool_executing_bg,
+                defaults.tool_executing_bg,
+                "tool_executing_bg",
+            ),
+            tool_success_bg: resolve(
+                self.colors.tool_success_bg,
+                defaults.tool_success_bg,
+                "tool_success_bg",
+            ),
+            tool_error_bg: resolve(
+                self.colors.tool_error_bg,
+                defaults.tool_error_bg,
+                "tool_error_bg",
+            ),
         };
         Theme {
             name: if self.name.is_empty() {

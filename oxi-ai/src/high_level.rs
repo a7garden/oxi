@@ -304,9 +304,9 @@ pub mod tokens {
         // CJK: ~1 token per character
         let cjk_tokens = cjk_chars;
         // Punctuation & symbols: ~1.5 tokens per char (round to 3 per 2)
-        let punct_tokens = (punct_chars * 3 + 1) / 2;
+        let punct_tokens = (punct_chars * 3).div_ceil(2);
         // ASCII / Latin: ~4 chars per token
-        let ascii_tokens = (ascii_or_latin_chars + 3) / 4;
+        let ascii_tokens = ascii_or_latin_chars.div_ceil(4);
         // Whitespace word-boundary tokens (BPE adds ~1 overhead per word)
         let ws_tokens = whitespace_words / 8;
 

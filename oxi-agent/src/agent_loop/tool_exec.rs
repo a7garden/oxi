@@ -1,13 +1,12 @@
 /// Tool execution logic for agent loop
-
-use crate::{AgentToolResult, AgentEvent};
+use crate::{AgentEvent, AgentToolResult};
 use anyhow::Result;
 use oxi_ai::{progress_callback, AssistantMessage, Message, ToolCall, ToolResultMessage};
 use std::pin::Pin;
 use std::sync::Arc;
 
 use super::config::{AfterToolCallHook, ToolExecutionMode};
-use super::helpers::{FinalizedToolCall, should_terminate_batch, create_tool_result_message};
+use super::helpers::{create_tool_result_message, should_terminate_batch, FinalizedToolCall};
 use crate::tools::ToolContext;
 
 pub(crate) struct ExecutedToolCallBatch {
@@ -31,7 +30,6 @@ enum PreparedToolCallKind {
 }
 
 struct PreparedToolCallOutcome {
-
     _kind: PreparedToolCallKind,
     immediate_result: Option<AgentToolResult>,
     is_error: bool,
@@ -49,9 +47,11 @@ pub(crate) async fn execute_tool_calls(
     ctx: &ToolContext,
 ) -> Result<ExecutedToolCallBatch> {
     if loop_ref.config.tool_execution == ToolExecutionMode::Sequential {
-        execute_tool_calls_sequential(loop_ref, messages, assistant_message, tool_calls, emit, ctx).await
+        execute_tool_calls_sequential(loop_ref, messages, assistant_message, tool_calls, emit, ctx)
+            .await
     } else {
-        execute_tool_calls_parallel(loop_ref, messages, assistant_message, tool_calls, emit, ctx).await
+        execute_tool_calls_parallel(loop_ref, messages, assistant_message, tool_calls, emit, ctx)
+            .await
     }
 }
 
@@ -112,14 +112,20 @@ async fn execute_tool_calls_sequential(
             result: oxi_ai::ToolResult {
                 tool_call_id: finalized.tool_call.id.clone(),
                 content: finalized.result.output.clone(),
-                status: if finalized.is_error { String::from("error") } else { String::from("success") },
+                status: if finalized.is_error {
+                    String::from("error")
+                } else {
+                    String::from("success")
+                },
             },
             is_error: finalized.is_error,
         });
 
         let tool_result_message = create_tool_result_message(&finalized);
         let msg = Message::ToolResult(tool_result_message.clone());
-        emit(AgentEvent::MessageStart { message: msg.clone() });
+        emit(AgentEvent::MessageStart {
+            message: msg.clone(),
+        });
         emit(AgentEvent::MessageEnd { message: msg });
 
         finalized_calls.push(finalized);
@@ -169,7 +175,11 @@ async fn execute_tool_calls_parallel(
                 result: oxi_ai::ToolResult {
                     tool_call_id: finalized.tool_call.id.clone(),
                     content: finalized.result.output.clone(),
-                    status: if finalized.is_error { String::from("error") } else { String::from("success") },
+                    status: if finalized.is_error {
+                        String::from("error")
+                    } else {
+                        String::from("success")
+                    },
                 },
                 is_error: finalized.is_error,
             });
@@ -190,7 +200,8 @@ async fn execute_tool_calls_parallel(
                     after_hook.clone(),
                     emit_clone.clone(),
                     &ctx_clone,
-                ).await;
+                )
+                .await;
 
                 FinalizedToolCall {
                     tool_call,
@@ -202,7 +213,10 @@ async fn execute_tool_calls_parallel(
     }
 
     let mut slots: Vec<Option<FinalizedToolCall>> = Vec::with_capacity(finalized_calls.len());
-    let mut pending_futures: Vec<(usize, Pin<Box<dyn futures::Future<Output = FinalizedToolCall>>>)> = Vec::new();
+    let mut pending_futures: Vec<(
+        usize,
+        Pin<Box<dyn futures::Future<Output = FinalizedToolCall>>>,
+    )> = Vec::new();
 
     for (i, entry) in finalized_calls.into_iter().enumerate() {
         match entry {
@@ -215,25 +229,30 @@ async fn execute_tool_calls_parallel(
     }
 
     if !pending_futures.is_empty() {
-        let indexed_results: Vec<(usize, FinalizedToolCall)> =
-            futures::future::join_all(pending_futures.into_iter().map(|(i, f)| async move {
-                (i, f.await)
-            }))
-            .await;
+        let indexed_results: Vec<(usize, FinalizedToolCall)> = futures::future::join_all(
+            pending_futures
+                .into_iter()
+                .map(|(i, f)| async move { (i, f.await) }),
+        )
+        .await;
 
         for (idx, finalized) in indexed_results {
             slots[idx] = Some(finalized);
         }
     }
 
-    let ordered_finalized_calls: Vec<FinalizedToolCall> =
-        slots.into_iter().map(|s| s.expect("all slots should be filled after join_all")).collect();
+    let ordered_finalized_calls: Vec<FinalizedToolCall> = slots
+        .into_iter()
+        .map(|s| s.expect("all slots should be filled after join_all"))
+        .collect();
 
     let mut tool_result_messages = Vec::new();
     for finalized in &ordered_finalized_calls {
         let tool_result_message = create_tool_result_message(finalized);
         let msg = Message::ToolResult(tool_result_message.clone());
-        emit(AgentEvent::MessageStart { message: msg.clone() });
+        emit(AgentEvent::MessageStart {
+            message: msg.clone(),
+        });
         emit(AgentEvent::MessageEnd { message: msg });
         tool_result_messages.push(tool_result_message);
     }
@@ -281,15 +300,16 @@ pub(crate) async fn execute_prepared_tool_call_static(
         result: oxi_ai::ToolResult {
             tool_call_id,
             content: result.output.clone(),
-            status: if is_error { String::from("error") } else { String::from("success") },
+            status: if is_error {
+                String::from("error")
+            } else {
+                String::from("success")
+            },
         },
         is_error,
     });
 
-    ExecutedToolCallOutcome {
-        result,
-        is_error,
-    }
+    ExecutedToolCallOutcome { result, is_error }
 }
 
 async fn prepare_tool_call(
@@ -367,7 +387,10 @@ async fn execute_prepared_tool_call(
             progress_cb(msg);
         }));
 
-        match tool.execute(&tool_call_id, prepared.args.clone(), None, ctx).await {
+        match tool
+            .execute(&tool_call_id, prepared.args.clone(), None, ctx)
+            .await
+        {
             Ok(r) => result = r,
             Err(e) => {
                 result = AgentToolResult::error(e);

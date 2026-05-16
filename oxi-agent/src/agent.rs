@@ -1,5 +1,4 @@
 /// Core agent implementation
-
 use crate::config::AgentConfig;
 use crate::config::ShouldStopAfterTurnContext;
 use crate::events::AgentEvent;
@@ -8,12 +7,11 @@ use crate::tools::{AgentTool, ToolRegistry};
 use crate::types::{Response, StopReason};
 use anyhow::{Error, Result};
 use oxi_ai::{
-    transform_for_provider, CompactionManager, CompactionStrategy,
-    LlmCompactor, Model, Provider,
+    transform_for_provider, CompactionManager, CompactionStrategy, LlmCompactor, Model, Provider,
 };
 use parking_lot::RwLock;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 // ── ProviderResolver trait ────────────────────────────────────────
 
@@ -40,7 +38,7 @@ pub(crate) struct GlobalProviderResolver;
 
 impl ProviderResolver for GlobalProviderResolver {
     fn resolve_provider(&self, name: &str) -> Option<Arc<dyn Provider>> {
-        oxi_ai::get_provider(name).map(|p| Arc::from(p))
+        oxi_ai::get_provider(name).map(Arc::from)
     }
 
     fn resolve_model(&self, model_id: &str) -> Option<Model> {
@@ -177,18 +175,24 @@ impl Agent {
     /// # Returns
     /// `Ok(())` on success, or an error if the model/provider is unknown
     pub fn switch_model(&self, model_id: &str) -> Result<()> {
-        let new_model = self.resolver.resolve_model(model_id)
+        let new_model = self
+            .resolver
+            .resolve_model(model_id)
             .ok_or_else(|| Error::msg(format!("Model '{}' not found", model_id)))?;
 
         // Create the new provider via resolver
-        let new_provider = self.resolver.resolve_provider(&new_model.provider)
+        let new_provider = self
+            .resolver
+            .resolve_provider(&new_model.provider)
             .ok_or_else(|| Error::msg(format!("Provider '{}' not found", new_model.provider)))?;
 
         // Detect API change and transform messages if needed
         {
             let inner = self.config();
             let old_model_id = &inner.config.model_id;
-            let old_api = self.resolver.resolve_model(old_model_id)
+            let old_api = self
+                .resolver
+                .resolve_model(old_model_id)
                 .map(|m| m.api)
                 .unwrap_or(oxi_ai::Api::AnthropicMessages);
 
@@ -205,7 +209,7 @@ impl Agent {
         // Update config and provider atomically
         let mut inner = self.inner_mut();
         inner.config.model_id = model_id.to_string();
-        inner.provider = Arc::from(new_provider);
+        inner.provider = new_provider;
 
         Ok(())
     }
@@ -216,13 +220,17 @@ impl Agent {
     /// and optionally created the provider.
     pub fn switch_to_model(&self, model: &oxi_ai::Model) -> Result<()> {
         let model_id = format!("{}/{}", model.provider, model.id);
-        let new_provider = self.resolver.resolve_provider(&model.provider)
+        let new_provider = self
+            .resolver
+            .resolve_provider(&model.provider)
             .ok_or_else(|| Error::msg(format!("Provider '{}' not found", model.provider)))?;
 
         // Detect API change and transform messages if needed
         {
             let inner = self.config();
-            let old_api = self.resolver.resolve_model(&inner.config.model_id)
+            let old_api = self
+                .resolver
+                .resolve_model(&inner.config.model_id)
                 .map(|m| m.api)
                 .unwrap_or(oxi_ai::Api::AnthropicMessages);
 
@@ -237,7 +245,7 @@ impl Agent {
 
         let mut inner = self.inner_mut();
         inner.config.model_id = model_id;
-        inner.provider = Arc::from(new_provider);
+        inner.provider = new_provider;
 
         Ok(())
     }
@@ -312,10 +320,11 @@ impl Agent {
     ) -> Result<Response> {
         // pi-mono: Agent.prompt() throws if activeRun exists.
         // Prevent concurrent runs that would corrupt shared state.
-        if self.is_running.compare_exchange(
-            false, true,
-            Ordering::SeqCst, Ordering::SeqCst,
-        ).is_err() {
+        if self
+            .is_running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             return Err(Error::msg("Agent is already running"));
         }
 
@@ -418,50 +427,62 @@ impl Agent {
 
         // Run the agent loop
         tracing::info!("[AGENT] Starting agent run with channel");
-        let result = al.run(prompt.clone(), move |event: AgentEvent| {
-            // Forward event to channel (std::sync::mpsc — send from sync context)
-            tracing::info!("[AGENT-EMIT] Event: {:?}", std::mem::discriminant(&event));
-            if let Err(e) = tx_emit.send(event.clone()) {
-                tracing::error!("[AGENT-EMIT] Failed to send agent event to channel: {:?}", e);
-            } else {
-                tracing::info!("[AGENT-EMIT] Successfully sent event");
-            }
+        let result = al
+            .run(prompt.clone(), move |event: AgentEvent| {
+                // Forward event to channel (std::sync::mpsc — send from sync context)
+                tracing::info!("[AGENT-EMIT] Event: {:?}", std::mem::discriminant(&event));
+                if let Err(e) = tx_emit.send(event.clone()) {
+                    tracing::error!(
+                        "[AGENT-EMIT] Failed to send agent event to channel: {:?}",
+                        e
+                    );
+                } else {
+                    tracing::info!("[AGENT-EMIT] Successfully sent event");
+                }
 
-            // On TurnEnd, poll the should_stop_after_turn hook to detect Ctrl+C.
-            // The hook wraps an AtomicBool (should_stop_flag from AgentSession).
-            // We can't pass real context here, but the TUI hook only checks
-            // the AtomicBool anyway: |ctx| should_stop_flag.load(SeqCst).
-            if let Some(ref hook) = maybe_hook {
-                if let AgentEvent::TurnEnd { ref assistant_message, ref tool_results, .. } = event {
-                    // Build real context from actual turn data
-                    let asst = match assistant_message {
-                        oxi_ai::Message::Assistant(a) => a.clone(),
-                        _ => {
-                            // Can't extract assistant message, just check the hook with empty ctx
-                            let ctx = ShouldStopAfterTurnContext {
-                                message: oxi_ai::AssistantMessage::new(
-                                    oxi_ai::Api::OpenAiCompletions, "agent", "agent-model",
-                                ),
-                                tool_results: Vec::new(),
-                                iteration: 0,
-                            };
-                            if hook(&ctx) {
-                                ext_stop.store(true, Ordering::SeqCst);
+                // On TurnEnd, poll the should_stop_after_turn hook to detect Ctrl+C.
+                // The hook wraps an AtomicBool (should_stop_flag from AgentSession).
+                // We can't pass real context here, but the TUI hook only checks
+                // the AtomicBool anyway: |ctx| should_stop_flag.load(SeqCst).
+                if let Some(ref hook) = maybe_hook {
+                    if let AgentEvent::TurnEnd {
+                        ref assistant_message,
+                        ref tool_results,
+                        ..
+                    } = event
+                    {
+                        // Build real context from actual turn data
+                        let asst = match assistant_message {
+                            oxi_ai::Message::Assistant(a) => a.clone(),
+                            _ => {
+                                // Can't extract assistant message, just check the hook with empty ctx
+                                let ctx = ShouldStopAfterTurnContext {
+                                    message: oxi_ai::AssistantMessage::new(
+                                        oxi_ai::Api::OpenAiCompletions,
+                                        "agent",
+                                        "agent-model",
+                                    ),
+                                    tool_results: Vec::new(),
+                                    iteration: 0,
+                                };
+                                if hook(&ctx) {
+                                    ext_stop.store(true, Ordering::SeqCst);
+                                }
+                                return;
                             }
-                            return;
+                        };
+                        let ctx = ShouldStopAfterTurnContext {
+                            message: asst,
+                            tool_results: tool_results.clone(),
+                            iteration: 0,
+                        };
+                        if hook(&ctx) {
+                            ext_stop.store(true, Ordering::SeqCst);
                         }
-                    };
-                    let ctx = ShouldStopAfterTurnContext {
-                        message: asst,
-                        tool_results: tool_results.clone(),
-                        iteration: 0,
-                    };
-                    if hook(&ctx) {
-                        ext_stop.store(true, Ordering::SeqCst);
                     }
                 }
-            }
-        }).await;
+            })
+            .await;
 
         match result {
             Ok(_events) => {
@@ -473,14 +494,15 @@ impl Agent {
 
                 // Extract final response text from state
                 let state = self.state.get_state();
-                let final_text = state.messages.iter().rev()
+                let final_text = state
+                    .messages
+                    .iter()
+                    .rev()
                     .find_map(|m| match m {
-                        oxi_ai::Message::Assistant(a) => {
-                            a.content.iter().find_map(|b| match b {
-                                oxi_ai::ContentBlock::Text(t) => Some(t.text.clone()),
-                                _ => None,
-                            })
-                        }
+                        oxi_ai::Message::Assistant(a) => a.content.iter().find_map(|b| match b {
+                            oxi_ai::ContentBlock::Text(t) => Some(t.text.clone()),
+                            _ => None,
+                        }),
                         _ => None,
                     })
                     .unwrap_or_default();
@@ -530,8 +552,7 @@ impl Agent {
     /// [`import_state`]: Agent::import_state
     pub fn export_state(&self) -> Result<serde_json::Value> {
         let state = self.state.get_state();
-        serde_json::to_value(&state)
-            .map_err(|e| Error::msg(format!("State export failed: {}", e)))
+        serde_json::to_value(&state).map_err(|e| Error::msg(format!("State export failed: {}", e)))
     }
 
     /// Import agent state from a JSON value.
@@ -590,10 +611,11 @@ impl Agent {
     )> {
         let (tx, rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
 
-        if self.is_running.compare_exchange(
-            false, true,
-            Ordering::SeqCst, Ordering::SeqCst,
-        ).is_err() {
+        if self
+            .is_running
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             return Err(Error::msg("Agent is already running"));
         }
 
@@ -657,29 +679,37 @@ impl Agent {
                     .build()
                     .expect("Failed to create runtime");
                 rt.block_on(async move {
-                    agent_loop.run(prompt, move |event: AgentEvent| {
-                        // Forward to tokio channel (non-blocking)
-                        let _ = tx.try_send(event.clone());
+                    agent_loop
+                        .run(prompt, move |event: AgentEvent| {
+                            // Forward to tokio channel (non-blocking)
+                            let _ = tx.try_send(event.clone());
 
-                        if let Some(ref hook) = maybe_hook {
-                            if let AgentEvent::TurnEnd { ref assistant_message, ref tool_results, .. } = event {
-                                let asst = match assistant_message {
-                                    oxi_ai::Message::Assistant(a) => a.clone(),
-                                    _ => return,
-                                };
-                                let ctx = ShouldStopAfterTurnContext {
-                                    message: asst,
-                                    tool_results: tool_results.clone(),
-                                    iteration: 0,
-                                };
-                                if hook(&ctx) {
-                                    ext_stop.store(true, Ordering::SeqCst);
+                            if let Some(ref hook) = maybe_hook {
+                                if let AgentEvent::TurnEnd {
+                                    ref assistant_message,
+                                    ref tool_results,
+                                    ..
+                                } = event
+                                {
+                                    let asst = match assistant_message {
+                                        oxi_ai::Message::Assistant(a) => a.clone(),
+                                        _ => return,
+                                    };
+                                    let ctx = ShouldStopAfterTurnContext {
+                                        message: asst,
+                                        tool_results: tool_results.clone(),
+                                        iteration: 0,
+                                    };
+                                    if hook(&ctx) {
+                                        ext_stop.store(true, Ordering::SeqCst);
+                                    }
                                 }
                             }
-                        }
-                    }).await
+                        })
+                        .await
                 })
-            }).await;
+            })
+            .await;
 
             // Clear the running flag
             is_running_clone.store(false, Ordering::SeqCst);
@@ -710,5 +740,4 @@ impl Agent {
 
         Ok((rx, handle))
     }
-
 }

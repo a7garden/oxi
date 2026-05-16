@@ -1,7 +1,6 @@
-/// Ls tool - list directory contents
-
-use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use super::path_security::PathGuard;
+/// Ls tool - list directory contents
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use crate::tools::truncate::{format_bytes, truncate_head, TruncationOptions};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -22,14 +21,16 @@ pub struct LsTool {
 }
 
 impl LsTool {
-/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
+    /// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
         Self { root_dir: None }
     }
 
     /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self { root_dir: Some(cwd) }
+        Self {
+            root_dir: Some(cwd),
+        }
     }
 
     /// Format file size in human-readable format
@@ -65,7 +66,8 @@ impl LsTool {
     ) -> Result<String, ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(root_dir);
-        let dir_path = guard.validate_traversal(Path::new(path))
+        let dir_path = guard
+            .validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
         if !dir_path.exists() {
@@ -208,11 +210,12 @@ impl AgentTool for LsTool {
     }
 
     fn label(&self) -> &str {
-
         "Ls"
     }
 
-    fn essential(&self) -> bool { true }
+    fn essential(&self) -> bool {
+        true
+    }
     fn description(&self) -> &str {
         "List directory contents. Shows files and subdirectories with optional details."
     }
@@ -323,7 +326,14 @@ mod tests {
 
         let result = rt
             .block_on(async {
-                LsTool::ls_impl(Path::new("."), temp_dir.path().to_str().unwrap(), false, false, None).await
+                LsTool::ls_impl(
+                    Path::new("."),
+                    temp_dir.path().to_str().unwrap(),
+                    false,
+                    false,
+                    None,
+                )
+                .await
             })
             .unwrap();
 
@@ -342,7 +352,14 @@ mod tests {
 
         let result = rt
             .block_on(async {
-                LsTool::ls_impl(Path::new("."), temp_dir.path().to_str().unwrap(), true, false, None).await
+                LsTool::ls_impl(
+                    Path::new("."),
+                    temp_dir.path().to_str().unwrap(),
+                    true,
+                    false,
+                    None,
+                )
+                .await
             })
             .unwrap();
 
@@ -357,7 +374,14 @@ mod tests {
 
         let result = rt
             .block_on(async {
-                LsTool::ls_impl(Path::new("."), temp_dir.path().to_str().unwrap(), false, true, None).await
+                LsTool::ls_impl(
+                    Path::new("."),
+                    temp_dir.path().to_str().unwrap(),
+                    false,
+                    true,
+                    None,
+                )
+                .await
             })
             .unwrap();
 
@@ -372,7 +396,14 @@ mod tests {
 
         let result = rt
             .block_on(async {
-                LsTool::ls_impl(Path::new("."), temp_dir.path().to_str().unwrap(), false, true, None).await
+                LsTool::ls_impl(
+                    Path::new("."),
+                    temp_dir.path().to_str().unwrap(),
+                    false,
+                    true,
+                    None,
+                )
+                .await
             })
             .unwrap();
 
@@ -389,7 +420,14 @@ mod tests {
         // Set limit to 2
         let result = rt
             .block_on(async {
-                LsTool::ls_impl(Path::new("."), temp_dir.path().to_str().unwrap(), false, false, Some(2)).await
+                LsTool::ls_impl(
+                    Path::new("."),
+                    temp_dir.path().to_str().unwrap(),
+                    false,
+                    false,
+                    Some(2),
+                )
+                .await
             })
             .unwrap();
 
@@ -409,7 +447,14 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt
             .block_on(async {
-                LsTool::ls_impl(Path::new("."), temp_dir.path().to_str().unwrap(), false, false, None).await
+                LsTool::ls_impl(
+                    Path::new("."),
+                    temp_dir.path().to_str().unwrap(),
+                    false,
+                    false,
+                    None,
+                )
+                .await
             })
             .unwrap();
 
@@ -432,7 +477,14 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt
             .block_on(async {
-                LsTool::ls_impl(Path::new("."), temp_dir.path().to_str().unwrap(), false, false, None).await
+                LsTool::ls_impl(
+                    Path::new("."),
+                    temp_dir.path().to_str().unwrap(),
+                    false,
+                    false,
+                    None,
+                )
+                .await
             })
             .unwrap();
 
@@ -446,7 +498,9 @@ mod tests {
     #[test]
     fn test_path_traversal_prevention() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(async { LsTool::ls_impl(Path::new("."), "../etc", false, false, None).await });
+        let result = rt.block_on(async {
+            LsTool::ls_impl(Path::new("."), "../etc", false, false, None).await
+        });
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("traversal"));
@@ -456,7 +510,14 @@ mod tests {
     fn test_nonexistent_path() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(async {
-            LsTool::ls_impl(Path::new("."), "/nonexistent/path/12345", false, false, None).await
+            LsTool::ls_impl(
+                Path::new("."),
+                "/nonexistent/path/12345",
+                false,
+                false,
+                None,
+            )
+            .await
         });
 
         assert!(result.is_err());
@@ -472,7 +533,14 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt
             .block_on(async {
-                LsTool::ls_impl(Path::new("."), file_path.to_str().unwrap(), false, false, None).await
+                LsTool::ls_impl(
+                    Path::new("."),
+                    file_path.to_str().unwrap(),
+                    false,
+                    false,
+                    None,
+                )
+                .await
             })
             .unwrap();
 

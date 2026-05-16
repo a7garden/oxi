@@ -1,5 +1,5 @@
 /// Agent loop configuration types
-
+///
 /// Configuration for an [`crate::AgentLoop`] instance.
 #[derive(Clone)]
 pub struct AgentLoopConfig {
@@ -47,25 +47,33 @@ pub struct AgentLoopConfig {
 // Re-export ToolExecutionMode from crate::config to avoid duplicate definitions.
 pub use crate::config::ToolExecutionMode;
 
-use std::sync::Arc;
+use crate::AgentToolResult;
+use anyhow::{Error, Result};
+use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
-use anyhow::{Error, Result};
-use crate::AgentToolResult;
-use serde_json::Value;
+use std::sync::Arc;
 
 /// Hook invoked before each tool call; may return an override result.
 pub type BeforeToolCallHook = Arc<
-    dyn Fn(&str, &Value) -> Pin<Box<dyn Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
-        + Send + Sync,
+    dyn Fn(
+            &str,
+            &Value,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
+        + Send
+        + Sync,
 >;
 
 /// Hook invoked after each tool call; may return a modified result.
 pub type AfterToolCallHook = Arc<
-    dyn Fn(&str, &AgentToolResult) -> Pin<Box<dyn Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
-        + Send + Sync,
+    dyn Fn(
+            &str,
+            &AgentToolResult,
+        ) -> Pin<Box<dyn Future<Output = Result<Option<AgentToolResult>, Error>> + Send>>
+        + Send
+        + Sync,
 >;
 
 // MAX_RETRIES and BACKOFF_BASE_SECS are now defined in crate::stream_retry
 // and re-exported from crate::agent_loop::retry.
-pub use crate::stream_retry::{MAX_RETRIES, BACKOFF_BASE_SECS};
+pub use crate::stream_retry::{BACKOFF_BASE_SECS, MAX_RETRIES};

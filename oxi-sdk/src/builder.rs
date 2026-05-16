@@ -3,8 +3,8 @@
 use anyhow::Result;
 use std::sync::Arc;
 
-use oxi_ai::{Provider, ProviderRegistry, Model, ModelRegistry};
-use oxi_agent::{ToolRegistry, ProviderResolver};
+use oxi_agent::{ProviderResolver, ToolRegistry};
+use oxi_ai::{Model, ModelRegistry, Provider, ProviderRegistry};
 
 use crate::agent_builder::AgentBuilder;
 

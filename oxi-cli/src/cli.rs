@@ -19,7 +19,7 @@ pub use oxi_store::settings::ThinkingLevel;
 #[command(about = "CLI coding harness for oxi")]
 #[command(version)]
 pub struct CliArgs {
-/// pub.
+    /// pub.
     #[command(subcommand)]
     pub command: Option<Commands>,
 
@@ -104,19 +104,19 @@ pub enum Commands {
     },
     /// Package management
     Pkg {
-/// action.
+        /// action.
         #[command(subcommand)]
         action: PkgCommands,
     },
     /// Configuration management
     Config {
-/// action.
+        /// action.
         #[command(subcommand)]
         action: ConfigCommands,
     },
     /// Extension management — install, update, remove WASM extensions
     Ext {
-/// action.
+        /// action.
         #[command(subcommand)]
         action: ExtCommands,
     },
@@ -317,7 +317,8 @@ mod tests {
 
     #[test]
     fn test_parse_extension_paths() {
-        let args = parse_args_from(["oxi", "-e", "/path/to/ext.so", "-e", "/other/ext.so"]).unwrap();
+        let args =
+            parse_args_from(["oxi", "-e", "/path/to/ext.so", "-e", "/other/ext.so"]).unwrap();
         assert_eq!(args.extensions.len(), 2);
     }
 
@@ -531,24 +532,29 @@ mod tests {
     #[test]
     fn test_thinking_level_reexport() {
         // Verify the re-export from settings works
-        assert_eq!(
-            format!("{:?}", ThinkingLevel::Medium),
-            "Medium"
-        );
+        assert_eq!(format!("{:?}", ThinkingLevel::Medium), "Medium");
     }
 
     #[test]
     fn test_parse_config_add_provider() {
         let args = parse_args_from([
-            "oxi", "config", "add-provider",
+            "oxi",
+            "config",
+            "add-provider",
             "minimax",
             "https://api.minimax.chat/v1",
             "MINIMAX_API_KEY",
             "openai-completions",
-        ]).unwrap();
+        ])
+        .unwrap();
         match args.command {
             Some(Commands::Config { action }) => match action {
-                ConfigCommands::AddProvider { name, base_url, api_key_env, api } => {
+                ConfigCommands::AddProvider {
+                    name,
+                    base_url,
+                    api_key_env,
+                    api,
+                } => {
                     assert_eq!(name, "minimax");
                     assert_eq!(base_url, "https://api.minimax.chat/v1");
                     assert_eq!(api_key_env, "MINIMAX_API_KEY");
@@ -563,14 +569,22 @@ mod tests {
     #[test]
     fn test_parse_config_add_provider_default_api() {
         let args = parse_args_from([
-            "oxi", "config", "add-provider",
+            "oxi",
+            "config",
+            "add-provider",
             "zai",
             "https://api.z.ai/v1",
             "ZAI_API_KEY",
-        ]).unwrap();
+        ])
+        .unwrap();
         match args.command {
             Some(Commands::Config { action }) => match action {
-                ConfigCommands::AddProvider { name, base_url, api_key_env, api } => {
+                ConfigCommands::AddProvider {
+                    name,
+                    base_url,
+                    api_key_env,
+                    api,
+                } => {
                     assert_eq!(name, "zai");
                     assert_eq!(base_url, "https://api.z.ai/v1");
                     assert_eq!(api_key_env, "ZAI_API_KEY");

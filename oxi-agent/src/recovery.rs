@@ -6,7 +6,6 @@
 ///   accumulated text is preserved and delivered as a partial result.
 /// - **Graceful degradation**: When the primary model fails, falls back
 ///   through a configured chain of models.
-
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 

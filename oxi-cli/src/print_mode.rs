@@ -158,8 +158,8 @@ async fn run_single_prompt(
     shutdown_rx: &mut mpsc::Receiver<()>,
 ) -> Result<(), PromptError> {
     let _ = quiet; // used by callers when handling PromptError
-    // Agent expects std::sync::mpsc, but we need async for tokio::select
-    // Use a sync mpsc channel inside spawn_blocking, bridge to tokio mpsc
+                   // Agent expects std::sync::mpsc, but we need async for tokio::select
+                   // Use a sync mpsc channel inside spawn_blocking, bridge to tokio mpsc
     let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
     let (async_tx, mut async_rx) = mpsc::channel::<AgentEvent>(256);
 
@@ -391,13 +391,16 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
             "type": "error",
             "message": message,
         }),
-        AgentEvent::Usage { input_tokens, output_tokens } => serde_json::json!({
+        AgentEvent::Usage {
+            input_tokens,
+            output_tokens,
+        } => serde_json::json!({
             "type": "usage",
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
         }),
 
-               // AgentLoop events (new-style lifecycle)
+        // AgentLoop events (new-style lifecycle)
         AgentEvent::AgentStart { .. } => serde_json::json!({
             "type": "agent_start"
         }),
@@ -434,13 +437,22 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
                 "text": text,
             })
         }
-        AgentEvent::ToolExecutionStart { tool_call_id, tool_name, args } => serde_json::json!({
+        AgentEvent::ToolExecutionStart {
+            tool_call_id,
+            tool_name,
+            args,
+        } => serde_json::json!({
             "type": "tool_execution_start",
             "tool_call_id": tool_call_id,
             "tool_name": tool_name,
             "args": args.to_string(),
         }),
-        AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => serde_json::json!({
+        AgentEvent::ToolExecutionEnd {
+            tool_call_id,
+            tool_name,
+            result,
+            is_error,
+        } => serde_json::json!({
             "type": "tool_execution_end",
             "tool_call_id": tool_call_id,
             "tool_name": tool_name,
@@ -448,7 +460,7 @@ fn event_to_json(event: &AgentEvent) -> serde_json::Value {
             "is_error": is_error,
         }),
 
-               // Everything else
+        // Everything else
         _ => serde_json::json!({
             "type": "unknown"
         }),

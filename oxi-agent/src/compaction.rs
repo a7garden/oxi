@@ -1,38 +1,37 @@
 /// Context compaction events
-
 use oxi_ai::CompactedContext as AiCompactedContext;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// CompactionEvent.
 pub enum CompactionEvent {
-/// Variant.
+    /// Variant.
     Triggered {
-/// context_tokens.
+        /// context_tokens.
         context_tokens: usize,
-/// iteration.
+        /// iteration.
         iteration: usize,
     },
-/// Variant.
+    /// Variant.
     Started {
-/// message_count.
+        /// message_count.
         message_count: usize,
     },
-/// Variant.
+    /// Variant.
     Completed {
-/// result.
+        /// result.
         result: CompactedContext,
-/// duration_ms.
+        /// duration_ms.
         duration_ms: u64,
     },
-/// Variant.
+    /// Variant.
     Skipped {
-/// reason.
+        /// reason.
         reason: String,
     },
-/// Variant.
+    /// Variant.
     Failed {
-/// error.
+        /// error.
         error: String,
     },
 }
@@ -40,11 +39,11 @@ pub enum CompactionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 /// CompactedContext.
 pub struct CompactedContext {
-/// pub.
+    /// pub.
     pub summary: String,
-/// pub.
+    /// pub.
     pub kept_messages: Vec<oxi_ai::Message>,
-/// pub.
+    /// pub.
     pub compacted_count: usize,
 }
 

@@ -1,5 +1,4 @@
 /// Integration tests for oxi-agent
-
 use crate::types::{ToolCall, ToolDefinition, ToolResult};
 use crate::{Agent, AgentConfig, AgentEvent, AgentState, ToolRegistry};
 use async_trait::async_trait;
@@ -182,7 +181,9 @@ async fn test_agent_with_mock_provider() {
 
     assert_eq!(response.content, "Hello! How can I help you?");
     assert_eq!(*provider.call_count.lock().unwrap(), 1);
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentStart { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::AgentStart { .. })));
     assert!(events
         .iter()
         .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
@@ -203,7 +204,9 @@ async fn test_agent_events_sequence() {
         .first()
         .map(|e| matches!(e, AgentEvent::AgentStart { .. }))
         .unwrap_or(false));
-    assert!(events.iter().any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
 }
 
 #[test]
@@ -567,11 +570,8 @@ impl Provider for MultiTurnToolProvider {
         let idx = (*call_count - 1).min(self.responses.len() - 1);
         let response = self.responses[idx].clone();
 
-        let mut assistant = oxi_ai::AssistantMessage::new(
-            oxi_ai::Api::AnthropicMessages,
-            "mock",
-            "mock-model",
-        );
+        let mut assistant =
+            oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
 
         let mut content_blocks: Vec<ContentBlock> = Vec::new();
         if let Some(text) = &response.text {
@@ -645,7 +645,10 @@ impl crate::tools::AgentTool for EchoTool {
             .get("message")
             .and_then(|v| v.as_str())
             .unwrap_or("<no message>");
-        Ok(crate::tools::AgentToolResult::success(format!("Echo: {}", msg)))
+        Ok(crate::tools::AgentToolResult::success(format!(
+            "Echo: {}",
+            msg
+        )))
     }
 }
 
@@ -681,14 +684,14 @@ impl Provider for RetryableProvider {
         *call_count += 1;
 
         if *call_count <= self.fail_count {
-            return Err(oxi_ai::ProviderError::HttpError(429, "rate limited".to_string()));
+            return Err(oxi_ai::ProviderError::HttpError(
+                429,
+                "rate limited".to_string(),
+            ));
         }
 
-        let mut assistant = oxi_ai::AssistantMessage::new(
-            oxi_ai::Api::AnthropicMessages,
-            "mock",
-            "mock-model",
-        );
+        let mut assistant =
+            oxi_ai::AssistantMessage::new(oxi_ai::Api::AnthropicMessages, "mock", "mock-model");
         assistant.content = vec![ContentBlock::Text(TextContent::new(
             self.success_response.clone(),
         ))];
@@ -699,7 +702,9 @@ impl Provider for RetryableProvider {
         };
 
         Ok(Box::pin(stream)
-            as Pin<Box<dyn futures::Stream<Item = ProviderEvent> + Send>>)
+            as Pin<
+                Box<dyn futures::Stream<Item = ProviderEvent> + Send>,
+            >)
     }
 
     fn name(&self) -> &str {
@@ -775,7 +780,7 @@ async fn test_multi_turn_tool_use_loop() {
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
         api_key: None,
-            workspace_dir: None,
+        workspace_dir: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -786,10 +791,9 @@ async fn test_multi_turn_tool_use_loop() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
     let result = agent_loop
-        .run(
-            "Echo hello world".to_string(),
-            move |e| events_clone.lock().unwrap().push(e),
-        )
+        .run("Echo hello world".to_string(), move |e| {
+            events_clone.lock().unwrap().push(e)
+        })
         .await;
 
     assert!(result.is_ok());
@@ -839,9 +843,7 @@ fn test_compaction_event_triggers_and_completes() {
         context_tokens: 50000,
         iteration: 3,
     };
-    let started = crate::compaction::CompactionEvent::Started {
-        message_count: 20,
-    };
+    let started = crate::compaction::CompactionEvent::Started { message_count: 20 };
     let completed = crate::compaction::CompactionEvent::Completed {
         result: crate::compaction::CompactedContext {
             summary: "Summary of conversation".to_string(),
@@ -925,10 +927,7 @@ async fn test_cross_provider_switch_preserves_tool_results() {
     let mut state = AgentState::new();
     state.add_user_message("What is the weather?".to_string());
     state.add_assistant_message("Let me check the weather.".to_string());
-    state.add_tool_result(
-        "call_1".to_string(),
-        "Sunny, 72°F".to_string(),
-    );
+    state.add_tool_result("call_1".to_string(), "Sunny, 72°F".to_string());
     state.add_assistant_message("The weather is sunny, 72°F.".to_string());
 
     assert_eq!(state.messages.len(), 4);
@@ -943,11 +942,8 @@ async fn test_cross_provider_switch_preserves_tool_results() {
 
     // Transform for OpenAI and back — tool results should survive
     let messages = state.messages.clone();
-    let to_openai = transform_for_provider(
-        &messages,
-        &Api::AnthropicMessages,
-        &Api::OpenAiCompletions,
-    );
+    let to_openai =
+        transform_for_provider(&messages, &Api::AnthropicMessages, &Api::OpenAiCompletions);
     assert_eq!(to_openai.len(), 4);
 
     // Tool result should still be there
@@ -977,11 +973,8 @@ async fn test_cross_provider_switch_with_tool_call_blocks() {
     ];
 
     // Transform for OpenAI
-    let transformed = transform_for_provider(
-        &messages,
-        &Api::AnthropicMessages,
-        &Api::OpenAiCompletions,
-    );
+    let transformed =
+        transform_for_provider(&messages, &Api::AnthropicMessages, &Api::OpenAiCompletions);
 
     // Should preserve both messages
     assert_eq!(transformed.len(), 2);
@@ -1082,7 +1075,9 @@ fn test_fallback_chain() {
 fn test_agent_error_retryable() {
     use crate::error::AgentError;
 
-    let rate_limited = AgentError::RateLimited { retry_after_secs: 30 };
+    let rate_limited = AgentError::RateLimited {
+        retry_after_secs: 30,
+    };
     assert!(rate_limited.is_retryable());
 
     let stream_err = AgentError::Stream("connection reset".to_string());
@@ -1103,7 +1098,9 @@ fn test_agent_error_user_friendly_messages() {
     use crate::error::AgentError;
 
     let errors = vec![
-        AgentError::RateLimited { retry_after_secs: 10 },
+        AgentError::RateLimited {
+            retry_after_secs: 10,
+        },
         AgentError::MaxIterations { iterations: 50 },
         AgentError::FallbackFailed {
             primary_model: "anthropic/claude-sonnet-4-20250514".to_string(),
@@ -1115,7 +1112,11 @@ fn test_agent_error_user_friendly_messages() {
 
     for err in &errors {
         let msg = err.user_friendly();
-        assert!(!msg.is_empty(), "user_friendly() should not be empty for {:?}", err);
+        assert!(
+            !msg.is_empty(),
+            "user_friendly() should not be empty for {:?}",
+            err
+        );
     }
 }
 
@@ -1159,7 +1160,7 @@ async fn test_steering_messages_injected_into_loop() {
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
         api_key: None,
-            workspace_dir: None,
+        workspace_dir: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1174,10 +1175,9 @@ async fn test_steering_messages_injected_into_loop() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
     let result = agent_loop
-        .run(
-            "Hello".to_string(),
-            move |e| events_clone.lock().unwrap().push(e),
-        )
+        .run("Hello".to_string(), move |e| {
+            events_clone.lock().unwrap().push(e)
+        })
         .await;
 
     assert!(result.is_ok());
@@ -1231,7 +1231,7 @@ async fn test_multiple_steering_messages() {
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
         api_key: None,
-            workspace_dir: None,
+        workspace_dir: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1246,10 +1246,9 @@ async fn test_multiple_steering_messages() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
     let result = agent_loop
-        .run(
-            "Hello".to_string(),
-            move |e| events_clone.lock().unwrap().push(e),
-        )
+        .run("Hello".to_string(), move |e| {
+            events_clone.lock().unwrap().push(e)
+        })
         .await;
 
     assert!(result.is_ok());
@@ -1294,7 +1293,7 @@ fn test_follow_up_queue_api() {
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
         api_key: None,
-            workspace_dir: None,
+        workspace_dir: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1314,7 +1313,9 @@ fn test_follow_up_queue_api() {
 
     // Add steering and clear all
     agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new("Steer")));
-    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new("Follow-up C")));
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+        "Follow-up C",
+    )));
     agent_loop.clear_all_queues();
 }
 
@@ -1369,7 +1370,7 @@ async fn test_follow_up_processed_in_tool_use_loop() {
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
         api_key: None,
-            workspace_dir: None,
+        workspace_dir: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1390,10 +1391,9 @@ async fn test_follow_up_processed_in_tool_use_loop() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
     let result = agent_loop
-        .run(
-            "Hello".to_string(),
-            move |e| events_clone.lock().unwrap().push(e),
-        )
+        .run("Hello".to_string(), move |e| {
+            events_clone.lock().unwrap().push(e)
+        })
         .await;
 
     assert!(result.is_ok());
@@ -1452,7 +1452,7 @@ async fn test_follow_up_via_continue_loop() {
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
         api_key: None,
-            workspace_dir: None,
+        workspace_dir: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1463,10 +1463,9 @@ async fn test_follow_up_via_continue_loop() {
     let events1 = Arc::new(Mutex::new(Vec::new()));
     let events1_clone = events1.clone();
     let result1 = agent_loop
-        .run(
-            "Hello".to_string(),
-            move |e| events1_clone.lock().unwrap().push(e),
-        )
+        .run("Hello".to_string(), move |e| {
+            events1_clone.lock().unwrap().push(e)
+        })
         .await;
     assert!(result1.is_ok());
 
@@ -1489,7 +1488,9 @@ async fn test_follow_up_via_continue_loop() {
         .filter(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
         .count();
     assert_eq!(steering_count, 1);
-    assert!(events2.iter().any(|e| matches!(e, AgentEvent::TurnStart { .. })));
+    assert!(events2
+        .iter()
+        .any(|e| matches!(e, AgentEvent::TurnStart { .. })));
 }
 
 #[tokio::test]
@@ -1521,7 +1522,7 @@ async fn test_follow_up_queue_cleared() {
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
         api_key: None,
-            workspace_dir: None,
+        workspace_dir: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1529,8 +1530,12 @@ async fn test_follow_up_queue_cleared() {
     let agent_loop = AgentLoop::new(provider, config, tools, state);
 
     // Queue messages and then clear them
-    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new("Follow-up 1")));
-    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new("Follow-up 2")));
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+        "Follow-up 1",
+    )));
+    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+        "Follow-up 2",
+    )));
     agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new("Steer 1")));
     agent_loop.clear_all_queues();
 
@@ -1538,10 +1543,9 @@ async fn test_follow_up_queue_cleared() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let events_clone = events.clone();
     let result = agent_loop
-        .run(
-            "Hello".to_string(),
-            move |e| events_clone.lock().unwrap().push(e),
-        )
+        .run("Hello".to_string(), move |e| {
+            events_clone.lock().unwrap().push(e)
+        })
         .await;
 
     assert!(result.is_ok());
@@ -1592,7 +1596,7 @@ fn test_follow_up_and_steering_queue_independent() {
         auto_retry_max_attempts: 3,
         auto_retry_base_delay_ms: 2000,
         api_key: None,
-            workspace_dir: None,
+        workspace_dir: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());

@@ -11,9 +11,8 @@ use ratatui::text::{Line, Span};
 use serde_json::Value;
 use unicode_width::UnicodeWidthStr;
 
-
-use crate::theme::ThemeStyles;
 use crate::text::truncate_to_width;
+use crate::theme::ThemeStyles;
 
 // ── Constants ────────────────────────────────────────────────────────────
 
@@ -43,7 +42,7 @@ pub fn shorten_path(path: &str) -> String {
 
 /// Parse arguments JSON to extract common fields.
 pub fn parse_tool_args(arguments: &str) -> Value {
-    serde_json::from_str(arguments).unwrap_or_else(|_| Value::Null)
+    serde_json::from_str(arguments).unwrap_or(Value::Null)
 }
 
 /// Extract a string field from parsed arguments.
@@ -56,7 +55,7 @@ pub fn get_path(args: &Value) -> Option<String> {
     args.get("path")
         .or_else(|| args.get("file_path"))
         .and_then(|v| v.as_str())
-        .map(|s| shorten_path(s))
+        .map(shorten_path)
 }
 
 /// Extract an integer field from arguments.
@@ -128,7 +127,12 @@ pub fn format_edit_call(args: &Value, styles: &ThemeStyles) -> Vec<Line<'static>
         });
 
     let extra = if edit_count > 0 {
-        format!("{} ({} replacement{})", path_display, edit_count, if edit_count == 1 { "" } else { "s" })
+        format!(
+            "{} ({} replacement{})",
+            path_display,
+            edit_count,
+            if edit_count == 1 { "" } else { "s" }
+        )
     } else {
         path_display
     };
@@ -201,17 +205,26 @@ pub fn format_search_call(name: &str, args: &Value, styles: &ThemeStyles) -> Vec
 
     let extra = format!("{}{} {}", icon, pattern, path);
     vec![Line::from(vec![
-        Span::styled(format!("{} ", name), styles.accent.add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{} ", name),
+            styles.accent.add_modifier(Modifier::BOLD),
+        ),
         Span::styled(extra, styles.muted),
     ])]
 }
 
 /// Format a generic tool call (fallback for unknown tools).
-pub fn format_generic_call(name: &str, args: &Value, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_generic_call(
+    name: &str,
+    args: &Value,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let name_style = styles.accent.add_modifier(Modifier::BOLD);
-    let mut lines = vec![Line::from(vec![
-        Span::styled(format!("{} ", name), name_style),
-    ])];
+    let mut lines = vec![Line::from(vec![Span::styled(
+        format!("{} ", name),
+        name_style,
+    )])];
 
     // Show first few args as key: value
     if let Some(obj) = args.as_object() {
@@ -235,7 +248,12 @@ pub fn format_generic_call(name: &str, args: &Value, max_width: usize, styles: &
 }
 
 /// Format a tool call by tool name.
-pub fn format_tool_call(name: &str, arguments: &str, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_tool_call(
+    name: &str,
+    arguments: &str,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let args = parse_tool_args(arguments);
 
     match name {
@@ -251,12 +269,19 @@ pub fn format_tool_call(name: &str, arguments: &str, max_width: usize, styles: &
 // ── Result formatters ─────────────────────────────────────────────────────
 
 /// Format an error result.
-pub fn format_error_result(error: &str, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_error_result(
+    error: &str,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     for line in error.lines().take(4) {
         let display = truncate_to_width(line, max_width);
-        lines.push(Line::from(Span::styled(format!("  {}", display), styles.error)));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", display),
+            styles.error,
+        )));
     }
 
     if error.lines().count() > 4 {
@@ -267,7 +292,11 @@ pub fn format_error_result(error: &str, max_width: usize, styles: &ThemeStyles) 
 }
 
 /// Format a unified diff result with colors.
-pub fn format_diff_result(diff: &str, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_diff_result(
+    diff: &str,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let total_lines = diff.lines().count();
 
@@ -281,19 +310,28 @@ pub fn format_diff_result(diff: &str, max_width: usize, styles: &ThemeStyles) ->
         } else if raw_line.starts_with('-') && !raw_line.starts_with("--") {
             // Removed line — red
             Line::from(Span::styled(
-                format!(" {}", truncate_to_width(raw_line, max_width.saturating_sub(1))),
+                format!(
+                    " {}",
+                    truncate_to_width(raw_line, max_width.saturating_sub(1))
+                ),
                 styles.error,
             ))
         } else if raw_line.starts_with('+') && !raw_line.starts_with("++") {
             // Added line — green
             Line::from(Span::styled(
-                format!(" {}", truncate_to_width(raw_line, max_width.saturating_sub(1))),
+                format!(
+                    " {}",
+                    truncate_to_width(raw_line, max_width.saturating_sub(1))
+                ),
                 styles.success,
             ))
         } else {
             // Context line
             Line::from(Span::styled(
-                format!(" {}", truncate_to_width(raw_line, max_width.saturating_sub(1))),
+                format!(
+                    " {}",
+                    truncate_to_width(raw_line, max_width.saturating_sub(1))
+                ),
                 styles.muted,
             ))
         };
@@ -304,7 +342,10 @@ pub fn format_diff_result(diff: &str, max_width: usize, styles: &ThemeStyles) ->
     let (added, removed) = count_diff_stats(diff);
     if total_lines > DIFF_PREVIEW_LINES {
         lines.push(Line::from(Span::styled(
-            format!("  \u{2026} ({} more lines)", total_lines - DIFF_PREVIEW_LINES),
+            format!(
+                "  \u{2026} ({} more lines)",
+                total_lines - DIFF_PREVIEW_LINES
+            ),
             styles.muted,
         )));
     } else if added > 0 || removed > 0 {
@@ -318,7 +359,11 @@ pub fn format_diff_result(diff: &str, max_width: usize, styles: &ThemeStyles) ->
 }
 
 /// Format a bash command result.
-pub fn format_bash_result(result: &str, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_bash_result(
+    result: &str,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     // Show last N lines of output
@@ -328,19 +373,28 @@ pub fn format_bash_result(result: &str, max_width: usize, styles: &ThemeStyles) 
         let start = all_lines.len() - RESULT_PREVIEW_LINES;
         for line in &all_lines[start..] {
             let display = truncate_to_width(line, max_width.saturating_sub(2));
-            lines.push(Line::from(Span::styled(format!("  {}", display), styles.normal)));
+            lines.push(Line::from(Span::styled(
+                format!("  {}", display),
+                styles.normal,
+            )));
         }
         if start > 0 {
-            lines.insert(0, Line::from(Span::styled(
-                format!("  … ({} earlier lines)", start),
-                styles.muted,
-            )));
+            lines.insert(
+                0,
+                Line::from(Span::styled(
+                    format!("  … ({} earlier lines)", start),
+                    styles.muted,
+                )),
+            );
         }
         all_lines.len()
     } else {
         for line in &all_lines {
             let display = truncate_to_width(line, max_width.saturating_sub(2));
-            lines.push(Line::from(Span::styled(format!("  {}", display), styles.normal)));
+            lines.push(Line::from(Span::styled(
+                format!("  {}", display),
+                styles.normal,
+            )));
         }
         all_lines.len()
     };
@@ -359,7 +413,11 @@ pub fn format_bash_result(result: &str, max_width: usize, styles: &ThemeStyles) 
 }
 
 /// Format a read tool result (file content preview).
-pub fn format_read_result(result: &str, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_read_result(
+    result: &str,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let all_lines: Vec<&str> = result.lines().collect();
     let total = all_lines.len();
@@ -391,18 +449,28 @@ pub fn format_read_result(result: &str, max_width: usize, styles: &ThemeStyles) 
 }
 
 /// Format a generic tool result (fallback).
-pub fn format_generic_result(result: &str, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_generic_result(
+    result: &str,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let all_lines: Vec<&str> = result.lines().collect();
 
     for line in all_lines.iter().take(GENERIC_PREVIEW_LINES) {
         let display = truncate_to_width(line, max_width.saturating_sub(2));
-        lines.push(Line::from(Span::styled(format!("  {}", display), styles.normal)));
+        lines.push(Line::from(Span::styled(
+            format!("  {}", display),
+            styles.normal,
+        )));
     }
 
     if all_lines.len() > GENERIC_PREVIEW_LINES {
         lines.push(Line::from(Span::styled(
-            format!("  \u{2026} ({} more lines)", all_lines.len() - GENERIC_PREVIEW_LINES),
+            format!(
+                "  \u{2026} ({} more lines)",
+                all_lines.len() - GENERIC_PREVIEW_LINES
+            ),
             styles.muted,
         )));
     }
@@ -411,7 +479,13 @@ pub fn format_generic_result(result: &str, max_width: usize, styles: &ThemeStyle
 }
 
 /// Format a tool result by tool name.
-pub fn format_tool_result(name: &str, result: &str, is_error: bool, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_tool_result(
+    name: &str,
+    result: &str,
+    is_error: bool,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     if is_error {
         return format_error_result(result, max_width, styles);
     }
@@ -458,7 +532,14 @@ pub fn measure_result_height(name: &str, result: &str, is_error: bool) -> u16 {
     if looks_like_diff(result) {
         let total = result.lines().count();
         let shown = total.min(DIFF_PREVIEW_LINES);
-        let extra = if total > DIFF_PREVIEW_LINES { 1 } else if count_diff_stats(result).0 > 0 || count_diff_stats(result).1 > 0 { 1 } else { 0 };
+        let extra = if total > DIFF_PREVIEW_LINES
+            || count_diff_stats(result).0 > 0
+            || count_diff_stats(result).1 > 0
+        {
+            1
+        } else {
+            0
+        };
         return shown as u16 + extra;
     }
 
@@ -478,7 +559,7 @@ pub fn measure_result_height(name: &str, result: &str, is_error: bool) -> u16 {
         "read" => {
             let total = result.lines().count();
             let shown = total.min(READ_PREVIEW_LINES);
-            let extra = if total > READ_PREVIEW_LINES { 1 } else { 1 }; // Always show count
+            let extra: u16 = 1; // Always show count
             shown as u16 + extra
         }
         _ => {

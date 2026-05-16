@@ -6,7 +6,6 @@
 /// - Line ending normalization (CRLF → LF for matching)
 /// - Unified diff output for previews
 /// - File mutation queue for concurrent write safety
-
 use super::edit_diff::{
     self, detect_line_ending, has_bom, normalize_to_lf, restore_line_endings, strip_bom, Edit,
     EditDiffError,
@@ -27,14 +26,16 @@ pub struct EditTool {
 }
 
 impl EditTool {
-/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
+    /// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
         Self { root_dir: None }
     }
 
     /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self { root_dir: Some(cwd) }
+        Self {
+            root_dir: Some(cwd),
+        }
     }
 
     /// Prepare edit arguments, handling both legacy and multi-edit formats.
@@ -99,7 +100,8 @@ impl EditTool {
     async fn apply_edits(root_dir: &Path, input: &EditInput) -> Result<EditOutput, ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(root_dir);
-        let validated_path = guard.validate_traversal(Path::new(&input.path))
+        let validated_path = guard
+            .validate_traversal(Path::new(&input.path))
             .map_err(|e| e.to_string())?;
         let path = validated_path.as_path();
 
@@ -213,11 +215,12 @@ impl AgentTool for EditTool {
     }
 
     fn label(&self) -> &str {
-
         "Edit File"
     }
 
-    fn essential(&self) -> bool { true }
+    fn essential(&self) -> bool {
+        true
+    }
     fn description(&self) -> &str {
         "Make targeted edits to a file. Supports both single edit (old_text/new_text) and multiple edits (edits[] array). \
          Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. \

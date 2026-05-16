@@ -36,7 +36,9 @@ pub struct SkillManager {
 impl SkillManager {
     /// Create an empty skill manager.
     pub fn new() -> Self {
-        Self { skills: HashMap::new() }
+        Self {
+            skills: HashMap::new(),
+        }
     }
 
     /// Load all skills from the given directory.

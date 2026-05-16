@@ -7,8 +7,8 @@
 //!
 //! Metadata stored in `~/.oxi/extensions/registry.json`.
 
-use anyhow::{Context, Result};
 use crate::util::http_client::shared_http_client;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -42,8 +42,7 @@ impl ExtensionRegistry {
         }
         let data = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        serde_json::from_str(&data)
-            .with_context(|| format!("Failed to parse {}", path.display()))
+        serde_json::from_str(&data).with_context(|| format!("Failed to parse {}", path.display()))
     }
 
     /// Save registry to disk.
@@ -60,15 +59,13 @@ impl ExtensionRegistry {
 
     /// Path to `~/.oxi/extensions/registry.json`.
     pub fn registry_path() -> Result<PathBuf> {
-        let home = dirs::home_dir()
-            .context("Cannot determine home directory")?;
+        let home = dirs::home_dir().context("Cannot determine home directory")?;
         Ok(home.join(".oxi").join("extensions").join("registry.json"))
     }
 
     /// Path to `~/.oxi/extensions/`.
     pub fn extensions_dir() -> Result<PathBuf> {
-        let home = dirs::home_dir()
-            .context("Cannot determine home directory")?;
+        let home = dirs::home_dir().context("Cannot determine home directory")?;
         Ok(home.join(".oxi").join("extensions"))
     }
 }
@@ -94,9 +91,7 @@ struct GitHubAsset {
 async fn fetch_latest_release(source: &str, include_prerelease: bool) -> Result<GitHubRelease> {
     let url = format!("https://api.github.com/repos/{}/releases", source);
     let client = shared_http_client();
-    let mut request = client
-        .get(&url)
-        .header("User-Agent", "oxi-ext");
+    let mut request = client.get(&url).header("User-Agent", "oxi-ext");
 
     // Use GITHUB_TOKEN if available for higher rate limits
     if let Ok(token) = std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN")) {
@@ -129,12 +124,12 @@ async fn download_file(url: &str, dest: &Path) -> Result<()> {
         anyhow::bail!("Download failed with status: {}", response.status());
     }
 
-    let bytes = response.bytes()
+    let bytes = response
+        .bytes()
         .await
         .context("Failed to read download response")?;
 
-    std::fs::write(dest, &bytes)
-        .with_context(|| format!("Failed to write {}", dest.display()))?;
+    std::fs::write(dest, &bytes).with_context(|| format!("Failed to write {}", dest.display()))?;
 
     Ok(())
 }
@@ -154,10 +149,7 @@ pub struct InstallResult {
 ///
 /// `source` should be in "owner/repo" format.
 /// Optionally specify version as "owner/repo@version".
-pub async fn install_extension(
-    source: &str,
-    include_prerelease: bool,
-) -> Result<InstallResult> {
+pub async fn install_extension(source: &str, include_prerelease: bool) -> Result<InstallResult> {
     let (repo, wanted_version) = if let Some((r, v)) = source.split_once('@') {
         (r, Some(v.to_string()))
     } else {
@@ -176,7 +168,10 @@ pub async fn install_extension(
         // Fetch specific release by tag
         // SAFE: wanted_version.is_some() checked in the outer if
         let tag = wanted_version.as_ref().unwrap();
-        let url = format!("https://api.github.com/repos/{}/releases/tags/{}", repo, tag);
+        let url = format!(
+            "https://api.github.com/repos/{}/releases/tags/{}",
+            repo, tag
+        );
         let client = shared_http_client();
         let mut request = client.get(&url).header("User-Agent", "oxi-ext");
         if let Ok(token) = std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN")) {
@@ -198,7 +193,10 @@ pub async fn install_extension(
         .assets
         .iter()
         .find(|a| a.name.ends_with(".wasm"))
-        .context(format!("No .wasm file found in release {} of {}", release.tag_name, repo))?;
+        .context(format!(
+            "No .wasm file found in release {} of {}",
+            release.tag_name, repo
+        ))?;
 
     // Determine extension name from wasm filename
     let ext_name = wasm_asset
@@ -212,7 +210,8 @@ pub async fn install_extension(
     std::fs::create_dir_all(&extensions_dir)?;
     let dest = extensions_dir.join(&wasm_asset.name);
 
-    println!("Downloading {} v{} ({:.1} KB)...",
+    println!(
+        "Downloading {} v{} ({:.1} KB)...",
         ext_name,
         release.tag_name,
         wasm_asset.size as f64 / 1024.0

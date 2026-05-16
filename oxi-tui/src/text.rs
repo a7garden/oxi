@@ -11,7 +11,8 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> String {
         return String::new();
     }
     // First pass: check if everything fits
-    let total_width: usize = s.chars()
+    let total_width: usize = s
+        .chars()
         .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
         .sum();
     if total_width <= max_width {

@@ -6,7 +6,6 @@
 /// - Diff-style output preview (first/last few lines for large files)
 /// - File mutation queue for serialized writes (concurrent safety)
 /// - Output truncation for very large content
-
 use super::file_mutation_queue::global_mutation_queue;
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
@@ -29,14 +28,16 @@ pub struct WriteTool {
 }
 
 impl WriteTool {
-/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
+    /// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
         Self { root_dir: None }
     }
 
     /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self { root_dir: Some(cwd) }
+        Self {
+            root_dir: Some(cwd),
+        }
     }
 
     /// Build a human-readable preview of the content that was written.
@@ -67,10 +68,16 @@ impl WriteTool {
     }
 
     /// Core write implementation — runs inside the mutation queue lock.
-    async fn write_file_impl(root_dir: &Path, path: &str, content: &str, append: bool) -> Result<String, ToolError> {
+    async fn write_file_impl(
+        root_dir: &Path,
+        path: &str,
+        content: &str,
+        append: bool,
+    ) -> Result<String, ToolError> {
         // Security: validate path with PathGuard
         let guard = PathGuard::new(root_dir);
-        let file_path = guard.validate_traversal(Path::new(path))
+        let file_path = guard
+            .validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
         // Ensure parent directory exists (create if missing)
@@ -169,11 +176,12 @@ impl AgentTool for WriteTool {
     }
 
     fn label(&self) -> &str {
-
         "Write File"
     }
 
-    fn essential(&self) -> bool { true }
+    fn essential(&self) -> bool {
+        true
+    }
     fn description(&self) -> &str {
         "Write content to a file, creating parent directories as needed. Existing files will be overwritten. Use append=true to append to existing files."
     }
@@ -282,7 +290,9 @@ mod tests {
         let path = tmp.path().join("test.txt");
         let path_str = path.to_str().unwrap();
 
-        let result = WriteTool::write_file_impl(Path::new("."), path_str, "hello world\nline 2", false).await;
+        let result =
+            WriteTool::write_file_impl(Path::new("."), path_str, "hello world\nline 2", false)
+                .await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -299,7 +309,8 @@ mod tests {
         let path = tmp.path().join("a/b/c/test.txt");
         let path_str = path.to_str().unwrap();
 
-        let result = WriteTool::write_file_impl(Path::new("."), path_str, "deep nested", false).await;
+        let result =
+            WriteTool::write_file_impl(Path::new("."), path_str, "deep nested", false).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -315,7 +326,8 @@ mod tests {
         // Create initial file
         std::fs::write(&path, "old content").unwrap();
 
-        let result = WriteTool::write_file_impl(Path::new("."), path_str, "new content", false).await;
+        let result =
+            WriteTool::write_file_impl(Path::new("."), path_str, "new content", false).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -353,7 +365,8 @@ mod tests {
         let path = tmp.path().join("new.txt");
         let path_str = path.to_str().unwrap();
 
-        let result = WriteTool::write_file_impl(Path::new("."), path_str, "appended content", true).await;
+        let result =
+            WriteTool::write_file_impl(Path::new("."), path_str, "appended content", true).await;
         assert!(result.is_ok());
 
         let written = std::fs::read_to_string(&path).unwrap();
@@ -362,7 +375,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_path_traversal_blocked() {
-        let result = WriteTool::write_file_impl(Path::new("."), "../../etc/passwd", "hack", false).await;
+        let result =
+            WriteTool::write_file_impl(Path::new("."), "../../etc/passwd", "hack", false).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Path traversal"));
     }
@@ -412,7 +426,9 @@ mod tests {
             "content": "via trait"
         });
 
-        let result = tool.execute("test-id", params, None, &ToolContext::default()).await;
+        let result = tool
+            .execute("test-id", params, None, &ToolContext::default())
+            .await;
         assert!(result.is_ok());
         let tool_result = result.unwrap();
         assert!(tool_result.success);
@@ -429,7 +445,9 @@ mod tests {
             "content": "no path"
         });
 
-        let result = tool.execute("test-id", params, None, &ToolContext::default()).await;
+        let result = tool
+            .execute("test-id", params, None, &ToolContext::default())
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("path"));
     }
@@ -441,7 +459,9 @@ mod tests {
             "path": "/tmp/test.txt"
         });
 
-        let result = tool.execute("test-id", params, None, &ToolContext::default()).await;
+        let result = tool
+            .execute("test-id", params, None, &ToolContext::default())
+            .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("content"));
     }
@@ -459,7 +479,9 @@ mod tests {
             "path": &path_str,
             "content": "first "
         });
-        tool.execute("test-id-1", params, None, &ToolContext::default()).await.unwrap();
+        tool.execute("test-id-1", params, None, &ToolContext::default())
+            .await
+            .unwrap();
 
         // Append
         let params = json!({
@@ -467,7 +489,10 @@ mod tests {
             "content": "second",
             "append": true
         });
-        let result = tool.execute("test-id-2", params, None, &ToolContext::default()).await.unwrap();
+        let result = tool
+            .execute("test-id-2", params, None, &ToolContext::default())
+            .await
+            .unwrap();
         assert!(result.success);
         assert!(result.output.contains("Appended"));
 

@@ -148,7 +148,10 @@ mod tests {
     fn error_chain_from_provider_error() {
         let inner = ProviderError::MissingApiKey;
         let outer: Error = inner.into();
-        assert!(matches!(outer, Error::Provider(ProviderError::MissingApiKey)));
+        assert!(matches!(
+            outer,
+            Error::Provider(ProviderError::MissingApiKey)
+        ));
         assert!(outer.to_string().contains("Missing API key"));
     }
 

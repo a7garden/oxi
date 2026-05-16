@@ -31,8 +31,8 @@ use std::sync::Arc;
 use libloading::Library;
 use sha2::Digest;
 
-use crate::extensions::Extension;
 use crate::extensions::types::ExtensionError;
+use crate::extensions::Extension;
 
 /// Entry point symbol that every extension must export.
 const ENTRY_SYMBOL: &[u8] = b"oxi_extension_create\0";
@@ -97,7 +97,9 @@ pub fn discover_extensions_in_dir(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn discover_in_dir(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_file() && is_shared_library(&path) {
@@ -133,11 +135,14 @@ pub fn load_extension(path: &Path) -> anyhow::Result<Arc<dyn Extension>> {
         .map_err(|e| anyhow::anyhow!("Failed to load library '{}': {}", path_display, e))?;
 
     // Get the entry point symbol
-    let create: libloading::Symbol<CreateFn> = unsafe { library.get(ENTRY_SYMBOL) }
-        .map_err(|e| anyhow::anyhow!(
-            "Symbol 'oxi_extension_create' not found in '{}': {}",
-            path_display, e
-        ))?;
+    let create: libloading::Symbol<CreateFn> =
+        unsafe { library.get(ENTRY_SYMBOL) }.map_err(|e| {
+            anyhow::anyhow!(
+                "Symbol 'oxi_extension_create' not found in '{}': {}",
+                path_display,
+                e
+            )
+        })?;
 
     // Call the entry point
     let raw_ptr = unsafe { create() };

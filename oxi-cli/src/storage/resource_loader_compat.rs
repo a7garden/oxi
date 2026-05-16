@@ -10,13 +10,13 @@ use std::path::{Path, PathBuf};
 /// Resource type
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ResourceType {
-/// skill variant.
+    /// skill variant.
     Skill,
-/// extension variant.
+    /// extension variant.
     Extension,
-/// theme variant.
+    /// theme variant.
     Theme,
-/// prompt variant.
+    /// prompt variant.
     Prompt,
 }
 
@@ -50,31 +50,31 @@ pub struct LoadResult<T> {
 /// Load error
 #[derive(Debug, Clone)]
 pub struct LoadError {
-/// pub.
+    /// pub.
     pub path: PathBuf,
-/// pub.
+    /// pub.
     pub error: String,
 }
 
 /// Resource diagnostic
 #[derive(Debug, Clone)]
 pub struct ResourceDiagnostic {
-/// pub.
+    /// pub.
     pub severity: DiagnosticSeverity,
-/// pub.
+    /// pub.
     pub message: String,
-/// pub.
+    /// pub.
     pub path: Option<PathBuf>,
 }
 
 /// Diagnostic severity
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
-/// warning variant.
+    /// warning variant.
     Warning,
-/// error variant.
+    /// error variant.
     Error,
-/// info variant.
+    /// info variant.
     Info,
 }
 
@@ -182,17 +182,17 @@ pub fn load_skill_impl(path: &Path) -> Result<Skill, String> {
 /// A loaded skill
 #[derive(Debug, Clone)]
 pub struct Skill {
-/// pub.
+    /// pub.
     pub id: String,
-/// pub.
+    /// pub.
     pub path: PathBuf,
-/// pub.
+    /// pub.
     pub content: String,
-/// pub.
+    /// pub.
     pub name: Option<String>,
-/// pub.
+    /// pub.
     pub description: Option<String>,
-/// pub.
+    /// pub.
     pub source: String,
 }
 
@@ -267,15 +267,15 @@ pub fn load_theme_impl(path: &Path) -> Result<Theme, String> {
 /// A loaded theme
 #[derive(Debug, Clone)]
 pub struct Theme {
-/// pub.
+    /// pub.
     pub id: String,
-/// pub.
+    /// pub.
     pub name: String,
-/// pub.
+    /// pub.
     pub path: PathBuf,
-/// pub.
+    /// pub.
     pub content: serde_json::Value,
-/// pub.
+    /// pub.
     pub source: String,
 }
 
@@ -345,17 +345,17 @@ pub fn load_prompt_impl(path: &Path) -> Result<Prompt, String> {
 /// A loaded prompt template
 #[derive(Debug, Clone)]
 pub struct Prompt {
-/// pub.
+    /// pub.
     pub id: String,
-/// pub.
+    /// pub.
     pub name: String,
-/// pub.
+    /// pub.
     pub path: PathBuf,
-/// pub.
+    /// pub.
     pub content: String,
-/// pub.
+    /// pub.
     pub description: Option<String>,
-/// pub.
+    /// pub.
     pub source: String,
 }
 
@@ -387,7 +387,7 @@ pub struct ResourceWatcher {
 }
 
 impl ResourceWatcher {
-/// TODO.
+    /// TODO.
     #[allow(dead_code)]
     pub fn new() -> Self {
         Self {
@@ -396,14 +396,14 @@ impl ResourceWatcher {
         }
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     #[allow(dead_code)]
     pub fn add_path(&mut self, path: PathBuf) {
         self.paths.push(path.clone());
-        self.callbacks.entry(path).or_insert_with(Vec::new);
+        self.callbacks.entry(path).or_default();
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     #[allow(dead_code)]
     pub fn on_change<F>(&mut self, path: &Path, callback: F)
     where
@@ -412,11 +412,11 @@ impl ResourceWatcher {
         let path = path.to_path_buf();
         self.callbacks
             .entry(path.clone())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(Box::new(callback));
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     #[allow(dead_code)]
     pub fn check_changes(&mut self) {
         for path in &self.paths {
@@ -447,9 +447,9 @@ impl Default for ResourceWatcher {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct ResourceChange {
-/// pub.
+    /// pub.
     pub path: PathBuf,
-/// pub.
+    /// pub.
     pub kind: ChangeKind,
 }
 
@@ -457,11 +457,11 @@ pub struct ResourceChange {
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]
 pub enum ChangeKind {
-/// created variant.
+    /// created variant.
     Created,
-/// modified variant.
+    /// modified variant.
     Modified,
-/// deleted variant.
+    /// deleted variant.
     Deleted,
 }
 
@@ -498,14 +498,14 @@ pub fn load_all_resources_impl(base_dir: &Path) -> LoadAllResourcesResult {
 /// Result of loading all resources
 #[allow(dead_code)]
 pub struct LoadAllResourcesResult {
-/// pub.
+    /// pub.
     pub skills: Vec<Skill>,
-/// pub.
+    /// pub.
     pub themes: Vec<Theme>,
-/// pub.
+    /// pub.
     pub prompts: Vec<Prompt>,
-/// pub.
+    /// pub.
     pub errors: Vec<LoadError>,
-/// pub.
+    /// pub.
     pub diagnostics: Vec<ResourceDiagnostic>,
 }

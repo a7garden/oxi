@@ -2,7 +2,6 @@
 ///
 /// Stores search results in memory keyed by generated IDs, enabling the
 /// `get_search_results` tool to retrieve previous results without re-querying.
-
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -86,7 +85,9 @@ impl SearchCache {
     /// Retrieve cached search results by ID.
     pub fn get(&self, search_id: &str) -> Option<(String, Vec<SearchResult>)> {
         let entries = self.entries.lock();
-        entries.get(search_id).map(|c| (c.query.clone(), c.results.clone()))
+        entries
+            .get(search_id)
+            .map(|c| (c.query.clone(), c.results.clone()))
     }
 }
 
@@ -181,8 +182,9 @@ impl AgentTool for GetSearchResultsTool {
             })
             .collect();
 
-        Ok(AgentToolResult::success(output)
-            .with_metadata(json!({ "results": results_json, "query": query, "searchId": search_id })))
+        Ok(AgentToolResult::success(output).with_metadata(
+            json!({ "results": results_json, "query": query, "searchId": search_id }),
+        ))
     }
 }
 
@@ -193,7 +195,7 @@ mod rand {
     use std::time::SystemTime;
 
     thread_local! {
-        static SEED: Cell<u64> = Cell::new(0);
+        static SEED: Cell<u64> = const { Cell::new(0) };
     }
 
     /// Simple xorshift pseudo-random number generator.
@@ -220,7 +222,7 @@ mod rand {
 
     fn thread_id() -> usize {
         // Use the address of a thread-local as a cheap thread id
-        thread_local! { static ANCHOR: () = (); }
+        thread_local! { static ANCHOR: () = const {  }; }
         ANCHOR.with(|_| &ANCHOR as *const _ as usize)
     }
 }
@@ -265,7 +267,10 @@ mod tests {
         let _id4 = cache.insert("q4", vec![]);
 
         // At least one of the first 3 should have been evicted
-        let found = [&id1, &id2, &id3].iter().filter(|id| cache.get(id).is_some()).count();
+        let found = [&id1, &id2, &id3]
+            .iter()
+            .filter(|id| cache.get(id).is_some())
+            .count();
         assert!(found < 3);
         assert!(cache.get(&_id4).is_some());
     }
@@ -291,7 +296,12 @@ mod tests {
 
         let tool = GetSearchResultsTool::new(cache);
         let result = tool
-            .execute("test", json!({ "searchId": id }), None, &ToolContext::default())
+            .execute(
+                "test",
+                json!({ "searchId": id }),
+                None,
+                &ToolContext::default(),
+            )
             .await
             .unwrap();
 
@@ -305,7 +315,12 @@ mod tests {
         let cache = Arc::new(SearchCache::new());
         let tool = GetSearchResultsTool::new(cache);
         let result = tool
-            .execute("test", json!({ "searchId": "bad-id" }), None, &ToolContext::default())
+            .execute(
+                "test",
+                json!({ "searchId": "bad-id" }),
+                None,
+                &ToolContext::default(),
+            )
             .await;
 
         assert!(result.is_err());

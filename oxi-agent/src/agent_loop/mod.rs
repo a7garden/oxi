@@ -8,40 +8,43 @@
 
 /// Agent-loop configuration.
 pub mod config;
-/// Tool execution strategies.
-pub mod tool_exec;
-/// Streaming response handling.
-pub mod streaming;
-/// Retry logic for the agent loop.
-pub mod retry;
-/// Internal message/event queues.
-pub mod queues;
 /// Miscellaneous helper functions.
 pub mod helpers;
+/// Internal message/event queues.
+pub mod queues;
+/// Retry logic for the agent loop.
+pub mod retry;
+/// Streaming response handling.
+pub mod streaming;
+/// Tool execution strategies.
+pub mod tool_exec;
 
 // Re-export for sibling module access
-pub use config::{AgentLoopConfig, BeforeToolCallHook, AfterToolCallHook, ToolExecutionMode};
 use crate::agent::ProviderResolver;
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
 use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
-use crate::{state::SharedState, tools::ToolRegistry, tools::ToolContext};
+use crate::{state::SharedState, tools::ToolContext, tools::ToolRegistry};
 use anyhow::{Error, Result};
+pub use config::{AfterToolCallHook, AgentLoopConfig, BeforeToolCallHook, ToolExecutionMode};
 use oxi_ai::{
-    ContentBlock, Message, Provider,
-    StopReason, TextContent, UserMessage, CompactionStrategy,
-    CompactionManager as OxCompactionManager,
-    estimate_tokens, LlmCompactor,
+    estimate_tokens, CompactionManager as OxCompactionManager, CompactionStrategy, ContentBlock,
+    LlmCompactor, Message, Provider, StopReason, TextContent, UserMessage,
 };
 use parking_lot::RwLock;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
-use self::queues::{drain_steering_queue, drain_follow_up_queue, clear_steering_queue, clear_follow_up_queue, clear_all_queues};
-use self::retry::{is_retryable_error, handle_retryable_error, cancel_auto_retry, auto_retry_attempt_method};
-use self::streaming::stream_assistant_response;
 use self::helpers::should_stop_after_turn;
+use self::queues::{
+    clear_all_queues, clear_follow_up_queue, clear_steering_queue, drain_follow_up_queue,
+    drain_steering_queue,
+};
+use self::retry::{
+    auto_retry_attempt_method, cancel_auto_retry, handle_retryable_error, is_retryable_error,
+};
+use self::streaming::stream_assistant_response;
 use self::tool_exec::execute_tool_calls;
 
 type EmitFn = Arc<dyn Fn(AgentEvent) + Send + Sync>;
@@ -69,7 +72,7 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
-/// TODO.
+    /// TODO.
     /// Create a new AgentLoop with an explicit resolver.
     pub fn new_with_resolver(
         provider: Arc<dyn Provider>,
@@ -78,10 +81,8 @@ impl AgentLoop {
         state: SharedState,
         resolver: Arc<dyn ProviderResolver>,
     ) -> Self {
-        let mut compaction_manager = OxCompactionManager::new(
-            config.compaction_strategy.clone(),
-            config.context_window,
-        );
+        let mut compaction_manager =
+            OxCompactionManager::new(config.compaction_strategy.clone(), config.context_window);
 
         if config.compaction_strategy != CompactionStrategy::Disabled {
             let model = resolver.resolve_model(&config.model_id);
@@ -120,44 +121,47 @@ impl AgentLoop {
     ) -> Self {
         use crate::agent::GlobalProviderResolver;
         Self::new_with_resolver(
-            provider, config, tools, state,
+            provider,
+            config,
+            tools,
+            state,
             Arc::new(GlobalProviderResolver),
         )
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn with_before_tool_call(mut self, hook: BeforeToolCallHook) -> Self {
         self.before_tool_call = Some(hook);
         self
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn with_after_tool_call(mut self, hook: AfterToolCallHook) -> Self {
         self.after_tool_call = Some(hook);
         self
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn steer(&self, message: Message) {
         self.steering_queue.write().push(message);
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn follow_up(&self, message: Message) {
         self.follow_up_queue.write().push(message);
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn clear_steering_queue(&self) {
         clear_steering_queue(self);
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn clear_follow_up_queue(&self) {
         clear_follow_up_queue(self);
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn clear_all_queues(&self) {
         clear_all_queues(self);
     }
@@ -166,10 +170,13 @@ impl AgentLoop {
         drain_steering_queue(self)
     }
 
-/// Build a ToolContext from the agent loop config.
+    /// Build a ToolContext from the agent loop config.
     /// Uses workspace_dir from config if set, otherwise falls back to current directory.
     fn build_tool_context(&self) -> ToolContext {
-        let workspace = self.config.workspace_dir.clone()
+        let workspace = self
+            .config
+            .workspace_dir
+            .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
         ToolContext {
             workspace_dir: workspace,
@@ -182,12 +189,12 @@ impl AgentLoop {
         drain_follow_up_queue(self)
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn cancel_auto_retry(&self) {
         cancel_auto_retry(self);
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub fn auto_retry_attempt(&self) -> usize {
         auto_retry_attempt_method(self)
     }
@@ -203,7 +210,7 @@ impl AgentLoop {
         &self.external_stop
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub async fn run(
         &self,
         prompt: String,
@@ -214,7 +221,7 @@ impl AgentLoop {
         self.run_messages(vec![message], emit).await
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub async fn run_messages(
         &self,
         prompts: Vec<Message>,
@@ -227,8 +234,14 @@ impl AgentLoop {
         all_messages.extend(prompts.clone());
 
         tracing::info!(session_id = ?self.session_id, "AgentLoop starting");
-        emit(AgentEvent::AgentStart { prompts: prompts.clone(), session_id: self.session_id.clone() });
-        all_events.push(AgentEvent::AgentStart { prompts: prompts.clone(), session_id: self.session_id.clone() });
+        emit(AgentEvent::AgentStart {
+            prompts: prompts.clone(),
+            session_id: self.session_id.clone(),
+        });
+        all_events.push(AgentEvent::AgentStart {
+            prompts: prompts.clone(),
+            session_id: self.session_id.clone(),
+        });
 
         let (result_messages, events) = self.run_loop(prompts, emit.clone()).await?;
 
@@ -249,13 +262,13 @@ impl AgentLoop {
             s.replace_messages(result_messages.clone());
         });
 
-        emit(AgentEvent::AgentEnd { 
-            messages: result_messages.clone(), 
+        emit(AgentEvent::AgentEnd {
+            messages: result_messages.clone(),
             stop_reason: stop_reason.clone(),
             session_id: self.session_id.clone(),
         });
-        all_events.push(AgentEvent::AgentEnd { 
-            messages: result_messages.clone(), 
+        all_events.push(AgentEvent::AgentEnd {
+            messages: result_messages.clone(),
             stop_reason,
             session_id: self.session_id.clone(),
         });
@@ -263,7 +276,7 @@ impl AgentLoop {
         Ok(all_events)
     }
 
-/// TODO: document this function.
+    /// TODO: document this function.
     pub async fn continue_loop(
         &self,
         emit: impl Fn(AgentEvent) + Send + Sync + 'static,
@@ -272,8 +285,14 @@ impl AgentLoop {
         let mut all_events = Vec::new();
 
         tracing::info!(session_id = ?self.session_id, "AgentLoop continuing");
-        emit(AgentEvent::AgentStart { prompts: vec![], session_id: self.session_id.clone() });
-        all_events.push(AgentEvent::AgentStart { prompts: vec![], session_id: self.session_id.clone() });
+        emit(AgentEvent::AgentStart {
+            prompts: vec![],
+            session_id: self.session_id.clone(),
+        });
+        all_events.push(AgentEvent::AgentStart {
+            prompts: vec![],
+            session_id: self.session_id.clone(),
+        });
 
         let (result_messages, events) = self.run_loop(vec![], emit.clone()).await?;
 
@@ -288,13 +307,13 @@ impl AgentLoop {
         });
 
         tracing::info!(session_id = ?self.session_id, "AgentLoop continue_loop complete");
-        emit(AgentEvent::AgentEnd { 
-            messages: result_messages.clone(), 
+        emit(AgentEvent::AgentEnd {
+            messages: result_messages.clone(),
             stop_reason: stop_reason.clone(),
             session_id: self.session_id.clone(),
         });
-        all_events.push(AgentEvent::AgentEnd { 
-            messages: result_messages.clone(), 
+        all_events.push(AgentEvent::AgentEnd {
+            messages: result_messages.clone(),
             stop_reason,
             session_id: self.session_id.clone(),
         });
@@ -315,12 +334,24 @@ impl AgentLoop {
             return;
         }
         for message in pending_messages.drain(..) {
-            emit(AgentEvent::SteeringMessage { message: message.clone() });
-            emit(AgentEvent::MessageStart { message: message.clone() });
-            emit(AgentEvent::MessageEnd { message: message.clone() });
-            events.push(AgentEvent::SteeringMessage { message: message.clone() });
-            events.push(AgentEvent::MessageStart { message: message.clone() });
-            events.push(AgentEvent::MessageEnd { message: message.clone() });
+            emit(AgentEvent::SteeringMessage {
+                message: message.clone(),
+            });
+            emit(AgentEvent::MessageStart {
+                message: message.clone(),
+            });
+            emit(AgentEvent::MessageEnd {
+                message: message.clone(),
+            });
+            events.push(AgentEvent::SteeringMessage {
+                message: message.clone(),
+            });
+            events.push(AgentEvent::MessageStart {
+                message: message.clone(),
+            });
+            events.push(AgentEvent::MessageEnd {
+                message: message.clone(),
+            });
             messages.push(message.clone());
             new_messages.push(message);
         }
@@ -345,14 +376,26 @@ impl AgentLoop {
             &self.config.model_id,
         );
         error_asst.stop_reason = StopReason::Error;
-        error_asst.content.push(ContentBlock::Text(TextContent::new(format!("⚠ {}", err_msg))));
+        error_asst
+            .content
+            .push(ContentBlock::Text(TextContent::new(format!(
+                "⚠ {}",
+                err_msg
+            ))));
 
         new_messages.push(Message::Assistant(error_asst.clone()));
         messages.push(Message::Assistant(error_asst.clone()));
 
-        emit(AgentEvent::MessageStart { message: Message::Assistant(error_asst.clone()) });
-        emit(AgentEvent::MessageEnd { message: Message::Assistant(error_asst.clone()) });
-        emit(AgentEvent::Error { message: err_msg.clone(), session_id: self.session_id.clone() });
+        emit(AgentEvent::MessageStart {
+            message: Message::Assistant(error_asst.clone()),
+        });
+        emit(AgentEvent::MessageEnd {
+            message: Message::Assistant(error_asst.clone()),
+        });
+        emit(AgentEvent::Error {
+            message: err_msg.clone(),
+            session_id: self.session_id.clone(),
+        });
 
         emit(AgentEvent::TurnEnd {
             turn_number,
@@ -385,7 +428,11 @@ impl AgentLoop {
         let mut pending_messages: Vec<Message> = self.drain_steering_queue();
 
         loop {
-            tracing::info!("[AGENT-LOOP] Top of loop, has_more_tool_calls={}, pending_messages={}", true, pending_messages.is_empty());
+            tracing::info!(
+                "[AGENT-LOOP] Top of loop, has_more_tool_calls={}, pending_messages={}",
+                true,
+                pending_messages.is_empty()
+            );
             let mut has_more_tool_calls = true;
 
             while has_more_tool_calls || !pending_messages.is_empty() {
@@ -402,27 +449,42 @@ impl AgentLoop {
 
                 if !pending_messages.is_empty() {
                     self.process_steering_messages(
-                        &mut pending_messages, &mut messages, &mut new_messages, &mut events, &emit,
+                        &mut pending_messages,
+                        &mut messages,
+                        &mut new_messages,
+                        &mut events,
+                        &emit,
                     );
                 }
 
-                self.maybe_compact(&mut messages, turn_number as usize, &emit).await;
+                self.maybe_compact(&mut messages, turn_number as usize, &emit)
+                    .await;
 
                 tracing::info!("[AGENT-LOOP] About to call stream_assistant_response");
-                let assistant_message = match stream_assistant_response(self, &mut messages, &emit).await {
-                    Ok(msg) => msg,
-                    Err(e) => {
-                        return Ok(self.handle_streaming_error(
-                            e, &mut messages, &mut new_messages, &mut events, &emit, turn_number,
-                        ).await);
-                    }
-                };
+                let assistant_message =
+                    match stream_assistant_response(self, &mut messages, &emit).await {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            return Ok(self
+                                .handle_streaming_error(
+                                    e,
+                                    &mut messages,
+                                    &mut new_messages,
+                                    &mut events,
+                                    &emit,
+                                    turn_number,
+                                )
+                                .await);
+                        }
+                    };
 
                 new_messages.push(Message::Assistant(assistant_message.clone()));
 
                 if matches!(assistant_message.stop_reason, StopReason::Error) {
                     if is_retryable_error(&assistant_message) {
-                        let did_retry = handle_retryable_error(self, &assistant_message, &mut messages, &emit).await;
+                        let did_retry =
+                            handle_retryable_error(self, &assistant_message, &mut messages, &emit)
+                                .await;
                         if did_retry {
                             emit(AgentEvent::TurnEnd {
                                 turn_number,
@@ -484,7 +546,11 @@ impl AgentLoop {
                 }
 
                 let tool_calls = helpers::extract_tool_calls(&assistant_message);
-                tracing::info!("[AGENT-LOOP] extract_tool_calls found {} calls, stop_reason={:?}", tool_calls.len(), assistant_message.stop_reason);
+                tracing::info!(
+                    "[AGENT-LOOP] extract_tool_calls found {} calls, stop_reason={:?}",
+                    tool_calls.len(),
+                    assistant_message.stop_reason
+                );
 
                 let mut tool_results: Vec<oxi_ai::ToolResultMessage> = Vec::new();
                 has_more_tool_calls = false;
@@ -499,7 +565,9 @@ impl AgentLoop {
                         tool_calls,
                         &emit,
                         &ctx,
-                    ).await {
+                    )
+                    .await
+                    {
                         Ok(batch) => batch,
                         Err(e) => {
                             // Tool execution failed — emit TurnEnd and return Ok.
@@ -543,13 +611,23 @@ impl AgentLoop {
                     tool_results: tool_results.clone(),
                 });
 
-                if should_stop_after_turn(&messages, &assistant_message, self.config.max_iterations, &self.external_stop, turn_number as usize) {
+                if should_stop_after_turn(
+                    &messages,
+                    &assistant_message,
+                    self.config.max_iterations,
+                    &self.external_stop,
+                    turn_number as usize,
+                ) {
                     tracing::info!("[AGENT-LOOP] should_stop_after_turn=true, ending loop");
                     return Ok((messages, events));
                 }
 
                 pending_messages = self.drain_steering_queue();
-                tracing::info!("[AGENT-LOOP] TurnEnd complete, pending_messages={}, has_more_tool_calls={}", !pending_messages.is_empty(), has_more_tool_calls);
+                tracing::info!(
+                    "[AGENT-LOOP] TurnEnd complete, pending_messages={}, has_more_tool_calls={}",
+                    !pending_messages.is_empty(),
+                    has_more_tool_calls
+                );
             }
 
             let follow_up_messages = self.drain_follow_up_queue();
@@ -564,16 +642,14 @@ impl AgentLoop {
         Ok((messages, events))
     }
 
-    async fn maybe_compact(
-        &self,
-        messages: &mut Vec<Message>,
-        iteration: usize,
-        emit: &EmitFn,
-    ) {
+    async fn maybe_compact(&self, messages: &mut Vec<Message>, iteration: usize, emit: &EmitFn) {
         let context_text = serde_json::to_string(&*messages).unwrap_or_default();
         let context_tokens = estimate_tokens(&context_text);
 
-        if !self.compaction_manager.should_compact(context_tokens, iteration) {
+        if !self
+            .compaction_manager
+            .should_compact(context_tokens, iteration)
+        {
             return;
         }
 
@@ -584,7 +660,7 @@ impl AgentLoop {
             },
         });
 
-        let messages_to_compact: Vec<Message> = messages.iter().cloned().collect();
+        let messages_to_compact: Vec<Message> = messages.to_vec();
         let instruction = self.config.compaction_instruction.as_deref();
 
         match self
@@ -635,7 +711,8 @@ impl AgentLoop {
     }
 
     fn resolve_model(&self) -> Result<oxi_ai::Model> {
-        self.resolver.resolve_model(&self.config.model_id)
+        self.resolver
+            .resolve_model(&self.config.model_id)
             .ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
     }
 }

@@ -34,14 +34,16 @@ impl AgentMetrics {
         self.successful_runs.fetch_add(1, Ordering::Relaxed);
         self.total_tokens.fetch_add(tokens, Ordering::Relaxed);
         self.tool_calls.fetch_add(tools, Ordering::Relaxed);
-        self.total_duration_ms.fetch_add(duration_ms, Ordering::Relaxed);
+        self.total_duration_ms
+            .fetch_add(duration_ms, Ordering::Relaxed);
     }
 
     /// Record a failed run.
     pub fn record_failure(&self, duration_ms: u64) {
         self.total_runs.fetch_add(1, Ordering::Relaxed);
         self.failed_runs.fetch_add(1, Ordering::Relaxed);
-        self.total_duration_ms.fetch_add(duration_ms, Ordering::Relaxed);
+        self.total_duration_ms
+            .fetch_add(duration_ms, Ordering::Relaxed);
     }
 
     /// Take a snapshot of all counters.
