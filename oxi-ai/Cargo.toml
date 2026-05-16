@@ -62,7 +62,7 @@ rsa = { version = "0.9", features = ["pem"] }
 tokio-test = "0.4"
 mockito = "1"
 tempfile = "3"
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 
 [[bench]]
 name = "token_estimation"
