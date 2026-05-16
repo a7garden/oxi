@@ -3,12 +3,17 @@
 use crate::types::{StopReason, ToolResult};
 use oxi_ai::{ContentBlock, Message, TextContent};
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Agent execution state
 ///
 /// Tracks the full lifecycle of an agent conversation including messages,
 /// token usage, tool results, and iteration progress.
-#[derive(Debug, Clone)]
+///
+/// Derives `Serialize`/`Deserialize` for session persistence and
+/// cross-process state transfer (e.g. oxios supervisor serialization).
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentState {
     /// Conversation message history (user, assistant, and tool-result messages).
     pub messages: Vec<Message>,
@@ -120,9 +125,9 @@ impl AgentState {
 }
 
 /// Thread-safe agent state wrapper.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SharedState {
-    state: RwLock<AgentState>,
+    state: Arc<RwLock<AgentState>>,
 }
 
 impl SharedState {

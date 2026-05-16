@@ -14,6 +14,7 @@ pub mod agent;
 pub mod agent_loop;
 /// Context compaction strategies and data types.
 pub mod compaction;
+pub mod structured_output;
 /// Agent configuration types.
 pub mod config;
 /// Error types for agent operations.
@@ -51,6 +52,7 @@ pub use recovery::{
 pub use state::{AgentState, SharedState};
 pub use compaction::{CompactedContext, CompactionEvent};
 pub use oxi_ai::{CompactionManager, CompactionStrategy};
+pub use structured_output::{StructuredOutput, OutputMode, StructuredOutputError};
 
 /// Built-in tool implementations and registry.
 pub use tools::{

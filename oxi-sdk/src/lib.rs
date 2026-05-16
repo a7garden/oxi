@@ -16,12 +16,20 @@ pub mod builder;
 pub mod agent_builder;
 pub mod closure_tool;
 pub mod tool_factory;
+pub mod kernel_bridge;
+pub mod agent_group;
+pub mod message_bus;
+pub mod metrics;
 pub mod prelude;
 
 // Re-export core SDK types
 pub use builder::{Oxi, OxiBuilder};
 pub use agent_builder::AgentBuilder;
 pub use closure_tool::ClosureTool;
+pub use kernel_bridge::{KernelToolProvider, KernelToolContext};
+pub use agent_group::{AgentGroup, GroupStrategy, GroupResult, AgentGroupOutput};
+pub use message_bus::{MessageBus, InterAgentMessage};
+pub use metrics::{AgentMetrics, MetricsSnapshot};
 
 // Re-export from oxi-ai
 pub use oxi_ai::{
@@ -29,6 +37,7 @@ pub use oxi_ai::{
     ProviderEvent, StreamOptions, CompactionStrategy,
     ProviderError, Api, Cost, InputModality,
 };
+pub use oxi_ai::provider_pool::{ProviderPool, RateLimitPolicy};
 
 // Re-export from oxi-agent  
 pub use oxi_agent::{
@@ -38,6 +47,7 @@ pub use oxi_agent::{
     ToolContext,
     AgentHooks, ToolExecutionMode, AgentError,
     ProviderResolver,
+    StructuredOutput, OutputMode, StructuredOutputError,
 };
 
 #[cfg(test)]

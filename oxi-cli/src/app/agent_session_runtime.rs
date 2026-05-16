@@ -276,6 +276,7 @@ pub fn create_agent_session_from_services(
             context_window: 128_000,
             api_key: None,
             workspace_dir: Some(services.cwd.clone()),
+            output_mode: None,
         };
         // Use anthropic as a placeholder provider so the session can be created
         let provider = oxi_ai::get_provider("anthropic")
@@ -318,6 +319,7 @@ pub fn create_agent_session_from_services(
         context_window: 128_000,
         api_key,
         workspace_dir: Some(services.cwd.clone()),
+        output_mode: None,
     };
 
     let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config, Arc::new(oxi_agent::ToolRegistry::new())));

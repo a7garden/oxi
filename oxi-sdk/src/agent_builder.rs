@@ -138,6 +138,22 @@ impl<'a> AgentBuilder<'a> {
         self
     }
 
+    /// Register kernel tools from a [`KernelToolProvider`].
+    ///
+    /// This is the bridge for oxios kernel tools (exec, memory, browser, etc.).
+    /// The kernel implements `KernelToolProvider` and registers its tools
+    /// into the agent's tool registry.
+    ///
+    /// [`KernelToolProvider`]: crate::KernelToolProvider
+    pub fn kernel_tools(
+        self,
+        provider: &dyn crate::KernelToolProvider,
+        context: &crate::KernelToolContext,
+    ) -> Self {
+        provider.register_tools(&self.tools, context);
+        self
+    }
+
     /// Build the agent.
     ///
     /// Uses the Oxi engine's `ProviderResolver` for isolated provider/model

@@ -348,6 +348,7 @@ impl App {
             context_window: 128_000,
             api_key,
             workspace_dir: Some(std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))),
+            output_mode: None,
         };
 
         let agent = Arc::new(Agent::new(Arc::from(provider), config, Arc::new(oxi_agent::ToolRegistry::new())));

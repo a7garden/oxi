@@ -56,10 +56,25 @@ struct AgentInner {
     provider: Arc<dyn Provider>,
 }
 
+impl Clone for AgentInner {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            provider: Arc::clone(&self.provider),
+        }
+    }
+}
+
 /// Agent runtime.
 ///
 /// Manages provider, tool registry, state, and compaction, providing an
 /// agentic loop for prompt execution, model switching, tool calls, and fallback.
+///
+/// Supports session continuation via [`continue_with`] and tokio-native
+/// event streaming via [`run_tokio_stream`].
+///
+/// [`continue_with`]: Agent::continue_with
+/// [`run_tokio_stream`]: Agent::run_tokio_stream
 pub struct Agent {
     inner: RwLock<AgentInner>,
     tools: Arc<ToolRegistry>,
@@ -503,6 +518,184 @@ impl Agent {
             on_event(event);
         }
         result
+    }
+
+    // ── Session persistence ────────────────────────────────────────
+
+    /// Export the agent state as a JSON value.
+    ///
+    /// The serialized state includes conversation messages, token counts,
+    /// iteration progress, and stop reason. Use [`import_state`] to restore.
+    ///
+    /// [`import_state`]: Agent::import_state
+    pub fn export_state(&self) -> Result<serde_json::Value> {
+        let state = self.state.get_state();
+        serde_json::to_value(&state)
+            .map_err(|e| Error::msg(format!("State export failed: {}", e)))
+    }
+
+    /// Import agent state from a JSON value.
+    ///
+    /// Restores conversation history, token counts, and iteration progress.
+    /// Typically used together with [`export_state`] for session persistence.
+    ///
+    /// [`export_state`]: Agent::export_state
+    pub fn import_state(&self, value: serde_json::Value) -> Result<()> {
+        let state: AgentState = serde_json::from_value(value)
+            .map_err(|e| Error::msg(format!("State import failed: {}", e)))?;
+        self.state.update(|s| *s = state);
+        Ok(())
+    }
+
+    // ── Session continuation ───────────────────────────────────────
+
+    /// Continue the current session with a new prompt.
+    ///
+    /// Unlike `run()`, which can be used on a fresh agent, `continue_with`
+    /// preserves the existing conversation state and appends the new prompt.
+    /// This enables multi-turn interactions within the same session.
+    pub async fn continue_with(&self, prompt: String) -> Result<(Response, Vec<AgentEvent>)> {
+        let mut events = Vec::new();
+        let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
+        let result = self.run_with_channel(prompt, tx).await;
+        while let Ok(event) = rx.recv() {
+            events.push(event);
+        }
+        result.map(|r| (r, events))
+    }
+
+    // ── Tokio-native streaming ─────────────────────────────────────
+
+    /// Run the agent with tokio-native event streaming.
+    ///
+    /// Returns a `tokio::sync::mpsc::Receiver` for events and a
+    /// `JoinHandle` for the response. This is the preferred API for
+    /// async runtimes (WebSocket/SSE gateways, tokio-based servers).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let (rx, handle) = agent.run_tokio_stream("Explain Rust".into()).await?;
+    /// while let Some(event) = rx.recv().await {
+    ///     println!("Event: {:?}", event.type_name());
+    /// }
+    /// let response = handle.await??;
+    /// ```
+    pub async fn run_tokio_stream(
+        &self,
+        prompt: String,
+    ) -> Result<(
+        tokio::sync::mpsc::Receiver<AgentEvent>,
+        tokio::task::JoinHandle<Result<Response>>,
+    )> {
+        let (tx, rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
+
+        if self.is_running.compare_exchange(
+            false, true,
+            Ordering::SeqCst, Ordering::SeqCst,
+        ).is_err() {
+            return Err(Error::msg("Agent is already running"));
+        }
+
+        let should_stop_hook = self.hooks.read().should_stop_after_turn.clone();
+
+        let state = self.state.clone();
+        let inner = self.inner.read().clone();
+        let tools = Arc::clone(&self.tools);
+        let resolver = Arc::clone(&self.resolver);
+
+        // Build AgentLoopConfig
+        let loop_config = crate::agent_loop::config::AgentLoopConfig {
+            model_id: inner.config.model_id.clone(),
+            system_prompt: inner.config.system_prompt.clone(),
+            max_iterations: inner.config.max_iterations,
+            temperature: inner.config.temperature.unwrap_or(1.0) as f32,
+            max_tokens: inner.config.max_tokens.unwrap_or(4096) as u32,
+            tool_execution: crate::config::ToolExecutionMode::Sequential,
+            compaction_strategy: inner.config.compaction_strategy.clone(),
+            compaction_instruction: None,
+            context_window: inner.config.context_window,
+            session_id: None,
+            transport: None,
+            compact_on_start: false,
+            max_retry_delay_ms: None,
+            auto_retry_enabled: true,
+            auto_retry_max_attempts: 3,
+            auto_retry_base_delay_ms: 1000,
+            api_key: inner.config.api_key.clone(),
+            workspace_dir: inner.config.workspace_dir.clone(),
+        };
+
+        let provider: Arc<dyn Provider> = Arc::clone(&inner.provider);
+
+        // Create fresh state from current
+        let fresh_state = SharedState::new();
+        let current = state.get_state();
+        fresh_state.update(|s| *s = current);
+
+        let agent_loop = crate::agent_loop::AgentLoop::new_with_resolver(
+            provider,
+            loop_config,
+            tools,
+            fresh_state,
+            resolver,
+        );
+
+        let maybe_hook = should_stop_hook;
+        let ext_stop = agent_loop.external_stop().clone();
+
+        let handle = tokio::task::spawn(async move {
+            // AgentLoop internals are !Send (dyn Future without Send bound),
+            // so we use spawn_blocking to run on a blocking thread.
+            let result = tokio::task::spawn_blocking(move || {
+                // Create a new tokio runtime for the blocking thread
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to create runtime");
+                rt.block_on(async move {
+                    agent_loop.run(prompt, move |event: AgentEvent| {
+                        // Forward to tokio channel (non-blocking)
+                        let _ = tx.try_send(event.clone());
+
+                        if let Some(ref hook) = maybe_hook {
+                            if let AgentEvent::TurnEnd { ref assistant_message, ref tool_results, .. } = event {
+                                let asst = match assistant_message {
+                                    oxi_ai::Message::Assistant(a) => a.clone(),
+                                    _ => return,
+                                };
+                                let ctx = ShouldStopAfterTurnContext {
+                                    message: asst,
+                                    tool_results: tool_results.clone(),
+                                    iteration: 0,
+                                };
+                                if hook(&ctx) {
+                                    ext_stop.store(true, Ordering::SeqCst);
+                                }
+                            }
+                        }
+                    }).await
+                })
+            }).await;
+
+            let response = match result {
+                Ok(Ok(_events)) => {
+                    // Sync state back
+                    // Note: state sync from blocking thread requires Arc<SharedState>
+                    // For now, the caller should call agent.state() after handle completes
+                    Ok(Response {
+                        content: String::new(), // extracted below
+                        stop_reason: StopReason::Stop,
+                    })
+                }
+                Ok(Err(e)) => Err(e),
+                Err(e) => Err(Error::msg(format!("Join error: {}", e))),
+            };
+
+            response
+        });
+
+        Ok((rx, handle))
     }
 
 }

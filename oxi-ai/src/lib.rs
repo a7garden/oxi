@@ -15,6 +15,7 @@ mod error;
 mod high_level;
 mod messages;
 pub mod oauth;
+pub mod provider_pool;
 pub mod provider_registry;
 mod providers;
 

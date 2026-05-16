@@ -3235,6 +3235,7 @@ dependencies = [
  "oxi-agent",
  "oxi-ai",
  "parking_lot",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

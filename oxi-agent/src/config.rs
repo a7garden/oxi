@@ -156,6 +156,14 @@ pub struct AgentConfig {
     /// Working directory for file tools. Defaults to current directory if None.
     #[serde(default)]
     pub workspace_dir: Option<std::path::PathBuf>,
+    /// Output mode for agent responses.
+    ///
+    /// When set, the agent extracts structured output from the final response.
+    /// See [`OutputMode`] for available modes.
+    ///
+    /// [`OutputMode`]: crate::structured_output::OutputMode
+    #[serde(default)]
+    pub output_mode: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -174,6 +182,7 @@ impl Default for AgentConfig {
             context_window: 128_000,
             api_key: None,
             workspace_dir: None,
+            output_mode: None,
         }
     }
 }
