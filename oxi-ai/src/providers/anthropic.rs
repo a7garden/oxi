@@ -314,20 +314,26 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
         // This ensures Done events carry the latest usage snapshot.
         // - Top-level `usage`: from `message_delta` events (output_tokens)
         // - Nested `message.usage`: from `message_start` events (input_tokens)
+        //
+        // Use max() to avoid overwriting values from earlier events with 0
+        // when a later event only includes a subset of fields.
         if let Some(usage) = &event.usage {
-            accumulated_usage.input = usage.input_tokens;
-            accumulated_usage.output = usage.output_tokens;
-            accumulated_usage.cache_read = usage.cache_read;
-            accumulated_usage.cache_write = usage.cache_creation;
-            accumulated_usage.total_tokens = usage.input_tokens + usage.output_tokens;
+            accumulated_usage.input = usage.input_tokens.max(accumulated_usage.input);
+            accumulated_usage.output = usage.output_tokens.max(accumulated_usage.output);
+            accumulated_usage.cache_read = usage.cache_read.max(accumulated_usage.cache_read);
+            accumulated_usage.cache_write = usage.cache_creation.max(accumulated_usage.cache_write);
+            accumulated_usage.total_tokens =
+                accumulated_usage.input + accumulated_usage.output;
         } else if let Some(msg) = &event.message {
             // `message_start` carries usage nested inside `message`
             if let Some(usage) = &msg.usage {
-                accumulated_usage.input = usage.input_tokens;
-                accumulated_usage.output = usage.output_tokens;
-                accumulated_usage.cache_read = usage.cache_read;
-                accumulated_usage.cache_write = usage.cache_creation;
-                accumulated_usage.total_tokens = usage.input_tokens + usage.output_tokens;
+                accumulated_usage.input = usage.input_tokens.max(accumulated_usage.input);
+                accumulated_usage.output = usage.output_tokens.max(accumulated_usage.output);
+                accumulated_usage.cache_read = usage.cache_read.max(accumulated_usage.cache_read);
+                accumulated_usage.cache_write =
+                    usage.cache_creation.max(accumulated_usage.cache_write);
+                accumulated_usage.total_tokens =
+                    accumulated_usage.input + accumulated_usage.output;
             }
         }
 
@@ -510,13 +516,13 @@ struct Delta {
 
 #[derive(Debug, Deserialize)]
 struct AnthropicUsage {
-    #[serde(rename = "input_tokens")]
+    #[serde(rename = "input_tokens", default)]
     input_tokens: usize,
-    #[serde(rename = "output_tokens")]
+    #[serde(rename = "output_tokens", default)]
     output_tokens: usize,
-    #[serde(rename = "cache_read")]
+    #[serde(rename = "cache_read", default)]
     cache_read: usize,
-    #[serde(rename = "cache_creation")]
+    #[serde(rename = "cache_creation", default)]
     cache_creation: usize,
 }
 

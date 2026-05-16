@@ -636,14 +636,16 @@ fn parse_sse_events(
         // Done event (triggered by finish_reason in an earlier chunk)
         // and any subsequent rendering sees the latest usage.
         if let Some(chunk_usage) = &chunk.usage {
-            accumulated_usage.input = chunk_usage.prompt_tokens;
-            accumulated_usage.output = chunk_usage.completion_tokens;
+            accumulated_usage.input = chunk_usage.prompt_tokens.max(accumulated_usage.input);
+            accumulated_usage.output = chunk_usage.completion_tokens.max(accumulated_usage.output);
             accumulated_usage.cache_read = chunk_usage
                 .prompt_tokens_details
                 .as_ref()
                 .map(|d| d.cached_tokens)
-                .unwrap_or(0);
-            accumulated_usage.total_tokens = chunk_usage.total_tokens;
+                .unwrap_or(0)
+                .max(accumulated_usage.cache_read);
+            accumulated_usage.total_tokens =
+                chunk_usage.total_tokens.max(accumulated_usage.total_tokens);
         }
 
         for choice in &chunk.choices {

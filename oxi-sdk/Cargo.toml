@@ -12,7 +12,7 @@ categories = ["api-bindings", "development-tools"]
 exclude = ["target/"]
 
 [dependencies]
-oxi-ai = { version = "0.16.0", path = "../oxi-ai" }
+oxi-ai = { version = "0.16.1", path = "../oxi-ai" }
 oxi-agent = { version = "0.16.0", path = "../oxi-agent" }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }

@@ -567,8 +567,16 @@ impl AppState {
         if let oxi_ai::Message::Assistant(assistant) = msg {
             // Update token usage from the completed message
             let usage = &assistant.usage;
+            tracing::info!(
+                "[TOKENS] input={} output={} cache_read={} cache_write={} total={}",
+                usage.input, usage.output, usage.cache_read, usage.cache_write, usage.total_tokens
+            );
             let context_window_pct = if usage.total_tokens > 0 {
                 (usage.total_tokens as f32 / 200_000.0) * 100.0
+            } else if usage.input > 0 || usage.output > 0 {
+                ((usage.input + usage.output + usage.cache_read + usage.cache_write) as f32
+                    / 200_000.0)
+                    * 100.0
             } else {
                 0.0
             };
