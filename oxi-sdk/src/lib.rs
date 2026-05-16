@@ -22,6 +22,8 @@ pub use oxi_ai::{
     Provider, Model, Context, Message, ContentBlock,
     ProviderEvent, StreamOptions, CompactionStrategy,
     ProviderError, Api, Cost, InputModality,
+    model_registry::{lookup_model, get_models, get_providers},
+    providers::get_provider,
 };
 
 // Re-export from oxi-agent  
@@ -29,6 +31,5 @@ pub use oxi_agent::{
     Agent, AgentLoop, AgentLoopConfig, AgentConfig,
     AgentEvent, AgentState, SharedState,
     ToolRegistry, AgentTool, AgentToolResult, ToolError,
-    AgentHooks, BeforeToolCallHook, AfterToolCallHook,
-    ToolExecutionMode, AgentError,
+    AgentHooks, ToolExecutionMode, AgentError,
 };

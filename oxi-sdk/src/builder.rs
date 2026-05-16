@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use oxi_ai::{Provider, Model};
-use oxi_agent::{Agent, AgentLoop, AgentLoopConfig, ToolRegistry};
+use oxi_agent::{Agent, AgentLoop, AgentLoopConfig, ToolRegistry, get_provider as agent_get_provider};
 
 use crate::agent_builder::AgentBuilder;
 
@@ -13,8 +13,7 @@ use crate::agent_builder::AgentBuilder;
 /// Created via [`OxiBuilder`]. Provides access to providers, models,
 /// and agent creation.
 pub struct Oxi {
-    providers: Arc<oxi_ai::providers::ProviderRegistry>,
-    models: Arc<oxi_ai::model_registry::ModelRegistry>,
+    tools: Arc<ToolRegistry>,
 }
 
 impl Oxi {
@@ -23,14 +22,9 @@ impl Oxi {
         AgentBuilder::new(self, config)
     }
 
-    /// Get the provider registry.
-    pub fn providers(&self) -> &oxi_ai::providers::ProviderRegistry {
-        &self.providers
-    }
-    
-    /// Get the model registry.
-    pub fn models(&self) -> &oxi_ai::model_registry::ModelRegistry {
-        &self.models
+    /// Get the shared tool registry.
+    pub fn tools(&self) -> Arc<ToolRegistry> {
+        Arc::clone(&self.tools)
     }
     
     /// Resolve a model ID to a Model.
@@ -45,59 +39,43 @@ impl Oxi {
             .ok_or_else(|| anyhow::anyhow!("Model '{}' not found", model_id))
     }
     
-    /// Create a provider instance.
+    /// Create a provider instance for a given provider name.
     pub fn create_provider(&self, name: &str) -> Result<Arc<dyn Provider>> {
-        self.providers
-            .get(name)
+        oxi_ai::providers::get_provider(name)
             .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", name))
     }
 }
 
 /// Builder for creating an Oxi instance.
 pub struct OxiBuilder {
-    providers: oxi_ai::providers::ProviderRegistry,
-    models: oxi_ai::model_registry::ModelRegistry,
+    tools: ToolRegistry,
 }
 
 impl OxiBuilder {
     /// Create a new empty builder.
     pub fn new() -> Self {
         Self {
-            providers: oxi_ai::providers::ProviderRegistry::new(),
-            models: oxi_ai::model_registry::ModelRegistry::new(),
+            tools: ToolRegistry::new(),
         }
     }
     
-    /// Register all built-in providers and models.
+    /// Register all built-in providers and models (populated by model_registry globals).
     pub fn with_builtins(mut self) -> Self {
-        // Register all built-in models from model_registry
-        for model in oxi_ai::model_registry::get_models("") {
-            let model = model.clone();
-            self.models.register(model);
-        }
-        
-        // Note: providers are created on-demand via create_provider()
-        // by looking up the model's API type
+        // Models are already globally registered in oxi-ai
+        // This method exists for API completeness
         self
     }
     
-    /// Register a custom provider.
-    pub fn provider(mut self, name: &str, provider: impl Provider + 'static) -> Self {
-        self.providers.register(name, provider);
-        self
-    }
-    
-    /// Register a custom model.
-    pub fn model(mut self, model: Model) -> Self {
-        self.models.register(model);
+    /// Register a tool.
+    pub fn tool(mut self, tool: impl oxi_agent::AgentTool + 'static) -> Self {
+        self.tools.register(tool);
         self
     }
     
     /// Build the Oxi instance.
     pub fn build(self) -> Oxi {
         Oxi {
-            providers: Arc::new(self.providers),
-            models: Arc::new(self.models),
+            tools: Arc::new(self.tools),
         }
     }
 }

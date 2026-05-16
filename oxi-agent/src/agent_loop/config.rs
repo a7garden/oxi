@@ -40,6 +40,8 @@ pub struct AgentLoopConfig {
     /// When set, this is injected into [`oxi_ai::StreamOptions`] so the
     /// provider uses it instead of an environment variable.
     pub api_key: Option<String>,
+    /// Working directory for file tools. Defaults to current directory if None.
+    pub workspace_dir: Option<std::path::PathBuf>,
 }
 
 // Re-export ToolExecutionMode from crate::config to avoid duplicate definitions.

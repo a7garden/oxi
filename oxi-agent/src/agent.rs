@@ -277,6 +277,7 @@ impl Agent {
             auto_retry_max_attempts: 3,
             auto_retry_base_delay_ms: 1000,
             api_key,
+            workspace_dir: None,
         };
 
         // Create AgentLoop. We give it a NEW SharedState and sync back after.

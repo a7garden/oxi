@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use oxi_ai::{Api, Model, Provider};
+use oxi_ai::{Model, Provider};
 use oxi_agent::{
     Agent, AgentLoop, AgentLoopConfig, AgentConfig,
-    ToolRegistry, AgentTool, BeforeToolCallHook, AfterToolCallHook,
+    ToolRegistry, AgentTool,
 };
 
 use crate::builder::Oxi;
@@ -63,7 +63,7 @@ impl<'a> AgentBuilder<'a> {
     pub fn build(self) -> anyhow::Result<Agent> {
         // Resolve model
         let model = self.oxi.resolve_model(&self.config.model_id)?;
-        let provider = self.oxi.create_provider(&model.provider)?.clone();
+        let provider = self.oxi.create_provider(&model.provider)?;
         
         // Build AgentLoopConfig
         let loop_config = AgentLoopConfig {
@@ -84,15 +84,14 @@ impl<'a> AgentBuilder<'a> {
             auto_retry_max_attempts: 3,
             auto_retry_base_delay_ms: 2000,
             api_key: self.config.api_key.clone(),
-            workspace_dir: self.workspace_dir,
         };
         
-        // Create AgentLoop
+        // Create AgentLoop with the provider
         let state = oxi_agent::SharedState::new();
         let tools = Arc::new(self.tools);
-        let agent_loop = AgentLoop::new(Arc::new(provider), loop_config, tools, state);
+        let _agent_loop = AgentLoop::new(provider, loop_config, tools, state);
         
-        // Wrap in Agent (higher-level API)
-        Ok(Agent::from_agent_loop(agent_loop, self.config.clone()))
+        // Create Agent directly with the provider
+        Ok(Agent::new(provider, self.config.clone()))
     }
 }

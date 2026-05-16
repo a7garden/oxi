@@ -1,8 +1,5 @@
 //! Tool factories for common tool sets
 
-// This will use the pattern from pi's createCodingTools({cwd})
-// but adapted for Rust's ownership model.
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,19 +9,21 @@ use oxi_agent::{
 };
 
 /// Create the standard coding tools: read, write, edit, ls
-pub fn coding_tools(cwd: &Path) -> Arc<ToolRegistry> {
+/// Note: These tools use the current working directory
+pub fn coding_tools() -> Arc<ToolRegistry> {
     let registry = ToolRegistry::new();
-    registry.register(ReadTool::new(cwd.to_path_buf()));
-    registry.register(WriteTool::new(cwd.to_path_buf()));
-    registry.register(EditTool::new(cwd.to_path_buf()));
-    registry.register(LsTool::new(cwd.to_path_buf()));
+    registry.register(ReadTool::new());
+    registry.register(WriteTool::new());
+    registry.register(EditTool::new());
+    registry.register(LsTool::new());
     Arc::new(registry)
 }
 
 /// Create read-only tools: read, ls
-pub fn readonly_tools(cwd: &Path) -> Arc<ToolRegistry> {
+/// Note: These tools use the current working directory
+pub fn readonly_tools() -> Arc<ToolRegistry> {
     let registry = ToolRegistry::new();
-    registry.register(ReadTool::new(cwd.to_path_buf()));
-    registry.register(LsTool::new(cwd.to_path_buf()));
+    registry.register(ReadTool::new());
+    registry.register(LsTool::new());
     Arc::new(registry)
 }

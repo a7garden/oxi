@@ -248,7 +248,7 @@ impl ReadTool {
 
 impl Default for ReadTool {
     fn default() -> Self {
-        Self::new_with_cwd()
+        Self::new()
     }
 }
 
@@ -311,7 +311,7 @@ impl AgentTool for ReadTool {
             .map(|n| n as usize);
 
         // Security: validate path with PathGuard
-        let guard = PathGuard::new(&self.root_dir);
+        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
         let validated = guard.validate_traversal(Path::new(path_str))
             .map_err(|e| e.to_string())?;
         let path = validated.as_path();
