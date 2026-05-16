@@ -9,7 +9,8 @@ use std::sync::LazyLock;
 
 /// Cached regex for parsing version headers in changelog
 static VERSION_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"##\s+\[?(\d+)\.(\d+)\.(\d+)\]?").expect("static regex verified at compile time by tests")
+    Regex::new(r"##\s+\[?(\d+)\.(\d+)\.(\d+)\]?")
+        .expect("static regex verified at compile time by tests")
 });
 
 /// A parsed changelog entry

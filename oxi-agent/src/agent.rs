@@ -343,7 +343,17 @@ impl Agent {
     ) -> Result<Response> {
         use crate::agent_loop::AgentLoop;
 
-        let (provider, max_iterations, system_prompt, temperature, max_tokens, compaction_strategy, context_window, api_key, workspace_dir) = {
+        let (
+            provider,
+            max_iterations,
+            system_prompt,
+            temperature,
+            max_tokens,
+            compaction_strategy,
+            context_window,
+            api_key,
+            workspace_dir,
+        ) = {
             let inner = self.inner.read();
             (
                 Arc::clone(&inner.provider) as Arc<dyn Provider>,
