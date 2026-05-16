@@ -1,14 +1,13 @@
 //! ChatView widget — scrollable message list with streaming support.
 //!
-//! Uses `tui-scrollview` for scrolling. This lets us render each content
-//! block as a proper ratatui widget (Block::bordered, Paragraph::wrap, etc.)
-//! into a virtual buffer, and the ScrollView handles scrolling/clipping.
+//! Renders layout entries directly into the frame buffer. Only visible
+//! entries (those within the scroll viewport) are rendered, avoiding the
+//! overhead of a virtual buffer. Scroll offset is managed directly.
 //!
-//! Benefits over manual approaches:
+//! Benefits:
 //! - Tool/error boxes use Block::bordered() — real ratatui borders
 //! - Text uses Paragraph::wrap(Wrap) — proper word-wrapping
-//! - No measurement/render mismatch — we render once, ScrollView clips
-//! - pending_images works — images are tracked in stream methods
+//! - No virtual buffer — direct rendering, no double-write
 //! - Layout caching — only recomputes when state actually changes
 //! - Truncation at ingest — no height inflation from monster inputs
 
@@ -23,7 +22,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
 use tui_markdown;
-use tui_scrollview::{ScrollView, ScrollViewState, ScrollbarVisibility};
 
 use crate::table_renderer::render_markdown_table;
 use crate::text::truncate_to_width as truncate_str;
@@ -196,8 +194,10 @@ pub struct ChatViewState {
     pub last_code_block: Option<String>,
     pub pending_images: Vec<(String, String)>,
     tool_tracker: ToolCallTracker,
-    /// ScrollView state — manages scroll position
-    pub scroll_state: ScrollViewState,
+    /// Vertical scroll offset (0 = top)
+    pub scroll_offset: u16,
+    /// When true, auto-scroll to bottom on each render (streaming)
+    pub auto_scroll: bool,
     /// Layout cache — guarded by RwLock
     layout_cache: RwLock<LayoutCache>,
 }
@@ -207,21 +207,38 @@ impl ChatViewState {
         Self::default()
     }
 
-    pub fn scroll_to_bottom(&mut self, _visible: u16) {
-        self.scroll_state.scroll_to_bottom();
+    /// Scroll to bottom of content. `visible_height` is the viewport height.
+    pub fn scroll_to_bottom(&mut self, visible_height: u16) {
+        self.auto_scroll = true;
+        if self.content_height > visible_height {
+            self.scroll_offset = self.content_height - visible_height;
+        } else {
+            self.scroll_offset = 0;
+        }
     }
     pub fn scroll_up(&mut self, n: u16) {
-        for _ in 0..n {
-            self.scroll_state.scroll_up();
-        }
+        self.auto_scroll = false;
+        self.scroll_offset = self.scroll_offset.saturating_sub(n);
     }
     pub fn scroll_down(&mut self, n: u16) {
-        for _ in 0..n {
-            self.scroll_state.scroll_down();
-        }
+        let max = self.max_scroll_offset();
+        self.scroll_offset = (self.scroll_offset + n).min(max);
     }
     pub fn scroll_to_top(&mut self) {
-        self.scroll_state.scroll_to_top();
+        self.auto_scroll = false;
+        self.scroll_offset = 0;
+    }
+    /// Maximum scroll offset (content_height - 1 visible line, so
+    /// at least one line is always visible).
+    fn max_scroll_offset(&self) -> u16 {
+        // We don't know visible_height here, so return content_height.
+        // The caller clamps via visible_height.
+        self.content_height
+    }
+    /// Clamp scroll_offset to [0, content_height - visible_height].
+    fn clamp_scroll(&mut self, visible_height: u16) {
+        let max_off = self.content_height.saturating_sub(visible_height);
+        self.scroll_offset = self.scroll_offset.min(max_off);
     }
 
     pub fn start_streaming(&mut self) {
@@ -491,7 +508,8 @@ impl ChatViewState {
     pub fn clear(&mut self) {
         self.messages.clear();
         self.streaming = None;
-        self.scroll_state = ScrollViewState::default();
+        self.scroll_offset = 0;
+        self.auto_scroll = false;
         self.last_code_block = None;
         self.pending_images.clear();
         self.tool_tracker.clear();
@@ -1307,26 +1325,34 @@ impl StatefulWidget for ChatView<'_> {
             .unwrap_or(0);
         state.content_height = total_height;
 
-        // Create ScrollView with virtual buffer sized to full width so
-        // entries positioned at x=pad get equal left/right padding.
-        let size = ratatui::layout::Size::new(width, total_height.max(area.height));
-        let mut scroll_view = ScrollView::new(size)
-            .vertical_scrollbar_visibility(ScrollbarVisibility::Never)
-            .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
+        // Auto-scroll: update scroll_offset to show bottom of content
+        if state.auto_scroll {
+            state.scroll_to_bottom(area.height);
+        } else {
+            // Clamp scroll offset to valid range (in case content shrank)
+            state.clamp_scroll(area.height);
+        }
 
-        // Render each layout entry into the virtual buffer.
-        // Position at x=pad for symmetric left/right margins.
+        // Render only visible entries directly into the buffer.
+        // Skip entries fully above the viewport.
+        let scroll_offset = state.scroll_offset;
         for entry in &layout {
+            // Entry ends before the visible area starts
+            if entry.y + entry.height <= scroll_offset {
+                continue;
+            }
+            // Entry starts after the visible area ends
+            if entry.y >= scroll_offset + area.height {
+                break;
+            }
             if entry.height == 0 {
                 continue;
             }
-            let rect = Rect::new(pad, entry.y, inner_width, entry.height);
-            let widget = EntryWidget::new(&entry.kind, &styles);
-            scroll_view.render_widget(widget, rect);
+            // Compute relative y within the viewport
+            let rel_y = entry.y.saturating_sub(scroll_offset);
+            let rect = Rect::new(area.x + pad, area.y + rel_y, inner_width, entry.height);
+            EntryWidget::new(&entry.kind, &styles).render(rect, buf);
         }
-
-        // Render the scroll view — handles clipping and scrolling
-        scroll_view.render(area, buf, &mut state.scroll_state);
     }
 }
 
@@ -1340,8 +1366,28 @@ mod tests {
     fn scroll_bounds() {
         let mut s = ChatViewState::new();
         s.content_height = 100;
+        // scroll_to_bottom with auto_scroll = true
         s.scroll_to_bottom(20);
-        assert!(s.scroll_state.offset().y > 80 || s.scroll_state.offset().y == u16::MAX);
+        assert_eq!(s.scroll_offset, 80);
+        assert!(s.auto_scroll);
+
+        // Manual scroll overrides auto_scroll
+        s.scroll_up(50);
+        assert_eq!(s.scroll_offset, 30);
+        assert!(!s.auto_scroll);
+
+        s.scroll_down(10);
+        assert_eq!(s.scroll_offset, 40);
+
+        // Clamp at top
+        s.scroll_up(100);
+        assert_eq!(s.scroll_offset, 0);
+
+        // clamp_scroll when content shrinks
+        s.scroll_offset = 90;
+        s.content_height = 30;
+        s.clamp_scroll(20);
+        assert_eq!(s.scroll_offset, 10);
     }
 
     #[test]
