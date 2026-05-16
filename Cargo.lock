@@ -3292,7 +3292,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-sdk"
-version = "0.15.2"
+version = "0.15.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3369,7 +3369,6 @@ dependencies = [
  "toml 0.8.23",
  "tracing",
  "tui-markdown",
- "tui-scrollview",
  "unicode-width",
 ]
 

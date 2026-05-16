@@ -39,6 +39,13 @@ pub use oxi_ai::{
     UserMessage,
 };
 
+// Credential management (oauth + env key resolution)
+pub use oxi_ai::env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_key, has_env_key};
+pub use oxi_ai::oauth::{
+    default_auth_path, load_auth_store, load_token, remove_token, save_auth_store, save_token,
+    AuthStore, OAuthError, TokenBundle,
+};
+
 // Re-export from oxi-agent
 pub use oxi_agent::{
     Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
