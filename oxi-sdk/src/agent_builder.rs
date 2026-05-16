@@ -42,12 +42,14 @@ impl<'a> AgentBuilder<'a> {
     }
     
     /// Register a tool.
+    #[allow(unused_mut)]
     pub fn tool(mut self, tool: impl AgentTool + 'static) -> Self {
         self.tools.register(tool);
         self
     }
     
     /// Register multiple tools.
+    #[allow(unused_mut)]
     pub fn tools(mut self, tools: impl IntoIterator<Item = impl AgentTool + 'static>) -> Self {
         for tool in tools {
             self.tools.register(tool);

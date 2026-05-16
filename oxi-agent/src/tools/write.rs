@@ -13,7 +13,7 @@ use super::truncate::{self, TruncationOptions};
 use super::{AgentTool, AgentToolResult, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
 
@@ -24,12 +24,21 @@ const PREVIEW_TAIL_LINES: usize = 5;
 const PREVIEW_THRESHOLD_LINES: usize = 20;
 
 /// WriteTool.
-pub struct WriteTool;
+pub struct WriteTool {
+    root_dir: PathBuf,
+}
 
 impl WriteTool {
-/// TODO.
+/// Create with current directory as root.
     pub fn new() -> Self {
-        Self
+        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Create with a specific working directory.
+    pub fn with_cwd(cwd: PathBuf) -> Self {
+        Self {
+            root_dir: cwd,
+        }
     }
 
     /// Build a human-readable preview of the content that was written.
@@ -60,9 +69,9 @@ impl WriteTool {
     }
 
     /// Core write implementation — runs inside the mutation queue lock.
-    async fn write_file_impl(path: &str, content: &str, append: bool) -> Result<String, ToolError> {
+    async fn write_file_impl(root_dir: &Path, path: &str, content: &str, append: bool) -> Result<String, ToolError> {
         // Security: validate path with PathGuard
-        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let guard = PathGuard::new(root_dir);
         let file_path = guard.validate_traversal(Path::new(path))
             .map_err(|e| e.to_string())?;
 
@@ -214,7 +223,7 @@ impl AgentTool for WriteTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        match Self::write_file_impl(path, content, append).await {
+        match Self::write_file_impl(&self.root_dir, path, content, append).await {
             Ok(msg) => Ok(AgentToolResult::success(msg)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }

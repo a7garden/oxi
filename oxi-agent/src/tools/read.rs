@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use oxi_ai::{ContentBlock, ImageContent, TextContent};
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::fs;
 use tokio::io::AsyncReadExt;
@@ -30,13 +30,20 @@ const IMAGE_EXTENSIONS: &[(&str, &str)] = &[
 
 /// ReadTool.
 pub struct ReadTool {
+    root_dir: PathBuf,
     progress_callback: Arc<Mutex<Option<ProgressCallback>>>,
 }
 
 impl ReadTool {
-/// TODO.
+/// Create with current directory as root.
     pub fn new() -> Self {
+        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Create with a specific working directory.
+    pub fn with_cwd(cwd: PathBuf) -> Self {
         Self {
+            root_dir: cwd,
             progress_callback: Arc::new(Mutex::new(None)),
         }
     }
@@ -311,7 +318,7 @@ impl AgentTool for ReadTool {
             .map(|n| n as usize);
 
         // Security: validate path with PathGuard
-        let guard = PathGuard::new(&std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        let guard = PathGuard::new(&self.root_dir);
         let validated = guard.validate_traversal(Path::new(path_str))
             .map_err(|e| e.to_string())?;
         let path = validated.as_path();
