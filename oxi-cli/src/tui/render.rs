@@ -274,21 +274,9 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
         top_row,
     );
 
-    // Always render the real input widget — typing is never blocked.
-    // When busy, show a placeholder hint about the message queue.
-    if state.is_agent_busy {
-        let placeholder = if state.pending_steering > 0 {
-            Some(format!(
-                "{} queued — type next message",
-                state.pending_steering
-            ))
-        } else {
-            Some("type next message to queue".to_string())
-        };
-        state.input.set_placeholder(placeholder);
-    } else {
-        state.input.set_placeholder(None);
-    }
+    // Never show placeholder during agent work — input is always functional.
+    // The placeholder was confusing users into thinking input was blocked.
+    state.input.set_placeholder(None);
     f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
 }
 
