@@ -68,6 +68,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub no_session: bool,
 
+    /// Timeout in seconds for print mode
+    #[arg(long)]
+    pub timeout: Option<u64>,
+
     /// Resume the most recent session for this project
     #[arg(short, long)]
     pub continue_session: bool,

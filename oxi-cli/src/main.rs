@@ -104,6 +104,7 @@ async fn main() -> Result<()> {
             mode,
             initial_message: if prompt.is_empty() { None } else { Some(prompt) },
             messages: vec![],
+            no_stdin: args.print,
         };
         let exit_code = oxi::print_mode::run_print_mode(&app, options).await?;
         std::process::exit(exit_code);

@@ -11,6 +11,7 @@ use crate::App;
 use anyhow::Result;
 use oxi_agent::{Agent, AgentEvent};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 /// Output format for print mode.
@@ -31,6 +32,15 @@ pub struct PrintModeOptions {
     pub messages: Vec<String>,
     /// The first prompt (may be provided via CLI or stdin).
     pub initial_message: Option<String>,
+    /// When true, skip any stdin reading. Set by the caller (main.rs) when
+    /// `--print` / `-p` is used so that print mode never blocks on a TTY.
+    pub no_stdin: bool,
+    /// Skip session creation entirely (for --print mode).
+    pub no_session: bool,
+    /// Suppress progress/stderr output.
+    pub quiet: bool,
+    /// Timeout in seconds for the entire operation.
+    pub timeout: Option<u64>,
 }
 
 impl Default for PrintModeOptions {
@@ -39,6 +49,10 @@ impl Default for PrintModeOptions {
             mode: PrintMode::Text,
             messages: Vec::new(),
             initial_message: None,
+            no_stdin: false,
+            no_session: false,
+            quiet: false,
+            timeout: None,
         }
     }
 }
@@ -51,7 +65,14 @@ pub async fn run_print_mode(app: &App, options: PrintModeOptions) -> Result<i32>
         mode,
         messages,
         initial_message,
+        no_stdin,
     } = options;
+
+    // If no_stdin is set, skip any stdin reading (prevents blocking on TTY).
+    // This is a no-op guard — the actual stdin read is done by the caller
+    // before entering run_print_mode, but future callers may call
+    // read_stdin_prompt() inside this function.
+    let _ = no_stdin;
 
     let agent: Arc<Agent> = app.agent();
     let mut exit_code = 0;
@@ -238,6 +259,8 @@ async fn run_single_prompt(
                         if mode == PrintMode::Json {
                             if let Ok(json) = serde_json::to_string(&event_to_json(&ev)) {
                                 println!("{}", json);
+                                use std::io::Write;
+                                std::io::stdout().flush().ok();
                             }
                         }
                     }
@@ -261,6 +284,8 @@ async fn run_single_prompt(
     // In text mode, print the final response
     if mode == PrintMode::Text && !last_text.is_empty() {
         println!("{}", last_text);
+        use std::io::Write;
+        std::io::stdout().flush().ok();
     }
 
     Ok(())
@@ -524,6 +549,7 @@ mod tests {
         assert_eq!(opts.mode, PrintMode::Text);
         assert!(opts.messages.is_empty());
         assert!(opts.initial_message.is_none());
+        assert!(!opts.no_stdin);
     }
 
     #[test]

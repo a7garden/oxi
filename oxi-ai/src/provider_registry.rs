@@ -362,12 +362,13 @@ impl ProviderAuthRegistry {
 
     /// Get API key for a provider using the resolution chain
     ///
-    /// Priority (all file-based, no environment variables):
+    /// Priority:
     /// 1. Runtime override (--api-key)
     /// 2. Stored credential (auth.json)
     /// 3. OAuth token
     /// 4. Ambient credentials (AWS IAM, Google ADC via SDK/filesystem)
-    /// 5. Fallback resolver (custom provider config)
+    /// 5. Fallback resolver (custom provider config from models.json)
+    /// 6. Environment variable (last resort for CI/CD)
     pub fn get_api_key(&self, provider: &str) -> Option<String> {
         // 1. Runtime override takes highest priority
         {
@@ -388,11 +389,14 @@ impl ProviderAuthRegistry {
         {
             let resolver = self.fallback_resolver.read();
             if let Some(ref fallback) = *resolver {
-                return fallback(provider);
+                if let Some(key) = fallback(provider) {
+                    return Some(key);
+                }
             }
         }
 
-        None
+        // 4. Environment variable (last resort)
+        env_api_keys::get_env_api_key(provider)
     }
 
     /// Check if any auth is configured for a provider
@@ -498,6 +502,15 @@ impl ProviderAuthRegistry {
                     label: None,
                 };
             }
+        }
+
+        // Check environment variables
+        if env_api_keys::has_env_key(provider) {
+            return AuthStatus {
+                configured: false, // Env vars don't count as "configured"
+                source: AuthSource::Environment,
+                label: None,
+            };
         }
 
         AuthStatus {
