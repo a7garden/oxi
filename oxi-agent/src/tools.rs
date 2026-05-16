@@ -315,13 +315,13 @@ impl ToolRegistry {
 
         // Register all builtin tools — essential ones ignore disabled list
         let mut all_tools: Vec<Box<dyn AgentTool>> = vec![
-            Box::new(ReadTool::new()),
-            Box::new(WriteTool::new()),
-            Box::new(EditTool::new()),
-            Box::new(BashTool::new()),
-            Box::new(GrepTool::new()),
-            Box::new(FindTool::new()),
-            Box::new(LsTool::new()),
+            Box::new(ReadTool::with_cwd(cwd.clone())),
+            Box::new(WriteTool::with_cwd(cwd.clone())),
+            Box::new(EditTool::with_cwd(cwd.clone())),
+            Box::new(BashTool::with_cwd(cwd.clone())),
+            Box::new(GrepTool::with_cwd(cwd.clone())),
+            Box::new(FindTool::with_cwd(cwd.clone())),
+            Box::new(LsTool::with_cwd(cwd.clone())),
             Box::new(web_search::WebSearchTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
             Box::new(search_cache::GetSearchResultsTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
             Box::new(github::GitHubTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),

@@ -22,6 +22,17 @@ In Progress
   - [x] Updated oxi-sdk/src/lib.rs — added ModelRegistry re-export
   - [x] cargo check --workspace — 0 errors, 0 warnings
 
+- [x] Fix 2+3: File tools store and use cwd, coding_tools() accepts cwd
+  - [x] Updated ReadTool, WriteTool, EditTool, LsTool, GrepTool, FindTool, BashTool — added root_dir: PathBuf field, with_cwd() constructor
+  - [x] All PathGuard::new() calls use self.root_dir instead of std::env::current_dir()
+  - [x] BashTool validates cwd within root_dir workspace, defaults to root_dir when no cwd param
+  - [x] Updated ToolRegistry::with_builtins_cwd() to pass cwd.clone() to all tool constructors
+  - [x] Updated tool_factory.rs: coding_tools(&Path) and readonly_tools(&Path) accept cwd
+  - [x] Updated oxi-sdk/src/lib.rs: removed global function re-exports (lookup_model, get_models, get_providers, get_provider)
+  - [x] Updated test calls to pass root_dir parameter where needed
+  - [x] cargo check --workspace --lib — 0 errors, 0 warnings
+  - [x] cargo test --workspace --lib — 1309 tests, 0 failures
+
 ## Files Changed
 - oxi-sdk/src/builder.rs — Oxi now holds Arc<ModelRegistry> instead of just tools; OxiBuilder.with_builtins() loads from static
 - oxi-sdk/src/agent_builder.rs — build() uses instance model registry, proper tool registration

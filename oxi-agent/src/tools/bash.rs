@@ -160,13 +160,20 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// BashTool.
 pub struct BashTool {
+    root_dir: PathBuf,
     progress_callback: Arc<std::sync::Mutex<Option<ProgressCallback>>>,
 }
 
 impl BashTool {
-/// TODO.
+/// Create with current directory as root.
     pub fn new() -> Self {
+        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    }
+
+    /// Create with a specific working directory.
+    pub fn with_cwd(cwd: PathBuf) -> Self {
         Self {
+            root_dir: cwd,
             progress_callback: Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -336,6 +343,7 @@ impl BashTool {
 
     /// Execute a command using tokio::process::Command with full feature support.
     async fn run_command(
+        root_dir: &Path,
         command: &str,
         cwd: Option<&str>,
         env: Option<&serde_json::Map<String, Value>>,
@@ -353,12 +361,10 @@ impl BashTool {
         // Resolve working directory
         let work_dir = match cwd {
             Some(dir) if !dir.is_empty() => {
-                // No workspace constraint enforced at this level (workspace is None)
-                // The caller can wrap with workspace validation if needed
-                let validated = validate_cwd(dir, None)?;
+                let validated = validate_cwd(dir, Some(root_dir))?;
                 Some(validated.to_string_lossy().to_string())
             }
-            _ => None,
+            _ => Some(root_dir.to_string_lossy().to_string()),
         };
 
         // Build the command
@@ -531,7 +537,7 @@ impl AgentTool for BashTool {
 
         let progress_cb = self.progress_callback.lock().expect("progress callback lock poisoned").clone();
 
-        Self::run_command(command, cwd, env, timeout, &progress_cb, signal).await
+        Self::run_command(&self.root_dir, command, cwd, env, timeout, &progress_cb, signal).await
     }
 
     fn on_progress(&self, callback: ProgressCallback) {
@@ -647,7 +653,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_working_directory() {
-        let tool = BashTool::new();
+        let tool = BashTool::with_cwd(PathBuf::from("/tmp"));
         let result = tool
             .execute("test-8", make_params_with_cwd("pwd", "/tmp"), None)
             .await

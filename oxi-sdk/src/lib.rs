@@ -23,8 +23,6 @@ pub use oxi_ai::{
     ProviderEvent, StreamOptions, CompactionStrategy,
     ProviderError, Api, Cost, InputModality,
     ModelRegistry,
-    lookup_model as oxi_lookup_model, get_models, get_providers,
-    get_provider,
 };
 
 // Re-export from oxi-agent  
