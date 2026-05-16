@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
 use super::{ProviderEvent, ProviderError};
-use crate::{Api, AssistantMessage, ContentBlock, Context, StopReason, Tool, Usage};
+use crate::{Api, AssistantMessage, ContentBlock, Context, StopReason, TextContent, ThinkingContent, Tool, Usage};
 
 // ---------------------------------------------------------------------------
 // Google Thinking Level
@@ -377,12 +377,30 @@ pub fn parse_google_events(
                             if let Some(text) = &part.text {
                                 // Check if this is a thinking part
                                 if is_thinking_part(part) {
+                                    // Accumulate into partial_message
+                                    let last_think_idx = partial_message.content.iter().rposition(|b| matches!(b, ContentBlock::Thinking(_)));
+                                    if let Some(idx) = last_think_idx {
+                                        if let ContentBlock::Thinking(t) = &mut partial_message.content[idx] {
+                                            t.thinking.push_str(text);
+                                        }
+                                    } else {
+                                        partial_message.content.push(ContentBlock::Thinking(ThinkingContent::new(text.clone())));
+                                    }
                                     events.push(ProviderEvent::ThinkingDelta {
                                         content_index: index,
                                         delta: text.clone(),
                                         partial: partial_message.clone(),
                                     });
                                 } else {
+                                    // Accumulate into partial_message
+                                    let last_text_idx = partial_message.content.iter().rposition(|b| matches!(b, ContentBlock::Text(_)));
+                                    if let Some(idx) = last_text_idx {
+                                        if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
+                                            t.text.push_str(text);
+                                        }
+                                    } else {
+                                        partial_message.content.push(ContentBlock::Text(TextContent::new(text.clone())));
+                                    }
                                     events.push(ProviderEvent::TextDelta {
                                         content_index: index,
                                         delta: text.clone(),

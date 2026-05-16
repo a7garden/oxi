@@ -228,12 +228,15 @@ impl ChatViewState {
 
     fn append_text(&mut self, text: &str) {
         if let Some(ref mut s) = self.streaming {
-            // Pure whitespace (no newlines) is noise from providers around tool calls.
-            // But \n and \n\n deltas carry paragraph breaks that are essential for
-            // markdown structure (headers, tables, lists). Keep them.
-            if text.trim().is_empty() && !text.contains('\n') {
-                return;
-            }
+            // NOTE: We no longer drop pure-whitespace deltas. In the pi-mono
+            // pattern, `new_text` is extracted from the provider's accumulated
+            // snapshot, so spaces between words are legitimate content.
+            // Dropping them caused Korean word-spacing to vanish (e.g.
+            // "안녕 하세요" → "안녕하세요").
+            //
+            // Previously we filtered whitespace-only deltas to remove "noise
+            // from providers around tool calls", but the proper fix is to
+            // handle that at the provider layer, not at the TUI layer.
 
             if let Some(ContentBlock::Text { ref mut content }) = s.message.content_blocks.first_mut() {
                 // Clamp total text size to prevent unbounded growth

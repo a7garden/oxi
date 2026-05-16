@@ -505,7 +505,7 @@ fn find_valid_utf8_prefix(bytes: &[u8]) -> (String, Vec<u8>) {
 /// Split bytes into complete lines (ending with \n) and trailing incomplete data.
 /// This ensures `parse_sse_events` only receives complete SSE `data:` lines,
 /// preventing JSON parse failures from lines split across HTTP chunks.
-fn split_complete_lines(bytes: &[u8]) -> (String, Vec<u8>) {
+pub fn split_complete_lines(bytes: &[u8]) -> (String, Vec<u8>) {
     // Find the last newline — everything up to and including it is complete.
     match bytes.iter().rposition(|&b| b == b'\n') {
         Some(last_nl) => {

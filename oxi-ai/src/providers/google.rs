@@ -9,6 +9,7 @@ use std::pin::Pin;
 use super::google_shared::{
     build_request_body, convert_messages, convert_tools, create_error_message, parse_google_events,
 };
+use super::openai::split_complete_lines;
 use super::shared_client;
 use super::{Provider, ProviderError, ProviderEvent, StreamOptions};
 use crate::{Api, Context, Model, StopReason};
@@ -94,28 +95,40 @@ impl Provider for GoogleProvider {
             return Err(ProviderError::HttpError(status.as_u16(), body));
         }
 
-        // Create event stream
+        // Create event stream — use split_complete_lines (like OpenAI provider)
+        // to handle UTF-8 boundaries safely.  Google SSE lines can be split
+        // across HTTP chunks at arbitrary byte boundaries.
         let model_name = model.id.clone();
 
-        let stream = response.bytes_stream().flat_map(move |chunk| match chunk {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                futures::stream::iter(parse_google_events(
-                    &text,
-                    Api::GoogleGenerativeAi,
-                    "google",
-                    &model_name,
-                ))
-            }
-            Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                reason: StopReason::Error,
-                error: create_error_message(
-                    Api::GoogleGenerativeAi,
-                    "google",
-                    &e.to_string(),
-                ),
-            }]),
-        });
+        let stream = response.bytes_stream().scan(
+            Vec::new(), // pending_bytes
+            move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                let events = match chunk {
+                    Ok(bytes) => {
+                        let mut combined = Vec::with_capacity(pending_bytes.len() + bytes.len());
+                        combined.extend_from_slice(pending_bytes);
+                        combined.extend_from_slice(&bytes);
+                        let (text, trailing) = split_complete_lines(&combined);
+                        *pending_bytes = trailing;
+                        parse_google_events(
+                            &text,
+                            Api::GoogleGenerativeAi,
+                            "google",
+                            &model_name,
+                        )
+                    }
+                    Err(e) => vec![ProviderEvent::Error {
+                        reason: StopReason::Error,
+                        error: create_error_message(
+                            Api::GoogleGenerativeAi,
+                            "google",
+                            &e.to_string(),
+                        ),
+                    }],
+                };
+                async move { Some(futures::stream::iter(events)) }
+            },
+        ).flatten();
 
         Ok(Box::pin(stream))
     }

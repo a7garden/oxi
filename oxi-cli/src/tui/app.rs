@@ -324,10 +324,19 @@ pub(crate) struct AppState {
     pub needs_persist: bool,
     /// Length of text already rendered from the snapshot's Text block.
     /// Used to compute incremental text delta from full snapshot.
+    /// Tracks bytes (not chars) to allow fast slicing of UTF-8 text.
     snapshot_text_rendered: usize,
     /// Length of thinking text already rendered from the snapshot's Thinking block.
     /// Prevents duplicate thinking blocks on repeated MessageUpdates.
+    /// Tracks bytes (not chars).
     snapshot_thinking_rendered: usize,
+    /// Whether the initial empty Text block has been created in the TUI.
+    /// Without this flag, the very first delta creates a Text content block
+    /// via `insert(0, ...)`, but on the *next* MessageUpdate, `first_mut()`
+    /// finds the existing block and we slice correctly.  The flag is defensive
+    /// — it ensures we always go through the `first_mut` path once the
+    /// block exists.
+    snapshot_text_block_created: bool,
     /// Questionnaire bridge — set by run_tui_interactive_impl() from App::questionnaire_bridge().
     questionnaire_bridge: Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
 }
@@ -357,6 +366,7 @@ impl AppState {
             needs_persist: false,
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: 0,
+            snapshot_text_block_created: false,
             questionnaire_bridge: None,
         }
     }
@@ -457,6 +467,7 @@ impl AppState {
         self.auto_scroll = true;
         self.snapshot_text_rendered = 0;
         self.snapshot_thinking_rendered = 0;
+        self.snapshot_text_block_created = false;
     }
 
     #[allow(dead_code)]
@@ -479,10 +490,14 @@ impl AppState {
                         // provider's Text block (which is properly separated
                         // from tool calls), not the raw delta string.
                         let text = &t.text;
-                        if text.len() > self.snapshot_text_rendered {
+                        // Use >= so that pure-whitespace additions (a single space)
+                        // are not skipped. Previously `>` caused spaces between
+                        // words to be dropped when the provider sent them as a
+                        // separate delta that only grew the text by 1 byte.
+                        if text.len() >= self.snapshot_text_rendered {
                             // Use char_indices to find the safe byte boundary
-                            // closest to snapshot_text_rendered (Korean chars
-                            // are 3 bytes each in UTF-8).
+                            // closest to snapshot_text_rendered (multi-byte chars
+                            // like Korean are 3 bytes each in UTF-8).
                             let byte_off = text.char_indices()
                                 .map(|(i, _)| i)
                                 .find(|&i| i >= self.snapshot_text_rendered)
@@ -492,6 +507,9 @@ impl AppState {
                                 self.chat.stream_text_delta(new_text);
                             }
                             self.snapshot_text_rendered = text.len();
+                            if !text.is_empty() {
+                                self.snapshot_text_block_created = true;
+                            }
                         }
                     }
                     oxi_ai::ContentBlock::ToolCall(tc) => {
@@ -560,6 +578,7 @@ impl AppState {
         self.is_agent_busy = false;
         self.snapshot_text_rendered = 0;
         self.snapshot_thinking_rendered = 0;
+        self.snapshot_text_block_created = false;
         if was_streaming {
             self.message_count += 1;
             // Refresh last code block from completed message

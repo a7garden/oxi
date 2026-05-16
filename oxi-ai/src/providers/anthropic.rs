@@ -8,9 +8,10 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use super::shared_client;
+use super::openai::split_complete_lines;
 use crate::{
     error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    ProviderEvent, StopReason, StreamOptions, Usage,
+    ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent, Usage,
 };
 
 /// Anthropic provider
@@ -122,16 +123,30 @@ impl Provider for AnthropicProvider {
         // Create event stream
         let model_name = model.id.clone();
 
-        let stream = response.bytes_stream().flat_map(move |chunk| match chunk {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                futures::stream::iter(parse_anthropic_events(&text, &model_name))
-            }
-            Err(e) => futures::stream::iter(vec![ProviderEvent::Error {
-                reason: StopReason::Error,
-                error: create_error_message(&e.to_string()),
-            }]),
-        });
+        // Use stateful scan (like OpenAI provider) to handle UTF-8 boundaries
+        // safely.  Anthropic SSE lines can be split across HTTP chunks at
+        // arbitrary byte boundaries; without reassembly, multi-byte characters
+        // (Korean, emoji, etc.) get corrupted by `from_utf8_lossy`.
+        let stream = response.bytes_stream().scan(
+            Vec::new(), // pending_bytes
+            move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                let events = match chunk {
+                    Ok(bytes) => {
+                        let mut combined = Vec::with_capacity(pending_bytes.len() + bytes.len());
+                        combined.extend_from_slice(pending_bytes);
+                        combined.extend_from_slice(&bytes);
+                        let (text, trailing) = split_complete_lines(&combined);
+                        *pending_bytes = trailing;
+                        parse_anthropic_events(&text, &model_name)
+                    }
+                    Err(e) => vec![ProviderEvent::Error {
+                        reason: StopReason::Error,
+                        error: create_error_message(&e.to_string()),
+                    }],
+                };
+                async move { Some(futures::stream::iter(events)) }
+            },
+        ).flatten();
 
         Ok(Box::pin(stream))
     }
@@ -254,7 +269,7 @@ fn build_anthropic_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderErr
 /// - Accumulated usage tracked separately, only cloned into Done message.
 fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(Api::AnthropicMessages, "anthropic", model_id);
+    let mut partial_message = AssistantMessage::new(Api::AnthropicMessages, "anthropic", model_id);
 
     // Pre-allocate based on data-line count
     let estimated = text.split('\n').filter(|l| l.starts_with("data: ")).count();
@@ -325,6 +340,16 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                     match delta.type_.as_deref() {
                         Some("text_delta") => {
                             if let Some(text) = &delta.text {
+                                // Accumulate into partial_message so the TUI
+                                // can diff against its snapshot tracker.
+                                let last_text_idx = partial_message.content.iter().rposition(|b| matches!(b, ContentBlock::Text(_)));
+                                if let Some(idx) = last_text_idx {
+                                    if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
+                                        t.text.push_str(text);
+                                    }
+                                } else {
+                                    partial_message.content.push(ContentBlock::Text(TextContent::new(text.clone())));
+                                }
                                 events.push(ProviderEvent::TextDelta {
                                     content_index: event.index.unwrap_or(0),
                                     delta: text.clone(),
@@ -334,6 +359,15 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                         }
                         Some("thinking_delta") => {
                             if let Some(text) = &delta.thinking {
+                                // Accumulate into partial_message
+                                let last_think_idx = partial_message.content.iter().rposition(|b| matches!(b, ContentBlock::Thinking(_)));
+                                if let Some(idx) = last_think_idx {
+                                    if let ContentBlock::Thinking(t) = &mut partial_message.content[idx] {
+                                        t.thinking.push_str(text);
+                                    }
+                                } else {
+                                    partial_message.content.push(ContentBlock::Thinking(ThinkingContent::new(text.clone())));
+                                }
                                 events.push(ProviderEvent::ThinkingDelta {
                                     content_index: event.index.unwrap_or(0),
                                     delta: text.clone(),
