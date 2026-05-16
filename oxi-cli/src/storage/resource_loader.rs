@@ -783,7 +783,7 @@ impl ResourceLoader {
         }
 
         // Sort by priority (descending)
-        context_files.sort_by(|a, b| b.priority.cmp(&a.priority));
+        context_files.sort_by_key(|b| std::cmp::Reverse(b.priority));
 
         Ok(context_files)
     }

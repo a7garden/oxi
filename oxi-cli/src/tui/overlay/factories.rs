@@ -79,10 +79,8 @@ impl OverlayComponent for ModelSelectOverlay {
                     self.selected = filtered_len - 1;
                 }
             }
-            KeyCode::Down => {
-                if !filtered.is_empty() {
-                    self.selected = (self.selected + 1).min(filtered.len() - 1);
-                }
+            KeyCode::Down if !filtered.is_empty() => {
+                self.selected = (self.selected + 1).min(filtered.len() - 1);
             }
             KeyCode::Enter => {
                 let selected = self.selected;
@@ -281,10 +279,8 @@ impl OverlayComponent for LogoutSelectOverlay {
                     self.selected = self.providers.len() - 1;
                 }
             }
-            KeyCode::Down => {
-                if !self.providers.is_empty() {
-                    self.selected = (self.selected + 1).min(self.providers.len() - 1);
-                }
+            KeyCode::Down if !self.providers.is_empty() => {
+                self.selected = (self.selected + 1).min(self.providers.len() - 1);
             }
             KeyCode::Enter => {
                 if let Some(provider) = self.providers.get(self.selected) {
@@ -405,10 +401,8 @@ impl OverlayComponent for ResumeSelectOverlay {
                     self.selected = self.sessions.len() - 1;
                 }
             }
-            KeyCode::Down => {
-                if !self.sessions.is_empty() {
-                    self.selected = (self.selected + 1).min(self.sessions.len() - 1);
-                }
+            KeyCode::Down if !self.sessions.is_empty() => {
+                self.selected = (self.selected + 1).min(self.sessions.len() - 1);
             }
             KeyCode::Enter => {
                 if let Some(s) = self.sessions.get(self.selected) {

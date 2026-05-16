@@ -763,10 +763,8 @@ fn handle_provider_event(
         InputMode::Normal => {
             if let Event::Key(key) = event {
                 match key.code {
-                    KeyCode::Up => {
-                        if state.provider_selected > 0 {
-                            state.provider_selected -= 1;
-                        }
+                    KeyCode::Up if state.provider_selected > 0 => {
+                        state.provider_selected -= 1;
                     }
                     KeyCode::Down => {
                         // +1 for "add custom" row
@@ -791,13 +789,13 @@ fn handle_provider_event(
                             };
                         }
                     }
-                    KeyCode::Char('d') | KeyCode::Delete => {
-                        if state.provider_selected < state.providers.len() {
-                            let name = state.providers[state.provider_selected].name.clone();
-                            auth_store.remove(&name);
-                            state.providers[state.provider_selected].has_key = false;
-                            state.providers[state.provider_selected].key_masked = String::new();
-                        }
+                    KeyCode::Char('d') | KeyCode::Delete
+                        if state.provider_selected < state.providers.len() =>
+                    {
+                        let name = state.providers[state.provider_selected].name.clone();
+                        auth_store.remove(&name);
+                        state.providers[state.provider_selected].has_key = false;
+                        state.providers[state.provider_selected].key_masked = String::new();
                     }
                     KeyCode::Right => {
                         state.step = 1;
@@ -938,15 +936,11 @@ fn handle_model_event(state: &mut WizardState, event: Event) -> Result<bool> {
             }
         } else {
             match key.code {
-                KeyCode::Up => {
-                    if state.model_selected > 0 {
-                        state.model_selected -= 1;
-                    }
+                KeyCode::Up if state.model_selected > 0 => {
+                    state.model_selected -= 1;
                 }
-                KeyCode::Down => {
-                    if state.model_selected + 1 < state.models.len() {
-                        state.model_selected += 1;
-                    }
+                KeyCode::Down if state.model_selected + 1 < state.models.len() => {
+                    state.model_selected += 1;
                 }
                 KeyCode::Char('/') => {
                     state.model_searching = true;
@@ -983,15 +977,11 @@ fn select_filtered_model(state: &mut WizardState) {
 fn handle_theme_event(state: &mut WizardState, event: Event) -> Result<bool> {
     if let Event::Key(key) = event {
         match key.code {
-            KeyCode::Up => {
-                if state.theme_selected > 0 {
-                    state.theme_selected -= 1;
-                }
+            KeyCode::Up if state.theme_selected > 0 => {
+                state.theme_selected -= 1;
             }
-            KeyCode::Down => {
-                if state.theme_selected + 1 < state.themes.len() {
-                    state.theme_selected += 1;
-                }
+            KeyCode::Down if state.theme_selected + 1 < state.themes.len() => {
+                state.theme_selected += 1;
             }
             KeyCode::Enter => {
                 // Save everything and go to done

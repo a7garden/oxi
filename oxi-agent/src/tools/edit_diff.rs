@@ -149,7 +149,7 @@ pub fn apply_edits_to_normalized_content(
     }
 
     // Sort by position (reverse order for safe replacement)
-    matches.sort_by(|a, b| b.0.cmp(&a.0));
+    matches.sort_by_key(|b| std::cmp::Reverse(b.0));
 
     let mut result = content.to_string();
     for (start, end, edit) in matches {

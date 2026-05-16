@@ -1796,7 +1796,7 @@ impl SessionManager {
             }
         }
 
-        all_sessions.sort_by(|a, b| b.modified.cmp(&a.modified));
+        all_sessions.sort_by_key(|b| std::cmp::Reverse(b.modified));
         Ok(all_sessions)
     }
 
@@ -1960,7 +1960,7 @@ impl SessionManager {
                 }
             }
         }
-        metas.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        metas.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
         Ok(metas)
     }
 
@@ -2299,7 +2299,7 @@ fn find_most_recent_session(session_dir: &str) -> Option<String> {
         }
     }
 
-    files.sort_by(|a, b| b.1.cmp(&a.1));
+    files.sort_by_key(|b| std::cmp::Reverse(b.1));
     files.into_iter().next().map(|(p, _)| p)
 }
 
@@ -2414,7 +2414,7 @@ fn build_session_context_internal(
 
 /// Sort tree nodes by timestamp
 fn sort_tree_by_timestamp(nodes: &mut Vec<SessionTreeNode>) {
-    nodes.sort_by(|a, b| a.entry.timestamp.cmp(&b.entry.timestamp));
+    nodes.sort_by_key(|a| a.entry.timestamp);
 
     for node in nodes {
         sort_tree_by_timestamp(&mut node.children);

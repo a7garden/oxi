@@ -247,10 +247,8 @@ impl OverlayComponent for QuestionnaireOverlay {
             KeyCode::Up => {
                 self.option_cursor = self.option_cursor.saturating_sub(1);
             }
-            KeyCode::Down => {
-                if opt_count > 0 {
-                    self.option_cursor = (self.option_cursor + 1).min(opt_count - 1);
-                }
+            KeyCode::Down if opt_count > 0 => {
+                self.option_cursor = (self.option_cursor + 1).min(opt_count - 1);
             }
             KeyCode::Enter => {
                 let sel = self.option_cursor;

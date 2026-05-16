@@ -956,13 +956,12 @@ async fn handle_wizard_step_key(
             }
         }
 
-        4 => {
+        4
             // Done
-            if key.code == KeyCode::Enter {
+            if key.code == KeyCode::Enter => {
                 state.overlay = None;
                 state.add_system_message(" Ready to chat. Type a message to start.".to_string());
             }
-        }
 
         _ => {}
     }

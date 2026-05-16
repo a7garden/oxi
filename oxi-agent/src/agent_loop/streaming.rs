@@ -87,16 +87,15 @@ pub(crate) async fn stream_assistant_response(
                 });
             }
 
-            ProviderEvent::ThinkingStart { partial, .. } => {
+            ProviderEvent::ThinkingStart { partial, .. }
                 // ThinkingStart arrives before ThinkingDelta.
                 // Update the snapshot.
-                if added_partial {
+                if added_partial => {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
                         *m = partial;
                     }
                 }
-            }
 
             ProviderEvent::ThinkingDelta { delta, partial, .. } => {
                 if added_partial {
@@ -112,27 +111,25 @@ pub(crate) async fn stream_assistant_response(
                 });
             }
 
-            ProviderEvent::ToolCallStart { partial, .. } => {
-                if added_partial {
+            ProviderEvent::ToolCallStart { partial, .. }
+                if added_partial => {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
                         *m = partial;
                     }
                 }
-            }
 
-            ProviderEvent::ToolCallDelta { partial, .. } => {
-                if added_partial {
+            ProviderEvent::ToolCallDelta { partial, .. }
+                if added_partial => {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
                         *m = partial;
                     }
                 }
-            }
 
-            ProviderEvent::ToolCallEnd { tool_call, .. } => {
+            ProviderEvent::ToolCallEnd { tool_call, .. }
                 // Add the tool call directly to our tracked message.
-                if added_partial {
+                if added_partial => {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
                         m.content.push(ContentBlock::ToolCall(tool_call));
@@ -146,7 +143,6 @@ pub(crate) async fn stream_assistant_response(
                         delta: None,
                     });
                 }
-            }
 
             ProviderEvent::Done { message, .. } => {
                 tracing::info!(

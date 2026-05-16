@@ -250,29 +250,25 @@ fn apply_sgr_codes(params: &[u16], style: &mut TextStyle) {
                 style.fg = Some(ANSI_COLORS[(code - 30) as usize].to_string());
             }
             // Extended foreground color (38;5;N or 38;2;R;G;B)
-            38 => {
-                if i + 1 < params.len() {
-                    match params[i + 1] {
-                        5 => {
+            38 if i + 1 < params.len() => {
+                match params[i + 1] {
+                        5
                             // 256-color: 38;5;N
-                            if i + 2 < params.len() {
+                            if i + 2 < params.len() => {
                                 style.fg = Some(color_256_to_hex(params[i + 2] as u8));
                                 i += 2;
                             }
-                        }
-                        2 => {
+                        2
                             // RGB: 38;2;R;G;B
-                            if i + 4 < params.len() {
+                            if i + 4 < params.len() => {
                                 let r = params[i + 2];
                                 let g = params[i + 3];
                                 let b = params[i + 4];
                                 style.fg = Some(format!("rgb({r},{g},{b})"));
                                 i += 4;
                             }
-                        }
                         _ => {}
                     }
-                }
             }
             39 => {
                 // Default foreground
@@ -283,28 +279,20 @@ fn apply_sgr_codes(params: &[u16], style: &mut TextStyle) {
                 style.bg = Some(ANSI_COLORS[(code - 40) as usize].to_string());
             }
             // Extended background color (48;5;N or 48;2;R;G;B)
-            48 => {
-                if i + 1 < params.len() {
-                    match params[i + 1] {
-                        5 => {
-                            if i + 2 < params.len() {
-                                style.bg = Some(color_256_to_hex(params[i + 2] as u8));
-                                i += 2;
-                            }
-                        }
-                        2 => {
-                            if i + 4 < params.len() {
-                                let r = params[i + 2];
-                                let g = params[i + 3];
-                                let b = params[i + 4];
-                                style.bg = Some(format!("rgb({r},{g},{b})"));
-                                i += 4;
-                            }
-                        }
-                        _ => {}
-                    }
+            48 if i + 1 < params.len() => match params[i + 1] {
+                5 if i + 2 < params.len() => {
+                    style.bg = Some(color_256_to_hex(params[i + 2] as u8));
+                    i += 2;
                 }
-            }
+                2 if i + 4 < params.len() => {
+                    let r = params[i + 2];
+                    let g = params[i + 3];
+                    let b = params[i + 4];
+                    style.bg = Some(format!("rgb({r},{g},{b})"));
+                    i += 4;
+                }
+                _ => {}
+            },
             49 => {
                 // Default background
                 style.bg = None;
