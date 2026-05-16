@@ -140,6 +140,16 @@ impl GrepTool {
             return Ok(());
         }
 
+        // Detect and skip broken symlinks - they cause read_dir to fail
+        // and should not cause the entire search to fail
+        if current.symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+            && !current.exists()
+        {
+            return Ok(());
+        }
+
         if current.is_file() {
             // Check include filter
             if let Some(glob) = include {

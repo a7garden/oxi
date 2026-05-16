@@ -85,7 +85,7 @@ pub fn has_bom(content: &str) -> bool {
 }
 
 /// Apply multiple edits to normalized (LF) content.
-/// Validates that edits don't overlap and all find matches.
+/// Validates that edits don't overlap, are unique, and all find matches.
 pub fn apply_edits_to_normalized_content(
     content: &str,
     edits: &[Edit],
@@ -98,23 +98,57 @@ pub fn apply_edits_to_normalized_content(
     let mut matches: Vec<(usize, usize, &Edit)> = Vec::new(); // (start, end, edit)
 
     for edit in edits {
-        let start = content.find(&edit.old_text).ok_or_else(|| EditDiffError {
+        // Reject empty old_text
+        if edit.old_text.is_empty() {
+            return Err(EditDiffError {
+                message: "old_text cannot be empty. Match must be unique in the file.".to_string(),
+            });
+        }
+
+        // Check for multiple occurrences of this edit's old_text
+        let first_pos = content.find(&edit.old_text).ok_or_else(|| EditDiffError {
             message: format!(
                 "Text to replace not found in file. Make sure to match the exact text including whitespace and newlines."
             ),
         })?;
-        let end = start + edit.old_text.len();
+
+        // Count total occurrences
+        let mut search_start = 0;
+        let mut occurrence_count = 0;
+        let mut first_found = false;
+        while let Some(pos) = content[search_start..].find(&edit.old_text) {
+            let actual_pos = search_start + pos;
+            if !first_found {
+                // Already found first match at first_pos
+                first_found = true;
+            }
+            occurrence_count += 1;
+            search_start = actual_pos + 1;
+        }
+
+        // If more than one occurrence, reject as ambiguous
+        if occurrence_count > 1 {
+            return Err(EditDiffError {
+                message: format!(
+                    "Edit rejected: '{}' appears {} times in the file. Matches must be unique. Provide more context to disambiguate.",
+                    edit.old_text.chars().take(50).collect::<String>(),
+                    occurrence_count
+                ),
+            });
+        }
+
+        let end = first_pos + edit.old_text.len();
 
         // Check for overlaps with existing matches
         for &(existing_start, existing_end, _) in &matches {
-            if start < existing_end && end > existing_start {
+            if first_pos < existing_end && end > existing_start {
                 return Err(EditDiffError {
                     message: "Edits overlap — merge nearby edits into one.".to_string(),
                 });
             }
         }
 
-        matches.push((start, end, edit));
+        matches.push((first_pos, end, edit));
     }
 
     // Sort by position (reverse order for safe replacement)

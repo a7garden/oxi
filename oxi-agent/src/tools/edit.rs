@@ -189,9 +189,9 @@ struct EditInput {
 /// A single edit entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct EditEntry {
-    #[serde(rename = "oldText")]
+    #[serde(rename = "oldText", alias = "old_text")]
     old_text: String,
-    #[serde(rename = "newText")]
+    #[serde(rename = "newText", alias = "new_text")]
     new_text: String,
 }
 

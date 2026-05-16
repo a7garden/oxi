@@ -291,8 +291,9 @@ async fn test_empty_stream() {
         event_count += 1;
     }
 
-    // Should complete without error
-    assert_eq!(event_count, 0, "empty stream should have no events");
+    // Should complete without error. An empty stream still emits exactly one
+    // ProviderEvent::Start event at the beginning (empty = no content chunks).
+    assert_eq!(event_count, 1, "empty stream should have exactly one Start event");
 
     mock.assert();
 }

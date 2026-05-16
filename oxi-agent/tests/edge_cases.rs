@@ -184,11 +184,12 @@ async fn test_read_large_file() {
     let tool = ReadTool::new();
 
     // Read with offset and limit to test pagination
+    // offset is 1-indexed, so offset=101 starts at line 100 (0-indexed index 100)
     let result = execute_tool(
         &tool,
         json!({
             "path": file_path,
-            "offset": 100,
+            "offset": 101,
             "limit": 10
         }),
     )
@@ -196,6 +197,7 @@ async fn test_read_large_file() {
 
     assert!(result.success, "read with offset/limit should succeed: {}", result.output);
     // Output includes line number prefix. Check for the actual content text.
+    // offset=101 with 1-indexed offset shows lines 100-109 (0-indexed indexes 100-109)
     assert!(result.output.contains("Line 100:"), "should contain line 100: {}", result.output);
     assert!(result.output.contains("Line 109:"), "should contain line 109: {}", result.output);
     // Should NOT contain line 110 or line 99
