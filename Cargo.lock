@@ -3096,7 +3096,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "oxi-agent"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "a3s-search",
  "anyhow",
@@ -3124,9 +3124,9 @@ dependencies = [
 
 [[package]]
 name = "oxi-agent"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "904e85db7b87b01e54f62db1d4e7da01a85676b40c8d6d3926118ab931129608"
+checksum = "37607621fc902eda9148dee8818edeb913990f7fd2fb94bafd9e047e0c40f806"
 dependencies = [
  "a3s-search",
  "anyhow",
@@ -3225,7 +3225,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-cli"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3244,9 +3244,9 @@ dependencies = [
  "libloading",
  "notify",
  "once_cell",
- "oxi-agent 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-agent 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxi-ai 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "oxi-sdk 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-sdk 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxi-store 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxi-tui 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot",
@@ -3276,11 +3276,11 @@ dependencies = [
 
 [[package]]
 name = "oxi-sdk"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "async-trait",
- "oxi-agent 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-agent 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxi-ai 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot",
  "serde",
@@ -3291,13 +3291,13 @@ dependencies = [
 
 [[package]]
 name = "oxi-sdk"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac5a4e1ee54d9c702f0daede915b8c13cfaca459a79611309bf08e8de14ef30d"
+checksum = "a04a1f70f1fa61a9aff2e6f3089347625a41617d9e6dc0e98217a78f81088802"
 dependencies = [
  "anyhow",
  "async-trait",
- "oxi-agent 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-agent 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxi-ai 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot",
  "serde",
