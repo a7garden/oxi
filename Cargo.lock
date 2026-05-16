@@ -3248,7 +3248,7 @@ dependencies = [
  "oxi-ai 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxi-sdk 0.15.1",
  "oxi-store 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "oxi-tui 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-tui 0.15.0",
  "parking_lot",
  "predicates",
  "rand 0.8.6",
@@ -3356,25 +3356,6 @@ dependencies = [
 [[package]]
 name = "oxi-tui"
 version = "0.15.0"
-dependencies = [
- "anyhow",
- "crossterm 0.28.1",
- "dirs",
- "parking_lot",
- "pulldown-cmark",
- "ratatui",
- "ratatui-textarea",
- "serde",
- "serde_json",
- "toml 0.8.23",
- "tracing",
- "tui-markdown",
- "unicode-width",
-]
-
-[[package]]
-name = "oxi-tui"
-version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5b08b517acf5b932edb6bf5d1e7692da8ce1258827a973475058e34ba9175df"
 dependencies = [
@@ -3391,6 +3372,25 @@ dependencies = [
  "tracing",
  "tui-markdown",
  "tui-scrollview",
+ "unicode-width",
+]
+
+[[package]]
+name = "oxi-tui"
+version = "0.16.0"
+dependencies = [
+ "anyhow",
+ "crossterm 0.28.1",
+ "dirs",
+ "parking_lot",
+ "pulldown-cmark",
+ "ratatui",
+ "ratatui-textarea",
+ "serde",
+ "serde_json",
+ "toml 0.8.23",
+ "tracing",
+ "tui-markdown",
  "unicode-width",
 ]
 
