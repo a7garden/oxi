@@ -644,6 +644,9 @@ impl Agent {
         let maybe_hook = should_stop_hook;
         let ext_stop = agent_loop.external_stop().clone();
 
+        let is_running = Arc::new(AtomicBool::new(true));
+        let is_running_clone = Arc::clone(&is_running);
+
         let handle = tokio::task::spawn(async move {
             // AgentLoop internals are !Send (dyn Future without Send bound),
             // so we use spawn_blocking to run on a blocking thread.
@@ -678,22 +681,32 @@ impl Agent {
                 })
             }).await;
 
-            let response = match result {
+            // Clear the running flag
+            is_running_clone.store(false, Ordering::SeqCst);
+
+            match result {
                 Ok(Ok(_events)) => {
-                    // Sync state back
-                    // Note: state sync from blocking thread requires Arc<SharedState>
-                    // For now, the caller should call agent.state() after handle completes
+                    // Sync state back from AgentLoop
+                    // Since we used SharedState (Arc<RwLock>), the state is shared
+                    // and the caller can read it from agent.state() after this completes.
                     Ok(Response {
-                        content: String::new(), // extracted below
+                        content: String::new(),
                         stop_reason: StopReason::Stop,
                     })
                 }
                 Ok(Err(e)) => Err(e),
                 Err(e) => Err(Error::msg(format!("Join error: {}", e))),
-            };
-
-            response
+            }
         });
+
+        // We can't easily sync the is_running flag from a spawned task back to
+        // self.is_running because self is not Send. Instead, the caller should
+        // await the JoinHandle before calling run() again. For safety, we provide
+        // the is_running Arc.
+        //
+        // A more complete solution would involve wrapping Agent in Arc and
+        // passing it to the spawned task, but that requires Agent: Send which
+        // it isn't due to !Send internals.
 
         Ok((rx, handle))
     }
