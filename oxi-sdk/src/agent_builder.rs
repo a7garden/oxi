@@ -64,7 +64,22 @@ impl<'a> AgentBuilder<'a> {
         // Convert Box<dyn Provider> to Arc<dyn Provider>
         let provider: Arc<dyn Provider> = provider.into();
         
-        // Create Agent with the provider
-        Ok(Agent::new(provider, self.config.clone()))
+        // Merge workspace_dir into config
+        let mut config = self.config.clone();
+        config.workspace_dir = self.workspace_dir.or(config.workspace_dir);
+        if let Some(ref prompt) = self.system_prompt {
+            config.system_prompt = Some(prompt.clone());
+        }
+        
+        let agent = Agent::new(provider, config);
+        
+        // Register tools from the builder's registry
+        for name in self.tools.names() {
+            if let Some(tool) = self.tools.get(&name) {
+                agent.tools().register_arc(tool);
+            }
+        }
+        
+        Ok(agent)
     }
 }
