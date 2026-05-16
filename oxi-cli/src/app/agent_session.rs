@@ -1415,7 +1415,7 @@ mod tests {
     fn make_session() -> AgentSession {
         let provider = Arc::new(MockProvider);
         let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
-        let agent = Arc::new(Agent::new(provider, config));
+        let agent = Arc::new(Agent::new(provider, config, Arc::new(oxi_agent::ToolRegistry::new())));
         let settings = Settings::default();
         let session_manager = SessionManager::in_memory("/tmp/test");
         AgentSession::new(agent, settings, session_manager, "/tmp/test".to_string())

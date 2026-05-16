@@ -54,8 +54,8 @@ pub use messages::*;
 /// Cache retention control for provider requests.
 pub use providers::CacheRetention;
 
-/// Provider trait and streaming options.
-pub use providers::{get_provider, register_provider, unregister_provider, custom_provider_names, Provider, ProviderEvent, StreamOptions};
+/// Provider trait, streaming options, and provider registry.
+pub use providers::{get_provider, register_provider, unregister_provider, custom_provider_names, Provider, ProviderEvent, ProviderRegistry, StreamOptions};
 
 /// OpenAI-compatible provider implementation.
 pub use providers::OpenAiProvider;

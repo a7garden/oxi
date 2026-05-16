@@ -1,7 +1,7 @@
 /// Integration tests for oxi-agent
 
 use crate::types::{ToolCall, ToolDefinition, ToolResult};
-use crate::{Agent, AgentConfig, AgentEvent, AgentState};
+use crate::{Agent, AgentConfig, AgentEvent, AgentState, ToolRegistry};
 use async_trait::async_trait;
 use futures::Stream;
 use oxi_ai::{
@@ -176,7 +176,7 @@ async fn test_agent_with_mock_provider() {
     }]));
 
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
-    let agent = Agent::new(provider.clone(), config);
+    let agent = Agent::new(provider.clone(), config, Arc::new(ToolRegistry::new()));
 
     let (response, events) = agent.run("Hi".to_string()).await.unwrap();
 
@@ -195,7 +195,7 @@ async fn test_agent_events_sequence() {
     }]));
 
     let config = AgentConfig::default();
-    let agent = Agent::new(provider, config);
+    let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     let (_, events) = agent.run("Test prompt".to_string()).await.unwrap();
 
@@ -334,7 +334,7 @@ fn test_agent_model_id() {
         content: "test".to_string(),
     }]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
-    let agent = Agent::new(provider, config);
+    let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
     assert_eq!(agent.model_id(), "anthropic/claude-sonnet-4-20250514");
 }
 
@@ -344,7 +344,7 @@ fn test_agent_switch_model_invalid_format() {
         content: "test".to_string(),
     }]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
-    let agent = Agent::new(provider, config);
+    let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     // Invalid format (no provider prefix)
     let result = agent.switch_model("gpt-4o");
@@ -357,7 +357,7 @@ fn test_agent_switch_model_unknown_model() {
         content: "test".to_string(),
     }]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
-    let agent = Agent::new(provider, config);
+    let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     let result = agent.switch_model("nonexistent/model");
     assert!(result.is_err());
@@ -369,7 +369,7 @@ fn test_agent_switch_model_same_provider() {
         content: "test".to_string(),
     }]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
-    let agent = Agent::new(provider, config);
+    let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     // Switch to another Anthropic model (same provider, same API)
     let result = agent.switch_model("anthropic/claude-3-haiku");
@@ -443,7 +443,7 @@ async fn test_cross_provider_handoff_openai_to_anthropic() {
         },
     ]));
     let config = AgentConfig::new("openai/gpt-4o");
-    let agent = Agent::new(provider, config);
+    let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     // 1. Send a message and get a response (on OpenAI)
     let (response, _) = agent.run("Hello from OpenAI".to_string()).await.unwrap();
@@ -488,7 +488,7 @@ async fn test_cross_provider_message_transformation_roundtrip() {
         },
     ]));
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
-    let agent = Agent::new(provider, config);
+    let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     // Build up conversation
     agent.run("Message 1".to_string()).await.unwrap();

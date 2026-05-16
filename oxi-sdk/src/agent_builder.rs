@@ -62,9 +62,8 @@ impl<'a> AgentBuilder<'a> {
         // Resolve model from Oxi's instance registry
         let model = self.oxi.resolve_model(&self.config.model_id)?;
 
-        // Create provider via Oxi (checks custom providers, then built-ins)
-        let provider_box = self.oxi.create_provider(&model.provider)?;
-        let provider: Arc<dyn Provider> = Arc::from(provider_box);
+        // Create provider via Oxi's ProviderRegistry (custom, then built-ins)
+        let provider: Arc<dyn Provider> = self.oxi.create_provider(&model.provider)?;
 
         // Merge workspace_dir into config
         let mut config = self.config.clone();
@@ -73,16 +72,8 @@ impl<'a> AgentBuilder<'a> {
             config.system_prompt = Some(prompt.clone());
         }
 
-        // Create the agent
-        let agent = Agent::new(provider, config);
-
-        // Register builder's tools into the agent's tool registry
-        let agent_tools = agent.tools();
-        for name in self.tools.names() {
-            if let Some(tool) = self.tools.get(&name) {
-                agent_tools.register_arc(tool);
-            }
-        }
+        // Create the agent, passing the builder's tool registry directly
+        let agent = Agent::new(provider, config, Arc::new(self.tools));
 
         Ok(agent)
     }

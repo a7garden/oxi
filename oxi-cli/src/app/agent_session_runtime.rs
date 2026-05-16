@@ -275,12 +275,12 @@ pub fn create_agent_session_from_services(
             compaction_instruction: None,
             context_window: 128_000,
             api_key: None,
-            workspace_dir: None,
+            workspace_dir: Some(services.cwd.clone()),
         };
         // Use anthropic as a placeholder provider so the session can be created
         let provider = oxi_ai::get_provider("anthropic")
             .ok_or_else(|| anyhow::anyhow!("No provider available"))?;
-        let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config));
+        let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config, Arc::new(oxi_agent::ToolRegistry::new())));
         let session = AgentSession::new(agent, settings.clone(), options.session_manager, cwd);
         return Ok(CreateAgentSessionResult {
             session,
@@ -317,10 +317,10 @@ pub fn create_agent_session_from_services(
         compaction_instruction: None,
         context_window: 128_000,
         api_key,
-        workspace_dir: None,
+        workspace_dir: Some(services.cwd.clone()),
     };
 
-    let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config));
+    let agent = Arc::new(oxi_agent::Agent::new(Arc::from(provider), config, Arc::new(oxi_agent::ToolRegistry::new())));
 
     // Register tools: use provided registry or fallback to builtins
     let registry = options.tool_registry.unwrap_or_else(|| {

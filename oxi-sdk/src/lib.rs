@@ -19,10 +19,9 @@ pub mod prelude;
 
 // Re-export from oxi-ai
 pub use oxi_ai::{
-    Provider, Model, Context, Message, ContentBlock,
+    Provider, ProviderRegistry, Model, ModelRegistry, Context, Message, ContentBlock,
     ProviderEvent, StreamOptions, CompactionStrategy,
     ProviderError, Api, Cost, InputModality,
-    ModelRegistry,
 };
 
 // Re-export from oxi-agent  

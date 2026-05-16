@@ -37,8 +37,8 @@ pub struct Agent {
 }
 
 impl Agent {
-    /// Create a new agent with the given provider and config
-    pub fn new(provider: Arc<dyn Provider>, config: AgentConfig) -> Self {
+    /// Create a new agent with the given provider, config, and tool registry.
+    pub fn new(provider: Arc<dyn Provider>, config: AgentConfig, tools: Arc<ToolRegistry>) -> Self {
         let mut compaction_manager =
             CompactionManager::new(config.compaction_strategy.clone(), config.context_window);
 
@@ -55,12 +55,17 @@ impl Agent {
 
         Self {
             inner: RwLock::new(AgentInner { config, provider }),
-            tools: Arc::new(ToolRegistry::new()),
+            tools,
             state: SharedState::new(),
             compaction_manager,
             hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
             is_running: AtomicBool::new(false),
         }
+    }
+
+    /// Create an agent with an empty tool registry.
+    pub fn new_empty(provider: Arc<dyn Provider>, config: AgentConfig) -> Self {
+        Self::new(provider, config, Arc::new(ToolRegistry::new()))
     }
 
     /// Get the agent configuration (read guard)

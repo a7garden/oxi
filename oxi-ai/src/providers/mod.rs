@@ -52,17 +52,76 @@ pub fn shared_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
-// ── Custom provider registry ────────────────────────────────────────
+// ── Instance-based provider registry ───────────────────────────────
 
-/// Runtime registry for custom (user-defined) providers.
+/// Runtime registry for providers (custom + built-in resolution).
 ///
-/// Custom providers are registered from `~/.oxi/settings.toml` `[[custom_provider]]`
-/// sections during startup.  They take priority over the built-in match arm in
-/// [`get_provider`].
+/// This is an instance-based alternative to the global `CUSTOM_PROVIDERS` static.
+/// It supports `register()`, `get()`, `remove()`, and `names()`, falling back
+/// to built-in providers from [`register_builtins`] when a name isn't found locally.
+#[derive(Default)]
+pub struct ProviderRegistry {
+    custom: RwLock<HashMap<String, Arc<dyn Provider>>>,
+}
+
+impl ProviderRegistry {
+    /// Create a new empty registry.
+    pub fn new() -> Self {
+        Self {
+            custom: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Register a custom provider.
+    pub fn register(&self, name: &str, provider: impl Provider + 'static) {
+        self.custom
+            .write()
+            .insert(name.to_string(), Arc::new(provider));
+    }
+
+    /// Register a pre-boxed provider.
+    pub fn register_arc(&self, name: &str, provider: Arc<dyn Provider>) {
+        self.custom.write().insert(name.to_string(), provider);
+    }
+
+    /// Remove a previously registered custom provider.
+    pub fn remove(&self, name: &str) {
+        self.custom.write().remove(name);
+    }
+
+    /// Return the set of currently registered custom provider names.
+    pub fn names(&self) -> Vec<String> {
+        self.custom.read().keys().cloned().collect()
+    }
+
+    /// Get a provider by name.
+    ///
+    /// Checks local custom providers first, then falls back to built-in providers
+    /// from [`register_builtins`].
+    pub fn get(&self, name: &str) -> Option<Arc<dyn Provider>> {
+        // 1. Check local custom providers
+        {
+            let guard = self.custom.read();
+            if let Some(provider) = guard.get(name) {
+                return Some(Arc::clone(provider));
+            }
+        }
+
+        // 2. Fall back to built-in providers
+        get_provider(name).map(|boxed| Arc::from(boxed))
+    }
+}
+
+// ── Global custom provider registry (legacy) ───────────────────────
+
+/// Global custom provider registry (for backward compatibility with CLI).
+///
+/// Custom providers registered via [`register_provider`] are stored here
+/// and take priority over built-in providers in [`get_provider`].
 static CUSTOM_PROVIDERS: Lazy<RwLock<HashMap<String, Arc<dyn Provider>>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-/// Register a custom provider at runtime.
+/// Register a custom provider at runtime (global registry).
 ///
 /// This is called from `oxi-cli` during startup for each `[[custom_provider]]` entry
 /// found in settings.
@@ -72,12 +131,12 @@ pub fn register_provider(name: &str, provider: impl Provider + 'static) {
         .insert(name.to_string(), Arc::new(provider));
 }
 
-/// Unregister a previously registered custom provider.
+/// Unregister a previously registered custom provider (global registry).
 pub fn unregister_provider(name: &str) {
     CUSTOM_PROVIDERS.write().remove(name);
 }
 
-/// Return the set of currently registered custom provider names.
+/// Return the set of currently registered custom provider names (global registry).
 pub fn custom_provider_names() -> Vec<String> {
     CUSTOM_PROVIDERS.read().keys().cloned().collect()
 }
