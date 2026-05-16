@@ -114,6 +114,12 @@ struct LibraryResult {
 /// Resolve a library name to a Context7-compatible library ID.
 pub struct Context7ResolveLibraryIdTool;
 
+impl Default for Context7ResolveLibraryIdTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Context7ResolveLibraryIdTool {
     /// Create a new instance.
     pub fn new() -> Self {
@@ -231,6 +237,12 @@ impl AgentTool for Context7ResolveLibraryIdTool {
 
 /// Query up-to-date documentation from Context7.
 pub struct Context7QueryDocsTool;
+
+impl Default for Context7QueryDocsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Context7QueryDocsTool {
     /// Create a new instance.

@@ -58,6 +58,8 @@ impl GrepTool {
         }
     }
 
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
     async fn grep_impl(
         root_dir: &Path,
         pattern: &str,
@@ -126,6 +128,7 @@ impl GrepTool {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn grep_walk(
         root: &Path,
         current: &Path,

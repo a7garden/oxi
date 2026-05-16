@@ -195,6 +195,7 @@ pub struct AgentSession {
     session_manager: Arc<RwLock<SessionManager>>,
 
     // ── Event listeners ──────────────────────────────────────────────
+    #[allow(clippy::type_complexity)]
     listeners: Arc<RwLock<Vec<Box<dyn Fn(&SessionEvent) + Send + Sync>>>>,
     event_tx: mpsc::UnboundedSender<SessionEvent>,
 
@@ -1325,6 +1326,7 @@ impl AgentSession {
 
 /// RAII guard that removes a session event listener when dropped.
 pub struct SessionListenerGuard {
+    #[allow(clippy::type_complexity)]
     listeners: Arc<RwLock<Vec<Box<dyn Fn(&SessionEvent) + Send + Sync>>>>,
     key: usize,
 }

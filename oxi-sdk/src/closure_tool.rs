@@ -43,6 +43,7 @@ impl ClosureTool {
             + Sync
             + 'static,
     ) -> Self {
+        #[allow(clippy::type_complexity)]
         let handler_arc: Arc<
             dyn Fn(Value, &ToolContext) -> Result<AgentToolResult, ToolError> + Send + Sync,
         > = Arc::new(handler);

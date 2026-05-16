@@ -37,6 +37,7 @@ pub trait RetryCallback: Send {
 /// The `on_success` / `on_failure` hooks are intended for circuit-breaker
 /// bookkeeping. Pass no-ops (`|_|{}`, `||{}`) when circuit-breaker tracking
 /// is not needed.
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_with_retry_core(
     provider: &dyn oxi_ai::Provider,
     model: &Model,

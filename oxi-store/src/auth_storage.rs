@@ -360,11 +360,13 @@ pub trait FallbackResolver: Send + Sync {
 
 /// A simple closure-based fallback resolver
 pub struct FnFallbackResolver {
+    #[allow(clippy::type_complexity)]
     f: Box<dyn Fn(&str) -> Option<String> + Send + Sync>,
 }
 
 impl FnFallbackResolver {
     /// Create from a closure
+    #[allow(clippy::type_complexity)]
     pub fn new(f: Box<dyn Fn(&str) -> Option<String> + Send + Sync>) -> Self {
         Self { f }
     }

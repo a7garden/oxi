@@ -16,6 +16,7 @@ pub struct DynamicTool {
     label: String,
     description: String,
     parameters: Value,
+    #[allow(clippy::type_complexity)]
     execute_fn: Arc<
         dyn Fn(
                 &str,

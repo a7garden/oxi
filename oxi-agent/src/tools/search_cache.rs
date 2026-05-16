@@ -46,6 +46,12 @@ struct CachedSearch {
     results: Vec<SearchResult>,
 }
 
+impl Default for SearchCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SearchCache {
     /// Create a new empty cache with default capacity (64 entries).
     pub fn new() -> Self {

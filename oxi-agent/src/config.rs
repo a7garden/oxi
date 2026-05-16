@@ -67,6 +67,7 @@ pub struct AfterToolCallContext {
 /// These mirror pi-mono's `AgentLoopConfig` hooks, allowing callers to
 /// inject custom logic at key points in the agentic loop.
 #[derive(Default)]
+#[allow(clippy::type_complexity)]
 pub struct AgentHooks {
     /// Called after each turn completes. Return `true` to stop the agent loop.
     ///
@@ -77,19 +78,23 @@ pub struct AgentHooks {
 
     /// Called before a tool is executed. Return a `BeforeToolCallResult` with
     /// `block: true` to prevent execution.
+    #[allow(clippy::type_complexity)]
     pub before_tool_call:
         Option<Box<dyn Fn(&BeforeToolCallContext) -> BeforeToolCallResult + Send + Sync>>,
 
     /// Called after a tool execution completes. Can override the result.
+    #[allow(clippy::type_complexity)]
     pub after_tool_call:
         Option<Box<dyn Fn(&AfterToolCallContext) -> AfterToolCallResult + Send + Sync>>,
 
     /// Returns steering messages to inject mid-run. Called after each turn
     /// (unless stopped).
+    #[allow(clippy::type_complexity)]
     pub get_steering_messages: Option<Box<dyn Fn() -> Vec<String> + Send + Sync>>,
 
     /// Returns follow-up messages to process after the agent would stop.
     /// Called when the agent has no more tool calls and no steering messages.
+    #[allow(clippy::type_complexity)]
     pub get_follow_up_messages: Option<Box<dyn Fn() -> Vec<String> + Send + Sync>>,
 
     /// Tool execution mode.

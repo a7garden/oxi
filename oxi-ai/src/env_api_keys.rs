@@ -45,7 +45,8 @@ fn get_env(key: &str) -> Option<String> {
 }
 
 /// Bun/Linux sandbox fallback: read from /proc/self/environ
-fn get_proc_env(_key: &str) -> Option<String> {
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+fn get_proc_env(key: &str) -> Option<String> {
     #[allow(unused_imports)]
     use std::os::unix::ffi::OsStrExt;
 

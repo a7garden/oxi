@@ -213,6 +213,7 @@ async fn execute_tool_calls_parallel(
     }
 
     let mut slots: Vec<Option<FinalizedToolCall>> = Vec::with_capacity(finalized_calls.len());
+    #[allow(clippy::type_complexity)]
     let mut pending_futures: Vec<(
         usize,
         Pin<Box<dyn futures::Future<Output = FinalizedToolCall>>>,

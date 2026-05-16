@@ -383,6 +383,7 @@ async fn terminate_child(
 }
 
 /// Run a single agent process with abort support.
+#[allow(clippy::too_many_arguments)]
 async fn run_single_agent(
     cwd: &Path,
     agents: &[AgentConfig],
@@ -668,6 +669,12 @@ pub struct SubagentTool {
     cwd: Option<PathBuf>,
     binary_path: Option<PathBuf>,
     progress_callback: parking_lot::Mutex<Option<ProgressFn>>,
+}
+
+impl Default for SubagentTool {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SubagentTool {

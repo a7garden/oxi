@@ -19,7 +19,9 @@ pub(crate) struct OxiResolver {
 /// We can't use `Oxi` directly because it's in the same crate.
 /// Instead we use a trait object approach.
 pub(crate) struct OxiCore {
+    #[allow(clippy::type_complexity)]
     resolve_provider_fn: Box<dyn Fn(&str) -> Option<Arc<dyn oxi_ai::Provider>> + Send + Sync>,
+    #[allow(clippy::type_complexity)]
     resolve_model_fn: Box<dyn Fn(&str) -> Option<oxi_ai::Model> + Send + Sync>,
 }
 

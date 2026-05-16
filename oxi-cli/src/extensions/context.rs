@@ -22,6 +22,7 @@ pub type ExtensionToolArc = Arc<ExtensionTool>;
 /// Gives extensions access to the session's working directory, settings,
 /// configuration, and various control surfaces (tool registration,
 /// message sending, model switching, etc.).
+#[allow(clippy::type_complexity)]
 pub struct ExtensionContext {
     /// Current working directory.
     pub cwd: PathBuf,
@@ -56,6 +57,7 @@ impl std::fmt::Debug for ExtensionContext {
 
 impl ExtensionContext {
     /// Create a new extension context.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cwd: PathBuf,
         settings: Arc<RwLock<Settings>>,
@@ -183,6 +185,7 @@ impl ExtensionContext {
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Builder for [`ExtensionContext`].
+#[allow(clippy::type_complexity)]
 pub struct ExtensionContextBuilder {
     cwd: PathBuf,
     settings: Option<Arc<RwLock<Settings>>>,
@@ -305,6 +308,7 @@ impl ExtensionContextBuilder {
         self
     }
     /// Set the session-fork callback.
+    #[allow(clippy::type_complexity)]
     pub fn session_fork(mut self, fork: Arc<dyn Fn(&str) -> Result<String> + Send + Sync>) -> Self {
         self.session_fork = Some(fork);
         self

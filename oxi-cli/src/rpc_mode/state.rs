@@ -16,6 +16,7 @@ pub struct RpcServer {
     /// Session state
     session_state: Arc<parking_lot::RwLock<SessionState>>,
     /// Pending extension UI requests
+    #[allow(clippy::type_complexity)]
     pending_extension_requests: Arc<Mutex<Vec<(String, oneshot::Sender<RpcExtensionUiResponse>)>>>,
     /// Event subscribers
     event_tx: mpsc::UnboundedSender<RpcEvent>,

@@ -102,6 +102,7 @@ impl FindTool {
         false
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn find_impl(
         root_dir: &Path,
         path: &str,

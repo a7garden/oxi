@@ -83,6 +83,7 @@ fn render_hint(f: &mut Frame, area: Rect, text: &str, style: Style) {
 }
 
 /// Render a selectable list with pointer, scrolling window, and highlight.
+#[allow(clippy::too_many_arguments)]
 fn render_selectable_list(
     f: &mut Frame,
     area: Rect,
@@ -139,6 +140,7 @@ fn render_selectable_list(
 }
 
 /// Render a list with status indicators (filled/empty circle).
+#[allow(clippy::too_many_arguments)]
 fn render_status_list(
     f: &mut Frame,
     area: Rect,

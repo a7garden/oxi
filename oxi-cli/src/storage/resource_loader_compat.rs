@@ -383,6 +383,7 @@ fn extract_yaml_field(content: &str, field: &str) -> Option<String> {
 #[allow(dead_code)]
 pub struct ResourceWatcher {
     paths: Vec<PathBuf>,
+    #[allow(clippy::type_complexity)]
     callbacks: HashMap<PathBuf, Vec<Box<dyn Fn(ResourceChange) + Send + Sync>>>,
 }
 

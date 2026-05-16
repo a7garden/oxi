@@ -830,6 +830,12 @@ pub struct WasmExtensionManager {
     permissions: HashMap<String, std::collections::HashSet<String>>,
 }
 
+impl Default for WasmExtensionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WasmExtensionManager {
     /// Create an empty manager.
     pub fn new() -> Self {
