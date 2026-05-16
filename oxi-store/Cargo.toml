@@ -1,6 +1,6 @@
 [package]
 name = "oxi-store"
-version = "0.12.0"
+version = "0.14.0"
 edition = "2021"
 description = "Shared persistent state for oxi — sessions, settings, auth, model registry"
 readme = "README.md"

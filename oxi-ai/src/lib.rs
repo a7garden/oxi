@@ -19,6 +19,7 @@ pub mod provider_pool;
 pub mod provider_registry;
 mod providers;
 
+#[allow(missing_docs)]
 pub mod register_builtins { pub use crate::providers::register_builtins::*; }
 pub mod secret;
 mod tools;

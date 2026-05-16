@@ -5,9 +5,52 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.12.0] - 2026-05-14
+## [0.14.0] - 2026-05-16
 
-### Added — oxi-tui / oxi-cli
+### Added — oxi-sdk (oxios Agent OS Engine)
+
+- **KernelToolProvider trait** (`oxi-sdk/src/kernel_bridge.rs`): Bridge interface for oxios kernel tools (exec, memory, browser, persona) to be plugged into the SDK agent builder
+- **AgentGroup** (`oxi-sdk/src/agent_group.rs`): Multi-agent orchestration with Pipeline/Parallel/Orchestrated strategies
+- **MessageBus** (`oxi-sdk/src/message_bus.rs`): Broadcast-based inter-agent communication for oxios environments
+- **AgentMetrics** (`oxi-sdk/src/metrics.rs`): Atomic counters for tracking runs, tokens, durations with snapshot export
+
+### Added — oxi-agent
+
+- **Agent::export_state() / import_state()**: Session persistence via JSON serialization of AgentState
+- **Agent::continue_with()**: Session continuation within same agent instance
+- **Agent::run_tokio_stream()**: Tokio-native event streaming with tokio::sync::mpsc channels (WebSocket/SSE gateway friendly)
+- **StructuredOutput** (`oxi-agent/src/structured_output.rs`): JSON extraction and schema validation from agent responses
+- **AgentState Serialize/Deserialize**: Full state serialization including messages, tokens, iteration progress
+- **AgentConfig::output_mode**: Optional structured output mode configuration
+
+### Added — oxi-ai
+
+- **ProviderPool** (`oxi-ai/src/provider_pool.rs`): Rate limiting and concurrency control with semaphore + sliding window RPM for multi-agent shared API key scenarios
+
+### Added — oxi-sdk / oxi-agent
+
+- **AgentBuilder::kernel_tools()**: Register kernel tools via KernelToolProvider during agent construction
+
+### Fixed — oxi-agent
+
+- **edit_diff.rs**: Detect and reject ambiguous matches (old_text appearing >1 time) with clear error message
+- **edit.rs**: Add serde aliases for `old_text`/`new_text` to fix multi-edit JSON parsing
+- **grep.rs**: Detect and skip broken symlinks before `read_dir` to prevent crashes
+
+### Fixed — tests
+
+- **edge_cases.rs**: Fix `test_read_large_file` offset (101 for 1-indexed), `test_grep_with_broken_symlink` error handling
+- **tools.rs**: Fix `test_bash_working_dir` (handle workspace restriction errors), `test_find_path_not_found` (accept 'Cannot read' error)
+- **provider_mock.rs**: Fix `test_empty_stream` expectation (1 Start event, not 0)
+
+### Changed — oxi-agent
+
+- **SharedState now Clone + Arc-based**: `SharedState` wraps `Arc<RwLock<AgentState>>` enabling state sharing across async boundaries
+- **AgentInner now Clone**: Inner config/provider cloneable for tokio streaming paths
+
+## [0.13.0] - 2026-05-15
+
+### Added — oxi-cli / oxi-agent
 
 - **Thinking level display in footer**: Model shown with thinking level indicator (e.g., `(minimax) MiniMax-M2.7 • high`)
 - **Shift+Tab to cycle thinking level**: Press Shift+Tab to cycle through thinking levels: off → minimal → low → medium → high → xhigh → off
