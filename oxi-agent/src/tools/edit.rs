@@ -13,7 +13,7 @@ use super::edit_diff::{
 };
 use super::file_mutation_queue::global_mutation_queue;
 use super::path_security::PathGuard;
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -23,20 +23,18 @@ use tokio::sync::oneshot;
 
 /// EditTool.
 pub struct EditTool {
-    root_dir: PathBuf,
+    root_dir: Option<PathBuf>,
 }
 
 impl EditTool {
-/// Create with current directory as root.
+/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
-        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        Self { root_dir: None }
     }
 
-    /// Create with a specific working directory.
+    /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self {
-            root_dir: cwd,
-        }
+        Self { root_dir: Some(cwd) }
     }
 
     /// Prepare edit arguments, handling both legacy and multi-edit formats.
@@ -276,10 +274,14 @@ impl AgentTool for EditTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let input = Self::prepare_arguments(&params);
 
-        match Self::apply_edits(&self.root_dir, &input).await {
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+
+        match Self::apply_edits(root, &input).await {
             Ok(output) => {
                 let mut result =
                     AgentToolResult::success(format!("{}\n\n{}", output.message, output.diff));

@@ -45,6 +45,7 @@ impl AgentTool for WasmTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &oxi_agent::ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let manager = self.manager.clone();
         let tool_name = self.tool_name.clone();

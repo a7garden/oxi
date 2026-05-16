@@ -639,6 +639,7 @@ impl crate::tools::AgentTool for EchoTool {
         _tool_call_id: &str,
         params: serde_json::Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        _ctx: &crate::tools::ToolContext,
     ) -> std::result::Result<crate::tools::AgentToolResult, String> {
         let msg = params
             .get("message")

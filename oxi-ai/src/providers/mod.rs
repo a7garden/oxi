@@ -110,6 +110,12 @@ impl ProviderRegistry {
         // 2. Fall back to built-in providers
         get_provider(name).map(|boxed| Arc::from(boxed))
     }
+
+    /// Get a provider by name, checking only custom providers (no built-in fallback).
+    pub fn get_custom(&self, name: &str) -> Option<Arc<dyn Provider>> {
+        let guard = self.custom.read();
+        guard.get(name).cloned()
+    }
 }
 
 // ── Global custom provider registry (legacy) ───────────────────────

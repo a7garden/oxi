@@ -36,6 +36,7 @@ pub mod stream_retry;
 pub mod mcp;
 
 pub use agent::Agent;
+pub use agent::ProviderResolver;
 pub use agent_loop::{AgentLoop, AgentLoopConfig};
 
 /// Agent configuration, hooks, and tool execution mode.
@@ -54,7 +55,7 @@ pub use oxi_ai::{CompactionManager, CompactionStrategy};
 /// Built-in tool implementations and registry.
 pub use tools::{
     AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
-    LsTool, ReadTool, ToolRegistry, WriteTool, ToolError,
+    LsTool, ReadTool, ToolContext, ToolRegistry, WriteTool, ToolError,
 };
 pub use tools::search_cache::{SearchCache, GetSearchResultsTool};
 pub use tools::web_search::WebSearchTool;
@@ -75,7 +76,7 @@ pub mod prelude {
     pub use crate::state::{AgentState, SharedState};
     pub use crate::tools::{
         AgentTool, AgentToolResult, BashTool, EditTool, FindTool, GrepTool,
-        LsTool, ReadTool, ToolRegistry, WriteTool,
+        LsTool, ReadTool, ToolContext, ToolRegistry, WriteTool,
     };
     pub use crate::tools::search_cache::{SearchCache, GetSearchResultsTool};
     pub use crate::tools::web_search::WebSearchTool;

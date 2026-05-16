@@ -1,6 +1,6 @@
 /// Ls tool - list directory contents
 
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use super::path_security::PathGuard;
 use crate::tools::truncate::{format_bytes, truncate_head, TruncationOptions};
 use async_trait::async_trait;
@@ -18,20 +18,18 @@ const DEFAULT_MAX_BYTES: usize = 50 * 1024;
 
 /// LsTool.
 pub struct LsTool {
-    root_dir: PathBuf,
+    root_dir: Option<PathBuf>,
 }
 
 impl LsTool {
-/// Create with current directory as root.
+/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
-        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        Self { root_dir: None }
     }
 
-    /// Create with a specific working directory.
+    /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self {
-            root_dir: cwd,
-        }
+        Self { root_dir: Some(cwd) }
     }
 
     /// Format file size in human-readable format
@@ -253,6 +251,7 @@ impl AgentTool for LsTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let path = params
             .get("path")
@@ -274,7 +273,10 @@ impl AgentTool for LsTool {
             .and_then(|v: &Value| v.as_u64())
             .map(|l| l as usize);
 
-        match Self::ls_impl(&self.root_dir, path, all, long_format, entry_limit).await {
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+
+        match Self::ls_impl(root, path, all, long_format, entry_limit).await {
             Ok(output) => Ok(AgentToolResult::success(output)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }

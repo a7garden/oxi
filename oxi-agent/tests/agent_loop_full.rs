@@ -214,6 +214,7 @@ mod tests {
             _tool_call_id: &str,
             params: serde_json::Value,
             _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+            _ctx: &oxi_agent::ToolContext,
         ) -> Result<AgentToolResult, String> {
             let msg = params
                 .get("message")
@@ -261,6 +262,7 @@ mod tests {
             _tool_call_id: &str,
             _params: serde_json::Value,
             _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+            _ctx: &oxi_agent::ToolContext,
         ) -> Result<AgentToolResult, String> {
             let count = self.call_count.fetch_add(1, Ordering::Relaxed);
             Ok(AgentToolResult::success(format!("Call #{}", count + 1)))

@@ -1,6 +1,6 @@
 /// Find tool - find files by name or pattern
 
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use super::path_security::PathGuard;
 use async_trait::async_trait;
 use glob::Pattern;
@@ -11,20 +11,18 @@ use tokio::sync::oneshot;
 
 /// FindTool.
 pub struct FindTool {
-    root_dir: PathBuf,
+    root_dir: Option<PathBuf>,
 }
 
 impl FindTool {
-/// Create with current directory as root.
+/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
-        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        Self { root_dir: None }
     }
 
-    /// Create with a specific working directory.
+    /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self {
-            root_dir: cwd,
-        }
+        Self { root_dir: Some(cwd) }
     }
 
     /// Check if a filename matches a simple glob pattern
@@ -353,6 +351,7 @@ impl AgentTool for FindTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let path = params
             .get("path")
@@ -386,8 +385,11 @@ impl AgentTool for FindTool {
             .and_then(|v: &Value| v.as_bool())
             .unwrap_or(false);
 
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+
         match Self::find_impl(
-            &self.root_dir,
+            root,
             path,
             name,
             file_type,

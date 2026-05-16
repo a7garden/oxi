@@ -332,12 +332,100 @@ pub fn is_builtin_provider(name: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// State-free provider factory
+// ---------------------------------------------------------------------------
+
+/// Create a built-in provider by name.
+///
+/// Returns `None` if the name is not a known built-in provider.
+/// Unlike `get_provider()`, this does NOT check the global `CUSTOM_PROVIDERS` registry,
+/// making it suitable for SDK use where isolated instances are required.
+pub fn create_builtin_provider(name: &str) -> Option<Box<dyn super::Provider>> {
+    // First resolve aliases
+    let canonical = resolve_provider_name(name).unwrap_or(name);
+
+    match canonical {
+        "anthropic" => Some(Box::new(super::anthropic::AnthropicProvider::new())),
+        "openai" => Some(Box::new(super::openai::OpenAiProvider::new())),
+        "openai-responses" => Some(Box::new(super::openai_responses::OpenAiResponsesProvider::new())),
+        "google" => Some(Box::new(super::google::GoogleProvider::new())),
+        "vertex" => Some(Box::new(super::vertex::VertexProvider::new())),
+        "mistral" => Some(Box::new(super::mistral::MistralProvider::new())),
+        "azure" | "azure-openai" => Some(Box::new(super::azure::AzureProvider::new())),
+        "bedrock" | "amazon-bedrock" | "aws-bedrock" => Some(Box::new(super::bedrock::BedrockProvider::new())),
+        "deepseek" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.deepseek.com",
+        ))),
+        "groq" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.groq.com/openai/v1",
+        ))),
+        "cerebras" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.cerebras.ai/v1",
+        ))),
+        "xai" | "grok" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.x.ai/v1",
+        ))),
+        "openrouter" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://openrouter.ai/api/v1",
+        ))),
+        "fireworks" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.fireworks.ai/inference/v1",
+        ))),
+        "cloudflare" | "workers-ai" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.cloudflare.com/client/v4/accounts",
+        ))),
+        "copilot" | "github-copilot" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.githubcopilot.com",
+        ))),
+        "codex" | "github-codex" | "copilot-codex" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.githubcopilot.com",
+        ))),
+        "minimax" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.minimax.chat/v1",
+        ))),
+        "zai" => Some(Box::new(super::openai::OpenAiProvider::with_base_url(
+            "https://api.z.ai/api/coding/paas/v4",
+        ))),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_create_builtin_provider_anthropic() {
+        let p = create_builtin_provider("anthropic").unwrap();
+        assert_eq!(p.name(), "anthropic");
+    }
+
+    #[test]
+    fn test_create_builtin_provider_openai() {
+        let p = create_builtin_provider("openai").unwrap();
+        assert_eq!(p.name(), "openai");
+    }
+
+    #[test]
+    fn test_create_builtin_provider_by_alias() {
+        let p = create_builtin_provider("amazon-bedrock").unwrap();
+        assert_eq!(p.name(), "bedrock");
+    }
+
+    #[test]
+    fn test_create_builtin_provider_unknown() {
+        assert!(create_builtin_provider("unknown").is_none());
+    }
+
+    #[test]
+    fn test_create_builtin_provider_deepseek() {
+        let p = create_builtin_provider("deepseek").unwrap();
+        assert_eq!(p.name(), "openai"); // Uses OpenAI provider with custom base URL
+    }
 
     #[test]
     fn test_get_builtin_provider_openai() {

@@ -10,7 +10,7 @@
 use super::file_mutation_queue::global_mutation_queue;
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -25,20 +25,18 @@ const PREVIEW_THRESHOLD_LINES: usize = 20;
 
 /// WriteTool.
 pub struct WriteTool {
-    root_dir: PathBuf,
+    root_dir: Option<PathBuf>,
 }
 
 impl WriteTool {
-/// Create with current directory as root.
+/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
-        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        Self { root_dir: None }
     }
 
-    /// Create with a specific working directory.
+    /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
-        Self {
-            root_dir: cwd,
-        }
+        Self { root_dir: Some(cwd) }
     }
 
     /// Build a human-readable preview of the content that was written.
@@ -207,6 +205,7 @@ impl AgentTool for WriteTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let path = params
             .get("path")
@@ -223,7 +222,10 @@ impl AgentTool for WriteTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        match Self::write_file_impl(&self.root_dir, path, content, append).await {
+        // Use root_dir if set, else ctx.root()
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+
+        match Self::write_file_impl(root, path, content, append).await {
             Ok(msg) => Ok(AgentToolResult::success(msg)),
             Err(e) => Ok(AgentToolResult::error(e)),
         }
@@ -410,7 +412,7 @@ mod tests {
             "content": "via trait"
         });
 
-        let result = tool.execute("test-id", params, None).await;
+        let result = tool.execute("test-id", params, None, &ToolContext::default()).await;
         assert!(result.is_ok());
         let tool_result = result.unwrap();
         assert!(tool_result.success);
@@ -427,7 +429,7 @@ mod tests {
             "content": "no path"
         });
 
-        let result = tool.execute("test-id", params, None).await;
+        let result = tool.execute("test-id", params, None, &ToolContext::default()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("path"));
     }
@@ -439,7 +441,7 @@ mod tests {
             "path": "/tmp/test.txt"
         });
 
-        let result = tool.execute("test-id", params, None).await;
+        let result = tool.execute("test-id", params, None, &ToolContext::default()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("content"));
     }
@@ -457,7 +459,7 @@ mod tests {
             "path": &path_str,
             "content": "first "
         });
-        tool.execute("test-id-1", params, None).await.unwrap();
+        tool.execute("test-id-1", params, None, &ToolContext::default()).await.unwrap();
 
         // Append
         let params = json!({
@@ -465,7 +467,7 @@ mod tests {
             "content": "second",
             "append": true
         });
-        let result = tool.execute("test-id-2", params, None).await.unwrap();
+        let result = tool.execute("test-id-2", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("Appended"));
 

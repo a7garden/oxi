@@ -8,7 +8,7 @@
 /// Agent definitions are markdown files with YAML frontmatter,
 /// discovered from `~/.oxi/agents/` (user) and `.oxi/agents/` (project).
 
-use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
+use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -641,16 +641,26 @@ struct ChainStep {
 
 /// SubagentTool.
 pub struct SubagentTool {
-    cwd: PathBuf,
+    /// Explicit working directory override. If None, uses ToolContext.root() at runtime.
+    cwd: Option<PathBuf>,
     binary_path: Option<PathBuf>,
     progress_callback: parking_lot::Mutex<Option<ProgressFn>>,
 }
 
 impl SubagentTool {
-/// TODO.
-    pub fn new(cwd: impl Into<PathBuf>) -> Self {
+/// Create with no explicit root (uses ToolContext.root() at runtime).
+    pub fn new() -> Self {
         Self {
-            cwd: cwd.into(),
+            cwd: None,
+            binary_path: None,
+            progress_callback: parking_lot::Mutex::new(None),
+        }
+    }
+
+    /// Create with an explicit working directory (overrides ToolContext).
+    pub fn with_cwd(cwd: impl Into<PathBuf>) -> Self {
+        Self {
+            cwd: Some(cwd.into()),
             binary_path: None,
             progress_callback: parking_lot::Mutex::new(None),
         }
@@ -740,13 +750,17 @@ impl AgentTool for SubagentTool {
         _tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
+        // Use explicit cwd if set, else ctx.root()
+        let effective_cwd = self.cwd.as_deref().unwrap_or(ctx.root());
+
         let scope: AgentScope = params
             .get("agentScope")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or(AgentScope::User);
 
-        let agents = discover_agents(&self.cwd, scope);
+        let agents = discover_agents(effective_cwd, scope);
         let binary = self.get_binary();
         let progress = self.progress_callback.lock().clone();
 
@@ -771,21 +785,21 @@ impl AgentTool for SubagentTool {
         // ── Chain mode ──
         if has_chain {
             return execute_chain_mode(
-                &self.cwd, &agents, params, &binary, progress, signal,
+                effective_cwd, &agents, params, &binary, progress, signal,
             ).await;
         }
 
         // ── Parallel mode ──
         if has_tasks {
             return execute_parallel_mode(
-                &self.cwd, &agents, params, &binary, progress,
+                effective_cwd, &agents, params, &binary, progress,
             ).await;
         }
 
         // ── Single mode ──
         if has_single {
             return execute_single_mode(
-                &self.cwd, &agents, params, &binary, progress, signal,
+                effective_cwd, &agents, params, &binary, progress, signal,
             ).await;
         }
 
@@ -1056,7 +1070,7 @@ mod tests {
 
     #[test]
     fn test_schema_structure() {
-        let tool = SubagentTool::new(".");
+        let tool = SubagentTool::new();
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["agent"].is_object());

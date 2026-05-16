@@ -3,7 +3,7 @@
 /// Stores search results in memory keyed by generated IDs, enabling the
 /// `get_search_results` tool to retrieve previous results without re-querying.
 
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -146,6 +146,7 @@ impl AgentTool for GetSearchResultsTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let search_id = params["searchId"]
             .as_str()
@@ -290,7 +291,7 @@ mod tests {
 
         let tool = GetSearchResultsTool::new(cache);
         let result = tool
-            .execute("test", json!({ "searchId": id }), None)
+            .execute("test", json!({ "searchId": id }), None, &ToolContext::default())
             .await
             .unwrap();
 
@@ -304,7 +305,7 @@ mod tests {
         let cache = Arc::new(SearchCache::new());
         let tool = GetSearchResultsTool::new(cache);
         let result = tool
-            .execute("test", json!({ "searchId": "bad-id" }), None)
+            .execute("test", json!({ "searchId": "bad-id" }), None, &ToolContext::default())
             .await;
 
         assert!(result.is_err());

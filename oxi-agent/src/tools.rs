@@ -6,9 +6,64 @@ use crate::types::ToolDefinition;
 use async_trait::async_trait;
 use serde_json::Value;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::oneshot;
+
+/// Context passed to tools at execution time.
+///
+/// This allows tools to operate on a specific workspace without being
+/// rebuilt. When `root_dir` is `Some`, tools use it as their base directory.
+/// When `None`, tools should fall back to `workspace_dir`.
+#[derive(Debug, Clone)]
+pub struct ToolContext {
+    /// Primary workspace directory (used when root_dir is None).
+    pub workspace_dir: PathBuf,
+    /// Optional explicit root directory for file tools.
+    /// Takes priority over workspace_dir if present.
+    pub root_dir: Option<PathBuf>,
+    /// Session identifier for logging/tracing.
+    pub session_id: Option<String>,
+}
+
+impl ToolContext {
+    /// Create a new context with the given workspace.
+    pub fn new(workspace_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            workspace_dir: workspace_dir.into(),
+            root_dir: None,
+            session_id: None,
+        }
+    }
+
+    /// Get the effective root directory.
+    /// Returns root_dir if set, otherwise workspace_dir.
+    pub fn root(&self) -> &Path {
+        self.root_dir.as_deref().unwrap_or(&self.workspace_dir)
+    }
+
+    /// Set a session ID.
+    pub fn with_session(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+
+    /// Set an explicit root directory.
+    pub fn with_root(mut self, root_dir: impl Into<PathBuf>) -> Self {
+        self.root_dir = Some(root_dir.into());
+        self
+    }
+}
+
+impl Default for ToolContext {
+    fn default() -> Self {
+        Self {
+            workspace_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            root_dir: None,
+            session_id: None,
+        }
+    }
+}
 
 /// Result type for tool execution
 pub type ToolError = String;
@@ -107,10 +162,14 @@ pub trait AgentTool: Send + Sync {
 
     /// Execute the tool with the given tool call ID and parameters.
     ///
+    /// The `ctx` parameter provides workspace information. File tools should
+    /// use `ctx.root()` to get the effective directory. Custom tools can use
+    /// `ctx.workspace_dir` for workspace-relative operations.
+    ///
     /// # Examples
     ///
     /// ```ignore
-    /// use oxi_agent::{AgentTool, AgentToolResult};
+    /// use oxi_agent::{AgentTool, AgentToolResult, ToolContext};
     /// use serde_json::json;
     /// use async_trait::async_trait;
     ///
@@ -126,8 +185,8 @@ pub trait AgentTool: Send + Sync {
     ///         "properties": {}
     ///     }) }
     ///
-    ///     async fn execute(&self, tool_call_id: &str, params: Value, _signal: Option<oneshot::Receiver<()>>) -> Result<AgentToolResult, String> {
-    ///         println!("Tool '{}' called with params: {:?}", tool_call_id, params);
+    ///     async fn execute(&self, tool_call_id: &str, params: Value, _signal: Option<oneshot::Receiver<()>>, ctx: &ToolContext) -> Result<AgentToolResult, String> {
+    ///         println!("Tool '{}' called with params: {:?}, workspace: {:?}", tool_call_id, params, ctx.workspace_dir);
     ///         Ok(AgentToolResult::success("Done!"))
     ///     }
     /// }
@@ -137,6 +196,7 @@ pub trait AgentTool: Send + Sync {
         tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError>;
 
     /// Called with progress updates during execution.
@@ -325,7 +385,7 @@ impl ToolRegistry {
             Box::new(web_search::WebSearchTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
             Box::new(search_cache::GetSearchResultsTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
             Box::new(github::GitHubTool::new(cache_once.get_or_init(|| Arc::new(search_cache::SearchCache::new())).clone())),
-            Box::new(SubagentTool::new(cwd)),
+            Box::new(SubagentTool::with_cwd(cwd)),
         ];
 
         all_tools.push(Box::new(crate::mcp::McpTool::new(mcp_manager)));

@@ -6,7 +6,7 @@
 
 use super::path_security::PathGuard;
 use super::truncate::{self, TruncationOptions};
-use super::{AgentTool, AgentToolResult, ProgressCallback, ToolError};
+use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
 use async_trait::async_trait;
 use base64::Engine;
 use oxi_ai::{ContentBlock, ImageContent, TextContent};
@@ -30,20 +30,23 @@ const IMAGE_EXTENSIONS: &[(&str, &str)] = &[
 
 /// ReadTool.
 pub struct ReadTool {
-    root_dir: PathBuf,
+    root_dir: Option<PathBuf>,
     progress_callback: Arc<Mutex<Option<ProgressCallback>>>,
 }
 
 impl ReadTool {
-/// Create with current directory as root.
+/// Create with no explicit root (uses ToolContext.workspace_dir at runtime).
     pub fn new() -> Self {
-        Self::with_cwd(std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        Self {
+            root_dir: None,
+            progress_callback: Arc::new(Mutex::new(None)),
+        }
     }
 
-    /// Create with a specific working directory.
+    /// Create with a specific working directory (overrides ToolContext).
     pub fn with_cwd(cwd: PathBuf) -> Self {
         Self {
-            root_dir: cwd,
+            root_dir: Some(cwd),
             progress_callback: Arc::new(Mutex::new(None)),
         }
     }
@@ -301,6 +304,7 @@ impl AgentTool for ReadTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<tokio::sync::oneshot::Receiver<()>>,
+        ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let path_str = params
             .get("path")
@@ -317,8 +321,9 @@ impl AgentTool for ReadTool {
             .and_then(|v| v.as_u64())
             .map(|n| n as usize);
 
-        // Security: validate path with PathGuard
-        let guard = PathGuard::new(&self.root_dir);
+        // Security: validate path with PathGuard (use root_dir if set, else ctx)
+        let root = self.root_dir.as_deref().unwrap_or(ctx.root());
+        let guard = PathGuard::new(root);
         let validated = guard.validate_traversal(Path::new(path_str))
             .map_err(|e| e.to_string())?;
         let path = validated.as_path();
@@ -373,7 +378,7 @@ mod tests {
         let f = make_text_file("hello\nworld\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("hello"));
         assert!(result.output.contains("world"));
@@ -384,7 +389,7 @@ mod tests {
         let f = make_text_file("line1\nline2\nline3\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         // Should contain line numbers
         assert!(result.output.contains("1"));
@@ -400,7 +405,7 @@ mod tests {
         let f = make_text_file("line1\nline2\nline3\nline4\nline5\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap(), "offset": 3});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         // Should show lines 3 onwards
         assert!(result.output.contains("Showing lines 3-5 of 5"));
@@ -417,7 +422,7 @@ mod tests {
         let f = make_text_file("line1\nline2\nline3\nline4\nline5\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap(), "offset": 2, "limit": 2});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("\tline2"));
         assert!(result.output.contains("\tline3"));
@@ -429,7 +434,7 @@ mod tests {
         let f = make_text_file("line1\nline2\n");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap(), "offset": 999});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(!result.success);
         assert!(result.output.contains("exceeds file length"));
     }
@@ -441,7 +446,7 @@ mod tests {
         let f = make_text_file(&content.join("\n"));
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("truncated"));
         assert!(result.output.contains("Use offset="));
@@ -451,7 +456,7 @@ mod tests {
     async fn test_read_path_traversal_rejected() {
         let tool = ReadTool::new();
         let params = json!({"path": "../../etc/passwd"});
-        let result = tool.execute("test", params, None).await;
+        let result = tool.execute("test", params, None, &ToolContext::default()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Path traversal"));
     }
@@ -460,7 +465,7 @@ mod tests {
     async fn test_read_nonexistent_file() {
         let tool = ReadTool::new();
         let params = json!({"path": "/nonexistent/path/file.txt"});
-        let result = tool.execute("test", params, None).await;
+        let result = tool.execute("test", params, None, &ToolContext::default()).await;
         assert!(result.is_err() || !result.unwrap().success);
     }
 
@@ -472,7 +477,7 @@ mod tests {
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(!result.success);
         assert!(result.output.contains("binary"));
     }
@@ -486,7 +491,7 @@ mod tests {
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("image/png"));
         // Should have content blocks with image
@@ -501,7 +506,7 @@ mod tests {
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("image/jpeg"));
         let blocks = result.content_blocks.unwrap();
@@ -515,7 +520,7 @@ mod tests {
         f.flush().unwrap();
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
         assert!(result.output.contains("image/webp"));
     }
@@ -525,7 +530,7 @@ mod tests {
         let f = make_text_file("");
         let tool = ReadTool::new();
         let params = json!({"path": f.path().to_str().unwrap()});
-        let result = tool.execute("test", params, None).await.unwrap();
+        let result = tool.execute("test", params, None, &ToolContext::default()).await.unwrap();
         assert!(result.success);
     }
 
@@ -533,7 +538,7 @@ mod tests {
     async fn test_read_file_not_found() {
         let tool = ReadTool::new();
         let params = json!({"path": "/tmp/nonexistent_oxi_test_file_12345.txt"});
-        let result = tool.execute("test", params, None).await;
+        let result = tool.execute("test", params, None, &ToolContext::default()).await;
         match result {
             Err(e) => assert!(e.contains("File not found")),
             Ok(r) => assert!(!r.success),
@@ -544,7 +549,7 @@ mod tests {
     async fn test_read_directory_error() {
         let tool = ReadTool::new();
         let params = json!({"path": "/tmp"});
-        let result = tool.execute("test", params, None).await;
+        let result = tool.execute("test", params, None, &ToolContext::default()).await;
         match result {
             Err(e) => assert!(e.contains("directory")),
             Ok(r) => assert!(!r.success || r.output.contains("directory")),

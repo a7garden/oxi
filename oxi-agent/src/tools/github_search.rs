@@ -7,7 +7,7 @@
 /// - Structured JSON results — no HTML scraping
 /// - Result caching with the shared SearchCache
 
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use super::search_cache::{SearchCache, SearchResult};
 use super::http_client::shared_http_client;
 use async_trait::async_trait;
@@ -337,6 +337,7 @@ impl AgentTool for GitHubSearchTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let query = params["query"]
             .as_str()

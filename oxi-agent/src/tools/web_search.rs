@@ -9,7 +9,7 @@
 /// - Configurable engine selection and result count
 /// - Zero-config: no API keys, no external binary needed
 
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use super::search_cache::{SearchCache, SearchResult};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -173,6 +173,7 @@ impl AgentTool for WebSearchTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         let query = params["query"]
             .as_str()

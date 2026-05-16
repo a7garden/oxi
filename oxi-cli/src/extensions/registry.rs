@@ -589,7 +589,7 @@ impl oxi_agent::AgentTool for WrappedTool {
     fn label(&self) -> &str { self.inner.label() }
     fn description(&self) -> &str { self.inner.description() }
     fn parameters_schema(&self) -> Value { self.inner.parameters_schema() }
-    async fn execute(&self, tool_call_id: &str, params: Value, signal: Option<tokio::sync::oneshot::Receiver<()>>) -> Result<AgentToolResult, String> {
-        self.inner.execute(tool_call_id, params, signal).await
+    async fn execute(&self, tool_call_id: &str, params: Value, signal: Option<tokio::sync::oneshot::Receiver<()>>, ctx: &oxi_agent::ToolContext) -> Result<AgentToolResult, String> {
+        self.inner.execute(tool_call_id, params, signal, ctx).await
     }
 }

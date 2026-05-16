@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use super::config::{AfterToolCallHook, ToolExecutionMode};
 use super::helpers::{FinalizedToolCall, should_terminate_batch, create_tool_result_message};
+use crate::tools::ToolContext;
 
 pub(crate) struct ExecutedToolCallBatch {
     pub messages: Vec<ToolResultMessage>,
@@ -45,11 +46,12 @@ pub(crate) async fn execute_tool_calls(
     assistant_message: &AssistantMessage,
     tool_calls: Vec<ToolCall>,
     emit: &super::EmitFn,
+    ctx: &ToolContext,
 ) -> Result<ExecutedToolCallBatch> {
     if loop_ref.config.tool_execution == ToolExecutionMode::Sequential {
-        execute_tool_calls_sequential(loop_ref, messages, assistant_message, tool_calls, emit).await
+        execute_tool_calls_sequential(loop_ref, messages, assistant_message, tool_calls, emit, ctx).await
     } else {
-        execute_tool_calls_parallel(loop_ref, messages, assistant_message, tool_calls, emit).await
+        execute_tool_calls_parallel(loop_ref, messages, assistant_message, tool_calls, emit, ctx).await
     }
 }
 
@@ -59,6 +61,7 @@ async fn execute_tool_calls_sequential(
     _assistant_message: &AssistantMessage,
     tool_calls: Vec<ToolCall>,
     emit: &super::EmitFn,
+    ctx: &ToolContext,
 ) -> Result<ExecutedToolCallBatch> {
     let mut finalized_calls = Vec::new();
     let mut tool_result_messages = Vec::new();
@@ -84,7 +87,7 @@ async fn execute_tool_calls_sequential(
                 is_error: prepared.is_error,
             }
         } else {
-            let executed = execute_prepared_tool_call(loop_ref, &prepared, emit).await;
+            let executed = execute_prepared_tool_call(loop_ref, &prepared, emit, ctx).await;
 
             let mut result = executed.result;
             let mut is_error = executed.is_error;
@@ -135,6 +138,7 @@ async fn execute_tool_calls_parallel(
     _assistant_message: &AssistantMessage,
     tool_calls: Vec<ToolCall>,
     emit: &super::EmitFn,
+    ctx: &ToolContext,
 ) -> Result<ExecutedToolCallBatch> {
     let mut finalized_calls: Vec<FinalizedToolCallEntry> = Vec::new();
 
@@ -176,6 +180,7 @@ async fn execute_tool_calls_parallel(
             let args = prepared.args.clone();
             let after_hook = loop_ref.after_tool_call.clone();
             let emit_clone = emit.clone();
+            let ctx_clone = ctx.clone();
 
             finalized_calls.push(FinalizedToolCallEntry::Future(Box::pin(async move {
                 let executed = execute_prepared_tool_call_static(
@@ -184,6 +189,7 @@ async fn execute_tool_calls_parallel(
                     args,
                     after_hook.clone(),
                     emit_clone.clone(),
+                    &ctx_clone,
                 ).await;
 
                 FinalizedToolCall {
@@ -244,6 +250,7 @@ pub(crate) async fn execute_prepared_tool_call_static(
     args: serde_json::Value,
     after_hook: Option<AfterToolCallHook>,
     emit: Arc<dyn Fn(AgentEvent) + Send + Sync>,
+    ctx: &ToolContext,
 ) -> ExecutedToolCallOutcome {
     let tool_call_id = tool_call.id.clone();
     let tool_name = tool_call.name.clone();
@@ -252,7 +259,7 @@ pub(crate) async fn execute_prepared_tool_call_static(
     let mut is_error = false;
 
     if let Some(ref tool) = tool {
-        match tool.execute(&tool_call_id, args, None).await {
+        match tool.execute(&tool_call_id, args, None, ctx).await {
             Ok(r) => result = r,
             Err(e) => {
                 result = AgentToolResult::error(e);
@@ -335,6 +342,7 @@ async fn execute_prepared_tool_call(
     _loop_ref: &super::AgentLoop,
     prepared: &PreparedToolCallOutcome,
     emit: &super::EmitFn,
+    ctx: &ToolContext,
 ) -> ExecutedToolCallOutcome {
     let tool_call_id = prepared.tool_call.id.clone();
     let tool_name = prepared.tool_call.name.clone();
@@ -359,7 +367,7 @@ async fn execute_prepared_tool_call(
             progress_cb(msg);
         }));
 
-        match tool.execute(&tool_call_id, prepared.args.clone(), None).await {
+        match tool.execute(&tool_call_id, prepared.args.clone(), None, ctx).await {
             Ok(r) => result = r,
             Err(e) => {
                 result = AgentToolResult::error(e);

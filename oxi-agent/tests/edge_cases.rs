@@ -26,7 +26,7 @@ async fn cleanup(path: &str) {
 }
 
 async fn execute_tool(tool: &dyn AgentTool, params: serde_json::Value) -> AgentToolResult {
-    tool.execute("test_call", params, None).await.unwrap()
+    tool.execute("test_call", params, None, &oxi_agent::ToolContext::default()).await.unwrap()
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -128,6 +128,7 @@ async fn test_grep_with_broken_symlink() {
                 "path": dir
             }),
             None,
+            &ToolContext::default(),
         )
         .await;
 
@@ -248,7 +249,7 @@ async fn test_read_file_with_binary_content() {
     fs::write(&file_path, &binary_content).await.unwrap();
 
     let tool = ReadTool::new();
-    let result = tool.execute("test_call", json!({ "path": file_path }), None).await;
+    let result = tool.execute("test_call", json!({ "path": file_path }), None, &oxi_agent::ToolContext::default()).await;
 
     // Should detect binary and return an error or warning
     assert!(result.is_err() || !result.as_ref().unwrap().success || result.unwrap().output.contains("binary"));
@@ -271,6 +272,7 @@ async fn test_read_offset_beyond_file() {
                 "limit": 10
             }),
             None,
+            &ToolContext::default(),
         )
         .await;
 
@@ -675,6 +677,7 @@ async fn test_bash_timeout() {
                 "timeout": 1
             }),
             None,
+            &ToolContext::default(),
         )
         .await;
 

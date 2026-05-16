@@ -1,7 +1,7 @@
 /// Tool definition wrapping utilities
 /// Provides adapters for converting between tool representations.
 
-use crate::tools::{AgentTool, AgentToolResult, ToolError};
+use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use crate::types::ToolDefinition;
 use async_trait::async_trait;
 use serde_json::Value;
@@ -91,6 +91,7 @@ impl AgentTool for DynamicTool {
         tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         (self.execute_fn)(tool_call_id, params, signal).await
     }
@@ -148,6 +149,7 @@ impl<T: ToolDefinitionLike + 'static> AgentTool for DefinitionWrapper<T> {
         tool_call_id: &str,
         params: Value,
         signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         self.0.tool_execute(tool_call_id, params, signal).await
     }
@@ -198,6 +200,7 @@ mod tests {
                 _tool_call_id: &str,
                 _params: Value,
                 _signal: Option<oneshot::Receiver<()>>,
+                _ctx: &ToolContext,
             ) -> Result<AgentToolResult, ToolError> {
                 Ok(AgentToolResult::success("test"))
             }
@@ -239,7 +242,7 @@ mod tests {
             },
         );
 
-        let result = tool.execute("call_1", serde_json::json!({"key": "value"}), None).await;
+        let result = tool.execute("call_1", serde_json::json!({"key": "value"}), None, &ToolContext::default()).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().output, "got: {\"key\":\"value\"}");
     }
@@ -275,7 +278,7 @@ mod tests {
     #[tokio::test]
     async fn test_wrapped_tool_execution() {
         let wrapped = wrap_tool_definition(MockDefLike);
-        let result = wrapped.execute("call_1", Value::Null, None).await;
+        let result = wrapped.execute("call_1", Value::Null, None, &ToolContext::default()).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap().output, "mock result");
     }

@@ -12,7 +12,7 @@ categories = ["development-tools", "asynchronous"]
 exclude = ["target/"]
 
 [dependencies]
-oxi-ai = { version = "0.12.0", path = "../oxi-ai" }
+oxi-ai = { path = "../oxi-ai" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

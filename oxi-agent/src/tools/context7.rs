@@ -13,7 +13,7 @@
 //!
 //! Anonymous access works without a key but has lower rate limits.
 
-use crate::tools::{AgentTool, AgentToolResult};
+use crate::tools::{AgentTool, AgentToolResult, ToolContext};
 use crate::tools::http_client::shared_http_client;
 use async_trait::async_trait;
 use std::sync::OnceLock;
@@ -177,6 +177,7 @@ impl AgentTool for Context7ResolveLibraryIdTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, String> {
         let query = params
             .get("query")
@@ -279,6 +280,7 @@ impl AgentTool for Context7QueryDocsTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, String> {
         let library_id = params
             .get("libraryId")

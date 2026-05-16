@@ -9,14 +9,48 @@ use crate::types::{Response, StopReason};
 use anyhow::{Error, Result};
 use oxi_ai::{
     transform_for_provider, CompactionManager, CompactionStrategy,
-    LlmCompactor, Provider,
+    LlmCompactor, Model, Provider,
 };
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Mutable agent internals protected by a read-write lock.
+// ── ProviderResolver trait ────────────────────────────────────────
 
+/// Trait for resolving providers and models within an Agent.
+///
+/// This abstracts away global static registries, allowing SDK users
+/// to provide isolated provider/model lookups.
+///
+/// When using the SDK (`oxi-sdk`), the `Oxi` engine implements this trait.
+/// When using `Agent::new()` directly, a global fallback is used.
+pub trait ProviderResolver: Send + Sync + 'static {
+    /// Resolve a provider by name, returning an Arc handle.
+    fn resolve_provider(&self, name: &str) -> Option<Arc<dyn Provider>>;
+
+    /// Resolve a model ID ("provider/model" or bare "model") to a Model.
+    fn resolve_model(&self, model_id: &str) -> Option<Model>;
+}
+
+/// Global provider resolver — uses `oxi_ai` global functions.
+///
+/// This is the default resolver when using `Agent::new()`, preserving
+/// backward compatibility with existing CLI usage.
+pub(crate) struct GlobalProviderResolver;
+
+impl ProviderResolver for GlobalProviderResolver {
+    fn resolve_provider(&self, name: &str) -> Option<Arc<dyn Provider>> {
+        oxi_ai::get_provider(name).map(|p| Arc::from(p))
+    }
+
+    fn resolve_model(&self, model_id: &str) -> Option<Model> {
+        crate::model_id::resolve_model_from_id(model_id)
+    }
+}
+
+// ── AgentInner ────────────────────────────────────────────────────
+
+/// Mutable agent internals protected by a read-write lock.
 struct AgentInner {
     config: AgentConfig,
     provider: Arc<dyn Provider>,
@@ -34,17 +68,49 @@ pub struct Agent {
     hooks: parking_lot::RwLock<crate::config::AgentHooks>,
     /// Guard: true while a run is in progress. Prevents concurrent runs.
     is_running: AtomicBool,
+    /// Provider/model resolver. Uses global functions by default,
+    /// or a custom resolver when created via `new_with_resolver()`.
+    resolver: Arc<dyn ProviderResolver>,
 }
 
 impl Agent {
     /// Create a new agent with the given provider, config, and tool registry.
+    ///
+    /// Uses the global `oxi_ai::get_provider()` / `resolve_model_from_id()`
+    /// for model switching. For isolated instances, use [`new_with_resolver`].
+    ///
+    /// [`new_with_resolver`]: Agent::new_with_resolver
     pub fn new(provider: Arc<dyn Provider>, config: AgentConfig, tools: Arc<ToolRegistry>) -> Self {
+        let resolver = Arc::new(GlobalProviderResolver);
+        Self::build_inner(provider, config, tools, resolver)
+    }
+
+    /// Create an agent with a custom provider/model resolver.
+    ///
+    /// This is the preferred constructor for SDK usage where provider
+    /// and model registries must be isolated from global state.
+    pub fn new_with_resolver(
+        provider: Arc<dyn Provider>,
+        config: AgentConfig,
+        tools: Arc<ToolRegistry>,
+        resolver: Arc<dyn ProviderResolver>,
+    ) -> Self {
+        Self::build_inner(provider, config, tools, resolver)
+    }
+
+    /// Internal constructor shared by `new()` and `new_with_resolver()`.
+    fn build_inner(
+        provider: Arc<dyn Provider>,
+        config: AgentConfig,
+        tools: Arc<ToolRegistry>,
+        resolver: Arc<dyn ProviderResolver>,
+    ) -> Self {
         let mut compaction_manager =
             CompactionManager::new(config.compaction_strategy.clone(), config.context_window);
 
         // Pre-initialize the LLM compactor if compaction is enabled
         if config.compaction_strategy != CompactionStrategy::Disabled {
-            let model = crate::model_id::resolve_model_from_id(&config.model_id);
+            let model = resolver.resolve_model(&config.model_id);
 
             if let Some(model) = model {
                 let llm_compactor =
@@ -60,6 +126,7 @@ impl Agent {
             compaction_manager,
             hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
             is_running: AtomicBool::new(false),
+            resolver,
         }
     }
 
@@ -95,18 +162,18 @@ impl Agent {
     /// # Returns
     /// `Ok(())` on success, or an error if the model/provider is unknown
     pub fn switch_model(&self, model_id: &str) -> Result<()> {
-        let new_model = crate::model_id::resolve_model_from_id(model_id)
+        let new_model = self.resolver.resolve_model(model_id)
             .ok_or_else(|| Error::msg(format!("Model '{}' not found", model_id)))?;
 
-        // Create the new provider
-        let new_provider = oxi_ai::get_provider(&new_model.provider)
+        // Create the new provider via resolver
+        let new_provider = self.resolver.resolve_provider(&new_model.provider)
             .ok_or_else(|| Error::msg(format!("Provider '{}' not found", new_model.provider)))?;
 
         // Detect API change and transform messages if needed
         {
             let inner = self.config();
             let old_model_id = &inner.config.model_id;
-            let old_api = crate::model_id::resolve_model_from_id(old_model_id)
+            let old_api = self.resolver.resolve_model(old_model_id)
                 .map(|m| m.api)
                 .unwrap_or(oxi_ai::Api::AnthropicMessages);
 
@@ -134,13 +201,13 @@ impl Agent {
     /// and optionally created the provider.
     pub fn switch_to_model(&self, model: &oxi_ai::Model) -> Result<()> {
         let model_id = format!("{}/{}", model.provider, model.id);
-        let new_provider = oxi_ai::get_provider(&model.provider)
+        let new_provider = self.resolver.resolve_provider(&model.provider)
             .ok_or_else(|| Error::msg(format!("Provider '{}' not found", model.provider)))?;
 
         // Detect API change and transform messages if needed
         {
             let inner = self.config();
-            let old_api = crate::model_id::resolve_model_from_id(&inner.config.model_id)
+            let old_api = self.resolver.resolve_model(&inner.config.model_id)
                 .map(|m| m.api)
                 .unwrap_or(oxi_ai::Api::AnthropicMessages);
 
@@ -294,11 +361,12 @@ impl Agent {
             *s = current;
         });
 
-        let agent_loop = AgentLoop::new(
+        let agent_loop = AgentLoop::new_with_resolver(
             provider,
             loop_config,
             Arc::clone(&self.tools),
             fresh_state,
+            Arc::clone(&self.resolver),
         );
 
         // Pre-populate steering/follow-up from hooks

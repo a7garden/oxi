@@ -35,6 +35,7 @@ impl AgentTool for TestTool {
         _tool_call_id: &str,
         _params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &oxi_agent::ToolContext,
     ) -> Result<oxi_agent::AgentToolResult, String> {
         Ok(oxi_agent::AgentToolResult::success("test result"))
     }

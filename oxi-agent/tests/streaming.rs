@@ -29,7 +29,7 @@ async fn test_read_tool_progress_streaming() {
 
     // Execute the tool
     let params = serde_json::json!({ "path": test_path });
-    let result = tool.execute("test_call_id", params, None).await;
+    let result = tool.execute("test_call_id", params, None, &ToolContext::default()).await;
 
     // Verify the result was successful
     assert!(result.is_ok());
@@ -72,7 +72,7 @@ async fn test_bash_tool_progress_streaming() {
     let params = serde_json::json!({
         "command": "echo 'Hello World' && sleep 0.1 && echo 'Done'"
     });
-    let result = tool.execute("test_call_id", params, None).await;
+    let result = tool.execute("test_call_id", params, None, &ToolContext::default()).await;
 
     // Verify the result was successful
     assert!(result.is_ok());
@@ -111,7 +111,7 @@ async fn test_tool_without_progress_callback() {
 
     // Execute without progress callback
     let params = serde_json::json!({ "path": test_path });
-    let result = tool.execute("test_call_id", params, None).await;
+    let result = tool.execute("test_call_id", params, None, &ToolContext::default()).await;
 
     // Should still work
     assert!(result.is_ok());
@@ -139,7 +139,7 @@ async fn test_read_tool_small_file_no_progress() {
     }));
 
     let params = serde_json::json!({ "path": test_path });
-    let result = tool.execute("test_call_id", params, None).await;
+    let result = tool.execute("test_call_id", params, None, &ToolContext::default()).await;
 
     assert!(result.is_ok());
 

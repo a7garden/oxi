@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-use super::{AgentTool, AgentToolResult, ToolError};
+use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 
 /// Shared bridge between the questionnaire tool (agent thread) and the TUI
 /// overlay (main thread). Created in `oxi-cli`, injected into both the tool
@@ -242,6 +242,7 @@ impl AgentTool for QuestionnaireTool {
         _tool_call_id: &str,
         params: serde_json::Value,
         signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, ToolError> {
         // 1. Parse and validate
         let questions = parse_questions(&params)?;

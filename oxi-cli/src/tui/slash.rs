@@ -776,7 +776,7 @@ fn try_re_register_tool(name: &str, registry: &std::sync::Arc<oxi_agent::ToolReg
             let cache = Arc::new(oxi_agent::SearchCache::new());
             registry.register(oxi_agent::GitHubTool::new(cache));
         }
-        "subagent" => registry.register(oxi_agent::SubagentTool::new(
+        "subagent" => registry.register(oxi_agent::SubagentTool::with_cwd(
             std::path::PathBuf::from("."),
         )),
         _ => return false,

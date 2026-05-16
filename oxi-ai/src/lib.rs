@@ -17,7 +17,8 @@ mod messages;
 pub mod oauth;
 pub mod provider_registry;
 mod providers;
-pub use providers::register_builtins;
+
+pub mod register_builtins { pub use crate::providers::register_builtins::*; }
 pub mod secret;
 mod tools;
 mod transform;
@@ -56,6 +57,12 @@ pub use providers::CacheRetention;
 
 /// Provider trait, streaming options, and provider registry.
 pub use providers::{get_provider, register_provider, unregister_provider, custom_provider_names, Provider, ProviderEvent, ProviderRegistry, StreamOptions};
+
+/// Built-in provider helpers (re-exported from providers).
+pub use providers::register_builtins::{
+    create_builtin_provider, get_builtin_provider,
+    get_provider_env_key, get_provider_env_keys, get_all_provider_names, is_builtin_provider,
+};
 
 /// OpenAI-compatible provider implementation.
 pub use providers::OpenAiProvider;

@@ -23,7 +23,7 @@ async fn cleanup(path: &str) {
 }
 
 async fn execute_tool(tool: &dyn AgentTool, params: serde_json::Value) -> AgentToolResult {
-    tool.execute("test_call", params, None).await.unwrap()
+    tool.execute("test_call", params, None, &ToolContext::default()).await.unwrap()
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -71,6 +71,7 @@ async fn test_read_file_not_found() {
             "test_call",
             json!({ "path": "/tmp/oxi_nonexistent_file_12345.txt" }),
             None,
+            &ToolContext::default(),
         )
         .await;
     // ReadTool returns Err for file not found
@@ -84,7 +85,7 @@ async fn test_read_directory_error() {
     let dir = create_temp_dir("read_dir_error").await;
     let tool = ReadTool::new();
     let result = tool
-        .execute("test_call", json!({ "path": dir }), None)
+        .execute("test_call", json!({ "path": dir }), None, &ToolContext::default())
         .await;
     // ReadTool returns Err for directory
     assert!(result.is_err());
@@ -98,7 +99,7 @@ async fn test_read_directory_error() {
 async fn test_read_path_traversal_blocked() {
     let tool = ReadTool::new();
     let result = tool
-        .execute("test_call", json!({ "path": "../../etc/passwd" }), None)
+        .execute("test_call", json!({ "path": "../../etc/passwd" }), None, &ToolContext::default())
         .await;
     // ReadTool returns Err for path traversal
     assert!(result.is_err());
@@ -108,7 +109,7 @@ async fn test_read_path_traversal_blocked() {
 #[tokio::test]
 async fn test_read_missing_path_param() {
     let tool = ReadTool::new();
-    let result = tool.execute("test_call", json!({}), None).await;
+    let result = tool.execute("test_call", json!({}), None, &ToolContext::default()).await;
     assert!(result.is_err());
 }
 
@@ -241,7 +242,7 @@ async fn test_write_path_traversal_blocked() {
 async fn test_write_missing_content_param() {
     let tool = WriteTool::new();
     let result = tool
-        .execute("test_call", json!({ "path": "/tmp/test.txt" }), None)
+        .execute("test_call", json!({}), None, &ToolContext::default())
         .await;
     assert!(result.is_err());
 }
@@ -454,7 +455,7 @@ async fn test_bash_empty_output() {
 #[tokio::test]
 async fn test_bash_missing_command_param() {
     let tool = BashTool::new();
-    let result = tool.execute("test_call", json!({}), None).await;
+    let result = tool.execute("test_call", json!({}), None, &ToolContext::default()).await;
     assert!(result.is_err());
 }
 
@@ -1109,6 +1110,7 @@ fn test_registry_custom_tool() {
             _id: &str,
             _params: Value,
             _signal: Option<oneshot::Receiver<()>>,
+            _ctx: &oxi_agent::ToolContext,
         ) -> Result<oxi_agent::AgentToolResult, String> {
             Ok(oxi_agent::AgentToolResult::success("custom result"))
         }

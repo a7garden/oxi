@@ -4,7 +4,7 @@
 //! gateway to all MCP servers.  The LLM calls this single tool with
 //! different parameters to search, describe, connect, and call MCP tools.
 
-use crate::tools::{AgentTool, AgentToolResult};
+use crate::tools::{AgentTool, AgentToolResult, ToolContext};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -91,6 +91,7 @@ impl AgentTool for McpTool {
         _tool_call_id: &str,
         params: Value,
         _signal: Option<oneshot::Receiver<()>>,
+        _ctx: &ToolContext,
     ) -> Result<AgentToolResult, String> {
         let obj = params.as_object().ok_or("Parameters must be a JSON object")?;
 

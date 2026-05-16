@@ -21,10 +21,11 @@ pub mod helpers;
 
 // Re-export for sibling module access
 pub use config::{AgentLoopConfig, BeforeToolCallHook, AfterToolCallHook, ToolExecutionMode};
+use crate::agent::ProviderResolver;
 use crate::compaction::{CompactedContext, CompactionEvent};
 use crate::events::AgentEvent;
 use crate::recovery::{CircuitBreaker, CircuitBreakerConfig};
-use crate::{state::SharedState, tools::ToolRegistry};
+use crate::{state::SharedState, tools::ToolRegistry, tools::ToolContext};
 use anyhow::{Error, Result};
 use oxi_ai::{
     ContentBlock, Message, Provider,
@@ -63,15 +64,19 @@ pub struct AgentLoop {
     /// External stop flag — when set, should_stop_after_turn returns true.
     /// Used by Agent to forward the should_stop_flag from AgentHooks.
     external_stop: Arc<AtomicBool>,
+    /// Provider/model resolver for isolated model lookups.
+    resolver: Arc<dyn ProviderResolver>,
 }
 
 impl AgentLoop {
 /// TODO.
-    pub fn new(
+    /// Create a new AgentLoop with an explicit resolver.
+    pub fn new_with_resolver(
         provider: Arc<dyn Provider>,
         config: AgentLoopConfig,
         tools: Arc<ToolRegistry>,
         state: SharedState,
+        resolver: Arc<dyn ProviderResolver>,
     ) -> Self {
         let mut compaction_manager = OxCompactionManager::new(
             config.compaction_strategy.clone(),
@@ -79,7 +84,7 @@ impl AgentLoop {
         );
 
         if config.compaction_strategy != CompactionStrategy::Disabled {
-            let model = crate::model_id::resolve_model_from_id(&config.model_id);
+            let model = resolver.resolve_model(&config.model_id);
             if let Some(model) = model {
                 let llm_compactor =
                     Arc::new(LlmCompactor::new(model.clone(), Arc::clone(&provider)));
@@ -102,7 +107,22 @@ impl AgentLoop {
             auto_retry_cancel: AtomicBool::new(false),
             circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
             external_stop: Arc::new(AtomicBool::new(false)),
+            resolver,
         }
+    }
+
+    /// Create a new AgentLoop using the global resolver (backward compat).
+    pub fn new(
+        provider: Arc<dyn Provider>,
+        config: AgentLoopConfig,
+        tools: Arc<ToolRegistry>,
+        state: SharedState,
+    ) -> Self {
+        use crate::agent::GlobalProviderResolver;
+        Self::new_with_resolver(
+            provider, config, tools, state,
+            Arc::new(GlobalProviderResolver),
+        )
     }
 
 /// TODO: document this function.
@@ -144,6 +164,18 @@ impl AgentLoop {
 
     fn drain_steering_queue(&self) -> Vec<Message> {
         drain_steering_queue(self)
+    }
+
+/// Build a ToolContext from the agent loop config.
+    /// Uses workspace_dir from config if set, otherwise falls back to current directory.
+    fn build_tool_context(&self) -> ToolContext {
+        let workspace = self.config.workspace_dir.clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+        ToolContext {
+            workspace_dir: workspace,
+            root_dir: self.config.workspace_dir.clone(),
+            session_id: self.session_id.clone(),
+        }
     }
 
     fn drain_follow_up_queue(&self) -> Vec<Message> {
@@ -459,12 +491,14 @@ impl AgentLoop {
 
                 if !tool_calls.is_empty() {
                     tracing::info!("[AGENT-LOOP] Executing {} tool calls", tool_calls.len());
+                    let ctx = self.build_tool_context();
                     let executed_batch = match execute_tool_calls(
                         self,
                         &mut messages,
                         &assistant_message,
                         tool_calls,
                         &emit,
+                        &ctx,
                     ).await {
                         Ok(batch) => batch,
                         Err(e) => {
@@ -601,7 +635,7 @@ impl AgentLoop {
     }
 
     fn resolve_model(&self) -> Result<oxi_ai::Model> {
-        crate::model_id::resolve_model_from_id(&self.config.model_id)
+        self.resolver.resolve_model(&self.config.model_id)
             .ok_or_else(|| Error::msg(format!("Model not found: {}", self.config.model_id)))
     }
 }
