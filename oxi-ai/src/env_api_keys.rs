@@ -54,7 +54,7 @@ fn get_proc_env(key: &str) -> Option<String> {
     #[cfg(target_os = "linux")]
     {
         // If process.env has entries, no need for /proc fallback
-        if !env::var("PATH").is_ok() || std::env::vars().count() > 0 {
+        if env::var("PATH").is_err() || std::env::vars().count() > 0 {
             return None;
         }
 
@@ -64,7 +64,7 @@ fn get_proc_env(key: &str) -> Option<String> {
 
         for segment in contents.split('\0') {
             if let Some(pos) = segment.find('=') {
-                let k = segment[..pos].as_bytes();
+                let k = &segment.as_bytes()[..pos];
                 let v = &segment[pos + 1..];
                 if k == key.as_bytes() {
                     return Some(v.to_string());
