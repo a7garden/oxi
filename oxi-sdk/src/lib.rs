@@ -17,6 +17,10 @@ pub mod agent_builder;
 pub mod tool_factory;
 pub mod prelude;
 
+// Re-export core SDK types
+pub use builder::{Oxi, OxiBuilder};
+pub use agent_builder::AgentBuilder;
+
 // Re-export from oxi-ai
 pub use oxi_ai::{
     Provider, ProviderRegistry, Model, ModelRegistry, Context, Message, ContentBlock,

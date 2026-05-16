@@ -79,7 +79,7 @@ impl CompactionContext {
 // ─── Module-level imports ────────────────────────────────────────────────────
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
-use oxi_ai::{get_model, get_provider};
+use oxi_sdk::OxiBuilder;
 use parking_lot::RwLock;
 use skills::SkillManager;
 use std::sync::Arc;
@@ -89,6 +89,8 @@ use uuid::Uuid;
 
 /// Application state and entry point
 pub struct App {
+    /// SDK engine for provider/model resolution
+    engine: oxi_sdk::Oxi,
     agent: Arc<Agent>,
     settings: Settings,
     skills: RwLock<SkillManager>,
@@ -294,18 +296,21 @@ impl App {
             (String::new(), String::new())
         };
 
-        let _model = if !provider_name.is_empty() && !model_name.is_empty() {
-            get_model(&provider_name, &model_name)
-        } else {
-            None
-        };
+        // Build SDK engine with built-in providers and models
+        let engine = OxiBuilder::new().with_builtins().build();
 
-        let provider = if !provider_name.is_empty() {
-            get_provider(&provider_name)
-                .ok_or_else(|| Error::msg(format!("Provider '{}' not found", provider_name)))?
+        // Resolve model via SDK (validation only)
+        if !provider_name.is_empty() && !model_name.is_empty() {
+            let _ = engine.resolve_model(&format!("{}/{}", provider_name, model_name));
+        }
+
+        // Resolve provider via SDK
+        let provider: Arc<dyn oxi_ai::Provider> = if !provider_name.is_empty() {
+            engine.create_provider(&provider_name)
+                .map_err(|e| Error::msg(format!("{}", e)))?
         } else {
-            get_provider("anthropic")
-                .ok_or_else(|| Error::msg("No provider available"))?
+            engine.create_provider("anthropic")
+                .map_err(|e| Error::msg(format!("{}", e)))?
         };
 
         let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
@@ -351,6 +356,7 @@ impl App {
         agent.tools().register_arc(std::sync::Arc::new(questionnaire_tool));
 
         Ok(Self {
+            engine,
             agent,
             settings,
             skills: RwLock::new(skills),
@@ -358,6 +364,11 @@ impl App {
             wasm_ext: None,
             questionnaire_bridge: Some(bridge),
         })
+    }
+
+    /// Access the SDK engine (for provider/model resolution)
+    pub(crate) fn engine(&self) -> &oxi_sdk::Oxi {
+        &self.engine
     }
 
     /// Get the current settings

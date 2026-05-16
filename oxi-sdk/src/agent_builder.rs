@@ -30,6 +30,9 @@ impl<'a> AgentBuilder<'a> {
     }
 
     /// Set the working directory for file tools.
+    ///
+    /// When set, subsequent calls to `.coding_tools()` or `.readonly_tools()`
+    /// will automatically use this directory as the tool root.
     pub fn workspace(mut self, dir: impl Into<PathBuf>) -> Self {
         self.workspace_dir = Some(dir.into());
         self
@@ -38,6 +41,36 @@ impl<'a> AgentBuilder<'a> {
     /// Set a custom system prompt.
     pub fn system_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Register the standard coding tools (read, write, edit, ls).
+    /// If `.workspace()` was called, uses that directory as cwd for tools.
+    /// Otherwise uses current directory.
+    pub fn coding_tools(mut self) -> Self {
+        let cwd = self.workspace_dir.clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let tools = crate::tool_factory::coding_tools(&cwd);
+        for name in tools.names() {
+            if let Some(tool) = tools.get(&name) {
+                self.tools.register_arc(tool);
+            }
+        }
+        self
+    }
+
+    /// Register read-only tools (read, ls).
+    /// If `.workspace()` was called, uses that directory as cwd for tools.
+    /// Otherwise uses current directory.
+    pub fn readonly_tools(mut self) -> Self {
+        let cwd = self.workspace_dir.clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+        let tools = crate::tool_factory::readonly_tools(&cwd);
+        for name in tools.names() {
+            if let Some(tool) = tools.get(&name) {
+                self.tools.register_arc(tool);
+            }
+        }
         self
     }
 
