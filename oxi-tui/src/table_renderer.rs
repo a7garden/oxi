@@ -340,7 +340,7 @@ fn calculate_column_widths(
                 .map(|&width| {
                     let weight = width.saturating_sub(1);
                     if total_weight > 0 {
-                        (weight * remaining) / total_weight
+                        (weight * remaining).checked_div(total_weight).unwrap_or(0)
                     } else {
                         0
                     }
