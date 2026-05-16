@@ -350,8 +350,8 @@ fn build_hunk<'a>(
     let mut first_old = None;
     let mut first_new = None;
 
-    for i in start..end {
-        match &ops[i] {
+    for op in ops.iter().take(end).skip(start) {
+        match op {
             DiffOp::Equal(oi, ni) => {
                 if first_old.is_none() {
                     first_old = Some(*oi);

@@ -1,5 +1,5 @@
-/// Queue management for agent loop
-///
+//! Queue management for agent loop
+
 /// Clear the steering queue.
 pub(crate) fn clear_steering_queue(loop_ref: &super::AgentLoop) {
     loop_ref.steering_queue.write().clear();

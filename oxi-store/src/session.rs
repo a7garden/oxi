@@ -2309,12 +2309,16 @@ pub fn resolve_session_path(input: &str, cwd: &str) -> Result<String, String> {
     if path.is_empty() {
         return Err("Empty path".to_string());
     }
-    let resolved = if path.starts_with("~") || path == "~" {
-        let home = dirs::home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
-        if path == "~" {
+    let resolved = if let Some(rest) = path.strip_prefix('~') {
+        if rest.is_empty() {
+            let home = dirs::home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
             home.to_string_lossy().into_owned()
+        } else if let Some(rest) = rest.strip_prefix('/') {
+            let home = dirs::home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
+            format!("{}/{}", home.to_string_lossy(), rest)
         } else {
-            format!("{}/{}", home.to_string_lossy(), &path[2..])
+            let home = dirs::home_dir().ok_or_else(|| "Cannot find home directory".to_string())?;
+            format!("{}/{}", home.to_string_lossy(), rest)
         }
     } else if path.starts_with('/') || path.contains(':') {
         path.to_string()

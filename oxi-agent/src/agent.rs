@@ -343,17 +343,20 @@ impl Agent {
     ) -> Result<Response> {
         use crate::agent_loop::AgentLoop;
 
-        let inner = self.inner.read();
-        let provider: Arc<dyn Provider> = Arc::clone(&inner.provider);
-        let max_iterations = inner.config.max_iterations;
-        let system_prompt = inner.config.system_prompt.clone();
-        let temperature = inner.config.temperature;
-        let max_tokens = inner.config.max_tokens;
-        let compaction_strategy = inner.config.compaction_strategy.clone();
-        let context_window = inner.config.context_window;
-        let api_key = inner.config.api_key.clone();
-        let workspace_dir = inner.config.workspace_dir.clone();
-        drop(inner); // release read lock
+        let (provider, max_iterations, system_prompt, temperature, max_tokens, compaction_strategy, context_window, api_key, workspace_dir) = {
+            let inner = self.inner.read();
+            (
+                Arc::clone(&inner.provider) as Arc<dyn Provider>,
+                inner.config.max_iterations,
+                inner.config.system_prompt.clone(),
+                inner.config.temperature,
+                inner.config.max_tokens,
+                inner.config.compaction_strategy.clone(),
+                inner.config.context_window,
+                inner.config.api_key.clone(),
+                inner.config.workspace_dir.clone(),
+            )
+        }; // release read lock
 
         // Build AgentLoopConfig from Agent's config
         let loop_config = crate::agent_loop::config::AgentLoopConfig {
@@ -394,19 +397,20 @@ impl Agent {
         );
 
         // Pre-populate steering/follow-up from hooks
-        let hooks = self.hooks.read();
+        {
+            let hooks = self.hooks.read();
+            if let Some(ref get_steering) = hooks.get_steering_messages {
+                for msg_text in get_steering() {
+                    agent_loop.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
+                }
+            }
+            if let Some(ref get_follow_up) = hooks.get_follow_up_messages {
+                for msg_text in get_follow_up() {
+                    agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
+                }
+            }
+        }
         let al = agent_loop;
-
-        if let Some(ref get_steering) = hooks.get_steering_messages {
-            for msg_text in get_steering() {
-                al.steer(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
-            }
-        }
-        if let Some(ref get_follow_up) = hooks.get_follow_up_messages {
-            for msg_text in get_follow_up() {
-                al.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
-            }
-        }
 
         // Wire should_stop_after_turn hook: share AgentLoop's external_stop
         // Arc with the emit callback. When the hook fires (Ctrl+C detected),
@@ -414,7 +418,6 @@ impl Agent {
         //
         // Arc<dyn Fn> can be cloned, so we read it without consuming.
         let maybe_hook = {
-            drop(hooks);
             let hooks_r = self.hooks.read();
             hooks_r.should_stop_after_turn.clone()
         };

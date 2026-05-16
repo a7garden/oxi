@@ -1,7 +1,7 @@
-/// Output truncation utilities for tool results
-/// Limits tool output by two independent limits (lines + bytes), whichever hits first.
-/// UTF-8 safe: truncates at valid character boundaries.
-///
+//! Output truncation utilities for tool results
+//! Limits tool output by two independent limits (lines + bytes), whichever hits first.
+//! UTF-8 safe: truncates at valid character boundaries.
+
 /// Default max output lines
 pub const DEFAULT_MAX_LINES: usize = 2000;
 /// Default max output bytes (50KB)

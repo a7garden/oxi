@@ -104,7 +104,7 @@ fn is_unicode_space(ch: char) -> bool {
 
 /// Try replacing regular space + AM/PM with narrow no-break space + AM/PM
 /// (macOS screenshot naming convention).
-fn try_macos_screenshot_path(path: &PathBuf) -> PathBuf {
+fn try_macos_screenshot_path(path: &Path) -> PathBuf {
     let path_str = path.to_string_lossy();
     let replaced = path_str
         .replace(" AM.", "\u{202F}AM.")
@@ -117,7 +117,7 @@ fn try_macos_screenshot_path(path: &PathBuf) -> PathBuf {
 
 /// Try NFD (decomposed) Unicode form of the path.
 /// macOS stores filenames in NFD form, but users may provide NFC input.
-fn try_nfd_variant(path: &PathBuf) -> PathBuf {
+fn try_nfd_variant(path: &Path) -> PathBuf {
     let path_str = path.to_string_lossy();
     let nfd = path_str.nfd().collect::<String>();
     PathBuf::from(nfd)
@@ -125,7 +125,7 @@ fn try_nfd_variant(path: &PathBuf) -> PathBuf {
 
 /// Try replacing straight apostrophes with curly quotes (U+2019).
 /// macOS uses U+2019 in screenshot names like "Capture d'écran".
-fn try_curly_quote_variant(path: &PathBuf) -> PathBuf {
+fn try_curly_quote_variant(path: &Path) -> PathBuf {
     let path_str = path.to_string_lossy();
     let replaced = path_str.replace('\'', "\u{2019}");
     PathBuf::from(replaced)

@@ -53,7 +53,6 @@ impl QuestionnaireBridge {
     }
 
     /// Returns `true` if a questionnaire is currently pending.
-    ///
     pub fn has_pending(&self) -> bool {
         self.inner.lock().is_some()
     }

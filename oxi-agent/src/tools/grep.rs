@@ -193,8 +193,8 @@ impl GrepTool {
                             // Add context lines before match
                             if context_before > 0 && i > 0 {
                                 let start = i.saturating_sub(context_before);
-                                for j in start..i {
-                                    let (truncated_text, was_truncated) = truncate_line(&lines[j]);
+                                for (j, context_line) in lines.iter().enumerate().take(i).skip(start) {
+                                    let (truncated_text, was_truncated) = truncate_line(context_line);
                                     if was_truncated {
                                         *lines_truncated = true;
                                     }
@@ -217,8 +217,8 @@ impl GrepTool {
                             // Add context lines after match
                             if context_after > 0 {
                                 let end = std::cmp::min(lines.len(), i + context_after + 1);
-                                for j in (i + 1)..end {
-                                    let (truncated_text, was_truncated) = truncate_line(&lines[j]);
+                                for (j, context_line) in lines.iter().enumerate().take(end).skip(i + 1) {
+                                    let (truncated_text, was_truncated) = truncate_line(context_line);
                                     if was_truncated {
                                         *lines_truncated = true;
                                     }

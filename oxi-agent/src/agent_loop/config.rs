@@ -1,5 +1,5 @@
-/// Agent loop configuration types
-///
+//! Agent loop configuration types
+
 /// Configuration for an [`crate::AgentLoop`] instance.
 #[derive(Clone)]
 pub struct AgentLoopConfig {
