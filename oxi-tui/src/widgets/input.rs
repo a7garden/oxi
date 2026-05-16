@@ -254,9 +254,7 @@ impl ratatui::widgets::StatefulWidget for Input<'_> {
         textarea.set_cursor_line_style(Style::default());
         textarea.remove_line_number();
 
-        // Placeholder
-        let placeholder_text = self.placeholder.unwrap_or("");
-        textarea.set_placeholder_text(placeholder_text);
+        // Placeholder style — text is managed by InputState::set_placeholder()
         textarea.set_placeholder_style(Style::default().fg(self.theme.colors.muted.to_ratatui()));
 
         // Render the textarea widget

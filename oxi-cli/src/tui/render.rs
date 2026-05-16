@@ -1,8 +1,7 @@
 //! Rendering functions for the TUI.
 
-use unicode_width::UnicodeWidthStr;
 
-use super::app::{AppOverlay, AppState, SetupStep, SPINNER};
+use super::app::{AppOverlay, AppState, SetupStep};
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
 use ratatui::{
@@ -225,6 +224,9 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         return;
     }
 
+    // Apply consistent 1px horizontal margin to all sections
+    let inner = size.inner(Margin::new(1, 0));
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -232,10 +234,9 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
             Constraint::Length(2), // Input (separator + input)
             Constraint::Length(3), // Status bar (separator + 2 lines)
         ])
-        .split(size);
+        .split(inner);
 
-    let chat_area = chunks[0].inner(Margin::new(1, 0));
-    f.render_stateful_widget(ChatView::new(theme), chat_area, &mut state.chat);
+    f.render_stateful_widget(ChatView::new(theme), chunks[0], &mut state.chat);
 
     // Input area
     render_input_area(f, chunks[1], state, theme);
@@ -273,65 +274,22 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
         top_row,
     );
 
+    // Always render the real input widget — typing is never blocked.
+    // When busy, show a placeholder hint about the message queue.
     if state.is_agent_busy {
-        render_busy_input(f, input_row, state, theme);
-    } else {
-        f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
-    }
-}
-
-fn render_busy_input(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
-    let spinner_ch = SPINNER[state.spinner_frame % SPINNER.len()];
-
-    // Build spinner + queue-count prefix
-    let prefix = if state.pending_steering > 0 {
-        format!(" {} [{} queued] ", spinner_ch, state.pending_steering)
-    } else {
-        format!(" {} ", spinner_ch)
-    };
-    let prefix_width = UnicodeWidthStr::width(prefix.as_str());
-    let max_text = (area.width as usize).saturating_sub(prefix_width + 3);
-
-    let user_text = state.input.text();
-    let (display_text, truncated) = if user_text.is_empty() {
-        (String::new(), false)
-    } else {
-        let mut visible = String::new();
-        let mut w = 0usize;
-        for ch in user_text.chars() {
-            let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(1);
-            if w + cw > max_text {
-                break;
-            }
-            visible.push(ch);
-            w += cw;
-        }
-        let truncated = visible.chars().count() < user_text.chars().count();
-        (visible, truncated)
-    };
-
-    let styles = theme.to_styles();
-
-    if user_text.is_empty() {
-        // Show hint when no text typed
-        let line = Line::from(vec![
-            Span::styled(prefix, styles.muted),
-            Span::styled("type to steer...", styles.muted),
-        ]);
-        f.render_widget(Paragraph::new(line), area);
-    } else {
-        // Show typed text (visible!) with spinner prefix
-        let text_part = if truncated {
-            format!("{}...", display_text)
+        let placeholder = if state.pending_steering > 0 {
+            Some(format!(
+                "{} queued — type next message",
+                state.pending_steering
+            ))
         } else {
-            display_text.clone()
+            Some("type next message to queue".to_string())
         };
-        let line = Line::from(vec![
-            Span::styled(prefix, styles.muted),
-            Span::styled(text_part, styles.normal),
-        ]);
-        f.render_widget(Paragraph::new(line), area);
+        state.input.set_placeholder(placeholder);
+    } else {
+        state.input.set_placeholder(None);
     }
+    f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
 }
 
 // ── Slash popup overlay ─────────────────────────────────────────────────

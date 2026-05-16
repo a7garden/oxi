@@ -324,6 +324,8 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
                 tool_call_id,
                 tool_name
             );
+            // Track start time for duration measurement
+            state.tool_start_times.insert(tool_call_id.clone(), std::time::Instant::now());
             let args_str = serde_json::to_string(&args).unwrap_or_else(|_| args.to_string());
             state.chat.stream_tool_call(
                 tool_call_id,
@@ -343,12 +345,28 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
                 tool_call_id,
                 tool_name
             );
+            // Compute and store execution duration
+            let duration = state.tool_start_times.remove(&tool_call_id).map(|t| {
+                let elapsed = t.elapsed();
+                if elapsed.as_secs() >= 60 {
+                    format!("{}m{}s", elapsed.as_secs() / 60, elapsed.as_secs() % 60)
+                } else if elapsed.as_millis() >= 1000 {
+                    format!("{:.1}s", elapsed.as_secs_f64())
+                } else {
+                    format!("{}ms", elapsed.as_millis())
+                }
+            });
+            // Pass full result content (clamped by stream_tool_result internally)
+            let content = result.content.clone();
             state.chat.stream_tool_result(
-                Some(tool_call_id),
+                Some(tool_call_id.clone()),
                 tool_name,
-                result.content.chars().take(500).collect(),
+                content,
                 is_error || result.status == "error",
             );
+            if let Some(dur) = duration {
+                state.chat.set_tool_duration(&tool_call_id, dur);
+            }
         }
 
         // ── Legacy events ─────────────────────────────────────────

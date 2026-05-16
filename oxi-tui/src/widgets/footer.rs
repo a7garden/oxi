@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, LineGauge, Paragraph, StatefulWidget, Widget},
+    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 use unicode_width::UnicodeWidthStr;
 
@@ -121,7 +121,7 @@ impl StatefulWidget for Footer<'_> {
             .border_style(styles.border)
             .render(rows[0], buf);
 
-        // ── Row 1: tokens + gauge ... model ──
+        // ── Row 1: tokens + duration ... model ──
         {
             let total_tokens =
                 d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_tokens;
@@ -135,8 +135,11 @@ impl StatefulWidget for Footer<'_> {
 
             let mut left_parts: Vec<String> = Vec::new();
             if has_tokens {
-                let max = FooterData::fmt_count(d.context_window_max);
-                left_parts.push(format!("{:.1}% / {}", pct_display, max));
+                // Show in/out token counts + context %
+                let in_fmt = FooterData::fmt_count(d.input_tokens + d.cache_read_tokens);
+                let out_fmt = FooterData::fmt_count(d.output_tokens);
+                left_parts.push(format!("\u{2191}{} \u{2193}{}", in_fmt, out_fmt));
+                left_parts.push(format!("{:.0}%", pct_display));
             }
             if d.session_duration_secs > 0 {
                 left_parts.push(FooterData::format_duration(d.session_duration_secs));
@@ -164,14 +167,8 @@ impl StatefulWidget for Footer<'_> {
                 }
             };
 
-            let indicator_color = if d.is_busy {
-                self.theme.colors.accent.to_ratatui()
-            } else {
-                self.theme.colors.success.to_ratatui()
-            };
-
-            // Build right_span with indicator + model name
-            let mut spans = vec![Span::styled("*", Style::default().fg(indicator_color))];
+            // Build right_span with model name
+            let mut spans = vec![];
 
             if d.model_name.is_empty() {
                 spans.push(Span::styled(
@@ -219,16 +216,11 @@ impl StatefulWidget for Footer<'_> {
 
             let text_w = UnicodeWidthStr::width(left_text.as_str()) as u16 + 2;
             let model_display_w = UnicodeWidthStr::width(model_display.as_str()) as u16 + 4;
-            let gauge_w = rows[1]
-                .width
-                .saturating_sub(text_w)
-                .saturating_sub(model_display_w);
 
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
                     Constraint::Length(text_w.min(rows[1].width)),
-                    Constraint::Length(gauge_w),
                     Constraint::Min(model_display_w),
                 ])
                 .split(rows[1]);
@@ -240,31 +232,9 @@ impl StatefulWidget for Footer<'_> {
             .alignment(Alignment::Left)
             .render(cols[0], buf);
 
-            if has_tokens && gauge_w > 4 {
-                let label = format!("{:.0}%", pct_display);
-                let gauge_color = if pct < 0.7 {
-                    self.theme.colors.success.to_ratatui()
-                } else if pct < 0.9 {
-                    self.theme.colors.warning.to_ratatui()
-                } else {
-                    self.theme.colors.error.to_ratatui()
-                };
-                LineGauge::default()
-                    .ratio(pct)
-                    .label(label)
-                    .style(
-                        Style::default().fg(gauge_color).bg(self
-                            .theme
-                            .colors
-                            .background
-                            .to_ratatui()),
-                    )
-                    .render(cols[1], buf);
-            }
-
             Paragraph::new(right_span)
                 .alignment(Alignment::Right)
-                .render(cols[2], buf);
+                .render(cols[1], buf);
         }
 
         // ── Row 2: path + git ... version ──
@@ -287,23 +257,16 @@ impl StatefulWidget for Footer<'_> {
 
             if let Some(ref branch) = d.git_branch {
                 if !branch.is_empty() {
-                    let dirty_marker = if d.git_dirty { "*" } else { "" };
                     left_spans.push(Span::styled(
-                        format!(" ({}){}", branch, dirty_marker),
+                        format!(" ({})", branch),
                         Style::default().fg(self.theme.colors.accent.to_ratatui()),
                     ));
-                    let (status_char, status_style) = if d.git_dirty {
-                        (
-                            " X",
-                            Style::default().fg(self.theme.colors.error.to_ratatui()),
-                        )
-                    } else {
-                        (
-                            " ok",
-                            Style::default().fg(self.theme.colors.success.to_ratatui()),
-                        )
-                    };
-                    left_spans.push(Span::styled(status_char, status_style));
+                    if d.git_dirty {
+                        left_spans.push(Span::styled(
+                            " *",
+                            Style::default().fg(self.theme.colors.warning.to_ratatui()),
+                        ));
+                    }
                 }
             }
 

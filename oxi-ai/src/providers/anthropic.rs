@@ -310,6 +310,27 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
 
         let event_type = event.type_.as_deref();
 
+        // ── Accumulate usage BEFORE the match statement ──────────────────
+        // This ensures Done events carry the latest usage snapshot.
+        // - Top-level `usage`: from `message_delta` events (output_tokens)
+        // - Nested `message.usage`: from `message_start` events (input_tokens)
+        if let Some(usage) = &event.usage {
+            accumulated_usage.input = usage.input_tokens;
+            accumulated_usage.output = usage.output_tokens;
+            accumulated_usage.cache_read = usage.cache_read;
+            accumulated_usage.cache_write = usage.cache_creation;
+            accumulated_usage.total_tokens = usage.input_tokens + usage.output_tokens;
+        } else if let Some(msg) = &event.message {
+            // `message_start` carries usage nested inside `message`
+            if let Some(usage) = &msg.usage {
+                accumulated_usage.input = usage.input_tokens;
+                accumulated_usage.output = usage.output_tokens;
+                accumulated_usage.cache_read = usage.cache_read;
+                accumulated_usage.cache_write = usage.cache_creation;
+                accumulated_usage.total_tokens = usage.input_tokens + usage.output_tokens;
+            }
+        }
+
         match event_type {
             Some("message_start") => {
                 events.push(ProviderEvent::Start {
@@ -433,15 +454,6 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
             }
             _ => {}
         }
-
-        // Accumulate usage
-        if let Some(usage) = event.usage {
-            accumulated_usage.input = usage.input_tokens;
-            accumulated_usage.output = usage.output_tokens;
-            accumulated_usage.cache_read = usage.cache_read;
-            accumulated_usage.cache_write = usage.cache_creation;
-            accumulated_usage.total_tokens = usage.input_tokens + usage.output_tokens;
-        }
     }
 
     events
@@ -464,6 +476,15 @@ struct AnthropicEvent {
     index: Option<usize>,
     content_block: Option<ContentBlockStart>,
     delta: Option<Delta>,
+    usage: Option<AnthropicUsage>,
+    /// Nested message from `message_start` event — contains initial usage.
+    message: Option<AnthropicMessageStart>,
+}
+
+/// Nested message object from Anthropic `message_start` events.
+/// Carries initial token usage (input_tokens, output_tokens) before streaming begins.
+#[derive(Debug, Deserialize)]
+struct AnthropicMessageStart {
     usage: Option<AnthropicUsage>,
 }
 

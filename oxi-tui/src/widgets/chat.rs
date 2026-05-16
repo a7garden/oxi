@@ -112,6 +112,8 @@ pub enum ContentBlock {
         arguments: String,
         result: Option<(String, bool)>,
         status: ToolCallStatus,
+        /// Formatted execution duration (e.g. "1.2s").
+        duration: Option<String>,
     },
     ToolResult {
         tool_name: String,
@@ -242,6 +244,12 @@ impl ChatViewState {
     }
 
     pub fn start_streaming(&mut self) {
+        // Auto-commit any existing streaming before starting new.
+        // This prevents tool execution results from being lost when
+        // a new MessageStart arrives while tool results are streaming.
+        if self.streaming.is_some() {
+            self.finish_streaming();
+        }
         self.streaming = Some(StreamingState {
             message: ChatMessage {
                 role: MessageRole::Assistant,
@@ -376,6 +384,7 @@ impl ChatViewState {
                 arguments: clamp_str(arguments, MAX_TOOL_ARG_CHARS, MAX_TOOL_ARG_LINES),
                 result: None,
                 status,
+                duration: None,
             });
             self.layout_cache.write().entries = None;
         }
@@ -503,6 +512,26 @@ impl ChatViewState {
         // Invalidate cache
         let mut cache = self.layout_cache.write();
         cache.entries = None;
+    }
+
+    /// Set the formatted duration for a tool call (by ID).
+    pub fn set_tool_duration(&mut self, id: &str, dur_str: String) {
+        if let Some(ref mut s) = self.streaming {
+            for block in &mut s.message.content_blocks {
+                if let ContentBlock::ToolCall {
+                    id: ref bid,
+                    ref mut duration,
+                    ..
+                } = block
+                {
+                    if bid == id {
+                        *duration = Some(dur_str);
+                        self.layout_cache.write().entries = None;
+                        return;
+                    }
+                }
+            }
+        }
     }
 
     pub fn clear(&mut self) {
@@ -730,6 +759,7 @@ enum LayoutKind {
         arguments: String,
         result: Option<(String, bool)>,
         status: ToolCallStatus,
+        duration: Option<String>,
     },
     ToolResultBox {
         tool_name: String,
@@ -903,12 +933,14 @@ fn block_to_layout_kind(block: &ContentBlock, role: MessageRole, width: u16) -> 
             arguments,
             result,
             status,
+            duration,
             ..
         } => LayoutKind::ToolBox {
             name: name.clone(),
             arguments: arguments.clone(),
             result: result.clone(),
             status: *status,
+            duration: duration.clone(),
         },
         ContentBlock::ToolResult {
             tool_name,
@@ -968,6 +1000,7 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             name,
             arguments,
             result,
+            duration,
             ..
         } => {
             use crate::widgets::tool_renderer::{measure_call_height, measure_result_height};
@@ -983,6 +1016,8 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             });
             // Block::ALL adds top + bottom border (2 rows) + separator if result exists
             let separator_h = if result.is_some() { 1 } else { 0 };
+            // Duration label takes 0 extra rows (rendered inline with header)
+            let _ = duration;
             2 + call_h + separator_h + result_h
         }
         LayoutKind::ToolResultBox { content, .. } => {
@@ -1067,6 +1102,7 @@ impl Widget for EntryWidget<'_> {
                 arguments,
                 result,
                 status,
+                duration,
             } => {
                 use crate::widgets::tool_renderer::{format_tool_call, format_tool_result};
 
@@ -1091,10 +1127,25 @@ impl Widget for EntryWidget<'_> {
 
                 let has_result = result.is_some();
 
-                // Box with all borders for a cleaner look (no background fill)
+                // Determine background style based on status
+                let bg_style = match status {
+                    ToolCallStatus::Requested => self.styles.tool_pending_bg,
+                    ToolCallStatus::Executing => self.styles.tool_executing_bg,
+                    ToolCallStatus::Done => {
+                        let is_error = result.as_ref().is_some_and(|(_, e)| *e);
+                        if is_error {
+                            self.styles.tool_error_bg
+                        } else {
+                            self.styles.tool_success_bg
+                        }
+                    }
+                };
+
+                // Box with all borders + status background
                 let block = Block::default()
                     .borders(Borders::ALL)
-                    .border_style(border_style);
+                    .border_style(border_style)
+                    .style(bg_style);
                 let inner = block.inner(rect);
                 block.render(rect, buf);
                 // Clear any stale content in the inner area before rendering.
@@ -1107,7 +1158,7 @@ impl Widget for EntryWidget<'_> {
                 let call_lines = format_tool_call(name, arguments, max_w, self.styles);
                 for (i, line) in call_lines.into_iter().enumerate() {
                     if i == 0 {
-                        // Prepend icon to first line
+                        // Prepend icon to first line, append duration if available
                         let icon_style = border_style.add_modifier(Modifier::BOLD);
                         let name_style = border_style.add_modifier(Modifier::BOLD);
                         let spans = line.spans.into_iter().collect::<Vec<_>>();
@@ -1116,6 +1167,13 @@ impl Widget for EntryWidget<'_> {
                             new_spans.push(Span::styled(
                                 span.content.clone(),
                                 span.style.patch(name_style),
+                            ));
+                        }
+                        // Append duration to header line (right-aligned conceptually)
+                        if let Some(ref dur) = duration {
+                            new_spans.push(Span::styled(
+                                format!("  {}", dur),
+                                self.styles.muted,
                             ));
                         }
                         content_lines.push(Line::from(new_spans));
@@ -1313,9 +1371,9 @@ impl StatefulWidget for ChatView<'_> {
         let styles = self.theme.to_styles();
         let width = area.width;
 
-        // Apply left/right padding to the inner content area
-        let pad = self.theme.spacing.padding.max(1);
-        let inner_width = width.saturating_sub(pad * 2);
+        // Outer layout already provides consistent horizontal margin.
+        // No additional internal padding needed.
+        let inner_width = width;
 
         // Get layout computed with inner_width for correct height measurements
         let layout = state.get_layout(inner_width);
@@ -1350,7 +1408,7 @@ impl StatefulWidget for ChatView<'_> {
             }
             // Compute relative y within the viewport
             let rel_y = entry.y.saturating_sub(scroll_offset);
-            let rect = Rect::new(area.x + pad, area.y + rel_y, inner_width, entry.height);
+            let rect = Rect::new(area.x, area.y + rel_y, inner_width, entry.height);
             EntryWidget::new(&entry.kind, &styles).render(rect, buf);
         }
     }
@@ -1414,9 +1472,12 @@ mod tests {
         s.stream_tool_result(Some("t1".into()), "bash".into(), "file.txt".into(), false);
         s.finish_streaming();
         match &s.messages[0].content_blocks[0] {
-            ContentBlock::ToolCall { status, result, .. } => {
+            ContentBlock::ToolCall {
+                status, result, duration, ..
+            } => {
                 assert_eq!(*status, ToolCallStatus::Done);
                 assert!(result.is_some());
+                assert!(duration.is_none()); // not set in this test
             }
             _ => panic!("expected ToolCall"),
         }

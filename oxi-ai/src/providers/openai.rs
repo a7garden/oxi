@@ -630,6 +630,22 @@ fn parse_sse_events(
             Err(_) => continue,
         };
 
+        // ── Accumulate usage BEFORE processing choices ────────────────
+        // OpenAI with include_usage sends usage in a final chunk with
+        // empty choices. By accumulating before the choice loop, the
+        // Done event (triggered by finish_reason in an earlier chunk)
+        // and any subsequent rendering sees the latest usage.
+        if let Some(chunk_usage) = &chunk.usage {
+            accumulated_usage.input = chunk_usage.prompt_tokens;
+            accumulated_usage.output = chunk_usage.completion_tokens;
+            accumulated_usage.cache_read = chunk_usage
+                .prompt_tokens_details
+                .as_ref()
+                .map(|d| d.cached_tokens)
+                .unwrap_or(0);
+            accumulated_usage.total_tokens = chunk_usage.total_tokens;
+        }
+
         for choice in &chunk.choices {
             if let Some(delta) = &choice.delta {
                 if let Some(content) = &delta.content {
@@ -731,18 +747,6 @@ fn parse_sse_events(
                     message: done_msg,
                 });
             }
-        }
-
-        // Accumulate usage from the chunk (if present).
-        if let Some(chunk_usage) = chunk.usage {
-            accumulated_usage.input = chunk_usage.prompt_tokens;
-            accumulated_usage.output = chunk_usage.completion_tokens;
-            accumulated_usage.cache_read = chunk_usage
-                .prompt_tokens_details
-                .as_ref()
-                .map(|d| d.cached_tokens)
-                .unwrap_or(0);
-            accumulated_usage.total_tokens = chunk_usage.total_tokens;
         }
     }
 

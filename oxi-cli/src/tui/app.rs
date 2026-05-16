@@ -3,6 +3,7 @@
 use super::handlers;
 use super::render;
 use super::slash;
+use super::welcome;
 use crate::app::agent_session::SessionEvent;
 use crate::app::agent_session_runtime::{
     create_agent_session_from_services, create_agent_session_services,
@@ -336,6 +337,8 @@ pub(crate) struct AppState {
     /// Questionnaire bridge — set by run_tui_interactive_impl() from App::questionnaire_bridge().
     questionnaire_bridge:
         Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
+    /// Tool execution start times for measuring duration.
+    pub(crate) tool_start_times: std::collections::HashMap<String, std::time::Instant>,
 }
 
 impl AppState {
@@ -365,6 +368,7 @@ impl AppState {
             snapshot_thinking_rendered: Vec::new(),
             snapshot_text_block_created: false,
             questionnaire_bridge: None,
+            tool_start_times: std::collections::HashMap::new(),
         }
     }
 
@@ -1010,6 +1014,46 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         state.wasm_ext = wasm_ext.clone();
         state.questionnaire_bridge = questionnaire_bridge.clone();
 
+        // Push welcome message (only for new sessions, not resumed)
+        if !is_resuming {
+            let tool_labels: Vec<(String, String)> = {
+                let registry = tools.clone();
+                let names = registry.names();
+                names
+                    .iter()
+                    .filter_map(|name| {
+                        registry.get(name).map(|t| (name.clone(), t.label().to_string()))
+                    })
+                    .collect()
+            };
+            let tool_names: Vec<String> = tool_labels.iter().map(|(n, _)| n.clone()).collect();
+            let skill_names: Vec<String> = {
+                let sm = crate::skills::SkillManager::load_from_dir(
+                    &crate::skills::SkillManager::skills_dir()
+                        .unwrap_or_else(|_| std::path::PathBuf::from("/dev/null")),
+                )
+                .unwrap_or_else(|_| crate::skills::SkillManager::new());
+                sm.all().iter().map(|s| s.name.clone()).collect()
+            };
+            let agents_md_path = welcome::detect_agents_md(&cwd_path);
+            let project_name = cwd_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| ".".to_string());
+            let welcome_info = welcome::WelcomeInfo {
+                model_id: model_id.clone(),
+                thinking_level: format!("{:?}", settings.thinking_level).to_lowercase(),
+                tool_names,
+                tool_labels,
+                skill_names,
+                agents_md_path,
+                session_type: "new",
+                git_branch: git_branch.clone(),
+                project_name,
+            };
+            state.add_system_message(welcome::format_welcome(&welcome_info));
+        }
+
         // Check if model is configured
         let has_model = !model_id.is_empty() && model_id.contains('/');
         if !has_model {
@@ -1032,6 +1076,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // ── Inner TUI loop ──
         let mut running = true;
         let mut last_spinner_tick = std::time::Instant::now();
+        let session_start = std::time::Instant::now();
         let poll_timeout = std::time::Duration::from_millis(50);
 
         while running {
@@ -1041,6 +1086,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 state.chat.spinner_frame = state.spinner_frame;
                 last_spinner_tick = now;
             }
+
+            // Update session duration in footer
+            state.footer_state.data.session_duration_secs = session_start.elapsed().as_secs();
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
 
