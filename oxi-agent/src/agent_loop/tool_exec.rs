@@ -16,7 +16,7 @@ pub(crate) struct ExecutedToolCallBatch {
 
 enum FinalizedToolCallEntry {
     Immediate(FinalizedToolCall),
-    Future(Pin<Box<dyn futures::Future<Output = FinalizedToolCall>>>),
+    Future(Pin<Box<dyn futures::Future<Output = FinalizedToolCall> + Send>>),
 }
 
 pub(crate) struct ExecutedToolCallOutcome {
@@ -216,7 +216,7 @@ async fn execute_tool_calls_parallel(
     #[allow(clippy::type_complexity)]
     let mut pending_futures: Vec<(
         usize,
-        Pin<Box<dyn futures::Future<Output = FinalizedToolCall>>>,
+        Pin<Box<dyn futures::Future<Output = FinalizedToolCall> + Send>>,
     )> = Vec::new();
 
     for (i, entry) in finalized_calls.into_iter().enumerate() {
