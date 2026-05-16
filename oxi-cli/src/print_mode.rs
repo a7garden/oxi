@@ -66,12 +66,12 @@ pub async fn run_print_mode(app: &App, options: PrintModeOptions) -> Result<i32>
         messages,
         initial_message,
         no_stdin,
+        no_session: _,
+        quiet,
+        timeout,
     } = options;
 
     // If no_stdin is set, skip any stdin reading (prevents blocking on TTY).
-    // This is a no-op guard — the actual stdin read is done by the caller
-    // before entering run_print_mode, but future callers may call
-    // read_stdin_prompt() inside this function.
     let _ = no_stdin;
 
     let agent: Arc<Agent> = app.agent();
@@ -81,45 +81,63 @@ pub async fn run_print_mode(app: &App, options: PrintModeOptions) -> Result<i32>
     let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
     ctrlc_handler(shutdown_tx)?;
 
-    // Process initial message
-    if let Some(prompt) = initial_message {
-        let result = run_single_prompt(&agent, &prompt, mode, &mut shutdown_rx).await;
-        match result {
-            Ok(()) => {}
-            Err(PromptError::AgentError(msg)) => {
-                if mode == PrintMode::Text {
-                    eprintln!("Error: {}", msg);
+    // Build the core async work as a future so we can apply a timeout
+    let work = async {
+        // Process initial message
+        if let Some(prompt) = initial_message {
+            let result = run_single_prompt(&agent, &prompt, mode, quiet, &mut shutdown_rx).await;
+            match result {
+                Ok(()) => {}
+                Err(PromptError::AgentError(msg)) => {
+                    if mode == PrintMode::Text && !quiet {
+                        eprintln!("Error: {}", msg);
+                    }
+                    exit_code = 1;
                 }
-                exit_code = 1;
-            }
-            Err(PromptError::Shutdown) => {
-                exit_code = 130; // 128 + SIGINT(2)
-                return Ok(exit_code);
+                Err(PromptError::Shutdown) => {
+                    exit_code = 130;
+                    return;
+                }
             }
         }
-    }
 
-    // Process additional messages
-    for message in messages {
-        if shutdown_rx.try_recv().is_ok() {
-            exit_code = 130;
-            return Ok(exit_code);
-        }
-
-        let result = run_single_prompt(&agent, &message, mode, &mut shutdown_rx).await;
-        match result {
-            Ok(()) => {}
-            Err(PromptError::AgentError(msg)) => {
-                if mode == PrintMode::Text {
-                    eprintln!("Error: {}", msg);
-                }
-                exit_code = 1;
-            }
-            Err(PromptError::Shutdown) => {
+        // Process additional messages
+        for message in messages {
+            if shutdown_rx.try_recv().is_ok() {
                 exit_code = 130;
-                return Ok(exit_code);
+                return;
+            }
+
+            let result = run_single_prompt(&agent, &message, mode, quiet, &mut shutdown_rx).await;
+            match result {
+                Ok(()) => {}
+                Err(PromptError::AgentError(msg)) => {
+                    if mode == PrintMode::Text && !quiet {
+                        eprintln!("Error: {}", msg);
+                    }
+                    exit_code = 1;
+                }
+                Err(PromptError::Shutdown) => {
+                    exit_code = 130;
+                    return;
+                }
             }
         }
+    };
+
+    // Apply timeout if specified
+    if let Some(secs) = timeout {
+        match tokio::time::timeout(Duration::from_secs(secs), work).await {
+            Ok(()) => {}
+            Err(_) => {
+                if !quiet {
+                    eprintln!("Timed out after {} seconds", secs);
+                }
+                exit_code = 124; // mirroring timeout(1) exit code
+            }
+        }
+    } else {
+        work.await;
     }
 
     Ok(exit_code)
@@ -136,8 +154,10 @@ async fn run_single_prompt(
     agent: &Arc<Agent>,
     prompt: &str,
     mode: PrintMode,
+    quiet: bool,
     shutdown_rx: &mut mpsc::Receiver<()>,
 ) -> Result<(), PromptError> {
+    let _ = quiet; // used by callers when handling PromptError
     // Agent expects std::sync::mpsc, but we need async for tokio::select
     // Use a sync mpsc channel inside spawn_blocking, bridge to tokio mpsc
     let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
@@ -550,6 +570,9 @@ mod tests {
         assert!(opts.messages.is_empty());
         assert!(opts.initial_message.is_none());
         assert!(!opts.no_stdin);
+        assert!(!opts.no_session);
+        assert!(!opts.quiet);
+        assert!(opts.timeout.is_none());
     }
 
     #[test]
