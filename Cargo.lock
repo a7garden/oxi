@@ -3246,7 +3246,7 @@ dependencies = [
  "once_cell",
  "oxi-agent 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxi-ai 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "oxi-sdk 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-sdk 0.15.1",
  "oxi-store 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxi-tui 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot",
@@ -3277,21 +3277,6 @@ dependencies = [
 [[package]]
 name = "oxi-sdk"
 version = "0.15.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "oxi-agent 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "oxi-ai 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "parking_lot",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "oxi-sdk"
-version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a04a1f70f1fa61a9aff2e6f3089347625a41617d9e6dc0e98217a78f81088802"
 dependencies = [
@@ -3302,6 +3287,21 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "oxi-sdk"
+version = "0.15.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "oxi-agent 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-ai 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tokio",
 ]
 

@@ -1,6 +1,6 @@
 [package]
 name = "oxi-sdk"
-version = "0.15.1"
+version = "0.15.2"
 edition = "2021"
 description = "oxi AI agent SDK — build isolated, multi-agent AI systems"
 readme = "README.md"

@@ -77,7 +77,7 @@ pub trait AgentTool: Send + Sync {
 }
 ```
 
-**15 built-in tools** in `oxi-agent/src/tools/`: `bash`, `read`, `write`, `edit`, `edit_diff`, `ls`, `find`, `grep`, `github`, `github_search`, `subagent`, `questionnaire`, `context7`, `web_search`, `file_mutation_queue`.
+**15 built-in tools** in `oxi-agent/src/tools/`: `bash`, `read`, `write`, `edit`, `ls`, `find`, `grep`, `github`, `github_search`, `subagent`, `questionnaire`, `context7` (2 sub-tools: resolve-library-id, query-docs), `web_search`, `get_search_results`.
 
 `agent_loop/` contains the retry/streaming/queue logic.
 `mcp/` implements a Model Context Protocol client.

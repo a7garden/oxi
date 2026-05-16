@@ -36,13 +36,16 @@ pub use oxi_ai::provider_pool::{ProviderPool, RateLimitPolicy};
 pub use oxi_ai::{
     Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, Model,
     ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderRegistry, StreamOptions,
+    UserMessage,
 };
 
 // Re-export from oxi-agent
 pub use oxi_agent::{
     Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
-    AgentTool, AgentToolResult, OutputMode, ProviderResolver, SharedState, StructuredOutput,
-    StructuredOutputError, ToolContext, ToolError, ToolExecutionMode, ToolRegistry,
+    AgentTool, AgentToolResult, CompactionEvent, EditTool, FindTool, GetSearchResultsTool,
+    GrepTool, LsTool, OutputMode, ProviderResolver, ReadTool, SearchCache, SharedState,
+    StructuredOutput, StructuredOutputError, ToolContext, ToolError, ToolExecutionMode,
+    ToolRegistry, WebSearchTool, WriteTool,
 };
 
 #[cfg(test)]
