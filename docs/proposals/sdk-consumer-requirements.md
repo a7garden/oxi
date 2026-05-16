@@ -2,7 +2,7 @@
 
 **Author:** oxios project  
 **Date:** 2026-05-16  
-**Status:** Draft  
+**Status:** Draft — Codebase-verified  
 **Target:** oxi-sdk (oxi project)
 
 ---
@@ -25,9 +25,9 @@ This violates the SDK abstraction and creates tight coupling to oxi's internal c
 The root causes are two:
 
 1. **Missing re-exports** — types that consumers need are not surfaced through `oxi-sdk`.
-2. **`!Send` future** — `AgentLoop::run()` returns a non-`Send` future, forcing consumers into `spawn_blocking`.
+2. **`!Send` future** — `AgentLoop::run()` returns a non-`Send` future due to internal boxed futures missing `+ Send`, forcing consumers into `spawn_blocking`.
 
-Both are fixable within oxi-sdk without changing public semantics. This document details each request.
+Both are fixable within oxi-sdk without changing public semantics. This document details each request, with root causes **verified against the actual codebase**.
 
 ---
 
@@ -99,26 +99,40 @@ use oxi_sdk::{AgentTool, AgentToolResult, ToolContext, ToolError};
 
 ### What oxi-sdk needs to add
 
-The following are **not currently re-exported** and need to be added:
+> **Verified against `oxi-sdk/src/lib.rs` as of 2026-05-16.**
+
+The initial draft listed 5 missing types. After codebase verification, only **3 are genuinely missing**:
+
+| Type | Source crate | Location | Currently in oxi-sdk? | Action |
+|------|-------------|----------|----------------------|--------|
+| `UserMessage` | `oxi-ai` | `messages.rs:200` | ❌ No | **Add** |
+| `SearchCache` | `oxi-agent` | `tools/search_cache.rs:37` | ❌ No | **Add** |
+| `CompactionEvent` | `oxi-agent` | `compaction.rs:8` | ❌ No | **Add** |
+| `ProviderError` | `oxi-ai` | `error.rs` | ✅ Already exported | None |
+| `ProviderEvent` | `oxi-ai` | `providers/` | ✅ Already exported | None |
+
+> **Correction:** `ProviderError` and `ProviderEvent` were incorrectly listed as missing.
+> They are already in the `oxi_ai` re-export block:
+> ```rust
+> pub use oxi_ai::{
+>     Provider, ProviderRegistry, Model, ModelRegistry, Context, Message, ContentBlock,
+>     ProviderEvent, StreamOptions, CompactionStrategy,
+>     ProviderError, Api, Cost, InputModality,
+> };
+> ```
+
+Only 3 `pub use` lines need adding:
 
 ```rust
-// In oxi-sdk/src/lib.rs — additions to existing re-export block
+// In oxi-sdk/src/lib.rs — additions to existing re-export blocks
+
+// From oxi-ai (messages module)
+pub use oxi_ai::UserMessage;
 
 // From oxi-agent
 pub use oxi_agent::SearchCache;
-pub use oxi_agent::prelude::CompactionEvent;
-
-// From oxi-ai
-pub use oxi_ai::UserMessage;
-pub use oxi_ai::ProviderError;  // critical for error handling downstream
-pub use oxi_ai::ProviderEvent;  // critical for streaming consumers
+pub use oxi_agent::compaction::CompactionEvent;
 ```
-
-Additionally, verify that these existing re-exports are accessible at the top level (not buried in submodules):
-
-- `ToolError` — currently re-exported as `oxi_sdk::ToolError` ✓
-- `ToolExecutionMode` — currently re-exported ✓
-- `Context`, `Message`, `Model` — currently re-exported ✓
 
 ### Acceptance criteria
 
@@ -131,7 +145,7 @@ Additionally, verify that these existing re-exports are accessible at the top le
 ## Request 2: Send-safe `AgentLoop::run()`
 
 **Priority: Medium-High**  
-**Effort estimate: Medium** (internal refactor in oxi-agent)
+**Effort estimate: Low** (2-line fix in `tool_exec.rs` + compile-time test)
 
 ### Problem
 
@@ -177,34 +191,58 @@ let handle = tokio::spawn(async move {
 let result = handle.await??;  // or just .await? if we don't need JoinError separately
 ```
 
-### Root cause
+### Root cause — verified by codebase audit
 
-The `!Send` bound originates in oxi-agent's internal tool dispatch, where futures are boxed without `Send`:
+The `!Send` bound was traced to a **specific location** in `oxi-agent/src/agent_loop/tool_exec.rs`:
 
 ```rust
-// Likely somewhere in oxi-agent internals:
-Box<dyn Future<Output = Result<AgentToolResult>>>
-//                                    needs to be:
-Box<dyn Future<Output = Result<AgentToolResult>> + Send>
+// tool_exec.rs:20 — FinalizedToolCallEntry enum
+enum FinalizedToolCallEntry {
+    Immediate(FinalizedToolCall),
+    Future(Pin<Box<dyn futures::Future<Output = FinalizedToolCall>>>),
+    //                                        ^^^ MISSING + Send ^^^
+}
+
+// tool_exec.rs:205 — pending_futures vector
+let mut pending_futures: Vec<(usize,
+    Pin<Box<dyn futures::Future<Output = FinalizedToolCall>>>)>
+= Vec::new();
+// ^^^ same issue — no + Send bound
 ```
 
-The fix is to ensure all captured state in the tool execution path is `Send`, and update the boxed future bounds accordingly. This is an internal change — the public `AgentTool` trait already returns `Pin<Box<dyn Future<Output = AgentToolResult> + Send>>` in most cases.
+These two locations box futures without `+ Send`, which infects the entire `run()` async fn with `!Send`.
 
-### Implementation notes for oxi
+**What is NOT the problem** (verified Send-safe):
 
-1. Audit `AgentLoop::run()` internals for `Box<dyn Future>` without `+ Send`.
-2. Ensure `AgentTool::call()` returns `Send` futures (add `+ Send` bound if missing).
-3. Verify `SharedState` and `ToolRegistry` are `Send + Sync` (they likely already are — they use `Arc` internally).
-4. Add `#[test] fn agent_loop_future_is_send()` compile-time assertion.
+| Component | Status | Evidence |
+|-----------|--------|----------|
+| `AgentLoop` struct fields | ✅ All `Send` | `Arc<dyn Provider>` (`Provider: Send + Sync` per `trait_def.rs:13`), `Arc<ToolRegistry>`, `SharedState` (wraps `Arc<RwLock<AgentState>>`), `RwLock<Vec<Message>>`, `Arc<AtomicBool>`, `Arc<dyn ProviderResolver>` (`ProviderResolver: Send + Sync` per `agent.rs:27`) |
+| `EmitFn` | ✅ `Send + Sync` | Defined as `Arc<dyn Fn(AgentEvent) + Send + Sync>` (`mod.rs:47`) |
+| `BeforeToolCallHook` / `AfterToolCallHook` | ✅ `Send + Sync` | `Arc<dyn Fn(...) + Send + Sync>` with `Pin<Box<dyn Future<...> + Send>>` return (`config.rs:58-66`) |
+| `AgentTool::execute()` | ✅ Already `Send` | Returns `Pin<Box<dyn Future<Output = AgentToolResult> + Send + '_>>` |
+
+### Fix specification
+
+The fix requires changing exactly **2 lines** in `tool_exec.rs` and adding 1 compile-time test:
 
 ```rust
-// Compile-time assertion to prevent regression
-fn _assert_send() {
-    fn assert_send<T: Send>() {}
-    assert_send::<AgentLoop>();  // if AgentLoop itself needs Send
-    // or check the future:
-    fn check_future<F: Future + Send>(_: F) {}
-    // check_future(agent_loop.run("sys".into(), "user".into()));
+// tool_exec.rs:20 — add + Send to the enum variant
+Future(Pin<Box<dyn futures::Future<Output = FinalizedToolCall> + Send>>),
+
+// tool_exec.rs:205 — add + Send to the pending_futures vector type
+let mut pending_futures: Vec<(usize,
+    Pin<Box<dyn futures::Future<Output = FinalizedToolCall> + Send>>)>
+= Vec::new();
+```
+
+```rust
+// In oxi-agent tests — compile-time assertion to prevent regression
+#[test]
+fn agent_loop_future_is_send() {
+    use std::future::Future;
+    fn assert_send_future<F: Future + Send>(_: F) {}
+    // This function exists only as a compile-time check.
+    // If AgentLoop::run() stops being Send, this will fail to compile.
 }
 ```
 
@@ -220,10 +258,12 @@ fn _assert_send() {
 
 ### For oxi project
 
-| Change | Risk | Scope |
-|--------|------|-------|
-| Additional re-exports | **Low** — additive only, no breaking changes | `oxi-sdk/src/lib.rs` (~5 lines) |
-| Send-safe AgentLoop | **Medium** — may require internal refactoring of tool dispatch | `oxi-agent` internals |
+| Change | Risk | Scope | Lines |
+|--------|------|-------|-------|
+| Add 3 re-exports (`UserMessage`, `SearchCache`, `CompactionEvent`) | **Low** — additive only | `oxi-sdk/src/lib.rs` | ~3 lines |
+| Add `+ Send` to boxed futures | **Low** — no semantic change | `oxi-agent/src/agent_loop/tool_exec.rs` | 2 lines + 1 test |
+
+> **Risk note on `+ Send` fix:** This is safe because every type flowing through the tool dispatch path is already `Send`-safe (verified above). If non-`Send` types are ever introduced, the compiler will catch it — which is the desired safety property.
 
 ### For oxios project
 
@@ -234,20 +274,24 @@ fn _assert_send() {
 
 ### Migration path
 
-1. oxi-sdk adds re-exports (can ship immediately).
-2. oxios switches imports and removes workspace deps (same PR or follow-up).
-3. oxi-agent refactors for `Send` future (can land independently, on oxi's timeline).
-4. oxios removes `spawn_blocking` workaround (after oxi release with Send-safe future).
+1. **oxi-sdk** adds 3 re-exports (`UserMessage`, `SearchCache`, `CompactionEvent`) — ships immediately.
+2. **oxios** switches imports and removes workspace deps (same PR or follow-up).
+3. **oxi-agent** adds `+ Send` to `FinalizedToolCallEntry::Future` and `pending_futures` + compile-time test (lands independently).
+4. **oxios** removes `spawn_blocking` workaround (after oxi release with Send-safe future).
 
 Steps 1–2 and 3–4 are independent — they can proceed in parallel.
+
+### Potential follow-up
+
+After both changes land, add an **SDK surface integration test** to `oxi-sdk` that compiles a minimal consumer using *only* `oxi-sdk` as a dependency. This catches future re-export regressions automatically.
 
 ---
 
 ## Summary
 
-| # | Request | Priority | Effort | Blocking |
-|---|---------|----------|--------|----------|
-| 1 | Re-export `SearchCache`, `CompactionEvent`, `UserMessage`, `ProviderError`, `ProviderEvent` | High | Low | No |
-| 2 | Make `AgentLoop::run()` return `Send` future | Medium-High | Medium | No |
+| # | Request | Priority | Effort | Files | Blocking |
+|---|---------|----------|--------|-------|----------|
+| 1 | Re-export `SearchCache`, `CompactionEvent`, `UserMessage` | High | Low (~3 lines) | `oxi-sdk/src/lib.rs` | No |
+| 2 | Add `+ Send` to boxed futures in `tool_exec.rs` | Medium-High | Low (~2 lines + test) | `oxi-agent/src/agent_loop/tool_exec.rs` | No |
 
 Both changes are additive or internal — no public API breakage. They allow oxios to depend solely on `oxi-sdk` as the integration contract, which was the original design intent.

@@ -9,10 +9,28 @@ use ratatui::style::{Modifier, Style};
 use tui_markdown;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-/// Wrap text to fit within max_width, breaking at word boundaries.
+/// Break a long word at character boundaries (CJK-safe).
+/// Returns (completed_lines, remaining_chunk, remaining_width).
+fn break_long_word(word: &str, max_width: usize) -> (Vec<String>, String, usize) {
+    let mut completed = Vec::new();
+    let mut chunk = String::new();
+    let mut chunk_width = 0usize;
+    for ch in word.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if chunk_width + cw > max_width && !chunk.is_empty() {
+            completed.push(chunk);
+            chunk = String::new();
+            chunk_width = 0;
+        }
+        chunk.push(ch);
+        chunk_width += cw;
+    }
+    (completed, chunk, chunk_width)
+}
+
+/// Wrap text to fit within max_width, breaking at word boundaries,
+/// with CJK character-level fallback for long words.
 fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
-    use std::fmt::Write;
-    
     if max_width == 0 {
         return vec![];
     }
@@ -30,24 +48,15 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
         let word_width = UnicodeWidthStr::width(word);
         
         if current_line.is_empty() {
-            if word_width > max_width {
-                // Word too long even for empty line, truncate
-                let mut truncated = String::new();
-                let mut w = 0usize;
-                for ch in word.chars() {
-                    let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
-                    if w + ch_width > max_width {
-                        break;
-                    }
-                    let _ = write!(truncated, "{}", ch);
-                    w += ch_width;
-                }
-                if !truncated.is_empty() {
-                    lines.push(truncated);
-                }
-            } else {
+            if word_width <= max_width {
                 current_line = word.to_string();
                 current_width = word_width;
+            } else {
+                // Word too long — break at character boundaries (CJK support)
+                let (completed, remainder, rem_w) = break_long_word(word, max_width);
+                lines.extend(completed);
+                current_line = remainder;
+                current_width = rem_w;
             }
         } else if current_width + 1 + word_width <= max_width {
             // Can fit with space
@@ -55,10 +64,17 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
             current_line.push_str(word);
             current_width += 1 + word_width;
         } else {
-            // Start new line
-            lines.push(current_line.clone());
-            current_line = word.to_string();
-            current_width = word_width;
+            // Doesn't fit — start new line
+            lines.push(current_line);
+            if word_width <= max_width {
+                current_line = word.to_string();
+                current_width = word_width;
+            } else {
+                let (completed, remainder, rem_w) = break_long_word(word, max_width);
+                lines.extend(completed);
+                current_line = remainder;
+                current_width = rem_w;
+            }
         }
     }
     
@@ -410,7 +426,7 @@ fn pad_to_width(text: &str, width: usize) -> String {
         let mut result = String::new();
         let mut current_width = 0usize;
         for ch in text.chars() {
-            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(1);
+            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
             if current_width + ch_width > width {
                 break;
             }

@@ -1225,44 +1225,19 @@ mod tests {
 
 /// Filter JSON tool call arrays from thinking text.
 /// GLM-5.1 writes tool call plans as `[{\"function\":...}]` inside
-/// reasoning_content. We detect `[{\"` and skip to the matching `]`.
+/// reasoning_content. We detect standalone JSON array lines (starting
+/// with `[{\"` and ending with `]`) and remove them. Line-by-line
+/// filtering avoids false positives from inline `[{\"` patterns in
+/// normal reasoning text.
 fn filter_tool_json(text: &str) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let mut result = String::new();
-    let mut i = 0;
-
-    while i < len {
-        // Detect `[{"` — start of a JSON array containing tool calls
-        if chars[i] == '['
-            && i + 2 < len
-            && chars[i + 1] == '{'
-            && chars[i + 2] == '"'
-        {
-            // Skip to matching `]`
-            let mut depth: i32 = 0;
-            while i < len {
-                match chars[i] {
-                    '[' | '{' => depth += 1,
-                    ']' | '}' => {
-                        depth -= 1;
-                        if depth <= 0 {
-                            i += 1;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            continue;
-        }
-        result.push(chars[i]);
-        i += 1;
-    }
-
-    // Trim empty lines but preserve content whitespace
-    result.lines()
+    text.lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            // Only remove lines that are standalone JSON tool call arrays.
+            // GLM pattern: [{"function":...}] on its own line.
+            // Inline occurrences like "see [{"key": "val"}] here" are preserved.
+            !(trimmed.starts_with("[{\"") && trimmed.ends_with(']'))
+        })
         .filter(|l| !l.trim().is_empty())
         .collect::<Vec<_>>()
         .join("\n")

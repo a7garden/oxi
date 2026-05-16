@@ -326,10 +326,11 @@ pub(crate) struct AppState {
     /// Used to compute incremental text delta from full snapshot.
     /// Tracks bytes (not chars) to allow fast slicing of UTF-8 text.
     snapshot_text_rendered: usize,
-    /// Length of thinking text already rendered from the snapshot's Thinking block.
-    /// Prevents duplicate thinking blocks on repeated MessageUpdates.
-    /// Tracks bytes (not chars).
-    snapshot_thinking_rendered: usize,
+    /// Per-block byte offsets for Thinking blocks already rendered.
+    /// Prevents duplicate thinking content on repeated MessageUpdates.
+    /// Uses Vec to support multiple Thinking blocks (defensive —
+    /// current providers emit at most one, but future ones may differ).
+    snapshot_thinking_rendered: Vec<usize>,
     /// Whether the initial empty Text block has been created in the TUI.
     /// Without this flag, the very first delta creates a Text content block
     /// via `insert(0, ...)`, but on the *next* MessageUpdate, `first_mut()`
@@ -365,7 +366,7 @@ impl AppState {
             pending_steering: 0,
             needs_persist: false,
             snapshot_text_rendered: 0,
-            snapshot_thinking_rendered: 0,
+            snapshot_thinking_rendered: Vec::new(),
             snapshot_text_block_created: false,
             questionnaire_bridge: None,
         }
@@ -466,7 +467,7 @@ impl AppState {
         self.is_agent_busy = true;
         self.auto_scroll = true;
         self.snapshot_text_rendered = 0;
-        self.snapshot_thinking_rendered = 0;
+        self.snapshot_thinking_rendered.clear();
         self.snapshot_text_block_created = false;
     }
 
@@ -482,6 +483,7 @@ impl AppState {
     /// be in a ToolCall block instead). This prevents JSON appearing in chat.
     pub fn update_streaming_message(&mut self, msg: &oxi_ai::Message, _delta: Option<&str>) {
         if let oxi_ai::Message::Assistant(assistant) = msg {
+            let mut thinking_block_idx: usize = 0;
             for block in &assistant.content {
                 match block {
                     oxi_ai::ContentBlock::Text(t) => {
@@ -525,22 +527,26 @@ impl AppState {
                     }
                     oxi_ai::ContentBlock::Thinking(t) => {
                         // Thinking blocks — only append new content beyond
-                        // what we've already rendered. Prevents duplicates.
-                        // Note: raw thinking content (including JSON tool call
-                        // arrays from GLM) is accumulated as-is. Filtering
-                        // happens at render time in chat.rs.
+                        // what we've already rendered for this specific block.
+                        // Per-block tracking prevents content loss if a future
+                        // provider emits multiple Thinking blocks.
                         let thinking = &t.thinking;
-                        if thinking.len() > self.snapshot_thinking_rendered {
+                        while self.snapshot_thinking_rendered.len() <= thinking_block_idx {
+                            self.snapshot_thinking_rendered.push(0);
+                        }
+                        if thinking.len() > self.snapshot_thinking_rendered[thinking_block_idx] {
+                            let prev = self.snapshot_thinking_rendered[thinking_block_idx];
                             let byte_off = thinking.char_indices()
                                 .map(|(i, _)| i)
-                                .find(|&i| i >= self.snapshot_thinking_rendered)
+                                .find(|&i| i >= prev)
                                 .unwrap_or(thinking.len());
                             let new_thinking = &thinking[byte_off..];
                             if !new_thinking.is_empty() {
                                 self.chat.stream_thinking(new_thinking.to_string(), false);
                             }
-                            self.snapshot_thinking_rendered = thinking.len();
+                            self.snapshot_thinking_rendered[thinking_block_idx] = thinking.len();
                         }
+                        thinking_block_idx += 1;
                     }
                     oxi_ai::ContentBlock::Image(img) => {
                         self.chat.stream_image(img.mime_type.clone(), img.data.clone());
@@ -577,7 +583,7 @@ impl AppState {
         self.chat.finish_streaming();
         self.is_agent_busy = false;
         self.snapshot_text_rendered = 0;
-        self.snapshot_thinking_rendered = 0;
+        self.snapshot_thinking_rendered.clear();
         self.snapshot_text_block_created = false;
         if was_streaming {
             self.message_count += 1;

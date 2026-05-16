@@ -10,22 +10,26 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
     }
+    // First pass: check if everything fits
+    let total_width: usize = s.chars()
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum();
+    if total_width <= max_width {
+        return s.to_string();
+    }
+    // Second pass: truncate to max_width - 1 (reserve 1 col for ellipsis)
+    let target = max_width.saturating_sub(1);
     let mut width = 0usize;
     let mut end = 0usize;
     for (i, ch) in s.char_indices() {
         let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + cw > max_width {
-            // Not enough room for ellipsis either
-            return s[..end].to_string();
-        }
-        if width + cw > max_width.saturating_sub(1) {
-            // Would overflow if we add ellipsis
-            return format!("{}\u{2026}", &s[..end]);
+        if width + cw > target {
+            break;
         }
         width += cw;
         end = i + ch.len_utf8();
     }
-    s.to_string()
+    format!("{}\u{2026}", &s[..end])
 }
 
 #[cfg(test)]
@@ -38,5 +42,12 @@ mod tests {
         assert_eq!(truncate_to_width(text, 100), "hello world");
         assert_eq!(truncate_to_width(text, 5), "hell…");
         assert_eq!(truncate_to_width(text, 0), "");
+        // Exact fit — no truncation
+        assert_eq!(truncate_to_width("hello", 5), "hello");
+        assert_eq!(truncate_to_width("abc", 3), "abc");
+        // CJK exact fit (안=2, 녕=2 → total width 4)
+        assert_eq!(truncate_to_width("안녕", 4), "안녕");
+        // CJK truncation
+        assert_eq!(truncate_to_width("안녕하세요", 5), "안녕…");
     }
 }
