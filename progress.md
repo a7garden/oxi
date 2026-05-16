@@ -6,6 +6,7 @@ In Progress
 ## Tasks
 - [x] Refactor 1: Agent accepts pre-built ToolRegistry
 - [x] Refactor 2: Oxi holds real ProviderRegistry + proper model loading
+- [x] Refactor 3: oxi-cli workspace_dir flow + Agent::new() 3-arg migration
 
 ## Files Changed — Refactor 1
 - `oxi-agent/src/agent.rs` — Changed `Agent::new()` to accept `Arc<ToolRegistry>`, added `new_empty()` convenience constructor
@@ -22,6 +23,11 @@ In Progress
 - `oxi-sdk/src/agent_builder.rs` — Updated to use `Arc<dyn Provider>` directly from `Oxi::create_provider()` (no more Box-to-Arc conversion)
 - `oxi-sdk/src/lib.rs` — Added `ProviderRegistry` and `ModelRegistry` to re-exports
 
+## Files Changed — Refactor 3
+- `oxi-cli/src/lib.rs` — Changed `workspace_dir: None` → `workspace_dir: Some(cwd)` in App::new() AgentConfig
+- `oxi-cli/src/app/agent_session_runtime.rs` — Changed `workspace_dir: None` → `workspace_dir: Some(services.cwd.clone())` in both AgentConfig construction sites (fallback path and main path)
+
 ## Notes
 - `cargo check --workspace --lib`: 0 errors
-- `cargo test --workspace --lib`: 79 tests passed, 0 failed
+- `cargo check -p oxi-cli` (bin target): 0 errors
+- `cargo test --workspace --lib`: 1209 tests passed, 0 failed (6 crates)
