@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **tool_exec.rs**: Add `+ Send` bound to `FinalizedToolCallEntry::Future` and `pending_futures` type alias, making `AgentLoop::run()` / `run_messages()` / `continue_loop()` futures `Send`-compatible for `tokio::spawn`
 
+### Changed — oxi-sdk, oxi-cli
+
+- Bump `oxi-agent` dependency to 0.15.1
+
 ## [0.15.0] - 2026-05-16
 
 (No changelog entry recorded)
