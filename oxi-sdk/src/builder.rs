@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use oxi_ai::{Provider, Model};
-use oxi_agent::{Agent, AgentLoop, AgentLoopConfig, ToolRegistry};
+use oxi_agent::ToolRegistry;
 
 use crate::agent_builder::AgentBuilder;
 

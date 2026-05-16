@@ -4,32 +4,28 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxi_ai::Provider;
-use oxi_agent::{
-    Agent, AgentLoop, AgentLoopConfig, AgentConfig,
-    ToolRegistry, AgentTool,
-};
+use oxi_agent::{Agent, AgentConfig, ToolRegistry, AgentTool};
 
 use crate::builder::Oxi;
 
 /// Builder for creating an agent with custom configuration.
+#[allow(dead_code)]
 pub struct AgentBuilder<'a> {
     oxi: &'a Oxi,
-    config: oxi_agent::AgentConfig,
+    config: AgentConfig,
     tools: ToolRegistry,
     workspace_dir: Option<PathBuf>,
     system_prompt: Option<String>,
-    hooks: Option<oxi_agent::AgentHooks>,
 }
 
 impl<'a> AgentBuilder<'a> {
-    pub fn new(oxi: &'a Oxi, config: oxi_agent::AgentConfig) -> Self {
+    pub fn new(oxi: &'a Oxi, config: AgentConfig) -> Self {
         Self {
             oxi,
             config,
             tools: ToolRegistry::new(),
             workspace_dir: None,
             system_prompt: None,
-            hooks: None,
         }
     }
     

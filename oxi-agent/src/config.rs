@@ -153,6 +153,9 @@ pub struct AgentConfig {
     /// provider uses it instead of an environment variable.
     #[serde(default)]
     pub api_key: Option<String>,
+    /// Working directory for file tools. Defaults to current directory if None.
+    #[serde(default)]
+    pub workspace_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for AgentConfig {
@@ -170,6 +173,7 @@ impl Default for AgentConfig {
             compaction_instruction: None,
             context_window: 128_000,
             api_key: None,
+            workspace_dir: None,
         }
     }
 }
