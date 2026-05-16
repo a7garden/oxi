@@ -953,7 +953,9 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             ..
         } => {
             use crate::widgets::tool_renderer::{measure_call_height, measure_result_height};
-            let call_h = measure_call_height(name, arguments);
+            // inner width for the bordered block: borders take 2 cols
+            let inner_w = width.saturating_sub(2) as usize;
+            let call_h = measure_call_height(name, arguments, inner_w);
             let result_h = result.as_ref().map_or(0, |(r, is_err)| {
                 if *is_err {
                     r.lines().count().min(4) as u16
@@ -1120,7 +1122,9 @@ impl Widget for EntryWidget<'_> {
                 }
 
                 let text: ratatui::text::Text = content_lines.into_iter().collect();
-                let para = Paragraph::new(text).wrap(Wrap { trim: false });
+                // No wrap — content is pre-truncated to max_w by format functions.
+                // Wrapping would cause measured height mismatches, clipping the result.
+                let para = Paragraph::new(text);
                 para.render(inner, buf);
             }
             LayoutKind::ToolResultBox {
@@ -1291,32 +1295,32 @@ impl StatefulWidget for ChatView<'_> {
         let styles = self.theme.to_styles();
         let width = area.width;
 
-        // Get layout (from cache or recomputed)
-        let layout = state.get_layout(width);
+        // Apply left/right padding to the inner content area
+        let pad = self.theme.spacing.padding.max(1);
+        let inner_width = width.saturating_sub(pad * 2);
+
+        // Get layout computed with inner_width for correct height measurements
+        let layout = state.get_layout(inner_width);
         let total_height = layout
             .last()
             .map(|e| e.y.saturating_add(e.height))
             .unwrap_or(0);
         state.content_height = total_height;
 
-        // Apply left/right padding to the inner content area
-        let pad = self.theme.spacing.padding.max(1);
-        let inner_width = width.saturating_sub(pad * 2);
-
-        // Create ScrollView with virtual buffer sized to total content.
-        // No scrollbar — scrolling via mouse wheel / keyboard.
-        let size = ratatui::layout::Size::new(inner_width, total_height.max(area.height));
+        // Create ScrollView with virtual buffer sized to full width so
+        // entries positioned at x=pad get equal left/right padding.
+        let size = ratatui::layout::Size::new(width, total_height.max(area.height));
         let mut scroll_view = ScrollView::new(size)
             .vertical_scrollbar_visibility(ScrollbarVisibility::Never)
             .horizontal_scrollbar_visibility(ScrollbarVisibility::Never);
 
         // Render each layout entry into the virtual buffer.
-        // Use inner_width so content never overlaps the vertical scrollbar.
+        // Position at x=pad for symmetric left/right margins.
         for entry in &layout {
             if entry.height == 0 {
                 continue;
             }
-            let rect = Rect::new(0, entry.y, inner_width, entry.height);
+            let rect = Rect::new(pad, entry.y, inner_width, entry.height);
             let widget = EntryWidget::new(&entry.kind, &styles);
             scroll_view.render_widget(widget, rect);
         }

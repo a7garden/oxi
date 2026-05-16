@@ -141,9 +141,10 @@ pub fn format_edit_call(args: &Value, styles: &ThemeStyles) -> Vec<Line<'static>
 }
 
 /// Format the bash tool call.
-pub fn format_bash_call(args: &Value, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_bash_call(args: &Value, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
     let command = get_str(args, "command").unwrap_or("...");
-    let command_display = truncate_to_width(command, 60);
+    // Account for "$ " prefix (2 chars)
+    let command_display = truncate_to_width(command, max_width.saturating_sub(2).max(20));
 
     let mut lines = vec![Line::from(vec![
         Span::styled("$ ", styles.accent.add_modifier(Modifier::BOLD)),
@@ -258,7 +259,7 @@ pub fn format_tool_call(
 
     match name {
         "edit" => format_edit_call(&args, styles),
-        "bash" => format_bash_call(&args, styles),
+        "bash" => format_bash_call(&args, max_width, styles),
         "read" => format_read_call(&args, styles),
         "write" => format_write_call(&args, styles),
         "grep" | "find" | "ls" => format_search_call(name, &args, styles),
@@ -506,12 +507,12 @@ pub fn format_tool_result(
 // ── Height calculation ─────────────────────────────────────────────────────
 
 /// Calculate the rendered height for a tool call.
-pub fn measure_call_height(name: &str, arguments: &str) -> u16 {
+pub fn measure_call_height(name: &str, arguments: &str, max_width: usize) -> u16 {
     let args = parse_tool_args(arguments);
 
     match name {
         "edit" => format_edit_call(&args, &ThemeStyles::default()).len() as u16,
-        "bash" => format_bash_call(&args, &ThemeStyles::default()).len() as u16,
+        "bash" => format_bash_call(&args, max_width, &ThemeStyles::default()).len() as u16,
         "read" => 1, // Always 1 line for read
         "write" => 1,
         "grep" | "find" | "ls" => 1,
@@ -638,7 +639,7 @@ mod tests {
             "command": "cargo build --release",
             "timeout": 120
         });
-        let lines = format_bash_call(&args, &ThemeStyles::default());
+        let lines = format_bash_call(&args, 80, &ThemeStyles::default());
         assert!(lines[0].to_string().contains("$ cargo build"));
     }
 
