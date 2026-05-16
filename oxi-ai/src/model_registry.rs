@@ -15,7 +15,7 @@ fn extract_model_name(id: &str) -> &str {
 }
 
 /// Global model registry (static built-in models)
-static MODELS: Lazy<HashMap<String, Model>> = Lazy::new(|| {
+static STATIC_MODELS: Lazy<HashMap<String, Model>> = Lazy::new(|| {
     let mut map = HashMap::new();
 
     // OpenAI models
@@ -640,92 +640,6 @@ fn add_azure_models(map: &mut HashMap<String, Model>) {
     }
 }
 
-/// Model registry
-pub struct ModelRegistry;
-
-impl ModelRegistry {
-    /// Get a model by provider/model ID
-    pub fn get(provider: &str, model_id: &str) -> Option<&'static Model> {
-        let key = format!("{}/{}", provider, model_id);
-        MODELS.get(&key)
-    }
-
-    /// Get all models from a provider
-    pub fn get_by_provider(provider: &str) -> Vec<&'static Model> {
-        MODELS.values().filter(|m| m.provider == provider).collect()
-    }
-
-    /// Get all available models
-    pub fn all() -> Vec<&'static Model> {
-        MODELS.values().collect()
-    }
-
-    /// Search models by pattern
-    pub fn search(pattern: &str) -> Vec<&'static Model> {
-        let pattern_lower = pattern.to_lowercase();
-        MODELS
-            .values()
-            .filter(|m| {
-                m.id.to_lowercase().contains(&pattern_lower)
-                    || m.name.to_lowercase().contains(&pattern_lower)
-            })
-            .collect()
-    }
-}
-
-// ── Dynamic model registration ──────────────────────────────────────
-
-/// Runtime registry for dynamically registered models (e.g., from custom providers).
-static DYNAMIC_MODELS: Lazy<RwLock<HashMap<String, Model>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-
-/// Register a model at runtime.
-///
-/// Call this during startup for each custom provider's model.
-/// If a model with the same `provider/model_id` key already exists,
-/// the new one replaces it.
-pub fn register_model(model: Model) {
-    let key = format!("{}/{}", model.provider, model.id);
-    DYNAMIC_MODELS.write().insert(key, model);
-}
-
-/// Unregister a previously registered dynamic model.
-pub fn unregister_model(provider: &str, model_id: &str) {
-    let key = format!("{}/{}", provider, model_id);
-    DYNAMIC_MODELS.write().remove(&key);
-}
-
-/// Look up a model by provider and model ID, checking both dynamic and static registries.
-///
-/// Dynamic models take priority over static ones.
-pub fn lookup_model(provider: &str, model_id: &str) -> Option<Model> {
-    let key = format!("{}/{}", provider, model_id);
-    // Dynamic models take priority
-    if let Some(m) = DYNAMIC_MODELS.read().get(&key) {
-        return Some(m.clone());
-    }
-    // Then static models
-    MODELS.get(&key).cloned()
-}
-
-/// Convenience function to get a model (static registry only – use [`lookup_model`] for dynamic too)
-pub fn get_model(provider: &str, model_id: &str) -> Option<&'static Model> {
-    ModelRegistry::get(provider, model_id)
-}
-
-/// Get all available providers
-pub fn get_providers() -> Vec<&'static str> {
-    let mut providers: Vec<&'static str> = MODELS.values().map(|m| m.provider.as_str()).collect();
-    providers.sort();
-    providers.dedup();
-    providers
-}
-
-/// Get all models from a provider
-pub fn get_models(provider: &str) -> Vec<&'static Model> {
-    ModelRegistry::get_by_provider(provider)
-}
-
 fn add_zai_models(map: &mut HashMap<String, Model>) {
     let models = [
         ("zai/glm-4.7", "GLM-4.7", true, 0.0, 0.0),
@@ -759,6 +673,163 @@ fn add_zai_models(map: &mut HashMap<String, Model>) {
             },
         );
     }
+}
+
+/// Runtime registry for AI models.
+///
+/// # Example
+/// ```
+/// use oxi_ai::model_registry::ModelRegistry;
+///
+/// let registry = ModelRegistry::from_static();
+/// registry.register(custom_model);
+///
+/// if let Some(model) = registry.lookup("openai", "gpt-4o") {
+///     println!("Found model: {}", model.name);
+/// }
+/// ```
+#[derive(Default)]
+pub struct ModelRegistry {
+    static_models: HashMap<String, Model>,
+    dynamic_models: parking_lot::RwLock<HashMap<String, Model>>,
+}
+
+impl ModelRegistry {
+    /// Create a new empty registry.
+    pub fn new() -> Self {
+        Self {
+            static_models: HashMap::new(),
+            dynamic_models: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Create a registry pre-populated with all built-in static models.
+    ///
+    /// This loads models from the embedded static database.
+    pub fn from_static() -> Self {
+        Self {
+            static_models: STATIC_MODELS.clone(),
+            dynamic_models: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Register a model at runtime.
+    ///
+    /// If a model with the same `provider/model_id` key already exists,
+    /// the new one replaces it.
+    pub fn register(&self, model: Model) {
+        let key = format!("{}/{}", model.provider, model.id);
+        self.dynamic_models.write().insert(key, model);
+    }
+
+    /// Unregister a previously registered dynamic model.
+    pub fn unregister(&self, provider: &str, model_id: &str) {
+        let key = format!("{}/{}", provider, model_id);
+        self.dynamic_models.write().remove(&key);
+    }
+
+    /// Look up a model by provider and model ID.
+    ///
+    /// Dynamic models take priority over static ones.
+    pub fn lookup(&self, provider: &str, model_id: &str) -> Option<Model> {
+        let key = format!("{}/{}", provider, model_id);
+        // Dynamic models take priority
+        if let Some(m) = self.dynamic_models.read().get(&key) {
+            return Some(m.clone());
+        }
+        // Then static models
+        self.static_models.get(&key).cloned()
+    }
+
+    /// Get a model by provider/model ID (static models only).
+    pub fn get(provider: &str, model_id: &str) -> Option<&'static Model> {
+        let key = format!("{}/{}", provider, model_id);
+        STATIC_MODELS.get(&key)
+    }
+
+    /// Get all models from a provider (static only).
+    pub fn get_by_provider(provider: &str) -> Vec<&'static Model> {
+        STATIC_MODELS
+            .values()
+            .filter(|m| m.provider == provider)
+            .collect()
+    }
+
+    /// Get all available models (static only).
+    pub fn all() -> Vec<&'static Model> {
+        STATIC_MODELS.values().collect()
+    }
+
+    /// Get all registered model IDs as `provider/model` strings.
+    pub fn model_ids(&self) -> Vec<String> {
+        let static_ids: Vec<String> = self.static_models.keys().cloned().collect();
+        let dynamic_ids: Vec<String> = self.dynamic_models.read().keys().cloned().collect();
+        static_ids
+            .into_iter()
+            .chain(dynamic_ids.into_iter())
+            .collect()
+    }
+
+    /// Search models by pattern (static only).
+    pub fn search(pattern: &str) -> Vec<&'static Model> {
+        let pattern_lower = pattern.to_lowercase();
+        STATIC_MODELS
+            .values()
+            .filter(|m| {
+                m.id.to_lowercase().contains(&pattern_lower)
+                    || m.name.to_lowercase().contains(&pattern_lower)
+            })
+            .collect()
+    }
+}
+
+// ── Global registry instance ────────────────────────────────────────
+
+/// Global model registry instance (for convenience functions).
+static GLOBAL_REGISTRY: Lazy<ModelRegistry> = Lazy::new(|| ModelRegistry::from_static());
+
+// ── Convenience functions using global registry ─────────────────────
+
+/// Register a model at runtime.
+///
+/// Call this during startup for each custom provider's model.
+/// If a model with the same `provider/model_id` key already exists,
+/// the new one replaces it.
+pub fn register_model(model: Model) {
+    GLOBAL_REGISTRY.register(model);
+}
+
+/// Unregister a previously registered dynamic model.
+pub fn unregister_model(provider: &str, model_id: &str) {
+    GLOBAL_REGISTRY.unregister(provider, model_id);
+}
+
+/// Look up a model by provider and model ID, checking both dynamic and static registries.
+///
+/// Dynamic models take priority over static ones.
+pub fn lookup_model(provider: &str, model_id: &str) -> Option<Model> {
+    GLOBAL_REGISTRY.lookup(provider, model_id)
+}
+
+/// Convenience function to get a model (static registry only – use [`lookup_model`] for dynamic too)
+pub fn get_model(provider: &str, model_id: &str) -> Option<&'static Model> {
+    ModelRegistry::get(provider, model_id)
+}
+
+/// Get all available providers
+pub fn get_providers() -> Vec<&'static str> {
+    let mut providers: Vec<&'static str> = STATIC_MODELS
+        .values()
+        .map(|m| m.provider.as_str())
+        .collect();
+    providers.sort();
+    providers.dedup();
+    providers
+}
+
+/// Get all models from a provider
+pub fn get_models(provider: &str) -> Vec<&'static Model> {
+    ModelRegistry::get_by_provider(provider)
 }
 
 #[cfg(test)]
@@ -801,5 +872,38 @@ mod tests {
         assert!(results
             .iter()
             .all(|m| m.name.to_lowercase().contains("gpt")));
+    }
+
+    #[test]
+    fn test_model_registry_instance() {
+        let registry = ModelRegistry::from_static();
+        assert!(registry.lookup("openai", "gpt-4o").is_some());
+        assert!(registry.lookup("fake", "fake-model").is_none());
+    }
+
+    #[test]
+    fn test_model_registry_register_dynamic() {
+        let registry = ModelRegistry::new();
+        let custom_model = Model {
+            id: "custom-model".to_string(),
+            name: "Custom Model".to_string(),
+            api: Api::OpenAiCompletions,
+            provider: "custom".to_string(),
+            base_url: "https://custom.example.com".to_string(),
+            reasoning: false,
+            input: vec![InputModality::Text],
+            cost: Cost {
+                input: 1.0,
+                output: 2.0,
+                cache_read: 0.5,
+                cache_write: 5.0,
+            },
+            context_window: 100_000,
+            max_tokens: 8192,
+            headers: Default::default(),
+            compat: None,
+        };
+        registry.register(custom_model.clone());
+        assert!(registry.lookup("custom", "custom-model").is_some());
     }
 }

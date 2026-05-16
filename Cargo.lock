@@ -3226,6 +3226,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxi-sdk"
+version = "0.12.0"
+dependencies = [
+ "anyhow",
+ "oxi-agent",
+ "oxi-ai",
+ "parking_lot",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "oxi-store"
 version = "0.12.0"
 dependencies = [
