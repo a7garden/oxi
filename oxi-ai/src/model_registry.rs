@@ -675,19 +675,11 @@ fn add_zai_models(map: &mut HashMap<String, Model>) {
     }
 }
 
-/// Runtime registry for AI models.
+/// Lightweight model registry for SDK/engine usage.
 ///
-/// # Example
-/// ```
-/// use oxi_ai::model_registry::ModelRegistry;
-///
-/// let registry = ModelRegistry::from_static();
-/// registry.register(custom_model);
-///
-/// if let Some(model) = registry.lookup("openai", "gpt-4o") {
-///     println!("Found model: {}", model.name);
-/// }
-/// ```
+/// Stores model metadata (provider, base_url, API type, costs) without
+/// authentication details. For CLI usage with auth integration, see
+/// `oxi_store::CliModelRegistry`.
 #[derive(Default)]
 pub struct ModelRegistry {
     static_models: HashMap<String, Model>,

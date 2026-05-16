@@ -20,7 +20,10 @@ pub mod auth_guidance;
 /// Persistent credential storage for API keys and tokens.
 pub use auth_storage::AuthStorage;
 
-/// Runtime model registry for dynamic model management.
+/// CLI-specific model registry with auth storage integration.
+pub use model_registry::CliModelRegistry;
+
+/// Backward-compatible alias for [`CliModelRegistry`].
 pub use model_registry::ModelRegistry;
 
 /// Session persistence, navigation, and message types.

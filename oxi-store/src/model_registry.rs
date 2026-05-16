@@ -352,14 +352,16 @@ fn resolve_headers(
 // Model Registry
 // =============================================================================
 
-/// Model registry — loads and manages models, resolves API keys via `AuthStorage`.
+/// CLI-specific model registry with auth storage integration.
 ///
-/// Mirrors the TypeScript `ModelRegistry` class:
-/// - Loads built-in models from `oxi_ai::model_db`
-/// - Loads custom models from `models.json` on disk
-/// - Supports dynamic provider registration (for extensions)
-/// - Resolves API keys through `AuthStorage`
-pub struct ModelRegistry {
+/// This extends the base model data from `oxi_ai::model_db` with:
+/// - API key resolution via `AuthStorage`
+/// - `models.json` file parsing
+/// - OAuth token detection
+/// - Available model filtering (only models with configured auth)
+///
+/// For SDK usage without CLI-specific features, use `oxi_ai::ModelRegistry` instead.
+pub struct CliModelRegistry {
     /// All loaded models (built-in + custom).
     models: RwLock<Vec<Model>>,
     /// Per-provider request configs loaded from models.json.
@@ -376,7 +378,10 @@ pub struct ModelRegistry {
     models_json_path: Option<PathBuf>,
 }
 
-impl ModelRegistry {
+/// Backward-compatible alias for [`CliModelRegistry`].
+pub type ModelRegistry = CliModelRegistry;
+
+impl CliModelRegistry {
     /// Create a new `ModelRegistry` that loads models from the given path.
     ///
     /// If `models_json_path` is `None`, falls back to

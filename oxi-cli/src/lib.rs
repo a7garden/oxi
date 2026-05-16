@@ -90,6 +90,7 @@ use uuid::Uuid;
 /// Application state and entry point
 pub struct App {
     /// SDK engine for provider/model resolution
+    #[allow(dead_code)]
     engine: oxi_sdk::Oxi,
     agent: Arc<Agent>,
     settings: Settings,
@@ -367,6 +368,7 @@ impl App {
     }
 
     /// Access the SDK engine (for provider/model resolution)
+    #[allow(dead_code)]
     pub(crate) fn engine(&self) -> &oxi_sdk::Oxi {
         &self.engine
     }

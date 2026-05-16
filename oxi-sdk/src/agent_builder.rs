@@ -47,6 +47,7 @@ impl<'a> AgentBuilder<'a> {
     /// Register the standard coding tools (read, write, edit, ls).
     /// If `.workspace()` was called, uses that directory as cwd for tools.
     /// Otherwise uses current directory.
+    #[allow(unused_mut)]
     pub fn coding_tools(mut self) -> Self {
         let cwd = self.workspace_dir.clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
@@ -62,6 +63,7 @@ impl<'a> AgentBuilder<'a> {
     /// Register read-only tools (read, ls).
     /// If `.workspace()` was called, uses that directory as cwd for tools.
     /// Otherwise uses current directory.
+    #[allow(unused_mut)]
     pub fn readonly_tools(mut self) -> Self {
         let cwd = self.workspace_dir.clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
