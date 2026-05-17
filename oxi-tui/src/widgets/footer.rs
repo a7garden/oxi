@@ -39,7 +39,7 @@ impl Default for FooterData {
             model_name: String::new(),
             thinking_level: None,
             provider_name: String::new(),
-            git_branch: None,
+            git_branch: Option::None,
             git_dirty: false,
             pwd: None,
             input_tokens: 0,
@@ -77,6 +77,27 @@ impl FooterData {
             format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
         }
     }
+
+    /// Shorten a path for display: ~ replacement, then take last component if still long.
+    fn display_path(pwd: &str) -> String {
+        let home = dirs::home_dir()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let shortened = if !home.is_empty() && pwd.starts_with(&home) {
+            format!("~{}", &pwd[home.len()..])
+        } else {
+            pwd.to_string()
+        };
+        // If still long, just show the last directory name
+        if shortened.len() > 20 {
+            std::path::Path::new(&shortened)
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or(shortened)
+        } else {
+            shortened
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -109,8 +130,8 @@ impl StatefulWidget for Footer<'_> {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // separator
-                Constraint::Length(1), // line 1
-                Constraint::Length(1), // line 2
+                Constraint::Length(1), // line 1: tokens + model
+                Constraint::Length(1), // line 2: path + version
             ])
             .split(area);
 
@@ -131,20 +152,18 @@ impl StatefulWidget for Footer<'_> {
             };
             let pct_display = (pct * 100.0) as f32;
             let has_tokens = total_tokens > 0;
+            let token_style = if has_tokens { styles.normal } else { styles.muted };
 
-            // Always show token area (even when 0) so the footer isn't empty.
             let in_fmt = FooterData::fmt_count(d.input_tokens + d.cache_read_tokens);
             let out_fmt = FooterData::fmt_count(d.output_tokens);
 
+            // Left: " ↑N ↓N  X%"  (leading space = 1 left padding)
             let mut left_spans: Vec<Span<'_>> = vec![
                 Span::styled(
                     format!(" \u{2191}{} \u{2193}{}", in_fmt, out_fmt),
-                    if has_tokens { styles.normal } else { styles.muted },
+                    token_style,
                 ),
-                Span::styled(
-                    format!("  {:.0}%", pct_display),
-                    if has_tokens { styles.normal } else { styles.muted },
-                ),
+                Span::styled(format!("  {:.0}%", pct_display), token_style),
             ];
 
             if d.session_duration_secs > 0 {
@@ -154,54 +173,37 @@ impl StatefulWidget for Footer<'_> {
                 ));
             }
 
-            // Model display — build spans for right side
+            // Right: "(provider) model • thinking"  (trailing space removed: -2 right padding)
             let mut right_spans: Vec<Span<'_>> = vec![];
 
             if d.model_name.is_empty() {
                 right_spans.push(Span::styled(
-                    "[no model] ".to_string(),
+                    "[no model]".to_string(),
                     Style::default()
                         .fg(self.theme.colors.primary.to_ratatui())
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
-                let thinking_style = if d.thinking_level.is_some() {
-                    Style::default().fg(self.theme.colors.muted.to_ratatui())
-                } else {
-                    Style::default()
-                        .fg(self.theme.colors.primary.to_ratatui())
-                        .add_modifier(Modifier::BOLD)
-                };
+                let model_bold = Style::default()
+                    .fg(self.theme.colors.primary.to_ratatui())
+                    .add_modifier(Modifier::BOLD);
+                let thinking_style = Style::default().fg(self.theme.colors.muted.to_ratatui());
 
                 let model_part = d.model_name.split('/').next_back().unwrap_or(&d.model_name);
                 let provider_part = d.model_name.split('/').next().unwrap_or("");
 
                 if !provider_part.is_empty() {
-                    right_spans.push(Span::styled(
-                        format!("({}) ", provider_part),
-                        Style::default()
-                            .fg(self.theme.colors.primary.to_ratatui())
-                            .add_modifier(Modifier::BOLD),
-                    ));
+                    right_spans.push(Span::styled(format!("({}) ", provider_part), model_bold));
                 }
-                right_spans.push(Span::styled(
-                    model_part.to_string(),
-                    Style::default()
-                        .fg(self.theme.colors.primary.to_ratatui())
-                        .add_modifier(Modifier::BOLD),
-                ));
+                right_spans.push(Span::styled(model_part.to_string(), model_bold));
                 if let Some(ref level) = d.thinking_level {
-                    right_spans.push(Span::styled(format!(" • {}", level), thinking_style));
+                    right_spans.push(Span::styled(format!(" \u{2022} {}", level), thinking_style));
                 }
-                right_spans.push(Span::styled(" ".to_string(), styles.normal));
             }
 
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Min(1),
-                    Constraint::Min(1),
-                ])
+                .constraints([Constraint::Min(1), Constraint::Min(1)])
                 .split(rows[1]);
 
             Paragraph::new(Line::from(left_spans))
@@ -217,19 +219,10 @@ impl StatefulWidget for Footer<'_> {
         {
             let mut left_spans: Vec<Span> = Vec::new();
 
-            let home = dirs::home_dir()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let pwd_display = if let Some(ref pwd) = d.pwd {
-                if !home.is_empty() && pwd.starts_with(&home) {
-                    format!(" ~{}", &pwd[home.len()..])
-                } else {
-                    format!(" {}", pwd)
-                }
-            } else {
-                String::new()
-            };
-            left_spans.push(Span::styled(pwd_display, styles.muted));
+            if let Some(ref pwd) = d.pwd {
+                let display = FooterData::display_path(pwd);
+                left_spans.push(Span::styled(format!(" {}", display), styles.muted));
+            }
 
             if let Some(ref branch) = d.git_branch {
                 if !branch.is_empty() {
@@ -247,7 +240,7 @@ impl StatefulWidget for Footer<'_> {
             }
 
             let version_tag = if !d.version.is_empty() {
-                format!(" v{} ", d.version)
+                format!("v{}", d.version)
             } else {
                 String::new()
             };
@@ -294,5 +287,26 @@ mod tests {
         assert_eq!(FooterData::fmt_count(500), "500");
         assert_eq!(FooterData::fmt_count(1500), "1.5k");
         assert_eq!(FooterData::fmt_count(1_500_000), "1.5M");
+    }
+
+    #[test]
+    fn display_path_short() {
+        let path = format!("{}/projects/myapp", dirs::home_dir().unwrap().display());
+        assert!(FooterData::display_path(&path).contains("~/projects/myapp"));
+    }
+
+    #[test]
+    fn display_path_long_truncates_to_basename() {
+        let path = "/Volumes/MERCURY/PROJECTS/oxi";
+        let displayed = FooterData::display_path(path);
+        assert_eq!(displayed, "oxi");
+    }
+
+    #[test]
+    fn display_path_home_short() {
+        let home = dirs::home_dir().unwrap();
+        let path = format!("{}/src", home.display());
+        let displayed = FooterData::display_path(&path);
+        assert_eq!(displayed, "~/src");
     }
 }
