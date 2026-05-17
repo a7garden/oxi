@@ -1,6 +1,5 @@
 //! Rendering functions for the TUI.
 
-
 use super::app::{AppOverlay, AppState, SetupStep};
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};

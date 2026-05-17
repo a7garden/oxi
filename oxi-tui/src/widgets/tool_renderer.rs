@@ -141,7 +141,11 @@ pub fn format_edit_call(args: &Value, styles: &ThemeStyles) -> Vec<Line<'static>
 }
 
 /// Format the bash tool call.
-pub fn format_bash_call(args: &Value, max_width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+pub fn format_bash_call(
+    args: &Value,
+    max_width: usize,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let command = get_str(args, "command").unwrap_or("...");
     // Account for "$ " prefix (2 chars)
     let command_display = truncate_to_width(command, max_width.saturating_sub(2).max(20));

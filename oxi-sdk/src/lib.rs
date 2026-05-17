@@ -44,7 +44,7 @@ pub use oxi_ai::env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_key,
 
 // Model database — provider catalog, model metadata
 pub use oxi_ai::model_db::{
-    get_all_models, get_cheapest_models, get_model_entry, get_providers, get_provider_models,
+    get_all_models, get_cheapest_models, get_model_entry, get_provider_models, get_providers,
     get_reasoning_models, get_vision_models, model_count, search_models, ModelEntry,
 };
 pub use oxi_ai::oauth::{

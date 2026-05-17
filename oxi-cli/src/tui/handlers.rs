@@ -39,6 +39,12 @@ pub async fn handle_input(
             match mouse.kind {
                 MouseEventKind::ScrollUp => state.scroll_up(3),
                 MouseEventKind::ScrollDown => state.scroll_down(3),
+                MouseEventKind::Up(button) => {
+                    use crossterm::event::MouseButton;
+                    if button == MouseButton::Left {
+                        handle_click(mouse.column, mouse.row, state);
+                    }
+                }
                 _ => {}
             }
             None
@@ -325,7 +331,9 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
                 tool_name
             );
             // Track start time for duration measurement
-            state.tool_start_times.insert(tool_call_id.clone(), std::time::Instant::now());
+            state
+                .tool_start_times
+                .insert(tool_call_id.clone(), std::time::Instant::now());
             let args_str = serde_json::to_string(&args).unwrap_or_else(|_| args.to_string());
             state.chat.stream_tool_call(
                 tool_call_id,
@@ -1216,4 +1224,23 @@ fn handle_overlay_paste(text: &str, state: &mut AppState) -> Option<Action> {
         _ => {}
     }
     None
+}
+
+/// Handle a mouse click — check if it hit a thinking or tool block.
+fn handle_click(col: u16, row: u16, state: &mut AppState) {
+    let thinking: Vec<(u16, u16, String)> = state.chat.thinking_regions.clone();
+    for (y_start, y_end, key) in &thinking {
+        if row >= *y_start && row < *y_end {
+            state.chat.toggle_thinking(key);
+            return;
+        }
+    }
+    let tools: Vec<(u16, u16, String)> = state.chat.tool_regions.clone();
+    for (y_start, y_end, key) in &tools {
+        if row >= *y_start && row < *y_end {
+            state.chat.toggle_tool(key);
+            return;
+        }
+    }
+    let _ = (col, row); // unused column
 }

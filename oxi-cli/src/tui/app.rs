@@ -569,7 +569,11 @@ impl AppState {
             let usage = &assistant.usage;
             tracing::info!(
                 "[TOKENS] input={} output={} cache_read={} cache_write={} total={}",
-                usage.input, usage.output, usage.cache_read, usage.cache_write, usage.total_tokens
+                usage.input,
+                usage.output,
+                usage.cache_read,
+                usage.cache_write,
+                usage.total_tokens
             );
             let context_window_pct = if usage.total_tokens > 0 {
                 (usage.total_tokens as f32 / 200_000.0) * 100.0
@@ -1030,7 +1034,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 names
                     .iter()
                     .filter_map(|name| {
-                        registry.get(name).map(|t| (name.clone(), t.label().to_string()))
+                        registry
+                            .get(name)
+                            .map(|t| (name.clone(), t.label().to_string()))
                     })
                     .collect()
             };
@@ -1059,7 +1065,16 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 git_branch: git_branch.clone(),
                 project_name,
             };
-            state.add_system_message(welcome::format_welcome(&welcome_info));
+            state.chat.add_message(oxi_tui::widgets::chat::ChatMessage {
+                role: oxi_tui::widgets::chat::MessageRole::System,
+                content_blocks: vec![oxi_tui::widgets::chat::ContentBlock::Dashboard {
+                    info: welcome::build_dashboard_info(&welcome_info),
+                }],
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64,
+            });
         }
 
         // Check if model is configured

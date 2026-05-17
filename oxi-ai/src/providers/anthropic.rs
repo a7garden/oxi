@@ -322,8 +322,7 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
             accumulated_usage.output = usage.output_tokens.max(accumulated_usage.output);
             accumulated_usage.cache_read = usage.cache_read.max(accumulated_usage.cache_read);
             accumulated_usage.cache_write = usage.cache_creation.max(accumulated_usage.cache_write);
-            accumulated_usage.total_tokens =
-                accumulated_usage.input + accumulated_usage.output;
+            accumulated_usage.total_tokens = accumulated_usage.input + accumulated_usage.output;
         } else if let Some(msg) = &event.message {
             // `message_start` carries usage nested inside `message`
             if let Some(usage) = &msg.usage {
@@ -332,8 +331,7 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                 accumulated_usage.cache_read = usage.cache_read.max(accumulated_usage.cache_read);
                 accumulated_usage.cache_write =
                     usage.cache_creation.max(accumulated_usage.cache_write);
-                accumulated_usage.total_tokens =
-                    accumulated_usage.input + accumulated_usage.output;
+                accumulated_usage.total_tokens = accumulated_usage.input + accumulated_usage.output;
             }
         }
 

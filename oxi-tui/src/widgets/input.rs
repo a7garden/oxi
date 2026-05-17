@@ -234,15 +234,6 @@ impl ratatui::widgets::StatefulWidget for Input<'_> {
 
         let y = area.y;
 
-        // Render prompt: ">" (1 cell)
-        let prompt_fg = self.theme.colors.primary.to_ratatui();
-        buf[(area.x, y)]
-            .set_char('>')
-            .set_style(Style::default().fg(prompt_fg));
-        buf[(area.x + 1, y)]
-            .set_char(' ')
-            .set_style(Style::default());
-
         // Configure the textarea with oxi styling
         let textarea = state.textarea_mut();
         textarea.set_style(Style::default().fg(self.theme.colors.foreground.to_ratatui()));
@@ -261,7 +252,7 @@ impl ratatui::widgets::StatefulWidget for Input<'_> {
         let content_area = Rect {
             x: area.x + 2,
             y,
-            width: area.width - 2,
+            width: area.width - 3, // 2 left padding + 1 right padding
             height: area.height,
         };
 

@@ -11,7 +11,7 @@
 //! - Layout caching — only recomputes when state actually changes
 //! - Truncation at ingest — no height inflation from monster inputs
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use parking_lot::RwLock;
 use ratatui::{
@@ -22,6 +22,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
 use tui_markdown;
+use unicode_width::UnicodeWidthStr;
 
 use crate::table_renderer::render_markdown_table;
 use crate::text::truncate_to_width as truncate_str;
@@ -81,6 +82,29 @@ impl ToolCallTracker {
     }
 }
 
+// ── Dashboard ──────────────────────────────────────────────────────────
+
+/// Information displayed in the welcome dashboard panel.
+#[derive(Debug, Clone)]
+pub struct DashboardInfo {
+    /// oxi version string.
+    pub version: String,
+    /// Full model identifier (e.g. "anthropic/claude-sonnet-4").
+    pub model_id: String,
+    /// Thinking level label (e.g. "medium").
+    pub thinking_level: String,
+    /// Project directory basename.
+    pub project_name: String,
+    /// Git branch name, if detected.
+    pub git_branch: Option<String>,
+    /// Path to AGENTS.md, if found.
+    pub agents_md_path: Option<String>,
+    /// Registered tool names.
+    pub tool_names: Vec<String>,
+    /// Loaded skill names.
+    pub skill_names: Vec<String>,
+}
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +152,10 @@ pub enum ContentBlock {
     Image {
         mime_type: String,
         base64_data: String,
+    },
+    /// Welcome dashboard panel with environment info.
+    Dashboard {
+        info: DashboardInfo,
     },
 }
 
@@ -202,6 +230,16 @@ pub struct ChatViewState {
     pub auto_scroll: bool,
     /// Layout cache — guarded by RwLock
     layout_cache: RwLock<LayoutCache>,
+    /// Expanded thinking block keys: "msg_idx:block_idx".
+    /// Blocks not in this set use their default `collapsed` state.
+    pub expanded_thinking: HashSet<String>,
+    /// Expanded tool result keys: "msg_idx:block_idx".
+    pub expanded_tools: HashSet<String>,
+    /// Clickable thinking block regions: (y_start, y_end, key).
+    /// Populated during render, consumed by click handler.
+    pub thinking_regions: Vec<(u16, u16, String)>,
+    /// Clickable tool result regions: (y_start, y_end, key).
+    pub tool_regions: Vec<(u16, u16, String)>,
 }
 
 impl ChatViewState {
@@ -241,6 +279,33 @@ impl ChatViewState {
     fn clamp_scroll(&mut self, visible_height: u16) {
         let max_off = self.content_height.saturating_sub(visible_height);
         self.scroll_offset = self.scroll_offset.min(max_off);
+    }
+
+    /// Toggle expanded state of a thinking block.
+    /// `key` is "msg_idx:block_idx".
+    pub fn toggle_thinking(&mut self, key: &str) {
+        if self.expanded_thinking.contains(key) {
+            self.expanded_thinking.remove(key);
+        } else {
+            self.expanded_thinking.insert(key.to_string());
+        }
+        self.layout_cache.write().entries = None;
+    }
+
+    /// Check if a thinking block is expanded.
+    /// If the key is in `expanded_thinking`, it's expanded (overrides collapsed).
+    pub fn is_thinking_expanded(&self, key: &str) -> bool {
+        self.expanded_thinking.contains(key)
+    }
+
+    /// Toggle expanded state of a tool result block.
+    pub fn toggle_tool(&mut self, key: &str) {
+        if self.expanded_tools.contains(key) {
+            self.expanded_tools.remove(key);
+        } else {
+            self.expanded_tools.insert(key.to_string());
+        }
+        self.layout_cache.write().entries = None;
     }
 
     pub fn start_streaming(&mut self) {
@@ -704,21 +769,380 @@ fn md_lines(content: &str, width: u16) -> Vec<Line<'static>> {
 }
 
 /// Render regular markdown (non-table content).
+/// Detects fenced code blocks and applies syntax highlighting.
 fn render_markdown(content: &str) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
-    let text: ratatui::text::Text<'_> = tui_markdown::from_str(&preprocessed);
-    text.lines
-        .into_iter()
-        .map(|l| {
-            let line_style = l.style;
-            let spans: Vec<Span<'static>> = l
-                .spans
-                .into_iter()
-                .map(|s| Span::styled(s.content.into_owned(), line_style.patch(s.style)))
-                .collect();
-            Line::from(spans)
-        })
-        .collect()
+
+    // Split into segments: code blocks vs inline markdown
+    let mut segments: Vec<MarkdownSegment> = Vec::new();
+    let mut in_code = false;
+    let mut code_lang = String::new();
+    let mut code_buf = String::new();
+    let mut md_buf = String::new();
+
+    for line in preprocessed.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            if in_code {
+                segments.push(MarkdownSegment::Code {
+                    lang: std::mem::take(&mut code_lang),
+                    content: std::mem::take(&mut code_buf),
+                });
+                in_code = false;
+            } else {
+                if !md_buf.is_empty() {
+                    segments.push(MarkdownSegment::Markdown(std::mem::take(&mut md_buf)));
+                }
+                code_lang = trimmed.strip_prefix("```").unwrap_or("").trim().to_string();
+                in_code = true;
+            }
+        } else if in_code {
+            if !code_buf.is_empty() {
+                code_buf.push('\n');
+            }
+            code_buf.push_str(line);
+        } else {
+            if !md_buf.is_empty() {
+                md_buf.push('\n');
+            }
+            md_buf.push_str(line);
+        }
+    }
+
+    if in_code {
+        segments.push(MarkdownSegment::Code {
+            lang: code_lang,
+            content: code_buf,
+        });
+    } else if !md_buf.is_empty() {
+        segments.push(MarkdownSegment::Markdown(md_buf));
+    }
+
+    let mut lines = Vec::new();
+    for seg in &segments {
+        match seg {
+            MarkdownSegment::Markdown(md) => {
+                let text: ratatui::text::Text<'_> = tui_markdown::from_str(md);
+                for l in text.lines {
+                    let line_style = l.style;
+                    let spans: Vec<Span<'static>> = l
+                        .spans
+                        .into_iter()
+                        .map(|s| Span::styled(s.content.into_owned(), line_style.patch(s.style)))
+                        .collect();
+                    lines.push(Line::from(spans));
+                }
+            }
+            MarkdownSegment::Code { lang, content } => {
+                lines.extend(highlight_code(content, lang));
+            }
+        }
+    }
+    lines
+}
+
+/// A segment of markdown — regular text or a fenced code block.
+enum MarkdownSegment {
+    Markdown(String),
+    Code { lang: String, content: String },
+}
+
+// ── Code syntax highlighting ──────────────────────────────────────────
+//
+// Simple token-based highlighter. Detects:
+// - Keywords (per language)
+// - Strings (single/double quoted)
+// - Comments (line)
+// - Numbers
+// - Type names (PascalCase)
+// - Punctuation/operators
+
+/// Code token types for styling.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TokenType {
+    Normal,
+    Keyword,
+    String,
+    Comment,
+    Number,
+    Type,
+    Function,
+    Punctuation,
+}
+
+/// Map token type to a ratatui Style using default theme colors.
+fn token_style(token: TokenType) -> Style {
+    let dark = crate::theme::ColorScheme::dark();
+    let styles = dark.to_styles();
+    match token {
+        TokenType::Normal => styles.normal,
+        TokenType::Keyword => styles.accent.add_modifier(Modifier::BOLD),
+        TokenType::String => styles.secondary,
+        TokenType::Comment => styles.muted,
+        TokenType::Number => styles.warning,
+        TokenType::Type => styles.primary,
+        TokenType::Function => styles.success,
+        TokenType::Punctuation => styles.muted,
+    }
+}
+
+/// Get keywords for a given language.
+fn lang_keywords(lang: &str) -> &'static [&'static str] {
+    match lang {
+        "rust" | "rs" => &[
+            "fn", "let", "mut", "if", "else", "match", "loop", "while", "for", "in", "return",
+            "break", "continue", "struct", "enum", "impl", "trait", "type", "pub", "mod", "use",
+            "crate", "self", "super", "where", "async", "await", "move", "ref", "static", "const",
+            "unsafe", "extern", "dyn", "as",
+        ],
+        "python" | "py" => &[
+            "def", "class", "if", "elif", "else", "for", "while", "return", "import", "from", "as",
+            "try", "except", "finally", "with", "yield", "lambda", "pass", "break", "continue",
+            "and", "or", "not", "in", "is", "True", "False", "None", "self", "async", "await",
+            "raise",
+        ],
+        "javascript" | "js" | "typescript" | "ts" | "tsx" | "jsx" => &[
+            "function",
+            "const",
+            "let",
+            "var",
+            "if",
+            "else",
+            "for",
+            "while",
+            "do",
+            "return",
+            "class",
+            "new",
+            "this",
+            "super",
+            "import",
+            "export",
+            "from",
+            "default",
+            "async",
+            "await",
+            "try",
+            "catch",
+            "finally",
+            "throw",
+            "typeof",
+            "instanceof",
+            "void",
+            "null",
+            "undefined",
+            "true",
+            "false",
+            "switch",
+            "case",
+            "break",
+            "continue",
+            "yield",
+            "of",
+            "in",
+        ],
+        "go" => &[
+            "func",
+            "var",
+            "const",
+            "type",
+            "struct",
+            "interface",
+            "map",
+            "chan",
+            "if",
+            "else",
+            "for",
+            "range",
+            "return",
+            "switch",
+            "case",
+            "default",
+            "break",
+            "continue",
+            "go",
+            "defer",
+            "select",
+            "package",
+            "import",
+            "nil",
+            "true",
+            "false",
+        ],
+        "bash" | "sh" | "shell" | "zsh" => &[
+            "if", "then", "else", "elif", "fi", "for", "while", "do", "done", "case", "esac",
+            "function", "return", "local", "export", "source", "echo", "cd", "exit", "set",
+            "unset", "readonly", "shift",
+        ],
+        "toml" | "yaml" | "yml" | "json" => &["true", "false", "null", "yes", "no"],
+        _ => &[],
+    }
+}
+
+/// Get line comment prefix for a language.
+fn line_comment_prefix(lang: &str) -> Option<&'static str> {
+    match lang {
+        "rust" | "rs" | "javascript" | "js" | "typescript" | "ts" | "tsx" | "jsx" | "go" | "c"
+        | "cpp" | "java" | "swift" | "kotlin" => Some("//"),
+        "python" | "py" | "bash" | "sh" | "shell" | "zsh" | "toml" => Some("#"),
+        "sql" => Some("--"),
+        _ => None,
+    }
+}
+
+/// Check if a string is PascalCase (potential type name).
+fn is_pascal_case(s: &str) -> bool {
+    s.chars().next().is_some_and(|c| c.is_uppercase())
+        && s.chars().any(|c| c.is_lowercase())
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Check if the text before a position ends with `.` (method call).
+fn preceded_by_dot(text_before: &str) -> bool {
+    text_before.trim_end().ends_with('.')
+}
+
+/// Highlight a single code line into styled Spans.
+fn highlight_line(line: &str, lang: &str) -> Line<'static> {
+    let keywords = lang_keywords(lang);
+    let comment_prefix = line_comment_prefix(lang);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        // ── Line comment ──
+        if let Some(prefix) = comment_prefix {
+            if line[i..].starts_with(prefix) {
+                let rest: String = chars[i..].iter().collect();
+                spans.push(Span::styled(rest, token_style(TokenType::Comment)));
+                break;
+            }
+        }
+
+        // ── String literal (double-quoted) ──
+        if chars[i] == '"' {
+            let mut end = i + 1;
+            while end < chars.len() {
+                if chars[end] == '\\' && end + 1 < chars.len() {
+                    end += 2;
+                } else if chars[end] == '"' {
+                    end += 1;
+                    break;
+                } else {
+                    end += 1;
+                }
+            }
+            let s: String = chars[i..end].iter().collect();
+            spans.push(Span::styled(s, token_style(TokenType::String)));
+            i = end;
+            continue;
+        }
+
+        // ── String literal (single-quoted) ──
+        if chars[i] == '\'' {
+            let mut end = i + 1;
+            while end < chars.len() {
+                if chars[end] == '\\' && end + 1 < chars.len() {
+                    end += 2;
+                } else if chars[end] == '\'' {
+                    end += 1;
+                    break;
+                } else {
+                    end += 1;
+                }
+            }
+            let s: String = chars[i..end].iter().collect();
+            spans.push(Span::styled(s, token_style(TokenType::String)));
+            i = end;
+            continue;
+        }
+
+        // ── Number ──
+        if chars[i].is_ascii_digit()
+            || (chars[i] == '0'
+                && i + 1 < chars.len()
+                && (chars[i + 1] == 'x' || chars[i + 1] == 'b'))
+        {
+            let mut end = i;
+            if chars[i] == '0' && end + 1 < chars.len() {
+                let next = chars[end + 1];
+                if next == 'x' || next == 'b' || next == 'o' {
+                    end += 2;
+                }
+            }
+            while end < chars.len()
+                && (chars[end].is_ascii_hexdigit() || chars[end] == '.' || chars[end] == '_')
+            {
+                end += 1;
+            }
+            while end < chars.len() && chars[end].is_ascii_alphabetic() {
+                end += 1;
+            }
+            let s: String = chars[i..end].iter().collect();
+            spans.push(Span::styled(s, token_style(TokenType::Number)));
+            i = end;
+            continue;
+        }
+
+        // ── Identifier / keyword ──
+        if chars[i].is_alphabetic() || chars[i] == '_' {
+            let mut end = i;
+            while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
+                end += 1;
+            }
+            let word: String = chars[i..end].iter().collect();
+            let before: String = chars[..i].iter().collect();
+
+            let token_type = if keywords.contains(&word.as_str()) {
+                TokenType::Keyword
+            } else if is_pascal_case(&word) {
+                TokenType::Type
+            } else if preceded_by_dot(&before) {
+                TokenType::Function
+            } else {
+                TokenType::Normal
+            };
+
+            spans.push(Span::styled(word, token_style(token_type)));
+            i = end;
+            continue;
+        }
+
+        // ── Punctuation / operators ──
+        let c = chars[i];
+        let tok = if c == '('
+            || c == ')'
+            || c == '{'
+            || c == '}'
+            || c == '['
+            || c == ']'
+            || c == ':'
+            || c == ';'
+            || c == ','
+            || c == '.'
+        {
+            TokenType::Punctuation
+        } else {
+            TokenType::Normal
+        };
+        spans.push(Span::styled(c.to_string(), token_style(tok)));
+        i += 1;
+    }
+
+    if spans.is_empty() {
+        spans.push(Span::raw(""));
+    }
+    Line::from(spans)
+}
+
+/// Highlight a code block with language-aware syntax coloring.
+fn highlight_code(content: &str, lang: &str) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        lines.push(highlight_line(line, lang));
+    }
+    lines
 }
 
 // ── Layout calculation ────────────────────────────────────────────────
@@ -760,6 +1184,8 @@ enum LayoutKind {
         result: Option<(String, bool)>,
         status: ToolCallStatus,
         duration: Option<String>,
+        expanded: bool,
+        key: String,
     },
     ToolResultBox {
         tool_name: String,
@@ -774,6 +1200,7 @@ enum LayoutKind {
     Thinking {
         content: String,
         collapsed: bool,
+        key: String,
     },
     Image {
         mime_type: String,
@@ -781,6 +1208,9 @@ enum LayoutKind {
     },
     Spinner {
         frame: usize,
+    },
+    Dashboard {
+        info: DashboardInfo,
     },
 }
 
@@ -800,6 +1230,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     let mut y: u16 = 0;
 
     let mut rendered_any_message = false;
+    let mut msg_idx: usize = 0;
 
     for msg in &state.messages {
         // Skip messages that have no visible content; they only create empty spacer rows.
@@ -809,6 +1240,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             _ => true,
         });
         if !has_visible_content {
+            msg_idx += 1;
             continue;
         }
 
@@ -833,7 +1265,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             y += 1;
         }
         let mut prev_was_box = false;
-        for block in &msg.content_blocks {
+        for (blk_idx, block) in msg.content_blocks.iter().enumerate() {
             // Skip whitespace-only blocks (defensive; finish_streaming also removes them).
             let is_empty = match block {
                 ContentBlock::Text { content } => content.trim().is_empty(),
@@ -856,11 +1288,40 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             }
             prev_was_box = is_box;
 
-            let kind = block_to_layout_kind(block, msg.role, width);
-            let h = measure_kind(&kind, width);
+            let key = format!("{}:{}", msg_idx, blk_idx);
+            let mut kind = block_to_layout_kind(block, msg.role, width, &key);
+            // Override collapsed/expanded state
+            #[allow(clippy::collapsible_match)]
+            match &mut kind {
+                LayoutKind::Thinking {
+                    ref mut collapsed,
+                    ref key,
+                    ..
+                } =>
+                {
+                    #[allow(clippy::collapsible_match)]
+                    if state.expanded_thinking.contains(key) {
+                        *collapsed = false;
+                    }
+                }
+                LayoutKind::ToolBox {
+                    ref mut expanded,
+                    ref key,
+                    ..
+                } =>
+                {
+                    #[allow(clippy::collapsible_match)]
+                    if state.expanded_tools.contains(key) {
+                        *expanded = true;
+                    }
+                }
+                _ => {}
+            }
+            let h = measure_kind(&kind, width, &state.expanded_thinking);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
+        msg_idx += 1;
     }
 
     if let Some(ref streaming) = state.streaming {
@@ -874,7 +1335,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             y += 1;
         }
         let mut prev_was_box = false;
-        for block in &streaming.message.content_blocks {
+        for (blk_idx, block) in streaming.message.content_blocks.iter().enumerate() {
             // Skip whitespace-only blocks (prevents large blank gaps during tool-only turns).
             let is_empty = match block {
                 ContentBlock::Text { content } => content.trim().is_empty(),
@@ -897,8 +1358,35 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             }
             prev_was_box = is_box;
 
-            let kind = block_to_layout_kind(block, MessageRole::Assistant, width);
-            let h = measure_kind(&kind, width);
+            let key = format!("s:{}", blk_idx);
+            let mut kind = block_to_layout_kind(block, MessageRole::Assistant, width, &key);
+            #[allow(clippy::collapsible_match)]
+            match &mut kind {
+                LayoutKind::Thinking {
+                    ref mut collapsed,
+                    ref key,
+                    ..
+                } =>
+                {
+                    #[allow(clippy::collapsible_match)]
+                    if state.expanded_thinking.contains(key) {
+                        *collapsed = false;
+                    }
+                }
+                LayoutKind::ToolBox {
+                    ref mut expanded,
+                    ref key,
+                    ..
+                } =>
+                {
+                    #[allow(clippy::collapsible_match)]
+                    if state.expanded_tools.contains(key) {
+                        *expanded = true;
+                    }
+                }
+                _ => {}
+            }
+            let h = measure_kind(&kind, width, &state.expanded_thinking);
             entries.push(LayoutEntry { y, height: h, kind });
             y += h;
         }
@@ -915,7 +1403,12 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     entries
 }
 
-fn block_to_layout_kind(block: &ContentBlock, role: MessageRole, width: u16) -> LayoutKind {
+fn block_to_layout_kind(
+    block: &ContentBlock,
+    role: MessageRole,
+    width: u16,
+    key: &str,
+) -> LayoutKind {
     match block {
         ContentBlock::Text { content } => {
             let lines = md_lines(content, width);
@@ -924,10 +1417,15 @@ fn block_to_layout_kind(block: &ContentBlock, role: MessageRole, width: u16) -> 
                 is_user: role == MessageRole::User,
             }
         }
-        ContentBlock::Thinking { content, collapsed } => LayoutKind::Thinking {
-            content: content.clone(),
-            collapsed: *collapsed,
-        },
+        ContentBlock::Thinking { content, collapsed } => {
+            // The actual collapsed state is determined by the key lookup later
+            // in compute_layout — we store the default here.
+            LayoutKind::Thinking {
+                content: content.clone(),
+                collapsed: *collapsed,
+                key: key.to_string(),
+            }
+        }
         ContentBlock::ToolCall {
             name,
             arguments,
@@ -941,6 +1439,8 @@ fn block_to_layout_kind(block: &ContentBlock, role: MessageRole, width: u16) -> 
             result: result.clone(),
             status: *status,
             duration: duration.clone(),
+            expanded: false, // overridden in compute_layout
+            key: key.to_string(),
         },
         ContentBlock::ToolResult {
             tool_name,
@@ -977,10 +1477,11 @@ fn block_to_layout_kind(block: &ContentBlock, role: MessageRole, width: u16) -> 
                 size_str: sz_str,
             }
         }
+        ContentBlock::Dashboard { info } => LayoutKind::Dashboard { info: info.clone() },
     }
 }
 
-fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
+fn measure_kind(kind: &LayoutKind, width: u16, expanded_thinking: &HashSet<String>) -> u16 {
     match kind {
         LayoutKind::Spacer
         | LayoutKind::Rule
@@ -1001,6 +1502,7 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             arguments,
             result,
             duration,
+            expanded,
             ..
         } => {
             use crate::widgets::tool_renderer::{measure_call_height, measure_result_height};
@@ -1008,7 +1510,13 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             let inner_w = width.saturating_sub(2) as usize;
             let call_h = measure_call_height(name, arguments, inner_w);
             let result_h = result.as_ref().map_or(0, |(r, is_err)| {
-                if *is_err {
+                if *expanded {
+                    // Full result: show all lines, capped at 80
+                    let total = r.lines().count();
+                    let shown = total.min(80);
+                    let ellipsis = if total > 80 { 1 } else { 0 };
+                    shown as u16 + ellipsis
+                } else if *is_err {
                     r.lines().count().min(4) as u16
                 } else {
                     measure_result_height(name, r, false)
@@ -1016,9 +1524,10 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             });
             // Block::ALL adds top + bottom border (2 rows) + separator if result exists
             let separator_h = if result.is_some() { 1 } else { 0 };
-            // Duration label takes 0 extra rows (rendered inline with header)
+            // Toggle hint line when result exists
+            let toggle_h = if result.is_some() { 1 } else { 0 };
             let _ = duration;
-            2 + call_h + separator_h + result_h
+            2 + call_h + separator_h + result_h + toggle_h
         }
         LayoutKind::ToolResultBox { content, .. } => {
             // 1 header + content lines (max 4) + optional ellipsis
@@ -1032,24 +1541,224 @@ fn measure_kind(kind: &LayoutKind, width: u16) -> u16 {
             let n = message.lines().count().min(4);
             2 + n as u16 + if *retryable { 1 } else { 0 }
         }
-        LayoutKind::Thinking { content, collapsed } => {
-            if *collapsed {
-                // Use filtered content for preview — matches render
+        LayoutKind::Thinking {
+            content,
+            collapsed,
+            key,
+        } => {
+            let is_expanded = expanded_thinking.contains(key);
+            if *collapsed && !is_expanded {
+                // Collapsed: header + one preview line
                 let filtered = filter_tool_json(content);
-                1 + if filtered.lines().next().is_some() {
-                    1
-                } else {
-                    0
-                }
+                let line_count = filtered.lines().count();
+                1 + if line_count > 0 { 1 } else { 0 }
             } else {
-                // Use filtered content for measurement to match rendering
+                // Expanded: header + filtered content rendered as markdown
                 let filtered = filter_tool_json(content);
                 let md = md_lines(&filtered, width);
                 1 + md.len() as u16
             }
         }
         LayoutKind::Image { .. } => 2,
+        LayoutKind::Dashboard { info } => measure_dashboard(info, width),
     }
+}
+
+// ── Dashboard helpers ────────────────────────────────────────────────────
+
+/// Count how many lines badges will occupy given the available width.
+fn badge_line_count(names: &[String], width: usize) -> usize {
+    if names.is_empty() {
+        return 0;
+    }
+    let prefix = 2; // "  " indent
+    let mut lines = 1;
+    let mut current_width = prefix;
+
+    for name in names {
+        // [name] = name display width + 2 brackets + 1 space
+        let badge_w = UnicodeWidthStr::width(name.as_str()) + 3;
+        if current_width + badge_w > width && current_width > prefix {
+            lines += 1;
+            current_width = prefix + badge_w;
+        } else {
+            current_width += badge_w;
+        }
+    }
+    lines
+}
+
+/// Build styled badge Lines that wrap at the given width.
+fn compute_badge_lines(names: &[String], width: usize, styles: &ThemeStyles) -> Vec<Line<'static>> {
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let prefix = 2;
+    let mut current_spans: Vec<Span<'static>> = vec![Span::raw("  ")];
+    let mut current_width = prefix;
+
+    for name in names {
+        let badge_text = format!("[{}] ", name);
+        let badge_w = UnicodeWidthStr::width(badge_text.as_str());
+
+        if current_width + badge_w > width && current_width > prefix {
+            lines.push(Line::from(std::mem::take(&mut current_spans)));
+            current_spans = vec![Span::raw("  ")];
+            current_width = prefix;
+        }
+
+        current_spans.push(Span::styled(badge_text, styles.primary));
+        current_width += badge_w;
+    }
+
+    if current_spans.len() > 1 {
+        lines.push(Line::from(current_spans));
+    }
+
+    lines
+}
+
+/// Shorten a path for display (replace home dir with ~).
+fn shorten_dashboard_path(path: &str) -> String {
+    crate::widgets::tool_renderer::shorten_path(path)
+}
+
+/// Measure the dashboard panel height.
+fn measure_dashboard(info: &DashboardInfo, width: u16) -> u16 {
+    let w = width as usize;
+    let mut h: usize = 0;
+
+    h += 1; // version header
+    h += 1; // empty line
+    h += 1; // model
+    h += 1; // project
+    h += 1; // agents.md
+    h += 1; // empty line
+    h += 1; // tools header
+    h += badge_line_count(&info.tool_names, w);
+    h += 1; // empty line
+
+    if !info.skill_names.is_empty() {
+        h += 1; // skills header
+        h += badge_line_count(&info.skill_names, w);
+        h += 1; // empty line
+    }
+
+    h += 1; // shortcuts
+
+    h as u16
+}
+
+/// Build all dashboard content lines for rendering.
+fn dashboard_lines(info: &DashboardInfo, width: u16, styles: &ThemeStyles) -> Vec<Line<'static>> {
+    let w = width as usize;
+    let mut lines = Vec::new();
+
+    // Version header
+    lines.push(Line::from(vec![
+        Span::styled("  \u{25C8} ", styles.accent),
+        Span::styled(
+            format!("oxi v{}", info.version),
+            styles.accent.add_modifier(Modifier::BOLD),
+        ),
+    ]));
+
+    // Empty line
+    lines.push(Line::raw(""));
+
+    // Model info
+    let model_display = info
+        .model_id
+        .split('/')
+        .next_back()
+        .unwrap_or(&info.model_id);
+    let provider = info.model_id.split('/').next().unwrap_or("");
+
+    let mut model_spans = vec![
+        Span::raw("  "),
+        Span::styled("Model     ", styles.muted),
+        Span::styled(format!("{} ({})", model_display, provider), styles.normal),
+    ];
+    if !info.thinking_level.is_empty() {
+        model_spans.push(Span::styled(" \u{00B7} ", styles.muted));
+        model_spans.push(Span::styled("Thinking: ", styles.muted));
+        model_spans.push(Span::styled(info.thinking_level.clone(), styles.warning));
+    }
+    lines.push(Line::from(model_spans));
+
+    // Project
+    let project = if let Some(ref branch) = info.git_branch {
+        format!("{} ({})", info.project_name, branch)
+    } else {
+        info.project_name.clone()
+    };
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("Project   ", styles.muted),
+        Span::styled(project, styles.normal),
+    ]));
+
+    // AGENTS.md
+    let agents = match &info.agents_md_path {
+        Some(p) => shorten_dashboard_path(p),
+        None => "not found".to_string(),
+    };
+    let agents_style = if info.agents_md_path.is_some() {
+        styles.success
+    } else {
+        styles.muted
+    };
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("AGENTS.md ", styles.muted),
+        Span::styled(agents, agents_style),
+    ]));
+
+    // Empty line
+    lines.push(Line::raw(""));
+
+    // Tools section header
+    if !info.tool_names.is_empty() {
+        let header_text = format!("  \u{2500}\u{2500} Tools ({}) ", info.tool_names.len());
+        let header_w = UnicodeWidthStr::width(header_text.as_str());
+        let sep_remain = w.saturating_sub(header_w);
+        let header_full = format!("{}{}", header_text, "\u{2500}".repeat(sep_remain));
+        lines.push(Line::from(Span::styled(header_full, styles.border)));
+
+        let badges = compute_badge_lines(&info.tool_names, w, styles);
+        lines.extend(badges);
+    }
+
+    // Empty line
+    lines.push(Line::raw(""));
+
+    // Skills section
+    if !info.skill_names.is_empty() {
+        let header_text = format!("  \u{2500}\u{2500} Skills ({}) ", info.skill_names.len());
+        let header_w = UnicodeWidthStr::width(header_text.as_str());
+        let sep_remain = w.saturating_sub(header_w);
+        let header_full = format!("{}{}", header_text, "\u{2500}".repeat(sep_remain));
+        lines.push(Line::from(Span::styled(header_full, styles.border)));
+
+        let badges = compute_badge_lines(&info.skill_names, w, styles);
+        lines.extend(badges);
+
+        lines.push(Line::raw(""));
+    }
+
+    // Shortcuts
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled("Enter ", styles.primary),
+        Span::styled("send  \u{00B7}  ", styles.muted),
+        Span::styled("/help ", styles.primary),
+        Span::styled("commands  \u{00B7}  ", styles.muted),
+        Span::styled("Ctrl+C ", styles.primary),
+        Span::styled("interrupt", styles.muted),
+    ]));
+
+    lines
 }
 
 // ── Rendering into ScrollView ─────────────────────────────────────────
@@ -1103,6 +1812,8 @@ impl Widget for EntryWidget<'_> {
                 result,
                 status,
                 duration,
+                expanded,
+                key: _,
             } => {
                 use crate::widgets::tool_renderer::{format_tool_call, format_tool_result};
 
@@ -1171,10 +1882,7 @@ impl Widget for EntryWidget<'_> {
                         }
                         // Append duration to header line (right-aligned conceptually)
                         if let Some(ref dur) = duration {
-                            new_spans.push(Span::styled(
-                                format!("  {}", dur),
-                                self.styles.muted,
-                            ));
+                            new_spans.push(Span::styled(format!("  {}", dur), self.styles.muted));
                         }
                         content_lines.push(Line::from(new_spans));
                     } else {
@@ -1190,16 +1898,49 @@ impl Widget for EntryWidget<'_> {
                     )));
                 }
 
-                // Format result using new renderer
+                // Format result
                 if let Some((result_content, is_err)) = result {
-                    let result_lines =
-                        format_tool_result(name, result_content, *is_err, max_w, self.styles);
-                    content_lines.extend(result_lines);
+                    if *expanded {
+                        // Expanded: show full result (up to 80 lines)
+                        let all_lines: Vec<&str> = result_content.lines().collect();
+                        let total = all_lines.len();
+                        let shown = total.min(80);
+                        for line in &all_lines[..shown] {
+                            let display =
+                                crate::text::truncate_to_width(line, max_w.saturating_sub(2));
+                            content_lines.push(Line::from(Span::styled(
+                                format!("  {}", display),
+                                if *is_err {
+                                    self.styles.error
+                                } else {
+                                    self.styles.normal
+                                },
+                            )));
+                        }
+                        if total > 80 {
+                            content_lines.push(Line::from(Span::styled(
+                                format!("  \u{2026} ({} more lines)", total - 80),
+                                self.styles.muted,
+                            )));
+                        }
+                    } else {
+                        // Collapsed: use the formatted preview
+                        let result_lines =
+                            format_tool_result(name, result_content, *is_err, max_w, self.styles);
+                        content_lines.extend(result_lines);
+                    }
+
+                    // Toggle hint
+                    let total_lines = result_content.lines().count();
+                    let toggle_hint = if *expanded {
+                        " \u{00B7} click to collapse".to_string()
+                    } else {
+                        format!(" \u{00B7} {} lines \u{00B7} click to expand", total_lines)
+                    };
+                    content_lines.push(Line::from(Span::styled(toggle_hint, self.styles.muted)));
                 }
 
                 let text: ratatui::text::Text = content_lines.into_iter().collect();
-                // No wrap — content is pre-truncated to max_w by format functions.
-                // Wrapping would cause measured height mismatches, clipping the result.
                 let para = Paragraph::new(text);
                 para.render(inner, buf);
             }
@@ -1279,27 +2020,47 @@ impl Widget for EntryWidget<'_> {
                 Clear.render(inner, buf);
                 Paragraph::new(text).render(inner, buf);
             }
-            LayoutKind::Thinking { content, collapsed } => {
+            LayoutKind::Thinking {
+                content,
+                collapsed,
+                key: _,
+            } => {
                 let filtered = filter_tool_json(content);
+                let line_count = filtered.lines().count();
                 let mut lines: Vec<Line<'static>> = Vec::new();
 
+                // Header with toggle hint
                 let header_style = self.styles.accent;
+                let count_str = if line_count > 0 {
+                    format!(
+                        " ({} line{})",
+                        line_count,
+                        if line_count == 1 { "" } else { "s" }
+                    )
+                } else {
+                    String::new()
+                };
+
                 if *collapsed {
-                    lines.push(Line::from(Span::styled(
-                        "\u{25B8} thinking".to_string(),
-                        header_style,
-                    )));
+                    lines.push(Line::from(vec![
+                        Span::styled("\u{25B8} ", header_style),
+                        Span::styled("thinking".to_string(), header_style),
+                        Span::styled(count_str, self.styles.muted),
+                        Span::styled(" \u{00B7} click to expand".to_string(), self.styles.muted),
+                    ]));
                     if let Some(first) = filtered.lines().next() {
+                        let preview: String = first.chars().take(80).collect();
                         lines.push(Line::from(Span::styled(
-                            format!("  {}", first),
+                            format!("  {}", preview),
                             self.styles.muted.add_modifier(Modifier::ITALIC),
                         )));
                     }
                 } else {
-                    lines.push(Line::from(Span::styled(
-                        "\u{25BE} thinking".to_string(),
-                        header_style,
-                    )));
+                    lines.push(Line::from(vec![
+                        Span::styled("\u{25BE} ", header_style),
+                        Span::styled("thinking".to_string(), header_style),
+                        Span::styled(count_str, self.styles.muted),
+                    ]));
                     let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
                     let md_rendered = md_lines(&filtered, rect.width);
                     for md_line in md_rendered {
@@ -1345,6 +2106,11 @@ impl Widget for EntryWidget<'_> {
                 )))
                 .render(rect, buf);
             }
+            LayoutKind::Dashboard { info } => {
+                let lines = dashboard_lines(info, rect.width, self.styles);
+                let text: ratatui::text::Text = lines.into_iter().collect();
+                Paragraph::new(text).render(rect, buf);
+            }
         }
     }
 }
@@ -1374,6 +2140,10 @@ impl StatefulWidget for ChatView<'_> {
         // Outer layout already provides consistent horizontal margin.
         // No additional internal padding needed.
         let inner_width = width;
+
+        // Clear click regions before recompute
+        state.thinking_regions.clear();
+        state.tool_regions.clear();
 
         // Get layout computed with inner_width for correct height measurements
         let layout = state.get_layout(inner_width);
@@ -1409,6 +2179,27 @@ impl StatefulWidget for ChatView<'_> {
             // Compute relative y within the viewport
             let rel_y = entry.y.saturating_sub(scroll_offset);
             let rect = Rect::new(area.x, area.y + rel_y, inner_width, entry.height);
+
+            // Track thinking regions for click handling
+            if let LayoutKind::Thinking { key, .. } = &entry.kind {
+                state.thinking_regions.push((
+                    area.y + rel_y,
+                    area.y + rel_y + entry.height,
+                    key.clone(),
+                ));
+            }
+
+            // Track tool box regions for click handling
+            if let LayoutKind::ToolBox { key, result, .. } = &entry.kind {
+                if result.is_some() {
+                    state.tool_regions.push((
+                        area.y + rel_y,
+                        area.y + rel_y + entry.height,
+                        key.clone(),
+                    ));
+                }
+            }
+
             EntryWidget::new(&entry.kind, &styles).render(rect, buf);
         }
     }
@@ -1473,7 +2264,10 @@ mod tests {
         s.finish_streaming();
         match &s.messages[0].content_blocks[0] {
             ContentBlock::ToolCall {
-                status, result, duration, ..
+                status,
+                result,
+                duration,
+                ..
             } => {
                 assert_eq!(*status, ToolCallStatus::Done);
                 assert!(result.is_some());

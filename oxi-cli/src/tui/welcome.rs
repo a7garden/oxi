@@ -1,5 +1,6 @@
 //! Welcome banner formatting with environment info.
 
+use oxi_tui::widgets::chat::DashboardInfo;
 use std::path::Path;
 
 /// Information to display in the welcome banner.
@@ -26,10 +27,25 @@ pub(crate) struct WelcomeInfo {
     pub project_name: String,
 }
 
-/// Format a rich startup welcome message.
+/// Build a `DashboardInfo` from `WelcomeInfo` for the new dashboard panel.
+pub(crate) fn build_dashboard_info(info: &WelcomeInfo) -> DashboardInfo {
+    DashboardInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        model_id: info.model_id.clone(),
+        thinking_level: info.thinking_level.clone(),
+        project_name: info.project_name.clone(),
+        git_branch: info.git_branch.clone(),
+        agents_md_path: info.agents_md_path.clone(),
+        tool_names: info.tool_labels.iter().map(|(n, _)| n.clone()).collect(),
+        skill_names: info.skill_names.clone(),
+    }
+}
+
+/// Format a rich startup welcome message (legacy markdown fallback).
 ///
 /// Shows the current environment: model, tools, skills, AGENTS.md, and key shortcuts.
 /// Markdown formatting is used so the chat renderer displays it nicely.
+#[allow(dead_code)]
 pub(crate) fn format_welcome(info: &WelcomeInfo) -> String {
     let version = env!("CARGO_PKG_VERSION");
     let mut md = String::new();
@@ -46,10 +62,7 @@ pub(crate) fn format_welcome(info: &WelcomeInfo) -> String {
             .next_back()
             .unwrap_or(&info.model_id);
         let provider = info.model_id.split('/').next().unwrap_or("");
-        md.push_str(&format!(
-            "**Model**: {} ({})",
-            model_display, provider
-        ));
+        md.push_str(&format!("**Model**: {} ({})", model_display, provider));
         if !info.thinking_level.is_empty() {
             md.push_str(&format!(" · Thinking: {}", info.thinking_level));
         }
@@ -73,10 +86,7 @@ pub(crate) fn format_welcome(info: &WelcomeInfo) -> String {
 
     // Tools
     if !info.tool_labels.is_empty() {
-        md.push_str(&format!(
-            "- **Tools** ({}): ",
-            info.tool_labels.len()
-        ));
+        md.push_str(&format!("- **Tools** ({}): ", info.tool_labels.len()));
         let names: Vec<String> = info
             .tool_labels
             .iter()
@@ -88,10 +98,7 @@ pub(crate) fn format_welcome(info: &WelcomeInfo) -> String {
 
     // Skills
     if !info.skill_names.is_empty() {
-        md.push_str(&format!(
-            "- **Skills** ({}): ",
-            info.skill_names.len()
-        ));
+        md.push_str(&format!("- **Skills** ({}): ", info.skill_names.len()));
         md.push_str(
             &info
                 .skill_names

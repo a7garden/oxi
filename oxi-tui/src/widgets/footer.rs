@@ -130,8 +130,8 @@ impl StatefulWidget for Footer<'_> {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(1), // separator
-                Constraint::Length(1), // line 1: tokens + model
-                Constraint::Length(1), // line 2: path + version
+                Constraint::Length(1), // line 1: tokens + duration
+                Constraint::Length(1), // line 2: path + git ... model
             ])
             .split(area);
 
@@ -141,7 +141,7 @@ impl StatefulWidget for Footer<'_> {
             .border_style(styles.border)
             .render(rows[0], buf);
 
-        // ── Row 1: tokens + duration ... model ──
+        // ── Row 1: tokens + duration ──
         {
             let total_tokens =
                 d.input_tokens + d.output_tokens + d.cache_read_tokens + d.cache_write_tokens;
@@ -152,12 +152,15 @@ impl StatefulWidget for Footer<'_> {
             };
             let pct_display = (pct * 100.0) as f32;
             let has_tokens = total_tokens > 0;
-            let token_style = if has_tokens { styles.normal } else { styles.muted };
+            let token_style = if has_tokens {
+                styles.normal
+            } else {
+                styles.muted
+            };
 
             let in_fmt = FooterData::fmt_count(d.input_tokens + d.cache_read_tokens);
             let out_fmt = FooterData::fmt_count(d.output_tokens);
 
-            // Left: " ↑N ↓N  X%"  (leading space = 1 left padding)
             let mut left_spans: Vec<Span<'_>> = vec![
                 Span::styled(
                     format!(" \u{2191}{} \u{2193}{}", in_fmt, out_fmt),
@@ -173,7 +176,36 @@ impl StatefulWidget for Footer<'_> {
                 ));
             }
 
-            // Right: "(provider) model • thinking"  (trailing space removed: -2 right padding)
+            Paragraph::new(Line::from(left_spans))
+                .alignment(Alignment::Left)
+                .render(rows[1], buf);
+        }
+
+        // ── Row 2: path + git ... model + thinking ──
+        {
+            let mut left_spans: Vec<Span> = Vec::new();
+
+            if let Some(ref pwd) = d.pwd {
+                let display = FooterData::display_path(pwd);
+                left_spans.push(Span::styled(format!(" {}", display), styles.muted));
+            }
+
+            if let Some(ref branch) = d.git_branch {
+                if !branch.is_empty() {
+                    left_spans.push(Span::styled(
+                        format!(" ({})", branch),
+                        Style::default().fg(self.theme.colors.accent.to_ratatui()),
+                    ));
+                    if d.git_dirty {
+                        left_spans.push(Span::styled(
+                            " *",
+                            Style::default().fg(self.theme.colors.warning.to_ratatui()),
+                        ));
+                    }
+                }
+            }
+
+            // Right: model + thinking (moved from row 1 to row 2, where version was)
             let mut right_spans: Vec<Span<'_>> = vec![];
 
             if d.model_name.is_empty() {
@@ -204,7 +236,7 @@ impl StatefulWidget for Footer<'_> {
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Min(1), Constraint::Min(1)])
-                .split(rows[1]);
+                .split(rows[2]);
 
             Paragraph::new(Line::from(left_spans))
                 .alignment(Alignment::Left)
@@ -213,53 +245,6 @@ impl StatefulWidget for Footer<'_> {
             Paragraph::new(Line::from(right_spans))
                 .alignment(Alignment::Right)
                 .render(cols[1], buf);
-        }
-
-        // ── Row 2: path + git ... version ──
-        {
-            let mut left_spans: Vec<Span> = Vec::new();
-
-            if let Some(ref pwd) = d.pwd {
-                let display = FooterData::display_path(pwd);
-                left_spans.push(Span::styled(format!(" {}", display), styles.muted));
-            }
-
-            if let Some(ref branch) = d.git_branch {
-                if !branch.is_empty() {
-                    left_spans.push(Span::styled(
-                        format!(" ({})", branch),
-                        Style::default().fg(self.theme.colors.accent.to_ratatui()),
-                    ));
-                    if d.git_dirty {
-                        left_spans.push(Span::styled(
-                            " *",
-                            Style::default().fg(self.theme.colors.warning.to_ratatui()),
-                        ));
-                    }
-                }
-            }
-
-            let version_tag = if !d.version.is_empty() {
-                format!("v{}", d.version)
-            } else {
-                String::new()
-            };
-
-            let cols = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(1), Constraint::Min(1)])
-                .split(rows[2]);
-
-            Paragraph::new(Line::from(left_spans))
-                .alignment(Alignment::Left)
-                .render(cols[0], buf);
-
-            Paragraph::new(Line::from(Span::styled(
-                version_tag,
-                Style::default().fg(self.theme.colors.muted.to_ratatui()),
-            )))
-            .alignment(Alignment::Right)
-            .render(cols[1], buf);
         }
     }
 }
