@@ -10,7 +10,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
-use unicode_width::UnicodeWidthStr;
 
 /// Footer data — shared state for token counts and session info.
 #[derive(Debug, Clone)]
@@ -133,53 +132,40 @@ impl StatefulWidget for Footer<'_> {
             let pct_display = (pct * 100.0) as f32;
             let has_tokens = total_tokens > 0;
 
-            let mut left_parts: Vec<String> = Vec::new();
-            if has_tokens {
-                // Show in/out token counts + context %
-                let in_fmt = FooterData::fmt_count(d.input_tokens + d.cache_read_tokens);
-                let out_fmt = FooterData::fmt_count(d.output_tokens);
-                left_parts.push(format!("\u{2191}{} \u{2193}{}", in_fmt, out_fmt));
-                left_parts.push(format!("{:.0}%", pct_display));
-            }
+            // Always show token area (even when 0) so the footer isn't empty.
+            let in_fmt = FooterData::fmt_count(d.input_tokens + d.cache_read_tokens);
+            let out_fmt = FooterData::fmt_count(d.output_tokens);
+
+            let mut left_spans: Vec<Span<'_>> = vec![
+                Span::styled(
+                    format!(" \u{2191}{} \u{2193}{}", in_fmt, out_fmt),
+                    if has_tokens { styles.normal } else { styles.muted },
+                ),
+                Span::styled(
+                    format!("  {:.0}%", pct_display),
+                    if has_tokens { styles.normal } else { styles.muted },
+                ),
+            ];
+
             if d.session_duration_secs > 0 {
-                left_parts.push(FooterData::format_duration(d.session_duration_secs));
+                left_spans.push(Span::styled(
+                    format!("  {}", FooterData::format_duration(d.session_duration_secs)),
+                    styles.muted,
+                ));
             }
-            let left_text = left_parts.join("  ");
 
-            // Build model display string with optional thinking level
-            // Format: "(provider) model • thinking" or "(provider) model" or "model • thinking" or just "model"
-            let model_display = if d.model_name.is_empty() {
-                "[no model]".to_string()
-            } else {
-                let model_part = d.model_name.split('/').next_back().unwrap_or(&d.model_name);
-                let provider_part = d.model_name.split('/').next().unwrap_or("");
-                let thinking_part = d.thinking_level.as_ref().map(|l| format!(" • {}", l));
-
-                if provider_part.is_empty() {
-                    format!("{}{}", model_part, thinking_part.unwrap_or_default())
-                } else {
-                    format!(
-                        "({}) {}{}",
-                        provider_part,
-                        model_part,
-                        thinking_part.unwrap_or_default()
-                    )
-                }
-            };
-
-            // Build right_span with model name
-            let mut spans = vec![];
+            // Model display — build spans for right side
+            let mut right_spans: Vec<Span<'_>> = vec![];
 
             if d.model_name.is_empty() {
-                spans.push(Span::styled(
-                    " [no model]",
+                right_spans.push(Span::styled(
+                    "[no model] ".to_string(),
                     Style::default()
                         .fg(self.theme.colors.primary.to_ratatui())
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
                 let thinking_style = if d.thinking_level.is_some() {
-                    // Style thinking level as muted (secondary info)
                     Style::default().fg(self.theme.colors.muted.to_ratatui())
                 } else {
                     Style::default()
@@ -190,49 +176,39 @@ impl StatefulWidget for Footer<'_> {
                 let model_part = d.model_name.split('/').next_back().unwrap_or(&d.model_name);
                 let provider_part = d.model_name.split('/').next().unwrap_or("");
 
-                // Provider
                 if !provider_part.is_empty() {
-                    spans.push(Span::styled(
-                        format!(" ({})", provider_part),
+                    right_spans.push(Span::styled(
+                        format!("({}) ", provider_part),
                         Style::default()
                             .fg(self.theme.colors.primary.to_ratatui())
                             .add_modifier(Modifier::BOLD),
                     ));
                 }
-                // Model name
-                spans.push(Span::styled(
-                    format!(" {}", model_part),
+                right_spans.push(Span::styled(
+                    model_part.to_string(),
                     Style::default()
                         .fg(self.theme.colors.primary.to_ratatui())
                         .add_modifier(Modifier::BOLD),
                 ));
-                // Thinking level
                 if let Some(ref level) = d.thinking_level {
-                    spans.push(Span::styled(format!(" • {}", level), thinking_style));
+                    right_spans.push(Span::styled(format!(" • {}", level), thinking_style));
                 }
+                right_spans.push(Span::styled(" ".to_string(), styles.normal));
             }
-
-            let right_span = Line::from(spans);
-
-            let text_w = UnicodeWidthStr::width(left_text.as_str()) as u16 + 2;
-            let model_display_w = UnicodeWidthStr::width(model_display.as_str()) as u16 + 4;
 
             let cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
-                    Constraint::Length(text_w.min(rows[1].width)),
-                    Constraint::Min(model_display_w),
+                    Constraint::Min(1),
+                    Constraint::Min(1),
                 ])
                 .split(rows[1]);
 
-            Paragraph::new(Line::from(Span::styled(
-                format!(" {}", left_text),
-                styles.muted,
-            )))
-            .alignment(Alignment::Left)
-            .render(cols[0], buf);
+            Paragraph::new(Line::from(left_spans))
+                .alignment(Alignment::Left)
+                .render(cols[0], buf);
 
-            Paragraph::new(right_span)
+            Paragraph::new(Line::from(right_spans))
                 .alignment(Alignment::Right)
                 .render(cols[1], buf);
         }
