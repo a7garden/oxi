@@ -2110,8 +2110,20 @@ impl Widget for EntryWidget<'_> {
                 let max_w = inner.width as usize;
                 let mut content_lines: Vec<Line<'static>> = Vec::new();
 
-                // Format tool call using new renderer
-                let call_lines = format_tool_call(name, arguments, max_w, self.styles);
+                // Calculate reserved space for icon prefix and duration suffix
+                // on the header line so format_tool_call truncates correctly.
+                let icon_prefix_w = UnicodeWidthStr::width(format!("{} ", icon).as_str());
+                let duration_suffix_w = duration
+                    .as_ref()
+                    .map(|d| UnicodeWidthStr::width(format!("  {}", d).as_str()))
+                    .unwrap_or(0);
+                let header_avail = max_w
+                    .saturating_sub(icon_prefix_w)
+                    .saturating_sub(duration_suffix_w)
+                    .max(20);
+
+                // Format tool call using new renderer (truncate to header_avail)
+                let call_lines = format_tool_call(name, arguments, header_avail, self.styles);
                 for (i, line) in call_lines.into_iter().enumerate() {
                     if i == 0 {
                         // Prepend icon to first line, append duration if available
@@ -2125,7 +2137,7 @@ impl Widget for EntryWidget<'_> {
                                 span.style.patch(name_style),
                             ));
                         }
-                        // Append duration to header line (right-aligned conceptually)
+                        // Append duration to header line
                         if let Some(ref dur) = duration {
                             new_spans.push(Span::styled(format!("  {}", dur), self.styles.muted));
                         }
@@ -2135,10 +2147,10 @@ impl Widget for EntryWidget<'_> {
                     }
                 }
 
-                // Separator line between call and result
+                // Separator line between call and result — full width to match borders
                 if has_result {
                     content_lines.push(Line::from(Span::styled(
-                        "\u{2500}".repeat(max_w.saturating_sub(2)),
+                        "\u{2500}".repeat(max_w),
                         border_style,
                     )));
                 }
@@ -2164,7 +2176,10 @@ impl Widget for EntryWidget<'_> {
                         }
                         if total > 80 {
                             content_lines.push(Line::from(Span::styled(
-                                format!("  \u{2026} ({} more lines)", total - 80),
+                                crate::text::truncate_to_width(
+                                    &format!("  \u{2026} ({} more lines)", total - 80),
+                                    max_w,
+                                ),
                                 self.styles.muted,
                             )));
                         }
@@ -2175,14 +2190,17 @@ impl Widget for EntryWidget<'_> {
                         content_lines.extend(result_lines);
                     }
 
-                    // Toggle hint
+                    // Toggle hint — truncate to max_w to prevent overflow
                     let total_lines = result_content.lines().count();
                     let toggle_hint = if *expanded {
                         " \u{00B7} click to collapse".to_string()
                     } else {
                         format!(" \u{00B7} {} lines \u{00B7} click to expand", total_lines)
                     };
-                    content_lines.push(Line::from(Span::styled(toggle_hint, self.styles.muted)));
+                    content_lines.push(Line::from(Span::styled(
+                        crate::text::truncate_to_width(&toggle_hint, max_w),
+                        self.styles.muted,
+                    )));
                 }
 
                 let text: ratatui::text::Text = content_lines.into_iter().collect();

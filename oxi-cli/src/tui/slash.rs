@@ -524,8 +524,30 @@ pub(crate) fn handle_slash_command(
             let cwd = std::env::current_dir()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| ".".to_string());
-            let rt = tokio::runtime::Handle::current();
-            match rt.block_on(oxi_store::session::SessionManager::list(&cwd, None)) {
+            // SessionManager::list is async but only does std::fs I/O.
+            // Use spawn_blocking to avoid "Cannot start a runtime from within
+            // a runtime" panic when called from inside the tokio runtime.
+            let list_result = std::thread::scope(|s| {
+                s.spawn(|| {
+                    // Build a temp runtime on this OS thread — safe because it's
+                    // a fresh thread, not the TUI's tokio worker thread.
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("failed to build temp runtime");
+                    rt.block_on(oxi_store::session::SessionManager::list(&cwd, None))
+                })
+                .join()
+                .unwrap_or_else(|e| {
+                    let msg = e
+                        .downcast_ref::<&str>()
+                        .map(|s| s.to_string())
+                        .or_else(|| e.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "unknown panic".to_string());
+                    Err(anyhow::anyhow!("thread panicked: {}", msg))
+                })
+            });
+            match list_result {
                 Ok(sessions) if sessions.is_empty() => {
                     state.add_system_message("No previous sessions found.".to_string());
                 }
