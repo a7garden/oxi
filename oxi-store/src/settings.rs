@@ -978,7 +978,14 @@ mod tests {
         assert_eq!(settings.default_provider, Some("google".to_string()));
 
         // Test routing flags
-        settings.merge_cli(None, None, Some(true), Some(false), Some(vec!["openai/gpt-4o".to_string()]), Some(false));
+        settings.merge_cli(
+            None,
+            None,
+            Some(true),
+            Some(false),
+            Some(vec!["openai/gpt-4o".to_string()]),
+            Some(false),
+        );
         assert!(settings.enable_routing);
         assert!(!settings.prefer_cost_efficient);
         assert_eq!(settings.fallback_chain, vec!["openai/gpt-4o"]);

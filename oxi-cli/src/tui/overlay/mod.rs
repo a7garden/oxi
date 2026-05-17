@@ -10,7 +10,8 @@ use ratatui::{layout::Rect, Frame};
 
 pub mod factories;
 pub mod questionnaire;
-pub use factories::{logout_select, model_select, resume_select};
+#[allow(unused_imports)]
+pub use factories::{logout_select, model_select, resume_select, routing_status};
 
 // ---------------------------------------------------------------------------
 // Overlay action

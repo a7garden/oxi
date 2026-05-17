@@ -694,13 +694,7 @@ mod tests {
 
     #[test]
     fn test_parse_fallback_chain_single() {
-        let args = parse_args_from([
-            "oxi",
-            "--fallback-chain",
-            "openai/gpt-4o",
-            "Hello",
-        ])
-        .unwrap();
+        let args = parse_args_from(["oxi", "--fallback-chain", "openai/gpt-4o", "Hello"]).unwrap();
         assert_eq!(args.fallback_chain, vec!["openai/gpt-4o"]);
     }
 

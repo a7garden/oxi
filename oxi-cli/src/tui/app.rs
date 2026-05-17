@@ -276,6 +276,12 @@ pub(crate) enum AppOverlay {
         sessions: Vec<oxi_store::session::SessionInfo>,
         selected: usize,
     },
+    /// Routing status panel (toggle with Ctrl+R)
+    #[allow(dead_code)]
+    RoutingStatus {
+        data: oxi_tui::widgets::routing::RoutingStatusData,
+        visible: bool,
+    },
 }
 
 // ── Session Switch Action ──────────────────────────────────────────────

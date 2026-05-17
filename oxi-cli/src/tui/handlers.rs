@@ -138,6 +138,24 @@ async fn handle_key(
             open_last_image(state);
             None
         }
+        // Ctrl+R: toggle routing status panel
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            use super::overlay;
+            use oxi_tui::widgets::routing::RoutingStatusData;
+            if matches!(&state.overlay, Some(AppOverlay::RoutingStatus { .. })) {
+                // Close routing panel
+                state.overlay = None;
+                state.overlay_state = None;
+            } else {
+                // Open routing panel — create component-based overlay
+                state.overlay_state = Some(overlay::factories::routing_status(RoutingStatusData::default()));
+                state.overlay = Some(AppOverlay::RoutingStatus {
+                    data: RoutingStatusData::default(),
+                    visible: true,
+                });
+            }
+            None
+        }
         // Shift+Tab: cycle thinking level
         KeyCode::BackTab => {
             if state.slash_completion_active {
@@ -621,6 +639,9 @@ async fn handle_overlay_key(
         Some(AppOverlay::ResumeSelect { .. }) => {
             handle_resume_select_key(key, state, session).await
         }
+
+        // ── Routing status (handled by component overlay) ──
+        Some(AppOverlay::RoutingStatus { .. }) => None,
 
         None => None,
     }

@@ -845,7 +845,9 @@ impl MultiProvider {
 
         // Not in model_db: determine API type from provider name
         let api = match provider {
-            "openai" | "openai-codex" | "opencode" | "opencode-go" => crate::types::Api::OpenAiResponses,
+            "openai" | "openai-codex" | "opencode" | "opencode-go" => {
+                crate::types::Api::OpenAiResponses
+            }
             "anthropic" | "cloudflare-ai-gateway" => crate::types::Api::AnthropicMessages,
             "google" => crate::types::Api::GoogleGenerativeAi,
             "google-vertex" => crate::types::Api::GoogleVertex,

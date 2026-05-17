@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
+use oxi_tui::widgets::routing::{RoutingStatus as RoutingStatusWidget, RoutingStatusData, RoutingStatusState};
 
 use super::{centered_popup, OverlayAction, OverlayComponent};
 use crate::app::agent_session::{AgentSession, AgentSessionHandle};
@@ -507,6 +508,76 @@ impl OverlayComponent for ResumeSelectOverlay {
 
     fn hint(&self) -> &str {
         " Up/Down  |  Enter switch  |  Esc cancel"
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Routing status overlay
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Create a routing status overlay component.
+pub fn routing_status(data: RoutingStatusData) -> Box<dyn OverlayComponent> {
+    Box::new(RoutingOverlay {
+        data,
+        widget_state: RoutingStatusState::new(),
+    })
+}
+
+struct RoutingOverlay {
+    data: RoutingStatusData,
+    widget_state: RoutingStatusState,
+}
+
+impl std::fmt::Debug for RoutingOverlay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RoutingOverlay")
+            .field("data", &self.data)
+            .finish()
+    }
+}
+
+impl OverlayComponent for RoutingOverlay {
+    fn handle_key(&mut self, key: KeyEvent) -> OverlayAction {
+        if key.kind != KeyEventKind::Press {
+            return OverlayAction::None;
+        }
+        match key.code {
+            // Ctrl+R and Esc both close the panel
+            KeyCode::Char('r') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                OverlayAction::Close
+            }
+            KeyCode::Esc => OverlayAction::Close,
+            _ => OverlayAction::None,
+        }
+    }
+
+    fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
+        use ratatui::widgets::Clear;
+
+        // Position panel in top-right corner
+        let panel_width = 45.min(area.width.saturating_sub(2));
+        let panel_height = 12.min(area.height.saturating_sub(2));
+        let panel_area = Rect {
+            x: area.x + area.width.saturating_sub(panel_width + 1),
+            y: area.y + 1,
+            width: panel_width,
+            height: panel_height,
+        };
+
+        // Update widget state with current data
+        self.widget_state.data = self.data.clone();
+        self.widget_state.visible = true;
+
+        // Render the routing widget
+        let widget = RoutingStatusWidget::new(theme);
+        frame.render_stateful_widget(widget, panel_area, &mut self.widget_state);
+
+        // Add subtle background to make panel readable
+        frame.render_widget(Clear, panel_area);
+    }
+
+    fn hint(&self) -> &str {
+        " Esc or Ctrl+R to close"
     }
 }
 

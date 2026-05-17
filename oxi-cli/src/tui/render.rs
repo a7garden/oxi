@@ -2,7 +2,12 @@
 
 use super::app::{AppOverlay, AppState, SetupStep};
 use oxi_tui::theme::Theme;
-use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
+use oxi_tui::widgets::{
+    chat::ChatView,
+    footer::Footer,
+    input::Input,
+    routing::{RoutingStatus as RoutingStatusWidget, RoutingStatusData, RoutingStatusState},
+};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Modifier, Style},
@@ -247,6 +252,11 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
 
     // Status bar
     f.render_stateful_widget(Footer::new(theme), chunks[2], &mut state.footer_state);
+
+    // Routing status panel (rendered on top of normal UI, triggered by Ctrl+R)
+    if let Some(AppOverlay::RoutingStatus { ref data, .. }) = state.overlay {
+        render_routing_panel(f, size, data, theme);
+    }
 }
 
 // ── Input area ──────────────────────────────────────────────────────────
@@ -416,6 +426,9 @@ fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme
         }
         Some(AppOverlay::ResumeSelect { .. }) => {
             render_resume_select(f, area, state, theme);
+        }
+        Some(AppOverlay::RoutingStatus { ref data, .. }) => {
+            render_routing_panel(f, area, data, theme);
         }
         None => {}
     }
@@ -710,4 +723,28 @@ fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
         " Up/Down select  |  Enter resume  |  Esc cancel",
         styles.muted,
     );
+}
+
+// ── Routing status panel ─────────────────────────────────────────────────
+
+/// Render the routing status panel in the top-right corner.
+fn render_routing_panel(f: &mut Frame, area: Rect, data: &RoutingStatusData, theme: &Theme) {
+    // Position panel in top-right corner with some margin
+    let panel_width = 50.min(area.width.saturating_sub(2));
+    let panel_height = 14.min(area.height.saturating_sub(2));
+    let panel_area = Rect {
+        x: area.x + area.width.saturating_sub(panel_width + 1),
+        y: area.y + 1,
+        width: panel_width,
+        height: panel_height,
+    };
+
+    // Create widget state
+    let mut widget_state = RoutingStatusState::new();
+    widget_state.data = data.clone();
+    widget_state.visible = true;
+
+    // Render the routing widget
+    let widget = RoutingStatusWidget::new(theme);
+    f.render_stateful_widget(widget, panel_area, &mut widget_state);
 }

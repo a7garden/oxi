@@ -37,7 +37,7 @@ impl ProviderHealth {
     fn symbol(&self) -> &'static str {
         match self {
             ProviderHealth::Healthy => "\u{25CF}",     // ● (filled green)
-            ProviderHealth::Degraded => "\u{25CF}",   // ● (filled amber)
+            ProviderHealth::Degraded => "\u{25CF}",    // ● (filled amber)
             ProviderHealth::Unavailable => "\u{25CB}", // ○ (hollow)
             ProviderHealth::Disabled => "\u{25CB}",    // ○ (hollow gray)
         }
@@ -176,7 +176,10 @@ impl StatefulWidget for RoutingStatus<'_> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(styles.border)
-            .title(Span::styled(title, styles.accent.add_modifier(Modifier::BOLD)));
+            .title(Span::styled(
+                title,
+                styles.accent.add_modifier(Modifier::BOLD),
+            ));
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -186,7 +189,11 @@ impl StatefulWidget for RoutingStatus<'_> {
 
         // ── Auto-Routing row ──────────────────────────────────────────────
         {
-            let enabled_ch = if d.auto_routing_enabled { "\u{25CF}" } else { "\u{25CB}" };
+            let enabled_ch = if d.auto_routing_enabled {
+                "\u{25CF}"
+            } else {
+                "\u{25CB}"
+            };
             let enabled_style = if d.auto_routing_enabled {
                 styles.success
             } else {
@@ -194,8 +201,11 @@ impl StatefulWidget for RoutingStatus<'_> {
             };
             let enabled_label = if d.auto_routing_enabled { "ON" } else { "OFF" };
 
-            let fallback_ch =
-                if d.fallback_enabled { "\u{25CF}" } else { "\u{25CB}" };
+            let fallback_ch = if d.fallback_enabled {
+                "\u{25CF}"
+            } else {
+                "\u{25CB}"
+            };
             let fallback_style = if d.fallback_enabled {
                 styles.success
             } else {
@@ -240,14 +250,25 @@ impl StatefulWidget for RoutingStatus<'_> {
                     ProviderHealth::Disabled => styles.muted,
                 };
 
-                let active_marker = if provider.is_active { " \u{25B6}" } else { "  " };
+                let active_marker = if provider.is_active {
+                    " \u{25B6}"
+                } else {
+                    "  "
+                };
 
                 // Build a single line: "  ● provider_name (n failures)"
                 let mut line_spans: Vec<Span<'static>> = vec![
                     Span::raw("  "),
                     Span::styled(health_ch, health_style),
                     Span::raw(active_marker),
-                    Span::styled(provider.name.clone(), if provider.is_active { styles.primary } else { styles.muted }),
+                    Span::styled(
+                        provider.name.clone(),
+                        if provider.is_active {
+                            styles.primary
+                        } else {
+                            styles.muted
+                        },
+                    ),
                 ];
 
                 if provider.failures > 0 {
