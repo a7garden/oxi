@@ -9,6 +9,7 @@
 
 mod compaction;
 mod context;
+pub mod circuit_breaker;
 pub mod env_api_keys;
 mod error;
 mod high_level;
@@ -129,6 +130,12 @@ pub use model_db::{
     get_all_models, get_cheapest_models, get_model_entry, get_provider_models,
     get_reasoning_models, get_vision_models, model_count, search_models, ModelEntry,
 };
+
+// Fallback chain for ordered model failover
+pub mod fallback_chain;
+
+/// Ordered fallback chain for model failover on failure.
+pub use fallback_chain::{FallbackChain, FallbackChainError};
 
 /// Re-export AssistantMessage from messages
 pub use messages::AssistantMessage;

@@ -1,0 +1,620 @@
+//! Complexity-based model routing for oxi-ai
+//!
+//! This module provides a router that classifies task complexity
+//! and selects appropriate models based on capability and cost requirements.
+
+use crate::model_db::{self, ModelEntry};
+use crate::{Context, Complexity, Message, MessageContent, UserMessage};
+use std::sync::Arc;
+
+/// Routes tasks to models based on estimated complexity.
+pub trait ComplexityRouter: Send + Sync {
+    /// Classify the complexity of the given context.
+    fn classify(&self, context: &Context) -> Complexity;
+
+    /// Pick the best models for a given complexity.
+    fn route(&self, complexity: Complexity, prefer_cost_efficient: bool) -> Vec<&'static ModelEntry>;
+}
+
+/// Default implementation of ComplexityRouter.
+///
+/// Uses keyword analysis, token counting, and system prompt hints
+/// to determine task complexity, then routes to appropriate models.
+#[derive(Debug, Clone, Default)]
+pub struct DefaultRouter {
+    _private: (),
+}
+
+impl Default for Arc<DefaultRouter> {
+    fn default() -> Self {
+        Arc::new(DefaultRouter::new())
+    }
+}
+
+impl DefaultRouter {
+    /// Create a new DefaultRouter
+    pub fn new() -> Self {
+        Self { _private: () }
+    }
+
+    /// Extract text content from a message
+    fn extract_message_text(&self, message: &Message) -> String {
+        match message {
+            Message::User(msg) => self.extract_content_text(&msg.content),
+            Message::Assistant(msg) => {
+                msg.content
+                    .iter()
+                    .filter_map(|b| b.as_text())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+            Message::ToolResult(msg) => msg
+                .content
+                .iter()
+                .filter_map(|b| b.as_text())
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
+
+    /// Extract text from MessageContent
+    fn extract_content_text(&self, content: &MessageContent) -> String {
+        match content {
+            MessageContent::Text(s) => s.clone(),
+            MessageContent::Blocks(blocks) => blocks
+                .iter()
+                .filter_map(|b| b.as_text())
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
+
+    /// Get the last user message text from the context
+    fn get_last_user_message_text(&self, context: &Context) -> Option<String> {
+        context
+            .messages
+            .iter()
+            .rev()
+            .find_map(|msg| {
+                if let Message::User(user_msg) = msg {
+                    let text = self.extract_content_text(&user_msg.content);
+                    if !text.is_empty() {
+                        Some(text)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+    }
+
+    /// Count tokens in text using the high-level estimator
+    fn count_tokens(&self, text: &str) -> usize {
+        crate::high_level::tokens::estimate(text)
+    }
+
+    /// Analyze text for complexity keywords and return a base complexity score
+    fn analyze_keywords(&self, text: &str) -> i32 {
+        let lower = text.to_lowercase();
+
+        // Trivial keywords: +1 point
+        let trivial_keywords = [
+            "translate", "summarize", "spell check", "format",
+            "capitalize", "lowercase", "uppercase", "trim", "count words",
+        ];
+        let trivial_score: i32 = trivial_keywords
+            .iter()
+            .filter(|kw| lower.contains(*kw))
+            .count() as i32;
+
+        // Simple keywords: +2 points
+        let simple_keywords = [
+            "explain", "write function", "fix typo", "list",
+            "describe", "define", "convert", "calculate", "simple",
+        ];
+        let simple_score: i32 = simple_keywords
+            .iter()
+            .filter(|kw| lower.contains(*kw))
+            .count() as i32;
+
+        // Moderate keywords: +3 points
+        let moderate_keywords = [
+            "architect", "design", "refactor", "implement",
+            "create a class", "optimize", "debug", "review code",
+            "parse", "validate", "schema", "api",
+        ];
+        let moderate_score: i32 = moderate_keywords
+            .iter()
+            .filter(|kw| lower.contains(*kw))
+            .count() as i32;
+
+        // Complex keywords: +4 points
+        let complex_keywords = [
+            "build", "create a service", "write a full", "implement a complete",
+            "microservice", "distributed", "concurrent", "parallel",
+            "full stack", "end-to-end", "production", "enterprise",
+        ];
+        let complex_score: i32 = complex_keywords
+            .iter()
+            .filter(|kw| lower.contains(*kw))
+            .count() as i32;
+
+        // Research keywords: +5 points
+        let research_keywords = [
+            "analyze deeply", "research", "evaluate", "investigate",
+            "compare and contrast", "benchmark", "evaluate performance",
+            "comprehensive", "thorough", "in-depth", "study",
+        ];
+        let research_score: i32 = research_keywords
+            .iter()
+            .filter(|kw| lower.contains(*kw))
+            .count() as i32;
+
+        // Return the highest matching score
+        let max_keyword_score = research_score
+            .max(complex_score)
+            .max(moderate_score)
+            .max(simple_score)
+            .max(trivial_score);
+
+        // If multiple keywords match, use the highest
+        // Otherwise use trivial as default
+        if max_keyword_score > 0 {
+            max_keyword_score
+        } else {
+            1 // Default to trivial
+        }
+    }
+
+    /// Analyze system prompt for complexity hints
+    fn analyze_system_prompt(&self, system_prompt: Option<&str>) -> i32 {
+        let Some(prompt) = system_prompt else {
+            return 0;
+        };
+
+        let lower = prompt.to_lowercase();
+
+        // System prompts with "research" or "deep analysis" suggest higher complexity
+        if lower.contains("research") || lower.contains("deep analysis") || lower.contains("thorough") {
+            return 2;
+        }
+
+        // "helpful assistant" without specific guidance suggests simple
+        if lower.contains("helpful assistant") && !lower.contains("expert") && !lower.contains("advanced") {
+            return 0;
+        }
+
+        // "expert" or "senior" suggests higher complexity
+        if lower.contains("expert") || lower.contains("senior developer") || lower.contains("architect") {
+            return 1;
+        }
+
+        0
+    }
+
+    /// Convert keyword score to Complexity enum
+    fn score_to_complexity(&self, score: i32) -> Complexity {
+        match score {
+            0 => Complexity::Trivial,
+            1 => Complexity::Simple,
+            2 => Complexity::Moderate,
+            3 => Complexity::Complex,
+            _ => Complexity::Research,
+        }
+    }
+
+    /// Get models filtered by complexity tier
+    fn get_models_for_complexity(&self, complexity: Complexity) -> Vec<&'static ModelEntry> {
+        let complexity_tier = complexity.cost_tier();
+
+        // Model mapping per complexity level
+        // We search for models by name/id pattern
+        let patterns: Vec<&str> = match complexity {
+            Complexity::Trivial => vec![
+                "haiku", "gpt-4o-mini", "mini",
+            ],
+            Complexity::Simple => vec![
+                "haiku", "sonnet", "gpt-4o-mini", "mini",
+            ],
+            Complexity::Moderate => vec![
+                "sonnet", "opus", "gpt-4o", "gpt-4.1",
+            ],
+            Complexity::Complex => vec![
+                "opus", "gemini-2.5-pro", "gpt-4.1", "claude-sonnet",
+            ],
+            Complexity::Research => vec![
+                "opus-4.5", "opus-4.6", "gemini-3-pro", "gemini-2.5-pro",
+                "claude-opus",
+            ],
+        };
+
+        // Collect matching models from the database
+        let mut candidates: Vec<&ModelEntry> = Vec::new();
+
+        for pattern in &patterns {
+            let matches = model_db::search_models(pattern);
+            for model in matches {
+                // Prefer models that have been updated more recently (higher version numbers)
+                // Also filter by relevance to complexity tier
+                if self.model_suitable_for_tier(model, complexity_tier) {
+                    if !candidates.contains(&model) {
+                        candidates.push(model);
+                    }
+                }
+            }
+        }
+
+        // Deduplicate and limit
+        candidates.truncate(20);
+        candidates
+    }
+
+    /// Check if a model is suitable for a given complexity tier
+    fn model_suitable_for_tier(&self, model: &ModelEntry, tier: u8) -> bool {
+        match tier {
+            // Trivial: fast, cheap models
+            0 => {
+                // Prefer models without reasoning (faster, cheaper)
+                !model.supports_reasoning()
+                    || model.cost_input < 0.5
+            }
+            // Simple: moderate capability
+            1 => {
+                !model.supports_reasoning() || model.cost_input < 1.5
+            }
+            // Moderate: good capability
+            2 => {
+                // Mid-range models
+                model.cost_input < 5.0 || model.supports_reasoning()
+            }
+            // Complex: high capability
+            3 => {
+                // High-end models
+                model.supports_reasoning() || model.cost_input < 15.0
+            }
+            // Research: top tier only
+            _ => {
+                // Best models for research
+                model.supports_reasoning()
+                    || model.context_window >= 200_000
+                    || model.name.to_lowercase().contains("pro")
+                    || model.name.to_lowercase().contains("opus")
+            }
+        }
+    }
+
+    /// Sort candidates by cost efficiency
+    fn sort_by_cost(&self, candidates: &mut [&'static ModelEntry]) {
+        candidates.sort_by(|a, b| {
+            let cost_a = a.cost_input + a.cost_output;
+            let cost_b = b.cost_input + b.cost_output;
+            cost_a
+                .partial_cmp(&cost_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    /// Sort candidates by capability (reasoning > context_window > cost)
+    fn sort_by_capability(&self, candidates: &mut [&'static ModelEntry]) {
+        candidates.sort_by(|a, b| {
+            // Primary: reasoning capability
+            let a_reasoning = if a.supports_reasoning() { 1 } else { 0 };
+            let b_reasoning = if b.supports_reasoning() { 1 } else { 0 };
+            if a_reasoning != b_reasoning {
+                return b_reasoning.cmp(&a_reasoning);
+            }
+
+            // Secondary: context window size
+            let a_context = a.context_window;
+            let b_context = b.context_window;
+            if a_context != b_context {
+                return b_context.cmp(&a_context);
+            }
+
+            // Tertiary: output capability
+            let a_output = a.max_tokens;
+            let b_output = b.max_tokens;
+            if a_output != b_output {
+                return b_output.cmp(&a_output);
+            }
+
+            // Quaternary: cost (prefer cheaper for same capability)
+            let cost_a = a.cost_input + a.cost_output;
+            let cost_b = b.cost_input + b.cost_output;
+            cost_a
+                .partial_cmp(&cost_b)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+}
+
+impl ComplexityRouter for DefaultRouter {
+    fn classify(&self, context: &Context) -> Complexity {
+        // Get last user message text
+        let last_user_text = self.get_last_user_message_text(context);
+
+        let Some(text) = last_user_text else {
+            // No user message - check system prompt
+            let prompt_score = self.analyze_system_prompt(context.system_prompt.as_deref());
+            if context.tools.len() > 0 {
+                let bumped = (prompt_score + 1).min(4);
+                return self.score_to_complexity(bumped);
+            }
+            return self.score_to_complexity(prompt_score);
+        };
+
+        // Count tokens
+        let token_count = self.count_tokens(&text);
+
+        // Analyze keywords for complexity
+        let keyword_score = self.analyze_keywords(&text);
+
+        // Adjust based on token count
+        let mut base_score = keyword_score;
+
+        // Very short inputs (likely trivial)
+        if token_count < 50 {
+            base_score = base_score.min(1);
+        }
+        // Medium length may indicate more complex requests
+        else if token_count > 500 {
+            base_score += 1;
+        }
+        // Very long inputs likely need more capable models
+        if token_count > 2000 {
+            base_score += 1;
+        }
+
+        // Analyze system prompt for hints
+        let system_score = self.analyze_system_prompt(context.system_prompt.as_deref());
+        if system_score > base_score {
+            base_score = system_score;
+        }
+
+        // If context has tools, bump complexity by 1 (capped at Research)
+        if !context.tools.is_empty() {
+            base_score = (base_score + 1).min(4);
+        }
+
+        // Cap at Research level
+        let final_score = base_score.min(4);
+
+        self.score_to_complexity(final_score)
+    }
+
+    fn route(&self, complexity: Complexity, prefer_cost_efficient: bool) -> Vec<&'static ModelEntry> {
+        // Get candidates for this complexity
+        let mut candidates = self.get_models_for_complexity(complexity);
+
+        // Filter to models that support the complexity tier
+        let tier = complexity.cost_tier();
+        candidates.retain(|m| self.model_suitable_for_tier(m, tier));
+
+        // Sort based on preference
+        if prefer_cost_efficient {
+            self.sort_by_cost(&mut candidates);
+        } else {
+            self.sort_by_capability(&mut candidates);
+        }
+
+        // Return top 3 candidates
+        candidates.truncate(3);
+        candidates
+    }
+}
+
+impl Arc<DefaultRouter> {
+    /// Create a new DefaultRouter wrapped in Arc
+    pub fn new_arc() -> Self {
+        Arc::new(DefaultRouter::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Message, UserMessage};
+
+    fn create_context_with_user_message(text: &str) -> Context {
+        let mut ctx = Context::new();
+        ctx.add_message(Message::User(UserMessage::new(text.to_string())));
+        ctx
+    }
+
+    #[test]
+    fn test_trivial_keywords() {
+        let router = DefaultRouter::new();
+
+        let ctx = create_context_with_user_message("Please translate this to Spanish");
+        assert_eq!(router.classify(&ctx), Complexity::Trivial);
+
+        let ctx = create_context_with_user_message("Summarize this text");
+        assert_eq!(router.classify(&ctx), Complexity::Trivial);
+
+        let ctx = create_context_with_user_message("Check the spelling");
+        assert_eq!(router.classify(&ctx), Complexity::Trivial);
+    }
+
+    #[test]
+    fn test_simple_keywords() {
+        let router = DefaultRouter::new();
+
+        let ctx = create_context_with_user_message("Explain how this code works");
+        assert_eq!(router.classify(&ctx), Complexity::Simple);
+
+        let ctx = create_context_with_user_message("Write a function to reverse a string");
+        assert_eq!(router.classify(&ctx), Complexity::Simple);
+
+        let ctx = create_context_with_user_message("List all files in the directory");
+        assert_eq!(router.classify(&ctx), Complexity::Simple);
+    }
+
+    #[test]
+    fn test_moderate_keywords() {
+        let router = DefaultRouter::new();
+
+        let ctx = create_context_with_user_message("Architect a REST API service");
+        assert_eq!(router.classify(&ctx), Complexity::Moderate);
+
+        let ctx = create_context_with_user_message("Design a database schema");
+        assert_eq!(router.classify(&ctx), Complexity::Moderate);
+
+        let ctx = create_context_with_user_message("Refactor this module");
+        assert_eq!(router.classify(&ctx), Complexity::Moderate);
+    }
+
+    #[test]
+    fn test_complex_keywords() {
+        let router = DefaultRouter::new();
+
+        let ctx = create_context_with_user_message("Build a complete microservices architecture");
+        assert_eq!(router.classify(&ctx), Complexity::Complex);
+
+        let ctx = create_context_with_user_message("Implement a full-stack application with authentication");
+        assert_eq!(router.classify(&ctx), Complexity::Complex);
+    }
+
+    #[test]
+    fn test_research_keywords() {
+        let router = DefaultRouter::new();
+
+        let ctx = create_context_with_user_message("Analyze deeply the performance characteristics");
+        assert_eq!(router.classify(&ctx), Complexity::Research);
+
+        let ctx = create_context_with_user_message("Research the latest developments in ML");
+        assert_eq!(router.classify(&ctx), Complexity::Research);
+    }
+
+    #[test]
+    fn test_tools_bump_complexity() {
+        let router = DefaultRouter::new();
+
+        let mut ctx = create_context_with_user_message("List files");
+        assert_eq!(router.classify(&ctx), Complexity::Simple);
+
+        // Add a tool - should bump complexity
+        ctx.add_tool(crate::Tool::new("list_files", "List files", serde_json::json!({})));
+        assert_eq!(router.classify(&ctx), Complexity::Moderate);
+    }
+
+    #[test]
+    fn test_token_count_affects_complexity() {
+        let router = DefaultRouter::new();
+
+        // Short text should be trivial
+        let ctx = create_context_with_user_message("Hi");
+        assert_eq!(router.classify(&ctx), Complexity::Trivial);
+
+        // Long text should increase complexity
+        let long_text = "Explain this code in detail. ".repeat(50);
+        let ctx = create_context_with_user_message(&long_text);
+        let complexity = router.classify(&ctx);
+        assert!(complexity >= Complexity::Moderate);
+    }
+
+    #[test]
+    fn test_routing_trivial() {
+        let router = DefaultRouter::new();
+
+        let models = router.route(Complexity::Trivial, true);
+        assert!(!models.is_empty());
+        assert!(models.len() <= 3);
+    }
+
+    #[test]
+    fn test_routing_research() {
+        let router = DefaultRouter::new();
+
+        let models = router.route(Complexity::Research, false);
+        assert!(!models.is_empty());
+        assert!(models.len() <= 3);
+
+        // Research models should support reasoning
+        for model in &models {
+            assert!(
+                model.supports_reasoning() || model.context_window >= 200_000,
+                "Model {} should support reasoning or have large context",
+                model.name
+            );
+        }
+    }
+
+    #[test]
+    fn test_cost_efficient_sorting() {
+        let router = DefaultRouter::new();
+
+        let models = router.route(Complexity::Moderate, true);
+
+        if models.len() > 1 {
+            // Verify cost sorting
+            for i in 1..models.len() {
+                let prev_cost = models[i - 1].cost_input + models[i - 1].cost_output;
+                let curr_cost = models[i].cost_input + models[i].cost_output;
+                assert!(
+                    prev_cost <= curr_cost,
+                    "Cost-efficient sorting failed: {:?} > {:?}",
+                    prev_cost,
+                    curr_cost
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_capability_sorting() {
+        let router = DefaultRouter::new();
+
+        let models = router.route(Complexity::Complex, false);
+
+        if models.len() > 1 {
+            // First model should have reasoning if any do
+            let any_reasoning = models.iter().any(|m| m.supports_reasoning());
+            if any_reasoning {
+                assert!(
+                    models[0].supports_reasoning(),
+                    "First model should support reasoning when sorting by capability"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_system_prompt_analysis() {
+        let router = DefaultRouter::new();
+
+        let mut ctx = Context::new();
+        ctx.set_system_prompt("You are a helpful assistant.");
+        ctx.add_message(Message::User(UserMessage::new("Hello")));
+
+        // Simple system prompt should not increase complexity
+        let complexity = router.classify(&ctx);
+        assert!(complexity <= Complexity::Simple);
+
+        let mut ctx = Context::new();
+        ctx.set_system_prompt("You are an expert senior software architect conducting thorough deep analysis.");
+        ctx.add_message(Message::User(UserMessage::new("Hello")));
+
+        // Expert system prompt should increase complexity
+        let complexity = router.classify(&ctx);
+        assert!(complexity >= Complexity::Moderate);
+    }
+
+    #[test]
+    fn test_empty_context() {
+        let router = DefaultRouter::new();
+
+        let ctx = Context::new();
+        let complexity = router.classify(&ctx);
+        // Empty context defaults to Trivial
+        assert_eq!(complexity, Complexity::Trivial);
+    }
+
+    #[test]
+    fn test_arc_default() {
+        let router: Arc<DefaultRouter> = Default::default();
+        let ctx = create_context_with_user_message("translate this");
+        let complexity = router.classify(&ctx);
+        assert_eq!(complexity, Complexity::Trivial);
+    }
+}
