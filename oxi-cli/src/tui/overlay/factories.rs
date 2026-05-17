@@ -517,6 +517,10 @@ impl OverlayComponent for ResumeSelectOverlay {
 // Routing status overlay
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Panel dimensions (shared constant to keep factories + render in sync).
+const ROUTING_PANEL_WIDTH: u16 = 50;
+const ROUTING_PANEL_HEIGHT: u16 = 14;
+
 /// Create a routing status overlay component.
 pub fn routing_status(data: RoutingStatusData) -> Box<dyn OverlayComponent> {
     Box::new(RoutingOverlay {
@@ -535,6 +539,18 @@ impl std::fmt::Debug for RoutingOverlay {
         f.debug_struct("RoutingOverlay")
             .field("data", &self.data)
             .finish()
+    }
+}
+
+/// Compute the panel area in the top-right corner of the given `area`.
+fn routing_panel_area(area: Rect) -> Rect {
+    let panel_width = ROUTING_PANEL_WIDTH.min(area.width.saturating_sub(2));
+    let panel_height = ROUTING_PANEL_HEIGHT.min(area.height.saturating_sub(2));
+    Rect {
+        x: area.x + area.width.saturating_sub(panel_width + 1),
+        y: area.y + 1,
+        width: panel_width,
+        height: panel_height,
     }
 }
 
@@ -560,26 +576,18 @@ impl OverlayComponent for RoutingOverlay {
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         use ratatui::widgets::Clear;
 
-        // Position panel in top-right corner
-        let panel_width = 45.min(area.width.saturating_sub(2));
-        let panel_height = 12.min(area.height.saturating_sub(2));
-        let panel_area = Rect {
-            x: area.x + area.width.saturating_sub(panel_width + 1),
-            y: area.y + 1,
-            width: panel_width,
-            height: panel_height,
-        };
+        let panel_area = routing_panel_area(area);
+
+        // Clear the background first so the widget is rendered on a clean slate
+        frame.render_widget(Clear, panel_area);
 
         // Update widget state with current data
         self.widget_state.data = self.data.clone();
         self.widget_state.visible = true;
 
-        // Render the routing widget
+        // Render the routing widget on top of the cleared area
         let widget = RoutingStatusWidget::new(theme);
         frame.render_stateful_widget(widget, panel_area, &mut self.widget_state);
-
-        // Add subtle background to make panel readable
-        frame.render_widget(Clear, panel_area);
     }
 
     fn hint(&self) -> &str {
