@@ -4,8 +4,7 @@
 //! and selects appropriate models based on capability and cost requirements.
 
 use crate::model_db::{self, ModelEntry};
-use crate::{Context, Complexity, Message, MessageContent, UserMessage};
-use std::sync::Arc;
+use crate::{Context, Complexity, Message, MessageContent};
 
 /// Routes tasks to models based on estimated complexity.
 pub trait ComplexityRouter: Send + Sync {
@@ -25,36 +24,10 @@ pub struct DefaultRouter {
     _private: (),
 }
 
-impl Default for Arc<DefaultRouter> {
-    fn default() -> Self {
-        Arc::new(DefaultRouter::new())
-    }
-}
-
 impl DefaultRouter {
     /// Create a new DefaultRouter
     pub fn new() -> Self {
         Self { _private: () }
-    }
-
-    /// Extract text content from a message
-    fn extract_message_text(&self, message: &Message) -> String {
-        match message {
-            Message::User(msg) => self.extract_content_text(&msg.content),
-            Message::Assistant(msg) => {
-                msg.content
-                    .iter()
-                    .filter_map(|b| b.as_text())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            }
-            Message::ToolResult(msg) => msg
-                .content
-                .iter()
-                .filter_map(|b| b.as_text())
-                .collect::<Vec<_>>()
-                .join(" "),
-        }
     }
 
     /// Extract text from MessageContent
@@ -163,7 +136,7 @@ impl DefaultRouter {
         if max_keyword_score > 0 {
             max_keyword_score
         } else {
-            1 // Default to trivial
+            1 // Default to simple
         }
     }
 
@@ -180,7 +153,7 @@ impl DefaultRouter {
             return 2;
         }
 
-        // "helpful assistant" without specific guidance suggests simple
+        // "helpful assistant" without specific guidance suggests trivial/simple
         if lower.contains("helpful assistant") && !lower.contains("expert") && !lower.contains("advanced") {
             return 0;
         }
@@ -230,7 +203,7 @@ impl DefaultRouter {
         };
 
         // Collect matching models from the database
-        let mut candidates: Vec<&ModelEntry> = Vec::new();
+        let mut candidates: Vec<&'static ModelEntry> = Vec::new();
 
         for pattern in &patterns {
             let matches = model_db::search_models(pattern);
@@ -401,13 +374,6 @@ impl ComplexityRouter for DefaultRouter {
         // Return top 3 candidates
         candidates.truncate(3);
         candidates
-    }
-}
-
-impl Arc<DefaultRouter> {
-    /// Create a new DefaultRouter wrapped in Arc
-    pub fn new_arc() -> Self {
-        Arc::new(DefaultRouter::new())
     }
 }
 
@@ -611,10 +577,23 @@ mod tests {
     }
 
     #[test]
-    fn test_arc_default() {
-        let router: Arc<DefaultRouter> = Default::default();
+    fn test_default_router() {
+        let router = DefaultRouter::default();
         let ctx = create_context_with_user_message("translate this");
         let complexity = router.classify(&ctx);
         assert_eq!(complexity, Complexity::Trivial);
+    }
+
+    #[test]
+    fn test_complexity_trait_object() {
+        use std::sync::Arc;
+
+        let router: Arc<dyn ComplexityRouter> = Arc::new(DefaultRouter::new());
+        let ctx = create_context_with_user_message("refactor this code");
+        let complexity = router.classify(&ctx);
+        assert_eq!(complexity, Complexity::Moderate);
+
+        let models = router.route(complexity, true);
+        assert!(!models.is_empty());
     }
 }

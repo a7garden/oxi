@@ -8,6 +8,7 @@
 //! It handles streaming, tool calling, context management, and cross-provider handoffs.
 
 mod compaction;
+mod complexity_router;
 mod context;
 pub mod circuit_breaker;
 pub mod env_api_keys;
@@ -100,6 +101,11 @@ pub use high_level::{complete, estimate_tokens};
 pub use compaction::{
     CompactedContext, CompactionManager, CompactionStrategy, Compactor, LlmCompactor,
 };
+
+// Complexity-based routing
+
+/// Complexity-based model routing.
+pub use complexity_router::{ComplexityRouter, DefaultRouter};
 
 // Cross-provider message transformation
 
