@@ -148,7 +148,9 @@ async fn handle_key(
                 state.overlay_state = None;
             } else {
                 // Open routing panel — create component-based overlay
-                state.overlay_state = Some(overlay::factories::routing_status(RoutingStatusData::default()));
+                state.overlay_state = Some(overlay::factories::routing_status(
+                    RoutingStatusData::default(),
+                ));
                 state.overlay = Some(AppOverlay::RoutingStatus {
                     data: RoutingStatusData::default(),
                     visible: true,

@@ -4,7 +4,7 @@
 use oxi_agent::agent_loop::config::{BACKOFF_BASE_SECS, MAX_RETRIES};
 use oxi_agent::agent_loop::retry::is_retryable_error;
 use oxi_agent::recovery::{
-    CircuitBreaker, CircuitBreakerConfig, CircuitOpenError, FallbackChain, PartialResponse,
+    CircuitBreaker, CircuitBreakerConfig, CircuitOpenErrorLocal, FallbackChain, PartialResponse,
 };
 use std::time::Duration;
 
@@ -225,7 +225,7 @@ fn success_resets_consecutive_failures() {
 
 #[test]
 fn circuit_open_error_display() {
-    let err = CircuitOpenError {
+    let err = CircuitOpenErrorLocal {
         remaining: Duration::from_secs(30),
     };
     let msg = err.to_string();
@@ -526,19 +526,27 @@ fn partial_response_clear() {
 fn fallback_chain_default() {
     let chain = FallbackChain::default();
     assert!(!chain.is_empty());
-    assert_eq!(chain.get(0), Some("openai/gpt-4o-mini"));
+    // Default chain starts with google/gemini-2.0-flash (cheapest first)
+    assert!(chain.names().first().map(|s| s.as_str()).unwrap_or("").contains("gemini-2.0-flash"));
 }
 
 #[test]
 fn fallback_chain_custom() {
-    let chain = FallbackChain::new(vec!["anthropic/claude-3".into(), "openai/gpt-4".into()]);
-    assert_eq!(chain.get(0), Some("anthropic/claude-3"));
-    assert_eq!(chain.get(1), Some("openai/gpt-4"));
-    assert_eq!(chain.get(2), None);
+    // Use from_ids to create a chain from model ID strings
+    let chain = FallbackChain::from_ids(&[
+        "anthropic/claude-3-5-haiku-20241022",
+        "openai/gpt-4o",
+    ])
+    .expect("valid model IDs");
+    
+    // Check names
+    assert_eq!(chain.names(), &["anthropic/claude-3-5-haiku-20241022", "openai/gpt-4o"]);
+    assert!(!chain.is_empty());
 }
 
 #[test]
 fn fallback_chain_empty() {
-    let chain = FallbackChain::new(vec![]);
+    // Empty chain with new() method
+    let chain: FallbackChain = FallbackChain::new(vec![]);
     assert!(chain.is_empty());
 }

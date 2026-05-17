@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use oxi_tui::widgets::routing::{RoutingStatus as RoutingStatusWidget, RoutingStatusData, RoutingStatusState};
+use oxi_tui::widgets::routing::{
+    RoutingStatus as RoutingStatusWidget, RoutingStatusData, RoutingStatusState,
+};
 
 use super::{centered_popup, OverlayAction, OverlayComponent};
 use crate::app::agent_session::{AgentSession, AgentSessionHandle};
@@ -543,7 +545,11 @@ impl OverlayComponent for RoutingOverlay {
         }
         match key.code {
             // Ctrl+R and Esc both close the panel
-            KeyCode::Char('r') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('r')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 OverlayAction::Close
             }
             KeyCode::Esc => OverlayAction::Close,

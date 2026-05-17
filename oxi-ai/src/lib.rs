@@ -151,6 +151,12 @@ pub mod fallback_chain;
 /// Ordered fallback chain for model failover on failure.
 pub use fallback_chain::{FallbackChain, FallbackChainError};
 
+// Partial response for stream recovery
+pub mod partial_response;
+
+/// Partial response accumulator for stream recovery.
+pub use partial_response::PartialResponse;
+
 // Circuit breaker for provider health tracking
 /// Per-provider circuit breaker for health tracking.
 pub use circuit_breaker::{CircuitBreakerConfig, CircuitOpenError, ProviderCircuitBreaker};

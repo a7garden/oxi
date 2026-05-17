@@ -1057,18 +1057,25 @@ fn test_partial_response_accumulator() {
 fn test_fallback_chain() {
     use crate::recovery::FallbackChain;
 
-    let chain = FallbackChain::new(vec![
-        "openai/gpt-4o".to_string(),
-        "anthropic/claude-3-haiku".to_string(),
-    ]);
+    // Create using from_ids which returns Result<Self, FallbackChainError>
+    let chain = FallbackChain::from_ids(&[
+        "openai/gpt-4o",
+        "anthropic/claude-3-5-haiku-20241022",
+    ])
+    .expect("valid model IDs");
 
-    assert_eq!(chain.get(0), Some("openai/gpt-4o"));
-    assert_eq!(chain.get(1), Some("anthropic/claude-3-haiku"));
-    assert_eq!(chain.get(2), None);
+    // Check first and last
+    assert_eq!(chain.first().expect("has first").id, "gpt-4o");
+    assert_eq!(chain.last().expect("has last").id, "claude-3-5-haiku-20241022");
+    
+    // Check names
+    assert_eq!(chain.names(), &["openai/gpt-4o", "anthropic/claude-3-5-haiku-20241022"]);
     assert!(!chain.is_empty());
 
+    // Empty chain
     let empty = FallbackChain::new(vec![]);
     assert!(empty.is_empty());
+    assert_eq!(empty.first(), None);
 }
 
 #[test]
