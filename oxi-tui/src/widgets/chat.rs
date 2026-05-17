@@ -6,7 +6,7 @@
 //!
 //! Benefits:
 //! - Tool/error boxes use Block::bordered() — real ratatui borders
-//! - Text uses Paragraph::wrap(Wrap) — proper word-wrapping
+//! - Text uses CJK-aware pre-wrapping (wrap_lines_styled) for correct line-breaking
 //! - No virtual buffer — direct rendering, no double-write
 //! - Layout caching — only recomputes when state actually changes
 //! - Truncation at ingest — no height inflation from monster inputs
@@ -19,10 +19,10 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget},
 };
 use tui_markdown;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::table_renderer::render_markdown_table;
 use crate::text::truncate_to_width as truncate_str;
@@ -764,8 +764,246 @@ fn md_lines(content: &str, width: u16) -> Vec<Line<'static>> {
         return table_lines;
     }
 
-    // No table found, use regular markdown rendering
-    render_markdown(content)
+    // No table found, use regular markdown rendering.
+    // Apply CJK-aware wrapping before returning so that the layout
+    // engine gets correctly-sized lines. Without this, ratatui's
+    // Paragraph::wrap would be used at render time, but it only
+    // breaks at whitespace — CJK characters that lack spaces between
+    // them would be treated as a single giant "word" and overflow.
+    let raw_lines = render_markdown(content);
+    wrap_lines_styled(&raw_lines, width)
+}
+
+/// Wrap styled `Line`s to fit within `width` terminal columns,
+/// breaking at word boundaries for Latin text and at character
+/// boundaries for CJK text. Preserves per-Span styling.
+///
+/// This replaces `Paragraph::wrap` for markdown content because
+/// ratatui's `WordWrapper` does not handle CJK line-breaking —
+/// Korean/Chinese/Japanese characters that lack spaces between
+/// them are treated as a single "word" and never get wrapped.
+fn wrap_lines_styled(lines: &[Line<'static>], width: u16) -> Vec<Line<'static>> {
+    let max_w = width as usize;
+    if max_w == 0 {
+        return lines.to_vec();
+    }
+
+    let mut result = Vec::new();
+    for line in lines {
+        // Collect all (char, Style) pairs from all Spans
+        let mut chars: Vec<(char, Style)> = Vec::new();
+        for span in &line.spans {
+            for ch in span.content.chars() {
+                chars.push((ch, span.style));
+            }
+        }
+
+        // Measure total width
+        let total_w: usize = chars
+            .iter()
+            .map(|(ch, _)| UnicodeWidthChar::width(*ch).unwrap_or(0))
+            .sum();
+        if total_w <= max_w {
+            result.push(line.clone());
+            continue;
+        }
+
+        // Break into wrapped lines
+        let wrapped = wrap_styled_chars(&chars, max_w);
+        result.extend(wrapped);
+    }
+    result
+}
+
+/// Wrap a flat list of (char, Style) into `Line`s that fit `max_width`.
+///
+/// Uses a word-boundary approach: groups consecutive chars into "words"
+/// (separated by whitespace) and fits as many words as possible per line.
+/// For CJK characters (which can break between any two characters),
+/// each character is its own "word".
+fn wrap_styled_chars(chars: &[(char, Style)], max_width: usize) -> Vec<Line<'static>> {
+    // Segment chars into "tokens": each is either a whitespace run,
+    // a CJK character, or a non-CJK word (consecutive non-ws non-CJK).
+    #[derive(Debug)]
+    enum Token<'a> {
+        Word(&'a [(char, Style)]),
+        Space(&'a [(char, Style)]),
+    }
+
+    let mut tokens: Vec<Token> = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let (ch, _) = chars[i];
+        if ch.is_whitespace() {
+            let start = i;
+            while i < chars.len() && chars[i].0.is_whitespace() {
+                i += 1;
+            }
+            tokens.push(Token::Space(&chars[start..i]));
+        } else if is_cjk_breakable(ch) {
+            // Each CJK character is its own token
+            tokens.push(Token::Word(&chars[i..i + 1]));
+            i += 1;
+        } else {
+            // Non-CJK word: collect until whitespace or CJK
+            let start = i;
+            while i < chars.len() {
+                let (c, _) = chars[i];
+                if c.is_whitespace() || is_cjk_breakable(c) {
+                    break;
+                }
+                i += 1;
+            }
+            tokens.push(Token::Word(&chars[start..i]));
+        }
+    }
+
+    // Build lines from tokens
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_width: usize = 0;
+    let mut pending_space: Option<&[(char, Style)]> = None;
+    let mut pending_space_width: usize = 0;
+
+    for token in &tokens {
+        match token {
+            Token::Space(space_chars) => {
+                let w: usize = space_chars
+                    .iter()
+                    .map(|(ch, _)| UnicodeWidthChar::width(*ch).unwrap_or(0))
+                    .sum();
+                pending_space = Some(space_chars);
+                pending_space_width = w;
+            }
+            Token::Word(word_chars) => {
+                let word_width: usize = word_chars
+                    .iter()
+                    .map(|(ch, _)| UnicodeWidthChar::width(*ch).unwrap_or(0))
+                    .sum();
+
+                // Can we fit pending_space + this word?
+                let needed = pending_space_width + word_width;
+
+                if current_width + needed <= max_width {
+                    // Fits on current line
+                    if let Some(space_chars) = pending_space.take() {
+                        append_chars_to_spans(space_chars, &mut current_spans);
+                        current_width += pending_space_width;
+                    }
+                    append_chars_to_spans(word_chars, &mut current_spans);
+                    current_width += word_width;
+                } else if word_width > max_width {
+                    // Word is wider than max_width — break at char boundaries
+                    // First, flush current line
+                    if !current_spans.is_empty() {
+                        lines.push(Line::from(std::mem::take(&mut current_spans)));
+                        current_width = 0;
+                    }
+                    // Break the oversized word
+                    let broken = break_styled_word(word_chars, max_width);
+                    let broken_len = broken.len();
+                    for (idx, broken_spans) in broken.into_iter().enumerate() {
+                        if idx == 0 && lines.is_empty() && current_width == 0 {
+                            current_spans = broken_spans;
+                            current_width = spans_width(&current_spans);
+                        } else if idx < broken_len - 1 {
+                            lines.push(Line::from(broken_spans));
+                        } else {
+                            current_spans = broken_spans;
+                            current_width = spans_width(&current_spans);
+                        }
+                    }
+                } else {
+                    // Doesn't fit — start new line
+                    lines.push(Line::from(std::mem::take(&mut current_spans)));
+                    // Drop leading space
+                    append_chars_to_spans(word_chars, &mut current_spans);
+                    current_width = word_width;
+                }
+                pending_space = None;
+                pending_space_width = 0;
+            }
+        }
+    }
+
+    if !current_spans.is_empty() {
+        lines.push(Line::from(current_spans));
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::raw(""));
+    }
+
+    lines
+}
+
+/// Check if a character is CJK — these characters allow line breaks
+/// between any two adjacent CJK characters.
+fn is_cjk_breakable(ch: char) -> bool {
+    matches!(ch,
+        '\u{2E80}'..='\u{9FFF}'   | // CJK Unified, Kangxi, etc.
+        '\u{A960}'..='\u{A97F}'   | // Hangul Jamo Extended-A
+        '\u{AC00}'..='\u{D7AF}'   | // Hangul Syllables (Korean)
+        '\u{D7B0}'..='\u{D7FF}'   | // Hangul Jamo Extended-B
+        '\u{F900}'..='\u{FAFF}'   | // CJK Compatibility Ideographs
+        '\u{FE30}'..='\u{FE4F}'   | // CJK Compatibility Forms
+        '\u{FF65}'..='\u{FFDC}'   | // Halfwidth and Fullwidth Forms
+        '\u{20000}'..='\u{2A6DF}' | // CJK Extension B
+        '\u{2A700}'..='\u{2B73F}' | // CJK Extension C
+        '\u{2B740}'..='\u{2B81F}' | // CJK Extension D
+        '\u{2F800}'..='\u{2FA1F}'   // CJK Compat Supplement
+    )
+}
+
+/// Append styled chars to spans, merging adjacent chars with the same style.
+fn append_chars_to_spans(chars: &[(char, Style)], spans: &mut Vec<Span<'static>>) {
+    for (ch, style) in chars {
+        if let Some(last) = spans.last_mut() {
+            if last.style == *style {
+                last.content.to_mut().push(*ch);
+                continue;
+            }
+        }
+        spans.push(Span::styled(ch.to_string(), *style));
+    }
+}
+
+/// Break an oversized styled word at character boundaries to fit `max_width`.
+fn break_styled_word(chars: &[(char, Style)], max_width: usize) -> Vec<Vec<Span<'static>>> {
+    let mut result: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut current: Vec<Span<'static>> = Vec::new();
+    let mut current_w: usize = 0;
+
+    for (ch, style) in chars {
+        let cw = UnicodeWidthChar::width(*ch).unwrap_or(0);
+        if current_w + cw > max_width && !current.is_empty() {
+            result.push(std::mem::take(&mut current));
+            current_w = 0;
+        }
+        if let Some(last) = current.last_mut() {
+            if last.style == *style {
+                last.content.to_mut().push(*ch);
+            } else {
+                current.push(Span::styled(ch.to_string(), *style));
+            }
+        } else {
+            current.push(Span::styled(ch.to_string(), *style));
+        }
+        current_w += cw;
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    }
+    result
+}
+
+/// Measure the total unicode display width of a set of Spans.
+fn spans_width(spans: &[Span<'static>]) -> usize {
+    spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum()
 }
 
 /// Render regular markdown (non-table content).
@@ -1148,13 +1386,13 @@ fn highlight_code(content: &str, lang: &str) -> Vec<Line<'static>> {
 // ── Layout calculation ────────────────────────────────────────────────
 
 /// Measure wrapped height using ratatui's Paragraph::line_count.
-fn measure_wrapped_height(lines: &[Line<'_>], width: u16) -> u16 {
-    if width < 1 {
-        return lines.len() as u16;
-    }
-    let text: ratatui::text::Text = lines.iter().cloned().collect();
-    let para = Paragraph::new(text).wrap(Wrap { trim: false });
-    para.line_count(width) as u16
+/// Measure the rendered height of pre-wrapped lines.
+///
+/// Lines are already wrapped to the correct width by `wrap_lines_styled()`,
+/// so we just count them. No need to use `Paragraph::line_count` which
+/// would try to re-wrap and produce incorrect results for CJK text.
+fn measure_wrapped_height(lines: &[Line<'_>], _width: u16) -> u16 {
+    lines.len() as u16
 }
 
 /// Calculate the layout: list of (y, height, block_ref) for each piece of content.
@@ -1411,7 +1649,14 @@ fn block_to_layout_kind(
 ) -> LayoutKind {
     match block {
         ContentBlock::Text { content } => {
-            let lines = md_lines(content, width);
+            // For user messages, Block::borders(LEFT) takes 1 column,
+            // so text must be wrapped to width-1.
+            let wrap_w = if role == MessageRole::User {
+                width.saturating_sub(1)
+            } else {
+                width
+            };
+            let lines = md_lines(content, wrap_w);
             LayoutKind::Text {
                 lines,
                 is_user: role == MessageRole::User,
@@ -1794,16 +2039,16 @@ impl Widget for EntryWidget<'_> {
                         .border_style(self.styles.user_border);
                     let inner = block.inner(rect);
                     block.render(rect, buf);
-                    Paragraph::new(text)
-                        .wrap(Wrap { trim: false })
-                        .render(inner, buf);
+                    // Lines are already pre-wrapped to the correct width
+                    // by wrap_lines_styled(). Do NOT use .wrap() here —
+                    // ratatui's WordWrapper does not handle CJK line-breaking.
+                    Paragraph::new(text).render(inner, buf);
                 } else {
                     // Don't set .style() here — markdown Spans already carry
                     // their own styling (bold, italic, code, headings).
                     // Paragraph::style() would override all per-Span styles.
-                    Paragraph::new(text)
-                        .wrap(Wrap { trim: false })
-                        .render(rect, buf);
+                    // Lines are pre-wrapped; no .wrap() needed.
+                    Paragraph::new(text).render(rect, buf);
                 }
             }
             LayoutKind::ToolBox {
@@ -2193,21 +2438,17 @@ impl StatefulWidget for ChatView<'_> {
             // Use clamped_height so click regions match what's actually rendered
             let region_bottom = area.y + rel_y + clamped_height;
             if let LayoutKind::Thinking { key, .. } = &entry.kind {
-                state.thinking_regions.push((
-                    area.y + rel_y,
-                    region_bottom,
-                    key.clone(),
-                ));
+                state
+                    .thinking_regions
+                    .push((area.y + rel_y, region_bottom, key.clone()));
             }
 
             // Track tool box regions for click handling
             if let LayoutKind::ToolBox { key, result, .. } = &entry.kind {
                 if result.is_some() {
-                    state.tool_regions.push((
-                        area.y + rel_y,
-                        region_bottom,
-                        key.clone(),
-                    ));
+                    state
+                        .tool_regions
+                        .push((area.y + rel_y, region_bottom, key.clone()));
                 }
             }
 
@@ -2386,6 +2627,81 @@ mod tests {
             "content len = {}",
             content.chars().count()
         );
+    }
+
+    #[test]
+    fn wrap_lines_styled_korean() {
+        // Korean text without spaces between characters should wrap
+        // at character boundaries, not overflow.
+        let text = "oxi는 Rust로 작성된 터미널 기반 AI 코딩 어시스턴트입니다.";
+        let lines = md_lines(text, 30);
+        // Should produce multiple lines, all fitting within width 30
+        for line in &lines {
+            let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
+            assert!(
+                w <= 30,
+                "Line width {} exceeds 30: '{}'",
+                w,
+                line.to_string()
+            );
+        }
+        assert!(lines.len() > 1, "Expected multiple wrapped lines");
+    }
+
+    #[test]
+    fn wrap_lines_styled_ascii() {
+        let text = "Hello world, this is a test of text wrapping.";
+        let lines = md_lines(text, 20);
+        for line in &lines {
+            let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
+            assert!(
+                w <= 20,
+                "Line width {} exceeds 20: '{}'",
+                w,
+                line.to_string()
+            );
+        }
+        assert!(lines.len() > 1, "Expected multiple wrapped lines");
+    }
+
+    #[test]
+    fn wrap_lines_styled_mixed() {
+        // Mixed Korean and ASCII
+        let text = "다중 LLM 프로바이더 지원, 스트리밍, 확장 가능한 도구 시스템을 갖추고 있으며";
+        let lines = md_lines(text, 30);
+        for line in &lines {
+            let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
+            assert!(
+                w <= 30,
+                "Line width {} exceeds 30: '{}'",
+                w,
+                line.to_string()
+            );
+        }
+        assert!(lines.len() > 1, "Expected multiple wrapped lines");
+    }
+
+    #[test]
+    fn wrap_lines_styled_short_text() {
+        // Short text should not be split
+        let text = "Hello";
+        let lines = md_lines(text, 80);
+        assert_eq!(lines.len(), 1, "Short text should be a single line");
+    }
+
+    #[test]
+    fn wrap_lines_preserves_style() {
+        use ratatui::style::Modifier;
+        let styled_line = Line::from(vec![
+            Span::styled(
+                "bold ".to_string(),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("normal".to_string(), Style::default()),
+        ]);
+        let result = wrap_lines_styled(&[styled_line], 80);
+        // Should have 1 line since it fits
+        assert_eq!(result.len(), 1);
     }
 }
 

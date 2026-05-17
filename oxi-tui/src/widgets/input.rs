@@ -248,11 +248,13 @@ impl ratatui::widgets::StatefulWidget for Input<'_> {
         // Placeholder style — text is managed by InputState::set_placeholder()
         textarea.set_placeholder_style(Style::default().fg(self.theme.colors.muted.to_ratatui()));
 
-        // Render the textarea widget
+        // Render the textarea widget.
+        // No prompt symbol is shown (the `> ` prefix was removed),
+        // so use minimal 1-char horizontal padding to maximize input width.
         let content_area = Rect {
-            x: area.x + 2,
+            x: area.x + 1,
             y,
-            width: area.width - 3, // 2 left padding + 1 right padding
+            width: area.width.saturating_sub(2), // 1 left + 1 right padding
             height: area.height,
         };
 

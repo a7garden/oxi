@@ -563,7 +563,10 @@ pub(crate) fn handle_slash_command(
                             }
                         }
                         Err(e) => {
-                            state.add_system_message(format!("Warning: Could not apply model: {}", e));
+                            state.add_system_message(format!(
+                                "Warning: Could not apply model: {}",
+                                e
+                            ));
                         }
                     }
                 }
