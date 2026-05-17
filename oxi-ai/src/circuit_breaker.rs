@@ -276,12 +276,13 @@ impl CircuitOpenError {
 /// let config = CircuitBreakerConfig::default();
 /// let breaker = ProviderCircuitBreaker::new("anthropic".to_string(), config);
 ///
-/// // In your request handler:
-/// if breaker.allow_request().is_ok() {
-///     // Make the actual request...
-///     match result {
-///         Ok(response) => breaker.record_success(),
-///         Err(e) => breaker.record_failure(),
+/// // Check if a request is allowed
+/// match breaker.allow_request() {
+///     Ok(()) => {
+///         // Proceed with the request
+///     }
+///     Err(e) => {
+///         println!("Circuit open: {}", e);
 ///     }
 /// }
 /// ```
@@ -350,6 +351,7 @@ impl ProviderCircuitBreaker {
     /// use oxi_ai::circuit_breaker::ProviderCircuitBreaker;
     ///
     /// let breaker = ProviderCircuitBreaker::with_defaults("openai".to_string());
+    /// assert!(breaker.allow_request().is_ok());
     /// ```
     #[inline]
     pub fn with_defaults(provider_name: String) -> Self {
@@ -374,13 +376,19 @@ impl ProviderCircuitBreaker {
     /// # Example
     ///
     /// ```rust
+    /// use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
+    ///
+    /// let breaker = ProviderCircuitBreaker::new(
+    ///     "openai".to_string(),
+    ///     CircuitBreakerConfig::default(),
+    /// );
+    ///
     /// match breaker.allow_request() {
     ///     Ok(()) => {
     ///         // Proceed with the request
     ///     }
     ///     Err(e) => {
     ///         eprintln!("Circuit open: {}", e);
-    ///         // Handle blocked request (e.g., use fallback, queue request)
     ///     }
     /// }
     /// ```
@@ -445,11 +453,15 @@ impl ProviderCircuitBreaker {
     /// # Example
     ///
     /// ```rust
-    /// let result = make_provider_request();
-    /// match result {
-    ///     Ok(response) => breaker.record_success(),
-    ///     Err(_) => breaker.record_failure(),
-    /// }
+    /// use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
+    ///
+    /// let breaker = ProviderCircuitBreaker::new(
+    ///     "openai".to_string(),
+    ///     CircuitBreakerConfig::default(),
+    /// );
+    ///
+    /// // Simulate a successful request
+    /// breaker.record_success();
     /// ```
     pub fn record_success(&self) {
         let state = self.load_state();
@@ -496,11 +508,15 @@ impl ProviderCircuitBreaker {
     /// # Example
     ///
     /// ```rust
-    /// if let Err(e) = make_provider_request() {
-    ///     breaker.record_failure();
-    ///     // Optionally log or handle the failure
-    ///     handle_error(e);
-    /// }
+    /// use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
+    ///
+    /// let breaker = ProviderCircuitBreaker::new(
+    ///     "openai".to_string(),
+    ///     CircuitBreakerConfig::default(),
+    /// );
+    ///
+    /// // Simulate a failed request
+    /// breaker.record_failure();
     /// ```
     pub fn record_failure(&self) {
         let state = self.load_state();
@@ -546,7 +562,14 @@ impl ProviderCircuitBreaker {
     /// # Example
     ///
     /// ```rust
-    /// // After manually verifying the provider is healthy
+    /// use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
+    ///
+    /// let breaker = ProviderCircuitBreaker::new(
+    ///     "openai".to_string(),
+    ///     CircuitBreakerConfig::default(),
+    /// );
+    ///
+    /// // Manually reset the circuit
     /// breaker.reset();
     /// ```
     pub fn reset(&self) {
@@ -647,10 +670,15 @@ impl ProviderCircuitBreaker {
     /// # Example
     ///
     /// ```rust
+    /// use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
+    ///
+    /// let breaker = ProviderCircuitBreaker::new(
+    ///     "openai".to_string(),
+    ///     CircuitBreakerConfig::default(),
+    /// );
+    ///
     /// let diagnostics = breaker.diagnostics();
     /// println!("Provider: {}", diagnostics.provider);
-    /// println!("State: {:?}", diagnostics.state);
-    /// println!("Failures: {}", diagnostics.consecutive_failures);
     /// ```
     pub fn diagnostics(&self) -> CircuitBreakerDiagnostics {
         let state = self.load_state();

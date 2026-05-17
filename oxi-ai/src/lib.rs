@@ -115,6 +115,14 @@ pub use transform::{
     openai_to_anthropic, transform_messages, transform_messages_for_model, TransformOptions,
 };
 
+// Multi-provider routing
+
+/// MultiProvider for intelligent routing with fallback support.
+pub mod multi_provider;
+
+/// Re-exports for multi_provider convenience.
+pub use multi_provider::MultiProvider;
+
 // Model registry (runtime mutable registry)
 mod model_registry;
 
@@ -142,6 +150,12 @@ pub mod fallback_chain;
 
 /// Ordered fallback chain for model failover on failure.
 pub use fallback_chain::{FallbackChain, FallbackChainError};
+
+// Circuit breaker for provider health tracking
+/// Per-provider circuit breaker for health tracking.
+pub use circuit_breaker::{
+    CircuitBreakerConfig, CircuitOpenError, ProviderCircuitBreaker,
+};
 
 /// Re-export AssistantMessage from messages
 pub use messages::AssistantMessage;
