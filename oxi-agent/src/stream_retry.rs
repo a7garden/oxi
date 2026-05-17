@@ -17,7 +17,7 @@ pub const BACKOFF_BASE_SECS: u64 = 2;
 /// Callback invoked each time a retry is about to happen.
 ///
 /// The implementer can use this to emit events or log the retry.
-pub trait RetryCallback: Send {
+pub trait RetryCallback: Send + Sync {
     /// Called before sleeping for `delay_secs`.
     fn on_retry(&self, attempt: usize, max_retries: usize, delay_secs: u64, reason: String);
 }

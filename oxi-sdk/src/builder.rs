@@ -146,6 +146,37 @@ impl OxiBuilder {
         self
     }
 
+    /// Register a provider factory — a closure that lazily creates a provider.
+    ///
+    /// Unlike [`Self::provider()`], which takes an already-constructed instance,
+    /// this stores a factory closure. The factory is invoked the **first time**
+    /// `Oxi::create_provider(name)` is called, and the resulting provider is
+    /// cached for subsequent calls.
+    ///
+    /// This is useful when provider construction requires credential resolution
+    /// or network configuration that should happen at first use, not at build time.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let oxi = OxiBuilder::new()
+    ///     .with_builtins()
+    ///     .provider_factory("zai", || {
+    ///         let api_key = resolve_key("zai");
+    ///         let base_url = env::var("ZAI_BASE_URL").unwrap_or_default();
+    ///         Ok(Arc::new(OpenAiProvider::with_base_url_and_key(&base_url, api_key)))
+    ///     })
+    ///     .build();
+    /// ```
+    pub fn provider_factory(
+        self,
+        name: &str,
+        factory: impl Fn() -> anyhow::Result<Arc<dyn Provider>> + Send + Sync + 'static,
+    ) -> Self {
+        self.providers.register_factory(name, factory);
+        self
+    }
+
     /// Register a custom model.
     pub fn model(self, model: Model) -> Self {
         self.models.register(model);

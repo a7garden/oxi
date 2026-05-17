@@ -338,6 +338,41 @@ impl ToolRegistry {
         self.tools.read().values().cloned().collect()
     }
 
+    /// Check whether all tools in `required` are registered.
+    ///
+    /// Useful for validating program/module dependencies before execution.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use oxi_agent::ToolRegistry;
+    /// let registry = ToolRegistry::new();
+    /// assert!(!registry.has_all(&["read", "write"]));
+    /// ```
+    pub fn has_all(&self, required: &[&str]) -> bool {
+        let tools = self.tools.read();
+        required.iter().all(|name| tools.contains_key(*name))
+    }
+
+    /// Return the subset of `required` tool names that are **not** registered.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use oxi_agent::ToolRegistry;
+    /// let registry = ToolRegistry::new();
+    /// let missing = registry.missing(&["read", "exec", "nonexistent"]);
+    /// assert_eq!(missing, vec!["read", "exec", "nonexistent"]);
+    /// ```
+    pub fn missing<'a>(&self, required: &[&'a str]) -> Vec<&'a str> {
+        let tools = self.tools.read();
+        required
+            .iter()
+            .filter(|name| !tools.contains_key(**name))
+            .copied()
+            .collect()
+    }
+
     /// Create a registry with all built-in tools
     ///
     /// # Examples

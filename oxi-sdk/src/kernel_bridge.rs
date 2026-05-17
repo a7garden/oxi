@@ -4,12 +4,17 @@
 //! (exec, memory, browser, persona, etc.) into the SDK's agent builder.
 
 use oxi_agent::ToolRegistry;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Context provided to kernel tool providers during registration.
 ///
 /// Contains the metadata that kernel tools need to operate correctly
 /// within an oxios agent session.
+///
+/// The `metadata` map is an extension point for kernel-specific data
+/// (e.g., `space_id`, `cspace_name`, `seed_id`) without requiring SDK
+/// changes for every new field.
 #[derive(Debug, Clone)]
 pub struct KernelToolContext {
     /// Agent's workspace directory.
@@ -20,6 +25,12 @@ pub struct KernelToolContext {
     pub session_id: Option<String>,
     /// CSpace-based permission list.
     pub permissions: Vec<String>,
+    /// Extension metadata for kernel-specific data.
+    ///
+    /// Keys are conventionally lowercase snake_case (e.g., `"space_id"`,
+    /// `"cspace_name"`, `"seed_id"`). Consumers should use
+    /// [`Self::get_meta`] / [`Self::get_meta_str`] for typed access.
+    pub metadata: HashMap<String, serde_json::Value>,
 }
 
 impl KernelToolContext {
@@ -30,6 +41,7 @@ impl KernelToolContext {
             agent_id: agent_id.into(),
             session_id: None,
             permissions: Vec::new(),
+            metadata: HashMap::new(),
         }
     }
 
@@ -43,6 +55,30 @@ impl KernelToolContext {
     pub fn with_permissions(mut self, permissions: Vec<String>) -> Self {
         self.permissions = permissions;
         self
+    }
+
+    /// Add an extension metadata entry.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let ctx = KernelToolContext::new("/workspace", "agent-001")
+    ///     .with_meta("space_id", serde_json::json!(uuid::Uuid::new_v4()))
+    ///     .with_meta("cspace_name", serde_json::json!("full"));
+    /// ```
+    pub fn with_meta(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.metadata.insert(key.into(), value);
+        self
+    }
+
+    /// Get a metadata value by key.
+    pub fn get_meta(&self, key: &str) -> Option<&serde_json::Value> {
+        self.metadata.get(key)
+    }
+
+    /// Get a metadata value as a string.
+    pub fn get_meta_str(&self, key: &str) -> Option<&str> {
+        self.metadata.get(key).and_then(|v| v.as_str())
     }
 }
 

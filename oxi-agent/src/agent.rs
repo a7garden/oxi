@@ -683,73 +683,50 @@ impl Agent {
         let is_running_clone = Arc::clone(&is_running);
 
         let handle = tokio::task::spawn(async move {
-            // AgentLoop internals are !Send (dyn Future without Send bound),
-            // so we use spawn_blocking to run on a blocking thread.
-            let result = tokio::task::spawn_blocking(move || {
-                // Create a new tokio runtime for the blocking thread
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("Failed to create runtime");
-                rt.block_on(async move {
-                    agent_loop
-                        .run(prompt, move |event: AgentEvent| {
-                            // Forward to tokio channel (non-blocking)
-                            let _ = tx.try_send(event.clone());
+            let result = agent_loop
+                .run(prompt, move |event: AgentEvent| {
+                    // Forward to tokio channel (non-blocking)
+                    let _ = tx.try_send(event.clone());
 
-                            if let Some(ref hook) = maybe_hook {
-                                if let AgentEvent::TurnEnd {
-                                    ref assistant_message,
-                                    ref tool_results,
-                                    ..
-                                } = event
-                                {
-                                    let asst = match assistant_message {
-                                        oxi_ai::Message::Assistant(a) => a.clone(),
-                                        _ => return,
-                                    };
-                                    let ctx = ShouldStopAfterTurnContext {
-                                        message: asst,
-                                        tool_results: tool_results.clone(),
-                                        iteration: 0,
-                                    };
-                                    if hook(&ctx) {
-                                        ext_stop.store(true, Ordering::SeqCst);
-                                    }
-                                }
+                    if let Some(ref hook) = maybe_hook {
+                        if let AgentEvent::TurnEnd {
+                            ref assistant_message,
+                            ref tool_results,
+                            ..
+                        } = event
+                        {
+                            let asst = match assistant_message {
+                                oxi_ai::Message::Assistant(a) => a.clone(),
+                                _ => return,
+                            };
+                            let ctx = ShouldStopAfterTurnContext {
+                                message: asst,
+                                tool_results: tool_results.clone(),
+                                iteration: 0,
+                            };
+                            if hook(&ctx) {
+                                ext_stop.store(true, Ordering::SeqCst);
                             }
-                        })
-                        .await
+                        }
+                    }
                 })
-            })
-            .await;
+                .await;
 
             // Clear the running flag
             is_running_clone.store(false, Ordering::SeqCst);
 
             match result {
-                Ok(Ok(_events)) => {
-                    // Sync state back from AgentLoop
-                    // Since we used SharedState (Arc<RwLock>), the state is shared
-                    // and the caller can read it from agent.state() after this completes.
+                Ok(_events) => {
+                    // State is shared via SharedState (Arc<RwLock>),
+                    // so the caller can read it from agent.state() after completion.
                     Ok(Response {
                         content: String::new(),
                         stop_reason: StopReason::Stop,
                     })
                 }
-                Ok(Err(e)) => Err(e),
-                Err(e) => Err(Error::msg(format!("Join error: {}", e))),
+                Err(e) => Err(e),
             }
         });
-
-        // We can't easily sync the is_running flag from a spawned task back to
-        // self.is_running because self is not Send. Instead, the caller should
-        // await the JoinHandle before calling run() again. For safety, we provide
-        // the is_running Arc.
-        //
-        // A more complete solution would involve wrapping Agent in Arc and
-        // passing it to the spawned task, but that requires Agent: Send which
-        // it isn't due to !Send internals.
 
         Ok((rx, handle))
     }

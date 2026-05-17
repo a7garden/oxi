@@ -54,14 +54,27 @@ pub fn shared_client() -> &'static reqwest::Client {
 
 // ── Instance-based provider registry ───────────────────────────────
 
+/// Type alias for the provider factory closure stored in [`ProviderRegistry`].
+pub type ProviderFactory = Box<dyn Fn() -> anyhow::Result<Arc<dyn Provider>> + Send + Sync>;
+
 /// Runtime registry for providers (custom + built-in resolution).
 ///
 /// This is an instance-based alternative to the global `CUSTOM_PROVIDERS` static.
 /// It supports `register()`, `get()`, `remove()`, and `names()`, falling back
 /// to built-in providers from [`register_builtins`] when a name isn't found locally.
-#[derive(Default)]
+///
+/// Providers can also be registered as **factories** via [`Self::register_factory`].
+/// A factory is a closure that lazily creates the provider on first access. The
+/// result is cached, so the factory runs at most once per name.
 pub struct ProviderRegistry {
     custom: RwLock<HashMap<String, Arc<dyn Provider>>>,
+    factories: RwLock<HashMap<String, ProviderFactory>>,
+}
+
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ProviderRegistry {
@@ -69,6 +82,7 @@ impl ProviderRegistry {
     pub fn new() -> Self {
         Self {
             custom: RwLock::new(HashMap::new()),
+            factories: RwLock::new(HashMap::new()),
         }
     }
 
@@ -112,9 +126,65 @@ impl ProviderRegistry {
     }
 
     /// Get a provider by name, checking only custom providers (no built-in fallback).
+    ///
+    /// If the provider was registered via [`Self::register_factory`] and hasn't
+    /// been materialized yet, the factory is invoked and the result cached.
     pub fn get_custom(&self, name: &str) -> Option<Arc<dyn Provider>> {
-        let guard = self.custom.read();
-        guard.get(name).cloned()
+        {
+            let guard = self.custom.read();
+            if let Some(provider) = guard.get(name) {
+                return Some(Arc::clone(provider));
+            }
+        }
+        // Try materializing from factory
+        self.materialize_factory(name)
+    }
+
+    /// Register a factory closure that lazily creates a provider on first access.
+    ///
+    /// When [`Self::get_custom`] or [`Self::get`] is called and the provider is
+    /// not yet in `custom`, the factory is invoked, the result is cached in
+    /// `custom`, and the factory entry is removed.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// registry.register_factory("my_provider", || {
+    ///     let key = resolve_api_key("my_provider");
+    ///     Ok(Arc::new(MyProvider::new(key)))
+    /// });
+    /// ```
+    pub fn register_factory(
+        &self,
+        name: &str,
+        factory: impl Fn() -> anyhow::Result<Arc<dyn Provider>> + Send + Sync + 'static,
+    ) {
+        self.factories
+            .write()
+            .insert(name.to_string(), Box::new(factory));
+    }
+
+    /// Invoke a registered factory (if any) for the given name.
+    ///
+    /// On success the resulting provider is cached in `custom` and the factory
+    /// entry is removed. Returns `None` if no factory is registered.
+    fn materialize_factory(&self, name: &str) -> Option<Arc<dyn Provider>> {
+        let factory = {
+            let mut factories = self.factories.write();
+            factories.remove(name)?
+        };
+        match factory() {
+            Ok(provider) => {
+                self.custom
+                    .write()
+                    .insert(name.to_string(), Arc::clone(&provider));
+                Some(provider)
+            }
+            Err(e) => {
+                tracing::warn!(provider = name, error = %e, "Provider factory failed");
+                None
+            }
+        }
     }
 }
 
