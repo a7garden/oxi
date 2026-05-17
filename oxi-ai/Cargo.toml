@@ -30,7 +30,7 @@ hmac = "0.12"
 url = "2"
 
 # JSON Schema validation
-jsonschema = "0.26"
+jsonschema = "0.46"
 
 # Logging
 tracing = "0.1"
