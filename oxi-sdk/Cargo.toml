@@ -1,6 +1,6 @@
 [package]
 name = "oxi-sdk"
-version = "0.16.1"
+version = "0.18.0"
 edition = "2021"
 description = "oxi AI agent SDK — build isolated, multi-agent AI systems"
 readme = "README.md"
@@ -12,8 +12,8 @@ categories = ["api-bindings", "development-tools"]
 exclude = ["target/"]
 
 [dependencies]
-oxi-ai = { version = "0.16.1", path = "../oxi-ai" }
-oxi-agent = { version = "0.16.0", path = "../oxi-agent" }
+oxi-ai = { version = "0.18.0", path = "../oxi-ai" }
+oxi-agent = { version = "0.18.0", path = "../oxi-agent" }
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"

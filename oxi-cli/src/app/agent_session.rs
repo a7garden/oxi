@@ -800,7 +800,7 @@ impl AgentSession {
     /// Internal compaction execution.
     async fn run_compaction(
         &self,
-        _custom_instructions: Option<String>,
+        custom_instructions: Option<String>,
     ) -> Result<CompactionResult> {
         let state = self.agent.state();
         let messages = state.messages.clone();
@@ -809,32 +809,25 @@ impl AgentSession {
             anyhow::bail!("Nothing to compact (session too small)");
         }
 
-        // Use the agent's built-in compaction manager
+        // Force compaction regardless of strategy — this is a manual command.
         let compacted = self
             .agent
             .compaction_manager()
-            .compact_if_needed(&messages, None, state.estimate_tokens(), state.iteration)
+            .compact_now(&messages, custom_instructions.as_deref())
             .await
             .context("Compaction failed")?;
 
-        match compacted {
-            Some(ctx) => {
-                let tokens_before = state.estimate_tokens();
+        let tokens_before = state.estimate_tokens();
 
-                // Replace messages in agent state
-                self.agent
-                    .state()
-                    .replace_messages(ctx.kept_messages.clone());
+        // Replace messages in agent state
+        self.agent
+            .state()
+            .replace_messages(compacted.kept_messages.clone());
 
-                // Persist to session
-                self.persist_session();
+        // Persist to session
+        self.persist_session();
 
-                Ok(CompactionResult { tokens_before })
-            }
-            None => {
-                anyhow::bail!("Nothing to compact");
-            }
-        }
+        Ok(CompactionResult { tokens_before })
     }
 
     /// Abort in-progress compaction.

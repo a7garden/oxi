@@ -37,14 +37,8 @@ pub(crate) fn handle_slash_command(
             *running = false;
             true
         }
-        "/clear" => {
-            state.chat.clear();
-            session.reset();
-            true
-        }
         "/model" => {
             if let Some(model_id) = arg {
-                // Direct model switch (backward compatible)
                 match session.set_model(model_id) {
                     Ok(()) => {
                         state.add_system_message(format!("Model: {}", model_id));
@@ -56,8 +50,6 @@ pub(crate) fn handle_slash_command(
                     }
                 }
             } else {
-                // Show interactive model selector overlay
-                // Only show models from providers that have API keys configured
                 let auth = oxi_store::auth_storage::shared_auth_storage();
                 let all_models: Vec<String> = oxi_ai::model_db::get_all_models()
                     .filter(|entry| auth.get_api_key(entry.provider).is_some())
@@ -127,9 +119,6 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/extensions" | "/ext" => {
-            // Re-discover to show what's available
-            let _cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            // let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd);
             let registry = session.agent_ref().tools();
             let names = registry.names();
             let mut essential_lines = Vec::new();
@@ -179,9 +168,6 @@ pub(crate) fn handle_slash_command(
                     out.push('\n');
                 }
             }
-            // if !wasm_paths.is_empty() {
-            //     out.push_str(&format!("\nDiscovered .wasm files: {}", wasm_paths.len()));
-            // }
             out.push_str("\n\nPlace .wasm files in ~/.oxi/extensions/ to add extensions");
             state.add_system_message(out);
             true
@@ -196,7 +182,6 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/copy" => {
-            // Prefer last code block if available, otherwise full last reply
             if let Some(ref code) = state.chat.last_code_block {
                 match clipboard_write::copy_to_clipboard(code) {
                     Ok(()) => {
@@ -350,16 +335,9 @@ pub(crate) fn handle_slash_command(
             }
             true
         }
-        "/share" => {
-            state.add_system_message(
-                "/share has been removed. Use /export <path> to export as HTML.".to_string(),
-            );
-            true
-        }
         "/fork" => {
             if let Some(ref path) = state.session_file_path {
                 if let Some(entry_id) = arg {
-                    // Direct fork: /fork <entry-id>
                     let sm = oxi_store::session::SessionManager::open(path, None, None);
                     match sm.branch_from_entry(entry_id) {
                         Ok(new_path) => {
@@ -482,10 +460,8 @@ pub(crate) fn handle_slash_command(
             if let Some(provider) = arg {
                 let parts: Vec<&str> = provider.splitn(2, ' ').collect();
                 if parts.len() == 2 {
-                    // /provider <provider> <key> — direct save (backward compatible)
                     try_provider_with_key(parts[0], parts[1], state);
                 } else {
-                    // /provider <provider> — show EnterApiKey overlay for that provider
                     state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey {
                         provider: parts[0].to_string(),
                         key: String::new(),
@@ -493,7 +469,6 @@ pub(crate) fn handle_slash_command(
                     }));
                 }
             } else {
-                // /provider — start with auth type selection
                 state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectAuthType {
                     auth_type: None,
                     selected: 0,
@@ -503,11 +478,9 @@ pub(crate) fn handle_slash_command(
         }
         "/logout" => {
             if let Some(provider) = arg {
-                // Direct logout (backward compatible)
                 oxi_store::auth_storage::shared_auth_storage().remove(provider);
                 state.add_system_message(format!("OK: Removed {}", provider));
             } else {
-                // Show provider selection overlay for logout
                 let auth = oxi_store::auth_storage::shared_auth_storage();
                 let providers = auth.configured_providers();
                 if providers.is_empty() {
@@ -520,8 +493,31 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/new" => {
+            // Reload settings so the next session uses latest config
+            let fresh = oxi_store::settings::Settings::load().unwrap_or_default();
+            session.set_thinking_level(fresh.thinking_level);
+            if let Some(m) = fresh.effective_model(None) {
+                if !m.is_empty() {
+                    // effective_model may already include the provider ("provider/model")
+                    // or be just a model id. Only prepend provider when needed.
+                    let full_id = if m.contains('/') {
+                        m.clone()
+                    } else {
+                        let p = fresh.effective_provider(None).unwrap_or_default();
+                        format!("{}/{}", p, m)
+                    };
+                    if let Ok(()) = session.set_model(&full_id) {
+                        let parts: Vec<&str> = full_id.splitn(2, '/').collect();
+                        state.footer_state.data.model_name = full_id.clone();
+                        if parts.len() == 2 {
+                            state.footer_state.data.provider_name = parts[0].to_string();
+                        }
+                    }
+                }
+            }
+            state.chat.clear();
+            session.reset();
             state.next_action = Some(super::app::TuiNextAction::NewSession);
-            state.add_system_message("Starting new session...".to_string());
             true
         }
         "/resume" => {
@@ -546,19 +542,37 @@ pub(crate) fn handle_slash_command(
         }
         "/reload" => {
             let reloaded = oxi_store::settings::Settings::load().unwrap_or_default();
-            let model_name = reloaded.effective_model(None).unwrap_or_default();
-            let provider = reloaded.effective_provider(None).unwrap_or_default();
             let theme_name = reloaded.theme.clone();
             session.set_thinking_level(reloaded.thinking_level);
-            if !model_name.is_empty() {
-                state.footer_state.data.model_name = model_name.clone();
-            }
-            if !provider.is_empty() {
-                state.footer_state.data.provider_name = provider.clone();
+            // Apply model change to the active agent session
+            if let Some(m) = reloaded.effective_model(None) {
+                if !m.is_empty() {
+                    // effective_model may already include provider ("provider/model")
+                    let full_id = if m.contains('/') {
+                        m
+                    } else {
+                        let p = reloaded.effective_provider(None).unwrap_or_default();
+                        format!("{}/{}", p, m)
+                    };
+                    match session.set_model(&full_id) {
+                        Ok(()) => {
+                            let parts: Vec<&str> = full_id.splitn(2, '/').collect();
+                            state.footer_state.data.model_name = full_id.clone();
+                            if parts.len() == 2 {
+                                state.footer_state.data.provider_name = parts[0].to_string();
+                            }
+                        }
+                        Err(e) => {
+                            state.add_system_message(format!("Warning: Could not apply model: {}", e));
+                        }
+                    }
+                }
             }
             state.add_system_message(format!(
                 "OK: Reloaded configuration\n  Model: {}\n  Provider: {}\n  Theme: {}\n  Thinking: {:?}\n  Extensions: {}\n  Stream: {}\n  Auto-compact: {}",
-                model_name, provider, theme_name, reloaded.thinking_level,
+                state.footer_state.data.model_name,
+                state.footer_state.data.provider_name,
+                theme_name, reloaded.thinking_level,
                 reloaded.extensions_enabled, reloaded.stream_responses, reloaded.auto_compaction,
             ));
             true
@@ -646,7 +660,6 @@ fn format_help() -> String {
     /fork <id>        Fork from a specific message
     /session          Show session info
     /name <name>      Set session name
-    /clear            Clear chat history
 
   Model
     /model [id]       Switch or show model
@@ -755,7 +768,6 @@ fn handle_tool_command(
 ) {
     let tool_name = action.trim().to_lowercase();
 
-    // Check if the tool name is known
     let is_known =
         BUILTIN_TOOL_NAMES.contains(&tool_name.as_str()) || registry.get(&tool_name).is_some();
 
@@ -768,22 +780,18 @@ fn handle_tool_command(
     }
 
     if registry.get(&tool_name).is_some() {
-        // Check if essential — cannot disable
         if let Some(tool) = registry.get(&tool_name) {
             if tool.essential() {
                 state.add_system_message(format!("Cannot disable essential tool: {}", tool_name));
                 return;
             }
         }
-        // Tool exists — unregister (disable)
         registry.unregister(&tool_name);
-        // web_search and get_search_results share a cache — disable both
         if tool_name == "web_search" {
             registry.unregister("get_search_results");
         }
         state.add_system_message(format!("OK: Tool disabled: {}", tool_name));
     } else {
-        // Tool is disabled — re-register
         let re_registered = try_re_register_tool(&tool_name, registry);
         if re_registered {
             state.add_system_message(format!("OK: Tool enabled: {}", tool_name));
@@ -801,7 +809,6 @@ fn try_re_register_tool(name: &str, registry: &std::sync::Arc<oxi_agent::ToolReg
     use std::sync::Arc;
 
     match name {
-        // Essential tools cannot be disabled, so never need re-registering
         "read" | "write" | "edit" | "bash" | "grep" | "find" | "ls" => return false,
         "web_search" => {
             let cache = Arc::new(oxi_agent::SearchCache::new());
@@ -809,7 +816,6 @@ fn try_re_register_tool(name: &str, registry: &std::sync::Arc<oxi_agent::ToolReg
             registry.register(oxi_agent::GetSearchResultsTool::new(cache));
         }
         "get_search_results" => {
-            // If web_search is active, get_search_results was already registered with it
             if registry.get("web_search").is_some() {
                 return false;
             }

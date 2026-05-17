@@ -676,7 +676,7 @@ pub async fn run_tui_interactive_with_continue(app: crate::App, resume_last: boo
 async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<()> {
     // ── Extract resources from App (needed for session switching loop) ──
     let settings = app.settings().clone();
-    let model_id = app.model_id();
+    let mut model_id = app.model_id();
     let tools = app.agent().tools();
     let wasm_ext = app.wasm_ext().cloned();
     let questionnaire_bridge = app.questionnaire_bridge().cloned();
@@ -1213,6 +1213,20 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             }
             Some(TuiNextAction::NewSession) => {
                 tracing::info!("Starting new session");
+                // Reload settings so the new session picks up any config changes
+                if let Ok(fresh) = oxi_store::settings::Settings::load() {
+                    if let Some(m) = fresh.effective_model(None) {
+                        if !m.is_empty() {
+                            // effective_model may already include provider
+                            model_id = if m.contains('/') {
+                                m
+                            } else {
+                                let p = fresh.effective_provider(None).unwrap_or_default();
+                                format!("{}/{}", p, m)
+                            };
+                        }
+                    }
+                }
                 session_target = None;
                 continue;
             }

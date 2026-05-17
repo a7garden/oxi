@@ -2178,13 +2178,24 @@ impl StatefulWidget for ChatView<'_> {
             }
             // Compute relative y within the viewport
             let rel_y = entry.y.saturating_sub(scroll_offset);
-            let rect = Rect::new(area.x, area.y + rel_y, inner_width, entry.height);
+            // Clamp height so the rect doesn't extend past the visible area.
+            // Without this, partially-visible entries at the bottom of the
+            // viewport would create rects outside the buffer bounds, causing
+            // a panic when rendering tool boxes or other bordered blocks.
+            let available = area.height.saturating_sub(rel_y);
+            let clamped_height = entry.height.min(available);
+            if clamped_height == 0 {
+                continue;
+            }
+            let rect = Rect::new(area.x, area.y + rel_y, inner_width, clamped_height);
 
             // Track thinking regions for click handling
+            // Use clamped_height so click regions match what's actually rendered
+            let region_bottom = area.y + rel_y + clamped_height;
             if let LayoutKind::Thinking { key, .. } = &entry.kind {
                 state.thinking_regions.push((
                     area.y + rel_y,
-                    area.y + rel_y + entry.height,
+                    region_bottom,
                     key.clone(),
                 ));
             }
@@ -2194,7 +2205,7 @@ impl StatefulWidget for ChatView<'_> {
                 if result.is_some() {
                     state.tool_regions.push((
                         area.y + rel_y,
-                        area.y + rel_y + entry.height,
+                        region_bottom,
                         key.clone(),
                     ));
                 }

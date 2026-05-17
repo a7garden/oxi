@@ -22,10 +22,6 @@ pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
         description: "Quit oxi",
     },
     BuiltinSlashCommand {
-        name: "clear",
-        description: "Clear chat history",
-    },
-    BuiltinSlashCommand {
         name: "settings",
         description: "Show current settings",
     },
