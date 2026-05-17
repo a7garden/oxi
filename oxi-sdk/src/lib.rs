@@ -19,6 +19,7 @@ pub mod closure_tool;
 pub mod kernel_bridge;
 pub mod message_bus;
 pub mod metrics;
+pub mod multi_provider;
 pub mod prelude;
 pub mod tool_factory;
 
@@ -26,12 +27,15 @@ pub mod tool_factory;
 pub use agent_builder::AgentBuilder;
 pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
 pub use builder::{Oxi, OxiBuilder};
+pub use multi_provider::{MultiProviderBuilder, RoutingConfig};
 pub use closure_tool::ClosureTool;
 pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
 pub use message_bus::{InterAgentMessage, MessageBus};
 pub use metrics::{AgentMetrics, MetricsSnapshot};
 
 // Re-export from oxi-ai
+pub use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
+pub use oxi_ai::multi_provider::MultiProviderConfig;
 pub use oxi_ai::provider_pool::{ProviderPool, RateLimitPolicy};
 pub use oxi_ai::{
     Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, Model,
