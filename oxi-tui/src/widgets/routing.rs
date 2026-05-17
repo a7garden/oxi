@@ -339,7 +339,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(data.chain_abbreviated(), "[anth] > opn");
+        assert_eq!(data.chain_abbreviated(), "[anth] > open");
     }
 
     #[test]
