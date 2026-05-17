@@ -1058,18 +1058,21 @@ fn test_fallback_chain() {
     use crate::recovery::FallbackChain;
 
     // Create using from_ids which returns Result<Self, FallbackChainError>
-    let chain = FallbackChain::from_ids(&[
-        "openai/gpt-4o",
-        "anthropic/claude-3-5-haiku-20241022",
-    ])
-    .expect("valid model IDs");
+    let chain = FallbackChain::from_ids(&["openai/gpt-4o", "anthropic/claude-3-5-haiku-20241022"])
+        .expect("valid model IDs");
 
     // Check first and last
     assert_eq!(chain.first().expect("has first").id, "gpt-4o");
-    assert_eq!(chain.last().expect("has last").id, "claude-3-5-haiku-20241022");
-    
+    assert_eq!(
+        chain.last().expect("has last").id,
+        "claude-3-5-haiku-20241022"
+    );
+
     // Check names
-    assert_eq!(chain.names(), &["openai/gpt-4o", "anthropic/claude-3-5-haiku-20241022"]);
+    assert_eq!(
+        chain.names(),
+        &["openai/gpt-4o", "anthropic/claude-3-5-haiku-20241022"]
+    );
     assert!(!chain.is_empty());
 
     // Empty chain

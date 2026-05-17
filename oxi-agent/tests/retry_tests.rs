@@ -527,20 +527,25 @@ fn fallback_chain_default() {
     let chain = FallbackChain::default();
     assert!(!chain.is_empty());
     // Default chain starts with google/gemini-2.0-flash (cheapest first)
-    assert!(chain.names().first().map(|s| s.as_str()).unwrap_or("").contains("gemini-2.0-flash"));
+    assert!(chain
+        .names()
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("")
+        .contains("gemini-2.0-flash"));
 }
 
 #[test]
 fn fallback_chain_custom() {
     // Use from_ids to create a chain from model ID strings
-    let chain = FallbackChain::from_ids(&[
-        "anthropic/claude-3-5-haiku-20241022",
-        "openai/gpt-4o",
-    ])
-    .expect("valid model IDs");
-    
+    let chain = FallbackChain::from_ids(&["anthropic/claude-3-5-haiku-20241022", "openai/gpt-4o"])
+        .expect("valid model IDs");
+
     // Check names
-    assert_eq!(chain.names(), &["anthropic/claude-3-5-haiku-20241022", "openai/gpt-4o"]);
+    assert_eq!(
+        chain.names(),
+        &["anthropic/claude-3-5-haiku-20241022", "openai/gpt-4o"]
+    );
     assert!(!chain.is_empty());
 }
 

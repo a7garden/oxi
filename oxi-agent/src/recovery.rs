@@ -4,9 +4,7 @@
 //! Types originally defined here have been promoted to `oxi-ai` for reuse
 //! across both oxi-ai and oxi-agent.
 
-pub use oxi_ai::circuit_breaker::{
-    CircuitBreakerConfig, CircuitOpenError, ProviderCircuitBreaker,
-};
+pub use oxi_ai::circuit_breaker::{CircuitBreakerConfig, CircuitOpenError, ProviderCircuitBreaker};
 pub use oxi_ai::fallback_chain::FallbackChain;
 pub use oxi_ai::partial_response::PartialResponse;
 
@@ -15,9 +13,9 @@ pub use oxi_ai::partial_response::PartialResponse;
 // Re-export the config types but keep a local struct for backward compat.
 use oxi_ai::circuit_breaker::CircuitBreakerConfig as CircuitBreakerConfigLocal;
 
+use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::time::Instant;
-use parking_lot::Mutex;
 
 /// Error returned when the circuit is open and requests are not allowed.
 /// Local version without provider name for backward compatibility.
@@ -50,13 +48,14 @@ impl CircuitBreaker {
             opened_at: Mutex::new(None),
         }
     }
-    
+
     /// Check if a request is allowed to proceed.
     pub fn allow_request(&self) -> Result<(), CircuitOpenErrorLocal> {
         let state = self.state.load(Ordering::SeqCst);
         match state {
             0 => Ok(()), // Closed
-            1 => { // Open
+            1 => {
+                // Open
                 let opened_at = self.opened_at.lock();
                 if let Some(t) = *opened_at {
                     if t.elapsed() >= self.config.open_duration {
@@ -75,7 +74,7 @@ impl CircuitBreaker {
             _ => Ok(()), // HalfOpen
         }
     }
-    
+
     /// Record a successful request.
     pub fn record_success(&self) {
         let state = self.state.load(Ordering::SeqCst);
@@ -89,7 +88,7 @@ impl CircuitBreaker {
             }
         }
     }
-    
+
     /// Record a failed request.
     pub fn record_failure(&self) {
         let state = self.state.load(Ordering::SeqCst);
@@ -104,7 +103,7 @@ impl CircuitBreaker {
             *self.opened_at.lock() = Some(Instant::now());
         }
     }
-    
+
     /// Manually reset the circuit breaker to the closed state.
     pub fn reset(&self) {
         self.state.store(0, Ordering::SeqCst);
