@@ -166,6 +166,31 @@ pub struct Settings {
     /// Updated when API keys are entered in setup wizard or on demand.
     #[serde(default)]
     pub dynamic_models: HashMap<String, Vec<String>>,
+
+    // ── Multi-provider routing ─────────────────────────────────────────
+    /// Enable automatic complexity-based routing
+    #[serde(default = "default_false")]
+    pub enable_routing: bool,
+
+    /// Prefer cost-efficient models when routing
+    #[serde(default = "default_true")]
+    pub prefer_cost_efficient: bool,
+
+    /// Fallback chain: ordered list of model IDs to try on failure
+    #[serde(default)]
+    pub fallback_chain: Vec<String>,
+
+    /// Whether to use provider fallback on errors
+    #[serde(default = "default_true")]
+    pub enable_fallback: bool,
+
+    /// Circuit breaker failure threshold per provider
+    #[serde(default = "default_circuit_failure_threshold")]
+    pub circuit_breaker_failure_threshold: u32,
+
+    /// Circuit breaker open duration in seconds
+    #[serde(default = "default_circuit_open_duration_secs")]
+    pub circuit_breaker_open_duration_secs: u64,
 }
 
 fn default_theme() -> String {
@@ -182,6 +207,18 @@ fn default_session_history_size() -> usize {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
+}
+
+fn default_circuit_failure_threshold() -> u32 {
+    5
+}
+
+fn default_circuit_open_duration_secs() -> u64 {
+    30
 }
 
 fn default_tool_timeout() -> u64 {
@@ -215,6 +252,13 @@ impl Default for Settings {
             themes: Vec::new(),
             custom_providers: Vec::new(),
             dynamic_models: HashMap::new(),
+            // Multi-provider routing defaults
+            enable_routing: false,
+            prefer_cost_efficient: true,
+            fallback_chain: Vec::new(),
+            enable_fallback: true,
+            circuit_breaker_failure_threshold: 5,
+            circuit_breaker_open_duration_secs: 30,
         }
     }
 }

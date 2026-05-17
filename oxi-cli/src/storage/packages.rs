@@ -1118,16 +1118,12 @@ impl PackageManager {
             message: Some(format!("Installing {}...", source)),
         });
         let result = match &parsed {
-            ParsedSource::Npm { .. } => {
-                run_on_fresh_runtime(self.install_npm_async(source, scope))
-            }
+            ParsedSource::Npm { .. } => run_on_fresh_runtime(self.install_npm_async(source, scope)),
             ParsedSource::Git { repo, ref_, .. } => {
                 self.install_git_sync(source, repo, ref_.as_deref(), scope)
             }
             ParsedSource::Local { path } => self.install_local(path),
-            ParsedSource::Url { url } => {
-                run_on_fresh_runtime(self.install_url(url, scope))
-            }
+            ParsedSource::Url { url } => run_on_fresh_runtime(self.install_url(url, scope)),
         };
         match &result {
             Ok(_) => self.emit_progress(ProgressEvent {

@@ -7,10 +7,10 @@
 //! This crate provides a unified interface for interacting with multiple LLM providers.
 //! It handles streaming, tool calling, context management, and cross-provider handoffs.
 
+pub mod circuit_breaker;
 mod compaction;
 mod complexity_router;
 mod context;
-pub mod circuit_breaker;
 pub mod env_api_keys;
 mod error;
 mod high_level;
@@ -153,9 +153,7 @@ pub use fallback_chain::{FallbackChain, FallbackChainError};
 
 // Circuit breaker for provider health tracking
 /// Per-provider circuit breaker for health tracking.
-pub use circuit_breaker::{
-    CircuitBreakerConfig, CircuitOpenError, ProviderCircuitBreaker,
-};
+pub use circuit_breaker::{CircuitBreakerConfig, CircuitOpenError, ProviderCircuitBreaker};
 
 /// Re-export AssistantMessage from messages
 pub use messages::AssistantMessage;

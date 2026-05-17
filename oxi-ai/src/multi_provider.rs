@@ -435,10 +435,7 @@ impl MultiProvider {
     pub fn circuit_breaker_diagnostics(
         &self,
     ) -> Vec<crate::circuit_breaker::CircuitBreakerDiagnostics> {
-        self.breakers
-            .values()
-            .map(|b| b.diagnostics())
-            .collect()
+        self.breakers.values().map(|b| b.diagnostics()).collect()
     }
 
     /// Get the router used for complexity-based routing.
@@ -555,7 +552,10 @@ impl Provider for MultiProvider {
             let max_retries = self.config.max_retries_per_model;
 
             loop {
-                match provider.stream(&candidate_model, context, options.clone()).await {
+                match provider
+                    .stream(&candidate_model, context, options.clone())
+                    .await
+                {
                     Ok(stream) => {
                         // Success! Record to circuit breaker
                         if let Some(breaker) = self.breakers.get(provider_name) {
@@ -617,9 +617,13 @@ impl Provider for MultiProvider {
         // All candidates exhausted
         if errors.is_empty() {
             if self.providers.is_empty() {
-                Err(ProviderError::UnknownProvider("multi-provider: no providers registered".to_string()))
+                Err(ProviderError::UnknownProvider(
+                    "multi-provider: no providers registered".to_string(),
+                ))
             } else {
-                Err(ProviderError::UnknownProvider("multi-provider: no model could be routed".to_string()))
+                Err(ProviderError::UnknownProvider(
+                    "multi-provider: no model could be routed".to_string(),
+                ))
             }
         } else {
             Err(ProviderError::UnknownProvider(format!(
@@ -667,8 +671,7 @@ impl MultiProvider {
                              provider: String,
                              model: Model| {
             let id = format!("{}/{}", provider, model.id);
-            if !seen_ids.contains_key(&id) {
-                seen_ids.insert(id, ());
+            if seen_ids.insert(id, ()).is_none() {
                 candidates.push(Candidate { provider, model });
             }
         };
@@ -676,7 +679,9 @@ impl MultiProvider {
         // 1. Auto-routing: get router's best model
         if self.config.auto_routing {
             let complexity = self.router.classify(context);
-            let router_models = self.router.route(complexity, self.config.prefer_cost_efficient);
+            let router_models = self
+                .router
+                .route(complexity, self.config.prefer_cost_efficient);
 
             tracing::debug!(
                 complexity = ?complexity,
@@ -686,9 +691,16 @@ impl MultiProvider {
 
             for entry in router_models {
                 // Try to get the model from registry
-                if let Some(registered_model) = crate::model_registry::get_model(entry.provider, entry.id) {
+                if let Some(registered_model) =
+                    crate::model_registry::get_model(entry.provider, entry.id)
+                {
                     if self.providers.contains_key(entry.provider) {
-                        add_candidate(&mut candidates, &mut seen_ids, entry.provider.to_string(), registered_model.clone());
+                        add_candidate(
+                            &mut candidates,
+                            &mut seen_ids,
+                            entry.provider.to_string(),
+                            registered_model.clone(),
+                        );
                     }
                 }
 
@@ -696,8 +708,7 @@ impl MultiProvider {
                 if self.providers.contains_key(entry.provider) {
                     let model = self.model_from_entry(entry);
                     let id = format!("{}/{}", entry.provider, entry.id);
-                    if !seen_ids.contains_key(&id) {
-                        seen_ids.insert(id, ());
+                    if seen_ids.insert(id, ()).is_none() {
                         candidates.push(Candidate {
                             provider: entry.provider.to_string(),
                             model,
@@ -733,16 +744,22 @@ impl MultiProvider {
         // 3. Fallback chain
         for fallback_entry in self.fallback.iter() {
             // Try registry first
-            if let Some(registered_model) = crate::model_registry::get_model(fallback_entry.provider, fallback_entry.id) {
+            if let Some(registered_model) =
+                crate::model_registry::get_model(fallback_entry.provider, fallback_entry.id)
+            {
                 if self.providers.contains_key(fallback_entry.provider) {
-                    add_candidate(&mut candidates, &mut seen_ids, fallback_entry.provider.to_string(), registered_model.clone());
+                    add_candidate(
+                        &mut candidates,
+                        &mut seen_ids,
+                        fallback_entry.provider.to_string(),
+                        registered_model.clone(),
+                    );
                 }
             } else if self.providers.contains_key(fallback_entry.provider) {
                 // Construct from entry
                 let model = self.model_from_entry(fallback_entry);
                 let id = format!("{}/{}", fallback_entry.provider, fallback_entry.id);
-                if !seen_ids.contains_key(&id) {
-                    seen_ids.insert(id, ());
+                if seen_ids.insert(id, ()).is_none() {
                     candidates.push(Candidate {
                         provider: fallback_entry.provider.to_string(),
                         model,
@@ -754,7 +771,11 @@ impl MultiProvider {
         // If no candidates found and providers exist, try using the first provider
         if candidates.is_empty() && !self.providers.is_empty() {
             // Use first available provider with a default model
-            let (provider_name, _provider) = self.providers.iter().next().unwrap();
+            let (provider_name, _provider) = self
+                .providers
+                .iter()
+                .next()
+                .expect("providers map is non-empty");
             let model = self.default_model_for_provider(provider_name);
             add_candidate(&mut candidates, &mut seen_ids, provider_name.clone(), model);
         }
@@ -764,12 +785,10 @@ impl MultiProvider {
             "MultiProvider: built candidate list"
         );
 
-        if candidates.is_empty() {
-            if self.providers.is_empty() {
-                return Err(ProviderError::UnknownProvider(
-                    "multi-provider: no providers registered".to_string(),
-                ));
-            }
+        if candidates.is_empty() && self.providers.is_empty() {
+            return Err(ProviderError::UnknownProvider(
+                "multi-provider: no providers registered".to_string(),
+            ));
         }
 
         Ok(candidates)
@@ -784,7 +803,7 @@ impl MultiProvider {
             provider: entry.provider.to_string(),
             base_url: String::new(), // Will be set by provider
             reasoning: entry.reasoning,
-            input: entry.input.iter().copied().collect(),
+            input: entry.input.to_vec(),
             cost: crate::types::Cost {
                 input: entry.cost_input,
                 output: entry.cost_output,
@@ -815,14 +834,23 @@ impl MultiProvider {
     }
 
     /// Construct a Model from just provider and model ID strings.
+    ///
+    /// Uses model_db to get actual metadata (context_window, cost, reasoning support, etc.).
+    /// Falls back to reasonable defaults if the model is not found in model_db.
     fn construct_model_from_id(&self, provider: &str, model_id: &str) -> Model {
-        // Try to determine API from provider
+        // First, try to look up the model in model_db
+        if let Some(entry) = crate::model_db::get_model_entry(provider, model_id) {
+            return self.model_from_entry(entry);
+        }
+
+        // Not in model_db: determine API type from provider name
         let api = match provider {
-            "openai" => crate::types::Api::OpenAiResponses,
-            "anthropic" => crate::types::Api::AnthropicMessages,
-            "google" | "vertex" => crate::types::Api::GoogleGenerativeAi,
-            "azure-openai" | "azure" => crate::types::Api::AzureOpenAiResponses,
-            "bedrock" | "amazon-bedrock" => crate::types::Api::BedrockConverseStream,
+            "openai" | "openai-codex" | "opencode" | "opencode-go" => crate::types::Api::OpenAiResponses,
+            "anthropic" | "cloudflare-ai-gateway" => crate::types::Api::AnthropicMessages,
+            "google" => crate::types::Api::GoogleGenerativeAi,
+            "google-vertex" => crate::types::Api::GoogleVertex,
+            "azure-openai" | "azure-openai-responses" => crate::types::Api::AzureOpenAiResponses,
+            "amazon-bedrock" | "bedrock" => crate::types::Api::BedrockConverseStream,
             _ => crate::types::Api::OpenAiResponses,
         };
 
@@ -843,33 +871,34 @@ impl MultiProvider {
     }
 
     /// Get the default model for a provider.
+    ///
+    /// Uses model_db to look up the most capable model for each provider,
+    /// with fallbacks for providers not in model_db.
     fn default_model_for_provider(&self, provider_name: &str) -> Model {
-        match provider_name {
-            "openai" => {
-                Model::new("gpt-4o", "GPT-4o", crate::types::Api::OpenAiResponses, "openai", "")
-            }
-            "anthropic" => Model::new(
-                "claude-sonnet-4-20250514",
-                "Claude Sonnet 4",
-                crate::types::Api::AnthropicMessages,
-                "anthropic",
-                "",
-            ),
-            "google" => Model::new(
-                "gemini-2.0-flash",
-                "Gemini 2.0 Flash",
-                crate::types::Api::GoogleGenerativeAi,
-                "google",
-                "",
-            ),
-            _ => Model::new(
-                "default",
-                "Default Model",
-                crate::types::Api::OpenAiResponses,
-                provider_name,
-                "",
-            ),
+        // Define the preferred default model IDs for each major provider
+        let default_model_id = match provider_name {
+            "openai" => "gpt-4o-mini",
+            "anthropic" => "claude-sonnet-4-20250514",
+            "google" => "gemini-2.0-flash",
+            _ => return self.construct_model_from_id(provider_name, "default"),
+        };
+
+        // Try to get the model from model_db
+        if let Some(entry) = crate::model_db::get_model_entry(provider_name, default_model_id) {
+            return self.model_from_entry(entry);
         }
+
+        // Fallback: try to get the first/last model from model_db for this provider
+        let provider_models = crate::model_db::get_provider_models(provider_name);
+        if !provider_models.is_empty() {
+            // Use the last model (typically the most capable/latest)
+            if let Some(entry) = provider_models.last() {
+                return self.model_from_entry(entry);
+            }
+        }
+
+        // Ultimate fallback: construct with sensible defaults
+        self.construct_model_from_id(provider_name, "default")
     }
 }
 
@@ -937,7 +966,8 @@ mod tests {
                 _model: &Model,
                 _context: &Context,
                 _options: Option<StreamOptions>,
-            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
+            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>
+            {
                 unreachable!("Mock provider - not called in this test")
             }
 
@@ -966,7 +996,8 @@ mod tests {
                 _model: &Model,
                 _context: &Context,
                 _options: Option<StreamOptions>,
-            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
+            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>
+            {
                 unreachable!("Mock provider")
             }
 
@@ -1011,7 +1042,8 @@ mod tests {
                 _model: &Model,
                 _context: &Context,
                 _options: Option<StreamOptions>,
-            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
+            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>
+            {
                 unreachable!("Mock provider")
             }
 
@@ -1033,9 +1065,7 @@ mod tests {
         let err = MultiProviderError::NoProviderForModel("gpt-4o".to_string());
         assert!(err.to_string().contains("gpt-4o"));
 
-        let err = MultiProviderError::AllProvidersExhausted {
-            errors: vec![],
-        };
+        let err = MultiProviderError::AllProvidersExhausted { errors: vec![] };
         assert!(err.to_string().contains("All providers exhausted"));
 
         let err = MultiProviderError::CircuitBreakerOpen {
@@ -1072,7 +1102,8 @@ mod tests {
                 _model: &Model,
                 _context: &Context,
                 _options: Option<StreamOptions>,
-            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
+            ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError>
+            {
                 unreachable!("Mock provider")
             }
 

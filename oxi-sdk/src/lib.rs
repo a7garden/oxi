@@ -27,11 +27,11 @@ pub mod tool_factory;
 pub use agent_builder::AgentBuilder;
 pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
 pub use builder::{Oxi, OxiBuilder};
-pub use multi_provider::{MultiProviderBuilder, RoutingConfig};
 pub use closure_tool::ClosureTool;
 pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
 pub use message_bus::{InterAgentMessage, MessageBus};
 pub use metrics::{AgentMetrics, MetricsSnapshot};
+pub use multi_provider::{MultiProviderBuilder, RoutingConfig};
 
 // Re-export from oxi-ai
 pub use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};

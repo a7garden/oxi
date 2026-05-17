@@ -4,7 +4,7 @@
 //! and selects appropriate models based on capability and cost requirements.
 
 use crate::model_db::{self, ModelEntry};
-use crate::{Context, Complexity, Message, MessageContent};
+use crate::{Complexity, Context, Message, MessageContent};
 
 /// Routes tasks to models based on estimated complexity.
 pub trait ComplexityRouter: Send + Sync {
@@ -12,7 +12,11 @@ pub trait ComplexityRouter: Send + Sync {
     fn classify(&self, context: &Context) -> Complexity;
 
     /// Pick the best models for a given complexity.
-    fn route(&self, complexity: Complexity, prefer_cost_efficient: bool) -> Vec<&'static ModelEntry>;
+    fn route(
+        &self,
+        complexity: Complexity,
+        prefer_cost_efficient: bool,
+    ) -> Vec<&'static ModelEntry>;
 }
 
 /// Default implementation of ComplexityRouter.
@@ -44,22 +48,18 @@ impl DefaultRouter {
 
     /// Get the last user message text from the context
     fn get_last_user_message_text(&self, context: &Context) -> Option<String> {
-        context
-            .messages
-            .iter()
-            .rev()
-            .find_map(|msg| {
-                if let Message::User(user_msg) = msg {
-                    let text = self.extract_content_text(&user_msg.content);
-                    if !text.is_empty() {
-                        Some(text)
-                    } else {
-                        None
-                    }
+        context.messages.iter().rev().find_map(|msg| {
+            if let Message::User(user_msg) = msg {
+                let text = self.extract_content_text(&user_msg.content);
+                if !text.is_empty() {
+                    Some(text)
                 } else {
                     None
                 }
-            })
+            } else {
+                None
+            }
+        })
     }
 
     /// Count tokens in text using the high-level estimator
@@ -75,41 +75,84 @@ impl DefaultRouter {
         // Check for complex/research keywords FIRST (more specific patterns)
         // Complex keywords: score 3
         let complex_keywords = [
-            "build a", "build the", "create a service", "write a full",
-            "implement a complete", "implement a full", "microservice",
-            "distributed system", "concurrent", "parallel processing",
-            "full-stack", "full stack", "end-to-end", "enterprise",
-            "complete application", "complete system",
+            "build a",
+            "build the",
+            "create a service",
+            "write a full",
+            "implement a complete",
+            "implement a full",
+            "microservice",
+            "distributed system",
+            "concurrent",
+            "parallel processing",
+            "full-stack",
+            "full stack",
+            "end-to-end",
+            "enterprise",
+            "complete application",
+            "complete system",
         ];
         let has_complex = complex_keywords.iter().any(|kw| lower.contains(*kw));
 
         // Research keywords: score 4
         let research_keywords = [
-            "analyze deeply", "research", "evaluate thoroughly", "investigate",
-            "compare and contrast", "benchmark", "comprehensive analysis",
-            "thorough", "in-depth", "deep research", "study of",
+            "analyze deeply",
+            "research",
+            "evaluate thoroughly",
+            "investigate",
+            "compare and contrast",
+            "benchmark",
+            "comprehensive analysis",
+            "thorough",
+            "in-depth",
+            "deep research",
+            "study of",
         ];
         let has_research = research_keywords.iter().any(|kw| lower.contains(*kw));
 
         // Moderate keywords: score 2
         let moderate_keywords = [
-            "architect", "design a", "refactor", "implement",
-            "create a class", "optimize", "debug", "review code",
-            "parse", "validate", "schema", "api", "build a",
+            "architect",
+            "design a",
+            "refactor",
+            "implement",
+            "create a class",
+            "optimize",
+            "debug",
+            "review code",
+            "parse",
+            "validate",
+            "schema",
+            "api",
+            "build a",
         ];
         let has_moderate = moderate_keywords.iter().any(|kw| lower.contains(*kw));
 
         // Simple keywords: score 1
         let simple_keywords = [
-            "explain", "write function", "fix typo", "list",
-            "describe", "define", "convert", "calculate", "simple",
+            "explain",
+            "write function",
+            "fix typo",
+            "list",
+            "describe",
+            "define",
+            "convert",
+            "calculate",
+            "simple",
         ];
         let has_simple = simple_keywords.iter().any(|kw| lower.contains(*kw));
 
         // Trivial keywords: score 0
         let trivial_keywords = [
-            "translate", "summarize", "spell check", "format",
-            "capitalize", "lowercase", "uppercase", "trim", "count words",
+            "translate",
+            "summarize",
+            "spell check",
+            "format",
+            "capitalize",
+            "lowercase",
+            "uppercase",
+            "trim",
+            "count words",
         ];
         let has_trivial = trivial_keywords.iter().any(|kw| lower.contains(*kw));
 
@@ -138,17 +181,26 @@ impl DefaultRouter {
         let lower = prompt.to_lowercase();
 
         // System prompts with "research" or "deep analysis" suggest higher complexity
-        if lower.contains("research") || lower.contains("deep analysis") || lower.contains("thorough") {
+        if lower.contains("research")
+            || lower.contains("deep analysis")
+            || lower.contains("thorough")
+        {
             return 2;
         }
 
         // "helpful assistant" without specific guidance suggests trivial/simple
-        if lower.contains("helpful assistant") && !lower.contains("expert") && !lower.contains("advanced") {
+        if lower.contains("helpful assistant")
+            && !lower.contains("expert")
+            && !lower.contains("advanced")
+        {
             return 0;
         }
 
         // "expert" or "senior" suggests higher complexity
-        if lower.contains("expert") || lower.contains("senior developer") || lower.contains("architect") {
+        if lower.contains("expert")
+            || lower.contains("senior developer")
+            || lower.contains("architect")
+        {
             return 1;
         }
 
@@ -174,20 +226,15 @@ impl DefaultRouter {
         // Model mapping per complexity level
         // We search for models by name/id pattern
         let patterns: Vec<&str> = match complexity {
-            Complexity::Trivial => vec![
-                "haiku", "gpt-4o-mini", "mini",
-            ],
-            Complexity::Simple => vec![
-                "haiku", "sonnet", "gpt-4o-mini", "mini",
-            ],
-            Complexity::Moderate => vec![
-                "sonnet", "opus", "gpt-4o", "gpt-4.1",
-            ],
-            Complexity::Complex => vec![
-                "opus", "gemini-2.5-pro", "gpt-4.1", "claude-sonnet",
-            ],
+            Complexity::Trivial => vec!["haiku", "gpt-4o-mini", "mini"],
+            Complexity::Simple => vec!["haiku", "sonnet", "gpt-4o-mini", "mini"],
+            Complexity::Moderate => vec!["sonnet", "opus", "gpt-4o", "gpt-4.1"],
+            Complexity::Complex => vec!["opus", "gemini-2.5-pro", "gpt-4.1", "claude-sonnet"],
             Complexity::Research => vec![
-                "opus-4.5", "opus-4.6", "gemini-3-pro", "gemini-2.5-pro",
+                "opus-4.5",
+                "opus-4.6",
+                "gemini-3-pro",
+                "gemini-2.5-pro",
                 "claude-opus",
             ],
         };
@@ -219,13 +266,10 @@ impl DefaultRouter {
             // Trivial: fast, cheap models
             0 => {
                 // Prefer models without reasoning (faster, cheaper)
-                !model.supports_reasoning()
-                    || model.cost_input < 0.5
+                !model.supports_reasoning() || model.cost_input < 0.5
             }
             // Simple: moderate capability
-            1 => {
-                !model.supports_reasoning() || model.cost_input < 1.5
-            }
+            1 => !model.supports_reasoning() || model.cost_input < 1.5,
             // Moderate: good capability
             2 => {
                 // Mid-range models
@@ -347,7 +391,11 @@ impl ComplexityRouter for DefaultRouter {
         self.score_to_complexity(final_score)
     }
 
-    fn route(&self, complexity: Complexity, prefer_cost_efficient: bool) -> Vec<&'static ModelEntry> {
+    fn route(
+        &self,
+        complexity: Complexity,
+        prefer_cost_efficient: bool,
+    ) -> Vec<&'static ModelEntry> {
         // Get candidates for this complexity
         let mut candidates = self.get_models_for_complexity(complexity);
 
@@ -428,10 +476,14 @@ mod tests {
         let router = DefaultRouter::new();
 
         // Complex keywords should be detected
-        let ctx = create_context_with_user_message("Build a complete microservices architecture with distributed tracing");
+        let ctx = create_context_with_user_message(
+            "Build a complete microservices architecture with distributed tracing",
+        );
         assert!(router.classify(&ctx) >= Complexity::Complex);
 
-        let ctx = create_context_with_user_message("Implement a full-stack application with authentication and database");
+        let ctx = create_context_with_user_message(
+            "Implement a full-stack application with authentication and database",
+        );
         assert!(router.classify(&ctx) >= Complexity::Complex);
     }
 
@@ -439,10 +491,14 @@ mod tests {
     fn test_research_keywords() {
         let router = DefaultRouter::new();
 
-        let ctx = create_context_with_user_message("Analyze deeply the performance characteristics of this system");
+        let ctx = create_context_with_user_message(
+            "Analyze deeply the performance characteristics of this system",
+        );
         assert_eq!(router.classify(&ctx), Complexity::Research);
 
-        let ctx = create_context_with_user_message("Conduct a comprehensive research study on machine learning");
+        let ctx = create_context_with_user_message(
+            "Conduct a comprehensive research study on machine learning",
+        );
         assert_eq!(router.classify(&ctx), Complexity::Research);
     }
 
@@ -454,7 +510,11 @@ mod tests {
         assert_eq!(router.classify(&ctx), Complexity::Simple);
 
         // Add a tool - should bump complexity
-        ctx.add_tool(crate::Tool::new("list_files", "List files", serde_json::json!({})));
+        ctx.add_tool(crate::Tool::new(
+            "list_files",
+            "List files",
+            serde_json::json!({}),
+        ));
         assert_eq!(router.classify(&ctx), Complexity::Moderate);
     }
 
@@ -465,7 +525,11 @@ mod tests {
         // Test single character - very short
         let ctx = create_context_with_user_message("a");
         let complexity = router.classify(&ctx);
-        assert!(complexity >= Complexity::Simple, "Short text should be at least Simple, got {:?}", complexity);
+        assert!(
+            complexity >= Complexity::Simple,
+            "Short text should be at least Simple, got {:?}",
+            complexity
+        );
 
         // Test "explain" keyword alone
         let ctx = create_context_with_user_message("explain this");
@@ -478,7 +542,11 @@ mod tests {
         let long_text = "Explain this code in detail. ".repeat(100);
         let ctx = create_context_with_user_message(&long_text);
         let complexity = router.classify(&ctx);
-        assert!(complexity >= Complexity::Moderate, "Long text should be at least Moderate, got {:?}", complexity);
+        assert!(
+            complexity >= Complexity::Moderate,
+            "Long text should be at least Moderate, got {:?}",
+            complexity
+        );
     }
 
     #[test]
@@ -560,7 +628,9 @@ mod tests {
         assert!(complexity <= Complexity::Simple);
 
         let mut ctx = Context::new();
-        ctx.set_system_prompt("You are an expert senior software architect conducting thorough deep analysis.");
+        ctx.set_system_prompt(
+            "You are an expert senior software architect conducting thorough deep analysis.",
+        );
         ctx.add_message(Message::User(UserMessage::new("Hello")));
 
         // Expert system prompt should increase complexity

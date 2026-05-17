@@ -419,10 +419,7 @@ impl ProviderCircuitBreaker {
 
                     // Still in cooldown period
                     let remaining = self.config.open_duration.saturating_sub(elapsed);
-                    return Err(CircuitOpenError::new(
-                        &self.provider_name,
-                        remaining,
-                    ));
+                    return Err(CircuitOpenError::new(&self.provider_name, remaining));
                 }
 
                 // No timestamp recorded somehow; treat as half-open
@@ -529,14 +526,16 @@ impl ProviderCircuitBreaker {
 
                 if new_count >= self.config.failure_threshold as u64 {
                     // Threshold reached: open the circuit
-                    self.state.store(CircuitState::Open.as_u8(), Ordering::SeqCst);
+                    self.state
+                        .store(CircuitState::Open.as_u8(), Ordering::SeqCst);
                     *self.opened_at.lock() = Some(Instant::now());
                 }
             }
 
             CircuitState::HalfOpen => {
                 // Any failure in half-open reopens the circuit
-                self.state.store(CircuitState::Open.as_u8(), Ordering::SeqCst);
+                self.state
+                    .store(CircuitState::Open.as_u8(), Ordering::SeqCst);
                 *self.opened_at.lock() = Some(Instant::now());
             }
 
@@ -851,7 +850,9 @@ mod tests {
 
         // Force to half-open
         breaker.reset();
-        breaker.state.store(CircuitState::HalfOpen.as_u8(), Ordering::SeqCst);
+        breaker
+            .state
+            .store(CircuitState::HalfOpen.as_u8(), Ordering::SeqCst);
 
         // Record success
         breaker.record_success();
@@ -865,7 +866,9 @@ mod tests {
 
         // Force to half-open
         breaker.reset();
-        breaker.state.store(CircuitState::HalfOpen.as_u8(), Ordering::SeqCst);
+        breaker
+            .state
+            .store(CircuitState::HalfOpen.as_u8(), Ordering::SeqCst);
 
         // Record failure
         breaker.record_failure();
@@ -879,7 +882,9 @@ mod tests {
 
         // Force to half-open
         breaker.reset();
-        breaker.state.store(CircuitState::HalfOpen.as_u8(), Ordering::SeqCst);
+        breaker
+            .state
+            .store(CircuitState::HalfOpen.as_u8(), Ordering::SeqCst);
 
         // Partial successes should not close
         breaker.record_success();
