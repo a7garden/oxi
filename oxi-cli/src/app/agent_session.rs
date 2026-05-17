@@ -535,7 +535,14 @@ impl AgentSession {
         // guard held across .await), so we need LocalSet + spawn_local
         // inside a blocking thread.
         tokio::task::spawn_blocking(move || {
-            let rt = tokio::runtime::Handle::current();
+            // Use a dedicated current-thread runtime instead of
+            // Handle::current().block_on() to avoid "Cannot start a
+            // runtime from within a runtime" panics if the caller is
+            // itself inside a tokio context.
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("failed to build agent runtime");
             rt.block_on(async {
                 let local = tokio::task::LocalSet::new();
                 local

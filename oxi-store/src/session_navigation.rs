@@ -555,14 +555,27 @@ impl SessionNavigator {
                 // Use tokio::task::block_in_place to safely call block_on from within
                 // a multi-threaded tokio runtime. Falls back to creating a new runtime
                 // if not in a tokio context.
+                // Run summarization outside any existing tokio runtime to
+                // avoid "Cannot start a runtime from within a runtime" panics.
+                // Uses std::thread::scope + new_current_thread which works
+                // regardless of whether we're inside a multi-threaded or
+                // current_thread tokio runtime.
                 let entries_clone: Vec<SessionEntryType> = collection.entries.clone();
                 let custom_clone = custom_instructions.clone();
-                let result = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(summarizer.summarize(
-                        &entries_clone,
-                        custom_clone.as_deref(),
-                        replace_instructions,
-                    ))
+                let result = std::thread::scope(|s| {
+                    s.spawn(|| {
+                        let rt = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .expect("failed to build temp runtime");
+                        rt.block_on(summarizer.summarize(
+                            &entries_clone,
+                            custom_clone.as_deref(),
+                            replace_instructions,
+                        ))
+                    })
+                    .join()
+                    .expect("summarization thread panicked")
                 });
 
                 match result {

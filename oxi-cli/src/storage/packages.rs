@@ -47,6 +47,29 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+/// Run an async future on a fresh tokio runtime created on a dedicated OS thread.
+///
+/// This avoids the "Cannot start a runtime from within a runtime" panic that
+/// `Runtime::new()?.block_on(future)` causes when called from inside an
+/// existing tokio context (e.g., from an agent tool callback or TUI handler).
+fn run_on_fresh_runtime<F, T>(future: F) -> Result<T>
+where
+    F: std::future::Future<Output = Result<T>> + Send,
+    T: Send,
+{
+    std::thread::scope(|s| {
+        s.spawn(|| {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("failed to build temp runtime")?;
+            rt.block_on(future)
+        })
+        .join()
+        .map_err(|_| anyhow::anyhow!("runtime thread panicked"))?
+    })
+}
+
 /// Cached regex for parsing npm package specs
 static NPM_SPEC_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     regex::Regex::new(r"^(@?[^@]+(?:/[^@]+)?)(?:@(.+))?$").expect("valid static regex")
@@ -1096,16 +1119,14 @@ impl PackageManager {
         });
         let result = match &parsed {
             ParsedSource::Npm { .. } => {
-                let rt = tokio::runtime::Runtime::new()?;
-                rt.block_on(self.install_npm_async(source, scope))
+                run_on_fresh_runtime(self.install_npm_async(source, scope))
             }
             ParsedSource::Git { repo, ref_, .. } => {
                 self.install_git_sync(source, repo, ref_.as_deref(), scope)
             }
             ParsedSource::Local { path } => self.install_local(path),
             ParsedSource::Url { url } => {
-                let rt = tokio::runtime::Runtime::new()?;
-                rt.block_on(self.install_url(url, scope))
+                run_on_fresh_runtime(self.install_url(url, scope))
             }
         };
         match &result {
@@ -1624,8 +1645,7 @@ impl PackageManager {
                 }
                 ParsedSource::Local { path } => self.install_local(path),
                 ParsedSource::Url { url } => {
-                    let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(self.install_url(url, entry.scope))
+                    run_on_fresh_runtime(self.install_url(url, entry.scope))
                 }
             };
         }
