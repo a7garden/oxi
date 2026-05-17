@@ -180,9 +180,13 @@ pub struct Settings {
     #[serde(default)]
     pub fallback_chain: Vec<String>,
 
-    /// Whether to use provider fallback on errors
+    /// Whether to use provider fallback on errors (false = fail fast)
     #[serde(default = "default_true")]
     pub enable_fallback: bool,
+
+    /// Disable automatic fallback (same as enable_fallback = false)
+    #[serde(default)]
+    pub disable_fallback: bool,
 
     /// Circuit breaker failure threshold per provider
     #[serde(default = "default_circuit_failure_threshold")]
@@ -257,6 +261,7 @@ impl Default for Settings {
             prefer_cost_efficient: true,
             fallback_chain: Vec::new(),
             enable_fallback: true,
+            disable_fallback: false,
             circuit_breaker_failure_threshold: 5,
             circuit_breaker_open_duration_secs: 30,
         }
@@ -628,12 +633,47 @@ impl Settings {
     // ── CLI overrides ────────────────────────────────────────────────
 
     /// Merge with CLI arguments (CLI takes precedence).
-    pub fn merge_cli(&mut self, model: Option<String>, provider: Option<String>) {
+    ///
+    /// # Arguments
+    ///
+    /// * `model` — CLI-specified model override
+    /// * `provider` — CLI-specified provider override
+    /// * `enable_routing` — CLI-specified enable_routing override
+    /// * `prefer_cost_efficient` — CLI-specified prefer_cost_efficient override
+    /// * `fallback_chain` — CLI-specified fallback chain override
+    /// * `disable_fallback` — CLI-specified disable_fallback override
+    pub fn merge_cli(
+        &mut self,
+        model: Option<String>,
+        provider: Option<String>,
+        enable_routing: Option<bool>,
+        prefer_cost_efficient: Option<bool>,
+        fallback_chain: Option<Vec<String>>,
+        disable_fallback: Option<bool>,
+    ) {
         if let Some(m) = model {
             self.default_model = Some(m);
         }
         if let Some(p) = provider {
             self.default_provider = Some(p);
+        }
+        if let Some(r) = enable_routing {
+            self.enable_routing = r;
+        }
+        if let Some(p) = prefer_cost_efficient {
+            self.prefer_cost_efficient = p;
+        }
+        if let Some(fc) = fallback_chain {
+            if !fc.is_empty() {
+                self.fallback_chain = fc;
+            }
+        }
+        if let Some(df) = disable_fallback {
+            self.disable_fallback = df;
+            // If disable_fallback is true, disable fallback
+            if df {
+                self.enable_fallback = false;
+            }
         }
     }
 
@@ -931,11 +971,24 @@ mod tests {
         let mut settings = Settings::default();
         settings.default_model = Some("gpt-4o".to_string());
 
-        settings.merge_cli(Some("claude".to_string()), None);
+        settings.merge_cli(Some("claude".to_string()), None, None, None, None, None);
         assert_eq!(settings.default_model, Some("claude".to_string()));
 
-        settings.merge_cli(None, Some("google".to_string()));
+        settings.merge_cli(None, Some("google".to_string()), None, None, None, None);
         assert_eq!(settings.default_provider, Some("google".to_string()));
+
+        // Test routing flags
+        settings.merge_cli(None, None, Some(true), Some(false), Some(vec!["openai/gpt-4o".to_string()]), Some(false));
+        assert!(settings.enable_routing);
+        assert!(!settings.prefer_cost_efficient);
+        assert_eq!(settings.fallback_chain, vec!["openai/gpt-4o"]);
+        assert!(!settings.disable_fallback);
+
+        // Test disable_fallback sets enable_fallback to false
+        let mut settings2 = Settings::default();
+        settings2.merge_cli(None, None, None, None, None, Some(true));
+        assert!(settings2.disable_fallback);
+        assert!(!settings2.enable_fallback);
     }
 
     // ── Layered loading ──────────────────────────────────────────────

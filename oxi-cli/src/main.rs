@@ -29,7 +29,18 @@ async fn main() -> Result<()> {
     let mut settings = Settings::load().unwrap_or_default();
 
     // Apply CLI overrides
-    settings.merge_cli(args.model.clone(), args.provider.clone());
+    settings.merge_cli(
+        args.model.clone(),
+        args.provider.clone(),
+        Some(args.enable_routing),
+        Some(args.prefer_cost_efficient),
+        if args.fallback_chain.is_empty() {
+            None
+        } else {
+            Some(args.fallback_chain.clone())
+        },
+        Some(args.disable_fallback),
+    );
 
     // Validate settings
     let report = settings.validate();

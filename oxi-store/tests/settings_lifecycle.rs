@@ -429,12 +429,12 @@ fn test_settings_merge_cli() {
     assert!(settings.default_model.is_none());
     assert!(settings.default_provider.is_none());
 
-    settings.merge_cli(Some("gpt-4o".to_string()), Some("openai".to_string()));
+    settings.merge_cli(Some("gpt-4o".to_string()), Some("openai".to_string()), None, None, None, None);
     assert_eq!(settings.default_model, Some("gpt-4o".to_string()));
     assert_eq!(settings.default_provider, Some("openai".to_string()));
 
     // Override again
-    settings.merge_cli(Some("claude-3".to_string()), None);
+    settings.merge_cli(Some("claude-3".to_string()), None, None, None, None, None);
     assert_eq!(settings.default_model, Some("claude-3".to_string()));
     assert_eq!(settings.default_provider, Some("openai".to_string())); // unchanged
 }
