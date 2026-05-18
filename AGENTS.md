@@ -8,7 +8,7 @@ Terminal-based AI coding assistant built in Rust. Multi-crate workspace providin
 |------|-------|
 | Language | Rust 2021 edition |
 | Workspace crates | `oxi-ai`, `oxi-agent`, `oxi-store`, `oxi-tui`, `oxi-sdk`, `oxi-cli` |
-| Version | 0.19.0 |
+| Version | 0.20.0 |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo test`, `cargo audit` |
 
