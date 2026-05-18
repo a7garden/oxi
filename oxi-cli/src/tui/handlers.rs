@@ -115,7 +115,7 @@ async fn handle_key(
                     state.input_history.remove(0);
                 }
                 state.history_index = 0;
-                std::mem::drop(session.steer(value));
+                session.steer_sync(value);
                 state.input_clear();
                 return None;
             }
@@ -292,8 +292,12 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             // Agent started processing
         }
         UiEvent::AgentEnd => {
-            // Agent finished all processing — clear busy state
-            state.is_agent_busy = false;
+            // Agent finished all processing.
+            // Only clear busy state if there are no pending queued messages
+            // (auto-processing will start a new run immediately).
+            if state.pending_steering == 0 {
+                state.is_agent_busy = false;
+            }
         }
 
         // ── Turn lifecycle ────────────────────────────────────────
@@ -462,6 +466,18 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         }
         UiEvent::QueueUpdate { pending } => {
             state.pending_steering = pending;
+        }
+        UiEvent::AutoProcessStart { prompt } => {
+            // A queued message is being auto-processed by the worker thread.
+            // Show the user message bubble and enter streaming state so the
+            // TUI is ready for the agent's response.
+            state.add_user_message(prompt.clone());
+            state.input_history.insert(0, prompt);
+            if state.input_history.len() > 100 {
+                state.input_history.remove(0);
+            }
+            state.history_index = 0;
+            state.start_streaming();
         }
         UiEvent::TokenUsage {
             input_tokens,

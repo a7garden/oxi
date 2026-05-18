@@ -590,28 +590,43 @@ impl AgentSession {
     }
 
     /// Queue a steering message (delivered after current turn's tool calls).
-    pub async fn steer(&self, text: String) -> Result<()> {
+    ///
+    /// This is a synchronous method because it contains no async operations.
+    /// The message is added to the steering queue and will be injected into
+    /// the agent loop by the `get_steering_messages` hook on the next run.
+    ///
+    /// Note: we intentionally do NOT call `agent.state().add_user_message()`
+    /// here because the agent loop will add the message from the queue via
+    /// hooks, and `run_with_channel` copies the current state at startup.
+    /// Adding it here would cause a duplicate.
+    pub fn steer_sync(&self, text: String) {
         {
             let mut queue = self.steering_messages.write();
-            queue.push_back(text.clone());
+            queue.push_back(text);
         }
         self.emit_queue_update();
+    }
 
-        // Inject into agent state as a user message
-        self.agent.state().add_user_message(text);
-
+    /// Queue a steering message (async wrapper for backward compatibility).
+    #[allow(dead_code)]
+    pub async fn steer(&self, text: String) -> Result<()> {
+        self.steer_sync(text);
         Ok(())
     }
 
     /// Queue a follow-up message (processed after agent finishes).
-    #[allow(dead_code)]
-    pub async fn follow_up(&self, text: String) -> Result<()> {
+    pub fn follow_up_sync(&self, text: String) {
         {
             let mut queue = self.follow_up_messages.write();
-            queue.push_back(text.clone());
+            queue.push_back(text);
         }
         self.emit_queue_update();
+    }
 
+    /// Queue a follow-up message (async wrapper for backward compatibility).
+    #[allow(dead_code)]
+    pub async fn follow_up(&self, text: String) -> Result<()> {
+        self.follow_up_sync(text);
         Ok(())
     }
 

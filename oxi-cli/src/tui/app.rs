@@ -215,6 +215,13 @@ pub(crate) enum UiEvent {
         context_window_pct: f32,
         total_cost: f64,
     },
+
+    /// A queued message is being auto-processed (sent from the worker
+    /// thread when draining the steering/follow-up queue after a run).
+    /// The TUI should display the user message and enter streaming state.
+    AutoProcessStart {
+        prompt: String,
+    },
 }
 
 // ── Spinner ──────────────────────────────────────────────────────────────
@@ -742,6 +749,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
         // Agent worker thread
         let session_handle = agent_session.clone_handle();
+        // Clone prompt_tx so the worker thread can auto-reprocess queued messages.
+        // The cloned sender feeds back into prompt_rx, triggering the outer while loop.
+        let prompt_tx_worker = prompt_tx.clone();
         let ui_tx_for_thread = ui_tx.clone();
         let agent_handle = std::thread::spawn(move || {
             let rt = get_agent_runtime();
@@ -974,11 +984,36 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             // for it before session teardown, the outer loop handles
                             // that via drop(prompt_tx) + agent_handle.join().
                             let _ = forwarder_handle; // move ownership, don't block
-                                                      // NOTE: No post-run queue drain needed.
-                                                      // The agent's agentic loop (run_with_channel) already processes
-                                                      // all steering and follow-up messages via the hooks configured
-                                                      // above. This matches pi-mono's architecture where the agent
-                                                      // loop handles everything internally before emitting Complete.
+
+                            // ── Auto-process queued messages ──────────────────
+                            // After the agent finishes, check if new messages were
+                            // queued during the run (via steer_sync). If so, feed
+                            // the first one back through prompt_tx_worker so the outer
+                            // while loop picks it up as a new prompt. Remaining messages
+                            // stay in the queue for subsequent iterations.
+                            let first_pending: Option<String> = {
+                                let sq = session_handle.steering_queue();
+                                let fq = session_handle.follow_up_queue();
+                                let mut sq_guard = sq.write();
+                                let mut fq_guard = fq.write();
+                                // Steering takes priority over follow-up
+                                sq_guard.pop_front().or_else(|| fq_guard.pop_front())
+                            };
+                            if let Some(msg) = first_pending {
+                                let remaining = session_handle.pending_message_count();
+                                tracing::info!(
+                                    "[AGENT-WORKER] Auto-processing queued message ({} remaining)",
+                                    remaining
+                                );
+                                let _ = ui_tx_for_thread.send(UiEvent::QueueUpdate {
+                                    pending: remaining,
+                                });
+                                // Tell TUI to show user message + enter streaming state
+                                let _ = ui_tx_for_thread.send(UiEvent::AutoProcessStart {
+                                    prompt: msg.clone(),
+                                });
+                                let _ = prompt_tx_worker.send(msg).await;
+                            }
                         }
                     })
                     .await;
