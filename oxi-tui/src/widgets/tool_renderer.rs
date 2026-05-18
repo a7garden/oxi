@@ -404,15 +404,12 @@ pub fn format_bash_result(
         all_lines.len()
     };
 
-    // Check for truncation info
-    if result.contains("Full output:") {
-        if let Some(line) = result.lines().find(|l| l.contains("Full output:")) {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", truncate_to_width(line, max_width.saturating_sub(2))),
-                styles.muted,
-            )));
-        }
-    }
+    // Note: "Full output:" truncation info is intentionally NOT appended
+    // as a separate line here. When the bash output is large, the tool
+    // result already includes this text, and it will appear in the preview
+    // naturally. Adding it separately caused a height measurement mismatch
+    // (format_bash_result produced more lines than measure_result_height
+    // expected), leading to content clipping in bordered tool boxes.
 
     lines
 }
@@ -531,7 +528,9 @@ pub fn measure_call_height(name: &str, arguments: &str, max_width: usize) -> u16
 /// Calculate the rendered height for a tool result.
 pub fn measure_result_height(name: &str, result: &str, is_error: bool) -> u16 {
     if is_error {
-        return 1 + result.lines().count().min(4) as u16;
+        let total = result.lines().count();
+        let shown = total.min(4);
+        return shown as u16 + if total > 4 { 1 } else { 0 };
     }
 
     if looks_like_diff(result) {
@@ -552,7 +551,10 @@ pub fn measure_result_height(name: &str, result: &str, is_error: bool) -> u16 {
         "edit" => {
             let total = result.lines().count();
             let shown = total.min(DIFF_PREVIEW_LINES);
-            let extra = if total > DIFF_PREVIEW_LINES { 1 } else { 0 };
+            let has_more = total > DIFF_PREVIEW_LINES;
+            let has_stats = !has_more
+                && (count_diff_stats(result).0 > 0 || count_diff_stats(result).1 > 0);
+            let extra = if has_more || has_stats { 1 } else { 0 };
             shown as u16 + extra
         }
         "bash" => {

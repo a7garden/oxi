@@ -1762,7 +1762,8 @@ fn measure_kind(kind: &LayoutKind, width: u16, expanded_thinking: &HashSet<Strin
                     let ellipsis = if total > 80 { 1 } else { 0 };
                     shown as u16 + ellipsis
                 } else if *is_err {
-                    r.lines().count().min(4) as u16
+                    let total = r.lines().count();
+                    total.min(4) as u16 + if total > 4 { 1 } else { 0 }
                 } else {
                     measure_result_height(name, r, false)
                 }
@@ -2104,8 +2105,11 @@ impl Widget for EntryWidget<'_> {
                     .style(bg_style);
                 let inner = block.inner(rect);
                 block.render(rect, buf);
-                // Clear any stale content in the inner area before rendering.
-                Clear.render(inner, buf);
+                // Do NOT Clear the inner area here — Clear resets cells to
+                // default style, which removes the block's background color
+                // (tool_pending_bg, tool_success_bg, etc.). The buffer is
+                // already clean at the start of each frame (ratatui
+                // swap_buffers resets it), so stale content is not an issue.
 
                 let max_w = inner.width as usize;
                 let mut content_lines: Vec<Line<'static>> = Vec::new();
@@ -2228,8 +2232,6 @@ impl Widget for EntryWidget<'_> {
                     .border_style(border_style);
                 let inner = block.inner(rect);
                 block.render(rect, buf);
-                // Clear any stale content in the inner area before rendering.
-                Clear.render(inner, buf);
 
                 let max_w = inner.width as usize;
                 let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
@@ -2247,7 +2249,6 @@ impl Widget for EntryWidget<'_> {
                     lines.push(Line::from(Span::styled("  \u{2026}", self.styles.muted)));
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
-                Clear.render(inner, buf);
                 Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::ErrorBox {
@@ -2280,7 +2281,6 @@ impl Widget for EntryWidget<'_> {
                 }
                 let text: ratatui::text::Text = lines.into_iter().collect();
                 // No wrap — pre-truncated to exact width
-                Clear.render(inner, buf);
                 Paragraph::new(text).render(inner, buf);
             }
             LayoutKind::Thinking {
@@ -2424,44 +2424,42 @@ impl StatefulWidget for ChatView<'_> {
             state.clamp_scroll(area.height);
         }
 
-        // Render only visible entries directly into the buffer.
-        // Skip entries fully above the viewport.
+        // Render only visible entries into the buffer.
         let scroll_offset = state.scroll_offset;
+        let vp_bottom = scroll_offset + area.height;
+
         for entry in &layout {
-            // Entry ends before the visible area starts
+            // Skip entries fully outside the viewport
             if entry.y + entry.height <= scroll_offset {
                 continue;
             }
-            // Entry starts after the visible area ends
-            if entry.y >= scroll_offset + area.height {
+            if entry.y >= vp_bottom {
                 break;
             }
             if entry.height == 0 {
                 continue;
             }
-            // Compute relative y within the viewport
-            let rel_y = entry.y.saturating_sub(scroll_offset);
-            // Clamp height so the rect doesn't extend past the visible area.
-            // Without this, partially-visible entries at the bottom of the
-            // viewport would create rects outside the buffer bounds, causing
-            // a panic when rendering tool boxes or other bordered blocks.
-            let available = area.height.saturating_sub(rel_y);
-            let clamped_height = entry.height.min(available);
-            if clamped_height == 0 {
+
+            // Compute the entry's vertical range within the viewport
+            // (clamped to viewport bounds). Every entry maps to a
+            // contiguous rect starting at viewport row 0 (for entries
+            // partially above the viewport) or at its natural position.
+            let entry_top = entry.y.max(scroll_offset);
+            let entry_bot = (entry.y + entry.height).min(vp_bottom);
+            let h = entry_bot.saturating_sub(entry_top);
+            if h == 0 {
                 continue;
             }
-            let rect = Rect::new(area.x, area.y + rel_y, inner_width, clamped_height);
+            let rel_y = entry_top - scroll_offset;
+            let rect = Rect::new(area.x, area.y + rel_y, inner_width, h);
 
-            // Track thinking regions for click handling
-            // Use clamped_height so click regions match what's actually rendered
-            let region_bottom = area.y + rel_y + clamped_height;
+            // Track click regions
+            let region_bottom = area.y + rel_y + h;
             if let LayoutKind::Thinking { key, .. } = &entry.kind {
                 state
                     .thinking_regions
                     .push((area.y + rel_y, region_bottom, key.clone()));
             }
-
-            // Track tool box regions for click handling
             if let LayoutKind::ToolBox { key, result, .. } = &entry.kind {
                 if result.is_some() {
                     state
@@ -2470,7 +2468,27 @@ impl StatefulWidget for ChatView<'_> {
                 }
             }
 
-            EntryWidget::new(&entry.kind, &styles).render(rect, buf);
+            // For entries fully within the viewport, render directly.
+            // For entries clipped at the top, render the full entry to a
+            // temp buffer then copy only the visible rows — otherwise
+            // EntryWidget would draw starting from row 0 of the rect
+            // (top border, first lines) instead of the clipped rows.
+            if entry.y >= scroll_offset {
+                EntryWidget::new(&entry.kind, &styles).render(rect, buf);
+            } else {
+                let hidden = scroll_offset - entry.y;
+                let tmp_rect = Rect::new(0, 0, inner_width, entry.height);
+                let mut tmp = Buffer::empty(tmp_rect);
+                EntryWidget::new(&entry.kind, &styles).render(tmp_rect, &mut tmp);
+                for row in 0..h {
+                    for col in 0..inner_width {
+                        if let Some(dst) = buf.cell_mut((area.x + col, area.y + rel_y + row))
+                        {
+                            *dst = tmp[(col, hidden + row)].clone();
+                        }
+                    }
+                }
+            }
         }
     }
 }
