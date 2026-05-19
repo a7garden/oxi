@@ -261,19 +261,15 @@ impl ChatViewState {
         self.scroll_offset = self.scroll_offset.saturating_sub(n);
     }
     pub fn scroll_down(&mut self, n: u16) {
-        let max = self.max_scroll_offset();
-        self.scroll_offset = (self.scroll_offset + n).min(max);
+        // NOTE: We don't clamp to content_height - visible_height here
+        // because visible_height is unknown.  render() calls
+        // clamp_scroll(area.height) on every frame which performs the
+        // correct clamping.
+        self.scroll_offset = self.scroll_offset.saturating_add(n);
     }
     pub fn scroll_to_top(&mut self) {
         self.auto_scroll = false;
         self.scroll_offset = 0;
-    }
-    /// Maximum scroll offset (content_height - 1 visible line, so
-    /// at least one line is always visible).
-    fn max_scroll_offset(&self) -> u16 {
-        // We don't know visible_height here, so return content_height.
-        // The caller clamps via visible_height.
-        self.content_height
     }
     /// Clamp scroll_offset to [0, content_height - visible_height].
     fn clamp_scroll(&mut self, visible_height: u16) {
@@ -899,14 +895,14 @@ fn wrap_styled_chars(chars: &[(char, Style)], max_width: usize) -> Vec<Line<'sta
                         lines.push(Line::from(std::mem::take(&mut current_spans)));
                         current_width = 0;
                     }
-                    // Break the oversized word
+                    // Break the oversized word into fragments that each fit max_width.
+                    // All non-last fragments become complete output lines;
+                    // the last fragment stays in current_spans so the next token
+                    // can potentially join it.
                     let broken = break_styled_word(word_chars, max_width);
                     let broken_len = broken.len();
                     for (idx, broken_spans) in broken.into_iter().enumerate() {
-                        if idx == 0 && lines.is_empty() && current_width == 0 {
-                            current_spans = broken_spans;
-                            current_width = spans_width(&current_spans);
-                        } else if idx < broken_len - 1 {
+                        if idx < broken_len - 1 {
                             lines.push(Line::from(broken_spans));
                         } else {
                             current_spans = broken_spans;
@@ -1465,12 +1461,12 @@ fn is_box_block(block: &ContentBlock) -> bool {
 
 fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     let mut entries = Vec::new();
-    let mut y: u16 = 0;
+    let mut y: u32 = 0;
 
     let mut rendered_any_message = false;
     let mut msg_idx: usize = 0;
 
-    for msg in &state.messages {
+    'outer: for msg in &state.messages {
         // Skip messages that have no visible content; they only create empty spacer rows.
         let has_visible_content = msg.content_blocks.iter().any(|b| match b {
             ContentBlock::Text { content } => !content.trim().is_empty(),
@@ -1484,22 +1480,26 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
 
         if rendered_any_message {
             // Gap between messages — use a spacer for breathing room
-            entries.push(LayoutEntry {
-                y,
-                height: 1,
-                kind: LayoutKind::Spacer,
-            });
+            if y <= u16::MAX as u32 {
+                entries.push(LayoutEntry {
+                    y: y as u16,
+                    height: 1,
+                    kind: LayoutKind::Spacer,
+                });
+            }
             y += 1;
         }
         rendered_any_message = true;
 
         // User messages: left accent border, no label needed (single-user context)
         if msg.role == MessageRole::User {
-            entries.push(LayoutEntry {
-                y,
-                height: 1,
-                kind: LayoutKind::Rule,
-            });
+            if y <= u16::MAX as u32 {
+                entries.push(LayoutEntry {
+                    y: y as u16,
+                    height: 1,
+                    kind: LayoutKind::Rule,
+                });
+            }
             y += 1;
         }
         let mut prev_was_box = false;
@@ -1517,11 +1517,13 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             // Insert spacer between consecutive box-type blocks (tool calls, errors)
             let is_box = is_box_block(block);
             if is_box && prev_was_box {
-                entries.push(LayoutEntry {
-                    y,
-                    height: 1,
-                    kind: LayoutKind::Spacer,
-                });
+                if y <= u16::MAX as u32 {
+                    entries.push(LayoutEntry {
+                        y: y as u16,
+                        height: 1,
+                        kind: LayoutKind::Spacer,
+                    });
+                }
                 y += 1;
             }
             prev_was_box = is_box;
@@ -1556,8 +1558,15 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
                 _ => {}
             }
             let h = measure_kind(&kind, width, &state.expanded_thinking);
-            entries.push(LayoutEntry { y, height: h, kind });
-            y += h;
+            if y > u16::MAX as u32 {
+                break 'outer;
+            }
+            entries.push(LayoutEntry {
+                y: y as u16,
+                height: h,
+                kind,
+            });
+            y += h as u32;
         }
         msg_idx += 1;
     }
@@ -1881,8 +1890,12 @@ fn measure_dashboard(info: &DashboardInfo, width: u16) -> u16 {
     h += 1; // project
     h += 1; // agents.md
     h += 1; // empty line
-    h += 1; // tools header
-    h += badge_line_count(&info.tool_names, w);
+
+    if !info.tool_names.is_empty() {
+        h += 1; // tools header
+        h += badge_line_count(&info.tool_names, w);
+    }
+
     h += 1; // empty line
 
     if !info.skill_names.is_empty() {
