@@ -552,8 +552,8 @@ pub fn measure_result_height(name: &str, result: &str, is_error: bool) -> u16 {
             let total = result.lines().count();
             let shown = total.min(DIFF_PREVIEW_LINES);
             let has_more = total > DIFF_PREVIEW_LINES;
-            let has_stats = !has_more
-                && (count_diff_stats(result).0 > 0 || count_diff_stats(result).1 > 0);
+            let has_stats =
+                !has_more && (count_diff_stats(result).0 > 0 || count_diff_stats(result).1 > 0);
             let extra = if has_more || has_stats { 1 } else { 0 };
             shown as u16 + extra
         }

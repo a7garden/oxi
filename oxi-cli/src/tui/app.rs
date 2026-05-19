@@ -1005,9 +1005,8 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                     "[AGENT-WORKER] Auto-processing queued message ({} remaining)",
                                     remaining
                                 );
-                                let _ = ui_tx_for_thread.send(UiEvent::QueueUpdate {
-                                    pending: remaining,
-                                });
+                                let _ = ui_tx_for_thread
+                                    .send(UiEvent::QueueUpdate { pending: remaining });
                                 // Tell TUI to show user message + enter streaming state
                                 let _ = ui_tx_for_thread.send(UiEvent::AutoProcessStart {
                                     prompt: msg.clone(),

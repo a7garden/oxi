@@ -1,6 +1,16 @@
+<div align="center">
+
 # oxi-tui
 
-Terminal UI library for Rust — component framework, differential rendering, and theme system.
+**Terminal UI library for Rust** — component framework, differential rendering, and theme system.
+
+[![Version](https://img.shields.io/badge/Version-0.20.0-blue?style=flat-square)](https://crates.io/search?q=oxi)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](../LICENSE.md)
+[![Docs](https://img.shields.io/docsrs/oxi-tui/latest?style=flat-square)](https://docs.rs/oxi-tui)
+
+</div>
+
+---
 
 ## Overview
 
@@ -429,4 +439,4 @@ tui.on_event(|event| {
 
 ## License
 
-MIT
+[MIT](../LICENSE.md)

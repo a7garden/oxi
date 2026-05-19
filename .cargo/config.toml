@@ -1,0 +1,7 @@
+[build]
+# Use a faster linker on macOS
+# target."aarch64-apple-darwin".linker = "clang"
+
+[term]
+# Show progress during builds
+verbose = false

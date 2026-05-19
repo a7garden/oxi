@@ -5,64 +5,64 @@ use thiserror::Error;
 /// Provider-specific errors
 #[derive(Error, Debug)]
 pub enum ProviderError {
-    /// API 키가 누락됨.
+    /// API key is missing.
     #[error("Missing API key")]
     MissingApiKey,
 
-    /// 알 수 없는 프로바이더.
+    /// Unknown provider.
     #[error("Unknown provider: {0}")]
     UnknownProvider(String),
 
-    /// 프로바이더가 아직 구현되지 않음.
+    /// Provider not yet implemented.
     #[error("Provider not implemented: {0}")]
     NotImplemented(String),
 
-    /// HTTP 오류 (상태 코드 + 메시지).
+    /// HTTP error (status code + message).
     #[error("HTTP error {0}: {1}")]
     HttpError(u16, String),
 
-    /// HTTP 요청 실패.
+    /// HTTP request failed.
     #[error("Request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
 
-    /// I/O 오류.
+    /// I/O error.
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 
-    /// 프로바이더로부터 올바르지 않은 응답.
+    /// Invalid response from provider.
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
 
-    /// API 키 형식이 올바르지 않음.
+    /// Invalid API key format.
     #[error("Invalid API key format")]
     InvalidApiKey,
 
-    /// JSON 파싱 오류.
+    /// JSON parsing error.
     #[error("JSON parse error: {0}")]
     JsonParse(#[from] serde_json::Error),
 
-    /// 스트리밍 오류.
+    /// Streaming error.
     #[error("Stream error: {0}")]
     StreamError(String),
 
-    /// 네트워크 오류.
+    /// Network error.
     #[error("Network error: {0}")]
     NetworkError(String),
 
-    /// 요청 시간 초과.
+    /// Request timed out.
     #[error("Request timed out")]
     Timeout,
 
-    /// 요청 속도 제한.
+    /// Rate limit exceeded.
     #[error("Rate limited")]
     RateLimited {
-        /// 서버가 제시한 대기 시간.
+        /// Wait time suggested by the server.
         retry_after: Option<std::time::Duration>,
     },
 }
 
 impl ProviderError {
-    /// 오류가 재시도 가능한지 반환.
+    /// Returns whether this error is retryable.
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::HttpError(status, _) => *status == 429 || *status >= 500,
@@ -73,7 +73,7 @@ impl ProviderError {
         }
     }
 
-    /// 서버가 제시한 재시도 대기 시간을 반환.
+    /// Returns the retry wait time suggested by the server.
     pub fn retry_after(&self) -> Option<std::time::Duration> {
         match self {
             Self::RateLimited { retry_after } => *retry_after,
@@ -99,15 +99,15 @@ pub enum ValidationError {
 /// Unified error type for oxi-ai
 #[derive(Error, Debug)]
 pub enum Error {
-    /// 프로바이더 오래의 래핑.
+    /// Wraps a provider error.
     #[error("Provider error: {0}")]
     Provider(#[from] ProviderError),
 
-    /// 유효성 검사 오래의 래핑.
+    /// Wraps a validation error.
     #[error("Validation error: {0}")]
     Validation(#[from] ValidationError),
 
-    /// I/O 오류의 래핑.
+    /// Wraps an I/O error.
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

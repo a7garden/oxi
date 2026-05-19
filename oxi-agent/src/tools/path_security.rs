@@ -1,15 +1,15 @@
-//! 파일 접근 경로 보안 검증.
+//! File path security validation.
 
 use std::path::{Path, PathBuf};
 
-/// 경로 보안 오류
+/// Path security error
 #[derive(Debug)]
 pub enum PathSecurityError {
-    /// 경로를 찾을 수 없음
+    /// Path not found
     NotFound(PathBuf),
-    /// 경로 순회 감지
+    /// Path traversal detected
     Traversal(PathBuf),
-    /// 작업 공간 밖 경로
+    /// Path outside workspace
     OutsideWorkspace(PathBuf),
 }
 
@@ -25,39 +25,39 @@ impl std::fmt::Display for PathSecurityError {
 
 impl std::error::Error for PathSecurityError {}
 
-/// 파일 접근 시 보안 검증 유틸.
+/// Security validation utility for file access.
 pub struct PathGuard {
     root: PathBuf,
 }
 
 impl PathGuard {
-    /// 작업 디렉토리 기반으로 생성.
+    /// Creates a new instance based on the current working directory.
     pub fn new(cwd: &Path) -> Self {
         let root = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
         Self { root }
     }
 
-    /// 경로가 작업 공간 내에 있는지 확인.
+    /// Checks whether the path is within the workspace.
     pub fn validate(&self, path: &Path) -> Result<PathBuf, PathSecurityError> {
-        // 1. 순회 방지
+        // 1. Prevent traversal
         if path.components().any(|c| c.as_os_str() == "..") {
             return Err(PathSecurityError::Traversal(path.to_path_buf()));
         }
 
-        // 2. 존재하는 경로면 canonicalize로 실제 경로 확인
+        // 2. For existing paths, canonicalize to resolve the real path
         if path.exists() {
             let canonical = path
                 .canonicalize()
                 .map_err(|_| PathSecurityError::NotFound(path.to_path_buf()))?;
 
-            // 3. 루트 내부인지 확인
+            // 3. Verify it is inside the root
             if !canonical.starts_with(&self.root) {
                 return Err(PathSecurityError::OutsideWorkspace(canonical));
             }
 
             Ok(canonical)
         } else {
-            // 존재하지 않는 경로는 순회만 확인
+            // For non-existing paths, only check traversal
             Ok(path.to_path_buf())
         }
     }
@@ -69,12 +69,12 @@ impl PathGuard {
     /// Blocks `..` components and canonicalizes existing paths but does
     /// NOT reject absolute paths outside the workspace.
     pub fn validate_traversal(&self, path: &Path) -> Result<PathBuf, PathSecurityError> {
-        // 1. 순회 방지
+        // 1. Prevent traversal
         if path.components().any(|c| c.as_os_str() == "..") {
             return Err(PathSecurityError::Traversal(path.to_path_buf()));
         }
 
-        // 2. 존재하는 경로면 canonicalize로 실제 경로 얻기
+        // 2. For existing paths, canonicalize to get the real path
         if path.exists() {
             let canonical = path
                 .canonicalize()

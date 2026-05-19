@@ -1,6 +1,16 @@
+<div align="center">
+
 # oxi-agent
 
-Agent runtime layer built on `oxi-ai` — manages the tool-calling loop, event emission, context compaction, and state.
+**Agent runtime for Rust** — tool-calling loop, event system, context compaction, and MCP client.
+
+[![Version](https://img.shields.io/badge/Version-0.20.0-blue?style=flat-square)](https://crates.io/search?q=oxi)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](../LICENSE.md)
+[![Docs](https://img.shields.io/docsrs/oxi-agent/latest?style=flat-square)](https://docs.rs/oxi-agent)
+
+</div>
+
+---
 
 ## Overview
 
@@ -274,4 +284,4 @@ agent.set_system_prompt("New instructions...".into());
 
 ## License
 
-MIT
+[MIT](../LICENSE.md)

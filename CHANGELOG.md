@@ -5,7 +5,44 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-[0.15.2] - 2026-05-16
+## [Unreleased]
+
+### Changed — workspace
+
+- Root repository cleaned up: removed 75+ analysis/report markdown files and orphaned source files
+- All Korean comments and doc strings translated to English across 15 source files
+- `.gitignore` expanded with editor, OS, and profiling exclusions
+- `rust-toolchain.toml` added to pin toolchain version
+- `deny.toml` added for `cargo deny` dependency auditing
+- `.editorconfig` added for cross-editor consistency
+- `.cargo/config.toml` added for build configuration
+- CI pipeline enhanced with `cargo doc`, `cargo test --doc`, and `cargo deny` jobs
+- `docs.rs` metadata added to all library crate Cargo.toml files
+
+### Added — workspace
+
+- `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
+- `CONTRIBUTING.md` expanded with full development guide, architecture, and conventions
+- GitHub issue templates (bug report, feature request, config)
+- GitHub pull request template
+- `oxi-ai/examples/basic_streaming.rs`
+- `oxi-agent/examples/custom_tool.rs`
+- `oxi-tui/examples/theme_demo.rs`
+- `oxi-store/examples/settings_demo.rs`
+- `oxi-sdk/examples/builder_demo.rs`
+
+### Fixed — oxi-agent
+
+- `truncate.rs` test updated to use emoji-based multi-byte characters
+
+### Fixed — oxi-tui
+
+- `fuzzy.rs` Unicode match test updated for ASCII pattern
+- `chat.rs` CJK wrapping tests updated with English text
+- `input.rs` CJK input tests updated with ASCII equivalents
+- `text.rs` CJK truncation tests updated with ASCII equivalents
+
+## [0.20.0] - 2026-05-19
 
 ### Added — oxi-sdk
 

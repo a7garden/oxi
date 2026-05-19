@@ -1,11 +1,11 @@
-//! 설정 검증 모듈.
+//! Settings validation module.
 //!
-//! 애플리케이션 시작 시 모든 설정 값을 검증하여
-//! 런타임 패닉을 사전에 방지한다.
+//! Validates all setting values at application startup
+//! to prevent runtime panics in advance.
 
 use crate::settings::Settings;
 
-/// 검증 결과
+/// Validation result
 #[derive(Debug)]
 pub struct ValidationReport {
     pub errors: Vec<ValidationError>,
@@ -25,23 +25,23 @@ pub struct ValidationWarning {
 }
 
 impl ValidationReport {
-    /// 에러가 없으면 `true`를 반환한다.
+    /// Returns `true` if there are no errors.
     pub fn is_valid(&self) -> bool {
         self.errors.is_empty()
     }
 }
 
 impl Settings {
-    /// 현재 설정의 유효성을 검증한다.
+    /// Validates the current settings.
     ///
-    /// 에러는 즉시 프로그램 종료 사유가 되며, 경고는 로그에 남기만 한다.
+    /// Errors are reasons for immediate program termination, while warnings are only logged.
     pub fn validate(&self) -> ValidationReport {
         let mut report = ValidationReport {
             errors: Vec::new(),
             warnings: Vec::new(),
         };
 
-        // 1. default_temperature — 0.0~2.0 범위
+        // 1. default_temperature — range 0.0~2.0
         if let Some(temp) = self.default_temperature {
             if !(0.0..=2.0).contains(&temp) {
                 report.errors.push(ValidationError {
@@ -53,7 +53,7 @@ impl Settings {
                 });
             }
         }
-        // 레거시 temperature(f32) 필드도 검증
+        // Also validate legacy temperature(f32) field
         if let Some(temp) = self.temperature {
             if !(0.0..=2.0).contains(&temp) {
                 report.errors.push(ValidationError {
@@ -66,7 +66,7 @@ impl Settings {
             }
         }
 
-        // 2. max_response_tokens — 최소 1, 128000 초과 시 경고
+        // 2. max_response_tokens — minimum 1, warn if exceeds 128000
         if let Some(tokens) = self.max_response_tokens {
             if tokens == 0 {
                 report.errors.push(ValidationError {
@@ -83,7 +83,7 @@ impl Settings {
                 });
             }
         }
-        // 레거시 max_tokens(u32)도 동일 검증
+        // Also validate legacy max_tokens(u32) field
         if let Some(tokens) = self.max_tokens {
             if tokens == 0 {
                 report.errors.push(ValidationError {
@@ -101,7 +101,7 @@ impl Settings {
             }
         }
 
-        // 3. tool_timeout_seconds — 최소 1
+        // 3. tool_timeout_seconds — minimum 1
         if self.tool_timeout_seconds == 0 {
             report.errors.push(ValidationError {
                 field: "tool_timeout_seconds".to_string(),
@@ -109,14 +109,14 @@ impl Settings {
             });
         }
 
-        // 4. thinking_level — 열거형이므로 직렬화/역직렬화 단계에서 이미 검증됨.
-        //    하지만 env 등을 통해 우회 입력된 값도 있으니 안전망으로 확인.
-        //    (ThinkingLevel은 이미 enum이므로 유효하지 않은 값은 역직렬화에서 거부됨)
+        // 4. thinking_level — already validated at deserialization since it is an enum.
+        //    However, values injected via env vars may bypass this, so add a safety check.
+        //    (ThinkingLevel is already an enum, so invalid values are rejected at deserialization)
 
         // 5. default_model — model name only (no provider prefix expected)
         // No validation needed: model name may or may not contain '/' depending on user input.
 
-        // 6. session_history_size — 최소 1
+        // 6. session_history_size — minimum 1
         if self.session_history_size == 0 {
             report.errors.push(ValidationError {
                 field: "session_history_size".to_string(),
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::settings::ThinkingLevel;
 
-    /// 기본 설정은 에러·경고 모두 없어야 한다.
+    /// Default settings should have no errors or warnings.
     #[test]
     fn test_default_settings_are_valid() {
         let settings = Settings::default();

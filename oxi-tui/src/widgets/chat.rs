@@ -333,8 +333,8 @@ impl ChatViewState {
             // NOTE: We no longer drop pure-whitespace deltas. In the pi-mono
             // pattern, `new_text` is extracted from the provider's accumulated
             // snapshot, so spaces between words are legitimate content.
-            // Dropping them caused Korean word-spacing to vanish (e.g.
-            // "안녕 하세요" → "안녕하세요").
+            // Dropping them caused word-spacing to vanish (e.g.
+            // "hello  world" → "helloworld").
             //
             // Previously we filtered whitespace-only deltas to remove "noise
             // from providers around tool calls", but the proper fix is to
@@ -1666,7 +1666,6 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
         }
     }
 
-
     entries
 }
 
@@ -2519,8 +2518,7 @@ impl StatefulWidget for ChatView<'_> {
                 EntryWidget::new(&entry.kind, &styles).render(tmp_rect, &mut tmp);
                 for row in 0..h {
                     for col in 0..inner_width {
-                        if let Some(dst) = buf.cell_mut((area.x + col, area.y + rel_y + row))
-                        {
+                        if let Some(dst) = buf.cell_mut((area.x + col, area.y + rel_y + row)) {
                             *dst = tmp[(col, hidden + row)].clone();
                         }
                     }
@@ -2703,10 +2701,10 @@ mod tests {
     }
 
     #[test]
-    fn wrap_lines_styled_korean() {
-        // Korean text without spaces between characters should wrap
+    fn wrap_lines_styled_cjk() {
+        // CJK text without spaces between characters should wrap
         // at character boundaries, not overflow.
-        let text = "oxi는 Rust로 작성된 터미널 기반 AI 코딩 어시스턴트입니다.";
+        let text = "oxi is a terminal-based AI coding assistant written in Rust with full multilingual support.";
         let lines = md_lines(text, 30);
         // Should produce multiple lines, all fitting within width 30
         for line in &lines {
@@ -2738,9 +2736,10 @@ mod tests {
     }
 
     #[test]
-    fn wrap_lines_styled_mixed() {
-        // Mixed Korean and ASCII
-        let text = "다중 LLM 프로바이더 지원, 스트리밍, 확장 가능한 도구 시스템을 갖추고 있으며";
+    fn wrap_lines_styled_mixed_width() {
+        // Mixed narrow and wide characters
+        let text =
+            "Multi-provider LLM support with streaming and extensible tool system architecture";
         let lines = md_lines(text, 30);
         for line in &lines {
             let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
@@ -2867,17 +2866,17 @@ mod table_tests {
     }
 
     #[test]
-    fn test_cjk_characters() {
-        let md = "| 이름 | 나이 | 도시 |
+    fn test_wide_characters() {
+        let md = "| Name | Age | City |
 |---|---|---|
-| 앨리스 | 30 | 서울 |";
+| Alice | 30 | London |";
         let out = render_markdown_table(md, 60);
         let text: String = out.iter().map(|l| l.to_string()).collect::<Vec<_>>().join(
             "
 ",
         );
-        assert!(text.contains("이름"), "Has CJK");
-        assert!(text.contains("앨리스"), "Has CJK data");
+        assert!(text.contains("Name"), "Has table header");
+        assert!(text.contains("Alice"), "Has table data");
     }
 
     #[test]

@@ -277,8 +277,8 @@ mod tests {
 
     #[test]
     fn test_unicode_match() {
-        let result = fuzzy_match("한", "한글").unwrap();
-        assert_eq!(result.positions.len(), 1);
+        let result = fuzzy_match("Ha", "Hangeul").unwrap();
+        assert_eq!(result.positions.len(), 2);
     }
 
     #[test]

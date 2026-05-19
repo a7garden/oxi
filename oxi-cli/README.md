@@ -1,6 +1,15 @@
+<div align="center">
+
 # oxi
 
-CLI coding agent harness — the top-level binary that ties together the oxi workspace.
+**CLI binary** — the terminal-based AI coding assistant that ties the oxi workspace together.
+
+[![CI](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/ci.yml?style=flat-square&label=CI)](https://github.com/a7garden/oxi/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](../LICENSE.md)
+
+</div>
+
+---
 
 ## Overview
 
@@ -218,4 +227,4 @@ Extensions implement the `AgentTool` trait from `oxi-agent` and are registered a
 
 ## License
 
-MIT
+[MIT](../LICENSE.md)

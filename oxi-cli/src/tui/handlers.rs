@@ -49,10 +49,10 @@ pub async fn handle_input(
             }
             None
         }
-        // IME 조합 완료 텍스트나 클립보드 붙여넣기 처리
+        // Handle IME composition completion or clipboard paste
         CEvent::Paste(text) => {
             if state.overlay.is_some() {
-                // 오버레이 활성 시 Paste를 overlay handler로 전달
+                // When overlay is active, forward Paste to the overlay handler
                 handle_overlay_paste(&text, state)
             } else {
                 state.input.insert_str(&text);
@@ -71,8 +71,8 @@ async fn handle_key(
     _ui_tx: &mpsc::UnboundedSender<UiEvent>,
     running: &mut bool,
 ) -> Option<Action> {
-    // 키보드 이벤트 타입이 지원되는 경우 Press만 처리
-    // (Repeat/Release 무시 — IME 조합 중 Repeat 이벤트 방지)
+    // Only handle Press events when the keyboard event type is supported
+    // (Ignore Repeat/Release — prevents Repeat events during IME composition)
     if key.kind != KeyEventKind::Press {
         return None;
     }

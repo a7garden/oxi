@@ -1,6 +1,16 @@
+<div align="center">
+
 # oxi-ai
 
-Unified LLM API for Rust — streaming, multi-provider, tool calling, and context management.
+**Unified LLM API for Rust** — streaming, multi-provider, tool calling, and context management.
+
+[![Version](https://img.shields.io/badge/Version-0.20.0-blue?style=flat-square)](https://crates.io/search?q=oxi)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](../LICENSE.md)
+[![Docs](https://img.shields.io/docsrs/oxi-ai/latest?style=flat-square)](https://docs.rs/oxi-ai)
+
+</div>
+
+---
 
 ## Overview
 
@@ -25,32 +35,37 @@ oxi-ai = { path = "path/to/oxi-ai" }
 Basic usage:
 
 ```rust
-use oxi_ai::{Context, get_provider, get_model, StreamOptions};
+use oxi_ai::prelude::*;
+use oxi_ai::create_builtin_provider;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Look up a model
-    let model = get_model("anthropic", "claude-sonnet-4-20250514")
-        .expect("model not found");
+    // Create a built-in provider (uses env vars for API keys)
+    let provider = create_builtin_provider("anthropic")
+        .ok_or_else(|| anyhow::anyhow!("Unknown provider"))?;
 
-    // Create a provider
-    let provider = get_provider("anthropic")
-        .expect("provider not found");
+    // Build a model descriptor
+    let model = oxi_ai::Model::new(
+        "claude-sonnet-4-20250514",
+        "Claude Sonnet 4",
+        oxi_ai::Api::AnthropicMessages,
+        "anthropic",
+        "https://api.anthropic.com",
+    );
 
     // Build context
-    let mut ctx = Context::new()
-        .with_system_prompt("You are a helpful assistant.");
-    ctx.add_user_message("Hello, world!");
+    let mut ctx = Context::new();
+    ctx.add_message(Message::user("Hello, world!"));
 
     // Stream the response
-    let mut stream = provider.stream(&model, &ctx, None).await?;
+    use futures::StreamExt;
+    let stream = provider.stream(&model, &ctx, None).await?;
+    tokio::pin!(stream);
 
     while let Some(event) = stream.next().await {
         match event {
             ProviderEvent::TextDelta { delta, .. } => print!("{}", delta),
-            ProviderEvent::Done { message, .. } => {
-                println!("\nDone. Tokens: {}", message.usage.total_tokens);
-            }
+            ProviderEvent::Done { .. } => println!("\n[Done]"),
             _ => {}
         }
     }
@@ -179,7 +194,7 @@ pub enum ContentBlock {
 let mut ctx = Context::new()
     .with_system_prompt("You are helpful.");
 
-ctx.add_user_message("Hello!");
+ctx.add_message(Message::user("Hello!"));
 ctx.add_tool(Tool::new("get_weather", "Get weather", schema));
 ```
 
@@ -263,4 +278,4 @@ let options = StreamOptions {
 
 ## License
 
-MIT
+[MIT](../LICENSE.md)

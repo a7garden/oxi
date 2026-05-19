@@ -56,12 +56,12 @@ impl fmt::Display for Api {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CacheRetention {
-    /// 캐시를 사용하지 않음 (기본값).
+    /// No caching (default).
     #[default]
     None,
-    /// 단기 캐시 유지.
+    /// Short-lived cache.
     Short,
-    /// 장기 캐시 유지.
+    /// Long-lived cache.
     Long,
 }
 
@@ -70,23 +70,23 @@ pub enum CacheRetention {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum ThinkingLevel {
-    /// 확장 추론 비활성화 (기본값).
+    /// Extended reasoning disabled (default).
     #[default]
     Off,
-    /// 최소 수준의 추론.
+    /// Minimal reasoning.
     Minimal,
-    /// 낮은 수준의 추론.
+    /// Low reasoning.
     Low,
-    /// 중간 수준의 추론.
+    /// Medium reasoning.
     Medium,
-    /// 높은 수준의 추론.
+    /// High reasoning.
     High,
-    /// 매우 높은 수준의 추론.
+    /// Very high reasoning.
     XHigh,
 }
 
 impl ThinkingLevel {
-    /// 추론 수준을 문자열로 반환. `Off`면 `None`.
+    /// Returns the reasoning level as a string. Returns `None` for `Off`.
     pub fn as_str(&self) -> Option<&str> {
         match self {
             ThinkingLevel::Off => None,
@@ -104,9 +104,9 @@ impl ThinkingLevel {
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
 pub enum InputModality {
-    /// 텍스트 입력.
+    /// Text input.
     Text,
-    /// 이미지 입력.
+    /// Image input.
     Image,
 }
 

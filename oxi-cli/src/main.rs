@@ -790,7 +790,10 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
                         return Ok(());
                     }
                     Err(e) => {
-                        eprintln!("[oxi] 경고: {} 모델 조회 실패: {}", provider_name, e);
+                        eprintln!(
+                            "[oxi] warning: failed to resolve models for {}: {}",
+                            provider_name, e
+                        );
                     }
                 }
             } else {
@@ -1066,7 +1069,11 @@ fn fetch_and_register_models(
                 );
             }
             Err(e) => {
-                tracing::warn!("[oxi] 경고: {} 모델 조회 실패: {}", cp.name, e);
+                tracing::warn!(
+                    "[oxi] warning: failed to resolve models for {}: {}",
+                    cp.name,
+                    e
+                );
             }
         }
     }

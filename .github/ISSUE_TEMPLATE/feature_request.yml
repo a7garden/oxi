@@ -1,0 +1,43 @@
+name: Feature Request
+description: Suggest a feature for oxi
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature! Please describe your idea below.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What problem does this feature solve?
+      placeholder: "I'm frustrated when..."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How would you like this to work?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches have you considered?
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which part of oxi does this affect?
+      options:
+        - oxi-ai (LLM providers)
+        - oxi-agent (tools, agent loop)
+        - oxi-tui (terminal UI)
+        - oxi-store (sessions, settings)
+        - oxi-sdk (multi-agent SDK)
+        - oxi-cli (binary, CLI interface)
+        - Extensions / Skills
+        - Documentation
+        - CI/CD

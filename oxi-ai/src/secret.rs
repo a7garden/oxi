@@ -1,11 +1,11 @@
-//! 민감 정보(API 키 등)의 실수 노출을 방지하는 래퍼 타입.
+//! Wrapper type to prevent accidental exposure of sensitive data (e.g., API keys).
 //!
-//! `Secret<T>`는 [`Debug`], [`Display`] 구현에서 값을 마스킹한다.
-//! 실제 값은 [`expose()`](Secret::expose)로만 접근 가능하다.
+//! `Secret<T>` masks values in [`Debug`] and [`Display`] implementations.
+//! The actual value is only accessible via [`expose()`](Secret::expose).
 
 use std::fmt;
 
-/// API 키 등 민감 정보를 감싸는 타입.
+/// A wrapper for sensitive data such as API keys.
 ///
 /// # Examples
 /// ```ignore
@@ -20,22 +20,22 @@ pub struct Secret<T> {
 }
 
 impl<T> Secret<T> {
-    /// 민감 값을 감싼다.
+    /// Wraps a sensitive value.
     pub fn new(value: T) -> Self {
         Self { inner: value }
     }
 
-    /// 실제 값에 접근. HTTP 헤더 생성 등 필수 로직에서만 사용.
+    /// Access the underlying value. Use only in essential logic such as HTTP header generation.
     pub fn expose(&self) -> &T {
         &self.inner
     }
 
-    /// 소유권 이전으로 값 꺼내기.
+    /// Extract the value by transferring ownership.
     pub fn expose_owned(self) -> T {
         self.inner
     }
 
-    /// 내부 값 변환.
+    /// Transform the inner value.
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Secret<U> {
         Secret::new(f(self.inner))
     }

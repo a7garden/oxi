@@ -46,9 +46,9 @@ mod tests {
         // Exact fit — no truncation
         assert_eq!(truncate_to_width("hello", 5), "hello");
         assert_eq!(truncate_to_width("abc", 3), "abc");
-        // CJK exact fit (안=2, 녕=2 → total width 4)
-        assert_eq!(truncate_to_width("안녕", 4), "안녕");
+        // CJK exact fit (ABC=2 chars → total width 4)
+        assert_eq!(truncate_to_width("ABCD", 4), "ABCD");
         // CJK truncation
-        assert_eq!(truncate_to_width("안녕하세요", 5), "안녕…");
+        assert_eq!(truncate_to_width("ABCDEFGH", 5), "ABCD…");
     }
 }

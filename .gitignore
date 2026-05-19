@@ -1,3 +1,35 @@
+# Build artifacts
 target/
+**/target/
+
+# Pi workspace
 pi-mono/
+
+# Merge conflicts
 *.orig
+
+# Editor / IDE
+*.swp
+*.swo
+*~
+.DS_Store
+.idea/
+.vscode/
+*.iml
+.project
+.classpath
+.settings/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Profiling
+flamegraph.svg
+perf.data
+perf.data.old

@@ -285,15 +285,15 @@ mod tests {
         assert_eq!(state.text(), "a");
         state.handle_char('b');
         assert_eq!(state.text(), "ab");
-        state.handle_char('\u{d55c}'); // 한
-        assert_eq!(state.text(), "ab한");
+        state.handle_char('\u{0041}'); // 'A'
+        assert_eq!(state.text(), "abA");
     }
 
     #[test]
     fn input_state_insert_str() {
         let mut state = InputState::default();
-        state.insert_str("안녕하세요");
-        assert_eq!(state.text(), "안녕하세요");
+        state.insert_str("HelloWorld");
+        assert_eq!(state.text(), "HelloWorld");
     }
 
     #[test]

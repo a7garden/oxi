@@ -356,10 +356,10 @@ mod tests {
 
     #[test]
     fn test_truncate_to_bytes_utf8() {
-        // Korean characters are multi-byte
-        let s = "안녕하세요";
-        let truncated = truncate_to_bytes(s, 6); // 2 Korean chars = 6 bytes
-        assert_eq!(truncated, "안녕");
+        // Multi-byte characters (emoji)
+        let s = "Hello 🌍🌎🌏";
+        let truncated = truncate_to_bytes(s, 11); // "Hello " = 6 + "🌍" = 4 → 10 bytes
+        assert_eq!(truncated, "Hello 🌍");
     }
 
     #[test]

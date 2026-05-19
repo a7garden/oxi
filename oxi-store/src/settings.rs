@@ -28,18 +28,18 @@ const ENV_PREFIX: &str = "OXI_";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ThinkingLevel {
-    /// 확장 추론 비활성화 (기본값).
+    /// Extended reasoning disabled (default).
     #[default]
     Off,
-    /// 최소 수준의 추론.
+    /// Minimal reasoning.
     Minimal,
-    /// 낮은 수준의 추론.
+    /// Low reasoning.
     Low,
-    /// 중간 수준의 추론.
+    /// Medium reasoning.
     Medium,
-    /// 높은 수준의 추론.
+    /// High reasoning.
     High,
-    /// 매우 높은 수준의 추론.
+    /// Very high reasoning.
     XHigh,
 }
 

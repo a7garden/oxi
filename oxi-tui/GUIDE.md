@@ -198,8 +198,7 @@ CJK characters occupy 2 columns:
 surface.write_string(0, 0, "Hello 世界");
 
 // Cells:
-// [H][e][l][l][o][ ][세][게]
-//        │           └── wide continuation
+// [H][e][l][l][o][ ][W][o]        │           └── wide continuation
 //        └─────────────── wide continuation
 ```
 

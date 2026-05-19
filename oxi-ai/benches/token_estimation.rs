@@ -40,7 +40,7 @@ fn code(n: usize) -> String {
 /// Uses chars-based truncation to avoid splitting multi-byte sequences.
 fn mixed_cjk(n: usize) -> String {
     let base = "这是一段中文测试文本，mixed with English words. \
-                日本語テキストも含まれています. 한국어도 있습니다. \
+                日本語テキストも含まれています. And some more CJK text too. \
                 The multilingual tokenizer must handle all of these. ";
     let mut s = String::new();
     while s.chars().count() < n {

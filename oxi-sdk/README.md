@@ -1,36 +1,67 @@
+<div align="center">
+
 # oxi-sdk
 
-**oxi AI agent SDK** — build isolated, multi-agent AI systems.
+**Multi-agent SDK for oxi** — build isolated, multi-agent AI systems in Rust.
 
-## Features
+[![Version](https://img.shields.io/badge/Version-0.20.0-blue?style=flat-square)](https://crates.io/search?q=oxi)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](../LICENSE.md)
+[![Docs](https://img.shields.io/docsrs/oxi-sdk/latest?style=flat-square)](https://docs.rs/oxi-sdk)
 
-- **Isolated instances** — No global state. Each `Oxi` instance has its own provider/model registries.
-- **Runtime workspace injection** — `ToolContext` passed at execution time, so tools can be reused across workspaces.
-- **ProviderResolver trait** — Custom provider/model resolution for embedded use cases (oxios).
-- **Fluent builder API** — `OxiBuilder` → `AgentBuilder` → `Agent`.
+</div>
 
-## Example
+---
+
+## Overview
+
+`oxi-sdk` provides a fluent builder API for constructing single and multi-agent AI systems
+on top of `oxi-ai` and `oxi-agent`.
+
+### Key Concepts
+
+| Component | Purpose |
+|-----------|---------|
+| `OxiBuilder` | Configure the engine: providers, builtins, custom resolvers |
+| `AgentBuilder` | Build individual agents with model, prompt, and tools |
+| `AgentGroup` | Orchestrate multiple agents (pipeline, parallel, fan-out) |
+| `MessageBus` | Pub/sub inter-agent communication |
+| `AgentMetrics` | Track run count, tokens, and durations |
+| `ClosureTool` | Create tools from closures without implementing the full trait |
+
+## Quick Start
 
 ```rust
-use oxi_sdk::{OxiBuilder, AgentConfig};
+use oxi_sdk::OxiBuilder;
 
-let oxi = OxiBuilder::new().with_builtins().build();
+// Build the engine
+let engine = OxiBuilder::new()
+    .include_builtins(true)
+    .build();
 
-let agent = oxi.agent(AgentConfig {
-    model_id: "anthropic/claude-sonnet-4-20250514".into(),
-    max_iterations: 20,
-    ..Default::default()
-})
-.workspace("/workspace/agent-1")
-.system_prompt("You are an autonomous coding agent.")
-.coding_tools()
-.build()?;
+// Create a provider
+let provider = engine.create_provider("anthropic")?;
 
-let (response, events) = agent.run("Build a REST API".into()).await?;
-println!("Result: {}", response.content);
+// Build an agent
+let agent = engine.agent("my-agent")
+    .model_id("claude-sonnet-4-20250514")
+    .system_prompt("You are a helpful coding assistant.")
+    .coding_tools()
+    .workspace("/path/to/project")
+    .build()?;
+
+// Run
+let (response, events) = agent.run("Implement a REST API".into()).await?;
+println!("{}", response.content);
 ```
 
-## Packages
+## Design Principles
+
+- **No global state** — each `Oxi` instance has its own provider/model registries
+- **Runtime workspace injection** — `ToolContext` passed at execution time for tool reuse
+- **ProviderResolver trait** — custom provider/model resolution for embedded use cases
+- **Composable** — agents can be combined into groups with different orchestration strategies
+
+## Workspace Crates
 
 | Crate | Description |
 |-------|-------------|
@@ -40,4 +71,4 @@ println!("Result: {}", response.content);
 
 ## License
 
-MIT
+[MIT](../LICENSE.md)
