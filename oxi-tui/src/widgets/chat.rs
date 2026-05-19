@@ -761,7 +761,11 @@ fn md_lines(content: &str, width: u16) -> Vec<Line<'static>> {
     // Try table rendering first (pulldown-cmark based)
     let table_lines = render_markdown_table(content, width);
     if !table_lines.is_empty() {
-        return table_lines;
+        // render_markdown_table handles table cell wrapping internally,
+        // but non-table text (before/after the table) comes from
+        // flush_text → tui_markdown and may exceed the width.
+        // Apply wrapping to the entire result to catch those cases.
+        return wrap_lines_styled(&table_lines, width);
     }
 
     // No table found, use regular markdown rendering.
