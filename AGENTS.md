@@ -1,6 +1,6 @@
 # oxi
 
-Terminal-based AI coding assistant built in Rust. Multi-crate workspace providing multi-provider LLM access, an agent tool-calling loop, a terminal UI, a persistent session store, and an SDK for building multi-agent systems.
+Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI coding assistant. Multi-crate workspace providing multi-provider LLM access, an agent tool-calling loop, a terminal UI, a persistent session store, and an SDK for building multi-agent systems.
 
 ## Quick Facts
 

@@ -4,6 +4,7 @@
 
 **A terminal-based AI coding assistant built in Rust.**
 
+A Rust port of [pi](https://github.com/earendil-works/pi) by Mario Zechner.
 Multi-provider · Streaming-first · Extensible · Session persistence
 
 [![CI](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/ci.yml?style=flat-square&label=CI)](https://github.com/a7garden/oxi/actions)
@@ -19,7 +20,9 @@ Multi-provider · Streaming-first · Extensible · Session persistence
 
 ## Why oxi?
 
-oxi brings the power of LLM-based coding assistants directly to your terminal — fast, private, and fully under your control.
+oxi is a Rust port of [pi](https://github.com/earendil-works/pi), re-implementing its core architecture — unified LLM API, agent runtime, tool calling, terminal UI, and session persistence — in idiomatic Rust with Tokio, Ratatui, and Serde.
+
+It brings the power of LLM-based coding assistants directly to your terminal — fast, private, and fully under your control.
 
 | Feature | Description |
 |---------|-------------|
@@ -199,6 +202,12 @@ Sessions are stored as append-only JSONL files in `~/.oxi/sessions/`. Each sessi
 oxi only communicates with the LLM provider you select. No telemetry, no analytics, no third-party data collection. Your code stays between you and your chosen provider.
 </details>
 
+## Attribution
+
+oxi is a Rust port of [pi](https://github.com/earendil-works/pi) by [Mario Zechner](https://github.com/badlogicgames).
+The architectural design, provider abstraction, tool system, streaming events, and session tree
+are derived from the original pi project (MIT License). See [NOTICE.md](NOTICE.md) for details.
+
 ## License
 
-[MIT](LICENSE.md) © oxi contributors
+[MIT](LICENSE.md) © 2025 Mario Zechner, 2025–2026 oxi contributors

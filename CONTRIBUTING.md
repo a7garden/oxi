@@ -232,4 +232,8 @@ oxi-tui     (independent)         ← oxi-cli
 By contributing to oxi, you agree that your contributions will be licensed
 under the [MIT License](LICENSE.md).
 
+Note: oxi is a Rust port of [pi](https://github.com/earendil-works/pi) (MIT License, Copyright © 2025 Mario Zechner).
+All contributions are made under the same MIT License that covers both the original
+pi codebase and the oxi port.
+
 [rust-api]: https://rust-lang.github.io/api-guidelines/

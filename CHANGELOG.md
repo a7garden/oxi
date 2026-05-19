@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed — workspace
 
+- Added proper attribution to original [pi](https://github.com/earendil-works/pi) project (MIT License, Copyright © 2025 Mario Zechner)
+- Updated LICENSE.md with dual copyright notice (pi + oxi contributors)
+- Added NOTICE.md with detailed attribution of derived architecture
+- Updated README.md, AGENTS.md, CONTRIBUTING.md to reflect port provenance
+
+### Changed — workspace
+
 - Root repository cleaned up: removed 75+ analysis/report markdown files and orphaned source files
 - All Korean comments and doc strings translated to English across 15 source files
 - `.gitignore` expanded with editor, OS, and profiling exclusions
