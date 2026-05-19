@@ -666,9 +666,13 @@ impl ChatViewState {
 
         // Recompute outside the read lock
         let entries = compute_layout(self, width);
-        let total_height = entries
+        let total_height: u16 = entries
             .last()
-            .map(|e| e.y.saturating_add(e.height))
+            .map(|e| {
+                (e.y as u32)
+                    .saturating_add(e.height as u32)
+                    .min(u16::MAX as u32) as u16
+            })
             .unwrap_or(0);
 
         {
@@ -1574,11 +1578,13 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
     if let Some(ref streaming) = state.streaming {
         // Only add a spacer if we actually rendered any history messages.
         if rendered_any_message {
-            entries.push(LayoutEntry {
-                y,
-                height: 1,
-                kind: LayoutKind::Spacer,
-            });
+            if y <= u16::MAX as u32 {
+                entries.push(LayoutEntry {
+                    y: y as u16,
+                    height: 1,
+                    kind: LayoutKind::Spacer,
+                });
+            }
             y += 1;
         }
         let mut prev_was_box = false;
@@ -1596,11 +1602,13 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             // Insert spacer between consecutive box-type blocks (tool calls, errors)
             let is_box = is_box_block(block);
             if is_box && prev_was_box {
-                entries.push(LayoutEntry {
-                    y,
-                    height: 1,
-                    kind: LayoutKind::Spacer,
-                });
+                if y <= u16::MAX as u32 {
+                    entries.push(LayoutEntry {
+                        y: y as u16,
+                        height: 1,
+                        kind: LayoutKind::Spacer,
+                    });
+                }
                 y += 1;
             }
             prev_was_box = is_box;
@@ -1634,18 +1642,26 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
                 _ => {}
             }
             let h = measure_kind(&kind, width, &state.expanded_thinking);
-            entries.push(LayoutEntry { y, height: h, kind });
-            y += h;
+            if y <= u16::MAX as u32 {
+                entries.push(LayoutEntry {
+                    y: y as u16,
+                    height: h,
+                    kind,
+                });
+            }
+            y += h as u32;
         }
-        entries.push(LayoutEntry {
-            y,
-            height: 1,
-            kind: LayoutKind::Spinner {
-                frame: state.spinner_frame,
-            },
-        });
-        _ = y;
+        if y <= u16::MAX as u32 {
+            entries.push(LayoutEntry {
+                y: y as u16,
+                height: 1,
+                kind: LayoutKind::Spinner {
+                    frame: state.spinner_frame,
+                },
+            });
+        }
     }
+
 
     entries
 }
@@ -2423,9 +2439,13 @@ impl StatefulWidget for ChatView<'_> {
 
         // Get layout computed with inner_width for correct height measurements
         let layout = state.get_layout(inner_width);
-        let total_height = layout
+        let total_height: u16 = layout
             .last()
-            .map(|e| e.y.saturating_add(e.height))
+            .map(|e| {
+                (e.y as u32)
+                    .saturating_add(e.height as u32)
+                    .min(u16::MAX as u32) as u16
+            })
             .unwrap_or(0);
         state.content_height = total_height;
 
