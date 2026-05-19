@@ -39,7 +39,7 @@ use std::time::Instant;
 use self::helpers::should_stop_after_turn;
 use self::queues::{
     clear_all_queues, clear_follow_up_queue, clear_steering_queue, drain_follow_up_queue,
-    drain_steering_queue,
+    drain_steering_queue, try_push_follow_up, try_push_steering,
 };
 use self::retry::{
     auto_retry_attempt_method, cancel_auto_retry, handle_retryable_error, is_retryable_error,
@@ -63,6 +63,8 @@ pub struct AgentLoop {
     session_id: Option<String>,
     auto_retry_attempt: AtomicUsize,
     auto_retry_cancel: AtomicBool,
+    /// Notify used to wake up the auto-retry sleep immediately when cancelled.
+    auto_retry_notify: tokio::sync::Notify,
     circuit_breaker: CircuitBreaker,
     /// External stop flag — when set, should_stop_after_turn returns true.
     /// Used by Agent to forward the should_stop_flag from AgentHooks.
@@ -106,6 +108,7 @@ impl AgentLoop {
             session_id: config.session_id.clone(),
             auto_retry_attempt: AtomicUsize::new(0),
             auto_retry_cancel: AtomicBool::new(false),
+            auto_retry_notify: tokio::sync::Notify::new(),
             circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
             external_stop: Arc::new(AtomicBool::new(false)),
             resolver,
@@ -141,14 +144,26 @@ impl AgentLoop {
         self
     }
 
-    /// TODO: document this function.
+    /// Inject a steering message into the agent loop.
+    ///
+    /// Steering messages are processed at the start of each turn, before the
+    /// next LLM call. If the steering queue is at capacity (256 messages), the
+    /// message is dropped and a warning is logged.
     pub fn steer(&self, message: Message) {
-        self.steering_queue.write().push(message);
+        if !try_push_steering(self, message) {
+            tracing::warn!("Steering message dropped — queue at capacity");
+        }
     }
 
-    /// TODO: document this function.
+    /// Enqueue a follow-up message to continue the conversation after all
+    /// tool calls in the current batch are complete.
+    ///
+    /// If the follow-up queue is at capacity (64 messages), the message is
+    /// dropped and a warning is logged.
     pub fn follow_up(&self, message: Message) {
-        self.follow_up_queue.write().push(message);
+        if !try_push_follow_up(self, message) {
+            tracing::warn!("Follow-up message dropped — queue at capacity");
+        }
     }
 
     /// TODO: document this function.
@@ -630,9 +645,30 @@ impl AgentLoop {
                 );
             }
 
+            // Re-check steering queue after the inner while loop exits.
+            // This closes the race window where steer() is called between the
+            // last drain_steering_queue() and the while-exit condition check.
+            let late_steering = self.drain_steering_queue();
+            if !late_steering.is_empty() {
+                tracing::info!(
+                    count = late_steering.len(),
+                    "[AGENT-LOOP] Caught late steering messages after inner loop exit"
+                );
+                pending_messages = late_steering;
+                continue;
+            }
+
             let follow_up_messages = self.drain_follow_up_queue();
             if !follow_up_messages.is_empty() {
                 pending_messages = follow_up_messages;
+                continue;
+            }
+
+            // Final check: one more steering drain after follow-up to catch
+            // messages injected during the follow-up drain window.
+            let final_steering = self.drain_steering_queue();
+            if !final_steering.is_empty() {
+                pending_messages = final_steering;
                 continue;
             }
 

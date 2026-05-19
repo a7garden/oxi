@@ -68,7 +68,7 @@ async fn handle_key(
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
     session: &AgentSession,
-    _ui_tx: &mpsc::UnboundedSender<UiEvent>,
+    ui_tx: &mpsc::UnboundedSender<UiEvent>,
     running: &mut bool,
 ) -> Option<Action> {
     // Only handle Press events when the keyboard event type is supported
@@ -97,7 +97,7 @@ async fn handle_key(
 
             // Slash command in input
             if value.starts_with('/') {
-                let handled = slash::handle_slash_command(&value, session, state, running);
+                let handled = slash::handle_slash_command(&value, session, state, running, ui_tx);
                 state.input_clear();
                 if handled {
                     return None;
@@ -426,6 +426,12 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
 
         // ── Session events ────────────────────────────────────────
         UiEvent::CompactionStart { reason } => {
+            // Skip for manual compaction — the slash command handler already
+            // shows an immediate "Compacting..." message, and the result
+            // arrives via UiEvent::SystemMessage. Only show for auto/overflow.
+            if matches!(reason, CompactionReason::Manual) {
+                return;
+            }
             let reason_str = match reason {
                 CompactionReason::Manual => "manual",
                 CompactionReason::Threshold => "auto",
@@ -439,6 +445,10 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             _reason,
             error_message,
         } => {
+            // Skip for manual — result is delivered via UiEvent::SystemMessage.
+            if matches!(_reason, CompactionReason::Manual) {
+                return;
+            }
             let msg = if let Some(err) = error_message {
                 format!("Compaction failed: {}", err)
             } else {
@@ -478,6 +488,9 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             }
             state.history_index = 0;
             state.start_streaming();
+        }
+        UiEvent::SystemMessage(msg) => {
+            state.add_system_message(msg);
         }
         UiEvent::TokenUsage {
             input_tokens,

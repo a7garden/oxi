@@ -60,6 +60,19 @@ impl GroupResult {
         self.results.iter().all(|r| r.success)
     }
 
+    /// Check if any agents failed.
+    ///
+    /// Unlike `!all_succeeded()`, this clearly conveys intent for callers
+    /// that need to handle partial failures.
+    pub fn has_failures(&self) -> bool {
+        self.results.iter().any(|r| !r.success)
+    }
+
+    /// Number of agents that completed successfully.
+    pub fn success_count(&self) -> usize {
+        self.results.iter().filter(|r| r.success).count()
+    }
+
     /// Get the combined content from all agents.
     pub fn combined_content(&self) -> String {
         self.results
@@ -128,6 +141,9 @@ impl AgentGroup {
     }
 
     /// Sequential pipeline: each agent receives the previous output.
+    ///
+    /// If an agent fails, the pipeline stops and returns partial results.
+    /// The caller should check [`GroupResult::has_failures`] to detect this.
     async fn run_pipeline(&self, prompt: String) -> Result<Vec<AgentGroupOutput>> {
         let mut results = Vec::with_capacity(self.agents.len());
         let mut current_input = prompt;
@@ -150,7 +166,13 @@ impl AgentGroup {
                         success: false,
                         error: Some(e.to_string()),
                     });
-                    // Pipeline stops on first failure
+                    // Pipeline stops on first failure. Partial results are
+                    // returned in the GroupResult — use has_failures() to detect.
+                    tracing::warn!(
+                        agent = agent.model_id(),
+                        index = results.len() - 1,
+                        "Pipeline agent failed, stopping sequential execution"
+                    );
                     break;
                 }
             }

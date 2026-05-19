@@ -1,11 +1,12 @@
 //! Slash command handling.
 
-use super::app::{AppOverlay, AppState, SetupStep};
+use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
 use crate::app::agent_session::{AgentSession, ScopedModel};
 use crate::media::clipboard_write;
 use crate::storage::export::{self, ExportMeta, HtmlExportOptions};
 use oxi_tui::widgets::chat::{ContentBlock, MessageRole};
 use std::path::PathBuf;
+use tokio::sync::mpsc;
 
 /// A slash command completion entry.
 pub(crate) struct SlashCompletion {
@@ -19,6 +20,7 @@ pub(crate) fn handle_slash_command(
     session: &AgentSession,
     state: &mut AppState,
     running: &mut bool,
+    ui_tx: &mpsc::UnboundedSender<UiEvent>,
 ) -> bool {
     let trimmed = input.trim();
     let (cmd, arg) = if let Some(space) = trimmed.find(' ') {
@@ -69,15 +71,18 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/compact" => {
+            state.add_system_message("Compacting (manual)...".to_string());
             let instructions = arg.map(|s| s.to_string());
             let sh = session.clone_handle();
+            let tx = ui_tx.clone();
             tokio::spawn(async move {
-                match sh.compact(instructions).await {
-                    Ok(result) => {
-                        tracing::info!("Compaction: {} tokens before", result.tokens_before)
-                    }
-                    Err(e) => tracing::warn!("Compaction failed: {}", e),
-                }
+                let result = sh.compact(instructions).await;
+                let msg = match &result {
+                    Ok(r) => format!("Compaction complete ({} tokens before)", r.tokens_before),
+                    Err(e) => format!("Compaction failed: {}", e),
+                };
+                // Send result directly to TUI via ui_tx for guaranteed delivery
+                let _ = tx.send(UiEvent::SystemMessage(msg));
             });
             true
         }
@@ -205,9 +210,19 @@ pub(crate) fn handle_slash_command(
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    match clipboard_write::copy_to_clipboard(&content) {
-                        Ok(()) => state.add_system_message("OK: Copied to clipboard".to_string()),
-                        Err(e) => state.add_system_message(format!("Error: Copy failed: {}", e)),
+                    if content.trim().is_empty() {
+                        state.add_system_message(
+                            "No text content to copy (last message has no text)".to_string(),
+                        );
+                    } else {
+                        match clipboard_write::copy_to_clipboard(&content) {
+                            Ok(()) => {
+                                state.add_system_message("OK: Copied to clipboard".to_string())
+                            }
+                            Err(e) => {
+                                state.add_system_message(format!("Error: Copy failed: {}", e))
+                            }
+                        }
                     }
                 } else {
                     state.add_system_message("No assistant message".to_string());
@@ -298,10 +313,21 @@ pub(crate) fn handle_slash_command(
                             }
                         }
                     } else {
-                        state.add_system_message(format!(
-                            "HTML ready ({} bytes). /export <path> to save.",
-                            html.len()
-                        ));
+                        // Auto-save to CWD with session-based filename
+                        let sid = session.session_id();
+                        let short_sid = &sid[..8.min(sid.len())];
+                        let default_name = format!("oxi-export-{}.html", short_sid);
+                        match std::fs::write(&default_name, &html) {
+                            Ok(()) => state.add_system_message(format!(
+                                "OK: Exported: {} ({} bytes)",
+                                default_name,
+                                html.len()
+                            )),
+                            Err(e) => state.add_system_message(format!(
+                                "Error: Write failed: {}. /export <path> to save manually.",
+                                e
+                            )),
+                        }
                     }
                 }
                 Err(e) => state.add_system_message(format!("Error: Export failed: {}", e)),
@@ -337,39 +363,46 @@ pub(crate) fn handle_slash_command(
         }
         "/fork" => {
             if let Some(ref path) = state.session_file_path {
-                if let Some(entry_id) = arg {
-                    let sm = oxi_store::session::SessionManager::open(path, None, None);
-                    match sm.branch_from_entry(entry_id) {
-                        Ok(new_path) => {
-                            state.next_action =
-                                Some(super::app::TuiNextAction::SwitchSession(new_path));
+                let sm = oxi_store::session::SessionManager::open(path, None, None);
+                let branch = sm.get_branch(None);
+                let user_entries: Vec<_> = branch.iter().filter(|e| e.message.is_user()).collect();
+
+                if let Some(sel) = arg {
+                    // Resolve the user's selection to a full entry ID.
+                    // Accept: number (1-based index), short ID (prefix), or full ID.
+                    let resolved_id = resolve_entry_id(sel, &user_entries);
+                    match resolved_id {
+                        Some(full_id) => match sm.branch_from_entry(&full_id) {
+                            Ok(new_path) => {
+                                state.next_action =
+                                    Some(super::app::TuiNextAction::SwitchSession(new_path));
+                                state.add_system_message(format!(
+                                    "Forked from [{}]\nStarting new session...",
+                                    &full_id[..8.min(full_id.len())]
+                                ));
+                            }
+                            Err(e) => {
+                                state.add_system_message(format!("Error forking: {}", e));
+                            }
+                        },
+                        None => {
                             state.add_system_message(format!(
-                                "Forked from [{}]\nStarting new session...",
-                                &entry_id[..8.min(entry_id.len())]
+                                "Entry not found: {}\nUse /fork to list available messages.",
+                                sel
                             ));
-                        }
-                        Err(e) => {
-                            state.add_system_message(format!("Error forking: {}", e));
                         }
                     }
                 } else {
-                    let sm = oxi_store::session::SessionManager::open(path, None, None);
-                    let branch = sm.get_branch(None);
-                    let user_entries: Vec<_> = branch
-                        .iter()
-                        .filter(|e| e.message.is_user())
-                        .enumerate()
-                        .collect();
                     if user_entries.is_empty() {
                         state.add_system_message("No user messages to fork from.".to_string());
                     } else {
                         let mut out = "Fork from which message?\n\n".to_string();
-                        for (i, entry) in user_entries.iter() {
+                        for (i, entry) in user_entries.iter().enumerate() {
                             let preview: String = entry.content().chars().take(60).collect();
                             let short_id = &entry.id[..8.min(entry.id.len())];
                             out.push_str(&format!("  {}. [{}] {}\n", i + 1, short_id, preview));
                         }
-                        out.push_str("\n/fork <entry-id> to fork from a specific message");
+                        out.push_str("\n/fork <number or id> to fork from a message");
                         state.add_system_message(out);
                     }
                 }
@@ -671,7 +704,35 @@ pub(crate) fn handle_slash_command(
     }
 }
 
-// ── Help text ────────────────────────────────────────────────────────────
+// ── Entry ID resolution for /fork ─────────────────────────────────────────
+
+/// Resolve a user-provided selector to a full entry ID.
+///
+/// Accepts:
+/// - A 1-based number ("1", "2", ...) matching the displayed list
+/// - A short ID prefix ("abc12345") that matches the start of a full ID
+/// - A full UUID
+///
+/// Returns `None` if nothing matches.
+fn resolve_entry_id(sel: &str, entries: &[&oxi_store::session::SessionEntry]) -> Option<String> {
+    // Try numeric index first (1-based)
+    if let Ok(idx) = sel.parse::<usize>() {
+        if idx >= 1 && idx <= entries.len() {
+            return Some(entries[idx - 1].id.clone());
+        }
+    }
+
+    // Try prefix match or full match on entry IDs
+    for entry in entries {
+        if entry.id == sel || entry.id.starts_with(sel) {
+            return Some(entry.id.clone());
+        }
+    }
+
+    None
+}
+
+// ── Help text ────────────────────────────────────────────────────────────────
 
 fn format_help() -> String {
     r#"
@@ -682,7 +743,8 @@ fn format_help() -> String {
     /import <path>    Import session from JSONL
     /tree             Show session tree
     /fork             List messages to fork from
-    /fork <id>        Fork from a specific message
+    /fork <number>    Fork from a message by list number
+    /fork <id>        Fork from a specific message ID
     /session          Show session info
     /name <name>      Set session name
 

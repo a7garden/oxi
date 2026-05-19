@@ -222,6 +222,9 @@ pub(crate) enum UiEvent {
     AutoProcessStart {
         prompt: String,
     },
+
+    /// A system message to display from an async operation (e.g., compaction).
+    SystemMessage(String),
 }
 
 // ── Spinner ──────────────────────────────────────────────────────────────
@@ -1196,6 +1199,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                 &agent_session,
                                 &mut state,
                                 &mut running,
+                                &ui_tx,
                             );
                         }
                     }

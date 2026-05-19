@@ -1,5 +1,5 @@
-use crate::stream_retry::{self, RetryCallback};
 /// Retry logic for agent loop
+use crate::stream_retry::{self, RetryCallback};
 use crate::{AgentError, AgentEvent};
 use anyhow::Result;
 use oxi_ai::{Context, Message, Model, ProviderEvent, StopReason, StreamOptions};
@@ -102,6 +102,9 @@ pub fn is_retryable_error(message: &oxi_ai::AssistantMessage) -> bool {
 }
 
 /// Attempt an auto-retry for a retryable assistant error.
+///
+/// Uses [`tokio::sync::Notify`] to allow immediate cancellation of the retry
+/// delay sleep, instead of waiting for the full delay to elapse.
 pub(crate) async fn handle_retryable_error(
     loop_ref: &super::AgentLoop,
     message: &oxi_ai::AssistantMessage,
@@ -137,6 +140,7 @@ pub(crate) async fn handle_retryable_error(
             .unwrap_or_else(|| "Unknown error".into()),
     });
 
+    // Remove the error assistant message so we can retry with a clean context.
     if messages
         .last()
         .is_some_and(|m| matches!(m, Message::Assistant(_)))
@@ -144,20 +148,22 @@ pub(crate) async fn handle_retryable_error(
         messages.pop();
     }
 
+    // Reset cancel flag before entering the wait.
     loop_ref.auto_retry_cancel.store(false, Ordering::SeqCst);
 
+    // Wait with immediate wake-up via Notify.
+    // If cancel_auto_retry() is called during the sleep, the Notify fires
+    // and we wake up immediately instead of waiting for the full delay.
     tokio::select! {
-        _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {}
-        _ = tokio::task::yield_now() => {
-            if loop_ref.auto_retry_cancel.load(Ordering::SeqCst) {
-                emit(AgentEvent::AutoRetryEnd {
-                    success: false,
-                    attempt,
-                    final_error: Some("Retry cancelled".into()),
-                });
-                loop_ref.auto_retry_attempt.store(0, Ordering::Relaxed);
-                return false;
-            }
+        _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {
+            // Normal delay elapsed — check cancel flag one more time.
+        }
+        _ = loop_ref.auto_retry_notify.notified() => {
+            // Woken up by cancel_auto_retry().
+            tracing::info!(
+                attempt,
+                "Auto-retry wait interrupted by cancellation"
+            );
         }
     }
 
@@ -175,8 +181,12 @@ pub(crate) async fn handle_retryable_error(
 }
 
 /// Cancel any in-progress auto-retry wait.
+///
+/// Sets the cancel flag and fires the [`tokio::sync::Notify`] to immediately
+/// wake up the retry delay sleep.
 pub fn cancel_auto_retry(loop_ref: &super::AgentLoop) {
     loop_ref.auto_retry_cancel.store(true, Ordering::SeqCst);
+    loop_ref.auto_retry_notify.notify_waiters();
 }
 
 /// Returns the current auto-retry attempt number (0 = no retry in progress).

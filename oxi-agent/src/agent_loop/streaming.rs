@@ -145,6 +145,10 @@ pub(crate) async fn stream_assistant_response(
                 }
 
             ProviderEvent::Done { message, .. } => {
+                // Record success in circuit breaker — the provider returned a
+                // complete response without errors.
+                loop_ref.circuit_breaker.record_success();
+
                 tracing::info!(
                     "Stream event #{}: Done (stop_reason={:?})",
                     event_count,
@@ -206,6 +210,11 @@ pub(crate) async fn stream_assistant_response(
             }
 
             ProviderEvent::Error { mut error, .. } => {
+                // Record failure in circuit breaker — the provider stream
+                // produced an error event after the connection was established.
+                // (connection-level failures are recorded in stream_with_retry)
+                loop_ref.circuit_breaker.record_failure();
+
                 tracing::info!("Stream event #{}: Error", event_count);
                 let raw_msg = error.text_content();
                 let friendly = if raw_msg.is_empty() {
