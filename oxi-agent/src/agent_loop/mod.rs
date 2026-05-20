@@ -232,6 +232,14 @@ impl AgentLoop {
         &self.external_stop
     }
 
+    /// Request cancellation from outside the loop (e.g. Ctrl+C).
+    /// Sets the `external_stop` flag which causes the streaming loop
+    /// to abort on its next periodic check (~500ms) and the agent loop
+    /// to exit after the current turn.
+    pub fn cancel(&self) {
+        self.external_stop.store(true, Ordering::SeqCst);
+    }
+
     /// Set the steering hook — called each turn to drain new messages
     /// from the session's steering queue into the loop's internal queue.
     pub fn set_steering_hook(&mut self, hook: Arc<dyn Fn() -> Vec<String> + Send + Sync>) {

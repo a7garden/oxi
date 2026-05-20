@@ -950,6 +950,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             let sh = session_handle.clone_handle();
                             let agent = sh.agent_ref();
                             sh.reset_should_stop();
+                            sh.agent_ref().reset_cancel();
                             let steering_q = sh.steering_queue();
                             let follow_up_q = sh.follow_up_queue();
                             let should_stop_flag = sh.should_stop_flag();

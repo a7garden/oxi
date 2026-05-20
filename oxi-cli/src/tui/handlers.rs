@@ -126,6 +126,12 @@ async fn handle_key(
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if state.is_agent_busy {
                 let sh = session.clone_handle();
+                // Cancel the agent run directly via Agent::cancel(). This sets
+                // a shared AtomicBool that the emit callback propagates to
+                // AgentLoop::external_stop on every event. Crucially, this also
+                // works when the provider stream is hung (no events) because the
+                // streaming loop's periodic check (~500ms) polls external_stop.
+                sh.agent_ref().cancel();
                 tokio::spawn(async move { sh.abort().await });
                 state.cancel_streaming();
                 state.is_agent_busy = false;
