@@ -124,10 +124,9 @@ async fn handle_key(
             Some(Action::SendPrompt(value))
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            // Simplest possible handler — just exit the loop
-            tracing::warn!("[TUI] Ctrl+C pressed — setting running = false");
+            tracing::debug!("[TUI-Handler] Ctrl+C setting running = false");
             *running = false;
-            tracing::warn!("[TUI] running is now: {}", *running);
+            tracing::debug!("[TUI-Handler] Ctrl+C done, running = {}", *running);
             None
         }
         KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
