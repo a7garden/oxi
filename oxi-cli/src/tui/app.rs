@@ -950,6 +950,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             let sh = session_handle.clone_handle();
                             let agent = sh.agent_ref();
                             sh.reset_should_stop();
+                            sh.agent_ref().reset_cancel();
                             let steering_q = sh.steering_queue();
                             let follow_up_q = sh.follow_up_queue();
                             let should_stop_flag = sh.should_stop_flag();
@@ -1179,8 +1180,12 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             state.footer_state.data.session_duration_secs = session_start.elapsed().as_secs();
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
+        tracing::warn!("[TUI] draw() completed");
+            tracing::warn!("[TUI] running = {}", running);
 
             if event::poll(poll_timeout)? {
+                tracing::warn!("[TUI] event::poll returned true");
+                tracing::warn!("[TUI] running = {} before read()", running);
                 if let Some(action) = handlers::handle_input(
                     event::read()?,
                     &mut state,
@@ -1268,6 +1273,8 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
         // ── Cleanup this iteration ──
         let next_action = state.next_action.take();
+
+        tracing::warn!("[TUI] Exiting loop, next_action = {:?}", next_action);
 
         // Signal the agent to stop before dropping the prompt channel.
         // This ensures the agent loop exits at the next turn boundary

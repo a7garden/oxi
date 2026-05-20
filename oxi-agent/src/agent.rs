@@ -84,6 +84,9 @@ pub struct Agent {
     /// Provider/model resolver. Uses global functions by default,
     /// or a custom resolver when created via `new_with_resolver()`.
     resolver: Arc<dyn ProviderResolver>,
+    /// Shared cancellation flag. Set by `cancel()` (e.g. on Ctrl+C),
+    /// propagated to AgentLoop's `external_stop` during each run.
+    cancel_flag: Arc<AtomicBool>,
 }
 
 impl Agent {
@@ -140,6 +143,7 @@ impl Agent {
             hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
             is_running: AtomicBool::new(false),
             resolver,
+            cancel_flag: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -336,6 +340,7 @@ impl Agent {
             }
         }
         let _guard = RunningGuard(&self.is_running);
+        self.reset_cancel();
 
         self.run_with_channel_inner(prompt, tx).await
     }
@@ -438,7 +443,8 @@ impl Agent {
 
         // Wire should_stop_after_turn hook: share AgentLoop's external_stop
         // Arc with the emit callback. When the hook fires (Ctrl+C detected),
-        // it sets ext_stop. AgentLoop checks this in should_stop_after_turn().
+        // it sets ext_stop. AgentLoop checks this in should_stop_after_turn()
+        // AND during streaming (streaming.rs checks external_stop each event).
         //
         // Arc<dyn Fn> can be cloned, so we read it without consuming.
         let maybe_hook = {
@@ -446,6 +452,7 @@ impl Agent {
             hooks_r.should_stop_after_turn.clone()
         };
         let ext_stop = al.external_stop().clone();
+        let cancel_flag = self.cancel_flag.clone();
 
         // Create emit callback that sends through the channel.
         // AgentLoop calls this synchronously. UnboundedSender::send() is
@@ -467,45 +474,41 @@ impl Agent {
                     tracing::info!("[AGENT-EMIT] Successfully sent event");
                 }
 
-                // On TurnEnd, poll the should_stop_after_turn hook to detect Ctrl+C.
-                // The hook wraps an AtomicBool (should_stop_flag from AgentSession).
-                // We can't pass real context here, but the TUI hook only checks
-                // the AtomicBool anyway: |ctx| should_stop_flag.load(SeqCst).
+                // Propagate cancellation from Agent::cancel() → external_stop.
+                // This runs on every event, ensuring the streaming loop detects
+                // cancellation promptly.
+                if cancel_flag.load(Ordering::SeqCst) {
+                    ext_stop.store(true, Ordering::SeqCst);
+                }
+
+                // Propagate should_stop → external_stop on every event, not
+                // just TurnEnd. The TUI hook only checks should_stop_flag.load(),
+                // so the context contents are irrelevant for non-TurnEnd events.
+                // This ensures streaming.rs detects cancellation immediately
+                // when the user presses Ctrl+C mid-stream.
                 if let Some(ref hook) = maybe_hook {
-                    if let AgentEvent::TurnEnd {
-                        ref assistant_message,
-                        ref tool_results,
-                        ..
-                    } = event
-                    {
-                        // Build real context from actual turn data
-                        let asst = match assistant_message {
-                            oxi_ai::Message::Assistant(a) => a.clone(),
-                            _ => {
-                                // Can't extract assistant message, just check the hook with empty ctx
-                                let ctx = ShouldStopAfterTurnContext {
-                                    message: oxi_ai::AssistantMessage::new(
-                                        oxi_ai::Api::OpenAiCompletions,
-                                        "agent",
-                                        "agent-model",
-                                    ),
-                                    tool_results: Vec::new(),
-                                    iteration: 0,
-                                };
-                                if hook(&ctx) {
-                                    ext_stop.store(true, Ordering::SeqCst);
-                                }
-                                return;
-                            }
-                        };
-                        let ctx = ShouldStopAfterTurnContext {
-                            message: asst,
-                            tool_results: tool_results.clone(),
-                            iteration: 0,
-                        };
-                        if hook(&ctx) {
-                            ext_stop.store(true, Ordering::SeqCst);
-                        }
+                    let ctx = ShouldStopAfterTurnContext {
+                        message: match &event {
+                            AgentEvent::TurnEnd {
+                                assistant_message: oxi_ai::Message::Assistant(a),
+                                ..
+                            } => a.clone(),
+                            _ => oxi_ai::AssistantMessage::new(
+                                oxi_ai::Api::OpenAiCompletions,
+                                "agent",
+                                "agent-model",
+                            ),
+                        },
+                        tool_results: match &event {
+                            AgentEvent::TurnEnd {
+                                ref tool_results, ..
+                            } => tool_results.clone(),
+                            _ => Vec::new(),
+                        },
+                        iteration: 0,
+                    };
+                    if hook(&ctx) {
+                        ext_stop.store(true, Ordering::SeqCst);
                     }
                 }
             })
@@ -551,6 +554,22 @@ impl Agent {
     pub fn set_hooks(&self, hooks: crate::config::AgentHooks) {
         let mut h = self.hooks.write();
         *h = hooks;
+    }
+
+    /// Request cancellation of the current agent run.
+    ///
+    /// Sets a shared `cancel_flag` that is propagated to the `AgentLoop`'s
+    /// `external_stop` on every event AND polled every ~500ms by the
+    /// streaming loop's periodic check. This ensures cancellation is
+    /// detected quickly even when the provider stream is completely hung
+    /// (no events arriving).
+    pub fn cancel(&self) {
+        self.cancel_flag.store(true, Ordering::SeqCst);
+    }
+
+    /// Reset the cancellation flag before starting a new run.
+    pub fn reset_cancel(&self) {
+        self.cancel_flag.store(false, Ordering::SeqCst);
     }
 
     /// Run the agent, invoking `on_event` for each [`AgentEvent`] produced.
@@ -702,25 +721,31 @@ impl Agent {
                     // Forward to tokio channel (non-blocking)
                     let _ = tx.try_send(event.clone());
 
+                    // Propagate should_stop → external_stop on every event,
+                    // not just TurnEnd. See run_with_channel_inner for rationale.
                     if let Some(ref hook) = maybe_hook {
-                        if let AgentEvent::TurnEnd {
-                            ref assistant_message,
-                            ref tool_results,
-                            ..
-                        } = event
-                        {
-                            let asst = match assistant_message {
-                                oxi_ai::Message::Assistant(a) => a.clone(),
-                                _ => return,
-                            };
-                            let ctx = ShouldStopAfterTurnContext {
-                                message: asst,
-                                tool_results: tool_results.clone(),
-                                iteration: 0,
-                            };
-                            if hook(&ctx) {
-                                ext_stop.store(true, Ordering::SeqCst);
-                            }
+                        let ctx = ShouldStopAfterTurnContext {
+                            message: match &event {
+                                AgentEvent::TurnEnd {
+                                    assistant_message: oxi_ai::Message::Assistant(a),
+                                    ..
+                                } => a.clone(),
+                                _ => oxi_ai::AssistantMessage::new(
+                                    oxi_ai::Api::OpenAiCompletions,
+                                    "agent",
+                                    "agent-model",
+                                ),
+                            },
+                            tool_results: match &event {
+                                AgentEvent::TurnEnd {
+                                    ref tool_results, ..
+                                } => tool_results.clone(),
+                                _ => Vec::new(),
+                            },
+                            iteration: 0,
+                        };
+                        if hook(&ctx) {
+                            ext_stop.store(true, Ordering::SeqCst);
                         }
                     }
                 })

@@ -124,15 +124,10 @@ async fn handle_key(
             Some(Action::SendPrompt(value))
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if state.is_agent_busy {
-                let sh = session.clone_handle();
-                tokio::spawn(async move { sh.abort().await });
-                state.cancel_streaming();
-                state.is_agent_busy = false;
-                state.add_system_message("Interrupted \u{00b7} Ctrl+C again to quit".to_string());
-            } else {
-                *running = false;
-            }
+            // Simplest possible handler — just exit the loop
+            tracing::warn!("[TUI] Ctrl+C pressed — setting running = false");
+            *running = false;
+            tracing::warn!("[TUI] running is now: {}", *running);
             None
         }
         KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
