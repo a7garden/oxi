@@ -90,12 +90,12 @@ pub struct AgentHooks {
     /// Returns steering messages to inject mid-run. Called after each turn
     /// (unless stopped).
     #[allow(clippy::type_complexity)]
-    pub get_steering_messages: Option<Box<dyn Fn() -> Vec<String> + Send + Sync>>,
+    pub get_steering_messages: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
 
     /// Returns follow-up messages to process after the agent would stop.
     /// Called when the agent has no more tool calls and no steering messages.
     #[allow(clippy::type_complexity)]
-    pub get_follow_up_messages: Option<Box<dyn Fn() -> Vec<String> + Send + Sync>>,
+    pub get_follow_up_messages: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
 
     /// Tool execution mode.
     pub tool_execution: ToolExecutionMode,

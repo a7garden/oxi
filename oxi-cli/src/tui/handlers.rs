@@ -294,11 +294,9 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         }
         UiEvent::AgentEnd => {
             // Agent finished all processing.
-            // Only clear busy state if there are no pending queued messages
-            // (auto-processing will start a new run immediately).
-            if state.pending_steering == 0 {
-                state.is_agent_busy = false;
-            }
+            // Always clear busy state — AutoProcessStart will re-set it
+            // if a queued message is being auto-processed.
+            state.is_agent_busy = false;
         }
 
         // ── Turn lifecycle ────────────────────────────────────────
@@ -313,9 +311,15 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         // These are the primary rendering events.
         UiEvent::MessageStart { message } => {
             // pi-mono: message_start — begin streaming
-            state.chat.start_streaming();
+            let auto_committed = state.chat.start_streaming();
+            if auto_committed {
+                state.message_count += 1;
+                state.chat.refresh_last_code_block();
+            }
             state.is_agent_busy = true;
             state.auto_scroll = true;
+            // Reset snapshot tracking counters for the new message
+            state.reset_snapshot_tracking();
             // Apply initial snapshot (delta = None for first message)
             state.update_streaming_message(&message, None);
         }
@@ -409,16 +413,6 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         UiEvent::ThinkingDelta(text) => {
             // Thinking text — still useful for showing reasoning
             state.chat.stream_thinking(text, true);
-        }
-        UiEvent::Complete => {
-            // Agent completed — only finalize if still streaming
-            // (MessageEnd may have already finalized)
-            if state.chat.is_streaming() {
-                state.finish_streaming();
-            } else {
-                // Already finalized via MessageEnd, just clear busy state
-                state.is_agent_busy = false;
-            }
         }
         UiEvent::Error(msg) => {
             state.cancel_streaming();

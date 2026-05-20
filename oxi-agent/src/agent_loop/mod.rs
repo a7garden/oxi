@@ -71,6 +71,11 @@ pub struct AgentLoop {
     external_stop: Arc<AtomicBool>,
     /// Provider/model resolver for isolated model lookups.
     resolver: Arc<dyn ProviderResolver>,
+    /// Steering hook from AgentHooks — polled each turn to drain new messages
+    /// from AgentSession's queue into AgentLoop's internal steering_queue.
+    steering_hook: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
+    /// Follow-up hook from AgentHooks — same as steering but for follow-ups.
+    follow_up_hook: Option<Arc<dyn Fn() -> Vec<String> + Send + Sync>>,
 }
 
 impl AgentLoop {
@@ -112,6 +117,8 @@ impl AgentLoop {
             circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
             external_stop: Arc::new(AtomicBool::new(false)),
             resolver,
+            steering_hook: None,
+            follow_up_hook: None,
         }
     }
 
@@ -223,6 +230,33 @@ impl AgentLoop {
     /// Get the external stop flag.
     pub fn external_stop(&self) -> &Arc<AtomicBool> {
         &self.external_stop
+    }
+
+    /// Set the steering hook — called each turn to drain new messages
+    /// from the session's steering queue into the loop's internal queue.
+    pub fn set_steering_hook(&mut self, hook: Arc<dyn Fn() -> Vec<String> + Send + Sync>) {
+        self.steering_hook = Some(hook);
+    }
+
+    /// Set the follow-up hook — called each turn to drain new messages
+    /// from the session's follow-up queue into the loop's internal queue.
+    pub fn set_follow_up_hook(&mut self, hook: Arc<dyn Fn() -> Vec<String> + Send + Sync>) {
+        self.follow_up_hook = Some(hook);
+    }
+
+    /// Poll the steering/follow-up hooks and inject new messages
+    /// into the internal queues.
+    fn poll_external_queues(&self) {
+        if let Some(ref hook) = self.steering_hook {
+            for msg_text in hook() {
+                self.steer(Message::User(UserMessage::new(msg_text)));
+            }
+        }
+        if let Some(ref hook) = self.follow_up_hook {
+            for msg_text in hook() {
+                self.follow_up(Message::User(UserMessage::new(msg_text)));
+            }
+        }
     }
 
     /// TODO: document this function.
@@ -472,6 +506,10 @@ impl AgentLoop {
                     );
                 }
 
+                // Poll external hooks each turn to drain new steering/follow-up
+                // messages injected since the last turn.
+                self.poll_external_queues();
+
                 self.maybe_compact(&mut messages, turn_number as usize, &emit)
                     .await;
 
@@ -643,6 +681,15 @@ impl AgentLoop {
                     !pending_messages.is_empty(),
                     has_more_tool_calls
                 );
+
+                // Early stop check: if external_stop was set (e.g. Ctrl+C),
+                // don't process steering messages from the next turn.
+                if self.external_stop.load(Ordering::SeqCst) {
+                    tracing::info!(
+                        "[AGENT-LOOP] external_stop set after steering drain, ending loop"
+                    );
+                    return Ok((messages, events));
+                }
             }
 
             // Re-check steering queue after the inner while loop exits.

@@ -304,13 +304,16 @@ impl ChatViewState {
         self.layout_cache.write().entries = None;
     }
 
-    pub fn start_streaming(&mut self) {
+    pub fn start_streaming(&mut self) -> bool {
         // Auto-commit any existing streaming before starting new.
         // This prevents tool execution results from being lost when
         // a new MessageStart arrives while tool results are streaming.
-        if self.streaming.is_some() {
+        let auto_committed = if self.streaming.is_some() {
             self.finish_streaming();
-        }
+            true
+        } else {
+            false
+        };
         self.streaming = Some(StreamingState {
             message: ChatMessage {
                 role: MessageRole::Assistant,
@@ -321,6 +324,7 @@ impl ChatViewState {
         self.tool_tracker.clear();
         // Streaming lifecycle changes should always invalidate layout.
         self.layout_cache.write().entries = None;
+        auto_committed
     }
 
     pub fn stream_text_delta(&mut self, delta: &str) {
@@ -569,7 +573,25 @@ impl ChatViewState {
     }
 
     pub fn cancel_streaming(&mut self) {
-        self.streaming = None;
+        // Preserve partial message (same as finish_streaming) so the user
+        // doesn't lose content that was already generated.
+        if let Some(mut s) = self.streaming.take() {
+            s.message.content_blocks.retain(|b| match b {
+                ContentBlock::Text { content } => !content.trim().is_empty(),
+                ContentBlock::Thinking { content, .. } => !content.trim().is_empty(),
+                _ => true,
+            });
+            if !s.message.content_blocks.is_empty() {
+                // Mark the last text block as cancelled
+                if let Some(ContentBlock::Text { content }) = s.message.content_blocks.last_mut() {
+                    if !content.ends_with('\n') {
+                        content.push('\n');
+                    }
+                    content.push_str("\u{2026} [cancelled]");
+                }
+                self.messages.push(s.message);
+            }
+        }
         // Invalidate cache
         let mut cache = self.layout_cache.write();
         cache.entries = None;

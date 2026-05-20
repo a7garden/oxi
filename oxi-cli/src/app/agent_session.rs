@@ -28,8 +28,8 @@
 
 use crate::context::auto_compaction::{CompactionConfig, CompactionReason};
 use crate::extensions::{
-    ExtensionContext, ExtensionContextBuilder, ExtensionRunner, InputEvent as ExtInputEvent,
-    InputEventResult as ExtInputEventResult, SessionShutdownEvent, SessionShutdownReason,
+    ExtensionContext, ExtensionContextBuilder, ExtensionRunner, SessionShutdownEvent,
+    SessionShutdownReason,
 };
 use anyhow::{Context, Result};
 use oxi_agent::{Agent, AgentEvent, AgentState};
@@ -41,7 +41,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::Mutex;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Session-level events (extends AgentEvent with session concerns)
@@ -106,55 +106,6 @@ pub struct ScopedModel {
 // Prompt options
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Options for [`AgentSession::prompt`].
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct PromptOptions {
-    /// Whether to expand file-based prompt templates (default: true).
-    pub expand_templates: bool,
-    /// Image attachments.
-    pub images: Vec<oxi_ai::ImageContent>,
-    /// How to queue when agent is streaming: steer (interrupt) or follow-up (wait).
-    pub streaming_behavior: Option<StreamingBehavior>,
-    /// Source of input (for extension hooks).
-    pub source: InputSource,
-}
-
-impl Default for PromptOptions {
-    fn default() -> Self {
-        Self {
-            expand_templates: true,
-            images: Vec::new(),
-            streaming_behavior: None,
-            source: InputSource::Interactive,
-        }
-    }
-}
-
-/// How to queue a message when the agent is already streaming.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum StreamingBehavior {
-    /// Inject as a steering message.
-    Steer,
-    /// Append as a follow-up.
-    FollowUp,
-}
-
-/// Source of user input (for extension hooks).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-#[derive(Default)]
-pub enum InputSource {
-    /// User typed at the interactive prompt.
-    #[default]
-    Interactive,
-    /// Input from an extension.
-    Extension,
-    /// Input from an RPC call.
-    Rpc,
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Session statistics
 // ═══════════════════════════════════════════════════════════════════════════
@@ -197,7 +148,6 @@ pub struct AgentSession {
     // ── Event listeners ──────────────────────────────────────────────
     #[allow(clippy::type_complexity)]
     listeners: Arc<RwLock<Vec<Box<dyn Fn(&SessionEvent) + Send + Sync>>>>,
-    event_tx: mpsc::UnboundedSender<SessionEvent>,
 
     // ── Model / thinking state ───────────────────────────────────────
     scoped_models: Arc<RwLock<Vec<ScopedModel>>>,
@@ -242,14 +192,11 @@ impl AgentSession {
             ..CompactionConfig::default()
         };
 
-        let (event_tx, _event_rx) = mpsc::unbounded_channel();
-
         Self {
             agent,
             settings: Arc::new(RwLock::new(settings)),
             session_manager: Arc::new(RwLock::new(session_manager)),
             listeners: Arc::new(RwLock::new(Vec::new())),
-            event_tx,
             scoped_models: Arc::new(RwLock::new(Vec::new())),
             steering_messages: Arc::new(RwLock::new(VecDeque::new())),
             follow_up_messages: Arc::new(RwLock::new(VecDeque::new())),
@@ -288,6 +235,12 @@ impl AgentSession {
     #[allow(dead_code)]
     pub fn is_streaming(&self) -> bool {
         self.streaming.load(Ordering::SeqCst)
+    }
+
+    /// Get a cloneable reference to the streaming flag.
+    /// Used by the TUI worker thread to set/clear the flag around agent runs.
+    pub fn streaming_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.streaming)
     }
 
     /// All messages in the agent state.
@@ -426,24 +379,12 @@ impl AgentSession {
         }
     }
 
-    /// Subscribe via an unbounded channel. Returns the receiver.
-    #[allow(dead_code)]
-    pub fn subscribe_channel(&self) -> mpsc::UnboundedReceiver<SessionEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.subscribe(Box::new(move |event| {
-            let _ = tx.send(event.clone());
-        }));
-        rx
-    }
-
     /// Emit a session event to all listeners.
     fn emit(&self, event: SessionEvent) {
         let listeners = self.listeners.read();
         for listener in listeners.iter() {
             listener(&event);
         }
-        // Also send to the internal channel
-        let _ = self.event_tx.send(event);
     }
 
     /// Emit a queue update event.
@@ -452,141 +393,6 @@ impl AgentSession {
             steering: self.steering_messages(),
             follow_up: self.follow_up_messages(),
         });
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    // Prompting
-    // ══════════════════════════════════════════════════════════════════
-
-    /// Send a prompt to the agent.
-    ///
-    /// If the agent is already streaming and `streaming_behavior` is set,
-    /// the message is queued as steering or follow-up instead.
-    ///
-    /// After the agent finishes, auto-compaction and auto-retry are
-    /// checked automatically.
-    #[allow(dead_code)]
-    pub async fn prompt(&self, text: String, options: PromptOptions) -> Result<()> {
-        // When streaming, queue the message instead
-        if self.is_streaming() {
-            return match options.streaming_behavior {
-                Some(StreamingBehavior::Steer) => self.steer(text).await,
-                Some(StreamingBehavior::FollowUp) => self.follow_up(text).await,
-                None => {
-                    anyhow::bail!(
-                        "Agent is already processing. Specify streaming_behavior to queue the message."
-                    );
-                }
-            };
-        }
-
-        // Validate model
-        let model_id = self.model_id();
-        if model_id.is_empty() {
-            anyhow::bail!("No model selected");
-        }
-
-        // Set agent hooks to poll steering/follow-up queues.
-        // Clone the Arc<> queue references so closures are 'static.
-        let steering_q = self.steering_messages.clone();
-        let follow_up_q = self.follow_up_messages.clone();
-        let hooks = oxi_agent::AgentHooks {
-            get_steering_messages: Some(Box::new(move || {
-                steering_q.write().drain(..).collect::<Vec<String>>()
-            })),
-            get_follow_up_messages: Some(Box::new(move || {
-                follow_up_q.write().drain(..).collect::<Vec<String>>()
-            })),
-            tool_execution: oxi_agent::ToolExecutionMode::Sequential,
-            ..Default::default()
-        };
-        self.agent.set_hooks(hooks);
-
-        // Run the agent and collect events
-        let (_response, events) = self.agent.run(text.clone()).await?;
-
-        // Process events for session persistence, compaction, and retry
-        self.process_events(events).await?;
-
-        Ok(())
-    }
-
-    /// Run a prompt and get a channel of events for streaming display.
-    ///
-    /// The returned receiver yields [`AgentEvent`]s as they are produced
-    /// by the agent. When the agent finishes (or errors), the channel is
-    /// closed and `is_streaming()` returns `false`.
-    ///
-    /// **Note:** The agent's `run_with_channel` produces a `!Send` future
-    /// because `parking_lot::RwLockReadGuard` is intentionally `!Send`
-    /// (contains `GuardNoSend`). We use `spawn_blocking` + `LocalSet` to
-    /// run it on a dedicated thread.
-    #[allow(dead_code)]
-    pub fn prompt_streaming(&self, text: String) -> mpsc::UnboundedReceiver<AgentEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
-
-        // Mark streaming as active
-        self.streaming.store(true, Ordering::SeqCst);
-
-        let agent = Arc::clone(&self.agent);
-        let streaming = Arc::clone(&self.streaming);
-
-        // Agent's run_with_channel produces a !Send future (parking_lot
-        // guard held across .await), so we need LocalSet + spawn_local
-        // inside a blocking thread.
-        tokio::task::spawn_blocking(move || {
-            // Use a dedicated current-thread runtime instead of
-            // Handle::current().block_on() to avoid "Cannot start a
-            // runtime from within a runtime" panics if the caller is
-            // itself inside a tokio context.
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("failed to build agent runtime");
-            rt.block_on(async {
-                let local = tokio::task::LocalSet::new();
-                local
-                    .run_until(async move {
-                        let (agent_tx, agent_rx) = std::sync::mpsc::channel::<AgentEvent>();
-
-                        // Run agent inside LocalSet
-                        let agent_for_task = Arc::clone(&agent);
-                        let agent_handle = tokio::task::spawn_local(async move {
-                            agent_for_task.run_with_channel(text, agent_tx).await
-                        });
-
-                        // Forward events from std::sync channel to unbounded output
-                        while let Ok(event) = agent_rx.recv() {
-                            let _ = tx.send(event);
-                        }
-
-                        // Wait for agent to finish and handle errors
-                        match agent_handle.await {
-                            Ok(Ok(_response)) => {
-                                // Agent completed successfully; events already forwarded
-                            }
-                            Ok(Err(e)) => {
-                                let _ = tx.send(AgentEvent::Error {
-                                    message: e.to_string(),
-                                    session_id: None,
-                                });
-                            }
-                            Err(join_err) => {
-                                let _ = tx.send(AgentEvent::Error {
-                                    message: format!("Agent task failed: {}", join_err),
-                                    session_id: None,
-                                });
-                            }
-                        }
-
-                        // Clear streaming flag when done
-                        streaming.store(false, Ordering::SeqCst);
-                    })
-                    .await;
-            });
-        });
-
-        rx
     }
 
     /// Queue a steering message (delivered after current turn's tool calls).
@@ -765,60 +571,6 @@ impl AgentSession {
         result
     }
 
-    /// Check auto-compaction after a response and trigger if needed.
-    #[allow(dead_code)]
-    async fn check_auto_compaction(&self) {
-        let config = self.compaction_config.read().clone();
-        if !config.enabled {
-            return;
-        }
-
-        let state = self.agent.state();
-        let messages = &state.messages;
-        if messages.is_empty() {
-            return;
-        }
-
-        // Estimate token count
-        let context_json = serde_json::to_string(messages).unwrap_or_default();
-        let estimated_tokens = oxi_ai::estimate_tokens(&context_json);
-
-        // Get context window from agent config (default 128k)
-        let context_window = 128_000;
-
-        // Check threshold
-        let ratio = estimated_tokens as f32 / context_window as f32;
-        if ratio >= config.threshold {
-            tracing::info!(
-                "Auto-compaction triggered: {} tokens ({:.0}%) >= {:.0}% of {}",
-                estimated_tokens,
-                ratio * 100.0,
-                config.threshold * 100.0,
-                context_window,
-            );
-
-            self.emit(SessionEvent::CompactionStart {
-                reason: CompactionReason::Threshold,
-            });
-
-            let result = self.run_compaction(None).await;
-
-            match result {
-                Ok(_r) => self.emit(SessionEvent::CompactionEnd {
-                    reason: CompactionReason::Threshold,
-                    error_message: None,
-                }),
-                Err(e) => {
-                    tracing::warn!("Auto-compaction failed: {}", e);
-                    self.emit(SessionEvent::CompactionEnd {
-                        reason: CompactionReason::Threshold,
-                        error_message: Some(format!("Auto-compaction failed: {}", e)),
-                    });
-                }
-            }
-        }
-    }
-
     /// Internal compaction execution.
     async fn run_compaction(
         &self,
@@ -852,20 +604,16 @@ impl AgentSession {
         Ok(CompactionResult { tokens_before })
     }
 
-    /// Abort in-progress compaction.
-    #[allow(dead_code)]
-    pub async fn abort_compaction(&self) {
-        let mut guard = self.compaction_abort.lock().await;
-        if let Some(handle) = guard.take() {
-            handle.abort();
+    /// Abort in-progress compaction via the shared abort handle.
+    /// Used by the TUI's auto-compaction infrastructure.
+    pub fn abort_compaction_sync(&self) {
+        // Best-effort: try to abort without async. The compaction
+        // checks compaction_abort periodically.
+        if let Ok(mut guard) = self.compaction_abort.try_lock() {
+            if let Some(handle) = guard.take() {
+                handle.abort();
+            }
         }
-    }
-
-    /// Enable or disable auto-compaction.
-    #[allow(dead_code)]
-    pub fn set_auto_compaction_enabled(&self, enabled: bool) {
-        self.compaction_config.write().enabled = enabled;
-        self.settings.write().auto_compaction = enabled;
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -980,66 +728,6 @@ impl AgentSession {
         sm.set_persisted_count(total);
     }
 
-    /// Process a batch of agent events for session concerns.
-    async fn process_events(&self, events: Vec<AgentEvent>) -> Result<()> {
-        // Forward all events to listeners and extensions
-        for event in &events {
-            self.emit(SessionEvent::Agent(event.clone()));
-
-            // Forward to extension runner for typed hooks
-            let guard = self.extension_runner.read();
-            if let Some(runner) = guard.as_ref() {
-                runner.registry().emit_event(event);
-
-                // Dispatch typed hooks
-                match event {
-                    AgentEvent::ToolCall { tool_call } => {
-                        runner.emit_tool_call(&tool_call.name, &tool_call.arguments);
-                    }
-                    AgentEvent::ToolExecutionStart {
-                        tool_name, args, ..
-                    } => {
-                        runner.emit_tool_call(tool_name, args);
-                    }
-                    AgentEvent::ToolExecutionEnd {
-                        tool_name, result, ..
-                    } => {
-                        let tool_result = oxi_agent::AgentToolResult::success(&result.content);
-                        runner.emit_tool_result_event(tool_name, &tool_result);
-                    }
-                    AgentEvent::Error { message, .. } => {
-                        let err = anyhow::anyhow!("{}", message);
-                        runner.registry().emit_error(&err);
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // Check auto-compaction after successful completion
-        let has_complete = events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::AgentEnd { .. } | AgentEvent::Complete { .. }));
-        if has_complete {
-            self.check_auto_compaction().await;
-
-            // Process follow-up queue if any
-            let follow_ups: Vec<String> = self.follow_up_messages.write().drain(..).collect();
-            if !follow_ups.is_empty() {
-                self.emit_queue_update();
-                // Submit follow-ups as new prompts
-                for msg in follow_ups {
-                    let _ = self.agent.run(msg).await;
-                }
-            }
-        }
-
-        // Persist to session
-        self.persist_session();
-
-        Ok(())
-    }
-
     // ══════════════════════════════════════════════════════════════════
     // Session management
     // ══════════════════════════════════════════════════════════════════
@@ -1088,7 +776,6 @@ impl AgentSession {
             settings: Arc::clone(&self.settings),
             session_manager: Arc::clone(&self.session_manager),
             listeners: Arc::clone(&self.listeners),
-            event_tx: self.event_tx.clone(),
             scoped_models: Arc::clone(&self.scoped_models),
             steering_messages: Arc::clone(&self.steering_messages),
             follow_up_messages: Arc::clone(&self.follow_up_messages),
@@ -1280,48 +967,6 @@ impl AgentSession {
             runner.emit_tool_result_event(tool_name, result)
         } else {
             crate::extensions::ToolResultEmitResult::default()
-        }
-    }
-
-    /// Process user input through extension hooks before agent processing.
-    ///
-    /// Extensions may transform or handle the input. Returns the final
-    /// [`InputEventResult`](ExtInputEventResult).
-    pub fn process_input_through_extensions(
-        &self,
-        text: &str,
-        source: InputSource,
-    ) -> ExtInputEventResult {
-        let guard = self.extension_runner.read();
-        if let Some(runner) = guard.as_ref() {
-            let ext_source = match source {
-                InputSource::Interactive => crate::extensions::InputSource::Interactive,
-                InputSource::Extension => crate::extensions::InputSource::Extension,
-                InputSource::Rpc => crate::extensions::InputSource::Rpc,
-            };
-            let mut event = ExtInputEvent {
-                text: text.to_string(),
-                source: ext_source,
-            };
-            runner.emit_input_event(&mut event)
-        } else {
-            ExtInputEventResult::Continue
-        }
-    }
-
-    /// Notify extensions that a message was sent.
-    pub fn notify_extensions_message_sent(&self, msg: &str) {
-        let guard = self.extension_runner.read();
-        if let Some(runner) = guard.as_ref() {
-            runner.registry().emit_message_sent(msg);
-        }
-    }
-
-    /// Notify extensions that a message was received.
-    pub fn notify_extensions_message_received(&self, msg: &str) {
-        let guard = self.extension_runner.read();
-        if let Some(runner) = guard.as_ref() {
-            runner.registry().emit_message_received(msg);
         }
     }
 
@@ -1691,16 +1336,6 @@ mod tests {
     }
 
     #[test]
-    fn test_set_auto_compaction_enabled() {
-        let session = make_session();
-        session.set_auto_compaction_enabled(true);
-        assert!(session.auto_compaction_enabled());
-
-        session.set_auto_compaction_enabled(false);
-        assert!(!session.auto_compaction_enabled());
-    }
-
-    #[test]
     fn test_is_compacting_initially_false() {
         let session = make_session();
         assert!(!session.is_compacting());
@@ -1898,29 +1533,6 @@ mod tests {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Streaming behavior and input source
-    // ══════════════════════════════════════════════════════════════════
-
-    #[test]
-    fn test_streaming_behavior_variants() {
-        assert_eq!(StreamingBehavior::Steer, StreamingBehavior::Steer);
-        assert_ne!(StreamingBehavior::Steer, StreamingBehavior::FollowUp);
-    }
-
-    #[test]
-    fn test_input_source_default() {
-        assert_eq!(InputSource::default(), InputSource::Interactive);
-    }
-
-    #[test]
-    fn test_prompt_options_default() {
-        let opts = PromptOptions::default();
-        assert!(opts.expand_templates);
-        assert!(opts.images.is_empty());
-        assert!(opts.streaming_behavior.is_none());
-        assert_eq!(opts.source, InputSource::Interactive);
-    }
-
     // ══════════════════════════════════════════════════════════════════
     // Extension integration
     // ══════════════════════════════════════════════════════════════════

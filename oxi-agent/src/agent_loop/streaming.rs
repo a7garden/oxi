@@ -260,6 +260,15 @@ pub(crate) async fn stream_assistant_response(
         })
         .ok_or_else(|| Error::msg("No assistant message in context"))?;
 
+    if !added_partial {
+        // Stream ended without a Start event — emit synthetic MessageStart
+        // so the TUI enters streaming state before MessageEnd finalizes.
+        tracing::warn!("Stream ended without Start event, emitting synthetic MessageStart");
+        emit(super::AgentEvent::MessageStart {
+            message: Message::Assistant(final_message.clone()),
+        });
+    }
+
     emit(super::AgentEvent::MessageEnd {
         message: Message::Assistant(final_message.clone()),
     });

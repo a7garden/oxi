@@ -328,11 +328,16 @@ impl Agent {
             return Err(Error::msg("Agent is already running"));
         }
 
-        let result = self.run_with_channel_inner(prompt, tx).await;
+        // Drop guard ensures is_running is cleared even on panic.
+        struct RunningGuard<'a>(&'a AtomicBool);
+        impl Drop for RunningGuard<'_> {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::SeqCst);
+            }
+        }
+        let _guard = RunningGuard(&self.is_running);
 
-        // Always clear the running flag
-        self.is_running.store(false, Ordering::SeqCst);
-        result
+        self.run_with_channel_inner(prompt, tx).await
     }
 
     /// Inner implementation of run_with_channel, called after the running guard is set.
@@ -398,7 +403,7 @@ impl Agent {
             *s = current;
         });
 
-        let agent_loop = AgentLoop::new_with_resolver(
+        let mut agent_loop = AgentLoop::new_with_resolver(
             provider,
             loop_config,
             Arc::clone(&self.tools),
@@ -418,6 +423,15 @@ impl Agent {
                 for msg_text in get_follow_up() {
                     agent_loop.follow_up(oxi_ai::Message::User(oxi_ai::UserMessage::new(msg_text)));
                 }
+            }
+
+            // Store hooks on AgentLoop so they can be polled each turn
+            // to pick up new messages injected during the run.
+            if let Some(ref get_steering) = hooks.get_steering_messages {
+                agent_loop.set_steering_hook(Arc::clone(get_steering));
+            }
+            if let Some(ref get_follow_up) = hooks.get_follow_up_messages {
+                agent_loop.set_follow_up_hook(Arc::clone(get_follow_up));
             }
         }
         let al = agent_loop;

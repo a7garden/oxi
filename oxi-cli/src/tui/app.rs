@@ -181,7 +181,6 @@ pub(crate) enum UiEvent {
     // ── Legacy events (kept for backward compat during transition) ──
     Thinking,
     ThinkingDelta(String),
-    Complete,
     Error(String),
 
     // ── Session events ─────────────────────────────────────────────
@@ -489,6 +488,16 @@ impl AppState {
         self.snapshot_text_block_created = false;
     }
 
+    /// Reset snapshot tracking counters for a new streaming message.
+    /// Called from the MessageStart handler to ensure counters are
+    /// clean even when MessageStart arrives without a preceding
+    /// AppState::start_streaming() call.
+    pub fn reset_snapshot_tracking(&mut self) {
+        self.snapshot_text_rendered = 0;
+        self.snapshot_thinking_rendered.clear();
+        self.snapshot_text_block_created = false;
+    }
+
     #[allow(dead_code)]
     pub fn stream_text_delta(&mut self, _delta: &str) {}
 
@@ -611,6 +620,7 @@ impl AppState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn finish_streaming(&mut self) {
         let was_streaming = self.chat.is_streaming();
         self.chat.finish_streaming();
@@ -748,7 +758,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         }));
 
         let (ui_tx, mut ui_rx) = mpsc::unbounded_channel::<UiEvent>();
-        let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(16);
+        let (prompt_tx, mut prompt_rx) = mpsc::channel::<String>(64);
 
         // Agent worker thread
         let session_handle = agent_session.clone_handle();
@@ -885,7 +895,6 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                         }
 
                                         // ── Completion & errors ──────────────────────
-                                        AgentEvent::Complete { .. } => UiEvent::Complete,
                                         AgentEvent::Error { message, .. } => {
                                             UiEvent::Error(message)
                                         }
@@ -948,10 +957,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                 should_stop_after_turn: Some(Arc::new(move |_ctx| {
                                     should_stop_flag.load(Ordering::SeqCst)
                                 })),
-                                get_steering_messages: Some(Box::new(move || {
+                                get_steering_messages: Some(Arc::new(move || {
                                     steering_q.write().drain(..).collect::<Vec<String>>()
                                 })),
-                                get_follow_up_messages: Some(Box::new(move || {
+                                get_follow_up_messages: Some(Arc::new(move || {
                                     follow_up_q.write().drain(..).collect::<Vec<String>>()
                                 })),
                                 tool_execution: oxi_agent::ToolExecutionMode::Sequential,
@@ -960,6 +969,13 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             agent.set_hooks(hooks);
                             let agent_clone = Arc::clone(&agent);
                             tracing::info!("[AGENT-WORKER] Spawning agent task");
+
+                            // Mark AgentSession streaming flag so is_streaming() is accurate
+                            // for any code that checks it (extensions, RPC, etc.).
+                            session_handle
+                                .streaming_flag()
+                                .store(true, Ordering::SeqCst);
+
                             let agent_handle = tokio::task::spawn_local(async move {
                                 tracing::info!(
                                     "[AGENT-WORKER] Agent task started, calling run_with_channel"
@@ -977,6 +993,12 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             // Agent runs on LocalSet, forwarder on its own thread.
                             // Agent drops event_tx when done → forwarder sees disconnect → exits.
                             let _ = agent_handle.await;
+
+                            // Clear streaming flag now that the agent run is complete.
+                            session_handle
+                                .streaming_flag()
+                                .store(false, Ordering::SeqCst);
+
                             // Do NOT call forwarder_handle.join() here — it blocks the
                             // tokio runtime thread, preventing prompt_rx.recv() from
                             // resolving on the next iteration. The forwarder will exit
@@ -1246,6 +1268,15 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
         // ── Cleanup this iteration ──
         let next_action = state.next_action.take();
+
+        // Signal the agent to stop before dropping the prompt channel.
+        // This ensures the agent loop exits at the next turn boundary
+        // instead of continuing to process.
+        agent_session
+            .should_stop_flag()
+            .store(true, Ordering::SeqCst);
+        agent_session.clear_queue();
+
         drop(prompt_tx);
         let _ = agent_handle.join();
 
