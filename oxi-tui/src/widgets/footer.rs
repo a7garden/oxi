@@ -166,7 +166,14 @@ impl StatefulWidget for Footer<'_> {
                     format!(" \u{2191}{} \u{2193}{}", in_fmt, out_fmt),
                     token_style,
                 ),
-                Span::styled(format!("  {:.0}%", pct_display), token_style),
+                Span::styled(
+                    format!(
+                        "  {:.1}%/{}",
+                        pct_display,
+                        FooterData::fmt_count(d.context_window_max)
+                    ),
+                    token_style,
+                ),
             ];
 
             if d.session_duration_secs > 0 {

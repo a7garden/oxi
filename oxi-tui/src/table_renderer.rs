@@ -315,6 +315,9 @@ fn render_table_data(state: &TableState, available_width: u16) -> Vec<Line<'stat
     // Bottom border
     lines.push(make_border_line(&column_widths, '└', '┴', '┘'));
 
+    // Trailing blank line for breathing room
+    lines.push(Line::from(Span::raw("")));
+
     lines
 }
 

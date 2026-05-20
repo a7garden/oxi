@@ -128,7 +128,8 @@ async fn handle_key(
                 let sh = session.clone_handle();
                 tokio::spawn(async move { sh.abort().await });
                 state.cancel_streaming();
-                state.add_system_message("Interrupted".to_string());
+                state.is_agent_busy = false;
+                state.add_system_message("Interrupted \u{00b7} Ctrl+C again to quit".to_string());
             } else {
                 *running = false;
             }

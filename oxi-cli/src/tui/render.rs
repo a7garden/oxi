@@ -223,8 +223,8 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         return;
     }
 
-    // Apply consistent 1px horizontal margin to all sections
-    let inner = size.inner(Margin::new(1, 0));
+    // Apply consistent 2-column horizontal margin to all sections
+    let inner = size.inner(Margin::new(2, 2));
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)

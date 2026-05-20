@@ -55,33 +55,39 @@ pub trait Provider: Send + Sync + 'static {
 }
 ```
 
-**10 providers** in `src/providers/`: anthropic, azure, bedrock, google, mistral, openai, openai_responses, vertex.
-`model_db.rs` contains pricing/context/feature data for 50+ models.
+**20 built-in providers** in `src/providers/`: openai, openai-responses, openai-completions, anthropic, google, vertex, mistral, azure, bedrock, deepseek, groq, cerebras, + 10 more.
+`model_db.rs` contains pricing/context/feature data for 544+ models across 28+ providers.
 `compaction.rs` summarizes old messages when context grows too large.
-`provider_registry.rs` has `ProviderAuth` trait for API key/OAuth management.
+`ProviderRegistry` in `mod.rs` supports both custom providers (via `register()`) and built-in fallback (via `register_builtins.rs`).
 
-Key types: `Model`, `Context`, `Message`, `ContentBlock`, `Tool`, `ProviderEvent`, `ProviderError`.
+Key types: `Model`, `Context`, `Message`, `ContentBlock`, `Tool`, `ProviderEvent`, `ProviderError`, `ProviderRegistry`.
 
 ### oxi-agent — Agent Runtime
 
 Manages the LLM tool-calling loop. Core trait in `src/tools.rs`:
 
 ```rust
+#[async_trait]
 pub trait AgentTool: Send + Sync {
     fn name(&self) -> &str;
     fn label(&self) -> &str;
     fn description(&self) -> &str;
     fn parameters_schema(&self) -> Value;
-    fn essential(&self) -> bool { false }  // Default: optional tool
-    async fn execute(&self, tool_call_id: &str, args: &Value) -> ToolResult;
+    fn essential(&self) -> bool { false }
+    async fn execute(
+        &self,
+        tool_call_id: &str,
+        params: Value,
+        signal: Option<oneshot::Receiver<()>>,
+        ctx: &ToolContext,
+    ) -> Result<AgentToolResult, ToolError>;
 }
 ```
 
-**18 tools** in `src/tools/`: bash, read, write, edit, ls, find, grep, github, github_search, subagent, questionnaire, context7 (2 sub-tools: resolve-library-id, query-docs), web_search, get_search_results.
+**20 tools** in `src/tools/`: bash, read, write, edit, edit_diff, ls, find, grep, github, github_search, subagent, questionnaire, context7 (2 sub-tools), web_search, get_search_results, file_mutation_queue.
 **7 essential tools** (cannot be disabled): read, write, edit, bash, grep, find, ls.
-`agent_loop/` contains retry/streaming/queue logic.
-`mcp/` implements Model Context Protocol client (client.rs, config.rs, tool.rs).
-`proxy.rs` handles permission gating.
+`agent_loop/` contains streaming, tool execution, retry logic, and queue management.
+`mcp/` implements Model Context Protocol client.
 `agent.rs` has `ProviderResolver` trait for resolving provider/model by name.
 
 Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
@@ -91,7 +97,7 @@ Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 Append-only JSONL session storage with tree branching (fork).
 Layered settings: defaults → global (`~/.oxi/settings.toml`) → project (`.oxi/settings.toml`) → env vars → CLI args.
 `auth_storage.rs` stores API keys and OAuth tokens.
-`model_resolver.rs` resolves model IDs to concrete `Model` structs.
+`model_registry.rs`/`model_resolver.rs` handle model metadata and ID resolution.
 
 Key types: `SessionEntry`, `AgentMessage`, `Settings`, `SessionManager`.
 
@@ -99,6 +105,7 @@ Key types: `SessionEntry`, `AgentMessage`, `Settings`, `SessionManager`.
 
 Built on `ratatui` + `crossterm`. Theme system with hot-reload from TOML/JSON files.
 Markdown rendering via `pulldown-cmark`. Fuzzy search for file/command completion.
+`widgets/chat.rs` is the main conversation widget (107K).
 
 Key types: `Theme`, `ThemeManager`, `ChatWidget`, `ToolRenderer`.
 
@@ -108,13 +115,13 @@ Builder pattern for constructing agents. `AgentGroup` supports parallel, sequent
 `MessageBus` provides pub/sub inter-agent communication.
 `KernelToolProvider` bridges SDK agents to the host tool registry.
 
-Key types: `AgentBuilder`, `AgentGroup`, `MessageBus`, `ClosureTool`, `KernelToolContext`.
+Key types: `AgentBuilder`, `AgentGroup`, `MessageBus`, `ClosureTool`, `KernelBridge`.
 
 ### oxi-cli — CLI Binary
 
 Entry point: `oxi-cli/src/main.rs` (uses `clap`).
 Runs in two modes: **TUI mode** (interactive terminal) and **RPC mode** (JSON-over-stdin/stdout for IDE integration).
-`extensions/` supports two mechanisms: native shared libraries (`.dylib`/`.so`/`.dll`) and WASM via Extism.
+`extensions/` supports native shared libraries (`.dylib`/`.so`/`.dll`) and WASM via Extism.
 `skills/` loads markdown skill files from `~/.oxi/skills/<name>/SKILL.md`.
 `storage/packages.rs` is the built-in package manager.
 
@@ -146,15 +153,16 @@ Extension system (`src/extensions/types.rs`):
 
 1. Create `oxi-ai/src/providers/<name>.rs`.
 2. Implement the `Provider` trait.
-3. Register in `oxi-ai/src/providers/register_builtins.rs`.
+3. Add `BuiltinProvider` entry in `oxi-ai/src/providers/register_builtins.rs`.
 4. Add model data to `oxi-ai/src/model_db.rs` if needed.
 
 ### Adding a New Tool
 
 1. Create `oxi-agent/src/tools/<name>.rs`.
 2. Implement the `AgentTool` trait.
-3. Register in `oxi-agent/src/tools.rs`.
-4. Mark `essential()` as `true` if it cannot be disabled.
+3. Add module declaration in `oxi-agent/src/tools.rs`.
+4. Register in `ToolRegistry::with_builtins_cwd()`.
+5. Mark `essential()` as `true` if it cannot be disabled.
 
 ### Adding a New Extension Type
 
@@ -200,6 +208,6 @@ cargo fmt --all -- --check           # Format check
 - Session entries form a tree via `parent_id`, not a flat list. Always traverse with this in mind.
 - Provider message formats differ significantly (Anthropic vs OpenAI). Use `transform.rs` for conversion.
 - The tool-calling loop in `agent_loop/` has retry logic — tool implementations must be idempotent.
-- `model_db.rs` may be auto-generated from provider APIs. Manual edits may be overwritten.
+- `model_db.rs` is large (585 entries). Manual edits may be overwritten by regeneration scripts.
 - SSE parsing handles partial UTF-8 lines. Do not assume line boundaries are clean.
 - `Agent::is_running` field prevents concurrent agent runs — check this before spawning parallel tasks.
