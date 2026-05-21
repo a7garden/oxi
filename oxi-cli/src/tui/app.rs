@@ -22,7 +22,7 @@ use oxi_tui::widgets::{
 };
 use std::io::{self, Write};
 use std::panic;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use tokio::sync::mpsc;
 
 use crossterm::{
@@ -94,6 +94,8 @@ impl Tui {
             let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
             // disable_raw_mode is the most critical — always attempt it.
             disable_raw_mode()?;
+            // Mark as cleaned up so Drop doesn't re-enter this path.
+            self.tty_ok = false;
         }
         Ok(())
     }
@@ -719,6 +721,20 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         None
     };
 
+    // ── Install SIGINT safety net ──
+    // Raw mode should capture Ctrl+C as a key event, but if it doesn't
+    // (e.g. child process modifies terminal state), we need a fallback.
+    // This sets a flag checked by the TUI loop.
+    let sigint_flag: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    {
+        let flag = sigint_flag.clone();
+        let _sigint_guard = tokio::spawn(async move {
+            tokio::signal::ctrl_c().await.ok();
+            flag.store(true, Ordering::SeqCst);
+            tracing::warn!("[TUI] SIGINT received (bypassed raw mode), setting exit flag");
+        });
+    }
+
     // ── Enter terminal ONCE ──
     let mut tui = Tui::enter()?;
     let theme = Theme::dark();
@@ -1255,7 +1271,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 break;
             }
 
-            if !running {
+            if !running || sigint_flag.load(Ordering::SeqCst) {
                 tracing::debug!("[TUI] Loop: running=false, breaking");
                 break;
             }
@@ -1333,6 +1349,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
     if let Err(e) = tui.exit() {
         tracing::error!("[TUI] tui.exit() failed: {:?}", e);
     }
-    tracing::debug!("[TUI] tui.exit() done, returning");
-    Ok(())
+    tracing::debug!("[TUI] tui.exit() done, exiting process");
+
+    // Force process exit to ensure background threads (agent worker, forwarder)
+    // don't keep the process alive. The terminal is already restored by
+    // tui.exit() above, and all critical cleanup is done.
+    std::process::exit(0);
 }

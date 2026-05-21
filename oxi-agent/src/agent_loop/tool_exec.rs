@@ -67,6 +67,16 @@ async fn execute_tool_calls_sequential(
     let mut tool_result_messages = Vec::new();
 
     for tool_call in tool_calls {
+        // Check cancellation before executing each tool.
+        // This allows Ctrl+C to interrupt a batch of tool calls
+        // without waiting for all of them to complete.
+        if loop_ref.is_cancelled() {
+            tracing::info!(
+                "[TOOL-EXEC] Cancelled before executing tool {}",
+                tool_call.name
+            );
+            break;
+        }
         // Clone tool_call fields once upfront to avoid repeated clones.
         let tc_id = tool_call.id.clone();
         let tc_name = tool_call.name.clone();
@@ -149,6 +159,14 @@ async fn execute_tool_calls_parallel(
     let mut finalized_calls: Vec<FinalizedToolCallEntry> = Vec::new();
 
     for tool_call in tool_calls {
+        // Check cancellation before preparing each tool.
+        if loop_ref.is_cancelled() {
+            tracing::info!(
+                "[TOOL-EXEC-PARALLEL] Cancelled before preparing tool {}",
+                tool_call.name
+            );
+            break;
+        }
         // Clone tool_call fields once upfront to avoid repeated clones.
         let tc_id = tool_call.id.clone();
         let tc_name = tool_call.name.clone();
