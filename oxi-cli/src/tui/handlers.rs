@@ -126,6 +126,11 @@ async fn handle_key(
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             tracing::debug!("[TUI-Handler] Ctrl+C setting running = false");
             *running = false;
+            // Cancel the agent's active stream so it doesn't block cleanup.
+            // Without this, the spawned agent task inside the worker thread
+            // keeps waiting for LLM tokens, causing the app to hang on exit.
+            session.agent_ref().cancel();
+            session.abort_compaction_sync();
             tracing::debug!("[TUI-Handler] Ctrl+C done, running = {}", *running);
             None
         }

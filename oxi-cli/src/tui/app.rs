@@ -79,20 +79,20 @@ impl Tui {
 
     fn exit(&mut self) -> Result<()> {
         if self.tty_ok {
-            // 1. Disable mouse tracking (before leaving alternate screen)
+            // Each cleanup step is independent — errors in earlier steps
+            // must NOT prevent later steps from running. Without this,
+            // disable_raw_mode() could be skipped if an execute!() fails,
+            // leaving the terminal in raw mode (no echo, no line editing).
             let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1006l");
             let _ = io::stdout().flush();
-            // 2. Pop keyboard enhancements and bracketed paste
-            execute!(
+            let _ = execute!(
                 self.terminal.backend_mut(),
                 PopKeyboardEnhancementFlags,
                 DisableBracketedPaste
-            )?;
-            // 3. Show cursor before leaving alternate screen
-            self.terminal.show_cursor()?;
-            // 4. Leave alternate screen
-            execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
-            // 5. Disable raw mode last
+            );
+            let _ = self.terminal.show_cursor();
+            let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+            // disable_raw_mode is the most critical — always attempt it.
             disable_raw_mode()?;
         }
         Ok(())
@@ -975,7 +975,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             // Mark AgentSession streaming flag so is_streaming() is accurate
                             // for any code that checks it (extensions, RPC, etc.).
                             let session_handle2 = session_handle.clone_handle();
-                            let sh_for_auto = session_handle.clone_handle();
+                            let _sh_for_auto = session_handle.clone_handle();
 
                             tokio::task::spawn_local(async move {
                                 tracing::info!(
@@ -1186,9 +1186,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
     
             if event::poll(poll_timeout)? {
-                
+                let ev = event::read()?;
+                tracing::info!("[TUI] Event: {:?}", ev);
                 if let Some(action) = handlers::handle_input(
-                    event::read()?,
+                    ev,
                     &mut state,
                     &agent_session,
                     &ui_tx,
@@ -1286,6 +1287,12 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         agent_session
             .should_stop_flag()
             .store(true, Ordering::SeqCst);
+        // Cancel the agent's active stream so it stops waiting for LLM tokens.
+        // This unblocks the worker thread's spawned task, allowing the
+        // LocalSet to complete and the thread to exit.
+        tracing::debug!("[TUI] Cleanup: cancelling agent");
+        agent_session.agent_ref().cancel();
+        agent_session.abort_compaction_sync();
         tracing::debug!("[TUI] Cleanup: clearing queue");
         agent_session.clear_queue();
 
