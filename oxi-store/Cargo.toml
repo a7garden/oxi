@@ -29,7 +29,7 @@ anyhow = "1"
 thiserror = { workspace = true }
 
 # File & paths
-dirs = "5"
+dirs = "6"
 walkdir = "2"
 regex = "1"
 parking_lot = "0.12"

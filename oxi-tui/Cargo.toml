@@ -33,7 +33,7 @@ anyhow = "1"
 # Utilities
 parking_lot = "0.12"
 unicode-width = "0.2"
-dirs = "5"
+dirs = "6"
 pulldown-cmark = "0.13.3"
 
 [package.metadata.docs.rs]
