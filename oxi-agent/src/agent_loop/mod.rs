@@ -69,6 +69,10 @@ pub struct AgentLoop {
     /// External stop flag — when set, should_stop_after_turn returns true.
     /// Used by Agent to forward the should_stop_flag from AgentHooks.
     external_stop: Arc<AtomicBool>,
+    /// Direct cancel signal shared with `Agent::cancel_flag`.
+    /// Set by `Agent::cancel()` and checked by the streaming loop's periodic
+    /// timer so cancellation is detected even when no stream events arrive.
+    cancel_signal: Option<Arc<AtomicBool>>,
     /// Provider/model resolver for isolated model lookups.
     resolver: Arc<dyn ProviderResolver>,
     /// Steering hook from AgentHooks — polled each turn to drain new messages
@@ -116,6 +120,7 @@ impl AgentLoop {
             auto_retry_notify: tokio::sync::Notify::new(),
             circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig::default()),
             external_stop: Arc::new(AtomicBool::new(false)),
+            cancel_signal: None,
             resolver,
             steering_hook: None,
             follow_up_hook: None,
@@ -232,6 +237,24 @@ impl AgentLoop {
         &self.external_stop
     }
 
+    /// Sets a shared cancel signal (typically `Agent::cancel_flag`).
+    /// The streaming loop checks this in its periodic wake-up timer,
+    /// ensuring cancellation is detected even when the provider stream
+    /// produces no events (e.g. waiting for first token).
+    pub fn set_cancel_signal(&mut self, flag: Arc<AtomicBool>) {
+        self.cancel_signal = Some(flag);
+    }
+
+    /// Returns true if cancellation has been requested via either
+    /// `external_stop` or the direct `cancel_signal`.
+    pub fn is_cancelled(&self) -> bool {
+        if self.external_stop.load(Ordering::SeqCst) {
+            return true;
+        }
+        self.cancel_signal
+            .as_ref()
+            .is_some_and(|f| f.load(Ordering::SeqCst))
+    }
     /// Request cancellation from outside the loop (e.g. Ctrl+C).
     /// Sets the `external_stop` flag which causes the streaming loop
     /// to abort on its next periodic check (~500ms) and the agent loop

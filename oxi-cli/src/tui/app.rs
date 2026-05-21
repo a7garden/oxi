@@ -22,7 +22,7 @@ use oxi_tui::widgets::{
 };
 use std::io::{self, Write};
 use std::panic;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
 use tokio::sync::mpsc;
 
 use crossterm::{
@@ -79,21 +79,23 @@ impl Tui {
 
     fn exit(&mut self) -> Result<()> {
         if self.tty_ok {
-            // 1. Disable mouse tracking (before leaving alternate screen)
+            // Each cleanup step is independent — errors in earlier steps
+            // must NOT prevent later steps from running. Without this,
+            // disable_raw_mode() could be skipped if an execute!() fails,
+            // leaving the terminal in raw mode (no echo, no line editing).
             let _ = io::stdout().write_all(b"\x1b[?1000l\x1b[?1006l");
             let _ = io::stdout().flush();
-            // 2. Pop keyboard enhancements and bracketed paste
-            execute!(
+            let _ = execute!(
                 self.terminal.backend_mut(),
                 PopKeyboardEnhancementFlags,
                 DisableBracketedPaste
-            )?;
-            // 3. Show cursor before leaving alternate screen
-            self.terminal.show_cursor()?;
-            // 4. Leave alternate screen
-            execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
-            // 5. Disable raw mode last
+            );
+            let _ = self.terminal.show_cursor();
+            let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+            // disable_raw_mode is the most critical — always attempt it.
             disable_raw_mode()?;
+            // Mark as cleaned up so Drop doesn't re-enter this path.
+            self.tty_ok = false;
         }
         Ok(())
     }
@@ -719,6 +721,20 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         None
     };
 
+    // ── Install SIGINT safety net ──
+    // Raw mode should capture Ctrl+C as a key event, but if it doesn't
+    // (e.g. child process modifies terminal state), we need a fallback.
+    // This sets a flag checked by the TUI loop.
+    let sigint_flag: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    {
+        let flag = sigint_flag.clone();
+        let _sigint_guard = tokio::spawn(async move {
+            tokio::signal::ctrl_c().await.ok();
+            flag.store(true, Ordering::SeqCst);
+            tracing::warn!("[TUI] SIGINT received (bypassed raw mode), setting exit flag");
+        });
+    }
+
     // ── Enter terminal ONCE ──
     let mut tui = Tui::enter()?;
     let theme = Theme::dark();
@@ -766,13 +782,14 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // The cloned sender feeds back into prompt_rx, triggering the outer while loop.
         let prompt_tx_worker = prompt_tx.clone();
         let ui_tx_for_thread = ui_tx.clone();
-        let agent_handle = std::thread::spawn(move || {
+        let _agent_handle = std::thread::spawn(move || {
             let rt = get_agent_runtime();
             rt.block_on(async {
                 let local = tokio::task::LocalSet::new();
                 local
                     .run_until(async {
                         while let Some(prompt) = prompt_rx.recv().await {
+                            tracing::debug!("[TUI] Worker: received prompt, calling agent.run_with_channel");
                             tracing::info!("[TUI] Received prompt, starting agent run");
                             let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
                             let ui_fwd = ui_tx_for_thread.clone();
@@ -973,11 +990,10 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
                             // Mark AgentSession streaming flag so is_streaming() is accurate
                             // for any code that checks it (extensions, RPC, etc.).
-                            session_handle
-                                .streaming_flag()
-                                .store(true, Ordering::SeqCst);
+                            let session_handle2 = session_handle.clone_handle();
+                            let _sh_for_auto = session_handle.clone_handle();
 
-                            let agent_handle = tokio::task::spawn_local(async move {
+                            tokio::task::spawn_local(async move {
                                 tracing::info!(
                                     "[AGENT-WORKER] Agent task started, calling run_with_channel"
                                 );
@@ -989,16 +1005,19 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                     "[AGENT-WORKER] Agent run_with_channel completed: {:?}",
                                     result
                                 );
-                                result
+                                // Clear streaming flag now that the agent run is complete.
+                                session_handle2
+                                    .streaming_flag()
+                                    .store(false, Ordering::SeqCst);
                             });
-                            // Agent runs on LocalSet, forwarder on its own thread.
-                            // Agent drops event_tx when done → forwarder sees disconnect → exits.
-                            let _ = agent_handle.await;
-
-                            // Clear streaming flag now that the agent run is complete.
-                            session_handle
-                                .streaming_flag()
-                                .store(false, Ordering::SeqCst);
+                            // NOTE: Do NOT await the spawned task.
+                            // If we await here, the outer thread blocks on the tokio runtime
+                            // until the agent completes. If the agent is mid-turn (LLM request
+                            // in flight, tool executing), this blocks forever. By not awaiting,
+                            // the tokio runtime thread is free to recv the next prompt from
+                            // prompt_rx. When the LocalSet is dropped (outer thread exits),
+                            // the spawned task is aborted and the event_tx channel is dropped,
+                            // causing the forwarder thread to exit.
 
                             // Do NOT call forwarder_handle.join() here — it blocks the
                             // tokio runtime thread, preventing prompt_rx.recv() from
@@ -1038,6 +1057,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                     prompt: msg.clone(),
                                 });
                                 let _ = prompt_tx_worker.send(msg).await;
+                            tracing::debug!("[TUI] Worker: queued message sent back via prompt_tx_worker");
                             }
                         }
                     })
@@ -1180,10 +1200,12 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             state.footer_state.data.session_duration_secs = session_start.elapsed().as_secs();
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
-
+    
             if event::poll(poll_timeout)? {
+                let ev = event::read()?;
+                tracing::info!("[TUI] Event: {:?}", ev);
                 if let Some(action) = handlers::handle_input(
-                    event::read()?,
+                    ev,
                     &mut state,
                     &agent_session,
                     &ui_tx,
@@ -1212,6 +1234,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             state.start_streaming();
                             agent_session.reset_should_stop();
                             tracing::info!("[TUI] About to send prompt to channel");
+                            tracing::debug!("[TUI] SendPrompt: prompt_tx.send() called");
                             let _ = prompt_tx.send(value).await;
                             tracing::info!("[TUI] Prompt sent to channel");
                             state.input_clear();
@@ -1243,9 +1266,14 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 }
             }
 
-            // Check if session switch was requested by a slash command
             if state.next_action.is_some() {
-                running = false;
+                tracing::debug!("[TUI] Loop: next_action set, breaking");
+                break;
+            }
+
+            if !running || sigint_flag.load(Ordering::SeqCst) {
+                tracing::debug!("[TUI] Loop: running=false, breaking");
+                break;
             }
 
             while let Ok(ui_event) = ui_rx.try_recv() {
@@ -1271,15 +1299,22 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         let next_action = state.next_action.take();
 
         // Signal the agent to stop before dropping the prompt channel.
-        // This ensures the agent loop exits at the next turn boundary
-        // instead of continuing to process.
+        tracing::debug!("[TUI] Cleanup: setting should_stop_flag");
         agent_session
             .should_stop_flag()
             .store(true, Ordering::SeqCst);
+        // Cancel the agent's active stream so it stops waiting for LLM tokens.
+        // This unblocks the worker thread's spawned task, allowing the
+        // LocalSet to complete and the thread to exit.
+        tracing::debug!("[TUI] Cleanup: cancelling agent");
+        agent_session.agent_ref().cancel();
+        agent_session.abort_compaction_sync();
+        tracing::debug!("[TUI] Cleanup: clearing queue");
         agent_session.clear_queue();
 
+        tracing::debug!("[TUI] Cleanup: dropping prompt_tx");
         drop(prompt_tx);
-        let _ = agent_handle.join();
+        tracing::debug!("[TUI] Cleanup: prompt_tx dropped");
 
         match next_action {
             Some(TuiNextAction::SwitchSession(path)) => {
@@ -1310,6 +1345,14 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         }
     }
 
-    tui.exit()?;
-    Ok(())
+    tracing::debug!("[TUI] About to call tui.exit()");
+    if let Err(e) = tui.exit() {
+        tracing::error!("[TUI] tui.exit() failed: {:?}", e);
+    }
+    tracing::debug!("[TUI] tui.exit() done, exiting process");
+
+    // Force process exit to ensure background threads (agent worker, forwarder)
+    // don't keep the process alive. The terminal is already restored by
+    // tui.exit() above, and all critical cleanup is done.
+    std::process::exit(0);
 }

@@ -11,7 +11,6 @@ use oxi_ai::{
     ContentBlock, Context, Message, ProviderEvent, StopReason, StreamOptions, Tool as OxTool,
 };
 use std::collections::HashSet;
-use std::sync::atomic::Ordering;
 
 pub(crate) async fn stream_assistant_response(
     loop_ref: &super::AgentLoop,
@@ -80,9 +79,9 @@ pub(crate) async fn stream_assistant_response(
             event = rx.next() => event,
             _ = tokio::time::sleep(cancel_check_interval) => {
                 // Periodic wake-up: check cancellation and idle timeout.
-                if loop_ref.external_stop.load(Ordering::SeqCst) {
+                if loop_ref.is_cancelled() {
                     tracing::info!(
-                        "Stream cancelled by external_stop (detected in periodic check)"
+                        "Stream cancelled (detected in periodic check)"
                     );
                     if added_partial {
                         let last_idx = messages.len() - 1;
@@ -155,9 +154,9 @@ pub(crate) async fn stream_assistant_response(
         // Check if the agent was cancelled (Ctrl+C) since the last event.
         // `external_stop` is set by the emit callback (Layer 2) which polls
         // the should_stop flag on *every* event, not just TurnEnd.
-        if loop_ref.external_stop.load(Ordering::SeqCst) {
+        if loop_ref.is_cancelled() {
             tracing::info!(
-                "Stream cancelled by external_stop after {} events",
+                "Stream cancelled after {} events",
                 event_count
             );
             if added_partial {

@@ -439,7 +439,7 @@ impl Agent {
                 agent_loop.set_follow_up_hook(Arc::clone(get_follow_up));
             }
         }
-        let al = agent_loop;
+        let mut al = agent_loop;
 
         // Wire should_stop_after_turn hook: share AgentLoop's external_stop
         // Arc with the emit callback. When the hook fires (Ctrl+C detected),
@@ -453,6 +453,12 @@ impl Agent {
         };
         let ext_stop = al.external_stop().clone();
         let cancel_flag = self.cancel_flag.clone();
+
+        // Share cancel_flag with AgentLoop so the streaming loop can check
+        // it directly in the periodic timer — no emit callback required.
+        // This closes the gap where cancel() was ineffective when the
+        // provider stream produced no events.
+        al.set_cancel_signal(self.cancel_flag.clone());
 
         // Create emit callback that sends through the channel.
         // AgentLoop calls this synchronously. UnboundedSender::send() is
