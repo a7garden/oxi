@@ -10,8 +10,11 @@ use ratatui::{layout::Rect, Frame};
 
 pub mod factories;
 pub mod questionnaire;
+pub mod router_integration;
+pub mod router_setup;
 #[allow(unused_imports)]
 pub use factories::{logout_select, model_select, resume_select, routing_status};
+pub use router_setup::{router_setup, RouterSetupData};
 
 // ---------------------------------------------------------------------------
 // Overlay action
@@ -33,6 +36,11 @@ pub enum OverlayAction {
     ExecuteSlashCommand(String),
     /// Send a user prompt.
     SendPrompt(String),
+    /// Open the router setup overlay.
+    OpenRouterSetup {
+        initial: crate::tui::overlay::RouterSetupData,
+        models: Vec<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------

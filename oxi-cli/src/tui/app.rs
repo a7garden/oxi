@@ -238,6 +238,7 @@ pub(super) const SPINNER: &[&str] = &["|", "/", "-", "\\"];
 
 /// Provider info for the selection UI.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct ProviderInfo {
     pub name: String,
     pub display_name: String,
@@ -274,6 +275,7 @@ pub(crate) enum SetupStep {
         selected: usize,
     },
     /// Done — show success
+    #[allow(dead_code)]
     Done { provider: String, model: String },
 }
 
@@ -281,6 +283,7 @@ pub(crate) enum SetupStep {
 #[derive(Debug, Clone)]
 pub(crate) enum AppOverlay {
     /// Initial setup wizard
+    #[allow(dead_code)]
     Setup(SetupStep),
     /// Model selector overlay
     ModelSelect {
