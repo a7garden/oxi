@@ -317,11 +317,17 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     // Horizontal: 1 col left, 1 col right. Vertical: 0 top/bottom.
     let inner = size.inner(Margin::new(1, 0));
 
-    // Calculate queue preview height (lines between status bar and input)
+    // Calculate queue area height
     let queue_count = state.steering_messages_snapshot.len();
-    let queue_preview_lines = if queue_count > 0 {
-        // Show up to 3 message previews
-        queue_count.min(3) as u16
+    let is_active = state.queue_panel_visible && queue_count > 0;
+    let queue_lines = if queue_count > 0 {
+        if is_active {
+            // Active: selected highlight, up to 5 items + hint line
+            (queue_count.min(5) as u16 + 1).min(6) // items + hint
+        } else {
+            // Compact: up to 3 message previews
+            queue_count.min(3) as u16
+        }
     } else {
         0
     };
@@ -329,15 +335,15 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),                          // Chat
-            Constraint::Length(2 + queue_preview_lines), // Status + queue preview + input
-            Constraint::Length(3),                       // Footer
+            Constraint::Min(3),                      // Chat
+            Constraint::Length(2 + queue_lines),      // Status + queue + input
+            Constraint::Length(3),                    // Footer
         ])
         .split(inner);
 
     f.render_stateful_widget(ChatView::new(theme), chunks[0], &mut state.chat);
 
-    // Input area (status line + optional queue preview + input)
+    // Input area (status line + optional queue + input)
     render_input_area(f, chunks[1], state, theme);
 
     // Slash popup — overlay above the input area
@@ -353,61 +359,144 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
 
 fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
     let queue_count = state.steering_messages_snapshot.len();
-    let queue_preview_lines = if queue_count > 0 {
-        queue_count.min(3) as u16
+    let is_active = state.queue_panel_visible && queue_count > 0;
+    let queue_lines = if queue_count > 0 {
+        if is_active {
+            (queue_count.min(5) as u16 + 1).min(6)
+        } else {
+            queue_count.min(3) as u16
+        }
     } else {
         0
     };
-    let total_lines = 2 + queue_preview_lines;
-    if area.height != total_lines {
-        // Layout gave us unexpected height — just render the basics
-        let top_row = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
-        let input_row = Rect { x: area.x, y: area.y + area.height.saturating_sub(1), width: area.width, height: 1 };
-        render_status_line(f, top_row, state, theme);
-        state.input.set_placeholder(None);
-        f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
-        return;
-    }
+    let _total_lines = 2 + queue_lines;
 
     // Row 0: status line (Working/Idle + queue count)
     let status_row = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
     render_status_line(f, status_row, state, theme);
 
-    // Rows 1..queue_preview_lines: queue message previews
-    for (i, msg) in state
-        .steering_messages_snapshot
-        .iter()
-        .take(queue_preview_lines as usize)
-        .enumerate()
-    {
-        let preview_row = Rect {
-            x: area.x,
-            y: area.y + 1 + i as u16,
-            width: area.width,
-            height: 1,
-        };
-        let max_chars = area.width.saturating_sub(6) as usize;
-        let truncated: String = msg.chars().take(max_chars).collect();
-        let ellipsis = if msg.chars().count() > max_chars { "…" } else { "" };
-        let content = format!("  ⏳ {}{}", truncated, ellipsis);
-        f.render_widget(
-            Paragraph::new(Span::styled(
-                content,
-                Style::default().fg(theme.colors.muted.to_ratatui()),
-            )),
-            preview_row,
-        );
+    // Queue preview / active panel rows
+    if is_active {
+        render_queue_active(f, area, state, theme);
+    } else {
+        render_queue_compact(f, area, state, theme);
     }
 
     // Last row: input
     let input_row = Rect {
         x: area.x,
-        y: area.y + 1 + queue_preview_lines,
+        y: area.y + 1 + queue_lines,
         width: area.width,
         height: 1,
     };
     state.input.set_placeholder(None);
     f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
+}
+
+/// Compact queue preview: dim ⏳ lines with message text.
+fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+    let queue_count = state.steering_messages_snapshot.len().min(3);
+    for (i, msg) in state
+        .steering_messages_snapshot
+        .iter()
+        .take(queue_count)
+        .enumerate()
+    {
+        let row = Rect {
+            x: area.x,
+            y: area.y + 1 + i as u16,
+            width: area.width,
+            height: 1,
+        };
+        let prefix = if i == 0 { "  ▶ " } else { "  ⏳ " };
+        let max_chars = area.width.saturating_sub(8) as usize;
+        let truncated: String = msg.chars().take(max_chars).collect();
+        let ellipsis = if msg.chars().count() > max_chars { "…" } else { "" };
+        let content = format!("{}{}{}", prefix, truncated, ellipsis);
+        let style = if i == 0 {
+            // First message = next to send — slightly brighter
+            Style::default().fg(theme.colors.foreground.to_ratatui())
+        } else {
+            Style::default().fg(theme.colors.muted.to_ratatui())
+        };
+        f.render_widget(Paragraph::new(Span::styled(content, style)), row);
+    }
+}
+
+/// Active queue panel: selected highlight, navigation, delete/edit.
+fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+    let queue_count = state.steering_messages_snapshot.len();
+    let max_items = queue_count.min(5);
+    let selected = state.queue_panel_selected;
+
+    // Item rows
+    for (i, msg) in state
+        .steering_messages_snapshot
+        .iter()
+        .take(max_items)
+        .enumerate()
+    {
+        let row = Rect {
+            x: area.x,
+            y: area.y + 1 + i as u16,
+            width: area.width,
+            height: 1,
+        };
+        let is_sel = i == selected;
+        let pointer = if is_sel { " ›" } else { "  " };
+        let prefix = if i == 0 { "▶ " } else { "⏳ " };
+        let max_chars = area.width.saturating_sub(8) as usize;
+        let truncated: String = msg.chars().take(max_chars).collect();
+        let ellipsis = if msg.chars().count() > max_chars { "…" } else { "" };
+        let content = format!("{}{}{}{}", pointer, prefix, truncated, ellipsis);
+
+        let style = if is_sel {
+            Style::default()
+                .fg(theme.colors.background.to_ratatui())
+                .bg(theme.colors.accent.to_ratatui())
+                .add_modifier(Modifier::BOLD)
+        } else if i == 0 {
+            Style::default().fg(theme.colors.foreground.to_ratatui())
+        } else {
+            Style::default().fg(theme.colors.muted.to_ratatui())
+        };
+        f.render_widget(Paragraph::new(Span::styled(content, style)), row);
+    }
+
+    // Hint line
+    if let Some(hint_row) = (max_items < area.height as usize - 1).then_some(()) {
+        let row = Rect {
+            x: area.x,
+            y: area.y + 1 + max_items as u16,
+            width: area.width,
+            height: 1,
+        };
+        let hint = " ↑/↓  d del  e edit  Esc close";
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                hint,
+                Style::default().fg(theme.colors.muted.to_ratatui()),
+            )),
+            row,
+        );
+    } else if queue_count > 0 {
+        // Items filled all space — overwrite last item row with hint appended
+        // Actually just render hint in the last allocated row
+        let row = Rect {
+            x: area.x,
+            y: area.y + max_items as u16,
+            width: area.width,
+            height: 1,
+        };
+        let hint = " ↑/↓  d del  e edit  Esc close";
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                hint,
+                Style::default().fg(theme.colors.muted.to_ratatui()),
+            )),
+            row,
+        );
+    }
 }
 
 /// Render the status/separator line with Working/Idle indicator and queue count.
