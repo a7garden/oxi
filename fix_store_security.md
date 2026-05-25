@@ -1,1 +1,0 @@
-Now replace `fs::write` in `_rewrite_file` with `atomic_write`:
