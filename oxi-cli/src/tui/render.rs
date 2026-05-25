@@ -314,24 +314,14 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         return;
     }
 
-    // Apply consistent 2-column horizontal margin to all sections
-    let inner = size.inner(Margin::new(2, 2));
+    // Horizontal: 1 col left, 1 col right. Vertical: 0 top/bottom.
+    let inner = size.inner(Margin::new(1, 0));
 
-    // Calculate queue panel height.
-    // Always visible when messages are queued — compact preview when inactive,
-    // expanded with controls when active (Ctrl+Q).
+    // Calculate queue preview height (lines between status bar and input)
     let queue_count = state.steering_messages_snapshot.len();
-    let has_messages = queue_count > 0;
-    let is_active = state.queue_panel_visible;
-    let max_queue = (inner.height / 2).clamp(3, 8);
-    let queue_height = if has_messages {
-        if is_active {
-            // Active: title + items + hint
-            (queue_count.min(6) as u16 + 2).min(max_queue)
-        } else {
-            // Compact: just the message previews, 1 line each
-            queue_count.min(3) as u16
-        }
+    let queue_preview_lines = if queue_count > 0 {
+        // Show up to 3 message previews
+        queue_count.min(3) as u16
     } else {
         0
     };
@@ -339,34 +329,24 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),               // Chat
-            Constraint::Length(queue_height), // Queue panel
-            Constraint::Length(2),            // Input (separator + input)
-            Constraint::Length(3),            // Status bar (separator + 2 lines)
+            Constraint::Min(3),                          // Chat
+            Constraint::Length(2 + queue_preview_lines), // Status + queue preview + input
+            Constraint::Length(3),                       // Footer
         ])
         .split(inner);
 
     f.render_stateful_widget(ChatView::new(theme), chunks[0], &mut state.chat);
 
-    // Queue panel
-    if has_messages && queue_height > 0 {
-        if is_active {
-            render_queue_panel_active(f, chunks[1], state, theme);
-        } else {
-            render_queue_panel_compact(f, chunks[1], state, theme);
-        }
-    }
-
-    // Input area
-    render_input_area(f, chunks[2], state, theme);
+    // Input area (status line + optional queue preview + input)
+    render_input_area(f, chunks[1], state, theme);
 
     // Slash popup — overlay above the input area
     if state.slash_completion_active {
-        render_slash_popup_overlay(f, chunks[2], state, theme);
+        render_slash_popup_overlay(f, chunks[1], state, theme);
     }
 
     // Status bar
-    f.render_stateful_widget(Footer::new(theme), chunks[3], &mut state.footer_state);
+    f.render_stateful_widget(Footer::new(theme), chunks[2], &mut state.footer_state);
 }
 
 // ── Queue panel (compact preview) ────────────────────────────────────
@@ -526,53 +506,104 @@ fn render_queue_panel_active(f: &mut Frame, area: Rect, state: &AppState, theme:
 // ── Input area ──────────────────────────────────────────────────────────
 
 fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
-    let top_row = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: 1,
+    let queue_count = state.steering_messages_snapshot.len();
+    let queue_preview_lines = if queue_count > 0 {
+        queue_count.min(3) as u16
+    } else {
+        0
     };
+    let total_lines = 2 + queue_preview_lines;
+    if area.height != total_lines {
+        // Layout gave us unexpected height — just render the basics
+        let top_row = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+        let input_row = Rect { x: area.x, y: area.y + area.height.saturating_sub(1), width: area.width, height: 1 };
+        render_status_line(f, top_row, state, theme);
+        state.input.set_placeholder(None);
+        f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
+        return;
+    }
+
+    // Row 0: status line (Working/Idle + queue count)
+    let status_row = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+    render_status_line(f, status_row, state, theme);
+
+    // Rows 1..queue_preview_lines: queue message previews
+    for (i, msg) in state
+        .steering_messages_snapshot
+        .iter()
+        .take(queue_preview_lines as usize)
+        .enumerate()
+    {
+        let preview_row = Rect {
+            x: area.x,
+            y: area.y + 1 + i as u16,
+            width: area.width,
+            height: 1,
+        };
+        let max_chars = area.width.saturating_sub(6) as usize;
+        let truncated: String = msg.chars().take(max_chars).collect();
+        let ellipsis = if msg.chars().count() > max_chars { "…" } else { "" };
+        let content = format!("  ⏳ {}{}", truncated, ellipsis);
+        f.render_widget(
+            Paragraph::new(Span::styled(
+                content,
+                Style::default().fg(theme.colors.muted.to_ratatui()),
+            )),
+            preview_row,
+        );
+    }
+
+    // Last row: input
     let input_row = Rect {
         x: area.x,
-        y: area.y + 1,
+        y: area.y + 1 + queue_preview_lines,
         width: area.width,
         height: 1,
     };
+    state.input.set_placeholder(None);
+    f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
+}
 
-    // Separator with integrated status indicator
+/// Render the status/separator line with Working/Idle indicator and queue count.
+fn render_status_line(f: &mut Frame, row: Rect, state: &AppState, theme: &Theme) {
+    let queue_count = state.steering_messages_snapshot.len();
+
     if state.is_agent_busy {
         // Moon phase spinner ◐ ◓ ◑ ◒
         let sp = ["\u{25D0}", "\u{25D3}", "\u{25D1}", "\u{25D2}"];
         let ch = sp[state.spinner_frame % sp.len()];
-        let label = format!(" {} Working", ch);
-        let label_len = label.chars().count() as u16;
-        let dash_count = area.width.saturating_sub(label_len + 2) as usize;
+        let label = if queue_count > 0 {
+            format!(" {} Working  ⏳{} queued", ch, queue_count)
+        } else {
+            format!(" {} Working", ch)
+        };
+        let label_len: u16 = label.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16).sum();
+        let dash_count = row.width.saturating_sub(label_len + 2) as usize;
         let line = format!("── {} {}", label, "─".repeat(dash_count));
         f.render_widget(
             Paragraph::new(Span::styled(
                 line,
                 Style::default().fg(theme.colors.accent.to_ratatui()),
             )),
-            top_row,
+            row,
         );
     } else {
-        let label = " ○ Idle";
-        let label_len = label.chars().count() as u16;
-        let dash_count = area.width.saturating_sub(label_len + 2) as usize;
+        let label = if queue_count > 0 {
+            format!(" ○ Idle  ⏳{} queued", queue_count)
+        } else {
+            " ○ Idle".to_string()
+        };
+        let label_len: u16 = label.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16).sum();
+        let dash_count = row.width.saturating_sub(label_len + 2) as usize;
         let line = format!("── {} {}", label, "─".repeat(dash_count));
         f.render_widget(
             Paragraph::new(Span::styled(
                 line,
                 Style::default().fg(theme.colors.muted.to_ratatui()),
             )),
-            top_row,
+            row,
         );
     }
-
-    // Never show placeholder during agent work — input is always functional.
-    // The placeholder was confusing users into thinking input was blocked.
-    state.input.set_placeholder(None);
-    f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
 }
 
 // ── Slash popup overlay ─────────────────────────────────────────────────

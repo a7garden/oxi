@@ -160,6 +160,18 @@ pub fn render_markdown_table(content: &str, available_width: u16) -> Vec<Line<'s
                     pending_text.push_str(&text);
                 }
             }
+            Event::Code(code) => {
+                // Inline code (e.g. `🔍`) — capture content for table cells.
+                // Without this, emojis or other content wrapped in backticks
+                // inside table cells are silently dropped.
+                if in_table {
+                    table_state.current_cell.push_str(&code);
+                } else {
+                    pending_text.push('`');
+                    pending_text.push_str(&code);
+                    pending_text.push('`');
+                }
+            }
             Event::End(TagEnd::TableCell) => {
                 if in_table {
                     table_state
