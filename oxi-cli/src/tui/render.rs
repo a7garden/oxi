@@ -541,9 +541,10 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
 
     // Separator with integrated status indicator
     if state.is_agent_busy {
-        let sp = ["|", "/", "-", "\\"];
+        // Moon phase spinner ◐ ◓ ◑ ◒
+        let sp = ["\u{25D0}", "\u{25D3}", "\u{25D1}", "\u{25D2}"];
         let ch = sp[state.spinner_frame % sp.len()];
-        let label = format!(" {} Working...", ch);
+        let label = format!(" {} Working", ch);
         let label_len = label.chars().count() as u16;
         let dash_count = area.width.saturating_sub(label_len + 2) as usize;
         let line = format!("── {} {}", label, "─".repeat(dash_count));

@@ -2087,7 +2087,6 @@ impl Widget for EntryWidget<'_> {
                 Paragraph::new(Line::from(Span::styled(text.clone(), *style))).render(rect, buf);
             }
             LayoutKind::Text { lines, is_user } => {
-                let text: ratatui::text::Text = lines.iter().cloned().collect();
                 if *is_user {
                     let block = Block::default()
                         .borders(Borders::LEFT)
@@ -2097,13 +2096,34 @@ impl Widget for EntryWidget<'_> {
                     // Lines are already pre-wrapped to the correct width
                     // by wrap_lines_styled(). Do NOT use .wrap() here —
                     // ratatui's WordWrapper does not handle CJK line-breaking.
-                    Paragraph::new(text).render(inner, buf);
+                    //
+                    // Use buf.set_line() instead of Paragraph::render() to ensure
+                    // multi-cell characters (emojis, wide CJK) have their trailing
+                    // cells properly reset. Paragraph::render_line() skips this,
+                    // causing Buffer::diff to corrupt wide character output.
+                    for (i, line) in lines.iter().enumerate() {
+                        let y = inner.y + i as u16;
+                        if y >= inner.bottom() {
+                            break;
+                        }
+                        buf.set_line(inner.x, y, line, inner.width);
+                    }
                 } else {
                     // Don't set .style() here — markdown Spans already carry
                     // their own styling (bold, italic, code, headings).
                     // Paragraph::style() would override all per-Span styles.
                     // Lines are pre-wrapped; no .wrap() needed.
-                    Paragraph::new(text).render(rect, buf);
+                    //
+                    // Use buf.set_line() instead of Paragraph::render() for the
+                    // same reason as above: trailing cells of wide characters
+                    // must be reset for correct terminal output.
+                    for (i, line) in lines.iter().enumerate() {
+                        let y = rect.y + i as u16;
+                        if y >= rect.bottom() {
+                            break;
+                        }
+                        buf.set_line(rect.x, y, line, rect.width);
+                    }
                 }
             }
             LayoutKind::ToolBox {
