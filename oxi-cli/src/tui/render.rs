@@ -393,9 +393,12 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
     f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
 }
 
-/// Compact queue preview: dim ⏳ lines with message text.
+/// Compact queue preview: dim numbered lines with message text.
 fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     let queue_count = state.steering_messages_snapshot.len().min(3);
+    let hint_text = " Ctrl+Q ";
+    let hint_width = hint_text.len() as u16;
+
     for (i, msg) in state
         .steering_messages_snapshot
         .iter()
@@ -408,18 +411,54 @@ fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &The
             width: area.width,
             height: 1,
         };
-        let prefix = if i == 0 { "  ▶ " } else { "  ⏳ " };
-        let max_chars = area.width.saturating_sub(8) as usize;
+        let badge = if i == 0 { "next" } else { "" };
+        let num = format!("{}. ", i + 1);
+        let prefix_w: u16 = (num.len() + badge.len()) as u16;
+        let max_chars = area.width.saturating_sub(prefix_w + 3) as usize;
         let truncated: String = msg.chars().take(max_chars).collect();
         let ellipsis = if msg.chars().count() > max_chars { "…" } else { "" };
-        let content = format!("{}{}{}", prefix, truncated, ellipsis);
-        let style = if i == 0 {
-            // First message = next to send — slightly brighter
+
+        let mut spans: Vec<Span<'_>> = Vec::new();
+        // Number
+        spans.push(Span::styled(
+            num,
+            Style::default().fg(theme.colors.muted.to_ratatui()),
+        ));
+        // "next" badge for first item
+        if i == 0 {
+            spans.push(Span::styled(
+                "next ",
+                Style::default()
+                    .fg(theme.colors.accent.to_ratatui())
+                    .add_modifier(Modifier::ITALIC),
+            ));
+        }
+        // Message text
+        let msg_style = if i == 0 {
             Style::default().fg(theme.colors.foreground.to_ratatui())
         } else {
             Style::default().fg(theme.colors.muted.to_ratatui())
         };
-        f.render_widget(Paragraph::new(Span::styled(content, style)), row);
+        spans.push(Span::styled(format!("{}{}", truncated, ellipsis), msg_style));
+        f.render_widget(Paragraph::new(Line::from(spans)), row);
+
+        // Ctrl+Q hint on the right side of first line
+        if i == 0 {
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    hint_text,
+                    Style::default()
+                        .fg(theme.colors.muted.to_ratatui())
+                        .add_modifier(Modifier::ITALIC),
+                )),
+                Rect {
+                    x: area.x + area.width.saturating_sub(hint_width),
+                    y: row.y,
+                    width: hint_width,
+                    height: 1,
+                },
+            );
+        }
     }
 }
 
@@ -443,52 +482,66 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
             height: 1,
         };
         let is_sel = i == selected;
-        let pointer = if is_sel { " ›" } else { "  " };
-        let prefix = if i == 0 { "▶ " } else { "⏳ " };
-        let max_chars = area.width.saturating_sub(8) as usize;
+        let pointer = if is_sel { "› " } else { "  " };
+        let badge = if i == 0 { "next " } else { "" };
+        let num = format!("{}. ", i + 1);
+        let prefix_w: u16 = (pointer.len() + num.len() + badge.len()) as u16;
+        let max_chars = area.width.saturating_sub(prefix_w + 2) as usize;
         let truncated: String = msg.chars().take(max_chars).collect();
         let ellipsis = if msg.chars().count() > max_chars { "…" } else { "" };
-        let content = format!("{}{}{}{}", pointer, prefix, truncated, ellipsis);
 
-        let style = if is_sel {
-            Style::default()
-                .fg(theme.colors.background.to_ratatui())
-                .bg(theme.colors.accent.to_ratatui())
-                .add_modifier(Modifier::BOLD)
+        let mut spans: Vec<Span<'_>> = Vec::new();
+        // Pointer
+        spans.push(Span::styled(
+            pointer,
+            if is_sel {
+                Style::default().fg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            },
+        ));
+        // Number
+        spans.push(Span::styled(
+            num,
+            if is_sel {
+                Style::default().fg(theme.colors.background.to_ratatui()).bg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.colors.muted.to_ratatui())
+            },
+        ));
+        // "next" badge for first
+        if i == 0 {
+            spans.push(Span::styled(
+                badge,
+                if is_sel {
+                    Style::default().fg(theme.colors.background.to_ratatui()).bg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::ITALIC)
+                } else {
+                    Style::default().fg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::ITALIC)
+                },
+            ));
+        }
+        // Message text
+        let msg_style = if is_sel {
+            Style::default().fg(theme.colors.background.to_ratatui()).bg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::BOLD)
         } else if i == 0 {
             Style::default().fg(theme.colors.foreground.to_ratatui())
         } else {
             Style::default().fg(theme.colors.muted.to_ratatui())
         };
-        f.render_widget(Paragraph::new(Span::styled(content, style)), row);
+        spans.push(Span::styled(format!("{}{}", truncated, ellipsis), msg_style));
+        f.render_widget(Paragraph::new(Line::from(spans)), row);
     }
 
-    // Hint line
-    if max_items < area.height as usize - 1 {
+    // Hint line at the bottom of allocated space
+    let hint_y = area.y + 1 + max_items as u16;
+    if hint_y < area.y + area.height {
         let row = Rect {
             x: area.x,
-            y: area.y + 1 + max_items as u16,
+            y: hint_y,
             width: area.width,
             height: 1,
         };
-        let hint = " ↑/↓  d del  e edit  Esc close";
-        f.render_widget(
-            Paragraph::new(Span::styled(
-                hint,
-                Style::default().fg(theme.colors.muted.to_ratatui()),
-            )),
-            row,
-        );
-    } else if queue_count > 0 {
-        // Items filled all space — overwrite last item row with hint appended
-        // Actually just render hint in the last allocated row
-        let row = Rect {
-            x: area.x,
-            y: area.y + max_items as u16,
-            width: area.width,
-            height: 1,
-        };
-        let hint = " ↑/↓  d del  e edit  Esc close";
+        let hint = " ↑↓ nav · d del · e edit · Esc close";
         f.render_widget(
             Paragraph::new(Span::styled(
                 hint,
