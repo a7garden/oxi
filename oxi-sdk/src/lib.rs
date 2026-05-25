@@ -65,6 +65,20 @@ pub use oxi_agent::{
     ToolRegistry, WebSearchTool, WriteTool,
 };
 
+// ── Browser engine re-exports ────────────────────────────────────────────────
+//
+// The browser trait layer (BrowserEngine, BrowserTab, config, error types)
+// is always available so SDK consumers can implement custom backends.
+// The native oxibrowser-core backend requires the `native-browser` feature.
+
+pub use oxi_agent::tools::browse::{
+    BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine, BrowserError, BrowserTab,
+    ElementInfo, LinkInfo, PageContent, TabGuard,
+};
+
+#[cfg(feature = "native-browser")]
+pub use oxi_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool, OxiBrowserEngine};
+
 #[cfg(test)]
 mod tests {
     use super::*;

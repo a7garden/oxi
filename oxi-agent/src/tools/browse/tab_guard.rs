@@ -119,7 +119,7 @@ mod tests {
         async fn click(&self, _selector: &str) -> Result<(), BrowserError> {
             Ok(())
         }
-        async fn r#type(&self, _selector: &str, _text: &str) -> Result<(), BrowserError> {
+        async fn type_(&self, _selector: &str, _text: &str) -> Result<(), BrowserError> {
             Ok(())
         }
         async fn fill(&self, _selector: &str, _value: &str) -> Result<(), BrowserError> {

@@ -40,6 +40,11 @@ pub struct BrowseConfig {
     /// Maximum output size in bytes (truncation threshold).
     #[serde(default = "default_max_output_bytes")]
     pub max_output_bytes: usize,
+
+    /// Maximum idle time (seconds) before a browse session auto-closes.
+    /// 0 = no timeout (not recommended).
+    #[serde(default = "default_session_idle_timeout_secs")]
+    pub session_idle_timeout_secs: u64,
 }
 
 impl Default for BrowseConfig {
@@ -53,6 +58,7 @@ impl Default for BrowseConfig {
             cache_max_entries: default_cache_max_entries(),
             max_concurrent_tabs: default_max_concurrent_tabs(),
             max_output_bytes: default_max_output_bytes(),
+            session_idle_timeout_secs: default_session_idle_timeout_secs(),
         }
     }
 }
@@ -83,6 +89,9 @@ fn default_max_concurrent_tabs() -> usize {
 fn default_max_output_bytes() -> usize {
     512_000
 }
+fn default_session_idle_timeout_secs() -> u64 {
+    300 // 5 minutes
+}
 
 #[cfg(test)]
 mod tests {
@@ -99,6 +108,7 @@ mod tests {
         assert_eq!(config.cache_max_entries, 50);
         assert_eq!(config.max_concurrent_tabs, 4);
         assert_eq!(config.max_output_bytes, 512_000);
+        assert_eq!(config.session_idle_timeout_secs, 300);
     }
 
     #[test]
@@ -119,10 +129,12 @@ mod tests {
             default_wait_timeout_ms: 30_000,
             max_concurrent_tabs: 8,
             cache_ttl_secs: 0, // disabled
+            session_idle_timeout_secs: 600,
             ..Default::default()
         };
         assert_eq!(config.default_wait_timeout_ms, 30_000);
         assert_eq!(config.max_concurrent_tabs, 8);
         assert_eq!(config.cache_ttl_secs, 0);
+        assert_eq!(config.session_idle_timeout_secs, 600);
     }
 }

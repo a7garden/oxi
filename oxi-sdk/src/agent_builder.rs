@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxi_agent::{
+    tools::browse::{BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine},
     Agent, AgentConfig, AgentTool, AgentToolResult, ProviderResolver, ToolContext, ToolRegistry,
 };
 
@@ -143,6 +144,85 @@ impl<'a> AgentBuilder<'a> {
         for tool in tools {
             self.tools.register(tool);
         }
+        self
+    }
+
+    /// Register browser tools (browse, browse_extract) with the given engine.
+    ///
+    /// This is the primary entry point for SDK consumers that want built-in
+    /// web browsing. Pass any [`BrowserEngine`] implementation — when the
+    /// `native-browser` feature is enabled on `oxi-agent`, use
+    /// [`OxiBrowserEngine`](oxi_agent::tools::browse::OxiBrowserEngine) for
+    /// the built-in headless browser.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let engine = Arc::new(OxiBrowserEngine::new()?);
+    /// let agent = oxi.agent(config)
+    ///     .workspace("/project")
+    ///     .coding_tools()
+    ///     .browsing(engine)
+    ///     .build()?;
+    /// ```
+    pub fn browsing(self, engine: Arc<dyn BrowserEngine>) -> Self {
+        self.tools.register(BrowseTool::new(Arc::clone(&engine)));
+        self.tools.register(BrowseExtractTool::new(engine));
+        self
+    }
+
+    /// Register browser tools with custom configuration.
+    ///
+    /// Like [`browsing()`](Self::browsing) but allows tuning timeouts,
+    /// cache, tab limits, etc. via [`BrowseConfig`].
+    pub fn browsing_with_config(
+        self,
+        engine: Arc<dyn BrowserEngine>,
+        config: BrowseConfig,
+    ) -> Self {
+        self.tools
+            .register(BrowseTool::with_config(Arc::clone(&engine), config.clone()));
+        self.tools
+            .register(BrowseExtractTool::with_config(engine, config));
+        self
+    }
+
+    /// Register the native browser tools using `oxibrowser-core`.
+    ///
+    /// Convenience method that creates an `OxiBrowserEngine` and registers
+    /// all browser tools. Only available when the `native-browser` feature
+    /// is enabled.
+    #[cfg(feature = "native-browser")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "native-browser")))]
+    pub fn native_browser(self) -> anyhow::Result<Self> {
+        let engine = oxi_agent::tools::browse::OxiBrowserEngine::new()?;
+        Ok(self.browsing(Arc::new(engine)))
+    }
+
+    /// Register all browser tools including persistent session support.
+    ///
+    /// Like [`browsing()`](Self::browsing) but also registers `browse_script`
+    /// and `browse_session` for multi-step interactive sessions with a
+    /// persistent tab. Only available when the `native-browser` feature
+    /// is enabled.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let engine = Arc::new(OxiBrowserEngine::new()?);
+    /// let agent = oxi.agent(config)
+    ///     .browsing_with_session(engine)
+    ///     .build()?;
+    /// ```
+    #[cfg(feature = "native-browser")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "native-browser")))]
+    pub fn browsing_with_session(self, engine: Arc<dyn BrowserEngine>) -> Self {
+        use oxi_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool};
+
+        self.tools.register(BrowseTool::new(Arc::clone(&engine)));
+        self.tools.register(BrowseExtractTool::new(Arc::clone(&engine)));
+        self.tools.register(BrowseScriptTool::new(Arc::clone(&engine)));
+        self.tools.register(BrowseSessionTool::new(engine));
         self
     }
 

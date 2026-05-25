@@ -1,6 +1,6 @@
 [package]
 name = "oxi-sdk"
-version = "0.22.0"
+version = "0.22.1"
 edition = "2021"
 description = "oxi AI agent SDK — build isolated, multi-agent AI systems"
 readme = "README.md"
@@ -24,6 +24,10 @@ tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+default = []
+native-browser = ["oxi-agent/native-browser"]
 
 [package.metadata.docs.rs]
 all-features = true

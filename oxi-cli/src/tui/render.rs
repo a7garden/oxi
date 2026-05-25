@@ -5,7 +5,7 @@ use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
@@ -212,16 +212,30 @@ fn render_status_list(
     );
 }
 
+/// A single row in the provider list — either a category header or an item.
+enum ProviderRow {
+    /// Category header line.
+    Header { label: String },
+    /// Provider item. `provider_idx` is the index into the `providers` slice.
+    Item { provider_idx: usize },
+}
+
 /// Render provider selection list grouped by category with descriptions.
-#[allow(dead_code)]
+///
+/// Uses `List` widget with scroll window — fully scrollable.
+#[must_use]
 fn render_provider_list(
     f: &mut Frame,
     area: Rect,
     providers: &[ProviderInfo],
     selected: usize,
     _styles: &oxi_tui::theme::ThemeStyles,
-    _theme: &Theme,
-) {
+    theme: &Theme,
+) -> Option<ScrollInfo> {
+    if providers.is_empty() {
+        return None;
+    }
+
     // Category display order and labels
     let category_order = [
         ("primary", "Primary Providers"),
@@ -232,75 +246,141 @@ fn render_provider_list(
         ("specialized", "Other"),
     ];
 
-    let mut idx = 0;
-    let mut last_category = "";
-
-    let mut lines: Vec<Line> = Vec::new();
+    // Build flat row list and index mapping
+    let mut rows: Vec<ProviderRow> = Vec::new();
+    // Map: provider index → row index (for scroll calculation)
+    let mut provider_to_row: Vec<usize> = vec![0; providers.len()];
 
     for (cat_key, cat_label) in &category_order {
-        let cat_providers: Vec<&ProviderInfo> = providers
+        let cat_providers: Vec<(usize, &ProviderInfo)> = providers
             .iter()
-            .filter(|p| p.category == *cat_key)
+            .enumerate()
+            .filter(|(_, p)| p.category == *cat_key)
             .collect();
         if cat_providers.is_empty() {
             continue;
         }
 
         // Category header
-        if !cat_label.is_empty() && *cat_key != last_category {
-            lines.push(Line::from(vec![Span::styled(
-                format!("  {}", cat_label),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            lines.push(Line::from(""));
+        rows.push(ProviderRow::Header {
+            label: cat_label.to_string(),
+        });
+
+        for (pi, _p) in &cat_providers {
+            provider_to_row[*pi] = rows.len();
+            rows.push(ProviderRow::Item { provider_idx: *pi });
         }
-
-        for p in &cat_providers {
-            let is_selected = idx == selected;
-            let check = if p.has_key { "✓" } else { "○" };
-
-            let highlight = if is_selected {
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-
-            let name_span = Span::styled(
-                format!(" {} {} ", check, p.display_name),
-                highlight.fg(if is_selected {
-                    Color::White
-                } else {
-                    Color::Gray
-                }),
-            );
-
-            let desc_span = if !p.description.is_empty() {
-                Span::styled(
-                    format!(" — {}", p.description),
-                    Style::default().fg(Color::DarkGray),
-                )
-            } else {
-                Span::raw("")
-            };
-
-            let key_span = if p.has_key {
-                Span::styled(" [key set]", Style::default().fg(Color::Green))
-            } else {
-                Span::raw("")
-            };
-
-            lines.push(Line::from(vec![name_span, desc_span, key_span]));
-            idx += 1;
-        }
-        last_category = cat_key;
     }
 
-    let para = Paragraph::new(lines);
-    f.render_widget(para, area);
+    // Calculate list area (leave 1 row for hint at bottom)
+    let list_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: area.height.saturating_sub(1),
+    };
+
+    let max_show = list_area.height as usize;
+    let selected_line = provider_to_row[selected];
+    let window_start = if selected_line >= max_show {
+        selected_line.saturating_sub(max_show - 1)
+    } else {
+        0
+    };
+
+    let accent_color = theme.colors.accent.to_ratatui();
+    let fg_color = theme.colors.foreground.to_ratatui();
+    let muted_color = theme.colors.muted.to_ratatui();
+    let bg_color = theme.colors.background.to_ratatui();
+    let success_color = theme.colors.success.to_ratatui();
+
+    let list_items: Vec<ListItem> = rows
+        .iter()
+        .enumerate()
+        .skip(window_start)
+        .take(max_show)
+        .map(|(_row_idx, row)| match row {
+            ProviderRow::Header { label } => {
+                // ── Category Header ────────── style
+                let dash_count = area.width as usize;
+                let header_text = format!(" {:} ", label);
+                let header_len = header_text.chars().count();
+                let trailing = dash_count.saturating_sub(header_len + 4); // "── " + " ─"
+                let line = format!("── {} {}", header_text, "─".repeat(trailing));
+                ListItem::new(Span::styled(
+                    line,
+                    Style::default()
+                        .fg(accent_color)
+                        .add_modifier(Modifier::BOLD),
+                ))
+            }
+            ProviderRow::Item { provider_idx } => {
+                let is_sel = *provider_idx == selected;
+                let p = &providers[*provider_idx];
+                let check = if p.has_key { "✓" } else { "○" };
+
+                let mut spans: Vec<Span<'_>> = Vec::new();
+
+                // Pointer
+                let pointer = if is_sel { "› " } else { "  " };
+                spans.push(Span::styled(
+                    pointer,
+                    if is_sel {
+                        Style::default().fg(accent_color).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    },
+                ));
+
+                // Check + name
+                let name_str = format!("{} {}", check, p.display_name);
+                spans.push(Span::styled(
+                    format!(" {:<16}", name_str),
+                    if is_sel {
+                        Style::default()
+                            .fg(bg_color)
+                            .bg(accent_color)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(fg_color)
+                    },
+                ));
+
+                // Description
+                if !p.description.is_empty() {
+                    let desc_style = if is_sel {
+                        Style::default().fg(bg_color).bg(accent_color)
+                    } else {
+                        Style::default().fg(muted_color)
+                    };
+                    spans.push(Span::styled(
+                        format!(" {}", p.description),
+                        desc_style,
+                    ));
+                }
+
+                // Key badge
+                if p.has_key {
+                    let badge_style = if is_sel {
+                        Style::default().fg(bg_color).bg(accent_color)
+                    } else {
+                        Style::default().fg(success_color)
+                    };
+                    spans.push(Span::styled(" [key]", badge_style));
+                }
+
+                ListItem::new(Line::from(spans))
+            }
+        })
+        .collect();
+
+    f.render_widget(List::new(list_items), list_area);
+
+    Some(ScrollInfo {
+        total: providers.len(),
+        visible: max_show.min(rows.len()),
+        window_start,
+    })
 }
 
 /// Render a text input field with label and cursor.
@@ -822,13 +902,17 @@ fn render_setup_step(
             ..
         } => {
             render_title(f, area, 2, " Select a provider to get started", fg, bg);
-            render_provider_list(f, area, providers, *selected, &styles, theme);
-            render_hint(
-                f,
-                area,
-                " Up/Down select  |  Enter confirm  |  q quit",
-                styles.muted,
-            );
+            // Provider list starts below the title (y_offset 3: title at 2 + 1 gap)
+            let list_area = Rect {
+                x: area.x,
+                y: area.y + 3,
+                width: area.width,
+                height: area.height.saturating_sub(3),
+            };
+            let scroll = render_provider_list(f, list_area, providers, *selected, &styles, theme);
+            let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
+            let hint = format!(" Up/Down select  |  Enter confirm  |  q quit  ({} providers){}", providers.len(), pos);
+            render_hint(f, area, &hint, styles.muted);
         }
 
         SetupStep::EnterApiKey { provider, key, .. } => {
