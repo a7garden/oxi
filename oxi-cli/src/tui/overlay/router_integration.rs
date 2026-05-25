@@ -57,6 +57,7 @@ pub fn store_config_to_ai_config(
             structural: c.weights().structural,
             behavioral: c.weights().behavioral,
             context_budget: c.weights().context_budget,
+            vision: c.weights().vision,
         },
     )
 }

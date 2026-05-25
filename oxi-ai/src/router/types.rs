@@ -139,6 +139,12 @@ pub struct RoutingDecision {
     pub is_context_triggered: bool,
     /// Whether the decision was forced by budget constraints.
     pub is_budget_forced: bool,
+    /// Whether vision capability influenced this decision.
+    #[serde(default)]
+    pub is_vision_triggered: bool,
+    /// Number of image blocks that triggered vision routing.
+    #[serde(default)]
+    pub vision_images: usize,
     /// Method used to make the decision.
     pub decision_method: DecisionMethod,
 }
@@ -194,16 +200,22 @@ pub struct ScoringWeights {
     /// Weight for context/budget signal.
     #[serde(default = "default_context")]
     pub context_budget: f64,
+    /// Weight for vision signal (image content requiring vision-capable model).
+    #[serde(default = "default_vision")]
+    pub vision: f64,
 }
 
 fn default_structural() -> f64 {
-    0.4
+    0.35
 }
 fn default_behavioral() -> f64 {
     0.35
 }
 fn default_context() -> f64 {
-    0.25
+    0.20
+}
+fn default_vision() -> f64 {
+    0.10
 }
 
 impl Default for ScoringWeights {
@@ -212,6 +224,7 @@ impl Default for ScoringWeights {
             structural: default_structural(),
             behavioral: default_behavioral(),
             context_budget: default_context(),
+            vision: default_vision(),
         }
     }
 }

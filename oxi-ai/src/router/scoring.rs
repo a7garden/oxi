@@ -1,6 +1,6 @@
 //! Scoring functions for routing decisions.
 
-use super::signals::{BehavioralSignal, ContextBudgetSignal, StructuralSignal};
+use super::signals::{BehavioralSignal, ContextBudgetSignal, StructuralSignal, VisionSignal};
 use super::types::ScoringWeights;
 
 /// Sigmoid function with configurable center and steepness.
@@ -21,25 +21,33 @@ pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
 }
 
 /// Compute a composite routing score from all signals.
+///
+/// If `vision` is `None`, behaves identically to the old 3-signal formula
+/// (vision weight is treated as 0).
 pub fn compute_score(
     structural: &StructuralSignal,
     behavioral: &BehavioralSignal,
     budget: &ContextBudgetSignal,
+    vision: Option<&VisionSignal>,
     weights: &ScoringWeights,
 ) -> f64 {
     let s_raw = structural.normalized();
     let b_raw = behavioral.normalized();
     let c_raw = budget.normalized();
+    let v_raw = vision.map(|v| v.normalized()).unwrap_or(0.0);
 
     // Sigmoid sharpening.
     let s_sharp = sigmoid(s_raw, 0.5, 4.0);
     let b_sharp = sigmoid(b_raw, 0.5, 4.0);
     let c_sharp = sigmoid(c_raw, 0.5, 4.0);
+    // Sharper sigmoid for vision — binary-like activation
+    let v_sharp = sigmoid(v_raw, 0.3, 8.0);
 
     let raw = weights.structural * s_sharp
         + weights.behavioral * b_sharp
-        + weights.context_budget * c_sharp;
-    let total = weights.structural + weights.behavioral + weights.context_budget;
+        + weights.context_budget * c_sharp
+        + weights.vision * v_sharp;
+    let total = weights.structural + weights.behavioral + weights.context_budget + weights.vision;
 
     if total > 0.0 {
         (raw / total).clamp(0.0, 1.0)
@@ -94,7 +102,7 @@ mod tests {
         let behavioral = BehavioralSignal::default();
         let budget = ContextBudgetSignal::default();
         let weights = ScoringWeights::default();
-        let score = compute_score(&structural, &behavioral, &budget, &weights);
+        let score = compute_score(&structural, &behavioral, &budget, None, &weights);
         assert!(
             (0.0..=1.0).contains(&score),
             "score out of range: {}",
@@ -119,11 +127,55 @@ mod tests {
             context_upgrade_threshold: Some(50_000),
         };
         let weights = ScoringWeights::default();
-        let score = compute_score(&structural, &behavioral, &budget, &weights);
+        let score = compute_score(&structural, &behavioral, &budget, None, &weights);
         assert!(
             (0.0..=1.0).contains(&score),
             "score out of range: {}",
             score
+        );
+    }
+
+    #[test]
+    fn compute_score_vision_increases_score() {
+        let structural = StructuralSignal::default();
+        let behavioral = BehavioralSignal::default();
+        let budget = ContextBudgetSignal::default();
+        let weights = ScoringWeights::default();
+
+        let without_vision = compute_score(&structural, &behavioral, &budget, None, &weights);
+        let vision = VisionSignal {
+            recent_image_count: 2,
+            has_image_in_latest_turn: true,
+            image_producing_tools: vec!["browse".to_string()],
+        };
+        let with_vision = compute_score(&structural, &behavioral, &budget, Some(&vision), &weights);
+        assert!(
+            with_vision > without_vision,
+            "vision should increase score: {} vs {}",
+            with_vision,
+            without_vision
+        );
+    }
+
+    #[test]
+    fn compute_score_vision_zero_weight_no_effect() {
+        let mut weights = ScoringWeights::default();
+        weights.vision = 0.0;
+        let structural = StructuralSignal::default();
+        let behavioral = BehavioralSignal::default();
+        let budget = ContextBudgetSignal::default();
+        let vision = VisionSignal {
+            recent_image_count: 5,
+            has_image_in_latest_turn: true,
+            image_producing_tools: vec![],
+        };
+        let with = compute_score(&structural, &behavioral, &budget, Some(&vision), &weights);
+        let without = compute_score(&structural, &behavioral, &budget, None, &weights);
+        assert!(
+            (with - without).abs() < 1e-6,
+            "vision=0.0 should have no effect: {} vs {}",
+            with,
+            without
         );
     }
 }

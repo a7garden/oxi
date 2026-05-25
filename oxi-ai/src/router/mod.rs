@@ -43,7 +43,7 @@ use std::sync::Arc;
 pub use fallback::FallbackChain;
 pub use profiles::{parse_tier_model, ProviderModel, RouterProfiles};
 pub use scoring::compute_score;
-pub use signals::{BehavioralSignal, ContextBudgetSignal, StructuralSignal};
+pub use signals::{BehavioralSignal, ContextBudgetSignal, StructuralSignal, VisionSignal};
 pub use types::{
     DecisionMethod, RoutedTierConfig, RouterConfig, RouterPhase, RouterProfile, RouterState,
     RouterTier, RoutingDecision, RoutingScore, ScoringWeights,
@@ -126,7 +126,7 @@ impl RouterPipeline {
             self.context_upgrade_threshold,
         );
 
-        let raw_score = compute_score(&structural, &behavioral, &budget, &self.weights);
+        let raw_score = compute_score(&structural, &behavioral, &budget, None, &self.weights);
         self.last_score = raw_score;
 
         let score = RoutingScore(raw_score);
@@ -250,6 +250,114 @@ impl RouterProvider {
     pub fn get_snapshot() -> Option<RouterSnapshot> {
         ROUTER_SNAPSHOT.read().clone()
     }
+
+    /// Route with vision awareness — extracts VisionSignal and adjusts tier/model.
+    ///
+    /// Returns `(vision_signal, adjusted_tier_config)`.
+    pub fn route_with_vision(
+        &self,
+        context: &Context,
+        profile_name: &str,
+        tier: RouterTier,
+    ) -> (VisionSignal, RoutedTierConfig) {
+        // Extract vision signal from recent messages
+        let vision = VisionSignal::extract(&context.messages, 10);
+
+        // Get base tier config
+        let tier_config = self
+            .profiles
+            .read()
+            .tier_config(profile_name, tier)
+            .cloned()
+            .unwrap_or_else(|| RoutedTierConfig {
+                model: String::new(),
+                thinking: None,
+                fallbacks: vec![],
+            });
+
+        // If vision is required, ensure we have a vision-capable model
+        if vision.requires_vision() {
+            let adjusted = self.ensure_vision_model(tier_config, tier, profile_name);
+            (vision, adjusted)
+        } else {
+            (vision, tier_config)
+        }
+    }
+
+    /// Ensure the selected model supports vision.
+    ///
+    /// Fallback priority:
+    /// 1. Current model already supports vision → keep it
+    /// 2. Fallback list contains a vision model → swap
+    /// 3. Higher tier has a vision model → upgrade
+    /// 4. No vision model found → warn and keep original
+    fn ensure_vision_model(
+        &self,
+        tier_config: RoutedTierConfig,
+        tier: RouterTier,
+        profile_name: &str,
+    ) -> RoutedTierConfig {
+        // 1. Current model already supports vision?
+        if let Some(pm) = parse_tier_model(&tier_config) {
+            if let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id) {
+                if model.supports_vision() {
+                    return tier_config;
+                }
+            }
+        }
+
+        let original_model = tier_config.model.clone();
+        let thinking = tier_config.thinking;
+        let fallbacks = tier_config.fallbacks.clone();
+
+        // 2. Fallback list contains a vision model?
+        for fb in &fallbacks {
+            if let Some(pm) = ProviderModel::parse(fb) {
+                if let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id) {
+                    if model.supports_vision() {
+                        tracing::info!(
+                            "Vision override: {} → {} (vision-capable fallback)",
+                            original_model, fb
+                        );
+                        return RoutedTierConfig {
+                            model: fb.clone(),
+                            thinking,
+                            fallbacks,
+                        };
+                    }
+                }
+            }
+        }
+
+        // 3. Higher tier has a vision model?
+        let profiles = self.profiles.read();
+        if let Some(profile) = profiles.get_with_fallback(profile_name) {
+            for higher_tier in [RouterTier::High, RouterTier::Medium] {
+                if higher_tier.rank() > tier.rank() {
+                    let tc = profile.tier_config(higher_tier);
+                    if let Some(pm) = parse_tier_model(tc) {
+                        if let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id) {
+                            if model.supports_vision() {
+                                tracing::info!(
+                                    "Vision upgrade: tier {:?} → {:?}, model {} → {}",
+                                    tier, higher_tier, original_model, tc.model
+                                );
+                                return tc.clone();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. No vision model found — warn and keep original
+        tracing::warn!(
+            "Vision required but no vision-capable model found for tier {:?}. \
+             Model {} may fail with image content.",
+            tier, original_model
+        );
+        tier_config
+    }
 }
 
 #[async_trait::async_trait]
@@ -309,6 +417,8 @@ impl Provider for RouterProvider {
             is_fallback: false,
             is_context_triggered: false,
             is_budget_forced: false,
+            is_vision_triggered: false,
+            vision_images: 0,
             decision_method: DecisionMethod::Heuristic,
         };
         self.pipeline.write().record_decision(decision);

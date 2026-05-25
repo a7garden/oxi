@@ -1259,6 +1259,7 @@ fn register_router_provider(settings: &Settings) {
             structural: store_cfg.weights().structural,
             behavioral: store_cfg.weights().behavioral,
             context_budget: store_cfg.weights().context_budget,
+            vision: store_cfg.weights().vision,
         },
     );
 

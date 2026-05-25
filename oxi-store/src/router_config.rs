@@ -109,24 +109,30 @@ pub struct ScoringWeights {
     pub behavioral: f64,
     #[serde(default = "default_context")]
     pub context_budget: f64,
+    #[serde(default = "default_vision")]
+    pub vision: f64,
 }
 
 fn default_structural() -> f64 {
-    0.4
+    0.35
 }
 fn default_behavioral() -> f64 {
     0.35
 }
 fn default_context() -> f64 {
-    0.25
+    0.20
+}
+fn default_vision() -> f64 {
+    0.10
 }
 
 impl Default for ScoringWeights {
     fn default() -> Self {
         Self {
-            structural: 0.4,
+            structural: 0.35,
             behavioral: 0.35,
-            context_budget: 0.25,
+            context_budget: 0.20,
+            vision: 0.10,
         }
     }
 }
@@ -258,9 +264,13 @@ fn parse_tier(value: Option<&toml::Value>) -> Option<RoutedTierConfig> {
 fn parse_weights(value: &toml::Value) -> Option<ScoringWeights> {
     let table = value.as_table()?;
     Some(ScoringWeights {
-        structural: table.get("structural")?.as_float().unwrap_or(0.4),
+        structural: table.get("structural")?.as_float().unwrap_or(0.35),
         behavioral: table.get("behavioral")?.as_float().unwrap_or(0.35),
-        context_budget: table.get("context_budget")?.as_float().unwrap_or(0.25),
+        context_budget: table.get("context_budget")?.as_float().unwrap_or(0.20),
+        vision: table
+            .get("vision")
+            .and_then(|v| v.as_float())
+            .unwrap_or(0.10),
     })
 }
 
