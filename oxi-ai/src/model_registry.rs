@@ -51,6 +51,9 @@ static STATIC_MODELS: Lazy<HashMap<String, Model>> = Lazy::new(|| {
     // ZAI models
     add_zai_models(&mut map);
 
+    // MiniMax models
+    add_minimax_models(&mut map);
+
     map
 });
 
@@ -667,6 +670,44 @@ fn add_zai_models(map: &mut HashMap<String, Model>) {
                     cache_write: 0.0,
                 },
                 context_window: 200_000,
+                max_tokens: 131_072,
+                headers: Default::default(),
+                compat: None,
+            },
+        );
+    }
+}
+
+fn add_minimax_models(map: &mut HashMap<String, Model>) {
+    let models = [
+        ("minimax/MiniMax-M2.7", "MiniMax-M2.7", true, 0.0, 0.0),
+        (
+            "minimax/MiniMax-M2.7-highspeed",
+            "MiniMax-M2.7-highspeed",
+            true,
+            0.0,
+            0.0,
+        ),
+    ];
+
+    for (id, name, reasoning, input_cost, output_cost) in models {
+        map.insert(
+            id.to_string(),
+            Model {
+                id: extract_model_name(id).to_string(),
+                name: name.to_string(),
+                api: Api::AnthropicMessages,
+                provider: "minimax".to_string(),
+                base_url: "https://api.minimax.io".to_string(),
+                reasoning,
+                input: vec![InputModality::Text],
+                cost: Cost {
+                    input: input_cost,
+                    output: output_cost,
+                    cache_read: 0.06,
+                    cache_write: 0.375,
+                },
+                context_window: 204_800,
                 max_tokens: 131_072,
                 headers: Default::default(),
                 compat: None,

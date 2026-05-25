@@ -5,6 +5,110 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
+/// Per-provider options for fine-grained control.
+///
+/// Each field corresponds to a specific provider's native API option.
+/// Only the relevant provider reads its section; others ignore it.
+/// Mirrors opencode's `providerOptions` pattern where the request carries
+/// a bag of per-provider knobs that the protocol layer reads selectively.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProviderOptions {
+    /// Anthropic-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anthropic: Option<AnthropicOptions>,
+
+    /// OpenAI-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai: Option<OpenAiOptions>,
+
+    /// Google/Gemini-specific options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub google: Option<GoogleOptions>,
+
+    /// Generic OpenAI-compatible provider options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub openai_compatible: Option<OpenAiCompatibleOptions>,
+}
+
+/// Anthropic-specific options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnthropicOptions {
+    /// Extended thinking mode.
+    /// - `"enabled"`: Fixed budget thinking
+    /// - `"adaptive"`: Anthropic chooses budget based on effort
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_type: Option<String>,
+
+    /// Token budget for thinking (when thinking_type is "enabled").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<usize>,
+
+    /// Reasoning effort level (when thinking_type is "adaptive").
+    /// Values: "low", "medium", "high", "xhigh", "max".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+}
+
+/// OpenAI-specific options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAiOptions {
+    /// Whether to store the response for session continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub store: Option<bool>,
+
+    /// Reasoning effort: "low", "medium", "high", "xhigh".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+
+    /// Whether to include reasoning summary in the response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_summary: Option<String>,
+
+    /// Whether to include encrypted reasoning content for session continuity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_encrypted_reasoning: Option<bool>,
+
+    /// Text verbosity: "low", "medium", "high".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_verbosity: Option<String>,
+
+    /// Prompt cache key for server-side caching.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+}
+
+/// Google/Gemini-specific options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GoogleOptions {
+    /// Whether to include thoughts in the response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include_thoughts: Option<bool>,
+
+    /// Thinking level: "low", "medium", "high".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_level: Option<String>,
+
+    /// Thinking budget in tokens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_budget: Option<usize>,
+}
+
+/// Generic OpenAI-compatible provider options.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAiCompatibleOptions {
+    /// Reasoning effort level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+
+    /// Whether thinking is enabled (for providers like ZAI).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_thinking: Option<bool>,
+
+    /// Cache control marker.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<String>,
+}
+
 /// Options for streaming requests
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct StreamOptions {
@@ -40,6 +144,15 @@ pub struct StreamOptions {
     /// Custom token budgets for thinking levels
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_budgets: Option<ThinkingBudgets>,
+
+    /// Per-provider options for fine-grained control.
+    ///
+    /// Each provider reads only its own section. For example, the Anthropic
+    /// provider reads `provider_options.anthropic`, OpenAI reads
+    /// `provider_options.openai`. This allows a single request to carry
+    /// options for multiple providers without conflicts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_options: Option<ProviderOptions>,
 }
 
 impl fmt::Debug for StreamOptions {
@@ -53,6 +166,7 @@ impl fmt::Debug for StreamOptions {
             .field("headers", &self.headers)
             .field("thinking_level", &self.thinking_level)
             .field("thinking_budgets", &self.thinking_budgets)
+            .field("provider_options", &self.provider_options)
             .finish()
     }
 }

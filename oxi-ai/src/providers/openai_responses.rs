@@ -106,6 +106,7 @@ impl Provider for OpenAiResponsesProvider {
         }
 
         if let Some(max) = options.max_tokens {
+            body["max_output_tokens"] = serde_json::json!(max);
             body["max_tokens"] = serde_json::json!(max);
         }
 
@@ -114,14 +115,60 @@ impl Provider for OpenAiResponsesProvider {
             body["tools"] = build_tools(&context.tools);
         }
 
-        // Add reasoning if enabled via thinking level
-        if let Some(ref thinking_level) = options.thinking_level {
+        // Add reasoning if enabled via thinking level or provider_options.openai
+        let openai_opts = options
+            .provider_options
+            .as_ref()
+            .and_then(|po| po.openai.as_ref());
+
+        if let Some(opts) = openai_opts {
+            // Fine-grained OpenAI control via provider_options
+            let effort = opts
+                .reasoning_effort
+                .as_deref()
+                .or_else(|| options.thinking_level.as_ref().and_then(|l| l.as_str()));
+            let summary = opts.reasoning_summary.as_deref().unwrap_or("auto");
+
+            if let Some(effort_str) = effort {
+                body["reasoning"] = serde_json::json!({
+                    "effort": effort_str,
+                    "summary": summary,
+                });
+            }
+
+            // Store flag
+            if let Some(store) = opts.store {
+                body["store"] = serde_json::json!(store);
+            }
+
+            // Encrypted reasoning content
+            if opts.include_encrypted_reasoning.unwrap_or(false) {
+                body["include"] = serde_json::json!(["reasoning.encrypted_content"]);
+            }
+
+            // Text verbosity
+            if let Some(ref verbosity) = opts.text_verbosity {
+                body["text"] = serde_json::json!({ "verbosity": verbosity });
+            }
+
+            // Prompt cache key
+            if let Some(ref key) = opts.prompt_cache_key {
+                body["prompt_cache_key"] = serde_json::json!(key);
+            }
+        } else if let Some(ref thinking_level) = options.thinking_level {
+            // Fallback: thinking_level only
             if thinking_level != &crate::ThinkingLevel::Off {
                 if let Some(effort) = thinking_level.as_str() {
                     body["reasoning"] = serde_json::json!({
                         "effort": effort,
+                        "summary": "auto",
                     });
                 }
+            }
+
+            // Include encrypted reasoning content for session continuity
+            if options.thinking_level.is_some() {
+                body["include"] = serde_json::json!(["reasoning.encrypted_content"]);
             }
         }
 
@@ -394,6 +441,20 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                                 partial: partial_message.clone(),
                             });
                         }
+                        // Hosted (provider-executed) tool calls: web_search,
+                        // file_search, code_interpreter, computer_use, etc.
+                        // These arrive complete (no streaming delta) and emit
+                        // a ToolCallStart + ToolCallEnd pair.
+                        t if is_hosted_tool_type(t) => {
+                            let tool_name = hosted_tool_name(t);
+                            events.push(ProviderEvent::ToolCallStart {
+                                content_index: output_item.index,
+                                tool_call_id: output_item.id.clone(),
+                                tool_name: Some(tool_name.clone()),
+                                partial: partial_message.clone(),
+                            });
+                            current_tool_call_index = Some(output_item.index);
+                        }
                         _ => {}
                     }
                 }
@@ -421,9 +482,25 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                 ResponsesEvent::OutputTextDelta { output_text: delta } => {
                     // Use the index from the delta if available, otherwise use current tracked index
                     let content_idx = delta.content_index.or(current_text_index).unwrap_or(0);
+                    let text = delta.slice.unwrap_or_default();
+                    // pi-mono: accumulate into partial_message so the TUI can
+                    // diff against its snapshot tracker.
+                    let last_text_idx = partial_message
+                        .content
+                        .iter()
+                        .rposition(|b| matches!(b, ContentBlock::Text(_)));
+                    if let Some(idx) = last_text_idx {
+                        if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
+                            t.text.push_str(&text);
+                        }
+                    } else {
+                        partial_message
+                            .content
+                            .push(ContentBlock::Text(crate::TextContent::new(text.clone())));
+                    }
                     events.push(ProviderEvent::TextDelta {
                         content_index: content_idx,
-                        delta: delta.slice.unwrap_or_default(),
+                        delta: text,
                         partial: partial_message.clone(),
                     });
                     // Update the current text index if not already set
@@ -472,6 +549,22 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                             }
                         }
                     }
+                }
+                // Hosted tool result completion — emit ToolCallEnd with the
+                // structured result payload for agent loop round-trip.
+                ResponsesEvent::OutputItemDone { output_item }
+                    if is_hosted_tool_type(&output_item.r#type) =>
+                {
+                    let tool_name = hosted_tool_name(&output_item.r#type);
+                    let tc_id = output_item
+                        .call_id
+                        .or_else(|| output_item.id.clone())
+                        .unwrap_or_default();
+                    events.push(ProviderEvent::ToolCallEnd {
+                        content_index: output_item.index,
+                        tool_call: crate::ToolCall::new(tc_id, tool_name, serde_json::json!({})),
+                        partial: partial_message.clone(),
+                    });
                 }
                 ResponsesEvent::ResponseWithUsage { response } => {
                     // Check if this is incomplete or completed
@@ -561,6 +654,10 @@ enum ResponsesEvent {
     ReasoningDone {
         reasoning: ReasoningDone,
     },
+    // Output item done — carries completed items including hosted tools
+    OutputItemDone {
+        output_item: OutputItemDoneData,
+    },
     // General response created (no usage field)
     ResponseCreatedData {
         response: ResponseCreatedData,
@@ -590,6 +687,58 @@ struct OutputItem {
     r#type: String,
     id: Option<String>,
     _status: Option<String>,
+}
+
+/// Completed output item — carries full data for hosted tools, reasoning, etc.
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct OutputItemDoneData {
+    index: usize,
+    #[serde(rename = "type")]
+    r#type: String,
+    id: Option<String>,
+    /// Tool call ID (for function_call items)
+    call_id: Option<String>,
+    /// Tool name (for function_call items)
+    name: Option<String>,
+    /// Tool arguments JSON (for function_call items)
+    arguments: Option<String>,
+    /// Reasoning encrypted content (for reasoning items)
+    encrypted_content: Option<String>,
+    /// Summary items (for reasoning items)
+    summary: Option<Vec<SummaryItem>>,
+    /// Hosted tool status
+    _status: Option<String>,
+}
+
+/// Check if an item type is a hosted (provider-executed) tool.
+fn is_hosted_tool_type(t: &str) -> bool {
+    matches!(
+        t,
+        "web_search_call"
+            | "web_search_preview_call"
+            | "file_search_call"
+            | "code_interpreter_call"
+            | "computer_use_call"
+            | "image_generation_call"
+            | "mcp_call"
+            | "local_shell_call"
+    )
+}
+
+/// Map hosted tool item type to our internal tool name.
+fn hosted_tool_name(t: &str) -> String {
+    match t {
+        "web_search_call" | "web_search_preview_call" => "web_search",
+        "file_search_call" => "file_search",
+        "code_interpreter_call" => "code_interpreter",
+        "computer_use_call" => "computer_use",
+        "image_generation_call" => "image_generation",
+        "mcp_call" => "mcp",
+        "local_shell_call" => "local_shell",
+        _ => "unknown",
+    }
+    .to_string()
 }
 
 #[derive(Debug, Deserialize)]

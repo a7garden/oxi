@@ -295,6 +295,7 @@ mod tests {
             auto_retry_base_delay_ms: 2000,
             api_key: None,
             workspace_dir: None,
+            provider_options: None,
         }
     }
 

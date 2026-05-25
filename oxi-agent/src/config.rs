@@ -156,6 +156,13 @@ pub struct AgentConfig {
     /// [`OutputMode`]: crate::structured_output::OutputMode
     #[serde(default)]
     pub output_mode: Option<String>,
+    /// Per-provider options for fine-grained control.
+    ///
+    /// When set, these are passed through to [`oxi_ai::StreamOptions::provider_options`]
+    /// so the provider can read provider-specific settings (e.g. Anthropic adaptive
+    /// thinking, OpenAI reasoning_effort, Google thinkingConfig).
+    #[serde(default)]
+    pub provider_options: Option<oxi_ai::ProviderOptions>,
 }
 
 impl Default for AgentConfig {
@@ -175,6 +182,7 @@ impl Default for AgentConfig {
             api_key: None,
             workspace_dir: None,
             output_mode: None,
+            provider_options: None,
         }
     }
 }

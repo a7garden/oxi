@@ -206,6 +206,8 @@ pub(crate) enum UiEvent {
     },
     QueueUpdate {
         pending: usize,
+        /// Snapshot of current steering queue messages
+        messages: Vec<String>,
     },
     /// Token usage updated.
     TokenUsage {
@@ -234,7 +236,16 @@ pub(super) const SPINNER: &[&str] = &["|", "/", "-", "\\"];
 
 // ── App State ────────────────────────────────────────────────────────────
 
-/// Setup wizard state
+/// Provider info for the selection UI.
+#[derive(Debug, Clone)]
+pub(crate) struct ProviderInfo {
+    pub name: String,
+    pub display_name: String,
+    pub has_key: bool,
+    pub category: String,
+    pub description: String,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum SetupStep {
     /// First step: OAuth or API Key
@@ -244,8 +255,10 @@ pub(crate) enum SetupStep {
     },
     /// Select provider from list
     SelectProvider {
-        providers: Vec<(String, bool)>, // (name, has_key)
+        providers: Vec<ProviderInfo>,
         selected: usize,
+        #[allow(dead_code)]
+        filter: String,
     },
     /// Enter API key for selected provider
     EnterApiKey {
@@ -333,8 +346,16 @@ pub(crate) struct AppState {
     pub next_action: Option<TuiNextAction>,
     /// Count of pending steering messages (shown in busy input)
     pub pending_steering: usize,
+    /// Snapshot of steering queue message texts
+    pub steering_messages_snapshot: Vec<String>,
+    /// Whether the queue panel is visible (toggle with Ctrl+Q)
+    pub queue_panel_visible: bool,
+    /// Selected index in the queue panel
+    pub queue_panel_selected: usize,
     /// Whether session needs to be persisted to disk
     pub needs_persist: bool,
+    /// Whether TUI chat needs to be rebuilt from agent state (after compaction)
+    pub needs_chat_rebuild: bool,
     /// Length of text already rendered from the snapshot's Text block.
     /// Used to compute incremental text delta from full snapshot.
     /// Tracks bytes (not chars) to allow fast slicing of UTF-8 text.
@@ -380,7 +401,11 @@ impl AppState {
             session_file_path: None,
             next_action: None,
             pending_steering: 0,
+            steering_messages_snapshot: Vec::new(),
+            queue_panel_visible: false,
+            queue_panel_selected: 0,
             needs_persist: false,
+            needs_chat_rebuild: false,
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: Vec::new(),
             snapshot_text_block_created: false,
@@ -510,7 +535,7 @@ impl AppState {
     /// from ToolCall blocks in the snapshot. If the provider sent tool call
     /// JSON as TextDelta, the snapshot's Text block won't contain it (it'll
     /// be in a ToolCall block instead). This prevents JSON appearing in chat.
-    pub fn update_streaming_message(&mut self, msg: &oxi_ai::Message, _delta: Option<&str>) {
+    pub fn update_streaming_message(&mut self, msg: &oxi_ai::Message, delta: Option<&str>) {
         if let oxi_ai::Message::Assistant(assistant) = msg {
             let mut thinking_block_idx: usize = 0;
             for block in &assistant.content {
@@ -541,6 +566,18 @@ impl AppState {
                             self.snapshot_text_rendered = text.len();
                             if !text.is_empty() {
                                 self.snapshot_text_block_created = true;
+                            }
+                        } else if text.is_empty() {
+                            // Fallback: provider did not accumulate text into
+                            // the partial snapshot — use the raw delta instead.
+                            // This guards against providers that emit TextDelta
+                            // without updating partial_message.content.
+                            if let Some(delta_str) = delta {
+                                if !delta_str.is_empty() {
+                                    self.chat.stream_text_delta(delta_str);
+                                    // Keep snapshot_text_rendered at 0 so future
+                                    // updates also use the delta fallback.
+                                }
                             }
                         }
                     }
@@ -778,9 +815,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
         // Agent worker thread
         let session_handle = agent_session.clone_handle();
-        // Clone prompt_tx so the worker thread can auto-reprocess queued messages.
-        // The cloned sender feeds back into prompt_rx, triggering the outer while loop.
-        let prompt_tx_worker = prompt_tx.clone();
+        // NOTE: prompt_tx_worker was previously used for auto-processing queued
+        // messages after agent completion. That logic now lives in the TUI main loop
+        // (see `saw_agent_end` check). The clone is kept for potential future use.
         let ui_tx_for_thread = ui_tx.clone();
         let _agent_handle = std::thread::spawn(move || {
             let rt = get_agent_runtime();
@@ -789,7 +826,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 local
                     .run_until(async {
                         while let Some(prompt) = prompt_rx.recv().await {
-                            tracing::debug!("[TUI] Worker: received prompt, calling agent.run_with_channel");
+                            tracing::debug!(
+                                "[TUI] Worker: received prompt, calling agent.run_with_channel"
+                            );
                             tracing::info!("[TUI] Received prompt, starting agent run");
                             let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
                             let ui_fwd = ui_tx_for_thread.clone();
@@ -938,17 +977,35 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             // → emit queue update so TUI shows current count
                                             let steering_q = session_h.steering_queue();
                                             let follow_up_q = session_h.follow_up_queue();
-                                            let pending =
-                                                steering_q.read().len() + follow_up_q.read().len();
-                                            let _ = ui_fwd.send(UiEvent::QueueUpdate { pending });
+                                            let sq = steering_q.read();
+                                            let fq = follow_up_q.read();
+                                            let pending = sq.len() + fq.len();
+                                            let mut msgs: Vec<String> =
+                                                sq.iter().cloned().collect();
+                                            msgs.extend(fq.iter().cloned());
+                                            drop(sq);
+                                            drop(fq);
+                                            let _ = ui_fwd.send(UiEvent::QueueUpdate {
+                                                pending,
+                                                messages: msgs,
+                                            });
                                             continue;
                                         }
                                         AgentEvent::FollowUpMessage { .. } => {
                                             let steering_q = session_h.steering_queue();
                                             let follow_up_q = session_h.follow_up_queue();
-                                            let pending =
-                                                steering_q.read().len() + follow_up_q.read().len();
-                                            let _ = ui_fwd.send(UiEvent::QueueUpdate { pending });
+                                            let sq = steering_q.read();
+                                            let fq = follow_up_q.read();
+                                            let pending = sq.len() + fq.len();
+                                            let mut msgs: Vec<String> =
+                                                sq.iter().cloned().collect();
+                                            msgs.extend(fq.iter().cloned());
+                                            drop(sq);
+                                            drop(fq);
+                                            let _ = ui_fwd.send(UiEvent::QueueUpdate {
+                                                pending,
+                                                messages: msgs,
+                                            });
                                             continue;
                                         }
 
@@ -968,19 +1025,16 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             let agent = sh.agent_ref();
                             sh.reset_should_stop();
                             sh.agent_ref().reset_cancel();
-                            let steering_q = sh.steering_queue();
-                            let follow_up_q = sh.follow_up_queue();
                             let should_stop_flag = sh.should_stop_flag();
                             let hooks = oxi_agent::AgentHooks {
                                 should_stop_after_turn: Some(Arc::new(move |_ctx| {
                                     should_stop_flag.load(Ordering::SeqCst)
                                 })),
-                                get_steering_messages: Some(Arc::new(move || {
-                                    steering_q.write().drain(..).collect::<Vec<String>>()
-                                })),
-                                get_follow_up_messages: Some(Arc::new(move || {
-                                    follow_up_q.write().drain(..).collect::<Vec<String>>()
-                                })),
+                                // NOTE: get_steering_messages and get_follow_up_messages
+                                // are intentionally NOT set. User-queued messages should
+                                // only be processed AFTER the current run completes,
+                                // not injected mid-loop. The TUI main loop handles
+                                // post-completion queue processing (see `saw_agent_end`).
                                 tool_execution: oxi_agent::ToolExecutionMode::Sequential,
                                 ..Default::default()
                             };
@@ -1030,35 +1084,12 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                             // that via drop(prompt_tx) + agent_handle.join().
                             let _ = forwarder_handle; // move ownership, don't block
 
-                            // ── Auto-process queued messages ──────────────────
-                            // After the agent finishes, check if new messages were
-                            // queued during the run (via steer_sync). If so, feed
-                            // the first one back through prompt_tx_worker so the outer
-                            // while loop picks it up as a new prompt. Remaining messages
-                            // stay in the queue for subsequent iterations.
-                            let first_pending: Option<String> = {
-                                let sq = session_handle.steering_queue();
-                                let fq = session_handle.follow_up_queue();
-                                let mut sq_guard = sq.write();
-                                let mut fq_guard = fq.write();
-                                // Steering takes priority over follow-up
-                                sq_guard.pop_front().or_else(|| fq_guard.pop_front())
-                            };
-                            if let Some(msg) = first_pending {
-                                let remaining = session_handle.pending_message_count();
-                                tracing::info!(
-                                    "[AGENT-WORKER] Auto-processing queued message ({} remaining)",
-                                    remaining
-                                );
-                                let _ = ui_tx_for_thread
-                                    .send(UiEvent::QueueUpdate { pending: remaining });
-                                // Tell TUI to show user message + enter streaming state
-                                let _ = ui_tx_for_thread.send(UiEvent::AutoProcessStart {
-                                    prompt: msg.clone(),
-                                });
-                                let _ = prompt_tx_worker.send(msg).await;
-                            tracing::debug!("[TUI] Worker: queued message sent back via prompt_tx_worker");
-                            }
+                            // NOTE: Auto-processing of queued messages after agent
+                            // completion is handled by the TUI main loop (see
+                            // `saw_agent_end` check below). We cannot do it here
+                            // because spawn_local is non-awaited, so this code runs
+                            // immediately after the agent *starts*, not when it
+                            // *finishes*.
                         }
                     })
                     .await;
@@ -1167,18 +1198,20 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         let has_model = !model_id.is_empty() && model_id.contains('/');
         if !has_model {
             let auth = oxi_store::auth_storage::shared_auth_storage();
-            let providers: Vec<(String, bool)> = oxi_ai::register_builtins::get_builtin_providers()
+            let providers: Vec<ProviderInfo> = oxi_ai::register_builtins::get_builtin_providers()
                 .iter()
-                .map(|builtin| {
-                    (
-                        builtin.name.to_string(),
-                        auth.get_api_key(builtin.name).is_some(),
-                    )
+                .map(|builtin| ProviderInfo {
+                    name: builtin.name.to_string(),
+                    display_name: builtin.display_name.to_string(),
+                    has_key: auth.get_api_key(builtin.name).is_some(),
+                    category: builtin.category.to_string(),
+                    description: builtin.description.to_string(),
                 })
                 .collect();
             state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider {
                 providers,
                 selected: 0,
+                filter: String::new(),
             }));
         }
 
@@ -1200,7 +1233,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             state.footer_state.data.session_duration_secs = session_start.elapsed().as_secs();
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
-    
+
             if event::poll(poll_timeout)? {
                 let ev = event::read()?;
                 tracing::info!("[TUI] Event: {:?}", ev);
@@ -1276,12 +1309,56 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 break;
             }
 
+            let mut saw_agent_end = false;
             while let Ok(ui_event) = ui_rx.try_recv() {
+                if matches!(ui_event, UiEvent::AgentEnd) {
+                    saw_agent_end = true;
+                }
                 handlers::handle_ui_event(ui_event, &mut state);
                 // Persist session after message_end events (pi-mono: persist on every message_end)
                 if state.needs_persist {
                     agent_session.persist();
                     state.needs_persist = false;
+                }
+                // Rebuild chat from agent state after compaction
+                if state.needs_chat_rebuild {
+                    rebuild_chat(&mut state, &agent_session);
+                    state.needs_chat_rebuild = false;
+                }
+            }
+
+            // After AgentEnd, check for queued steering/follow-up messages.
+            // The worker thread's auto-process only runs immediately after spawn_local
+            // (before the agent finishes), so messages queued during the run that
+            // weren't consumed by poll_external_queues() are left stranded.
+            // Feed the first one back through prompt_tx to re-enter the worker loop.
+            if saw_agent_end && !state.is_agent_busy {
+                let first_pending: Option<String> = {
+                    let sq = agent_session.steering_queue();
+                    let fq = agent_session.follow_up_queue();
+                    let mut sq_guard = sq.write();
+                    let mut fq_guard = fq.write();
+                    sq_guard.pop_front().or_else(|| fq_guard.pop_front())
+                };
+                if let Some(msg) = first_pending {
+                    let remaining = agent_session.pending_message_count();
+                    tracing::info!(
+                        "[TUI] Post-AgentEnd auto-processing queued message ({} remaining)",
+                        remaining
+                    );
+                    let _ = ui_tx.send(UiEvent::QueueUpdate {
+                        pending: remaining,
+                        messages: agent_session
+                            .steering_messages()
+                            .into_iter()
+                            .chain(agent_session.follow_up_messages())
+                            .collect(),
+                    });
+                    let _ = ui_tx.send(UiEvent::AutoProcessStart {
+                        prompt: msg.clone(),
+                    });
+                    state.is_agent_busy = true;
+                    let _ = prompt_tx.send(msg).await;
                 }
             }
             while let Ok(session_event) = session_event_rx.try_recv() {
@@ -1311,6 +1388,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         agent_session.abort_compaction_sync();
         tracing::debug!("[TUI] Cleanup: clearing queue");
         agent_session.clear_queue();
+
+        // Remove session file if no real conversation happened
+        agent_session.cleanup_empty_session();
 
         tracing::debug!("[TUI] Cleanup: dropping prompt_tx");
         drop(prompt_tx);
@@ -1355,4 +1435,93 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
     // don't keep the process alive. The terminal is already restored by
     // tui.exit() above, and all critical cleanup is done.
     std::process::exit(0);
+}
+
+/// Rebuild the TUI chat view from the current agent state.
+/// Called after compaction completes — the agent's message list has been replaced
+/// with the compacted subset, so the TUI must reflect that.
+fn rebuild_chat(state: &mut AppState, session: &crate::app::agent_session::AgentSession) {
+    let agent_state = session.agent_ref().state();
+    let messages = &agent_state.messages;
+
+    state.chat.clear();
+    state.message_count = 0;
+
+    for msg in messages {
+        match msg {
+            oxi_ai::Message::User(u) => {
+                let content = match &u.content {
+                    oxi_ai::MessageContent::Text(t) => t.clone(),
+                    oxi_ai::MessageContent::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| b.as_text())
+                        .collect::<Vec<_>>()
+                        .join(""),
+                };
+                state.chat.add_message(ChatMessage {
+                    role: MessageRole::User,
+                    content_blocks: vec![ContentBlock::Text { content }],
+                    timestamp: now_millis(),
+                });
+                state.message_count += 1;
+            }
+            oxi_ai::Message::Assistant(a) => {
+                let mut blocks = Vec::new();
+                for cb in &a.content {
+                    match cb {
+                        oxi_ai::ContentBlock::Text(t) => {
+                            blocks.push(ContentBlock::Text {
+                                content: t.text.clone(),
+                            });
+                        }
+                        oxi_ai::ContentBlock::Thinking(_t) => {
+                            // Skip thinking blocks in rebuilt chat
+                        }
+                        oxi_ai::ContentBlock::ToolCall(tc) => {
+                            blocks.push(ContentBlock::ToolCall {
+                                id: tc.id.clone(),
+                                name: tc.name.clone(),
+                                arguments: tc.arguments.to_string(),
+                                result: None,
+                                status: oxi_tui::widgets::chat::ToolCallStatus::Done,
+                                duration: None,
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+                state.chat.add_message(ChatMessage {
+                    role: MessageRole::Assistant,
+                    content_blocks: blocks,
+                    timestamp: now_millis(),
+                });
+            }
+            oxi_ai::Message::ToolResult(t) => {
+                let content = t
+                    .content
+                    .iter()
+                    .filter_map(|b| b.as_text())
+                    .collect::<Vec<_>>()
+                    .join("");
+                state.chat.add_message(ChatMessage {
+                    role: MessageRole::System,
+                    content_blocks: vec![ContentBlock::ToolResult {
+                        tool_name: t.tool_call_id.clone(),
+                        content,
+                        is_error: false,
+                    }],
+                    timestamp: now_millis(),
+                });
+            }
+        }
+    }
+
+    // Add a compaction summary marker
+    state.chat.add_message(ChatMessage {
+        role: MessageRole::System,
+        content_blocks: vec![ContentBlock::Text {
+            content: "📋 Context compacted — earlier messages summarized".to_string(),
+        }],
+        timestamp: now_millis(),
+    });
 }

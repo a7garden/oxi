@@ -45,6 +45,7 @@ pub(crate) async fn stream_assistant_response(
         temperature: Some(loop_ref.config.temperature as f64),
         max_tokens: Some(loop_ref.config.max_tokens as usize),
         api_key: loop_ref.config.api_key.clone(),
+        provider_options: loop_ref.config.provider_options.clone(),
         ..Default::default()
     };
 
@@ -155,10 +156,7 @@ pub(crate) async fn stream_assistant_response(
         // `external_stop` is set by the emit callback (Layer 2) which polls
         // the should_stop flag on *every* event, not just TurnEnd.
         if loop_ref.is_cancelled() {
-            tracing::info!(
-                "Stream cancelled after {} events",
-                event_count
-            );
+            tracing::info!("Stream cancelled after {} events", event_count);
             if added_partial {
                 let last_idx = messages.len() - 1;
                 if let Message::Assistant(ref mut m) = messages[last_idx] {

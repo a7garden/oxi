@@ -1190,6 +1190,36 @@ impl SessionManager {
         self.session_file.clone()
     }
 
+    /// Remove the session file from disk if the session has no real conversation
+    /// (i.e., no user message was ever persisted).
+    /// Called before switching to a new session or quitting.
+    pub fn cleanup_if_empty(&self) {
+        if !self.persist {
+            return;
+        }
+        let Some(file) = &self.session_file else {
+            return;
+        };
+
+        let has_user = self.file_entries.read().iter().any(|e| {
+            matches!(
+                e,
+                FileEntry::Entry(SessionEntryEnum::Message(m)) if m.message.is_user()
+            )
+        });
+
+        if !has_user {
+            let path = Path::new(file);
+            if path.exists() {
+                if let Err(e) = fs::remove_file(path) {
+                    tracing::warn!("Failed to remove empty session file {}: {}", file, e);
+                } else {
+                    tracing::debug!("Removed empty session file: {}", file);
+                }
+            }
+        }
+    }
+
     fn _persist(&mut self, entry: &SessionEntry) {
         if !self.persist {
             return;
@@ -1198,15 +1228,15 @@ impl SessionManager {
             return;
         };
 
-        let has_assistant = self.file_entries.read().iter().any(|e| {
-            matches!(
-                e,
-                FileEntry::Entry(SessionEntryEnum::Message(m)) if m.message.is_assistant()
-            )
-        });
+        // Only persist once we have at least one message entry.
+        // This avoids writing header-only stubs to disk.
+        let has_message = self
+            .file_entries
+            .read()
+            .iter()
+            .any(|e| matches!(e, FileEntry::Entry(SessionEntryEnum::Message(_))));
 
-        if !has_assistant {
-            // Mark as not flushed so when assistant arrives, all entries get written
+        if !has_message {
             self.flushed = false;
             return;
         }
@@ -2090,8 +2120,12 @@ impl SessionManager {
                 };
                 if eid == entry_id {
                     found = true;
-                }
-                if found {
+                    // First entry in the fork: clear parent_id so the chain
+                    // starts fresh in the new file (the old parent doesn't exist here).
+                    let mut entry = entry.clone();
+                    clear_entry_parent_id(&mut entry);
+                    new_entries.push(FileEntry::Entry(entry));
+                } else if found {
                     new_entries.push(FileEntry::Entry(entry.clone()));
                 }
             }
@@ -2116,6 +2150,22 @@ impl SessionManager {
 // ============================================================================
 // Internal Conversion Functions
 // ============================================================================
+
+/// Clear the parent_id of a session entry so it becomes a root entry.
+/// Used by `branch_from_entry` to fix the parent chain in forked sessions.
+fn clear_entry_parent_id(entry: &mut SessionEntryEnum) {
+    match entry {
+        SessionEntryEnum::Message(m) => m.base.parent_id = None,
+        SessionEntryEnum::ThinkingLevelChange(m) => m.base.parent_id = None,
+        SessionEntryEnum::ModelChange(m) => m.base.parent_id = None,
+        SessionEntryEnum::Compaction(m) => m.base.parent_id = None,
+        SessionEntryEnum::BranchSummary(m) => m.base.parent_id = None,
+        SessionEntryEnum::Custom(m) => m.base.parent_id = None,
+        SessionEntryEnum::Label(m) => m.base.parent_id = None,
+        SessionEntryEnum::SessionInfo(m) => m.base.parent_id = None,
+        SessionEntryEnum::CustomMessage(m) => m.base.parent_id = None,
+    }
+}
 
 /// Convert internal enum to simple SessionEntry struct
 fn convert_to_session_entry(entry: &SessionEntryEnum) -> Option<SessionEntry> {
@@ -2494,6 +2544,11 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
                 }
             }
         }
+    }
+
+    // Skip sessions with no real messages
+    if message_count == 0 {
+        return None;
     }
 
     let cwd = header.cwd.clone();

@@ -15,6 +15,8 @@ mod openai_responses;
 pub mod openai_responses_shared;
 mod options;
 pub mod register_builtins;
+#[allow(unused_imports)]
+pub use register_builtins::AuthMethod;
 mod trait_def;
 mod vertex;
 
@@ -22,6 +24,7 @@ use futures::Stream;
 use std::pin::Pin;
 
 use crate::error::ProviderError;
+#[allow(unused_imports)]
 pub use crate::Api;
 pub use crate::CacheRetention;
 pub use crate::Context;
@@ -33,12 +36,13 @@ pub use anthropic::AnthropicProvider;
 #[allow(unused_imports)]
 pub use azure::AzureProvider;
 pub use event::ProviderEvent;
+pub use openai::normalize_messages;
 #[allow(unused_imports)]
 pub use openai::OpenAiProvider;
 #[allow(unused_imports)]
 pub use openai_responses::OpenAiResponsesProvider;
 #[allow(unused_imports)]
-pub use options::{StreamOptions, ThinkingBudgets};
+pub use options::{ProviderOptions, StreamOptions, ThinkingBudgets};
 pub use trait_def::Provider;
 
 use once_cell::sync::Lazy;
@@ -218,38 +222,20 @@ pub fn custom_provider_names() -> Vec<String> {
 }
 
 /// Get a provider by name
+///
+/// Checks custom providers first (global registry), then falls back to the
+/// data-driven built-in provider factory in [`register_builtins`].
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
     // 1. Check custom providers first (higher priority than builtins)
     {
         let custom = CUSTOM_PROVIDERS.read();
         if let Some(provider) = custom.get(name) {
-            // Clone the Arc and wrap in a newtype that implements Provider via Arc delegation
             return Some(Box::new(ArcedProvider(provider.clone())));
         }
     }
 
-    // 2. Built-in providers: look up metadata from registry
-    let builtin = register_builtins::get_builtin_provider(name)?;
-
-    match builtin.api {
-        Api::AnthropicMessages => Some(Box::new(anthropic::AnthropicProvider::new())),
-        Api::GoogleGenerativeAi => Some(Box::new(google::GoogleProvider::new())),
-        Api::GoogleVertex => Some(Box::new(vertex::VertexProvider::new())),
-        Api::MistralConversations => Some(Box::new(mistral::MistralProvider::new())),
-        Api::AzureOpenAiResponses => Some(Box::new(azure::AzureProvider::new())),
-        Api::BedrockConverseStream => Some(Box::new(bedrock::BedrockProvider::new())),
-        Api::OpenAiCompletions => {
-            // All OpenAI-compatible providers use OpenAiProvider with a custom base_url
-            if builtin.base_url.is_empty() {
-                Some(Box::new(openai::OpenAiProvider::new()))
-            } else {
-                Some(Box::new(openai::OpenAiProvider::with_base_url(
-                    builtin.base_url,
-                )))
-            }
-        }
-        Api::OpenAiResponses => Some(Box::new(openai_responses::OpenAiResponsesProvider::new())),
-    }
+    // 2. Fall back to built-in provider factory (data-driven from BuiltinProvider metadata)
+    register_builtins::create_builtin_provider(name)
 }
 
 /// Wrapper that lets us return a cloned `Arc<dyn Provider>` as `Box<dyn Provider>`.

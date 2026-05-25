@@ -471,7 +471,13 @@ impl AgentSession {
 
     /// Switch model mid-conversation.
     pub fn set_model(&self, model_id: &str) -> Result<()> {
-        self.agent.switch_model(model_id)?;
+        let parts: Vec<&str> = model_id.split('/').collect();
+        let provider = parts
+            .first()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "anthropic".to_string());
+        let api_key = oxi_store::auth_storage::shared_auth_storage().get_api_key(&provider);
+        self.agent.switch_model(model_id, api_key)?;
 
         // Persist model change to session
         {
@@ -593,10 +599,11 @@ impl AgentSession {
 
         let tokens_before = state.estimate_tokens();
 
-        // Replace messages in agent state
-        self.agent
-            .state()
-            .replace_messages(compacted.kept_messages.clone());
+        // Replace messages in agent state (must use update_state to
+        // actually mutate the SharedState, not just a snapshot copy)
+        self.agent.update_state(|s| {
+            s.replace_messages(compacted.kept_messages.clone());
+        });
 
         // Persist to session
         self.persist_session();
@@ -744,6 +751,12 @@ impl AgentSession {
         self.agent.reset();
         *self.overflow_recovery_attempted.write() = false;
         self.clear_queue();
+    }
+
+    /// Remove the session file if no real conversation happened.
+    /// Called before session switch or quit.
+    pub fn cleanup_empty_session(&self) {
+        self.session_manager.read().cleanup_if_empty();
     }
 
     /// Get a reference to the underlying [`Agent`].

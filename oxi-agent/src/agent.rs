@@ -177,8 +177,15 @@ impl Agent {
     /// * `model_id` - New model ID in `provider/model` format
     ///
     /// # Returns
+    /// Switch model mid-conversation.
+    ///
+    /// # Arguments
+    /// * `model_id` - New model ID in `provider/model` format
+    /// * `api_key` - Optional API key for the new provider (will be passed to StreamOptions)
+    ///
+    /// # Returns
     /// `Ok(())` on success, or an error if the model/provider is unknown
-    pub fn switch_model(&self, model_id: &str) -> Result<()> {
+    pub fn switch_model(&self, model_id: &str, api_key: Option<String>) -> Result<()> {
         let new_model = self
             .resolver
             .resolve_model(model_id)
@@ -213,6 +220,7 @@ impl Agent {
         // Update config and provider atomically
         let mut inner = self.inner_mut();
         inner.config.model_id = model_id.to_string();
+        inner.config.api_key = api_key;
         inner.provider = new_provider;
 
         Ok(())
@@ -222,7 +230,7 @@ impl Agent {
     ///
     /// This is useful when the caller has already looked up the model
     /// and optionally created the provider.
-    pub fn switch_to_model(&self, model: &oxi_ai::Model) -> Result<()> {
+    pub fn switch_to_model(&self, model: &oxi_ai::Model, api_key: Option<String>) -> Result<()> {
         let model_id = format!("{}/{}", model.provider, model.id);
         let new_provider = self
             .resolver
@@ -249,6 +257,7 @@ impl Agent {
 
         let mut inner = self.inner_mut();
         inner.config.model_id = model_id;
+        inner.config.api_key = api_key;
         inner.provider = new_provider;
 
         Ok(())
@@ -262,6 +271,11 @@ impl Agent {
     /// Get a snapshot of the current agent state.
     pub fn state(&self) -> AgentState {
         self.state.get_state()
+    }
+
+    /// Update agent state in-place. Used by compaction to replace messages.
+    pub fn update_state(&self, f: impl FnOnce(&mut AgentState)) {
+        self.state.update(f);
     }
 
     /// Reset agent state for a new conversation
@@ -398,6 +412,7 @@ impl Agent {
             auto_retry_base_delay_ms: 1000,
             api_key,
             workspace_dir,
+            provider_options: self.config().config.provider_options.clone(),
         };
 
         // Create AgentLoop. We give it a NEW SharedState and sync back after.
@@ -415,6 +430,20 @@ impl Agent {
             fresh_state,
             Arc::clone(&self.resolver),
         );
+
+        // Add the user prompt to Agent.state() AFTER fresh_state is created.
+        // fresh_state got a copy of the pre-prompt state, so run_loop will
+        // add the prompt to fresh_state independently via initial_prompts.
+        // But persist_session() reads Agent.state() (not fresh_state), so it
+        // needs the user prompt there to write it to the session file.
+        // Sync happens at AgentEnd (after run_loop completes), where
+        // Agent.state is overwritten with fresh_state (which has all messages).
+        self.state.update(|s| {
+            s.messages
+                .push(oxi_ai::Message::User(oxi_ai::UserMessage::new(
+                    prompt.clone(),
+                )));
+        });
 
         // Pre-populate steering/follow-up from hooks
         {
@@ -698,6 +727,7 @@ impl Agent {
             auto_retry_base_delay_ms: 1000,
             api_key: inner.config.api_key.clone(),
             workspace_dir: inner.config.workspace_dir.clone(),
+            provider_options: inner.config.provider_options.clone(),
         };
 
         let provider: Arc<dyn Provider> = Arc::clone(&inner.provider);

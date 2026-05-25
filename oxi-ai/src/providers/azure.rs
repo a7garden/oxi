@@ -341,7 +341,7 @@ fn build_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
 /// This is identical to the OpenAI provider's SSE parsing logic.
 fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
+    let mut partial_message = AssistantMessage::new(Api::OpenAiCompletions, provider, model_id);
 
     // Pre-estimate capacity: one event per data line is a reasonable upper bound.
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
@@ -382,6 +382,21 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
         for choice in &chunk.choices {
             if let Some(delta) = &choice.delta {
                 if let Some(content) = &delta.content {
+                    // pi-mono: accumulate into partial_message so the TUI can
+                    // diff against its snapshot tracker.
+                    let last_text_idx = partial_message
+                        .content
+                        .iter()
+                        .rposition(|b| matches!(b, ContentBlock::Text(_)));
+                    if let Some(idx) = last_text_idx {
+                        if let ContentBlock::Text(t) = &mut partial_message.content[idx] {
+                            t.text.push_str(content);
+                        }
+                    } else {
+                        partial_message
+                            .content
+                            .push(ContentBlock::Text(crate::TextContent::new(content.clone())));
+                    }
                     events.push(ProviderEvent::TextDelta {
                         content_index: choice.index,
                         delta: content.clone(),

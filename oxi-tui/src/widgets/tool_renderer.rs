@@ -194,9 +194,9 @@ pub fn format_write_call(args: &Value, styles: &ThemeStyles) -> Vec<Line<'static
 /// Format search tools (grep, find, ls).
 pub fn format_search_call(name: &str, args: &Value, styles: &ThemeStyles) -> Vec<Line<'static>> {
     let icon = match name {
-        "grep" => "⌕",
-        "find" => "🔍",
-        "ls" => "📁",
+        "grep" => "[G]",
+        "find" => "[F]",
+        "ls" => "[D]",
         _ => "○",
     };
 

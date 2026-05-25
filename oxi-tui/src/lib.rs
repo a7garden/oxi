@@ -8,6 +8,7 @@
 
 pub mod cell;
 pub mod fuzzy;
+pub mod markdown_styles;
 pub mod table_renderer;
 pub mod text;
 pub mod theme;

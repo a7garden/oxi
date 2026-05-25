@@ -70,13 +70,53 @@ impl Provider for GoogleProvider {
         let tools_json = convert_tools(&context.tools, false);
 
         // Build request body using shared helper
-        let body = build_request_body(
+        let mut body = build_request_body(
             &contents,
             context.system_prompt.as_deref(),
             tools_json.as_ref(),
             options.temperature,
             options.max_tokens,
         );
+
+        // ── Google thinking config (via ProviderOptions) ────────────────
+        // When the model supports reasoning, apply thinkingConfig from
+        // provider_options.google. Mirrors opencode's Gemini thinking support.
+        if model.reasoning {
+            let google_opts = options
+                .provider_options
+                .as_ref()
+                .and_then(|po| po.google.as_ref());
+
+            let mut thinking_config = serde_json::json!({});
+
+            // Include thoughts (always true for reasoning models)
+            thinking_config["includeThoughts"] = serde_json::json!(true);
+
+            if let Some(opts) = google_opts {
+                if let Some(ref level) = opts.thinking_level {
+                    thinking_config["thinkingLevel"] = serde_json::json!(level);
+                }
+                if let Some(budget) = opts.thinking_budget {
+                    thinking_config["thinkingBudget"] = serde_json::json!(budget);
+                }
+            } else if let Some(ref level) = options.thinking_level {
+                // Fallback: derive from thinking_level
+                if let Some(effort) = level.as_str() {
+                    thinking_config["thinkingLevel"] = serde_json::json!(effort);
+                }
+            }
+
+            // Merge into generationConfig
+            if let Some(gc) = body.get_mut("generationConfig") {
+                if let serde_json::Value::Object(map) = gc {
+                    map.insert("thinkingConfig".to_string(), thinking_config);
+                }
+            } else {
+                body["generationConfig"] = serde_json::json!({
+                    "thinkingConfig": thinking_config,
+                });
+            }
+        }
 
         // Make request with API key in header (not URL query param)
         let response = self

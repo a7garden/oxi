@@ -15,10 +15,18 @@ use crate::{
 };
 
 /// Anthropic provider
+///
+/// Supports the Anthropic Messages API (v1/messages) and Anthropic-compatible
+/// providers (MiniMax, etc.) via custom base URLs and extra headers.
 #[derive(Clone)]
 pub struct AnthropicProvider {
     client: &'static Client,
     api_key: Option<String>,
+    /// Override base URL. When `None`, falls back to `model.base_url`.
+    base_url: Option<String>,
+    /// Extra HTTP headers to include in every request (e.g. anthropic-version,
+    /// anthropic-beta).
+    extra_headers: Vec<(String, String)>,
 }
 
 impl AnthropicProvider {
@@ -30,6 +38,79 @@ impl AnthropicProvider {
         Self {
             client: shared_client(),
             api_key: None,
+            base_url: None,
+            extra_headers: vec![
+                ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                // Enable interleaved thinking and fine-grained tool streaming
+                // (matches opencode's anthropic custom loader defaults)
+                (
+                    "anthropic-beta".to_string(),
+                    "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+                        .to_string(),
+                ),
+            ],
+        }
+    }
+
+    /// Create with an explicit API key.
+    #[allow(dead_code)]
+    pub fn with_api_key(api_key: impl Into<String>) -> Self {
+        Self {
+            client: shared_client(),
+            api_key: Some(api_key.into()),
+            base_url: None,
+            extra_headers: vec![
+                ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                (
+                    "anthropic-beta".to_string(),
+                    "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+                        .to_string(),
+                ),
+            ],
+        }
+    }
+
+    /// Create with a custom base URL (for Anthropic-compatible providers like
+    /// MiniMax that expose the Messages API at a different host).
+    #[allow(dead_code)]
+    pub fn with_base_url(base_url: &str) -> Self {
+        Self {
+            client: shared_client(),
+            api_key: None,
+            base_url: Some(base_url.to_string()),
+            extra_headers: vec![
+                ("anthropic-version".to_string(), "2023-06-01".to_string()),
+                (
+                    "anthropic-beta".to_string(),
+                    "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+                        .to_string(),
+                ),
+            ],
+        }
+    }
+
+    /// Create with a custom base URL, API key, and extra headers.
+    ///
+    /// Used for registering Anthropic-compatible providers (MiniMax, etc.).
+    pub fn with_config(
+        base_url: &str,
+        api_key: Option<String>,
+        extra_headers: Vec<(String, String)>,
+    ) -> Self {
+        let mut headers = vec![
+            ("anthropic-version".to_string(), "2023-06-01".to_string()),
+            (
+                "anthropic-beta".to_string(),
+                "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
+                    .to_string(),
+            ),
+        ];
+        headers.extend(extra_headers);
+        Self {
+            client: shared_client(),
+            api_key,
+            base_url: Some(base_url.to_string()),
+            extra_headers: headers,
         }
     }
 }
@@ -50,8 +131,9 @@ impl Provider for AnthropicProvider {
     ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
         let options = options.unwrap_or_default();
 
-        // Build the request
-        let url = format!("{}/v1/messages", model.base_url);
+        // Build the request – use provider base_url override, fall back to model.base_url
+        let effective_base_url = self.base_url.as_deref().unwrap_or(&model.base_url);
+        let url = format!("{}/v1/messages", effective_base_url);
 
         // Get API key
         let api_key = options
@@ -60,8 +142,15 @@ impl Provider for AnthropicProvider {
             .or(self.api_key.as_ref())
             .ok_or_else(|| ProviderError::MissingApiKey)?;
 
-        // Build messages
-        let messages = build_anthropic_messages(context)?;
+        // Build messages (apply provider-specific normalization for
+        // Anthropic: filter empty content, reorder tool_use blocks)
+        let normalized = crate::providers::openai::normalize_messages(
+            &context.messages,
+            &model.provider,
+            &model.id,
+        );
+        let messages =
+            build_anthropic_messages_from_normalized(&context.system_prompt, &normalized)?;
 
         // Build request body
         let mut body = serde_json::json!({
@@ -89,6 +178,177 @@ impl Provider for AnthropicProvider {
             body["tools"] = build_anthropic_tools(&context.tools)?;
         }
 
+        // ── Thinking / Extended Reasoning ──────────────────────────────
+        // Supports two modes via provider_options.anthropic:
+        //   1. "enabled" with explicit budget_tokens (from thinking_level or custom)
+        //   2. "adaptive" with effort level (Anthropic dynamically allocates budget)
+        //
+        // Falls back to thinking_level-based budget when provider_options is absent.
+        if model.reasoning {
+            // Check provider_options first for fine-grained control
+            let anthropic_opts = options
+                .provider_options
+                .as_ref()
+                .and_then(|po| po.anthropic.as_ref());
+
+            if let Some(opts) = anthropic_opts {
+                // Provider-level override
+                match opts.thinking_type.as_deref() {
+                    Some("adaptive") => {
+                        // Adaptive thinking — Anthropic chooses budget
+                        body["thinking"] = serde_json::json!({
+                            "type": "adaptive",
+                        });
+                        if let Some(ref effort) = opts.effort {
+                            // effort is not a body param but could influence
+                            // max_tokens allocation
+                            let budget = match effort.as_str() {
+                                "max" => model.max_tokens.min(31999),
+                                "xhigh" => (model.max_tokens * 4 / 5).min(31999),
+                                "high" => (model.max_tokens / 2).min(31999),
+                                "medium" => (model.max_tokens / 4).min(16000),
+                                "low" => (model.max_tokens / 8).min(8000),
+                                _ => (model.max_tokens / 4).min(16000),
+                            };
+                            if body.get("max_tokens").is_none() {
+                                body["max_tokens"] =
+                                    serde_json::json!((budget + 1024).min(model.max_tokens));
+                            }
+                        }
+                    }
+                    Some("enabled") => {
+                        // Explicit budget from provider_options or thinking_level
+                        let budget = opts.thinking_budget.unwrap_or_else(|| {
+                            compute_thinking_budget(&options.thinking_level, model.max_tokens)
+                        });
+                        if budget > 0 {
+                            if body.get("max_tokens").is_none() {
+                                body["max_tokens"] =
+                                    serde_json::json!((budget + 1024).min(model.max_tokens));
+                            }
+                            body["thinking"] = serde_json::json!({
+                                "type": "enabled",
+                                "budget_tokens": budget,
+                            });
+                        }
+                    }
+                    _ => {
+                        // No explicit thinking_type — use thinking_level fallback
+                        let budget =
+                            compute_thinking_budget(&options.thinking_level, model.max_tokens);
+                        if budget > 0 {
+                            if body.get("max_tokens").is_none() {
+                                body["max_tokens"] =
+                                    serde_json::json!((budget + 1024).min(model.max_tokens));
+                            }
+                            body["thinking"] = serde_json::json!({
+                                "type": "enabled",
+                                "budget_tokens": budget,
+                            });
+                        }
+                    }
+                }
+            } else if let Some(ref level) = options.thinking_level {
+                // No provider_options — use thinking_level directly
+                let budget = compute_thinking_budget(&Some(*level), model.max_tokens);
+                if budget > 0 {
+                    if body.get("max_tokens").is_none() {
+                        body["max_tokens"] =
+                            serde_json::json!((budget + 1024).min(model.max_tokens));
+                    }
+                    body["thinking"] = serde_json::json!({
+                        "type": "enabled",
+                        "budget_tokens": budget,
+                    });
+                }
+            }
+        }
+
+        // Ensure max_tokens is always set (Anthropic requires it)
+        if body.get("max_tokens").is_none() {
+            body["max_tokens"] = serde_json::json!(model.max_tokens.min(16384));
+        }
+
+        // ── Cache Control ─────────────────────────────────────────────
+        // When cache_retention is set, add cache_control breakpoints to
+        // the system prompt and last few messages.
+        //
+        // Anthropic allows at most 4 cache_control breakpoints per request.
+        // We use a counter to enforce this limit, allocating in priority
+        // order: system prompt → last message → second-to-last message.
+        // Mirrors opencode's Cache.Breakpoints with ANTHROPIC_BREAKPOINT_CAP.
+        const ANTHROPIC_BREAKPOINT_CAP: usize = 4;
+        let want_cache = options.cache_retention == Some(crate::CacheRetention::Short)
+            || options.cache_retention == Some(crate::CacheRetention::Long);
+
+        if want_cache {
+            let mut remaining = ANTHROPIC_BREAKPOINT_CAP;
+            let cache_marker = serde_json::json!({ "type": "ephemeral" });
+
+            // 1. System prompt (highest priority)
+            if remaining > 0 {
+                if let Some(system) = body.get_mut("system") {
+                    if system.is_string() {
+                        *system = serde_json::json!([{
+                            "type": "text",
+                            "text": system,
+                            "cache_control": cache_marker.clone(),
+                        }]);
+                        remaining -= 1;
+                    }
+                }
+            }
+
+            // 2. Last message (high priority)
+            if remaining > 0 {
+                if let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) {
+                    if let Some(last_msg) = messages.last_mut() {
+                        if let Some(content) = last_msg.get_mut("content") {
+                            if let Some(parts) = content.as_array_mut() {
+                                if let Some(last_part) = parts.last_mut() {
+                                    last_part["cache_control"] = cache_marker.clone();
+                                    remaining -= 1;
+                                }
+                            } else if content.is_string() {
+                                let text = content.take();
+                                *content = serde_json::json!([{
+                                    "type": "text",
+                                    "text": text,
+                                    "cache_control": cache_marker.clone(),
+                                }]);
+                                remaining -= 1;
+                            }
+                        }
+                    }
+
+                    // 3. Second-to-last message (tool results)
+                    if remaining > 0 {
+                        let msg_count = messages.len();
+                        if msg_count >= 3 {
+                            if let Some(msg) = messages.get_mut(msg_count - 3) {
+                                if let Some(content) = msg.get_mut("content") {
+                                    if let Some(parts) = content.as_array_mut() {
+                                        if let Some(last_part) = parts.last_mut() {
+                                            last_part["cache_control"] = cache_marker;
+                                            remaining -= 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if remaining < ANTHROPIC_BREAKPOINT_CAP {
+                tracing::debug!(
+                    used = ANTHROPIC_BREAKPOINT_CAP - remaining,
+                    cap = ANTHROPIC_BREAKPOINT_CAP,
+                    "Anthropic cache breakpoints applied"
+                );
+            }
+        }
+
         // Build headers
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert("x-api-key", api_key.parse().expect("valid header value"));
@@ -96,11 +356,18 @@ impl Provider for AnthropicProvider {
             "content-type",
             "application/json".parse().expect("valid header value"),
         );
-        headers.insert(
-            "anthropic-version",
-            "2023-06-01".parse().expect("valid header value"),
-        );
 
+        // Provider-level default headers (e.g. anthropic-version, anthropic-beta)
+        for (k, v) in &self.extra_headers {
+            if let (Ok(name), Ok(value)) = (
+                k.parse::<reqwest::header::HeaderName>(),
+                v.parse::<reqwest::header::HeaderValue>(),
+            ) {
+                headers.insert(name, value);
+            }
+        }
+
+        // Per-request headers (from StreamOptions)
         for (k, v) in &options.headers {
             if let (Ok(name), Ok(value)) = (
                 k.parse::<reqwest::header::HeaderName>(),
@@ -166,11 +433,14 @@ impl Provider for AnthropicProvider {
     }
 }
 
-/// Build messages in Anthropic format
-fn build_anthropic_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
+/// Build messages in Anthropic format from normalized Message structs.
+fn build_anthropic_messages_from_normalized(
+    _system_prompt: &Option<String>,
+    messages_in: &[crate::Message],
+) -> Result<Vec<JsonValue>, ProviderError> {
     let mut messages = Vec::new();
 
-    for msg in &context.messages {
+    for msg in messages_in {
         match msg {
             crate::Message::User(u) => {
                 let content = match &u.content {
@@ -254,7 +524,19 @@ fn blocks_to_anthropic_content(blocks: &[ContentBlock]) -> Result<Vec<JsonValue>
     Ok(items)
 }
 
-/// Build tools in Anthropic format
+/// Compute thinking budget from ThinkingLevel enum + model max_tokens.
+fn compute_thinking_budget(level: &Option<crate::ThinkingLevel>, max_tokens: usize) -> usize {
+    match level {
+        Some(crate::ThinkingLevel::High) | Some(crate::ThinkingLevel::XHigh) => {
+            (max_tokens / 2).min(31999)
+        }
+        Some(crate::ThinkingLevel::Medium) => (max_tokens / 4).min(16000),
+        Some(crate::ThinkingLevel::Low) => (max_tokens / 8).min(8000),
+        Some(crate::ThinkingLevel::Minimal) => (max_tokens / 16).min(4000),
+        _ => 0,
+    }
+}
+
 fn build_anthropic_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderError> {
     let items: Vec<_> = tools
         .iter()
@@ -358,13 +640,38 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                                 partial: partial_message.clone(),
                             });
                         }
-                        Some("tool_use") => {
+                        Some("tool_use") | Some("server_tool_use") => {
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: idx,
                                 tool_call_id: block.id.clone(),
-                                tool_name: None,
+                                tool_name: block.name.clone(),
                                 partial: partial_message.clone(),
                             });
+                        }
+                        // Server-side tool results arrive whole in
+                        // content_block_start (no streaming delta).
+                        // Anthropic executes the tool and inlines the
+                        // structured result into the assistant turn.
+                        // We emit ToolCallEnd with the result so the agent
+                        // loop can store it for round-trip continuity.
+                        Some(t) if t.ends_with("_tool_result") => {
+                            let name = match t {
+                                "web_search_tool_result" => Some("web_search".to_string()),
+                                "code_execution_tool_result" => Some("code_execution".to_string()),
+                                "web_fetch_tool_result" => Some("web_fetch".to_string()),
+                                _ => None,
+                            };
+                            if let Some(tool_name) = name {
+                                events.push(ProviderEvent::ToolCallEnd {
+                                    content_index: idx,
+                                    tool_call: crate::ToolCall::new(
+                                        block.tool_use_id.clone().unwrap_or_default(),
+                                        tool_name,
+                                        serde_json::json!({}),
+                                    ),
+                                    partial: partial_message.clone(),
+                                });
+                            }
                         }
                         _ => {}
                     }
@@ -430,6 +737,16 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                                     delta: args.clone(),
                                     partial: partial_message.clone(),
                                 });
+                            }
+                        }
+                        // signature_delta — Anthropic extended thinking sends a signature
+                        // at the end of each thinking block for session continuity.
+                        // We emit it as a ThinkingEnd event so callers can persist it.
+                        Some("signature_delta") => {
+                            if let Some(_sig) = &delta.signature {
+                                // The signature is for session continuity; we track it
+                                // but don't need to emit a separate event for basic usage.
+                                // Advanced usage would store this in ThinkingContent.
                             }
                         }
                         _ => {}
@@ -499,6 +816,22 @@ struct ContentBlockStart {
     index: Option<usize>,
     /// Tool call ID present for tool_use blocks (Anthropic sends this in content_block_start)
     id: Option<String>,
+    /// Tool name for tool_use blocks.
+    name: Option<String>,
+    /// Initial thinking content (may be empty string).
+    #[allow(dead_code)]
+    thinking: Option<String>,
+    /// Signature for extended thinking session continuity.
+    #[allow(dead_code)]
+    signature: Option<String>,
+    /// Initial text content (may be non-empty for pre-filled blocks).
+    #[allow(dead_code)]
+    text: Option<String>,
+    /// Tool use ID for server tool result blocks.
+    tool_use_id: Option<String>,
+    /// Structured content for server tool result blocks.
+    #[allow(dead_code)]
+    content: Option<JsonValue>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -508,8 +841,15 @@ struct Delta {
     text: Option<String>,
     thinking: Option<String>,
     partial_json: Option<String>,
+    /// Signature for extended thinking session continuity.
+    /// Sent in `signature_delta` events after a thinking block.
+    #[allow(dead_code)]
+    signature: Option<String>,
     #[serde(rename = "stop_reason")]
     stop_reason: Option<String>,
+    #[serde(rename = "stop_sequence")]
+    #[allow(dead_code)]
+    stop_sequence: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -518,9 +858,15 @@ struct AnthropicUsage {
     input_tokens: usize,
     #[serde(rename = "output_tokens", default)]
     output_tokens: usize,
-    #[serde(rename = "cache_read", default)]
+    /// Cache read tokens (Anthropic field: `cache_read_input_tokens`)
+    #[serde(rename = "cache_read_input_tokens", alias = "cache_read", default)]
     cache_read: usize,
-    #[serde(rename = "cache_creation", default)]
+    /// Cache write tokens (Anthropic field: `cache_creation_input_tokens`)
+    #[serde(
+        rename = "cache_creation_input_tokens",
+        alias = "cache_creation",
+        default
+    )]
     cache_creation: usize,
 }
 

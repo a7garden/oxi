@@ -350,7 +350,7 @@ fn test_agent_switch_model_invalid_format() {
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     // Invalid format (no provider prefix)
-    let result = agent.switch_model("gpt-4o");
+    let result = agent.switch_model("gpt-4o", None);
     assert!(result.is_err());
 }
 
@@ -362,7 +362,7 @@ fn test_agent_switch_model_unknown_model() {
     let config = AgentConfig::new("anthropic/claude-sonnet-4-20250514");
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
-    let result = agent.switch_model("nonexistent/model");
+    let result = agent.switch_model("nonexistent/model", None);
     assert!(result.is_err());
 }
 
@@ -375,7 +375,7 @@ fn test_agent_switch_model_same_provider() {
     let agent = Agent::new(provider, config, Arc::new(ToolRegistry::new()));
 
     // Switch to another Anthropic model (same provider, same API)
-    let result = agent.switch_model("anthropic/claude-3-haiku");
+    let result = agent.switch_model("anthropic/claude-3-haiku", None);
     assert!(result.is_ok());
     assert_eq!(agent.model_id(), "anthropic/claude-3-haiku");
 }
@@ -468,7 +468,7 @@ async fn test_cross_provider_handoff_openai_to_anthropic() {
 
     // 4. Switch model (this fails to create the provider, but the message
     //    transformation logic was verified above)
-    let result = agent.switch_model("anthropic/claude-sonnet-4-20250514");
+    let result = agent.switch_model("anthropic/claude-sonnet-4-20250514", None);
     // The switch itself may fail due to missing API keys for the real provider,
     // but the model_id won't change since we guard the update atomically.
     // The key invariant: if the switch succeeds, messages are transformed.
@@ -781,6 +781,7 @@ async fn test_multi_turn_tool_use_loop() {
         auto_retry_base_delay_ms: 2000,
         api_key: None,
         workspace_dir: None,
+        provider_options: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1171,6 +1172,7 @@ async fn test_steering_messages_injected_into_loop() {
         auto_retry_base_delay_ms: 2000,
         api_key: None,
         workspace_dir: None,
+        provider_options: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1242,6 +1244,7 @@ async fn test_multiple_steering_messages() {
         auto_retry_base_delay_ms: 2000,
         api_key: None,
         workspace_dir: None,
+        provider_options: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1304,6 +1307,7 @@ fn test_follow_up_queue_api() {
         auto_retry_base_delay_ms: 2000,
         api_key: None,
         workspace_dir: None,
+        provider_options: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1381,6 +1385,7 @@ async fn test_follow_up_processed_in_tool_use_loop() {
         auto_retry_base_delay_ms: 2000,
         api_key: None,
         workspace_dir: None,
+        provider_options: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1463,6 +1468,7 @@ async fn test_follow_up_via_continue_loop() {
         auto_retry_base_delay_ms: 2000,
         api_key: None,
         workspace_dir: None,
+        provider_options: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1533,6 +1539,7 @@ async fn test_follow_up_queue_cleared() {
         auto_retry_base_delay_ms: 2000,
         api_key: None,
         workspace_dir: None,
+        provider_options: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1607,6 +1614,7 @@ fn test_follow_up_and_steering_queue_independent() {
         auto_retry_base_delay_ms: 2000,
         api_key: None,
         workspace_dir: None,
+        provider_options: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());

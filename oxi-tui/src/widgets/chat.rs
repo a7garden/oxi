@@ -524,11 +524,15 @@ impl ChatViewState {
     pub fn stream_thinking(&mut self, content: String, collapsed: bool) {
         if let Some(ref mut s) = self.streaming {
             if let Some(ContentBlock::Thinking {
-                content: existing, ..
+                content: existing,
+                collapsed: existing_collapsed,
             }) = s.message.content_blocks.last_mut()
             {
                 existing.push_str(&content);
                 *existing = clamp_str(existing.clone(), 50_000, 200);
+                // When streaming new content, mark as expanded so the user
+                // can see the thinking process unfold in real-time.
+                *existing_collapsed = false;
             } else {
                 s.message.content_blocks.push(ContentBlock::Thinking {
                     content: clamp_str(content, 50_000, 200),
@@ -1086,7 +1090,10 @@ fn render_markdown(content: &str) -> Vec<Line<'static>> {
     for seg in &segments {
         match seg {
             MarkdownSegment::Markdown(md) => {
-                let text: ratatui::text::Text<'_> = tui_markdown::from_str(md);
+                let text: ratatui::text::Text<'_> = tui_markdown::from_str_with_options(
+                    md,
+                    &tui_markdown::Options::new(crate::markdown_styles::OxiStyleSheet),
+                );
                 for l in text.lines {
                     let line_style = l.style;
                     let spans: Vec<Span<'static>> = l
@@ -1470,6 +1477,7 @@ enum LayoutKind {
         mime_type: String,
         size_str: String,
     },
+    #[allow(dead_code)]
     Spinner {
         frame: usize,
     },
@@ -1677,15 +1685,7 @@ fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
             }
             y += h as u32;
         }
-        if y <= u16::MAX as u32 {
-            entries.push(LayoutEntry {
-                y: y as u16,
-                height: 1,
-                kind: LayoutKind::Spinner {
-                    frame: state.spinner_frame,
-                },
-            });
-        }
+        // Spinner removed: status now shown in the input separator line (render_input_area).
     }
 
     entries

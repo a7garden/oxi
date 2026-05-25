@@ -11,8 +11,9 @@ use std::pin::Pin;
 use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
 use crate::{
-    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent, Usage,
+    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Message, MessageContent,
+    Model, Provider, ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent,
+    ToolCall, ToolResultMessage, Usage,
 };
 
 /// Detect whether a model targets the ZAI provider.
@@ -26,6 +27,8 @@ pub struct OpenAiProvider {
     client: &'static Client,
     api_key: Option<String>,
     base_url: Option<String>,
+    /// Extra HTTP headers to include in every request (e.g. OpenRouter Referer).
+    extra_headers: Vec<(String, String)>,
 }
 
 impl OpenAiProvider {
@@ -38,6 +41,7 @@ impl OpenAiProvider {
             client: shared_client(),
             api_key: None,
             base_url: None,
+            extra_headers: Vec::new(),
         }
     }
 
@@ -47,17 +51,19 @@ impl OpenAiProvider {
             client: shared_client(),
             api_key: Some(api_key.into()),
             base_url: None,
+            extra_headers: Vec::new(),
         }
     }
 
     /// Create with a custom base URL (API key resolved from auth storage).
     ///
-    /// Used for built-in OpenAI-compatible providers like ZAI.
+    /// Used for built-in OpenAI-compatible providers like Groq, Cerebras, etc.
     pub fn with_base_url(base_url: &str) -> Self {
         Self {
             client: shared_client(),
             api_key: None,
             base_url: Some(base_url.to_string()),
+            extra_headers: Vec::new(),
         }
     }
 
@@ -69,6 +75,23 @@ impl OpenAiProvider {
             client: shared_client(),
             api_key,
             base_url: Some(base_url.to_string()),
+            extra_headers: Vec::new(),
+        }
+    }
+
+    /// Create with a custom base URL, optional API key, and extra headers.
+    ///
+    /// Used for providers that require specific HTTP headers (OpenRouter, etc.).
+    pub fn with_config(
+        base_url: &str,
+        api_key: Option<String>,
+        extra_headers: Vec<(String, String)>,
+    ) -> Self {
+        Self {
+            client: shared_client(),
+            api_key,
+            base_url: Some(base_url.to_string()),
+            extra_headers,
         }
     }
 }
@@ -100,8 +123,9 @@ impl Provider for OpenAiProvider {
             .or(self.api_key.as_ref())
             .ok_or_else(|| ProviderError::MissingApiKey)?;
 
-        // Build messages
-        let messages = build_messages(context)?;
+        // Build messages (apply provider-specific normalization)
+        let normalized = normalize_messages(&context.messages, &model.provider, &model.id);
+        let messages = build_messages_from_normalized(&context.system_prompt, &normalized)?;
 
         // Build request body
         let mut body = serde_json::json!({
@@ -117,12 +141,39 @@ impl Provider for OpenAiProvider {
         }
 
         if let Some(max) = options.max_tokens {
+            // Use max_completion_tokens for OpenAI (newer API field).
+            // Some providers still use max_tokens; we keep both for compat.
+            body["max_completion_tokens"] = serde_json::json!(max);
             body["max_tokens"] = serde_json::json!(max);
         }
 
         // Add tools if present
         if !context.tools.is_empty() {
             body["tools"] = build_tools(&context.tools)?;
+        }
+
+        // ── Reasoning effort (o1/o3/o4 models) ──────────────────────────
+        // When thinking_level is set and the model supports reasoning,
+        // include `reasoning_effort` in the request body.
+        // Also checks provider_options.openai for fine-grained control.
+        if model.reasoning {
+            let openai_opts = options
+                .provider_options
+                .as_ref()
+                .and_then(|po| po.openai.as_ref());
+
+            let effort = openai_opts
+                .and_then(|o| o.reasoning_effort.clone())
+                .or_else(|| {
+                    options
+                        .thinking_level
+                        .as_ref()
+                        .and_then(|l| l.as_str().map(String::from))
+                });
+
+            if let Some(effort_str) = effort {
+                body["reasoning_effort"] = serde_json::json!(effort_str);
+            }
         }
 
         // ── ZAI-specific parameters ──────────────────────────────────
@@ -160,6 +211,17 @@ impl Provider for OpenAiProvider {
             "application/json".parse().expect("valid header value"),
         );
 
+        // Provider-level default headers (e.g. OpenRouter HTTP-Referer)
+        for (k, v) in &self.extra_headers {
+            if let (Ok(name), Ok(value)) = (
+                k.parse::<reqwest::header::HeaderName>(),
+                v.parse::<reqwest::header::HeaderValue>(),
+            ) {
+                headers.insert(name, value);
+            }
+        }
+
+        // Per-request headers (from StreamOptions)
         for (k, v) in &options.headers {
             if let (Ok(name), Ok(value)) = (
                 k.parse::<reqwest::header::HeaderName>(),
@@ -398,32 +460,39 @@ impl Provider for OpenAiProvider {
     }
 }
 
-/// Build messages array from context
-fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
-    let mut messages = Vec::new();
+/// Build messages array from normalized Message structs (without Context dependency).
+///
+/// This function is called after `normalize_messages` has already applied
+/// provider-specific transforms. It converts oxi Message types to the
+/// JSON format required by the OpenAI Chat API.
+fn build_messages_from_normalized(
+    system_prompt: &Option<String>,
+    messages: &[Message],
+) -> Result<Vec<JsonValue>, ProviderError> {
+    let mut result = Vec::new();
 
     // System prompt
-    if let Some(ref prompt) = context.system_prompt {
-        messages.push(serde_json::json!({
+    if let Some(ref prompt) = system_prompt {
+        result.push(serde_json::json!({
             "role": "system",
             "content": prompt,
         }));
     }
 
     // Conversation messages
-    for msg in &context.messages {
+    for msg in messages {
         match msg {
-            crate::Message::User(u) => {
+            Message::User(u) => {
                 let content: String = match &u.content {
-                    crate::MessageContent::Text(s) => s.clone(),
-                    crate::MessageContent::Blocks(blocks) => blocks_to_content(blocks)?.to_string(),
+                    MessageContent::Text(s) => s.clone(),
+                    MessageContent::Blocks(blocks) => blocks_to_content(blocks)?.to_string(),
                 };
-                messages.push(serde_json::json!({
+                result.push(serde_json::json!({
                     "role": "user",
                     "content": content,
                 }));
             }
-            crate::Message::Assistant(a) => {
+            Message::Assistant(a) => {
                 // OpenAI format: separate content (text) and tool_calls
                 let mut text_parts = Vec::new();
                 let mut tool_calls = Vec::new();
@@ -448,23 +517,24 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
                         ContentBlock::Image(_) | ContentBlock::Unknown(_) => {}
                     }
                 }
-                let mut msg = serde_json::json!({
+
+                let mut msg_obj = serde_json::json!({
                     "role": "assistant",
                     "content": text_parts.join(""),
                 });
                 if !tool_calls.is_empty() {
-                    msg["tool_calls"] = serde_json::json!(tool_calls);
+                    msg_obj["tool_calls"] = serde_json::json!(tool_calls);
                 }
-                messages.push(msg);
+                result.push(msg_obj);
             }
-            crate::Message::ToolResult(t) => {
+            Message::ToolResult(t) => {
                 let result_text: String = t
                     .content
                     .iter()
                     .filter_map(|b| b.as_text())
                     .collect::<Vec<_>>()
                     .join("");
-                messages.push(serde_json::json!({
+                result.push(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": t.tool_call_id,
                     "content": result_text,
@@ -473,7 +543,7 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
         }
     }
 
-    Ok(messages)
+    Ok(result)
 }
 
 /// Convert content blocks to a string representation
@@ -819,6 +889,261 @@ struct UsageInfo {
 struct PromptTokensDetails {
     #[serde(rename = "cached_tokens")]
     cached_tokens: usize,
+}
+
+// ============================================================================
+// Provider-agnostic Message Normalization
+//
+// Mirrors opencode's transform.ts normalizeMessages() — these transforms
+// sanitize message content before sending to the API:
+//   - Empty content filtering (Anthropic rejects empty messages/parts)
+//   - Tool ID scrubbing (Mistral requires 9-char, Claude needs alphanum)
+//   - DeepSeek reasoning injection (empty reasoning parts required)
+//   - Anthropic tool-use ordering (tool_use must not precede non-tool content)
+// ============================================================================
+
+/// Normalize messages for a specific provider.
+///
+/// This applies provider-specific transforms that the API requires:
+///   - Anthropic: filter empty text/reasoning parts, add cache_control
+///   - Claude (via Anthropic): scrub tool IDs to alphanumeric + underscore
+///   - Mistral: truncate tool IDs to 9 alphanumeric chars
+///   - DeepSeek: inject empty reasoning parts into assistant messages
+///   - Anthropic/Vertex: reorder tool_use before text parts
+pub fn normalize_messages(messages: &[Message], provider: &str, model_id: &str) -> Vec<Message> {
+    let provider_lower = provider.to_lowercase();
+    let model_lower = model_id.to_lowercase();
+
+    let is_anthropic = provider_lower == "anthropic"
+        || provider_lower.contains("vertex-anthropic")
+        || provider_lower.contains("google-vertex") && model_lower.contains("claude");
+
+    let is_mistral = provider_lower == "mistral"
+        || model_lower.contains("mistral")
+        || model_lower.contains("devstral");
+
+    let is_deepseek = model_lower.contains("deepseek");
+
+    let is_claude = model_lower.contains("claude");
+
+    let needs_tool_id_scrub = is_mistral || is_claude;
+
+    let messages: Vec<Message> = messages.to_vec();
+
+    // 1. DeepSeek: inject empty reasoning parts into assistant messages
+    let messages = if is_deepseek {
+        messages
+            .iter()
+            .map(|msg| match msg {
+                Message::Assistant(a) => {
+                    let has_reasoning = a
+                        .content
+                        .iter()
+                        .any(|b| matches!(b, ContentBlock::Thinking(_)));
+                    if has_reasoning {
+                        Message::Assistant(a.clone())
+                    } else {
+                        let mut new_content = a.content.clone();
+                        new_content
+                            .push(ContentBlock::Thinking(ThinkingContent::new(String::new())));
+                        let mut new_msg = AssistantMessage::new(a.api, &a.provider, &a.model);
+                        new_msg.content = new_content;
+                        new_msg.usage = a.usage.clone();
+                        new_msg.stop_reason = a.stop_reason;
+                        new_msg.response_id = a.response_id.clone();
+                        new_msg.timestamp = a.timestamp;
+                        Message::Assistant(new_msg)
+                    }
+                }
+                _ => msg.clone(),
+            })
+            .collect()
+    } else {
+        messages
+    };
+
+    // 2. Anthropic: filter empty text/reasoning parts, remove empty messages
+    let messages = if is_anthropic {
+        messages
+            .iter()
+            .filter_map(|msg| match msg {
+                Message::User(u) => {
+                    let filtered = filter_empty_content(&u.content);
+                    filtered.as_ref()?;
+                    Some(Message::User(crate::UserMessage {
+                        role: u.role,
+                        content: filtered.expect("checked above"),
+                        timestamp: u.timestamp,
+                    }))
+                }
+                Message::Assistant(a) => {
+                    let filtered: Vec<ContentBlock> = a
+                        .content
+                        .iter()
+                        .filter(|b| !is_empty_content_block(b))
+                        .cloned()
+                        .collect();
+                    if filtered.is_empty() {
+                        return None; // Entire message is empty
+                    }
+                    let mut new_msg = AssistantMessage::new(a.api, &a.provider, &a.model);
+                    new_msg.content = filtered;
+                    new_msg.usage = a.usage.clone();
+                    new_msg.stop_reason = a.stop_reason;
+                    new_msg.response_id = a.response_id.clone();
+                    new_msg.timestamp = a.timestamp;
+                    Some(Message::Assistant(new_msg))
+                }
+                Message::ToolResult(t) => Some(Message::ToolResult(t.clone())),
+            })
+            .collect()
+    } else {
+        messages
+    };
+
+    // 3. Anthropic/Vertex: reorder tool_use before non-tool content
+    let messages = if is_anthropic {
+        messages
+            .iter()
+            .flat_map(|msg| match msg {
+                Message::Assistant(a) => {
+                    let parts = &a.content;
+                    let has_tool = parts.iter().any(|b| matches!(b, ContentBlock::ToolCall(_)));
+                    let has_non_tool = parts
+                        .iter()
+                        .any(|b| !matches!(b, ContentBlock::ToolCall(_)));
+
+                    if has_tool && has_non_tool {
+                        // Split into [non-tool parts] + [tool parts]
+                        let non_tools: Vec<ContentBlock> = parts
+                            .iter()
+                            .filter(|b| !matches!(b, ContentBlock::ToolCall(_)))
+                            .cloned()
+                            .collect();
+                        let tools: Vec<ContentBlock> = parts
+                            .iter()
+                            .filter(|b| matches!(b, ContentBlock::ToolCall(_)))
+                            .cloned()
+                            .collect();
+
+                        let mut msg1 = AssistantMessage::new(a.api, &a.provider, &a.model);
+                        msg1.content = non_tools;
+                        msg1.usage = a.usage.clone();
+                        msg1.stop_reason = a.stop_reason;
+                        msg1.response_id = a.response_id.clone();
+                        msg1.timestamp = a.timestamp;
+
+                        let mut msg2 = AssistantMessage::new(a.api, &a.provider, &a.model);
+                        msg2.content = tools;
+                        msg2.usage = a.usage.clone();
+                        msg2.stop_reason = a.stop_reason;
+                        msg2.response_id = a.response_id.clone();
+                        msg2.timestamp = a.timestamp;
+
+                        vec![Message::Assistant(msg1), Message::Assistant(msg2)]
+                    } else {
+                        vec![Message::Assistant(a.clone())]
+                    }
+                }
+                _ => vec![msg.clone()],
+            })
+            .collect()
+    } else {
+        messages
+    };
+
+    // 4. Tool ID scrubbing (Mistral: 9 chars, Claude: alphanumeric + underscore)
+    let messages = if needs_tool_id_scrub {
+        messages
+            .iter()
+            .map(|msg| match msg {
+                Message::Assistant(a) => {
+                    let new_content: Vec<ContentBlock> = a
+                        .content
+                        .iter()
+                        .map(|block| match block {
+                            ContentBlock::ToolCall(tc) => ContentBlock::ToolCall(ToolCall::new(
+                                scrub_tool_id(&tc.id, is_mistral),
+                                tc.name.clone(),
+                                tc.arguments.clone(),
+                            )),
+                            _ => block.clone(),
+                        })
+                        .collect();
+                    let mut new_msg = AssistantMessage::new(a.api, &a.provider, &a.model);
+                    new_msg.content = new_content;
+                    new_msg.usage = a.usage.clone();
+                    new_msg.stop_reason = a.stop_reason;
+                    new_msg.response_id = a.response_id.clone();
+                    new_msg.timestamp = a.timestamp;
+                    Message::Assistant(new_msg)
+                }
+                Message::ToolResult(t) => Message::ToolResult(ToolResultMessage::new(
+                    scrub_tool_id(&t.tool_call_id, is_mistral),
+                    &t.tool_name,
+                    t.content.clone(),
+                )),
+                _ => msg.clone(),
+            })
+            .collect()
+    } else {
+        messages
+    };
+
+    messages
+}
+
+/// Check if a content block is effectively empty.
+fn is_empty_content_block(block: &ContentBlock) -> bool {
+    match block {
+        ContentBlock::Text(t) => t.text.trim().is_empty(),
+        ContentBlock::Thinking(t) => t.thinking.trim().is_empty(),
+        _ => false,
+    }
+}
+
+/// Filter empty parts from MessageContent.
+/// Returns None if the entire content becomes empty.
+fn filter_empty_content(content: &MessageContent) -> Option<MessageContent> {
+    match content {
+        MessageContent::Text(s) => {
+            if s.trim().is_empty() {
+                None
+            } else {
+                Some(MessageContent::Text(s.clone()))
+            }
+        }
+        MessageContent::Blocks(blocks) => {
+            let filtered: Vec<ContentBlock> = blocks
+                .iter()
+                .filter(|b| !is_empty_content_block(b))
+                .cloned()
+                .collect();
+            if filtered.is_empty() {
+                None
+            } else {
+                Some(MessageContent::Blocks(filtered))
+            }
+        }
+    }
+}
+
+/// Scrub a tool call ID for provider compatibility.
+/// Mistral: keep first 9 alphanumeric chars, pad with zeros
+/// Claude: keep only alphanumeric + underscore
+fn scrub_tool_id(id: &str, is_mistral: bool) -> String {
+    if is_mistral {
+        let alphanumeric: String = id.chars().filter(|c| c.is_alphanumeric()).take(9).collect();
+        if alphanumeric.len() < 9 {
+            format!("{}{}", alphanumeric, "0".repeat(9 - alphanumeric.len()))
+        } else {
+            alphanumeric
+        }
+    } else {
+        id.chars()
+            .filter(|c| c.is_alphanumeric() || *c == '_')
+            .collect()
+    }
 }
 
 #[cfg(test)]

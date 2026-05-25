@@ -1354,6 +1354,8 @@ impl CliModelRegistry {
             "openrouter" => "https://openrouter.ai/api/v1".to_string(),
             "azure-openai-responses" => "https://{resource}.openai.azure.com".to_string(),
             "amazon-bedrock" => "https://bedrock-runtime.us-east-1.amazonaws.com".to_string(),
+            "minimax" => "https://api.minimax.io/anthropic".to_string(),
+            "minimax-cn" => "https://api.minimaxi.com/anthropic".to_string(),
             _ => "".to_string(),
         }
     }

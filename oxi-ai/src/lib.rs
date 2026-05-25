@@ -63,7 +63,7 @@ pub use providers::CacheRetention;
 /// Provider trait, streaming options, and provider registry.
 pub use providers::{
     custom_provider_names, get_provider, register_provider, unregister_provider, Provider,
-    ProviderEvent, ProviderRegistry, StreamOptions,
+    ProviderEvent, ProviderOptions, ProviderRegistry, StreamOptions,
 };
 
 /// Built-in provider helpers (re-exported from providers).
@@ -80,6 +80,10 @@ pub use providers::model_fetch::{fetch_models_async, fetch_models_blocking};
 
 /// OpenAI Responses API provider.
 pub use providers::OpenAiResponsesProvider;
+
+/// Provider-specific message normalization (empty content filtering, tool ID
+/// scrubbing, reasoning injection, tool-use ordering fix).
+pub use providers::normalize_messages;
 
 /// Tool definition and argument validation.
 pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ToolValidationError};

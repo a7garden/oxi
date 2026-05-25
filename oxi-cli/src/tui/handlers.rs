@@ -1,6 +1,6 @@
 //! Event handlers for the TUI.
 
-use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
+use super::app::{AppOverlay, AppState, ProviderInfo, SetupStep, UiEvent};
 use super::slash;
 use crate::app::agent_session::{AgentSession, SessionEvent};
 use crate::context::auto_compaction::CompactionReason;
@@ -18,6 +18,18 @@ pub(crate) enum Action {
     ExecuteSlashCommand(String),
 }
 
+/// Remove a message at the given index from the steering queue.
+/// Returns the removed message text, or None if index was out of bounds.
+fn remove_from_steering_queue(session: &AgentSession, index: usize) -> Option<String> {
+    let queue = session.steering_queue();
+    let mut guard = queue.write();
+    if index < guard.len() {
+        guard.remove(index)
+    } else {
+        None
+    }
+}
+
 /// Handle a crossterm input event. Returns an action if the main loop needs to do async work.
 pub async fn handle_input(
     event: CEvent,
@@ -29,7 +41,7 @@ pub async fn handle_input(
 ) -> Option<Action> {
     match event {
         CEvent::Key(key) => {
-            if state.overlay.is_some() {
+            if state.overlay.is_some() || state.overlay_state.is_some() {
                 handle_overlay_key(key, state, session).await
             } else {
                 handle_key(key, state, session, ui_tx, running).await
@@ -51,7 +63,7 @@ pub async fn handle_input(
         }
         // Handle IME composition completion or clipboard paste
         CEvent::Paste(text) => {
-            if state.overlay.is_some() {
+            if state.overlay.is_some() || state.overlay_state.is_some() {
                 // When overlay is active, forward Paste to the overlay handler
                 handle_overlay_paste(&text, state)
             } else {
@@ -75,6 +87,81 @@ async fn handle_key(
     // (Ignore Repeat/Release — prevents Repeat events during IME composition)
     if key.kind != KeyEventKind::Press {
         return None;
+    }
+
+    // Ctrl+Q: toggle queue panel
+    if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        state.queue_panel_visible = !state.queue_panel_visible;
+        if state.queue_panel_visible {
+            state.queue_panel_selected = state.steering_messages_snapshot.len().saturating_sub(1);
+        }
+        return None;
+    }
+
+    // When queue panel is visible and has items, intercept navigation keys
+    if state.queue_panel_visible && !state.steering_messages_snapshot.is_empty() {
+        match key.code {
+            KeyCode::Up if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if state.queue_panel_selected > 0 {
+                    state.queue_panel_selected -= 1;
+                }
+                return None;
+            }
+            KeyCode::Down if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if state.queue_panel_selected < state.steering_messages_snapshot.len() - 1 {
+                    state.queue_panel_selected += 1;
+                }
+                return None;
+            }
+            KeyCode::Delete | KeyCode::Char('d')
+                if !key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                // Remove selected item from queue
+                let idx = state.queue_panel_selected;
+                let removed = remove_from_steering_queue(session, idx);
+                if let Some(msg) = removed {
+                    let preview: String = msg.chars().take(40).collect();
+                    state.add_system_message(format!("Removed: {}", preview));
+                }
+                // Refresh snapshot
+                let msgs = session.steering_messages();
+                let fq = session.follow_up_messages();
+                let pending = msgs.len() + fq.len();
+                let mut all = msgs;
+                all.extend(fq);
+                state.pending_steering = pending;
+                state.steering_messages_snapshot = all;
+                if state.queue_panel_selected >= state.steering_messages_snapshot.len() {
+                    state.queue_panel_selected =
+                        state.steering_messages_snapshot.len().saturating_sub(1);
+                }
+                return None;
+            }
+            KeyCode::Char('e') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Edit: take selected item out of queue and put into input
+                let idx = state.queue_panel_selected;
+                let removed = remove_from_steering_queue(session, idx);
+                if let Some(msg) = removed {
+                    state.input_set_text(msg);
+                }
+                let msgs = session.steering_messages();
+                let fq = session.follow_up_messages();
+                let pending = msgs.len() + fq.len();
+                let mut all = msgs;
+                all.extend(fq);
+                state.pending_steering = pending;
+                state.steering_messages_snapshot = all;
+                state.queue_panel_selected =
+                    state.steering_messages_snapshot.len().saturating_sub(1);
+                state.queue_panel_visible = false;
+                return None;
+            }
+            KeyCode::Esc => {
+                state.queue_panel_visible = false;
+                return None;
+            }
+            _ => {} // fall through to normal handling
+        }
     }
 
     match key.code {
@@ -115,7 +202,11 @@ async fn handle_key(
                     state.input_history.remove(0);
                 }
                 state.history_index = 0;
-                session.steer_sync(value);
+                session.steer_sync(value.clone());
+                // Track locally — the agent will drain the session queue
+                // but we keep this snapshot for UI display until consumed.
+                state.steering_messages_snapshot.push(value);
+                state.pending_steering = state.steering_messages_snapshot.len();
                 state.input_clear();
                 return None;
             }
@@ -132,6 +223,13 @@ async fn handle_key(
             session.agent_ref().cancel();
             session.abort_compaction_sync();
             tracing::debug!("[TUI-Handler] Ctrl+C done, running = {}", *running);
+            None
+        }
+        // Escape during compaction → cancel compaction
+        KeyCode::Esc if state.footer_state.data.is_compacting => {
+            session.abort_compaction_sync();
+            state.footer_state.data.is_compacting = false;
+            state.add_system_message("Compaction cancelled".to_string());
             None
         }
         KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -296,6 +394,9 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             // Always clear busy state — AutoProcessStart will re-set it
             // if a queued message is being auto-processed.
             state.is_agent_busy = false;
+            // Persist any remaining messages after the agent run completes
+            // and state has been synced back from the agent loop.
+            state.needs_persist = true;
         }
 
         // ── Turn lifecycle ────────────────────────────────────────
@@ -419,36 +520,28 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         }
 
         // ── Session events ────────────────────────────────────────
-        UiEvent::CompactionStart { reason } => {
-            // Skip for manual compaction — the slash command handler already
-            // shows an immediate "Compacting..." message, and the result
-            // arrives via UiEvent::SystemMessage. Only show for auto/overflow.
-            if matches!(reason, CompactionReason::Manual) {
-                return;
-            }
-            let reason_str = match reason {
-                CompactionReason::Manual => "manual",
-                CompactionReason::Threshold => "auto",
-                CompactionReason::Automatic => "auto",
-                CompactionReason::Overflow => "overflow",
-                CompactionReason::Iteration { .. } => "iteration",
+        UiEvent::CompactionStart { reason: _reason } => {
+            state.footer_state.data.is_compacting = true;
+            let label = match _reason {
+                CompactionReason::Manual => "Compacting context...",
+                CompactionReason::Threshold | CompactionReason::Automatic => "Auto-compacting...",
+                CompactionReason::Overflow => "Context overflow, compacting...",
+                CompactionReason::Iteration { .. } => "Auto-compacting (iteration)...",
             };
-            state.add_system_message(format!("Compacting ({})...", reason_str));
+            state.add_system_message(format!("{} (Esc to cancel)", label));
         }
         UiEvent::CompactionEnd {
             _reason,
             error_message,
         } => {
-            // Skip for manual — result is delivered via UiEvent::SystemMessage.
-            if matches!(_reason, CompactionReason::Manual) {
-                return;
-            }
-            let msg = if let Some(err) = error_message {
-                format!("Compaction failed: {}", err)
+            state.footer_state.data.is_compacting = false;
+            if let Some(err) = error_message {
+                state.add_system_message(format!("Compaction failed: {}", err));
             } else {
-                "Compaction complete".to_string()
-            };
-            state.add_system_message(msg);
+                // Compaction succeeded — flag chat rebuild so the main loop
+                // can reconstruct ChatViewState from the agent's new messages.
+                state.needs_chat_rebuild = true;
+            }
         }
         UiEvent::RetryStart {
             attempt,
@@ -468,20 +561,54 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             state.add_system_message(format!("Thinking: {}", level));
             state.footer_state.data.thinking_level = Some(level.to_lowercase());
         }
-        UiEvent::QueueUpdate { pending } => {
+        UiEvent::QueueUpdate { pending, messages } => {
             state.pending_steering = pending;
+            // If the agent consumed messages (snapshot is shorter than ours),
+            // trim our snapshot to match the agent's view.
+            // If the agent reports more messages, it means new ones were added
+            // externally — update fully.
+            if messages.len() < state.steering_messages_snapshot.len() {
+                // Agent consumed some messages — trim from the front
+                let consumed = state.steering_messages_snapshot.len() - messages.len();
+                state.steering_messages_snapshot =
+                    state.steering_messages_snapshot.drain(consumed..).collect();
+            } else {
+                state.steering_messages_snapshot = messages;
+            }
+            // Clamp selection
+            if state.queue_panel_selected >= state.steering_messages_snapshot.len() {
+                state.queue_panel_selected =
+                    state.steering_messages_snapshot.len().saturating_sub(1);
+            }
         }
         UiEvent::AutoProcessStart { prompt } => {
             // A queued message is being auto-processed by the worker thread.
             // Show the user message bubble and enter streaming state so the
             // TUI is ready for the agent's response.
             state.add_user_message(prompt.clone());
-            state.input_history.insert(0, prompt);
+            state.input_history.insert(0, prompt.clone());
             if state.input_history.len() > 100 {
                 state.input_history.remove(0);
             }
             state.history_index = 0;
             state.start_streaming();
+            // Remove this message from the local snapshot
+            if let Some(pos) = state
+                .steering_messages_snapshot
+                .iter()
+                .position(|m| m == &prompt)
+            {
+                state.steering_messages_snapshot.remove(pos);
+            } else if !state.steering_messages_snapshot.is_empty() {
+                // Fallback: remove first if exact match not found
+                state.steering_messages_snapshot.remove(0);
+            }
+            state.pending_steering = state.steering_messages_snapshot.len();
+            // Clamp selection
+            if state.queue_panel_selected >= state.steering_messages_snapshot.len() {
+                state.queue_panel_selected =
+                    state.steering_messages_snapshot.len().saturating_sub(1);
+            }
         }
         UiEvent::SystemMessage(msg) => {
             state.add_system_message(msg);
@@ -532,7 +659,12 @@ pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSe
             follow_up,
         } => {
             let pending = steering.len() + follow_up.len();
-            let _ = ui_tx.send(UiEvent::QueueUpdate { pending });
+            let mut all_messages = steering;
+            all_messages.extend(follow_up);
+            let _ = ui_tx.send(UiEvent::QueueUpdate {
+                pending,
+                messages: all_messages,
+            });
         }
         SessionEvent::SessionInfoChanged => {}
         SessionEvent::Agent(agent_event) => match &agent_event {
@@ -649,10 +781,10 @@ async fn handle_overlay_key(
     let overlay = state.overlay.clone();
     match &overlay {
         // ── Setup wizard ──
-        Some(AppOverlay::Setup(_)) => handle_wizard_step_key(key, state).await,
+        Some(AppOverlay::Setup(_)) => handle_wizard_step_key(key, state, session).await,
 
         // ── Provider config wizard (same steps as setup) ──
-        Some(AppOverlay::ProviderConfig(_)) => handle_wizard_step_key(key, state).await,
+        Some(AppOverlay::ProviderConfig(_)) => handle_wizard_step_key(key, state, session).await,
 
         // ── Model selector ──
         Some(AppOverlay::ModelSelect { .. }) => handle_model_select_key(key, state, session).await,
@@ -696,10 +828,55 @@ fn is_provider_config(overlay: &Option<AppOverlay>) -> bool {
     matches!(overlay, Some(AppOverlay::ProviderConfig(_)))
 }
 
+/// Build the provider list from builtins, sorted by category and enriched
+/// with display names, descriptions, and key status.
+fn build_provider_list(is_config: bool) -> Vec<ProviderInfo> {
+    let auth = oxi_store::auth_storage::shared_auth_storage();
+    let mut providers: Vec<ProviderInfo> = oxi_ai::register_builtins::get_builtin_providers()
+        .iter()
+        .map(|builtin| {
+            let has_key = if is_config {
+                auth.has_auth(builtin.name)
+            } else {
+                auth.get_api_key(builtin.name).is_some()
+            };
+            ProviderInfo {
+                name: builtin.name.to_string(),
+                display_name: builtin.display_name.to_string(),
+                has_key,
+                category: builtin.category.to_string(),
+                description: builtin.description.to_string(),
+            }
+        })
+        .collect();
+
+    // Sort by category order (matching render_provider_list) then by name.
+    // This ensures the selected index matches the rendered position.
+    let category_rank = |cat: &str| -> usize {
+        match cat {
+            "primary" => 0,
+            "chinese" => 1,
+            "open" => 2,
+            "cloud" => 3,
+            "enterprise" => 4,
+            "specialized" => 5,
+            _ => 6,
+        }
+    };
+    providers.sort_by(|a, b| {
+        category_rank(&a.category)
+            .cmp(&category_rank(&b.category))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+
+    providers
+}
+
 /// Unified handler for Setup and ProviderConfig wizard steps.
 async fn handle_wizard_step_key(
     key: crossterm::event::KeyEvent,
     state: &mut AppState,
+    session: &AgentSession,
 ) -> Option<Action> {
     let step_kind = match extract_step(&state.overlay) {
         Some(s) => match s {
@@ -738,26 +915,27 @@ async fn handle_wizard_step_key(
                         extract_step(&state.overlay)
                     {
                         match *selected {
-                            0 => { /* OAuth — not yet implemented */ }
-                            1 => {
-                                let auth = oxi_store::auth_storage::shared_auth_storage();
-                                let providers: Vec<(String, bool)> =
-                                    oxi_ai::register_builtins::get_builtin_providers()
-                                        .iter()
-                                        .map(|builtin| {
-                                            let has_key = if is_config {
-                                                auth.has_auth(builtin.name)
-                                            } else {
-                                                auth.get_api_key(builtin.name).is_some()
-                                            };
-                                            (builtin.name.to_string(), has_key)
-                                        })
-                                        .collect();
+                            0 => {
+                                // API Key flow
+                                let providers = build_provider_list(is_config);
                                 state.overlay = wrap_step(
                                     &state.overlay,
                                     SetupStep::SelectProvider {
                                         providers,
                                         selected: 0,
+                                        filter: String::new(),
+                                    },
+                                );
+                            }
+                            1 => {
+                                // OAuth — not yet implemented, just go to provider select
+                                let providers = build_provider_list(is_config);
+                                state.overlay = wrap_step(
+                                    &state.overlay,
+                                    SetupStep::SelectProvider {
+                                        providers,
+                                        selected: 0,
+                                        filter: String::new(),
                                     },
                                 );
                             }
@@ -779,6 +957,7 @@ async fn handle_wizard_step_key(
                     if let Some(SetupStep::SelectProvider {
                         providers,
                         selected,
+                        ..
                     }) = extract_step(&state.overlay)
                     {
                         let new_sel = if *selected == 0 {
@@ -791,6 +970,7 @@ async fn handle_wizard_step_key(
                             SetupStep::SelectProvider {
                                 providers: providers.clone(),
                                 selected: new_sel,
+                                filter: String::new(),
                             },
                         );
                     }
@@ -799,6 +979,7 @@ async fn handle_wizard_step_key(
                     if let Some(SetupStep::SelectProvider {
                         providers,
                         selected,
+                        ..
                     }) = extract_step(&state.overlay)
                     {
                         let new_sel = (*selected + 1) % providers.len();
@@ -807,6 +988,7 @@ async fn handle_wizard_step_key(
                             SetupStep::SelectProvider {
                                 providers: providers.clone(),
                                 selected: new_sel,
+                                filter: String::new(),
                             },
                         );
                     }
@@ -815,13 +997,14 @@ async fn handle_wizard_step_key(
                     if let Some(SetupStep::SelectProvider {
                         providers,
                         selected,
+                        ..
                     }) = extract_step(&state.overlay)
                     {
-                        if let Some((name, _)) = providers.get(*selected).cloned() {
+                        if let Some(pi) = providers.get(*selected).cloned() {
                             state.overlay = wrap_step(
                                 &state.overlay,
                                 SetupStep::EnterApiKey {
-                                    provider: name,
+                                    provider: pi.name.clone(),
                                     key: String::new(),
                                     masked_cursor: 0,
                                 },
@@ -907,24 +1090,13 @@ async fn handle_wizard_step_key(
                     }
                 }
                 KeyCode::Esc => {
-                    let auth = oxi_store::auth_storage::shared_auth_storage();
-                    let providers: Vec<(String, bool)> =
-                        oxi_ai::register_builtins::get_builtin_providers()
-                            .iter()
-                            .map(|builtin| {
-                                let has_key = if is_config {
-                                    auth.has_auth(builtin.name)
-                                } else {
-                                    auth.get_api_key(builtin.name).is_some()
-                                };
-                                (builtin.name.to_string(), has_key)
-                            })
-                            .collect();
+                    let providers = build_provider_list(is_config);
                     state.overlay = wrap_step(
                         &state.overlay,
                         SetupStep::SelectProvider {
                             providers,
                             selected: 0,
+                            filter: String::new(),
                         },
                     );
                 }
@@ -1004,7 +1176,12 @@ async fn handle_wizard_step_key(
                                     },
                                 );
                             } else {
-                                state.add_system_message(format!("Model set to {}", full_model));
+                                // Actually switch the model in the running session
+                                if let Err(e) = session.set_model(&full_model) {
+                                    state.add_system_message(format!("Error switching model: {}", e));
+                                } else {
+                                    state.add_system_message(format!("Model set to {}", full_model));
+                                }
                                 state.overlay = None;
                             }
                         }

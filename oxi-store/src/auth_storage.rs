@@ -244,9 +244,9 @@ impl FileAuthStorage {
         }
     }
 
-    /// Get the default auth file path
+    /// Get the default auth file path (uses ~/.oxi/auth.json for consistency with settings)
     pub fn default_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("oxi").join("auth.json"))
+        dirs::home_dir().map(|p| p.join(".oxi").join("auth.json"))
     }
 
     /// Get the storage path
@@ -375,6 +375,38 @@ impl FnFallbackResolver {
 impl FallbackResolver for FnFallbackResolver {
     fn resolve(&self, provider: &str) -> Option<String> {
         (self.f)(provider)
+    }
+}
+
+/// Environment variable fallback resolver.
+///
+/// Uses oxi-ai's `BuiltinProvider` registry to look up the primary and
+/// extra env var names for each provider, then checks `std::env`.
+pub struct EnvVarFallbackResolver;
+
+impl FallbackResolver for EnvVarFallbackResolver {
+    fn resolve(&self, provider: &str) -> Option<String> {
+        // Look up the provider's env key from the builtin registry
+        let builtin = oxi_ai::get_builtin_provider(provider)?;
+        let key = builtin.env_key;
+
+        // Try primary key
+        if let Ok(val) = std::env::var(key) {
+            if !val.is_empty() {
+                return Some(val);
+            }
+        }
+
+        // Try extra keys
+        for extra in builtin.extra_env_keys {
+            if let Ok(val) = std::env::var(extra) {
+                if !val.is_empty() {
+                    return Some(val);
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -1045,7 +1077,15 @@ pub mod keyring_support {
 /// in-memory state through the `Arc`.
 pub fn shared_auth_storage() -> Arc<AuthStorage> {
     static STORAGE: OnceLock<Arc<AuthStorage>> = OnceLock::new();
-    STORAGE.get_or_init(|| Arc::new(AuthStorage::new())).clone()
+    STORAGE
+        .get_or_init(|| {
+            let storage = Arc::new(AuthStorage::new());
+            // Default fallback: resolve API keys from environment variables
+            // using the BuiltinProvider registry (env_key + extra_env_keys).
+            storage.set_fallback_resolver(Arc::new(EnvVarFallbackResolver));
+            storage
+        })
+        .clone()
 }
 
 // ============================================================================

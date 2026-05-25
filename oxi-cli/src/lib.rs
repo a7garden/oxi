@@ -343,6 +343,7 @@ impl App {
                 std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             ),
             output_mode: None,
+            provider_options: None,
         };
 
         let agent = Arc::new(Agent::new(
@@ -501,7 +502,13 @@ impl App {
 
     /// Switch the model used for future LLM calls.
     pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
-        self.agent.switch_model(model_id)
+        let parts: Vec<&str> = model_id.split('/').collect();
+        let provider = parts
+            .first()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "anthropic".to_string());
+        let api_key = oxi_store::auth_storage::shared_auth_storage().get_api_key(&provider);
+        self.agent.switch_model(model_id, api_key)
     }
 
     /// Get the current model ID

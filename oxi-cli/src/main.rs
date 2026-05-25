@@ -143,9 +143,41 @@ async fn main() -> Result<()> {
 async fn handle_subcommand(command: &Commands) -> Result<()> {
     match command {
         Commands::Sessions => {
-            let manager = SessionManager::new().await?;
-            list_sessions(&manager).await?;
+            let cwd = std::env::current_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                .to_string_lossy()
+                .to_string();
+            let sessions = oxi_store::session::SessionManager::list(&cwd, None).await?;
+            if sessions.is_empty() {
+                println!("No sessions found.");
+            } else {
+                println!("Sessions:");
+                println!(
+                    "{:<20} {:>6} {:<30} {:>12}",
+                    "NAME", "MSG", "PREVIEW", "TIME"
+                );
+                println!("{:-<20} {:-<6} {:-<30} {:-<12}", "", "", "", "");
+                for session in &sessions {
+                    let name = session.name.as_deref().unwrap_or("-");
+                    let preview = if session.first_message.len() > 28 {
+                        format!("{}...", &session.first_message[..28])
+                    } else {
+                        session.first_message.clone()
+                    };
+                    let time = chrono::DateTime::<chrono::Local>::from(session.modified)
+                        .format("%m-%d %H:%M")
+                        .to_string();
+                    println!(
+                        "{:<20} {:>6} {:<30} {:>12}",
+                        &name[..name.len().min(20)],
+                        session.message_count,
+                        preview,
+                        time
+                    );
+                }
+            }
         }
+
         Commands::Tree { session_id } => {
             let manager = SessionManager::new().await?;
             show_tree(&manager, session_id).await?;
@@ -838,6 +870,7 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn list_sessions(manager: &SessionManager) -> Result<()> {
     let sessions = manager.list_sessions().await?;
 

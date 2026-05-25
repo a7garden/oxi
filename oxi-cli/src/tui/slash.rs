@@ -71,18 +71,22 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/compact" => {
-            state.add_system_message("Compacting (manual)...".to_string());
             let instructions = arg.map(|s| s.to_string());
             let sh = session.clone_handle();
             let tx = ui_tx.clone();
+            // The compaction events (CompactionStart/CompactionEnd) will be
+            // emitted by AgentSession::compact() and handled in handle_ui_event.
             tokio::spawn(async move {
                 let result = sh.compact(instructions).await;
-                let msg = match &result {
-                    Ok(r) => format!("Compaction complete ({} tokens before)", r.tokens_before),
-                    Err(e) => format!("Compaction failed: {}", e),
+                // For manual compaction, CompactionEnd is emitted by AgentSession.
+                // But we also send the result via SystemMessage as a fallback.
+                let _ = match &result {
+                    Ok(r) => tx.send(UiEvent::SystemMessage(format!(
+                        "Compacted from {} tokens",
+                        r.tokens_before
+                    ))),
+                    Err(e) => tx.send(UiEvent::SystemMessage(format!("Compaction failed: {}", e))),
                 };
-                // Send result directly to TUI via ui_tx for guaranteed delivery
-                let _ = tx.send(UiEvent::SystemMessage(msg));
             });
             true
         }

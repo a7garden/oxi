@@ -30,6 +30,7 @@ pub struct FooterData {
     pub total_cost: f64,
     pub session_duration_secs: u64,
     pub is_busy: bool,
+    pub is_compacting: bool,
     pub version: String,
 }
 
@@ -52,6 +53,7 @@ impl Default for FooterData {
             total_cost: 0.0,
             session_duration_secs: 0,
             is_busy: false,
+            is_compacting: false,
             version: String::new(),
         }
     }
@@ -175,6 +177,15 @@ impl StatefulWidget for Footer<'_> {
                     token_style,
                 ),
             ];
+
+            if d.is_compacting {
+                left_spans.push(Span::styled(
+                    "  Compacting...",
+                    Style::default()
+                        .fg(self.theme.colors.warning.to_ratatui())
+                        .add_modifier(Modifier::BOLD),
+                ));
+            }
 
             if d.session_duration_secs > 0 {
                 left_spans.push(Span::styled(

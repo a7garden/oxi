@@ -39,8 +39,8 @@ pub use oxi_ai::multi_provider::MultiProviderConfig;
 pub use oxi_ai::provider_pool::{ProviderPool, RateLimitPolicy};
 pub use oxi_ai::{
     Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, Model,
-    ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderRegistry, StreamOptions,
-    UserMessage,
+    ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderOptions, ProviderRegistry,
+    StreamOptions, UserMessage,
 };
 
 // Credential management (oauth + env key resolution)

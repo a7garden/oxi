@@ -609,7 +609,7 @@ fn build_bedrock_tool_config(tools: &[crate::Tool]) -> Result<JsonValue, Provide
 /// Parse Bedrock ConverseStream SSE events
 fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let partial_message = AssistantMessage::new(Api::BedrockConverseStream, provider, model_id);
+    let mut partial_message = AssistantMessage::new(Api::BedrockConverseStream, provider, model_id);
 
     let estimated_events = text.split('\n').filter(|l| l.starts_with("data: ")).count();
     events.reserve(estimated_events);
@@ -680,6 +680,22 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                     match delta.type_.as_deref() {
                         Some("textDelta") => {
                             if let Some(text) = &delta.text {
+                                // pi-mono: accumulate into partial_message so the TUI can
+                                // diff against its snapshot tracker.
+                                let last_text_idx = partial_message
+                                    .content
+                                    .iter()
+                                    .rposition(|b| matches!(b, ContentBlock::Text(_)));
+                                if let Some(idx) = last_text_idx {
+                                    if let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                                    {
+                                        t.text.push_str(text);
+                                    }
+                                } else {
+                                    partial_message.content.push(ContentBlock::Text(
+                                        crate::TextContent::new(text.clone()),
+                                    ));
+                                }
                                 events.push(ProviderEvent::TextDelta {
                                     content_index: event.index.unwrap_or(0),
                                     delta: text.clone(),
@@ -709,6 +725,22 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                         }
                         Some("thinkingDelta") => {
                             if let Some(thinking) = &delta.thinking {
+                                // pi-mono: accumulate into partial_message
+                                let last_think_idx = partial_message
+                                    .content
+                                    .iter()
+                                    .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
+                                if let Some(idx) = last_think_idx {
+                                    if let ContentBlock::Thinking(t) =
+                                        &mut partial_message.content[idx]
+                                    {
+                                        t.thinking.push_str(thinking);
+                                    }
+                                } else {
+                                    partial_message.content.push(ContentBlock::Thinking(
+                                        crate::ThinkingContent::new(thinking.clone()),
+                                    ));
+                                }
                                 events.push(ProviderEvent::ThinkingDelta {
                                     content_index: event.index.unwrap_or(0),
                                     delta: thinking.clone(),
