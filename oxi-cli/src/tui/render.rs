@@ -382,6 +382,22 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
         render_queue_compact(f, area, state, theme);
     }
 
+    // Separator line below status (idle color)
+    let separator_row = Rect {
+        x: area.x,
+        y: area.y + 1 + queue_lines - 1,
+        width: area.width,
+        height: 1,
+    };
+    let separator_line = "─".repeat(area.width as usize);
+    f.render_widget(
+        Paragraph::new(Span::styled(
+            separator_line,
+            Style::default().fg(theme.colors.muted.to_ratatui()),
+        )),
+        separator_row,
+    );
+
     // Last row: input
     let input_row = Rect {
         x: area.x,
