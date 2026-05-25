@@ -464,7 +464,7 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
     }
 
     // Hint line
-    if let Some(hint_row) = (max_items < area.height as usize - 1).then_some(()) {
+    if max_items < area.height as usize - 1 {
         let row = Rect {
             x: area.x,
             y: area.y + 1 + max_items as u16,
