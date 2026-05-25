@@ -58,6 +58,9 @@ async fn main() -> Result<()> {
     // Register custom OpenAI-compatible providers from settings
     register_custom_providers(&settings);
 
+    // Register model router (opt-in — only activates when user selects router/auto)
+    register_router_provider(&settings);
+
     // Apply thinking level if specified
     if let Some(ref level_str) = args.thinking {
         if let Some(level) = oxi_store::settings::parse_thinking_level(level_str) {
@@ -1186,4 +1189,82 @@ async fn run_single_prompt(app: oxi::App, prompt: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Register the model auto-router if configured in settings.
+fn register_router_provider(settings: &Settings) {
+    let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
+    let project_dir = std::env::current_dir().unwrap_or_default();
+
+    // Always register the discoverable model entry.
+    oxi_ai::register_model(oxi_ai::Model::new(
+        "auto",
+        "Router (auto)".to_string(),
+        oxi_ai::Api::AnthropicMessages,
+        "router",
+        "router://local",
+    ));
+
+    let store_cfg = match oxi_store::router_config::load_router_config(&global_dir, &project_dir)
+    {
+        Some(cfg) => cfg,
+        None => {
+            tracing::debug!("No router config found — router/auto is discoverable but not configured");
+            return;
+        }
+    };
+
+    // Convert store config to AI config.
+    let mut ai_profiles = std::collections::HashMap::new();
+    for (name, sp) in store_cfg.profiles() {
+        fn parse_thinking(s: &Option<String>) -> Option<oxi_ai::ThinkingLevel> {
+            s.as_ref().and_then(|s| match s.as_str() {
+                "off" => Some(oxi_ai::ThinkingLevel::Off),
+                "minimal" => Some(oxi_ai::ThinkingLevel::Minimal),
+                "low" => Some(oxi_ai::ThinkingLevel::Low),
+                "medium" => Some(oxi_ai::ThinkingLevel::Medium),
+                "high" => Some(oxi_ai::ThinkingLevel::High),
+                "xhigh" => Some(oxi_ai::ThinkingLevel::XHigh),
+                _ => None,
+            })
+        }
+        ai_profiles.insert(
+            name.clone(),
+            oxi_ai::router::RouterProfile {
+                high: oxi_ai::router::RoutedTierConfig {
+                    model: sp.high.model.clone(),
+                    thinking: parse_thinking(&sp.high.thinking),
+                    fallbacks: sp.high.fallbacks.clone(),
+                },
+                medium: oxi_ai::router::RoutedTierConfig {
+                    model: sp.medium.model.clone(),
+                    thinking: parse_thinking(&sp.medium.thinking),
+                    fallbacks: sp.medium.fallbacks.clone(),
+                },
+                low: oxi_ai::router::RoutedTierConfig {
+                    model: sp.low.model.clone(),
+                    thinking: parse_thinking(&sp.low.thinking),
+                    fallbacks: sp.low.fallbacks.clone(),
+                },
+            },
+        );
+    }
+    let ai_cfg = oxi_ai::router::RouterConfig::new(
+        store_cfg.default_profile().to_string(),
+        store_cfg.classifier_model().map(String::from),
+        store_cfg.context_upgrade_threshold(),
+        store_cfg.max_session_budget(),
+        ai_profiles,
+        oxi_ai::router::ScoringWeights {
+            structural: store_cfg.weights().structural,
+            behavioral: store_cfg.weights().behavioral,
+            context_budget: store_cfg.weights().context_budget,
+        },
+    );
+
+    oxi_ai::router::register_router(&ai_cfg);
+
+    if let Some(profile) = settings.router_profile() {
+        tracing::info!("Router active with profile: {profile}");
+    }
 }

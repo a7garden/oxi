@@ -14,6 +14,7 @@ pub mod session_cwd;
 pub mod session_navigation;
 pub mod settings;
 pub mod settings_validation;
+pub mod router_config;
 
 // Public re-exports
 

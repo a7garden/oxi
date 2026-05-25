@@ -1,5 +1,6 @@
 //! Event handlers for the TUI.
 
+use super::overlay::router_integration;
 use super::app::{AppOverlay, AppState, ProviderInfo, SetupStep, UiEvent};
 use super::slash;
 use crate::app::agent_session::{AgentSession, SessionEvent};
@@ -238,22 +239,31 @@ async fn handle_key(
         }
         // Ctrl+R: toggle routing status panel
         KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            use super::overlay;
-            use oxi_tui::widgets::routing::RoutingStatusData;
-            if matches!(&state.overlay, Some(AppOverlay::RoutingStatus { .. })) {
-                // Close routing panel
-                state.overlay = None;
-                state.overlay_state = None;
+            state.overlay_state = None;
+
+            let snap = oxi_ai::router::RouterProvider::get_snapshot();
+            let data = if let Some(ref s) = snap {
+                use oxi_tui::widgets::routing::{ProviderInfo, ProviderHealth, RoutingStatusData};
+                let chain = vec![
+                    ProviderInfo {
+                        name: s.last_provider.clone().unwrap_or_default(),
+                        health: ProviderHealth::Healthy,
+                        failures: 0,
+                        is_active: true,
+                    },
+                ];
+                RoutingStatusData {
+                    auto_routing_enabled: true,
+                    fallback_enabled: true,
+                    fallback_chain: chain,
+                    active_index: 0,
+                }
             } else {
-                // Open routing panel — create component-based overlay
-                state.overlay_state = Some(overlay::factories::routing_status(
-                    RoutingStatusData::default(),
-                ));
-                state.overlay = Some(AppOverlay::RoutingStatus {
-                    data: RoutingStatusData::default(),
-                    visible: true,
-                });
-            }
+                oxi_tui::widgets::routing::RoutingStatusData::default()
+            };
+
+            state.overlay_state = Some(super::overlay::factories::routing_status(data));
+
             None
         }
         // Shift+Tab: cycle thinking level
@@ -771,6 +781,21 @@ async fn handle_overlay_key(
             OverlayAction::NewSession => {
                 state.next_action = Some(super::app::TuiNextAction::NewSession);
                 state.overlay_state = None;
+            }
+            OverlayAction::OpenRouterSetup { initial, models } => {
+                state.overlay_state = None;
+                state.overlay_state = Some(super::overlay::router_setup(
+                    initial,
+                    models,
+                    move |data: &super::overlay::RouterSetupData| {
+                        let store_cfg = router_integration::save_router_config(data)?;
+                        let ai_cfg = router_integration::store_config_to_ai_config(&store_cfg);
+                        oxi_ai::router::register_router(&ai_cfg);
+                        Ok(())
+                    },
+                    || {},
+                ));
+                return None;
             }
             _ => {}
         }

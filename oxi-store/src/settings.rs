@@ -172,6 +172,10 @@ pub struct Settings {
     #[serde(default = "default_false")]
     pub enable_routing: bool,
 
+    /// Router profile name to use (e.g., "auto", "balanced").
+    #[serde(default)]
+    pub router_profile: Option<String>,
+
     /// Prefer cost-efficient models when routing
     #[serde(default = "default_true")]
     pub prefer_cost_efficient: bool,
@@ -258,6 +262,7 @@ impl Default for Settings {
             dynamic_models: HashMap::new(),
             // Multi-provider routing defaults
             enable_routing: false,
+            router_profile: None,
             prefer_cost_efficient: true,
             fallback_chain: Vec::new(),
             enable_fallback: true,
@@ -716,6 +721,11 @@ impl Settings {
     pub fn effective_max_tokens(&self) -> Option<usize> {
         self.max_response_tokens
             .or(self.max_tokens.map(|t| t as usize))
+    }
+
+    /// Get the configured router profile name.
+    pub fn router_profile(&self) -> Option<&str> {
+        self.router_profile.as_deref()
     }
 
     // ── Theme persistence ─────────────────────────────────────────────

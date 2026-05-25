@@ -238,6 +238,17 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
     register_builtins::create_builtin_provider(name)
 }
 
+/// Get a provider by name, returning Arc (for router delegation).
+pub fn get_provider_arc(name: &str) -> Option<Arc<dyn Provider>> {
+    {
+        let custom = CUSTOM_PROVIDERS.read();
+        if let Some(provider) = custom.get(name) {
+            return Some(Arc::clone(provider));
+        }
+    }
+    register_builtins::create_builtin_provider(name).map(Arc::from)
+}
+
 /// Wrapper that lets us return a cloned `Arc<dyn Provider>` as `Box<dyn Provider>`.
 struct ArcedProvider(Arc<dyn Provider>);
 

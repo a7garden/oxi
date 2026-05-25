@@ -1,6 +1,7 @@
 //! Slash command handling.
 
 use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
+use super::overlay::router_integration;
 use crate::app::agent_session::{AgentSession, ScopedModel};
 use crate::media::clipboard_write;
 use crate::storage::export::{self, ExportMeta, HtmlExportOptions};
@@ -53,10 +54,19 @@ pub(crate) fn handle_slash_command(
                 }
             } else {
                 let auth = oxi_store::auth_storage::shared_auth_storage();
-                let all_models: Vec<String> = oxi_ai::model_db::get_all_models()
+                // Static models filtered by API key
+                let mut all_models: Vec<String> = oxi_ai::model_db::get_all_models()
                     .filter(|entry| auth.get_api_key(entry.provider).is_some())
                     .map(|entry| format!("{}/{}", entry.provider, entry.id))
                     .collect();
+
+                // Dynamic models (custom providers + router/auto)
+                for dyn_model in oxi_ai::dynamic_models() {
+                    let entry = format!("{}/{}", dyn_model.provider, dyn_model.id);
+                    if !all_models.contains(&entry) {
+                        all_models.push(entry);
+                    }
+                }
                 if all_models.is_empty() {
                     state.add_system_message(format!(
                         "Model: {}\n/model <provider/model> to switch",
@@ -513,6 +523,81 @@ pub(crate) fn handle_slash_command(
             }
             true
         }
+        "/router" => {
+            if let Some(sub) = arg {
+                match sub {
+                    "status" => {
+                        if let Some(snap) = oxi_ai::router::RouterProvider::get_snapshot() {
+                            state.add_system_message(format!(
+                                "Router Status:\n  Profile: {}\n  Tier: {:?}\n  Score: {:.2}\n  Model: {}\n  Provider: {}\n  Cost: ${:.4}\n  Turns: {}",
+                                snap.profile.as_deref().unwrap_or("-"),
+                                snap.last_tier.unwrap_or(oxi_ai::router::RouterTier::Medium),
+                                snap.last_score,
+                                snap.last_model.as_deref().unwrap_or("-"),
+                                snap.last_provider.as_deref().unwrap_or("-"),
+                                snap.accumulated_cost,
+                                snap.turn_count,
+                            ));
+                        } else {
+                            state.add_system_message("Router: not active. Select \"router/auto\" in /model or type /router to configure.".to_string());
+                        }
+                    }
+                    "pin" => {
+                        state.add_system_message("Router pin: not yet implemented. Coming soon.".to_string());
+                    }
+                    "disable" => {
+                        state.add_system_message("Router disabled. Use /model to select a specific model.".to_string());
+                    }
+                    _ => {
+                        state.add_system_message(router_help());
+                    }
+                }
+            } else {
+                let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
+                let project_dir = std::env::current_dir().unwrap_or_default();
+                let has_config = oxi_store::router_config::load_router_config(&global_dir, &project_dir).is_some();
+
+                if has_config {
+                    if let Some(snap) = oxi_ai::router::RouterProvider::get_snapshot() {
+                        state.add_system_message(format!(
+                            "Router Status:\n  Profile: {}\n  Tier: {:?}\n  Score: {:.2}\n  Model: {}\n  Cost: ${:.4}\n  Turns: {}",
+                            snap.profile.as_deref().unwrap_or("-"),
+                            snap.last_tier.unwrap_or(oxi_ai::router::RouterTier::Medium),
+                            snap.last_score,
+                            snap.last_model.as_deref().unwrap_or("-"),
+                            snap.accumulated_cost,
+                            snap.turn_count,
+                        ));
+                    } else {
+                        state.add_system_message("Router: configured but not yet active. Send a message to start routing.".to_string());
+                    }
+                } else {
+                    state.add_system_message("Opening router setup...".to_string());
+                    let auth = oxi_store::auth_storage::shared_auth_storage();
+                    let setup_models: Vec<String> = oxi_ai::model_db::get_all_models()
+                        .filter(|entry| auth.get_api_key(entry.provider).is_some())
+                        .map(|entry| format!("{}/{}", entry.provider, entry.id))
+                        .collect();
+                    let initial = super::overlay::RouterSetupData {
+                        profile_name: "auto".to_string(),
+                        ..Default::default()
+                    };
+                    state.overlay = None;
+                    state.overlay_state = Some(super::overlay::router_setup(
+                        initial,
+                        setup_models,
+                        move |data: &super::overlay::RouterSetupData| {
+                            let store_cfg = router_integration::save_router_config(data)?;
+                            let ai_cfg = router_integration::store_config_to_ai_config(&store_cfg);
+                            oxi_ai::router::register_router(&ai_cfg);
+                            Ok(())
+                        },
+                        || {},
+                    ));
+                }
+            }
+            true
+        }
         "/logout" => {
             if let Some(provider) = arg {
                 oxi_store::auth_storage::shared_auth_storage().remove(provider);
@@ -738,6 +823,18 @@ fn resolve_entry_id(sel: &str, entries: &[&oxi_store::session::SessionEntry]) ->
 
 // ── Help text ────────────────────────────────────────────────────────────────
 
+fn router_help() -> String {
+    r#"Router Commands:
+
+  /router          Configure router (opens setup) or show status
+  /router status   Show routing status (tier, score, model, cost)
+  /router pin      Pin current tier (coming soon)
+  /router disable  Disable router, return to fixed model
+
+  Or select \"router/auto\" in /model"#
+        .to_string()
+}
+
 fn format_help() -> String {
     r#"
   Session
@@ -755,6 +852,7 @@ fn format_help() -> String {
   Model
     /model [id]       Switch or show model
     /scoped-models    Models for Ctrl+P cycling
+    /router           Configure model router
 
   Context
     /compact [instr]  Compact context
