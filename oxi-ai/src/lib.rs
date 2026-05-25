@@ -29,6 +29,7 @@ mod tools;
 mod transform;
 mod types;
 pub mod utils;
+pub mod router;
 
 /// Standard imports for oxi-ai usage.
 pub mod prelude {
@@ -62,7 +63,7 @@ pub use providers::CacheRetention;
 
 /// Provider trait, streaming options, and provider registry.
 pub use providers::{
-    custom_provider_names, get_provider, register_provider, unregister_provider, Provider,
+    custom_provider_names, get_provider, get_provider_arc, register_provider, unregister_provider, Provider,
     ProviderEvent, ProviderOptions, ProviderRegistry, StreamOptions,
 };
 
@@ -135,6 +136,7 @@ mod model_registry;
 /// Unlike the static `model_db`, this supports adding/removing models at runtime.
 pub use model_registry::{
     get_model, get_models, get_providers, lookup_model, register_model, unregister_model,
+    dynamic_models,
     ModelRegistry,
 };
 

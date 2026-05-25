@@ -793,6 +793,11 @@ impl ModelRegistry {
         STATIC_MODELS.values().collect()
     }
 
+    /// Get all dynamically registered models.
+    pub fn dynamic_models(&self) -> Vec<Model> {
+        self.dynamic_models.read().values().cloned().collect()
+    }
+
     /// Get all registered model IDs as `provider/model` strings.
     pub fn model_ids(&self) -> Vec<String> {
         let static_ids: Vec<String> = self.static_models.keys().cloned().collect();
@@ -860,6 +865,11 @@ pub fn get_providers() -> Vec<&'static str> {
 /// Get all models from a provider
 pub fn get_models(provider: &str) -> Vec<&'static Model> {
     ModelRegistry::get_by_provider(provider)
+}
+
+/// Get all dynamically registered models.
+pub fn dynamic_models() -> Vec<Model> {
+    GLOBAL_REGISTRY.dynamic_models()
 }
 
 #[cfg(test)]
