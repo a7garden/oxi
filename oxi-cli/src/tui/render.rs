@@ -82,6 +82,43 @@ fn render_hint(f: &mut Frame, area: Rect, text: &str, style: Style) {
 
 /// Render a selectable list with pointer, scrolling window, and highlight.
 #[allow(clippy::too_many_arguments)]
+/// Scroll position info returned by [`render_selectable_list`].
+struct ScrollInfo {
+    total: usize,
+    visible: usize,
+    window_start: usize,
+}
+
+impl ScrollInfo {
+    /// Number of items scrolled off the bottom of the visible window.
+    fn below(&self) -> usize {
+        self.total
+            .saturating_sub(self.window_start + self.visible)
+    }
+
+    /// Number of items scrolled off the top of the visible window.
+    #[allow(dead_code)]
+    fn above(&self) -> usize {
+        self.window_start
+    }
+
+    /// Human-readable position string like "(5/28, 12 below)" or empty if everything fits.
+    fn hint(&self) -> String {
+        if self.total <= self.visible {
+            return String::new();
+        }
+        let below = self.below();
+        let above = self.window_start;
+        match (above, below) {
+            (0, 0) => String::new(),
+            (0, b) => format!(" ({} below)", b),
+            (a, 0) => format!(" ({} above)", a),
+            (a, b) => format!(" ({} above, {} below)", a, b),
+        }
+    }
+}
+
+#[must_use]
 fn render_selectable_list(
     f: &mut Frame,
     area: Rect,
@@ -91,9 +128,9 @@ fn render_selectable_list(
     styles: &oxi_tui::theme::ThemeStyles,
     theme: &Theme,
     highlight_color: Option<ratatui::style::Color>,
-) {
+) -> Option<ScrollInfo> {
     if items.is_empty() {
-        return;
+        return None;
     }
 
     let list_area = Rect {
@@ -135,6 +172,12 @@ fn render_selectable_list(
         .collect();
 
     f.render_widget(List::new(list_items), list_area);
+
+    Some(ScrollInfo {
+        total: items.len(),
+        visible: max_show.min(items.len()),
+        window_start,
+    })
 }
 
 /// Render a list with status indicators (filled/empty circle).
@@ -157,7 +200,7 @@ fn render_status_list(
             format!("{} {}", status, name)
         })
         .collect();
-    render_selectable_list(
+    let _ = render_selectable_list(
         f,
         area,
         y_offset,
@@ -764,7 +807,7 @@ fn render_setup_step(
                 " API Key    Enter an API key manually".to_string(),
                 " OAuth      Sign in with your account (coming soon)".to_string(),
             ];
-            render_selectable_list(f, area, 4, &items, *selected, &styles, theme, None);
+            let _ = render_selectable_list(f, area, 4, &items, *selected, &styles, theme, None);
             render_hint(
                 f,
                 area,
@@ -807,10 +850,11 @@ fn render_setup_step(
         } => {
             let title = format!(" Select a model for {}", provider);
             render_title(f, area, 2, &title, fg, bg);
-            render_selectable_list(f, area, 4, models, *selected, &styles, theme, None);
+            let scroll = render_selectable_list(f, area, 4, models, *selected, &styles, theme, None);
+            let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
             let hint = format!(
-                " Up/Down select  |  Enter confirm  |  Esc back  ({} models)",
-                models.len()
+                " Up/Down select  |  Enter confirm  |  Esc back  ({} models){}",
+                models.len(), pos
             );
             render_hint(f, area, &hint, styles.muted);
         }
@@ -916,7 +960,7 @@ fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &
     );
 
     // List
-    render_selectable_list(
+    let scroll = render_selectable_list(
         f,
         inner,
         2,
@@ -928,9 +972,10 @@ fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &
     );
 
     // Hint
+    let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
     let hint = format!(
-        " {} models  |  Up/Down  |  type to filter  |  Enter select  |  Esc cancel",
-        filtered.len()
+        " {} models  |  Up/Down  |  type to filter  |  Enter select  |  Esc cancel{}",
+        filtered.len(), pos
     );
     render_hint(f, inner, &hint, styles.muted);
 }
@@ -964,7 +1009,7 @@ fn render_logout_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
         theme.colors.error.to_ratatui(),
         theme.colors.background.to_ratatui(),
     );
-    render_selectable_list(
+    let _ = render_selectable_list(
         f,
         inner,
         2,
@@ -1027,11 +1072,8 @@ fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
         theme.colors.primary.to_ratatui(),
         theme.colors.background.to_ratatui(),
     );
-    render_selectable_list(f, inner, 2, &items, selected, &styles, theme, None);
-    render_hint(
-        f,
-        inner,
-        " Up/Down select  |  Enter resume  |  Esc cancel",
-        styles.muted,
-    );
+    let scroll = render_selectable_list(f, inner, 2, &items, selected, &styles, theme, None);
+    let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
+    let hint = format!(" Up/Down select  |  Enter resume  |  Esc cancel{}", pos);
+    render_hint(f, inner, &hint, styles.muted);
 }
