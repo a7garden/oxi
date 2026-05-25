@@ -118,6 +118,7 @@ impl ScrollInfo {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[must_use]
 fn render_selectable_list(
     f: &mut Frame,
