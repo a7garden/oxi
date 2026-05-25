@@ -170,6 +170,7 @@ fn render_status_list(
 }
 
 /// Render provider selection list grouped by category with descriptions.
+#[allow(dead_code)]
 fn render_provider_list(
     f: &mut Frame,
     area: Rect,
@@ -260,6 +261,7 @@ fn render_provider_list(
 }
 
 /// Render a text input field with label and cursor.
+#[allow(dead_code)]
 fn render_input_field(
     f: &mut Frame,
     area: Rect,
@@ -755,6 +757,7 @@ fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme
 
 // ── Setup wizard ────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 fn render_setup_step(
     f: &mut Frame,
     area: Rect,
