@@ -147,6 +147,48 @@ mod tests {
             self.closed.store(true, Ordering::SeqCst);
             Ok(())
         }
+        async fn select_option(&self, _selector: &str, _value: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn check(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn uncheck(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn clear(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn hover(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn double_click(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn right_click(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn scroll(&self, _delta_x: f64, _delta_y: f64) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn scroll_into_view(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn drag(&self, _from: &str, _to: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn upload_file(&self, _selector: &str, _path: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn get_value(&self, _selector: &str) -> Result<String, BrowserError> {
+            Ok(String::new())
+        }
+        async fn evaluate_await(&self, _js: &str) -> Result<Value, BrowserError> {
+            Ok(Value::Null)
+        }
+        fn is_closed(&self) -> bool {
+            self.closed.load(Ordering::SeqCst)
+        }
     }
 
     // ── Tests ────────────────────────────────────────────────────

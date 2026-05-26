@@ -9,6 +9,9 @@ use oxi_agent::{
 };
 
 use crate::builder::Oxi;
+use crate::middleware::{Middleware, MiddlewarePipeline};
+use crate::observability::{AuditLog, CostTracker, Tracer};
+use crate::security::{Authorizer, CapabilitySet};
 
 /// Wrapper that makes Arc<Oxi> usable as ProviderResolver.
 /// This is needed because Agent stores Arc<dyn ProviderResolver + 'static>.
@@ -44,6 +47,15 @@ pub struct AgentBuilder<'a> {
     tools: ToolRegistry,
     workspace_dir: Option<PathBuf>,
     system_prompt: Option<String>,
+    // ── Security ──
+    capabilities: Option<CapabilitySet>,
+    authorizer: Option<Arc<Authorizer>>,
+    // ── Observability ──
+    tracer: Option<Arc<Tracer>>,
+    audit_log: Option<Arc<AuditLog>>,
+    cost_tracker: Option<Arc<CostTracker>>,
+    // ── Middleware ──
+    middlewares: Vec<Arc<dyn Middleware>>,
 }
 
 impl<'a> AgentBuilder<'a> {
@@ -54,6 +66,12 @@ impl<'a> AgentBuilder<'a> {
             tools: ToolRegistry::new(),
             workspace_dir: None,
             system_prompt: None,
+            capabilities: None,
+            authorizer: None,
+            tracer: None,
+            audit_log: None,
+            cost_tracker: None,
+            middlewares: Vec::new(),
         }
     }
 
@@ -194,8 +212,8 @@ impl<'a> AgentBuilder<'a> {
     /// is enabled.
     #[cfg(feature = "native-browser")]
     #[cfg_attr(docsrs, doc(cfg(feature = "native-browser")))]
-    pub fn native_browser(self) -> anyhow::Result<Self> {
-        let engine = oxi_agent::tools::browse::OxiBrowserEngine::new()?;
+    pub async fn native_browser(self) -> anyhow::Result<Self> {
+        let engine = oxi_agent::tools::browse::OxiBrowserEngine::new().await?;
         Ok(self.browsing(Arc::new(engine)))
     }
 
@@ -220,8 +238,10 @@ impl<'a> AgentBuilder<'a> {
         use oxi_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool};
 
         self.tools.register(BrowseTool::new(Arc::clone(&engine)));
-        self.tools.register(BrowseExtractTool::new(Arc::clone(&engine)));
-        self.tools.register(BrowseScriptTool::new(Arc::clone(&engine)));
+        self.tools
+            .register(BrowseExtractTool::new(Arc::clone(&engine)));
+        self.tools
+            .register(BrowseScriptTool::new(Arc::clone(&engine)));
         self.tools.register(BrowseSessionTool::new(engine));
         self
     }
@@ -240,6 +260,83 @@ impl<'a> AgentBuilder<'a> {
     ) -> Self {
         provider.register_tools(&self.tools, context);
         self
+    }
+
+    // ── Security ──────────────────────────────────────────
+
+    /// Set the capability set for this agent.
+    pub fn capabilities(mut self, caps: CapabilitySet) -> Self {
+        self.capabilities = Some(caps);
+        self
+    }
+
+    /// Use standard coding capabilities.
+    pub fn coding_capabilities(self) -> Self {
+        let ws = self
+            .workspace_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."));
+        self.capabilities(CapabilitySet::coding(ws.to_str().unwrap_or(".")))
+    }
+
+    /// Use read-only capabilities.
+    pub fn readonly_capabilities(self) -> Self {
+        let ws = self
+            .workspace_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("."));
+        self.capabilities(CapabilitySet::read_only(ws.to_str().unwrap_or(".")))
+    }
+
+    /// Attach an authorizer for capability enforcement.
+    pub fn authorizer(mut self, authorizer: Arc<Authorizer>) -> Self {
+        self.authorizer = Some(authorizer);
+        self
+    }
+
+    // ── Observability ──────────────────────────────────────
+
+    /// Attach a tracer for distributed tracing.
+    pub fn tracer(mut self, tracer: Arc<Tracer>) -> Self {
+        self.tracer = Some(tracer);
+        self
+    }
+
+    /// Attach an audit log for security and tool audit trail.
+    pub fn audit_log(mut self, audit: Arc<AuditLog>) -> Self {
+        self.audit_log = Some(audit);
+        self
+    }
+
+    /// Attach a cost tracker for token and cost monitoring.
+    pub fn cost_tracker(mut self, tracker: Arc<CostTracker>) -> Self {
+        self.cost_tracker = Some(tracker);
+        self
+    }
+
+    // ── Middleware ─────────────────────────────────────────
+
+    /// Add a middleware to the pipeline.
+    pub fn middleware(mut self, mw: impl Middleware + 'static) -> Self {
+        self.middlewares.push(Arc::new(mw));
+        self
+    }
+
+    /// Add a rate limit middleware (convenience shortcut).
+    pub fn with_rate_limit(self, max_per_minute: usize) -> Self {
+        self.middleware(crate::middleware::RateLimitMiddleware::new(max_per_minute))
+    }
+
+    /// Add a token budget middleware (convenience shortcut).
+    pub fn with_token_budget(self, max_tokens: usize) -> Self {
+        self.middleware(crate::middleware::TokenBudgetMiddleware::new(max_tokens))
+    }
+
+    /// Add a logging middleware (convenience shortcut).
+    pub fn with_logging(self) -> Self {
+        self.middleware(crate::middleware::LoggingMiddleware::new(
+            tracing::Level::INFO,
+        ))
     }
 
     /// Build the agent.
@@ -295,6 +392,36 @@ impl<'a> AgentBuilder<'a> {
 
         // 5. Create agent with the isolated resolver
         let agent = Agent::new_with_resolver(provider, config, Arc::new(self.tools), resolver);
+
+        // 6. Authorizer: grant capabilities
+        if let Some(authorizer) = &self.authorizer {
+            let agent_id = if agent.get_config().name.is_empty() {
+                uuid::Uuid::new_v4().to_string()
+            } else {
+                agent.get_config().name.clone()
+            };
+            if let Some(caps) = self.capabilities {
+                let subject = crate::security::CapabilitySubject::Agent(agent_id);
+                authorizer.grant(subject, caps);
+            }
+        }
+
+        // 7. Middleware pipeline → AgentHooks
+        if !self.middlewares.is_empty() {
+            let pipeline = Arc::new(
+                self.middlewares
+                    .into_iter()
+                    .fold(MiddlewarePipeline::new(), |p, mw| p.add_arc(mw)),
+            );
+            let agent_id = if agent.get_config().name.is_empty() {
+                uuid::Uuid::new_v4().to_string()
+            } else {
+                agent.get_config().name.clone()
+            };
+            let terminate_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let hooks = crate::middleware::build_hooks(pipeline, agent_id, terminate_flag);
+            agent.set_hooks(hooks);
+        }
 
         Ok(agent)
     }

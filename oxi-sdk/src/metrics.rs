@@ -70,7 +70,7 @@ impl AgentMetrics {
 }
 
 /// Point-in-time snapshot of agent metrics.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct MetricsSnapshot {
     /// Total number of agent runs.
     pub total_runs: u64,

@@ -16,11 +16,18 @@ pub mod agent_builder;
 pub mod agent_group;
 pub mod builder;
 pub mod closure_tool;
+pub mod coordination;
+pub mod error;
 pub mod kernel_bridge;
+pub mod lifecycle;
 pub mod message_bus;
 pub mod metrics;
+pub mod middleware;
 pub mod multi_provider;
+pub mod observability;
 pub mod prelude;
+pub mod routing;
+pub mod security;
 pub mod tool_factory;
 
 // Re-export core SDK types
@@ -31,7 +38,40 @@ pub use closure_tool::ClosureTool;
 pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
 pub use message_bus::{InterAgentMessage, LagAwareReceiver, MessageBus, PublishResult};
 pub use metrics::{AgentMetrics, MetricsSnapshot};
+
+// Foundation Layer
+pub use error::SdkError;
+pub use lifecycle::{
+    AgentHandle, AgentLifecycleEvent, AgentSnapshot, AgentStatus, AgentSupervisor,
+    FileSnapshotStore, RestartBackoff, SnapshotStore, SupervisorPolicy, ToolManifest,
+};
+pub use middleware::Middleware;
+pub use middleware::{
+    build_hooks, MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewarePipeline,
+    MiddlewareResult,
+};
 pub use multi_provider::{MultiProviderBuilder, RoutingConfig};
+pub use observability::{
+    AuditEntry, AuditFilter, AuditLog, CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig,
+    EventQuery, EventStore, EventStoreConfig, GlobalCostSnapshot, Span, SpanContext, SpanGuard,
+    SpanId, SpanKind, SpanStatus, StoredEvent, TokenUsage, TraceId, Tracer,
+};
+
+// Composition Layer — Security
+pub use security::{
+    Authorizer, Capability, CapabilitySet, CapabilitySubject, DefaultPolicy, SecurityMiddleware,
+    StringPattern,
+};
+
+// Composition Layer — Coordination
+pub use coordination::{
+    Consensus, CoordinatedGroup, CoordinatedGroupBuilder, MemoryEntry, MemoryEvent, MemoryKey,
+    SharedMemory, VoteResult, WorkEvent, WorkItem, WorkQueue, WorkQueueConfig, WorkQueueStats,
+    WorkResult, WorkStatus,
+};
+
+// Runtime routing control
+pub use routing::RoutingControl;
 
 // Re-export from oxi-ai
 pub use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
@@ -59,11 +99,20 @@ pub use oxi_ai::oauth::{
 // Re-export from oxi-agent
 pub use oxi_agent::{
     Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
-    AgentTool, AgentToolResult, CompactionEvent, EditTool, FindTool, GetSearchResultsTool,
+    AgentTool, AgentToolResult, CompactedContext, CompactionEvent, CompactionHook, EditTool, FindTool, GetSearchResultsTool,
     GrepTool, LsTool, OutputMode, ProviderResolver, ReadTool, SearchCache, SharedState,
     StructuredOutput, StructuredOutputError, ToolContext, ToolError, ToolExecutionMode,
     ToolRegistry, WebSearchTool, WriteTool,
 };
+
+// ── Concrete provider re-exports ─────────────────────────────────────────
+//
+// SDK consumers can construct providers directly without depending on
+// `oxi-ai`. This enables the single-dependency pattern:
+//   oxios → oxi-sdk  (no oxi-ai, no oxi-agent direct dep)
+
+pub use oxi_ai::OpenAiProvider;
+pub use oxi_ai::OpenAiResponsesProvider;
 
 // ── Browser engine re-exports ────────────────────────────────────────────────
 //
@@ -216,6 +265,23 @@ mod tests {
         assert!(names.contains(&"read".to_string()));
         assert!(names.contains(&"ls".to_string()));
         assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn test_tool_registry_extend_from() {
+        let base = crate::tool_factory::coding_tools(Path::new("/tmp"));
+        let extra = crate::tool_factory::readonly_tools(Path::new("/tmp"));
+
+        // extend_from should add tools from extra into base
+        let combined = ToolRegistry::new();
+        combined.extend_from(&base);
+        combined.extend_from(&extra);
+
+        let names = combined.names();
+        assert!(names.contains(&"read".to_string()));
+        assert!(names.contains(&"write".to_string()));
+        assert!(names.contains(&"ls".to_string()));
+        // read and ls are in both — no duplicates expected since same names
     }
 
     // ── Phase 2+ Tests: ProviderResolver, ClosureTool, Isolation ──
@@ -379,5 +445,36 @@ mod tests {
             .unwrap();
         // Agent built successfully with custom system prompt
         drop(agent);
+    }
+
+    #[test]
+    fn test_oxi_builder_api_key() {
+        // Builder accepts api_key without panic
+        let oxi = OxiBuilder::new()
+            .with_builtins()
+            .api_key("anthropic", "sk-ant-test-key")
+            .build();
+        // The key is stored internally. create_provider will use it
+        // (but actual API calls will fail since it's a fake key).
+        assert!(oxi.has_builtins());
+    }
+
+    #[test]
+    fn test_oxi_builder_base_url() {
+        let oxi = OxiBuilder::new()
+            .with_builtins()
+            .base_url("openai", "https://my-proxy.example.com/v1")
+            .build();
+        assert!(oxi.has_builtins());
+    }
+
+    #[test]
+    fn test_oxi_builder_credential() {
+        let oxi = OxiBuilder::new()
+            .with_builtins()
+            .credential("openai", "sk-test-key", Some("https://proxy.example.com/v1"))
+            .credential("anthropic", "sk-ant-test", None)
+            .build();
+        assert!(oxi.has_builtins());
     }
 }

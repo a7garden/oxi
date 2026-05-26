@@ -47,17 +47,81 @@ pub struct AgentLoopConfig {
     /// Passed through to [`oxi_ai::StreamOptions::provider_options`] so the
     /// provider can read provider-specific settings.
     pub provider_options: Option<oxi_ai::ProviderOptions>,
+
+    /// Async hook invoked after context compaction completes.
+    ///
+    /// Unlike the `Compaction` event in the `Fn` callback, this hook is
+    /// async and its future is awaited within the agent loop. Errors are
+    /// logged at WARN level but don't fail the loop.
+    ///
+    /// Use this for side effects that require async I/O (e.g., persisting
+    /// compaction summaries to a memory store) without resorting to
+    /// `tokio::spawn` fire-and-forget.
+    pub on_compaction: Option<CompactionHook>,
+}
+
+impl Default for AgentLoopConfig {
+    fn default() -> Self {
+        Self {
+            model_id: String::new(),
+            system_prompt: None,
+            temperature: 0.7,
+            max_tokens: 4096,
+            max_iterations: 20,
+            tool_execution: ToolExecutionMode::Parallel,
+            compaction_strategy: oxi_ai::CompactionStrategy::default(),
+            context_window: 128_000,
+            compaction_instruction: None,
+            session_id: None,
+            transport: None,
+            compact_on_start: false,
+            max_retry_delay_ms: None,
+            auto_retry_enabled: false,
+            auto_retry_max_attempts: 3,
+            auto_retry_base_delay_ms: 2000,
+            api_key: None,
+            workspace_dir: None,
+            provider_options: None,
+            on_compaction: None,
+        }
+    }
 }
 
 // Re-export ToolExecutionMode from crate::config to avoid duplicate definitions.
 pub use crate::config::ToolExecutionMode;
 
+use crate::compaction::CompactedContext;
 use crate::AgentToolResult;
 use anyhow::{Error, Result};
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+
+/// Async hook invoked after context compaction completes.
+///
+/// Receives the [`CompactedContext`] and returns a `Result<()>` future.
+/// The future is awaited within the agent loop, so async operations
+/// (memory storage, logging, etc.) are safe here.
+///
+/// # Example
+///
+/// ```ignore
+/// let config = AgentLoopConfig {
+///     on_compaction: Some(Arc::new(|ctx: CompactedContext| {
+///         let summary = ctx.summary.clone();
+///         Box::pin(async move {
+///             memory_store.save(summary).await
+///         })
+///     })),
+///     ..Default::default()
+/// };
+/// ```
+pub type CompactionHook = Arc<
+    dyn Fn(CompactedContext) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
+        + Send
+        + Sync,
+>;
 
 /// Hook invoked before each tool call; may return an override result.
 pub type BeforeToolCallHook = Arc<

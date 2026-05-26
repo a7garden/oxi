@@ -28,6 +28,7 @@ pub struct VertexProvider {
 }
 
 impl VertexProvider {
+    /// Create a new Vertex provider with default settings.
     pub fn new() -> Self {
         Self {
             client: shared_client(),

@@ -69,18 +69,32 @@ pub use providers::{
 
 /// Built-in provider helpers (re-exported from providers).
 pub use providers::register_builtins::{
-    create_builtin_provider, get_all_provider_names, get_builtin_provider, get_provider_env_key,
-    get_provider_env_keys, is_builtin_provider,
+    create_builtin_provider, create_builtin_provider_with_options, get_all_provider_names,
+    get_builtin_provider, get_provider_env_key, get_provider_env_keys, is_builtin_provider,
 };
 
 /// OpenAI-compatible provider implementation.
 pub use providers::OpenAiProvider;
+
+/// Anthropic provider implementation.
+pub use providers::AnthropicProvider;
+/// Azure OpenAI provider implementation.
+pub use providers::AzureProvider;
 
 /// Model fetching utilities (async and blocking).
 pub use providers::model_fetch::{fetch_models_async, fetch_models_blocking};
 
 /// OpenAI Responses API provider.
 pub use providers::OpenAiResponsesProvider;
+
+/// Google (Gemini) provider implementation.
+pub use providers::GoogleProvider;
+/// AWS Bedrock provider implementation.
+pub use providers::BedrockProvider;
+/// Google Vertex AI provider implementation.
+pub use providers::VertexProvider;
+/// Mistral provider implementation.
+pub use providers::MistralProvider;
 
 /// Provider-specific message normalization (empty content filtering, tool ID
 /// scrubbing, reasoning injection, tool-use ordering fix).

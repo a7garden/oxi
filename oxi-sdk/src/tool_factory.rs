@@ -96,19 +96,18 @@ pub fn full_tools(cwd: &Path, engine: Arc<dyn BrowserEngine>) -> Arc<ToolRegistr
 /// ```
 #[cfg(feature = "native-browser")]
 #[cfg_attr(docsrs, doc(cfg(feature = "native-browser")))]
-pub fn native_browser_tools() -> anyhow::Result<Arc<ToolRegistry>> {
-    let engine = oxi_agent::tools::browse::OxiBrowserEngine::new()?;
+pub async fn native_browser_tools() -> anyhow::Result<Arc<ToolRegistry>> {
+    let engine = oxi_agent::tools::browse::OxiBrowserEngine::new().await?;
     Ok(browsing_tools(Arc::new(engine)))
 }
 
 /// Create browser tools using the native backend with custom config.
 #[cfg(feature = "native-browser")]
 #[cfg_attr(docsrs, doc(cfg(feature = "native-browser")))]
-pub fn native_browser_tools_with_config(
+pub async fn native_browser_tools_with_config(
     config: BrowseConfig,
 ) -> anyhow::Result<Arc<ToolRegistry>> {
-    let engine =
-        oxi_agent::tools::browse::OxiBrowserEngine::with_config(config.clone())?;
+    let engine = oxi_agent::tools::browse::OxiBrowserEngine::with_config(config.clone()).await?;
     Ok(browsing_tools_with_config(Arc::new(engine), config))
 }
 

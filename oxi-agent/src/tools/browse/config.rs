@@ -45,6 +45,18 @@ pub struct BrowseConfig {
     /// 0 = no timeout (not recommended).
     #[serde(default = "default_session_idle_timeout_secs")]
     pub session_idle_timeout_secs: u64,
+
+    /// Custom User-Agent string. `None` uses the browser default.
+    #[serde(default)]
+    pub user_agent: Option<String>,
+
+    /// Whether to respect robots.txt. Defaults to `true`.
+    #[serde(default = "default_obey_robots")]
+    pub obey_robots: bool,
+
+    /// JavaScript evaluation timeout in milliseconds.
+    #[serde(default = "default_js_timeout_ms")]
+    pub js_timeout_ms: u64,
 }
 
 impl Default for BrowseConfig {
@@ -59,6 +71,9 @@ impl Default for BrowseConfig {
             max_concurrent_tabs: default_max_concurrent_tabs(),
             max_output_bytes: default_max_output_bytes(),
             session_idle_timeout_secs: default_session_idle_timeout_secs(),
+            user_agent: None,
+            obey_robots: default_obey_robots(),
+            js_timeout_ms: default_js_timeout_ms(),
         }
     }
 }
@@ -92,6 +107,12 @@ fn default_max_output_bytes() -> usize {
 fn default_session_idle_timeout_secs() -> u64 {
     300 // 5 minutes
 }
+fn default_obey_robots() -> bool {
+    true
+}
+fn default_js_timeout_ms() -> u64 {
+    10_000
+}
 
 #[cfg(test)]
 mod tests {
@@ -109,6 +130,9 @@ mod tests {
         assert_eq!(config.max_concurrent_tabs, 4);
         assert_eq!(config.max_output_bytes, 512_000);
         assert_eq!(config.session_idle_timeout_secs, 300);
+        assert!(config.user_agent.is_none());
+        assert!(config.obey_robots);
+        assert_eq!(config.js_timeout_ms, 10_000);
     }
 
     #[test]

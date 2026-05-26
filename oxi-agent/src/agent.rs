@@ -167,6 +167,16 @@ impl Agent {
         self.config().config.model_id.clone()
     }
 
+    /// Get the agent configuration (full clone)
+    pub fn get_config(&self) -> AgentConfig {
+        self.config().config.clone()
+    }
+
+    /// Get a reference to the provider resolver.
+    pub fn resolver(&self) -> &Arc<dyn ProviderResolver> {
+        &self.resolver
+    }
+
     /// Switch the model used for future LLM calls.
     ///
     /// If the new model uses a different provider API, the conversation
@@ -413,6 +423,7 @@ impl Agent {
             api_key,
             workspace_dir,
             provider_options: self.config().config.provider_options.clone(),
+            on_compaction: None,
         };
 
         // Create AgentLoop. We give it a NEW SharedState and sync back after.
@@ -728,6 +739,7 @@ impl Agent {
             api_key: inner.config.api_key.clone(),
             workspace_dir: inner.config.workspace_dir.clone(),
             provider_options: inner.config.provider_options.clone(),
+            on_compaction: None,
         };
 
         let provider: Arc<dyn Provider> = Arc::clone(&inner.provider);

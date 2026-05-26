@@ -31,6 +31,8 @@ pub enum BrowserError {
     TabClosed(String),
     #[error("browser error: {0}")]
     Backend(String),
+    #[error("no active session — call 'open' first")]
+    NoActiveSession,
 }
 
 impl From<BrowserError> for crate::tools::ToolError {
@@ -129,6 +131,104 @@ pub trait BrowserTab: Send + Sync {
 
     /// Close this tab.
     async fn close(&self) -> Result<(), BrowserError>;
+
+    /// Select an option in a `<select>` element.
+    async fn select_option(&self, selector: &str, value: &str) -> Result<(), BrowserError>;
+
+    /// Check a checkbox or radio input.
+    async fn check(&self, selector: &str) -> Result<(), BrowserError>;
+
+    /// Uncheck a checkbox or radio input.
+    async fn uncheck(&self, selector: &str) -> Result<(), BrowserError>;
+
+    // ── Advanced interaction ───────────────────────────────────
+
+    /// Clear the value of an input element.
+    async fn clear(&self, selector: &str) -> Result<(), BrowserError> {
+        self.fill(selector, "").await
+    }
+
+    /// Hover over an element.
+    async fn hover(&self, selector: &str) -> Result<(), BrowserError> {
+        let sel = serde_json::to_string(selector).unwrap_or_default();
+        let js = format!(
+            r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; el.dispatchEvent(new MouseEvent('mouseover', {{bubbles:true}})); return el.tagName; }})()"#
+        );
+        self.evaluate(&js).await.map(|_| ())
+    }
+
+    /// Double-click an element.
+    async fn double_click(&self, selector: &str) -> Result<(), BrowserError> {
+        let sel = serde_json::to_string(selector).unwrap_or_default();
+        let js = format!(
+            r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; el.dispatchEvent(new MouseEvent('dblclick', {{bubbles:true}})); return el.tagName; }})()"#
+        );
+        self.evaluate(&js).await.map(|_| ())
+    }
+
+    /// Right-click (context menu) an element.
+    async fn right_click(&self, selector: &str) -> Result<(), BrowserError> {
+        let sel = serde_json::to_string(selector).unwrap_or_default();
+        let js = format!(
+            r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; el.dispatchEvent(new MouseEvent('contextmenu', {{bubbles:true, button:2}})); return el.tagName; }})()"#
+        );
+        self.evaluate(&js).await.map(|_| ())
+    }
+
+    /// Scroll the page by delta pixels.
+    async fn scroll(&self, delta_x: f64, delta_y: f64) -> Result<(), BrowserError> {
+        let js = format!("window.scrollBy({}, {})", delta_x, delta_y);
+        self.evaluate(&js).await.map(|_| ())
+    }
+
+    /// Scroll an element into view.
+    async fn scroll_into_view(&self, selector: &str) -> Result<(), BrowserError> {
+        let sel = serde_json::to_string(selector).unwrap_or_default();
+        let js = format!(
+            r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; el.scrollIntoView(); return el.tagName; }})()"#
+        );
+        self.evaluate(&js).await.map(|_| ())
+    }
+
+    /// Drag from one element to another.
+    async fn drag(&self, from_selector: &str, to_selector: &str) -> Result<(), BrowserError> {
+        let from_sel = serde_json::to_string(from_selector).unwrap_or_default();
+        let to_sel = serde_json::to_string(to_selector).unwrap_or_default();
+        let js = format!(
+            r#"(function() {{ var src = document.querySelector({from_sel}); var dst = document.querySelector({to_sel}); if (!src || !dst) return null; src.dispatchEvent(new DragEvent('dragstart', {{bubbles:true}})); dst.dispatchEvent(new DragEvent('drop', {{bubbles:true}})); src.dispatchEvent(new DragEvent('dragend', {{bubbles:true}})); return 'ok'; }})()"#
+        );
+        self.evaluate(&js).await.map(|_| ())
+    }
+
+    /// Upload a file to a file input element.
+    async fn upload_file(&self, selector: &str, path: &str) -> Result<(), BrowserError> {
+        let sel = serde_json::to_string(selector).unwrap_or_default();
+        let p = serde_json::to_string(path).unwrap_or_default();
+        let js = format!(
+            r#"(function() {{ var el = document.querySelector({sel}); if (!el || el.type !== 'file') return null; if (typeof DataTransfer === 'undefined') return null; var dt = new DataTransfer(); var f = new File([], {p}.split('/').pop()); dt.items.add(f); el.files = dt.files; el.dispatchEvent(new Event('change', {{bubbles:true}})); return el.tagName; }})()"#
+        );
+        self.evaluate(&js).await.map(|_| ())
+    }
+
+    /// Get the value or text content of an element.
+    async fn get_value(&self, selector: &str) -> Result<String, BrowserError> {
+        let sel = serde_json::to_string(selector).unwrap_or_default();
+        let js = format!(
+            r#"(function() {{ var el = document.querySelector({sel}); if (!el) return null; return (el.value !== undefined ? el.value : el.textContent) || ''; }})()"#
+        );
+        let val = self.evaluate(&js).await?;
+        Ok(val.as_str().unwrap_or("").to_string())
+    }
+
+    /// Evaluate JS that may return a promise; awaits by default.
+    async fn evaluate_await(&self, js: &str) -> Result<Value, BrowserError> {
+        self.evaluate(js).await
+    }
+
+    /// Returns `true` if this tab has been closed.
+    fn is_closed(&self) -> bool {
+        false
+    }
 }
 
 // ── BrowserEngine trait ───────────────────────────────────────────────────────
@@ -196,5 +296,11 @@ mod tests {
         let json = serde_json::to_string(&elem).unwrap();
         assert!(json.contains("DIV"));
         assert!(json.contains("Hello"));
+    }
+
+    #[test]
+    fn browser_error_no_active_session() {
+        let e = BrowserError::NoActiveSession;
+        assert!(e.to_string().contains("no active session"));
     }
 }

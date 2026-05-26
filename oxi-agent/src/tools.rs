@@ -454,6 +454,25 @@ impl ToolRegistry {
         registry
     }
 
+    /// Extend this registry with all tools from another registry.
+    ///
+    /// Useful for composing tool sets from multiple sources
+    /// (e.g., coding tools + kernel tools + browser tools).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let base = ToolRegistry::new();
+    /// base.extend_from(&other_registry);
+    /// ```
+    pub fn extend_from(&self, other: &ToolRegistry) {
+        for name in other.names() {
+            if let Some(tool) = other.get(&name) {
+                self.register_arc(tool);
+            }
+        }
+    }
+
     /// Create registry with selected builtins only.
     pub fn with_selected_tools(cwd: PathBuf, names: &[&str]) -> Self {
         let full = Self::with_builtins_cwd(cwd, &[]);

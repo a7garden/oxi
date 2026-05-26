@@ -49,6 +49,7 @@ pub use error::AgentError;
 pub use events::AgentEvent;
 
 pub use compaction::{CompactedContext, CompactionEvent};
+pub use agent_loop::config::CompactionHook;
 pub use oxi_ai::{CompactionManager, CompactionStrategy};
 /// Fault-recovery primitives for resilient agent execution.
 pub use recovery::{

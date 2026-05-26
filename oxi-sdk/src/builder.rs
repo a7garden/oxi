@@ -1,13 +1,17 @@
 //! OxiBuilder and Oxi — SDK entry point
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use oxi_agent::{ProviderResolver, ToolRegistry};
 use oxi_ai::{Model, ModelRegistry, Provider, ProviderRegistry};
 
 use crate::agent_builder::AgentBuilder;
+use crate::lifecycle::{AgentSupervisor, FileSnapshotStore, SupervisorPolicy};
 use crate::multi_provider::{MultiProviderBuilder, RoutingConfig};
+use crate::observability::{AuditLog, CostTracker, Tracer};
+use crate::security::Authorizer;
 
 /// Oxi AI engine instance — holds isolated provider and model registries.
 ///
@@ -16,12 +20,17 @@ use crate::multi_provider::{MultiProviderBuilder, RoutingConfig};
 ///
 /// Implements [`ProviderResolver`] so it can be passed directly to
 /// [`oxi_agent::Agent::new_with_resolver`] for fully isolated operation.
+#[derive(Clone)]
 pub struct Oxi {
     providers: Arc<ProviderRegistry>,
     models: Arc<ModelRegistry>,
     tools: Arc<ToolRegistry>,
     /// Whether to include built-in provider resolution (from create_builtin_provider).
     include_builtins: bool,
+    /// Per-provider API keys (take precedence over environment variables).
+    api_keys: Arc<HashMap<String, String>>,
+    /// Per-provider base URL overrides.
+    base_urls: Arc<HashMap<String, String>>,
 }
 
 impl Oxi {
@@ -62,15 +71,24 @@ impl Oxi {
 
     /// Create a provider instance for a given provider name.
     ///
-    /// Checks the local `ProviderRegistry` first, then falls back
-    /// to built-in providers (if `with_builtins()` was called).
+    /// Resolution order:
+    /// 1. Custom providers registered via `OxiBuilder::provider()`
+    /// 2. Provider factories registered via `OxiBuilder::provider_factory()`
+    /// 3. Built-in providers with credential injection (if `with_builtins()` was called)
     pub fn create_provider(&self, name: &str) -> Result<Arc<dyn Provider>> {
         // 1. Check custom providers registered via OxiBuilder::provider()
         if let Some(p) = self.providers.get_custom(name) {
             return Ok(p);
         }
-        // 2. Fall back to built-in providers (stateless creation)
+        // 2. Fall back to built-in providers (with optional credential injection)
         if self.include_builtins {
+            let api_key = self.api_keys.get(name).map(|s| s.as_str());
+            let base_url = self.base_urls.get(name).map(|s| s.as_str());
+            if let Some(p) = oxi_ai::create_builtin_provider_with_options(name, api_key, base_url)
+            {
+                return Ok(Arc::from(p));
+            }
+            // Fallback to default built-in creation (no credential override)
             if let Some(p) = oxi_ai::create_builtin_provider(name) {
                 return Ok(Arc::from(p));
             }
@@ -111,6 +129,8 @@ pub struct OxiBuilder {
     models: ModelRegistry,
     tools: ToolRegistry,
     include_builtins: bool,
+    api_keys: HashMap<String, String>,
+    base_urls: HashMap<String, String>,
 }
 
 impl OxiBuilder {
@@ -121,6 +141,8 @@ impl OxiBuilder {
             models: ModelRegistry::new(),
             tools: ToolRegistry::new(),
             include_builtins: false,
+            api_keys: HashMap::new(),
+            base_urls: HashMap::new(),
         }
     }
 
@@ -175,6 +197,70 @@ impl OxiBuilder {
     ) -> Self {
         self.providers.register_factory(name, factory);
         self
+    }
+
+       /// Register an API key for a specific provider.
+    ///
+    /// When `create_provider(name)` is called, the key is injected into
+    /// the provider's constructor automatically. Keys registered here
+    /// take precedence over environment variables.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let oxi = OxiBuilder::new()
+    ///     .with_builtins()
+    ///     .api_key("anthropic", "sk-ant-...")
+    ///     .api_key("openai", "sk-...")
+    ///     .build();
+    /// ```
+    pub fn api_key(mut self, provider_name: &str, key: impl Into<String>) -> Self {
+        self.api_keys.insert(provider_name.to_string(), key.into());
+        self
+    }
+
+    /// Register a base URL override for a specific provider.
+    ///
+    /// Useful for OpenAI-compatible providers (ZAI, Groq, etc.)
+    /// that use a different endpoint.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let oxi = OxiBuilder::new()
+    ///     .with_builtins()
+    ///     .base_url("openai", "https://my-proxy.example.com/v1")
+    ///     .build();
+    /// ```
+    pub fn base_url(mut self, provider_name: &str, url: impl Into<String>) -> Self {
+        self.base_urls.insert(provider_name.to_string(), url.into());
+        self
+    }
+
+    /// Register a full credential set for a provider.
+    ///
+    /// Convenience method combining [`api_key()`](Self::api_key) and
+    /// [`base_url()`](Self::base_url).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let oxi = OxiBuilder::new()
+    ///     .with_builtins()
+    ///     .credential("openai", "sk-...", Some("https://proxy.example.com/v1"))
+    ///     .build();
+    /// ```
+    pub fn credential(
+        self,
+        provider_name: &str,
+        api_key: impl Into<String>,
+        base_url: Option<&str>,
+    ) -> Self {
+        let mut builder = self.api_key(provider_name, api_key);
+        if let Some(url) = base_url {
+            builder = builder.base_url(provider_name, url);
+        }
+        builder
     }
 
     /// Register a custom model.
@@ -239,6 +325,27 @@ impl OxiBuilder {
         self
     }
 
+    /// Create a supervisor builder for managing agent lifecycles.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let supervisor = oxi.supervisor()
+    ///     .snapshot_dir("/data/snapshots")
+    ///     .build()?;
+    /// ```
+    pub fn supervisor(self) -> SupervisorBuilder {
+        SupervisorBuilder {
+            oxi_builder: self,
+            policy: SupervisorPolicy::default(),
+            snapshot_dir: None,
+            audit: None,
+            authorizer: None,
+            tracer: None,
+            cost_tracker: None,
+        }
+    }
+
     /// Build the Oxi engine instance.
     pub fn build(self) -> Oxi {
         Oxi {
@@ -246,6 +353,8 @@ impl OxiBuilder {
             models: Arc::new(self.models),
             tools: Arc::new(self.tools),
             include_builtins: self.include_builtins,
+            api_keys: Arc::new(self.api_keys),
+            base_urls: Arc::new(self.base_urls),
         }
     }
 }
@@ -253,5 +362,77 @@ impl OxiBuilder {
 impl Default for OxiBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── SupervisorBuilder ──────────────────────────────────────────────────────
+
+/// Builder for creating an `AgentSupervisor`.
+///
+/// Created via [`OxiBuilder::supervisor()`].
+pub struct SupervisorBuilder {
+    oxi_builder: OxiBuilder,
+    policy: SupervisorPolicy,
+    snapshot_dir: Option<std::path::PathBuf>,
+    audit: Option<Arc<AuditLog>>,
+    authorizer: Option<Arc<Authorizer>>,
+    tracer: Option<Arc<Tracer>>,
+    cost_tracker: Option<Arc<CostTracker>>,
+}
+
+impl SupervisorBuilder {
+    /// Set the restart policy.
+    pub fn policy(mut self, policy: SupervisorPolicy) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Set the directory for persisting snapshots.
+    pub fn snapshot_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.snapshot_dir = Some(dir.into());
+        self
+    }
+
+    /// Attach an audit log.
+    pub fn with_audit(mut self, audit: Arc<AuditLog>) -> Self {
+        self.audit = Some(audit);
+        self
+    }
+
+    /// Attach an authorizer.
+    pub fn with_authorizer(mut self, authorizer: Arc<Authorizer>) -> Self {
+        self.authorizer = Some(authorizer);
+        self
+    }
+
+    /// Attach a tracer.
+    pub fn with_tracer(mut self, tracer: Arc<Tracer>) -> Self {
+        self.tracer = Some(tracer);
+        self
+    }
+
+    /// Attach a cost tracker.
+    pub fn with_cost_tracker(mut self, tracker: Arc<CostTracker>) -> Self {
+        self.cost_tracker = Some(tracker);
+        self
+    }
+
+    /// Build the supervisor.
+    ///
+    /// Creates an `Oxi` instance internally and constructs the supervisor
+    /// with a file-based snapshot store.
+    pub fn build(self) -> anyhow::Result<(Oxi, AgentSupervisor)> {
+        let oxi = self.oxi_builder.build();
+        let resolver: Arc<dyn oxi_agent::ProviderResolver> = Arc::new(oxi.clone());
+
+        let snapshot_store: Arc<dyn crate::lifecycle::SnapshotStore> = match &self.snapshot_dir {
+            Some(dir) => Arc::new(FileSnapshotStore::new(dir)?),
+            None => Arc::new(FileSnapshotStore::new(
+                std::env::temp_dir().join("oxi-snapshots"),
+            )?),
+        };
+
+        let supervisor = AgentSupervisor::with_policy(resolver, snapshot_store, self.policy);
+        Ok((oxi, supervisor))
     }
 }

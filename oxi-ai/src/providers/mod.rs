@@ -16,6 +16,8 @@ pub mod openai_responses_shared;
 mod options;
 pub mod register_builtins;
 #[allow(unused_imports)]
+pub use register_builtins::create_builtin_provider_with_options;
+#[allow(unused_imports)]
 pub use register_builtins::AuthMethod;
 mod trait_def;
 mod vertex;
@@ -44,6 +46,14 @@ pub use openai_responses::OpenAiResponsesProvider;
 #[allow(unused_imports)]
 pub use options::{ProviderOptions, StreamOptions, ThinkingBudgets};
 pub use trait_def::Provider;
+#[allow(unused_imports)]
+pub use google::GoogleProvider;
+#[allow(unused_imports)]
+pub use bedrock::BedrockProvider;
+#[allow(unused_imports)]
+pub use vertex::VertexProvider;
+#[allow(unused_imports)]
+pub use mistral::MistralProvider;
 
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;

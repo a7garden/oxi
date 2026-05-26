@@ -26,3 +26,38 @@ pub use oxi_agent::tools::browse::{
 
 pub use oxi_ai::circuit_breaker::CircuitBreakerConfig;
 pub use oxi_ai::{CompactionStrategy, Model, Provider, UserMessage};
+
+// ── Concrete provider re-exports (single-dependency pattern) ──────────
+pub use oxi_ai::OpenAiProvider;
+pub use oxi_ai::OpenAiResponsesProvider;
+
+// ── Foundation Layer ───────────────────────────────────────────────────
+pub use crate::error::SdkError;
+pub use crate::lifecycle::{
+    AgentHandle, AgentLifecycleEvent, AgentSnapshot, AgentStatus, AgentSupervisor,
+    FileSnapshotStore, RestartBackoff, SnapshotStore, SupervisorPolicy, ToolManifest,
+};
+pub use crate::middleware::Middleware;
+pub use crate::middleware::{
+    build_hooks, MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewarePipeline,
+    MiddlewareResult,
+};
+pub use crate::observability::{
+    AuditEntry, AuditFilter, AuditLog, CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig,
+    EventQuery, EventStore, EventStoreConfig, GlobalCostSnapshot, Span, SpanContext, SpanGuard,
+    SpanId, SpanKind, SpanStatus, StoredEvent, TokenUsage, TraceId, Tracer,
+};
+
+// ── Composition Layer — Security ────────────────────────────────────────
+pub use crate::security::{
+    Authorizer, Capability, CapabilitySet, CapabilitySubject, SecurityMiddleware,
+};
+
+// ── Composition Layer — Coordination ────────────────────────────────────
+pub use crate::coordination::{
+    Consensus, CoordinatedGroup, MemoryKey, SharedMemory, VoteResult, WorkQueue, WorkResult,
+    WorkStatus,
+};
+
+// ── Runtime routing control ──────────────────────────────────────────────
+pub use crate::routing::RoutingControl;

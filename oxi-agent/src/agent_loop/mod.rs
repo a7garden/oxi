@@ -301,6 +301,74 @@ impl AgentLoop {
         self.run_messages(vec![message], emit).await
     }
 
+    /// Run with an `FnMut` callback and mutable state — no `Arc<Mutex<>>` needed.
+    ///
+    /// Unlike [`run()`](Self::run), which takes `Fn`, this method accepts `FnMut`
+    /// and a user-provided state value `S`. The callback receives `&mut S` on each
+    /// event, so you can accumulate results without any locking overhead.
+    ///
+    /// Returns the collected events **and** the final state value.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// #[derive(Default)]
+    /// struct MyState { steps: usize, output: String }
+    ///
+    /// let (events, state) = agent_loop.run_mut(
+    ///     "do something".into(),
+    ///     MyState::default(),
+    ///     |event, s| {
+    ///         match event {
+    ///             AgentEvent::ToolExecutionEnd { is_error: false, .. } => s.steps += 1,
+    ///             AgentEvent::AgentEnd { messages, .. } => {
+    ///                 if let Some(Message::Assistant(a)) = messages.last() {
+    ///                     s.output = a.text_content();
+    ///                 }
+    ///             }
+    ///             _ => {}
+    ///         }
+    ///     },
+    /// ).await?;
+    /// ```
+    pub async fn run_mut<S: Send + std::fmt::Debug + 'static>(
+        &self,
+        prompt: String,
+        state: S,
+        emit: impl FnMut(AgentEvent, &mut S) + Send + 'static,
+    ) -> Result<(Vec<AgentEvent>, S)> {
+        let emit_fnmut = Arc::new(parking_lot::Mutex::new(emit));
+        let state_arc = Arc::new(parking_lot::Mutex::new(state));
+
+        // Clone the Arc for the closure; the original stays for recovery after run.
+        let state_for_closure = Arc::clone(&state_arc);
+
+        let emit_fn: EmitFn = Arc::new(move |event: AgentEvent| {
+            let mut cb = emit_fnmut.lock();
+            let mut s = state_for_closure.lock();
+            cb(event, &mut s);
+        });
+
+        let events = self.run_inner(prompt, emit_fn).await?;
+
+        // Recover the state. After run_inner completes, emit_fn is dropped,
+        // releasing the last Arc clone. Arc::try_unwrap should succeed since
+        // only our `state_arc` reference remains.
+        let mutex = Arc::try_unwrap(state_arc)
+            .expect("run_mut: state Arc still has multiple owners after run");
+        Ok((events, mutex.into_inner()))
+    }
+
+    /// Internal: create the initial user message and delegate to run_messages.
+    async fn run_inner(
+        &self,
+        prompt: String,
+        emit: EmitFn,
+    ) -> Result<Vec<AgentEvent>> {
+        let message = Message::User(UserMessage::new(prompt));
+        self.run_messages(vec![message], emit).await
+    }
+
     /// TODO: document this function.
     pub async fn run_messages(
         &self,
@@ -808,10 +876,22 @@ impl AgentLoop {
                 };
                 emit(AgentEvent::Compaction {
                     event: CompactionEvent::Completed {
-                        result: compacted_ctx,
+                        result: compacted_ctx.clone(),
                         duration_ms: start.elapsed().as_millis() as u64,
                     },
                 });
+
+                // Async compaction hook — awaited, not fire-and-forget.
+                if let Some(ref hook) = self.config.on_compaction {
+                    match hook(compacted_ctx).await {
+                        Ok(()) => {
+                            tracing::debug!("Compaction hook completed successfully");
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "Compaction hook failed");
+                        }
+                    }
+                }
             }
             Ok(None) => {}
             Err(e) => {

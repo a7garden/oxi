@@ -12,6 +12,7 @@ use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{Mutex, oneshot};
 
 /// Interactive browser session with a persistent tab across calls.
@@ -23,6 +24,7 @@ pub struct BrowseSessionTool {
     engine: Arc<dyn BrowserEngine>,
     tab: Arc<Mutex<Option<TabGuard>>>,
     config: BrowseConfig,
+    last_action: Arc<Mutex<Option<Instant>>>,
 }
 
 impl BrowseSessionTool {
@@ -32,6 +34,7 @@ impl BrowseSessionTool {
             engine,
             tab: Arc::new(Mutex::new(None)),
             config: BrowseConfig::default(),
+            last_action: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -41,18 +44,44 @@ impl BrowseSessionTool {
             engine,
             tab: Arc::new(Mutex::new(None)),
             config,
+            last_action: Arc::new(Mutex::new(None)),
         }
     }
 
+    /// Update the last-action timestamp to now.
+    async fn touch(&self) {
+        *self.last_action.lock().await = Some(Instant::now());
+    }
+
     /// Check idle timeout. Returns Ok if session is still valid or
-    /// if idle timeout is disabled (0).
-    fn check_idle_timeout(&self) -> Result<(), ToolError> {
+    /// if idle timeout is disabled (0). Auto-closes stale sessions.
+    async fn check_idle_timeout(&self) -> Result<(), ToolError> {
         if self.config.session_idle_timeout_secs == 0 {
             return Ok(());
         }
-        // Future: track last-action Instant and compare.
-        // For now, the Mutex serializes access and the session is valid
-        // as long as the tab is alive.
+        let elapsed = {
+            let last = self.last_action.lock().await;
+            match *last {
+                Some(instant) => instant.elapsed().as_secs(),
+                None => return Ok(()), // No action yet, session is fresh
+            }
+        };
+        if elapsed >= self.config.session_idle_timeout_secs {
+            // Auto-close stale session
+            let mut slot = self.tab.lock().await;
+            if let Some(guard) = slot.take() {
+                tracing::warn!(
+                    elapsed_secs = elapsed,
+                    timeout_secs = self.config.session_idle_timeout_secs,
+                    "browse_session: auto-closing stale session"
+                );
+                guard.close().await;
+            }
+            return Err(format!(
+                "Session timed out after {}s of inactivity",
+                elapsed
+            ));
+        }
         Ok(())
     }
 }
@@ -96,11 +125,19 @@ impl AgentTool for BrowseSessionTool {
                         "check",
                         "uncheck",
                         "scroll",
+                        "scroll_into_view",
+                        "hover",
+                        "double_click",
+                        "right_click",
+                        "drag",
+                        "upload_file",
                         "wait_for",
                         "content",
                         "query_all",
                         "extract_links",
                         "evaluate",
+                        "evaluate_await",
+                        "get_value",
                         "screenshot",
                         "close"
                     ],
@@ -128,7 +165,7 @@ impl AgentTool for BrowseSessionTool {
                 },
                 "javascript": {
                     "type": "string",
-                    "description": "JS expression to evaluate (evaluate action)"
+                    "description": "JS expression to evaluate (evaluate, evaluate_await actions)"
                 },
                 "format": {
                     "type": "string",
@@ -140,6 +177,18 @@ impl AgentTool for BrowseSessionTool {
                     "type": "integer",
                     "default": 10000,
                     "description": "Timeout in ms (wait_for action)"
+                },
+                "from_selector": {
+                    "type": "string",
+                    "description": "Source CSS selector (drag action)"
+                },
+                "to_selector": {
+                    "type": "string",
+                    "description": "Target CSS selector (drag action)"
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Local file path to upload (upload_file action)"
                 },
                 "width": {
                     "type": "integer",
@@ -175,8 +224,13 @@ impl AgentTool for BrowseSessionTool {
                 .as_u64()
                 .unwrap_or(self.config.default_wait_timeout_ms);
         let width = params["width"].as_u64().unwrap_or(self.config.screenshot_width as u64) as u32;
+        let from_selector = params["from_selector"].as_str();
+        let to_selector = params["to_selector"].as_str();
+        let file_path = params["file_path"].as_str();
 
         tracing::info!(action = %action, "browse_session action");
+
+        self.touch().await;
 
         match action {
             // ── Lifecycle ────────────────────────────────────────────
@@ -204,13 +258,13 @@ impl AgentTool for BrowseSessionTool {
                         guard.close().await;
                         Ok(json_ok())
                     }
-                    None => Ok(json_error("No active session to close")),
+                    None => Ok(json_error("no active session to close")),
                 }
             }
 
             // ── Navigation ──────────────────────────────────────────
             "goto" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let url =
                     url.ok_or_else(|| "Missing required parameter: url".to_string())?;
                 let slot = self.tab.lock().await;
@@ -225,32 +279,47 @@ impl AgentTool for BrowseSessionTool {
             }
 
             "back" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let _ = tab.evaluate("history.back()").await;
-                Ok(json_ok())
+                let page = tab.content().await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "url": page.url,
+                    "title": page.title,
+                }))))
             }
 
             "forward" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let _ = tab.evaluate("history.forward()").await;
-                Ok(json_ok())
+                let page = tab.content().await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "url": page.url,
+                    "title": page.title,
+                }))))
             }
 
             "reload" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let _ = tab.evaluate("location.reload()").await;
-                Ok(json_ok())
+                let page = tab.content().await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "url": page.url,
+                    "title": page.title,
+                }))))
             }
 
             // ── DOM interaction ─────────────────────────────────────
             "click" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
@@ -260,7 +329,7 @@ impl AgentTool for BrowseSessionTool {
             }
 
             "fill" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let val =
@@ -272,7 +341,7 @@ impl AgentTool for BrowseSessionTool {
             }
 
             "type" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let val =
@@ -284,17 +353,17 @@ impl AgentTool for BrowseSessionTool {
             }
 
             "clear" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
-                tab.fill(sel, "").await.map_err(browser_err)?;
+                tab.clear(sel).await.map_err(browser_err)?;
                 Ok(json_ok())
             }
 
             "press" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let c =
                     combo.ok_or_else(|| "Missing required parameter: combo".to_string())?;
                 let slot = self.tab.lock().await;
@@ -304,52 +373,48 @@ impl AgentTool for BrowseSessionTool {
             }
 
             "select" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let val =
                     value.ok_or_else(|| "Missing required parameter: value".to_string())?;
-                let js = helpers::js_set_select_value(sel, val);
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
-                tab.evaluate(&js).await.map_err(browser_err)?;
+                tab.select_option(sel, val).await.map_err(browser_err)?;
                 Ok(json_ok())
             }
 
             "check" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                let js = helpers::js_check(sel);
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
-                tab.evaluate(&js).await.map_err(browser_err)?;
+                tab.check(sel).await.map_err(browser_err)?;
                 Ok(json_ok())
             }
 
             "uncheck" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                let js = helpers::js_uncheck(sel);
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
-                tab.evaluate(&js).await.map_err(browser_err)?;
+                tab.uncheck(sel).await.map_err(browser_err)?;
                 Ok(json_ok())
             }
 
             "scroll" => {
-                self.check_idle_timeout()?;
-                let js = format!("window.scrollBy(0, {})", pixels);
+                self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
-                tab.evaluate(&js).await.map_err(browser_err)?;
+                tab.scroll(0.0, pixels as f64).await.map_err(browser_err)?;
                 Ok(json_ok())
             }
 
             // ── Wait ────────────────────────────────────────────────
             "wait_for" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
@@ -360,7 +425,7 @@ impl AgentTool for BrowseSessionTool {
 
             // ── Read ────────────────────────────────────────────────
             "content" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let page = tab.content().await.map_err(browser_err)?;
@@ -409,7 +474,7 @@ impl AgentTool for BrowseSessionTool {
             }
 
             "query_all" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let sel = selector
                     .ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
@@ -422,7 +487,7 @@ impl AgentTool for BrowseSessionTool {
             }
 
             "extract_links" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
 
@@ -447,7 +512,7 @@ impl AgentTool for BrowseSessionTool {
 
             // ── Evaluate ────────────────────────────────────────────
             "evaluate" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let js = javascript.ok_or_else(|| {
                     "Missing required parameter: javascript".to_string()
                 })?;
@@ -460,9 +525,23 @@ impl AgentTool for BrowseSessionTool {
                 }))))
             }
 
+            "evaluate_await" => {
+                self.check_idle_timeout().await?;
+                let js = javascript.ok_or_else(|| {
+                    "Missing required parameter: javascript".to_string()
+                })?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let result_val = tab.evaluate_await(js).await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "result": result_val,
+                }))))
+            }
+
             // ── Screenshot ──────────────────────────────────────────
             "screenshot" => {
-                self.check_idle_timeout()?;
+                self.check_idle_timeout().await?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let png = tab.screenshot(width).await.map_err(browser_err)?;
@@ -483,10 +562,93 @@ impl AgentTool for BrowseSessionTool {
                 )
             }
 
+            // ── Extended DOM actions ──────────────────────────────
+            "scroll_into_view" => {
+                self.check_idle_timeout().await?;
+                let sel = selector
+                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.scroll_into_view(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "hover" => {
+                self.check_idle_timeout().await?;
+                let sel = selector
+                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.hover(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "double_click" => {
+                self.check_idle_timeout().await?;
+                let sel = selector
+                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.double_click(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "right_click" => {
+                self.check_idle_timeout().await?;
+                let sel = selector
+                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.right_click(sel).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "drag" => {
+                self.check_idle_timeout().await?;
+                let from = from_selector.ok_or_else(|| {
+                    "Missing required parameter: from_selector".to_string()
+                })?;
+                let to = to_selector.ok_or_else(|| {
+                    "Missing required parameter: to_selector".to_string()
+                })?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.drag(from, to).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "upload_file" => {
+                self.check_idle_timeout().await?;
+                let sel = selector
+                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let path = file_path.ok_or_else(|| {
+                    "Missing required parameter: file_path".to_string()
+                })?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                tab.upload_file(sel, path).await.map_err(browser_err)?;
+                Ok(json_ok())
+            }
+
+            "get_value" => {
+                self.check_idle_timeout().await?;
+                let sel = selector
+                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let slot = self.tab.lock().await;
+                let tab = require_tab(&slot)?;
+                let result_val = tab.get_value(sel).await.map_err(browser_err)?;
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "value": result_val,
+                }))))
+            }
+
             _ => Err(format!(
                 "Unknown action: '{}'. Valid actions: open, goto, back, forward, reload, \
                  click, fill, type, clear, press, select, check, uncheck, scroll, \
-                 wait_for, content, query_all, extract_links, evaluate, screenshot, close",
+                 scroll_into_view, hover, double_click, right_click, drag, upload_file, \
+                 wait_for, content, query_all, extract_links, evaluate, evaluate_await, \
+                 get_value, screenshot, close",
                 action
             )),
         }
@@ -501,7 +663,7 @@ fn require_tab(
 ) -> Result<&dyn super::engine::BrowserTab, ToolError> {
     match slot {
         Some(guard) => Ok(guard.tab()),
-        None => Err("No active session. Call action='open' first.".into()),
+        None => Err(BrowserError::NoActiveSession.into()),
     }
 }
 
@@ -605,6 +767,51 @@ mod tests {
             self.closed.store(true, Ordering::SeqCst);
             Ok(())
         }
+        async fn select_option(
+            &self,
+            _selector: &str,
+            _value: &str,
+        ) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn check(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn uncheck(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn hover(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn double_click(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn right_click(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn scroll_into_view(&self, _selector: &str) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn drag(
+            &self,
+            _from_selector: &str,
+            _to_selector: &str,
+        ) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn upload_file(
+            &self,
+            _selector: &str,
+            _path: &str,
+        ) -> Result<(), BrowserError> {
+            Ok(())
+        }
+        async fn get_value(&self, _selector: &str) -> Result<String, BrowserError> {
+            Ok("mock_value".into())
+        }
+        async fn evaluate_await(&self, _js: &str) -> Result<Value, BrowserError> {
+            Ok(Value::String("ok".into()))
+        }
     }
 
     // ── Mock engine ─────────────────────────────────────────────
@@ -668,7 +875,7 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No active session"));
+        assert!(result.unwrap_err().to_string().contains("no active session"));
     }
 
     #[tokio::test]
@@ -841,12 +1048,27 @@ mod tests {
                 "wait_for",
                 json!({"action": "wait_for", "selector": ".loaded"}),
             ),
+            (
+                "scroll_into_view",
+                json!({"action": "scroll_into_view", "selector": "#section"}),
+            ),
+            ("hover", json!({"action": "hover", "selector": "#menu"})),
+            (
+                "double_click",
+                json!({"action": "double_click", "selector": "#item"}),
+            ),
+            (
+                "right_click",
+                json!({"action": "right_click", "selector": "#item"}),
+            ),
+            (
+                "get_value",
+                json!({"action": "get_value", "selector": "#input"}),
+            ),
         ];
 
         for (name, params) in &actions {
-            let result = tool
-                .execute("cx", params.clone(), None, &ctx)
-                .await;
+            let result = tool.execute("cx", params.clone(), None, &ctx).await;
             assert!(result.is_ok(), "Action '{}' failed: {:?}", name, result);
         }
 
@@ -866,12 +1088,7 @@ mod tests {
 
         for nav_action in &["back", "forward", "reload"] {
             let result = tool
-                .execute(
-                    "cx",
-                    json!({"action": *nav_action}),
-                    None,
-                    &ctx,
-                )
+                .execute("cx", json!({"action": *nav_action}), None, &ctx)
                 .await;
             assert!(
                 result.is_ok(),
@@ -996,6 +1213,6 @@ mod tests {
         let actions = schema["properties"]["action"]["enum"]
             .as_array()
             .unwrap();
-        assert_eq!(actions.len(), 21);
+        assert_eq!(actions.len(), 29);
     }
 }

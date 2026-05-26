@@ -903,6 +903,129 @@ pub fn create_builtin_provider(name: &str) -> Option<Box<dyn super::Provider>> {
     }
 }
 
+/// Create a built-in provider with optional credential and base URL overrides.
+///
+/// This is like [`create_builtin_provider`] but allows injecting an API key
+/// and/or base URL at construction time instead of reading from environment
+/// variables. When `api_key` is `Some`, it takes precedence over the
+/// environment. When `base_url` is `Some`, the provider's default endpoint
+/// is overridden.
+///
+/// Returns `None` if the name is not a known built-in provider.
+pub fn create_builtin_provider_with_options(
+    name: &str,
+    api_key: Option<&str>,
+    base_url: Option<&str>,
+) -> Option<Box<dyn super::Provider>> {
+    let builtin = get_builtin_provider(name)?;
+
+    // Resolve API key: explicit override > environment variables
+    let resolved_key = api_key
+        .map(String::from)
+        .or_else(|| {
+            std::env::var(builtin.env_key)
+                .ok()
+                .or_else(|| {
+                    builtin
+                        .extra_env_keys
+                        .iter()
+                        .find_map(|k| std::env::var(k).ok())
+                })
+        });
+
+    // Resolve base URL: explicit override > built-in default
+    let resolved_base_url = base_url
+        .map(String::from)
+        .or_else(|| {
+            if builtin.base_url.is_empty() {
+                None
+            } else {
+                Some(builtin.base_url.to_string())
+            }
+        });
+
+    let extra_headers: Vec<(String, String)> = builtin
+        .extra_headers
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+
+    match builtin.api {
+        // ── Anthropic Messages API ──────────────────────────────────────
+        Api::AnthropicMessages => {
+            if let Some(key) = resolved_key {
+                Some(Box::new(super::anthropic::AnthropicProvider::with_config(
+                    resolved_base_url
+                        .as_deref()
+                        .unwrap_or("https://api.anthropic.com"),
+                    Some(key),
+                    extra_headers,
+                )))
+            } else if resolved_base_url.is_some() {
+                Some(Box::new(super::anthropic::AnthropicProvider::with_config(
+                    resolved_base_url.as_deref().unwrap_or("https://api.anthropic.com"),
+                    None,
+                    extra_headers,
+                )))
+            } else {
+                // No key and no base URL — fall back to default construction
+                // (reads from env at stream time)
+                create_builtin_provider(name)
+            }
+        }
+
+        // ── Google APIs ─────────────────────────────────────────────────
+        Api::GoogleGenerativeAi => create_builtin_provider(name),
+        Api::GoogleVertex => create_builtin_provider(name),
+
+        // ── Mistral ─────────────────────────────────────────────────────
+        Api::MistralConversations => create_builtin_provider(name),
+
+        // ── Azure ───────────────────────────────────────────────────────
+        Api::AzureOpenAiResponses => create_builtin_provider(name),
+
+        // ── Bedrock ─────────────────────────────────────────────────────
+        Api::BedrockConverseStream => create_builtin_provider(name),
+
+        // ── OpenAI Responses API ────────────────────────────────────────
+        Api::OpenAiResponses => create_builtin_provider(name),
+
+        // ── OpenAI Chat Completions API ─────────────────────────────────
+        Api::OpenAiCompletions => {
+            let url = resolved_base_url
+                .as_deref()
+                .unwrap_or(if builtin.base_url.is_empty() {
+                    "https://api.openai.com/v1"
+                } else {
+                    builtin.base_url
+                });
+
+            if let Some(key) = resolved_key {
+                if extra_headers.is_empty() {
+                    Some(Box::new(
+                        super::openai::OpenAiProvider::with_base_url_and_key(url, Some(key)),
+                    ))
+                } else {
+                    Some(Box::new(super::openai::OpenAiProvider::with_config(
+                        url,
+                        Some(key),
+                        extra_headers,
+                    )))
+                }
+            } else if url != builtin.base_url || !extra_headers.is_empty() {
+                // Base URL override or extra headers without explicit key
+                Some(Box::new(super::openai::OpenAiProvider::with_config(
+                    url,
+                    None,
+                    extra_headers,
+                )))
+            } else {
+                create_builtin_provider(name)
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1119,5 +1242,41 @@ mod tests {
             p.extra_headers,
             &[("X-Cerebras-3rd-Party-Integration", "opencode")]
         );
+    }
+
+    #[test]
+    fn test_create_builtin_provider_with_options_openai() {
+        // With explicit API key and base URL
+        let p = create_builtin_provider_with_options(
+            "openai",
+            Some("sk-test-key"),
+            Some("https://my-proxy.example.com/v1"),
+        );
+        assert!(p.is_some());
+        assert_eq!(p.unwrap().name(), "openai");
+    }
+
+    #[test]
+    fn test_create_builtin_provider_with_options_anthropic() {
+        let p = create_builtin_provider_with_options(
+            "anthropic",
+            Some("sk-ant-test-key"),
+            None,
+        );
+        assert!(p.is_some());
+        assert_eq!(p.unwrap().name(), "anthropic");
+    }
+
+    #[test]
+    fn test_create_builtin_provider_with_options_no_override() {
+        // No key or URL — should fall back to default creation
+        let p = create_builtin_provider_with_options("deepseek", None, None);
+        assert!(p.is_some());
+    }
+
+    #[test]
+    fn test_create_builtin_provider_with_options_unknown() {
+        let p = create_builtin_provider_with_options("nonexistent_provider", None, None);
+        assert!(p.is_none());
     }
 }

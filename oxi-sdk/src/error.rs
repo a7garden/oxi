@@ -1,0 +1,124 @@
+//! oxi-sdk error types
+//!
+//! Structured error enum for SDK consumers to match against.
+
+use thiserror::Error;
+
+/// oxi-sdk structured error type.
+///
+/// SDK consumers can use `match` to handle specific error cases.
+/// Internal implementations may still use `anyhow`, converted at public API boundaries.
+#[derive(Debug, Error)]
+pub enum SdkError {
+    // ── Model/Provider ────────────────────────────────────────────────────────
+    #[error("model not found: {model_id}")]
+    ModelNotFound { model_id: String },
+
+    #[error("provider not found: {provider}")]
+    ProviderNotFound { provider: String },
+
+    #[error("all providers exhausted: {attempts} attempts")]
+    AllProvidersExhausted { attempts: usize },
+
+    // ── Agent Lifecycle ────────────────────────────────────────────────────────
+    #[error("agent {agent_id} not runnable (status: {status})")]
+    AgentNotRunnable { agent_id: String, status: String },
+
+    #[error("agent {agent_id} already running")]
+    AgentAlreadyRunning { agent_id: String },
+
+    #[error("snapshot not found: {agent_id}")]
+    SnapshotNotFound { agent_id: String },
+
+    #[error("snapshot corrupt: {agent_id}: {reason}")]
+    SnapshotCorrupt { agent_id: String, reason: String },
+
+    // ── Security ─────────────────────────────────────────────────────────────
+    #[error("permission denied: {subject} requires {capability}")]
+    PermissionDenied { subject: String, capability: String },
+
+    #[error("capability expired: {subject}")]
+    CapabilityExpired { subject: String },
+
+    // ── Coordination ─────────────────────────────────────────────────────────
+    #[error("work item not found: {item_id}")]
+    WorkItemNotFound { item_id: String },
+
+    #[error("version conflict on {key}: expected {expected}, current {current}")]
+    VersionConflict {
+        key: String,
+        expected: u64,
+        current: u64,
+    },
+
+    #[error("vote session not found: {vote_id}")]
+    VoteNotFound { vote_id: String },
+
+    // ── Middleware ───────────────────────────────────────────────────────────
+    #[error("middleware blocked: {middleware}: {reason}")]
+    MiddlewareBlocked { middleware: String, reason: String },
+
+    #[error("token budget exceeded: {used} / {budget}")]
+    TokenBudgetExceeded { used: usize, budget: usize },
+
+    #[error("cost budget exceeded: ${used:.4} / ${budget:.4}")]
+    CostBudgetExceeded { used: f64, budget: f64 },
+
+    // ── Routing ─────────────────────────────────────────────────────────────
+    #[error("routing disabled")]
+    RoutingDisabled,
+
+    #[error("no route available for model: {model_id}")]
+    NoRouteAvailable { model_id: String },
+
+    // ── General ─────────────────────────────────────────────────────────────
+    #[error("{0}")]
+    Internal(#[from] anyhow::Error),
+}
+
+impl SdkError {
+    /// Returns true if this is an internal/unexpected error.
+    pub fn is_internal(&self) -> bool {
+        matches!(self, SdkError::Internal(_))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sdk_error_display() {
+        let err = SdkError::ModelNotFound {
+            model_id: "test-model".into(),
+        };
+        assert!(err.to_string().contains("test-model"));
+
+        let err = SdkError::PermissionDenied {
+            subject: "agent-001".into(),
+            capability: "FileWrite".into(),
+        };
+        assert!(err.to_string().contains("agent-001"));
+        assert!(err.to_string().contains("FileWrite"));
+    }
+
+    #[test]
+    fn test_sdk_error_from_anyhow() {
+        let anyhow_err = anyhow::anyhow!("test error");
+        let sdk_err: SdkError = SdkError::from(anyhow_err);
+        assert!(sdk_err.is_internal());
+    }
+
+    #[test]
+    fn test_version_conflict_error() {
+        let err = SdkError::VersionConflict {
+            key: "counter".into(),
+            expected: 5,
+            current: 7,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("counter"));
+        assert!(msg.contains("5"));
+        assert!(msg.contains("7"));
+    }
+}

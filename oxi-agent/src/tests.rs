@@ -782,6 +782,7 @@ async fn test_multi_turn_tool_use_loop() {
         api_key: None,
         workspace_dir: None,
         provider_options: None,
+        on_compaction: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1173,6 +1174,7 @@ async fn test_steering_messages_injected_into_loop() {
         api_key: None,
         workspace_dir: None,
         provider_options: None,
+        on_compaction: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1245,6 +1247,7 @@ async fn test_multiple_steering_messages() {
         api_key: None,
         workspace_dir: None,
         provider_options: None,
+        on_compaction: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1308,6 +1311,7 @@ fn test_follow_up_queue_api() {
         api_key: None,
         workspace_dir: None,
         provider_options: None,
+        on_compaction: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1386,6 +1390,7 @@ async fn test_follow_up_processed_in_tool_use_loop() {
         api_key: None,
         workspace_dir: None,
         provider_options: None,
+        on_compaction: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1469,6 +1474,7 @@ async fn test_follow_up_via_continue_loop() {
         api_key: None,
         workspace_dir: None,
         provider_options: None,
+        on_compaction: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1540,6 +1546,7 @@ async fn test_follow_up_queue_cleared() {
         api_key: None,
         workspace_dir: None,
         provider_options: None,
+        on_compaction: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
@@ -1615,6 +1622,7 @@ fn test_follow_up_and_steering_queue_independent() {
         api_key: None,
         workspace_dir: None,
         provider_options: None,
+        on_compaction: None,
     };
 
     let tools = Arc::new(ToolRegistry::new());
