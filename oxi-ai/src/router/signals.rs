@@ -341,43 +341,55 @@ mod vision_tests {
 
     fn text_user_msg(s: &str) -> Message {
         Message::User(UserMessage {
+            role: crate::messages::UserRole::User,
             content: crate::messages::MessageContent::Text(s.to_string()),
-            ..Default::default()
+            timestamp: 0,
         })
     }
 
     fn image_user_msg() -> Message {
         Message::User(UserMessage {
+            role: crate::messages::UserRole::User,
             content: crate::messages::MessageContent::Blocks(vec![ContentBlock::Image(
                 crate::messages::ImageContent {
+                    content_type: crate::messages::ImageContentType::Image,
                     data: "fake".to_string(),
-                    media_type: "image/png".to_string(),
+                    mime_type: "image/png".to_string(),
                 },
             )]),
-            ..Default::default()
+            timestamp: 0,
         })
     }
 
     fn text_tool_result() -> Message {
         Message::ToolResult(ToolResultMessage {
+            role: crate::messages::ToolResultRole::ToolResult,
             tool_call_id: "t1".to_string(),
             tool_name: "bash".to_string(),
             content: vec![ContentBlock::Text(TextContent {
+                content_type: crate::messages::TextContentType::Text,
                 text: "done".to_string(),
+                text_signature: None,
             })],
+            details: None,
             is_error: false,
+            timestamp: 0,
         })
     }
 
     fn image_tool_result(tool: &str) -> Message {
         Message::ToolResult(ToolResultMessage {
+            role: crate::messages::ToolResultRole::ToolResult,
             tool_call_id: "t2".to_string(),
             tool_name: tool.to_string(),
             content: vec![ContentBlock::Image(crate::messages::ImageContent {
+                content_type: crate::messages::ImageContentType::Image,
                 data: "fake".to_string(),
-                media_type: "image/png".to_string(),
+                mime_type: "image/png".to_string(),
             })],
+            details: None,
             is_error: false,
+            timestamp: 0,
         })
     }
 
