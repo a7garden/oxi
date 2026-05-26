@@ -99,10 +99,10 @@ pub use oxi_ai::oauth::{
 // Re-export from oxi-agent
 pub use oxi_agent::{
     Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
-    AgentTool, AgentToolResult, CompactedContext, CompactionEvent, CompactionHook, EditTool, FindTool, GetSearchResultsTool,
-    GrepTool, LsTool, OutputMode, ProviderResolver, ReadTool, SearchCache, SharedState,
-    StructuredOutput, StructuredOutputError, ToolContext, ToolError, ToolExecutionMode,
-    ToolRegistry, WebSearchTool, WriteTool,
+    AgentTool, AgentToolResult, CompactedContext, CompactionEvent, CompactionHook, EditTool,
+    FindTool, GetSearchResultsTool, GrepTool, LsTool, OutputMode, ProviderResolver, ReadTool,
+    SearchCache, SharedState, StructuredOutput, StructuredOutputError, ToolContext, ToolError,
+    ToolExecutionMode, ToolRegistry, WebSearchTool, WriteTool,
 };
 
 // ── Concrete provider re-exports ─────────────────────────────────────────
@@ -472,7 +472,11 @@ mod tests {
     fn test_oxi_builder_credential() {
         let oxi = OxiBuilder::new()
             .with_builtins()
-            .credential("openai", "sk-test-key", Some("https://proxy.example.com/v1"))
+            .credential(
+                "openai",
+                "sk-test-key",
+                Some("https://proxy.example.com/v1"),
+            )
             .credential("anthropic", "sk-ant-test", None)
             .build();
         assert!(oxi.has_builtins());

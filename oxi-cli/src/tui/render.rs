@@ -92,8 +92,7 @@ struct ScrollInfo {
 impl ScrollInfo {
     /// Number of items scrolled off the bottom of the visible window.
     fn below(&self) -> usize {
-        self.total
-            .saturating_sub(self.window_start + self.visible)
+        self.total.saturating_sub(self.window_start + self.visible)
     }
 
     /// Number of items scrolled off the top of the visible window.
@@ -327,7 +326,9 @@ fn render_provider_list(
                 spans.push(Span::styled(
                     pointer,
                     if is_sel {
-                        Style::default().fg(accent_color).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(accent_color)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     },
@@ -354,10 +355,7 @@ fn render_provider_list(
                     } else {
                         Style::default().fg(muted_color)
                     };
-                    spans.push(Span::styled(
-                        format!(" {}", p.description),
-                        desc_style,
-                    ));
+                    spans.push(Span::styled(format!(" {}", p.description), desc_style));
                 }
 
                 // Key badge
@@ -461,9 +459,9 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),                      // Chat
-            Constraint::Length(2 + queue_lines),      // Status + queue + input
-            Constraint::Length(3),                    // Footer
+            Constraint::Min(3),                  // Chat
+            Constraint::Length(2 + queue_lines), // Status + queue + input
+            Constraint::Length(3),               // Footer
         ])
         .split(inner);
 
@@ -498,7 +496,12 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
     let _total_lines = 2 + queue_lines;
 
     // Row 0: status line (Working/Idle + queue count)
-    let status_row = Rect { x: area.x, y: area.y, width: area.width, height: 1 };
+    let status_row = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width,
+        height: 1,
+    };
     render_status_line(f, status_row, state, theme);
 
     // Queue preview / active panel rows
@@ -546,7 +549,11 @@ fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &The
         let prefix_w: u16 = (num.len() + badge.len()) as u16;
         let max_chars = area.width.saturating_sub(prefix_w + 3) as usize;
         let truncated: String = msg.chars().take(max_chars).collect();
-        let ellipsis = if msg.chars().count() > max_chars { "…" } else { "" };
+        let ellipsis = if msg.chars().count() > max_chars {
+            "…"
+        } else {
+            ""
+        };
 
         let mut spans: Vec<Span<'_>> = Vec::new();
         // Number
@@ -569,7 +576,10 @@ fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &The
         } else {
             Style::default().fg(theme.colors.muted.to_ratatui())
         };
-        spans.push(Span::styled(format!("{}{}", truncated, ellipsis), msg_style));
+        spans.push(Span::styled(
+            format!("{}{}", truncated, ellipsis),
+            msg_style,
+        ));
         f.render_widget(Paragraph::new(Line::from(spans)), row);
 
         // Ctrl+Q hint on the right side of first line
@@ -618,14 +628,20 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
         let prefix_w: u16 = (pointer.len() + num.len() + badge.len()) as u16;
         let max_chars = area.width.saturating_sub(prefix_w + 2) as usize;
         let truncated: String = msg.chars().take(max_chars).collect();
-        let ellipsis = if msg.chars().count() > max_chars { "…" } else { "" };
+        let ellipsis = if msg.chars().count() > max_chars {
+            "…"
+        } else {
+            ""
+        };
 
         let mut spans: Vec<Span<'_>> = Vec::new();
         // Pointer
         spans.push(Span::styled(
             pointer,
             if is_sel {
-                Style::default().fg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme.colors.accent.to_ratatui())
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             },
@@ -634,7 +650,10 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
         spans.push(Span::styled(
             num,
             if is_sel {
-                Style::default().fg(theme.colors.background.to_ratatui()).bg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme.colors.background.to_ratatui())
+                    .bg(theme.colors.accent.to_ratatui())
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme.colors.muted.to_ratatui())
             },
@@ -644,21 +663,32 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
             spans.push(Span::styled(
                 badge,
                 if is_sel {
-                    Style::default().fg(theme.colors.background.to_ratatui()).bg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::ITALIC)
+                    Style::default()
+                        .fg(theme.colors.background.to_ratatui())
+                        .bg(theme.colors.accent.to_ratatui())
+                        .add_modifier(Modifier::ITALIC)
                 } else {
-                    Style::default().fg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::ITALIC)
+                    Style::default()
+                        .fg(theme.colors.accent.to_ratatui())
+                        .add_modifier(Modifier::ITALIC)
                 },
             ));
         }
         // Message text
         let msg_style = if is_sel {
-            Style::default().fg(theme.colors.background.to_ratatui()).bg(theme.colors.accent.to_ratatui()).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme.colors.background.to_ratatui())
+                .bg(theme.colors.accent.to_ratatui())
+                .add_modifier(Modifier::BOLD)
         } else if i == 0 {
             Style::default().fg(theme.colors.foreground.to_ratatui())
         } else {
             Style::default().fg(theme.colors.muted.to_ratatui())
         };
-        spans.push(Span::styled(format!("{}{}", truncated, ellipsis), msg_style));
+        spans.push(Span::styled(
+            format!("{}{}", truncated, ellipsis),
+            msg_style,
+        ));
         f.render_widget(Paragraph::new(Line::from(spans)), row);
     }
 
@@ -695,7 +725,10 @@ fn render_status_line(f: &mut Frame, row: Rect, state: &AppState, theme: &Theme)
         } else {
             format!(" {} Working", ch)
         };
-        let label_len: u16 = label.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16).sum();
+        let label_len: u16 = label
+            .chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16)
+            .sum();
         let dash_count = row.width.saturating_sub(label_len + 2) as usize;
         let line = format!("── {} {}", label, "─".repeat(dash_count));
         f.render_widget(
@@ -711,7 +744,10 @@ fn render_status_line(f: &mut Frame, row: Rect, state: &AppState, theme: &Theme)
         } else {
             " ○ Idle".to_string()
         };
-        let label_len: u16 = label.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16).sum();
+        let label_len: u16 = label
+            .chars()
+            .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1) as u16)
+            .sum();
         let dash_count = row.width.saturating_sub(label_len + 2) as usize;
         let line = format!("── {} {}", label, "─".repeat(dash_count));
         f.render_widget(
@@ -912,7 +948,11 @@ fn render_setup_step(
             };
             let scroll = render_provider_list(f, list_area, providers, *selected, &styles, theme);
             let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
-            let hint = format!(" Up/Down select  |  Enter confirm  |  q quit  ({} providers){}", providers.len(), pos);
+            let hint = format!(
+                " Up/Down select  |  Enter confirm  |  q quit  ({} providers){}",
+                providers.len(),
+                pos
+            );
             render_hint(f, area, &hint, styles.muted);
         }
 
@@ -935,11 +975,13 @@ fn render_setup_step(
         } => {
             let title = format!(" Select a model for {}", provider);
             render_title(f, area, 2, &title, fg, bg);
-            let scroll = render_selectable_list(f, area, 4, models, *selected, &styles, theme, None);
+            let scroll =
+                render_selectable_list(f, area, 4, models, *selected, &styles, theme, None);
             let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
             let hint = format!(
                 " Up/Down select  |  Enter confirm  |  Esc back  ({} models){}",
-                models.len(), pos
+                models.len(),
+                pos
             );
             render_hint(f, area, &hint, styles.muted);
         }
@@ -1060,7 +1102,8 @@ fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &
     let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
     let hint = format!(
         " {} models  |  Up/Down  |  type to filter  |  Enter select  |  Esc cancel{}",
-        filtered.len(), pos
+        filtered.len(),
+        pos
     );
     render_hint(f, inner, &hint, styles.muted);
 }

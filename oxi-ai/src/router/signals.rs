@@ -298,7 +298,10 @@ impl VisionSignal {
                     }
                 }
                 Message::ToolResult(t) => {
-                    let has_image = t.content.iter().any(|b| matches!(b, ContentBlock::Image(_)));
+                    let has_image = t
+                        .content
+                        .iter()
+                        .any(|b| matches!(b, ContentBlock::Image(_)));
                     if has_image {
                         signal.recent_image_count += 1;
                         // Track which tool produced the image
@@ -328,7 +331,9 @@ impl VisionSignal {
         if self.recent_image_count == 0 && !self.has_image_in_latest_turn {
             return 0.0;
         }
-        let count = self.recent_image_count.max(if self.has_image_in_latest_turn { 1 } else { 0 });
+        let count = self
+            .recent_image_count
+            .max(if self.has_image_in_latest_turn { 1 } else { 0 });
         // Sharper curve: 1→0.7, 2→0.9, 3→0.95, 4+→~1.0
         1.0 - (-0.8 * count as f64).exp()
     }

@@ -196,9 +196,7 @@ async fn extract_from_tab(
             };
             let json_elems: Vec<Value> = elements
                 .iter()
-                .map(|(tag, text, attrs)| {
-                    json!({ "tag": tag, "text": text, "attributes": attrs })
-                })
+                .map(|(tag, text, attrs)| json!({ "tag": tag, "text": text, "attributes": attrs }))
                 .collect();
             Ok(serde_json::to_string_pretty(&json_elems).unwrap_or_default())
         }

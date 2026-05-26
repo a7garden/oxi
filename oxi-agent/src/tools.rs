@@ -215,10 +215,10 @@ pub trait AgentTool: Send + Sync {
 }
 
 // Built-in tools
-/// Browser tools (engine abstraction always compiled).
-pub mod browse;
 /// Bash shell execution tool.
 pub mod bash;
+/// Browser tools (engine abstraction always compiled).
+pub mod browse;
 /// Context7 documentation tools.
 pub mod context7;
 /// In-place file edit tool.

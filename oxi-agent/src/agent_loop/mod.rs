@@ -360,11 +360,7 @@ impl AgentLoop {
     }
 
     /// Internal: create the initial user message and delegate to run_messages.
-    async fn run_inner(
-        &self,
-        prompt: String,
-        emit: EmitFn,
-    ) -> Result<Vec<AgentEvent>> {
+    async fn run_inner(&self, prompt: String, emit: EmitFn) -> Result<Vec<AgentEvent>> {
         let message = Message::User(UserMessage::new(prompt));
         self.run_messages(vec![message], emit).await
     }

@@ -543,10 +543,14 @@ pub(crate) fn handle_slash_command(
                         }
                     }
                     "pin" => {
-                        state.add_system_message("Router pin: not yet implemented. Coming soon.".to_string());
+                        state.add_system_message(
+                            "Router pin: not yet implemented. Coming soon.".to_string(),
+                        );
                     }
                     "disable" => {
-                        state.add_system_message("Router disabled. Use /model to select a specific model.".to_string());
+                        state.add_system_message(
+                            "Router disabled. Use /model to select a specific model.".to_string(),
+                        );
                     }
                     _ => {
                         state.add_system_message(router_help());
@@ -555,7 +559,9 @@ pub(crate) fn handle_slash_command(
             } else {
                 let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
                 let project_dir = std::env::current_dir().unwrap_or_default();
-                let has_config = oxi_store::router_config::load_router_config(&global_dir, &project_dir).is_some();
+                let has_config =
+                    oxi_store::router_config::load_router_config(&global_dir, &project_dir)
+                        .is_some();
 
                 if has_config {
                     if let Some(snap) = oxi_ai::router::RouterProvider::get_snapshot() {

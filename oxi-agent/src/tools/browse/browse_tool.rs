@@ -129,7 +129,10 @@ impl AgentTool for BrowseTool {
         let output = match format {
             "html" => {
                 if let Some(sel) = selector {
-                    tab.query_all(sel).await.map_err(|e| e.to_string())?.join("\n\n")
+                    tab.query_all(sel)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .join("\n\n")
                 } else {
                     page.html.clone()
                 }
@@ -140,7 +143,10 @@ impl AgentTool for BrowseTool {
             }
             "text" => {
                 if let Some(sel) = selector {
-                    tab.query_all(sel).await.map_err(|e| e.to_string())?.join("\n")
+                    tab.query_all(sel)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .join("\n")
                 } else {
                     page.markdown.clone()
                 }
@@ -148,7 +154,10 @@ impl AgentTool for BrowseTool {
             _ => {
                 // "markdown" (default)
                 if let Some(sel) = selector {
-                    tab.query_all(sel).await.map_err(|e| e.to_string())?.join("\n\n")
+                    tab.query_all(sel)
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .join("\n\n")
                 } else {
                     page.markdown.clone()
                 }

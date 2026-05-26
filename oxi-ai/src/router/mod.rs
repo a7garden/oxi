@@ -22,7 +22,8 @@ use crate::types::Model;
 use crate::{register_model, register_provider, Api, Provider, ProviderEvent, ThinkingLevel};
 
 /// Global router state snapshot — updated after each routing decision.
-static ROUTER_SNAPSHOT: parking_lot::RwLock<Option<RouterSnapshot>> = parking_lot::RwLock::new(None);
+static ROUTER_SNAPSHOT: parking_lot::RwLock<Option<RouterSnapshot>> =
+    parking_lot::RwLock::new(None);
 
 /// Snapshot of the current router state for UI display.
 #[derive(Debug, Clone, Default)]
@@ -317,7 +318,8 @@ impl RouterProvider {
                     if model.supports_vision() {
                         tracing::info!(
                             "Vision override: {} → {} (vision-capable fallback)",
-                            original_model, fb
+                            original_model,
+                            fb
                         );
                         return RoutedTierConfig {
                             model: fb.clone(),
@@ -340,7 +342,10 @@ impl RouterProvider {
                             if model.supports_vision() {
                                 tracing::info!(
                                     "Vision upgrade: tier {:?} → {:?}, model {} → {}",
-                                    tier, higher_tier, original_model, tc.model
+                                    tier,
+                                    higher_tier,
+                                    original_model,
+                                    tc.model
                                 );
                                 return tc.clone();
                             }
@@ -354,7 +359,8 @@ impl RouterProvider {
         tracing::warn!(
             "Vision required but no vision-capable model found for tier {:?}. \
              Model {} may fail with image content.",
-            tier, original_model
+            tier,
+            original_model
         );
         tier_config
     }

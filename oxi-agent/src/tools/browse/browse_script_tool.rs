@@ -22,9 +22,7 @@ use tokio::sync::oneshot;
 #[serde(rename_all = "snake_case")]
 pub enum Step {
     /// Navigate to a URL.
-    Goto {
-        url: String,
-    },
+    Goto { url: String },
     /// Go back in browser history.
     Back,
     /// Go forward in browser history.
@@ -32,52 +30,27 @@ pub enum Step {
     /// Reload the current page.
     Reload,
     /// Click an element.
-    Click {
-        selector: String,
-    },
+    Click { selector: String },
     /// Fill an input element (sets value directly).
-    Fill {
-        selector: String,
-        value: String,
-    },
+    Fill { selector: String, value: String },
     /// Type text character by character.
-    Type {
-        selector: String,
-        value: String,
-    },
+    Type { selector: String, value: String },
     /// Clear an input element.
-    Clear {
-        selector: String,
-    },
+    Clear { selector: String },
     /// Check a checkbox.
-    Check {
-        selector: String,
-    },
+    Check { selector: String },
     /// Uncheck a checkbox.
-    Uncheck {
-        selector: String,
-    },
+    Uncheck { selector: String },
     /// Select an option in a `<select>`.
-    Select {
-        selector: String,
-        value: String,
-    },
+    Select { selector: String, value: String },
     /// Press a keyboard combo.
-    Press {
-        combo: String,
-    },
+    Press { combo: String },
     /// Scroll down by N pixels.
-    Scroll {
-        pixels: u32,
-    },
+    Scroll { pixels: u32 },
     /// Wait for an element to appear.
-    Wait {
-        selector: String,
-    },
+    Wait { selector: String },
     /// Evaluate JavaScript and optionally store the result.
-    Evaluate {
-        expr: String,
-    },
+    Evaluate { expr: String },
     /// Extract text content from elements matching a selector.
     Extract {
         selector: String,
@@ -89,18 +62,11 @@ pub enum Step {
     /// Take a screenshot.
     Screenshot,
     /// Set a variable (echo for debugging).
-    Set {
-        key: String,
-        value: String,
-    },
+    Set { key: String, value: String },
     /// Echo a value (for debugging).
-    Echo {
-        message: String,
-    },
+    Echo { message: String },
     /// Sleep for N milliseconds.
-    Sleep {
-        ms: u64,
-    },
+    Sleep { ms: u64 },
 }
 
 /// Result of executing a script.
@@ -114,8 +80,8 @@ pub struct ScriptResult {
 
 fn parse_steps(yaml: &str) -> Result<Vec<Step>, ToolError> {
     // Accept both simple format (list of maps) and explicit format
-    let docs: Vec<serde_yaml::Value> = serde_yaml::from_str(yaml)
-        .map_err(|e| format!("Invalid YAML: {}", e))?;
+    let docs: Vec<serde_yaml::Value> =
+        serde_yaml::from_str(yaml).map_err(|e| format!("Invalid YAML: {}", e))?;
 
     let steps_val = if docs.len() == 1 {
         &docs[0]
@@ -124,9 +90,7 @@ fn parse_steps(yaml: &str) -> Result<Vec<Step>, ToolError> {
     };
 
     // Look for "steps:" key or treat as a direct list
-    let steps_node = steps_val
-        .get("steps")
-        .unwrap_or(steps_val);
+    let steps_node = steps_val.get("steps").unwrap_or(steps_val);
 
     let steps: Vec<Step> = serde_yaml::from_value(steps_node.clone())
         .map_err(|e| format!("Failed to parse steps: {}", e))?;
@@ -184,7 +148,9 @@ async fn execute_single_step(
             tab.fill(selector, value).await.map_err(|e| e.to_string())?;
         }
         Step::Type { selector, value } => {
-            tab.type_(selector, value).await.map_err(|e| e.to_string())?;
+            tab.type_(selector, value)
+                .await
+                .map_err(|e| e.to_string())?;
         }
         Step::Clear { selector } => {
             // Clear by filling with empty string
@@ -239,7 +205,10 @@ async fn execute_single_step(
             result.outputs.push(page.markdown);
         }
         Step::Screenshot => {
-            let png = tab.screenshot(config.screenshot_width).await.map_err(|e| e.to_string())?;
+            let png = tab
+                .screenshot(config.screenshot_width)
+                .await
+                .map_err(|e| e.to_string())?;
             result.screenshot = Some(png);
         }
         Step::Set { key, value } => {
@@ -394,19 +363,21 @@ mod tests {
 
     #[test]
     fn parse_simple_goto() {
-        let yaml = r#"
+        let yaml = r##"
 steps:
   - goto: "https://example.com"
   - click: "button.submit"
   - fill:
       selector: "#search"
       value: "rust"
-"#;
+"##;
         let steps = parse_steps(yaml).unwrap();
         assert_eq!(steps.len(), 3);
         assert!(matches!(&steps[0], Step::Goto { url } if url == "https://example.com"));
         assert!(matches!(&steps[1], Step::Click { selector } if selector == "button.submit"));
-        assert!(matches!(&steps[2], Step::Fill { selector, value } if selector == "#search" && value == "rust"));
+        assert!(
+            matches!(&steps[2], Step::Fill { selector, value } if selector == "#search" && value == "rust")
+        );
     }
 
     #[test]
@@ -419,7 +390,9 @@ steps:
 "#;
         let steps = parse_steps(yaml).unwrap();
         assert_eq!(steps.len(), 1);
-        assert!(matches!(&steps[0], Step::Extract { selector, all } if selector == ".result h3" && *all));
+        assert!(
+            matches!(&steps[0], Step::Extract { selector, all } if selector == ".result h3" && *all)
+        );
     }
 
     #[test]
@@ -479,25 +452,27 @@ steps:
 
     #[test]
     fn parse_select_step() {
-        let yaml = r#"
+        let yaml = r##"
 steps:
   - select:
       selector: "#country"
       value: "US"
-"#;
+"##;
         let steps = parse_steps(yaml).unwrap();
-        assert!(matches!(&steps[0], Step::Select { selector, value } if selector == "#country" && value == "US"));
+        assert!(
+            matches!(&steps[0], Step::Select { selector, value } if selector == "#country" && value == "US")
+        );
     }
 
     #[test]
     fn parse_check_uncheck_steps() {
-        let yaml = r#"
+        let yaml = r##"
 steps:
   - check:
       selector: "#agree"
   - uncheck:
       selector: "#newsletter"
-"#;
+"##;
         let steps = parse_steps(yaml).unwrap();
         assert!(matches!(&steps[0], Step::Check { selector } if selector == "#agree"));
         assert!(matches!(&steps[1], Step::Uncheck { selector } if selector == "#newsletter"));

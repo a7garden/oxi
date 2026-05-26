@@ -920,29 +920,23 @@ pub fn create_builtin_provider_with_options(
     let builtin = get_builtin_provider(name)?;
 
     // Resolve API key: explicit override > environment variables
-    let resolved_key = api_key
-        .map(String::from)
-        .or_else(|| {
-            std::env::var(builtin.env_key)
-                .ok()
-                .or_else(|| {
-                    builtin
-                        .extra_env_keys
-                        .iter()
-                        .find_map(|k| std::env::var(k).ok())
-                })
-        });
+    let resolved_key = api_key.map(String::from).or_else(|| {
+        std::env::var(builtin.env_key).ok().or_else(|| {
+            builtin
+                .extra_env_keys
+                .iter()
+                .find_map(|k| std::env::var(k).ok())
+        })
+    });
 
     // Resolve base URL: explicit override > built-in default
-    let resolved_base_url = base_url
-        .map(String::from)
-        .or_else(|| {
-            if builtin.base_url.is_empty() {
-                None
-            } else {
-                Some(builtin.base_url.to_string())
-            }
-        });
+    let resolved_base_url = base_url.map(String::from).or_else(|| {
+        if builtin.base_url.is_empty() {
+            None
+        } else {
+            Some(builtin.base_url.to_string())
+        }
+    });
 
     let extra_headers: Vec<(String, String)> = builtin
         .extra_headers
@@ -963,7 +957,9 @@ pub fn create_builtin_provider_with_options(
                 )))
             } else if resolved_base_url.is_some() {
                 Some(Box::new(super::anthropic::AnthropicProvider::with_config(
-                    resolved_base_url.as_deref().unwrap_or("https://api.anthropic.com"),
+                    resolved_base_url
+                        .as_deref()
+                        .unwrap_or("https://api.anthropic.com"),
                     None,
                     extra_headers,
                 )))
@@ -1258,11 +1254,7 @@ mod tests {
 
     #[test]
     fn test_create_builtin_provider_with_options_anthropic() {
-        let p = create_builtin_provider_with_options(
-            "anthropic",
-            Some("sk-ant-test-key"),
-            None,
-        );
+        let p = create_builtin_provider_with_options("anthropic", Some("sk-ant-test-key"), None);
         assert!(p.is_some());
         assert_eq!(p.unwrap().name(), "anthropic");
     }

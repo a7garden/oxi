@@ -25,7 +25,7 @@ pub use browse_extract_tool::BrowseExtractTool;
 pub use browse_session_tool::BrowseSessionTool;
 pub use browse_tool::BrowseTool;
 pub use config::BrowseConfig;
-pub use engine::{BrowserEngine, BrowserTab, BrowserError, PageContent, LinkInfo, ElementInfo};
+pub use engine::{BrowserEngine, BrowserError, BrowserTab, ElementInfo, LinkInfo, PageContent};
 pub use tab_guard::TabGuard;
 
 #[cfg(feature = "native-browser")]

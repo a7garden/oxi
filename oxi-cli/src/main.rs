@@ -1205,11 +1205,12 @@ fn register_router_provider(settings: &Settings) {
         "router://local",
     ));
 
-    let store_cfg = match oxi_store::router_config::load_router_config(&global_dir, &project_dir)
-    {
+    let store_cfg = match oxi_store::router_config::load_router_config(&global_dir, &project_dir) {
         Some(cfg) => cfg,
         None => {
-            tracing::debug!("No router config found — router/auto is discoverable but not configured");
+            tracing::debug!(
+                "No router config found — router/auto is discoverable but not configured"
+            );
             return;
         }
     };

@@ -117,11 +117,8 @@ use std::sync::Arc;
 ///     ..Default::default()
 /// };
 /// ```
-pub type CompactionHook = Arc<
-    dyn Fn(CompactedContext) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
-        + Send
-        + Sync,
->;
+pub type CompactionHook =
+    Arc<dyn Fn(CompactedContext) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>;
 
 /// Hook invoked before each tool call; may return an override result.
 pub type BeforeToolCallHook = Arc<

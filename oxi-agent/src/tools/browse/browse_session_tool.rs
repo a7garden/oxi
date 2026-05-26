@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 
 /// Interactive browser session with a persistent tab across calls.
 ///
@@ -219,11 +219,12 @@ impl AgentTool for BrowseSessionTool {
         let pixels = params["pixels"].as_u64().unwrap_or(300);
         let javascript = params["javascript"].as_str();
         let format = params["format"].as_str().unwrap_or("markdown");
-        let timeout_ms =
-            params["timeout_ms"]
-                .as_u64()
-                .unwrap_or(self.config.default_wait_timeout_ms);
-        let width = params["width"].as_u64().unwrap_or(self.config.screenshot_width as u64) as u32;
+        let timeout_ms = params["timeout_ms"]
+            .as_u64()
+            .unwrap_or(self.config.default_wait_timeout_ms);
+        let width = params["width"]
+            .as_u64()
+            .unwrap_or(self.config.screenshot_width as u64) as u32;
         let from_selector = params["from_selector"].as_str();
         let to_selector = params["to_selector"].as_str();
         let file_path = params["file_path"].as_str();
@@ -265,8 +266,7 @@ impl AgentTool for BrowseSessionTool {
             // ── Navigation ──────────────────────────────────────────
             "goto" => {
                 self.check_idle_timeout().await?;
-                let url =
-                    url.ok_or_else(|| "Missing required parameter: url".to_string())?;
+                let url = url.ok_or_else(|| "Missing required parameter: url".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let page = tab.goto(url).await.map_err(browser_err)?;
@@ -320,8 +320,8 @@ impl AgentTool for BrowseSessionTool {
             // ── DOM interaction ─────────────────────────────────────
             "click" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.click(sel).await.map_err(browser_err)?;
@@ -330,10 +330,9 @@ impl AgentTool for BrowseSessionTool {
 
             "fill" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                let val =
-                    value.ok_or_else(|| "Missing required parameter: value".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let val = value.ok_or_else(|| "Missing required parameter: value".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.fill(sel, val).await.map_err(browser_err)?;
@@ -342,10 +341,9 @@ impl AgentTool for BrowseSessionTool {
 
             "type" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                let val =
-                    value.ok_or_else(|| "Missing required parameter: value".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let val = value.ok_or_else(|| "Missing required parameter: value".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.type_(sel, val).await.map_err(browser_err)?;
@@ -354,8 +352,8 @@ impl AgentTool for BrowseSessionTool {
 
             "clear" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.clear(sel).await.map_err(browser_err)?;
@@ -364,8 +362,7 @@ impl AgentTool for BrowseSessionTool {
 
             "press" => {
                 self.check_idle_timeout().await?;
-                let c =
-                    combo.ok_or_else(|| "Missing required parameter: combo".to_string())?;
+                let c = combo.ok_or_else(|| "Missing required parameter: combo".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.press(c).await.map_err(browser_err)?;
@@ -374,10 +371,9 @@ impl AgentTool for BrowseSessionTool {
 
             "select" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                let val =
-                    value.ok_or_else(|| "Missing required parameter: value".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let val = value.ok_or_else(|| "Missing required parameter: value".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.select_option(sel, val).await.map_err(browser_err)?;
@@ -386,8 +382,8 @@ impl AgentTool for BrowseSessionTool {
 
             "check" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.check(sel).await.map_err(browser_err)?;
@@ -396,8 +392,8 @@ impl AgentTool for BrowseSessionTool {
 
             "uncheck" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.uncheck(sel).await.map_err(browser_err)?;
@@ -415,8 +411,8 @@ impl AgentTool for BrowseSessionTool {
             // ── Wait ────────────────────────────────────────────────
             "wait_for" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.wait_for(sel, timeout_ms).await.map_err(browser_err)?;
@@ -444,7 +440,9 @@ impl AgentTool for BrowseSessionTool {
                             let value = tab.evaluate(&js).await.map_err(browser_err)?;
                             helpers::parse_link_values(value)
                         } else {
-                            helpers::extract_links(tab).await.map_err(|e: ToolError| e)?
+                            helpers::extract_links(tab)
+                                .await
+                                .map_err(|e: ToolError| e)?
                         };
                         helpers::format_links(&links)
                     }
@@ -475,8 +473,8 @@ impl AgentTool for BrowseSessionTool {
 
             "query_all" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let results = tab.query_all(sel).await.map_err(browser_err)?;
@@ -496,7 +494,9 @@ impl AgentTool for BrowseSessionTool {
                     let value = tab.evaluate(&js).await.map_err(browser_err)?;
                     helpers::parse_link_values(value)
                 } else {
-                    helpers::extract_links(tab).await.map_err(|e: ToolError| e)?
+                    helpers::extract_links(tab)
+                        .await
+                        .map_err(|e: ToolError| e)?
                 };
 
                 let json_links: Vec<Value> = links
@@ -513,9 +513,8 @@ impl AgentTool for BrowseSessionTool {
             // ── Evaluate ────────────────────────────────────────────
             "evaluate" => {
                 self.check_idle_timeout().await?;
-                let js = javascript.ok_or_else(|| {
-                    "Missing required parameter: javascript".to_string()
-                })?;
+                let js = javascript
+                    .ok_or_else(|| "Missing required parameter: javascript".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let result_val = tab.evaluate(js).await.map_err(browser_err)?;
@@ -527,9 +526,8 @@ impl AgentTool for BrowseSessionTool {
 
             "evaluate_await" => {
                 self.check_idle_timeout().await?;
-                let js = javascript.ok_or_else(|| {
-                    "Missing required parameter: javascript".to_string()
-                })?;
+                let js = javascript
+                    .ok_or_else(|| "Missing required parameter: javascript".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let result_val = tab.evaluate_await(js).await.map_err(browser_err)?;
@@ -546,27 +544,21 @@ impl AgentTool for BrowseSessionTool {
                 let tab = require_tab(&slot)?;
                 let png = tab.screenshot(width).await.map_err(browser_err)?;
                 let size_bytes = png.len();
-                let b64 = base64::Engine::encode(
-                    &base64::engine::general_purpose::STANDARD,
-                    &png,
-                );
-                let img =
-                    oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(b64, "image/png"));
+                let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &png);
+                let img = oxi_ai::ContentBlock::Image(oxi_ai::ImageContent::new(b64, "image/png"));
 
-                Ok(
-                    AgentToolResult::success(json_str(&json!({
-                        "status": "ok",
-                        "size_bytes": size_bytes,
-                    })))
-                    .with_content_blocks(vec![img]),
-                )
+                Ok(AgentToolResult::success(json_str(&json!({
+                    "status": "ok",
+                    "size_bytes": size_bytes,
+                })))
+                .with_content_blocks(vec![img]))
             }
 
             // ── Extended DOM actions ──────────────────────────────
             "scroll_into_view" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.scroll_into_view(sel).await.map_err(browser_err)?;
@@ -575,8 +567,8 @@ impl AgentTool for BrowseSessionTool {
 
             "hover" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.hover(sel).await.map_err(browser_err)?;
@@ -585,8 +577,8 @@ impl AgentTool for BrowseSessionTool {
 
             "double_click" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.double_click(sel).await.map_err(browser_err)?;
@@ -595,8 +587,8 @@ impl AgentTool for BrowseSessionTool {
 
             "right_click" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.right_click(sel).await.map_err(browser_err)?;
@@ -605,12 +597,10 @@ impl AgentTool for BrowseSessionTool {
 
             "drag" => {
                 self.check_idle_timeout().await?;
-                let from = from_selector.ok_or_else(|| {
-                    "Missing required parameter: from_selector".to_string()
-                })?;
-                let to = to_selector.ok_or_else(|| {
-                    "Missing required parameter: to_selector".to_string()
-                })?;
+                let from = from_selector
+                    .ok_or_else(|| "Missing required parameter: from_selector".to_string())?;
+                let to = to_selector
+                    .ok_or_else(|| "Missing required parameter: to_selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.drag(from, to).await.map_err(browser_err)?;
@@ -619,11 +609,10 @@ impl AgentTool for BrowseSessionTool {
 
             "upload_file" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
-                let path = file_path.ok_or_else(|| {
-                    "Missing required parameter: file_path".to_string()
-                })?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let path =
+                    file_path.ok_or_else(|| "Missing required parameter: file_path".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 tab.upload_file(sel, path).await.map_err(browser_err)?;
@@ -632,8 +621,8 @@ impl AgentTool for BrowseSessionTool {
 
             "get_value" => {
                 self.check_idle_timeout().await?;
-                let sel = selector
-                    .ok_or_else(|| "Missing required parameter: selector".to_string())?;
+                let sel =
+                    selector.ok_or_else(|| "Missing required parameter: selector".to_string())?;
                 let slot = self.tab.lock().await;
                 let tab = require_tab(&slot)?;
                 let result_val = tab.get_value(sel).await.map_err(browser_err)?;
@@ -658,9 +647,7 @@ impl AgentTool for BrowseSessionTool {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Get a reference to the tab from the locked slot, or return an error.
-fn require_tab(
-    slot: &Option<TabGuard>,
-) -> Result<&dyn super::engine::BrowserTab, ToolError> {
+fn require_tab(slot: &Option<TabGuard>) -> Result<&dyn super::engine::BrowserTab, ToolError> {
     match slot {
         Some(guard) => Ok(guard.tab()),
         None => Err(BrowserError::NoActiveSession.into()),
@@ -708,7 +695,12 @@ mod tests {
     impl MockTab {
         fn new() -> (Self, Arc<AtomicBool>) {
             let closed = Arc::new(AtomicBool::new(false));
-            (Self { closed: closed.clone() }, closed)
+            (
+                Self {
+                    closed: closed.clone(),
+                },
+                closed,
+            )
         }
     }
 
@@ -735,11 +727,7 @@ mod tests {
         async fn press(&self, _combo: &str) -> Result<(), BrowserError> {
             Ok(())
         }
-        async fn wait_for(
-            &self,
-            _selector: &str,
-            _timeout_ms: u64,
-        ) -> Result<(), BrowserError> {
+        async fn wait_for(&self, _selector: &str, _timeout_ms: u64) -> Result<(), BrowserError> {
             Ok(())
         }
         async fn content(&self) -> Result<PageContent, BrowserError> {
@@ -751,10 +739,7 @@ mod tests {
                 html: "<h1>Example</h1>".into(),
             })
         }
-        async fn query_all(
-            &self,
-            _selector: &str,
-        ) -> Result<Vec<String>, BrowserError> {
+        async fn query_all(&self, _selector: &str) -> Result<Vec<String>, BrowserError> {
             Ok(vec!["item1".into(), "item2".into()])
         }
         async fn evaluate(&self, _js: &str) -> Result<Value, BrowserError> {
@@ -767,11 +752,7 @@ mod tests {
             self.closed.store(true, Ordering::SeqCst);
             Ok(())
         }
-        async fn select_option(
-            &self,
-            _selector: &str,
-            _value: &str,
-        ) -> Result<(), BrowserError> {
+        async fn select_option(&self, _selector: &str, _value: &str) -> Result<(), BrowserError> {
             Ok(())
         }
         async fn check(&self, _selector: &str) -> Result<(), BrowserError> {
@@ -792,18 +773,10 @@ mod tests {
         async fn scroll_into_view(&self, _selector: &str) -> Result<(), BrowserError> {
             Ok(())
         }
-        async fn drag(
-            &self,
-            _from_selector: &str,
-            _to_selector: &str,
-        ) -> Result<(), BrowserError> {
+        async fn drag(&self, _from_selector: &str, _to_selector: &str) -> Result<(), BrowserError> {
             Ok(())
         }
-        async fn upload_file(
-            &self,
-            _selector: &str,
-            _path: &str,
-        ) -> Result<(), BrowserError> {
+        async fn upload_file(&self, _selector: &str, _path: &str) -> Result<(), BrowserError> {
             Ok(())
         }
         async fn get_value(&self, _selector: &str) -> Result<String, BrowserError> {
@@ -820,9 +793,7 @@ mod tests {
 
     #[async_trait]
     impl super::super::engine::BrowserEngine for MockEngine {
-        async fn new_tab(
-            &self,
-        ) -> Result<Box<dyn super::super::engine::BrowserTab>, BrowserError> {
+        async fn new_tab(&self) -> Result<Box<dyn super::super::engine::BrowserTab>, BrowserError> {
             let (tab, _) = MockTab::new();
             Ok(Box::new(tab))
         }
@@ -875,7 +846,10 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("no active session"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("no active session"));
     }
 
     #[tokio::test]
@@ -1090,11 +1064,7 @@ mod tests {
             let result = tool
                 .execute("cx", json!({"action": *nav_action}), None, &ctx)
                 .await;
-            assert!(
-                result.is_ok(),
-                "Navigation action '{}' failed",
-                nav_action
-            );
+            assert!(result.is_ok(), "Navigation action '{}' failed", nav_action);
         }
 
         tool.execute("c99", json!({"action": "close"}), None, &ctx)
@@ -1177,7 +1147,12 @@ mod tests {
 
         // fill without value
         assert!(tool
-            .execute("c4", json!({"action": "fill", "selector": "#x"}), None, &ctx)
+            .execute(
+                "c4",
+                json!({"action": "fill", "selector": "#x"}),
+                None,
+                &ctx
+            )
             .await
             .is_err());
 
@@ -1210,9 +1185,7 @@ mod tests {
     async fn test_schema_has_all_actions() {
         let tool = make_tool();
         let schema = tool.parameters_schema();
-        let actions = schema["properties"]["action"]["enum"]
-            .as_array()
-            .unwrap();
+        let actions = schema["properties"]["action"]["enum"].as_array().unwrap();
         assert_eq!(actions.len(), 29);
     }
 }

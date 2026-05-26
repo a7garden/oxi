@@ -24,12 +24,12 @@ mod providers;
 pub mod register_builtins {
     pub use crate::providers::register_builtins::*;
 }
+pub mod router;
 pub mod secret;
 mod tools;
 mod transform;
 mod types;
 pub mod utils;
-pub mod router;
 
 /// Standard imports for oxi-ai usage.
 pub mod prelude {
@@ -63,8 +63,8 @@ pub use providers::CacheRetention;
 
 /// Provider trait, streaming options, and provider registry.
 pub use providers::{
-    custom_provider_names, get_provider, get_provider_arc, register_provider, unregister_provider, Provider,
-    ProviderEvent, ProviderOptions, ProviderRegistry, StreamOptions,
+    custom_provider_names, get_provider, get_provider_arc, register_provider, unregister_provider,
+    Provider, ProviderEvent, ProviderOptions, ProviderRegistry, StreamOptions,
 };
 
 /// Built-in provider helpers (re-exported from providers).
@@ -87,14 +87,14 @@ pub use providers::model_fetch::{fetch_models_async, fetch_models_blocking};
 /// OpenAI Responses API provider.
 pub use providers::OpenAiResponsesProvider;
 
-/// Google (Gemini) provider implementation.
-pub use providers::GoogleProvider;
 /// AWS Bedrock provider implementation.
 pub use providers::BedrockProvider;
-/// Google Vertex AI provider implementation.
-pub use providers::VertexProvider;
+/// Google (Gemini) provider implementation.
+pub use providers::GoogleProvider;
 /// Mistral provider implementation.
 pub use providers::MistralProvider;
+/// Google Vertex AI provider implementation.
+pub use providers::VertexProvider;
 
 /// Provider-specific message normalization (empty content filtering, tool ID
 /// scrubbing, reasoning injection, tool-use ordering fix).
@@ -149,9 +149,8 @@ mod model_registry;
 ///
 /// Unlike the static `model_db`, this supports adding/removing models at runtime.
 pub use model_registry::{
-    get_model, get_models, get_providers, lookup_model, register_model, unregister_model,
-    dynamic_models,
-    ModelRegistry,
+    dynamic_models, get_model, get_models, get_providers, lookup_model, register_model,
+    unregister_model, ModelRegistry,
 };
 
 // Static model database (comprehensive)

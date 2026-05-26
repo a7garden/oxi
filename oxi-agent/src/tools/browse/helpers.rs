@@ -102,11 +102,7 @@ pub fn js_query_elements(selector: &str) -> String {
 /// Parse the JSON array returned by `js_query_elements`.
 pub fn parse_element_values(
     value: Value,
-) -> Vec<(
-    String,
-    String,
-    std::collections::HashMap<String, String>,
-)> {
+) -> Vec<(String, String, std::collections::HashMap<String, String>)> {
     let Value::Array(arr) = value else {
         return Vec::new();
     };

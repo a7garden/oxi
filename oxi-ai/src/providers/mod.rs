@@ -37,7 +37,13 @@ pub use crate::ThinkingLevel;
 pub use anthropic::AnthropicProvider;
 #[allow(unused_imports)]
 pub use azure::AzureProvider;
+#[allow(unused_imports)]
+pub use bedrock::BedrockProvider;
 pub use event::ProviderEvent;
+#[allow(unused_imports)]
+pub use google::GoogleProvider;
+#[allow(unused_imports)]
+pub use mistral::MistralProvider;
 pub use openai::normalize_messages;
 #[allow(unused_imports)]
 pub use openai::OpenAiProvider;
@@ -47,13 +53,7 @@ pub use openai_responses::OpenAiResponsesProvider;
 pub use options::{ProviderOptions, StreamOptions, ThinkingBudgets};
 pub use trait_def::Provider;
 #[allow(unused_imports)]
-pub use google::GoogleProvider;
-#[allow(unused_imports)]
-pub use bedrock::BedrockProvider;
-#[allow(unused_imports)]
 pub use vertex::VertexProvider;
-#[allow(unused_imports)]
-pub use mistral::MistralProvider;
 
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;

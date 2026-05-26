@@ -1,7 +1,7 @@
 //! Event handlers for the TUI.
 
-use super::overlay::router_integration;
 use super::app::{AppOverlay, AppState, ProviderInfo, SetupStep, UiEvent};
+use super::overlay::router_integration;
 use super::slash;
 use crate::app::agent_session::{AgentSession, SessionEvent};
 use crate::context::auto_compaction::CompactionReason;
@@ -243,15 +243,13 @@ async fn handle_key(
 
             let snap = oxi_ai::router::RouterProvider::get_snapshot();
             let data = if let Some(ref s) = snap {
-                use oxi_tui::widgets::routing::{ProviderInfo, ProviderHealth, RoutingStatusData};
-                let chain = vec![
-                    ProviderInfo {
-                        name: s.last_provider.clone().unwrap_or_default(),
-                        health: ProviderHealth::Healthy,
-                        failures: 0,
-                        is_active: true,
-                    },
-                ];
+                use oxi_tui::widgets::routing::{ProviderHealth, ProviderInfo, RoutingStatusData};
+                let chain = vec![ProviderInfo {
+                    name: s.last_provider.clone().unwrap_or_default(),
+                    health: ProviderHealth::Healthy,
+                    failures: 0,
+                    is_active: true,
+                }];
                 RoutingStatusData {
                     auto_routing_enabled: true,
                     fallback_enabled: true,

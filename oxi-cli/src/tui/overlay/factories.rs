@@ -90,30 +90,33 @@ impl OverlayComponent for ModelSelectOverlay {
                 if let Some((_idx, model_id)) = filtered.get(selected) {
                     let model_id = (*model_id).clone();
 
-                // Router auto-setup: if selecting router/* without config, open setup overlay
-                if model_id.starts_with("router/") {
-                    let gd = dirs::config_dir().unwrap_or_default().join("oxi");
-                    let pd = std::env::current_dir().unwrap_or_default();
-                    let has_config = oxi_store::router_config::load_router_config(&gd, &pd).is_some();
-                    if !has_config {
-                        if let Ok(ptr) = self.app_state.lock() {
-                            unsafe {
-                                if let Some(ref mut app) = (*ptr).as_mut() {
-                                    app.add_system_message("Opening router setup...".to_string());
+                    // Router auto-setup: if selecting router/* without config, open setup overlay
+                    if model_id.starts_with("router/") {
+                        let gd = dirs::config_dir().unwrap_or_default().join("oxi");
+                        let pd = std::env::current_dir().unwrap_or_default();
+                        let has_config =
+                            oxi_store::router_config::load_router_config(&gd, &pd).is_some();
+                        if !has_config {
+                            if let Ok(ptr) = self.app_state.lock() {
+                                unsafe {
+                                    if let Some(ref mut app) = (*ptr).as_mut() {
+                                        app.add_system_message(
+                                            "Opening router setup...".to_string(),
+                                        );
+                                    }
                                 }
                             }
+                            return OverlayAction::OpenRouterSetup {
+                                initial: crate::tui::overlay::RouterSetupData {
+                                    profile_name: "auto".to_string(),
+                                    ..Default::default()
+                                },
+                                models: self.models.clone(),
+                            };
                         }
-                        return OverlayAction::OpenRouterSetup {
-                            initial: crate::tui::overlay::RouterSetupData {
-                                profile_name: "auto".to_string(),
-                                ..Default::default()
-                            },
-                            models: self.models.clone(),
-                        };
                     }
-                }
 
-                match self.session.set_model(&model_id) {
+                    match self.session.set_model(&model_id) {
                         Ok(()) => {
                             if let Ok(ptr) = self.app_state.lock() {
                                 unsafe {

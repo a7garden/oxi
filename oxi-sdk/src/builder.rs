@@ -84,8 +84,7 @@ impl Oxi {
         if self.include_builtins {
             let api_key = self.api_keys.get(name).map(|s| s.as_str());
             let base_url = self.base_urls.get(name).map(|s| s.as_str());
-            if let Some(p) = oxi_ai::create_builtin_provider_with_options(name, api_key, base_url)
-            {
+            if let Some(p) = oxi_ai::create_builtin_provider_with_options(name, api_key, base_url) {
                 return Ok(Arc::from(p));
             }
             // Fallback to default built-in creation (no credential override)
@@ -199,7 +198,7 @@ impl OxiBuilder {
         self
     }
 
-       /// Register an API key for a specific provider.
+    /// Register an API key for a specific provider.
     ///
     /// When `create_provider(name)` is called, the key is injected into
     /// the provider's constructor automatically. Keys registered here
