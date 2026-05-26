@@ -1063,7 +1063,7 @@ pub fn normalize_messages(messages: &[Message], provider: &str, model_id: &str) 
                         .iter()
                         .map(|block| match block {
                             ContentBlock::ToolCall(tc) => ContentBlock::ToolCall(ToolCall::new(
-                                scrub_tool_id(&tc.id, is_mistral),
+                                scrub_tool_id(&tc.id, is_mistral, is_anthropic),
                                 tc.name.clone(),
                                 tc.arguments.clone(),
                             )),
@@ -1079,7 +1079,7 @@ pub fn normalize_messages(messages: &[Message], provider: &str, model_id: &str) 
                     Message::Assistant(new_msg)
                 }
                 Message::ToolResult(t) => Message::ToolResult(ToolResultMessage::new(
-                    scrub_tool_id(&t.tool_call_id, is_mistral),
+                    scrub_tool_id(&t.tool_call_id, is_mistral, is_anthropic),
                     &t.tool_name,
                     t.content.clone(),
                 )),
@@ -1131,7 +1131,7 @@ fn filter_empty_content(content: &MessageContent) -> Option<MessageContent> {
 /// Scrub a tool call ID for provider compatibility.
 /// Mistral: keep first 9 alphanumeric chars, pad with zeros
 /// Claude: keep only alphanumeric + underscore
-fn scrub_tool_id(id: &str, is_mistral: bool) -> String {
+fn scrub_tool_id(id: &str, is_mistral: bool, is_anthropic: bool) -> String {
     if is_mistral {
         let alphanumeric: String = id.chars().filter(|c| c.is_alphanumeric()).take(9).collect();
         if alphanumeric.len() < 9 {
@@ -1139,6 +1139,13 @@ fn scrub_tool_id(id: &str, is_mistral: bool) -> String {
         } else {
             alphanumeric
         }
+    } else if is_anthropic {
+        // Anthropic requires tool call IDs matching [a-zA-Z0-9_-]{1,64}.
+        // pi: `id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)`
+        id.chars()
+            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .take(64)
+            .collect()
     } else {
         id.chars()
             .filter(|c| c.is_alphanumeric() || *c == '_')

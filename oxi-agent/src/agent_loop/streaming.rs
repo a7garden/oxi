@@ -63,7 +63,7 @@ pub(crate) async fn stream_assistant_response(
     // Maximum total time without any stream event before declaring the
     // connection hung. LLM providers should emit events (at least heartbeat
     // or thinking deltas) far more frequently than this.
-    let stream_idle_timeout = std::time::Duration::from_secs(120);
+    let stream_idle_timeout = std::time::Duration::from_secs(30);
     // Interval for checking cancellation when no stream events arrive.
     // This ensures Ctrl+C is detected within ~500ms even if the provider
     // stream is completely hung (no events at all).

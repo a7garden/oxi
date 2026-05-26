@@ -27,6 +27,11 @@ pub struct AnthropicProvider {
     /// Extra HTTP headers to include in every request (e.g. anthropic-version,
     /// anthropic-beta).
     extra_headers: Vec<(String, String)>,
+    /// Whether this is the native Anthropic API endpoint.
+    /// When `false` (compatible providers like MiniMax), Anthropic-specific
+    /// features such as the `thinking` parameter and beta headers are
+    /// suppressed because they may not be supported.
+    native: bool,
 }
 
 impl AnthropicProvider {
@@ -49,6 +54,7 @@ impl AnthropicProvider {
                         .to_string(),
                 ),
             ],
+            native: true,
         }
     }
 
@@ -67,11 +73,15 @@ impl AnthropicProvider {
                         .to_string(),
                 ),
             ],
+            native: true,
         }
     }
 
     /// Create with a custom base URL (for Anthropic-compatible providers like
     /// MiniMax that expose the Messages API at a different host).
+    ///
+    /// Note: Anthropic-specific beta headers are NOT included because
+    /// third-party compatible providers may not support them.
     #[allow(dead_code)]
     pub fn with_base_url(base_url: &str) -> Self {
         Self {
@@ -80,18 +90,21 @@ impl AnthropicProvider {
             base_url: Some(base_url.to_string()),
             extra_headers: vec![
                 ("anthropic-version".to_string(), "2023-06-01".to_string()),
-                (
-                    "anthropic-beta".to_string(),
-                    "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
-                        .to_string(),
-                ),
             ],
+            native: false,
         }
     }
 
     /// Create with a custom base URL, API key, and extra headers.
     ///
     /// Used for registering Anthropic-compatible providers (MiniMax, etc.).
+    ///
+    /// Note: Anthropic-specific beta headers (`interleaved-thinking`,
+    /// `fine-grained-tool-streaming`) are NOT included here because
+    /// third-party compatible providers may not support them, leading
+    /// to stream hangs or protocol errors. Use [`new`] or
+    /// [`with_api_key`] for the native Anthropic endpoint which includes
+    /// beta headers.
     pub fn with_config(
         base_url: &str,
         api_key: Option<String>,
@@ -99,11 +112,6 @@ impl AnthropicProvider {
     ) -> Self {
         let mut headers = vec![
             ("anthropic-version".to_string(), "2023-06-01".to_string()),
-            (
-                "anthropic-beta".to_string(),
-                "interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14"
-                    .to_string(),
-            ),
         ];
         headers.extend(extra_headers);
         Self {
@@ -111,6 +119,7 @@ impl AnthropicProvider {
             api_key,
             base_url: Some(base_url.to_string()),
             extra_headers: headers,
+            native: false,
         }
     }
 }
@@ -165,8 +174,14 @@ impl Provider for AnthropicProvider {
         }
 
         // Add optional parameters
+        // Temperature is incompatible with extended thinking (adaptive or
+        // budget-based). Only send when thinking is not active.
+        // Matches pi: `if (options?.temperature !== undefined && !options?.thinkingEnabled)`
+        let thinking_active = body.get("thinking").is_some();
         if let Some(temp) = options.temperature {
-            body["temperature"] = serde_json::json!(temp);
+            if !thinking_active {
+                body["temperature"] = serde_json::json!(temp);
+            }
         }
 
         if let Some(max) = options.max_tokens {
@@ -184,7 +199,13 @@ impl Provider for AnthropicProvider {
         //   2. "adaptive" with effort level (Anthropic dynamically allocates budget)
         //
         // Falls back to thinking_level-based budget when provider_options is absent.
-        if model.reasoning {
+        //
+        // IMPORTANT: Only send the `thinking` parameter when connected to the
+        // native Anthropic API (`self.native == true`). Third-party compatible
+        // providers (MiniMax, etc.) may generate thinking content natively but
+        // don't support the explicit `thinking` request parameter — sending it
+        // can cause incomplete responses or prevent tool calls.
+        if model.reasoning && self.native {
             // Check provider_options first for fine-grained control
             let anthropic_opts = options
                 .provider_options
@@ -265,6 +286,23 @@ impl Provider for AnthropicProvider {
         }
 
         // Ensure max_tokens is always set (Anthropic requires it)
+        // For reasoning models, ensure max_tokens is large enough for
+        // the model to think AND respond. opencode uses OUTPUT_TOKEN_MAX = 32_000
+        // for MiniMax and other reasoning models.
+        //
+        // When the caller sets a small max_tokens (e.g., 4096 default),
+        // reasoning models like MiniMax may think for thousands of tokens
+        // and then stop before generating tool calls because they calculate
+        // they won't have enough room. Bumping to a minimum of 16_384 for
+        // reasoning models ensures the model has space to think + call tools.
+        if model.reasoning {
+            if let Some(current) = body.get("max_tokens").and_then(|v| v.as_u64()) {
+                if current < 16_384 {
+                    body["max_tokens"] =
+                        serde_json::json!(model.max_tokens.min(32_768));
+                }
+            }
+        }
         if body.get("max_tokens").is_none() {
             body["max_tokens"] = serde_json::json!(model.max_tokens.min(16384));
         }
@@ -396,24 +434,48 @@ impl Provider for AnthropicProvider {
         // Create event stream
         let model_name = model.id.clone();
 
-        // Use stateful scan (like OpenAI provider) to handle UTF-8 boundaries
-        // safely.  Anthropic SSE lines can be split across HTTP chunks at
-        // arbitrary byte boundaries; without reassembly, multi-byte characters
-        // (Korean, emoji, etc.) get corrupted by `from_utf8_lossy`.
+        // Stateful scan: persists partial_message and usage ACROSS chunks.
+        //
+        // Previous implementation created a fresh partial_message per chunk,
+        // which caused content loss at chunk boundaries. When an HTTP response
+        // is split into multiple chunks, content_block_delta events from
+        // earlier chunks would be lost because the new chunk's partial_message
+        // started empty. This particularly affected compatible providers
+        // (MiniMax, etc.) that split responses across many small chunks.
+        //
+        // pi (TypeScript) avoids this by keeping a single `output` object
+        // across the entire stream. We replicate that pattern here by
+        // including partial_message in the scan state.
+        struct AnthropicScanState {
+            pending_bytes: Vec<u8>,
+            partial: AssistantMessage,
+            usage: Usage,
+        }
+
+        let initial_state = AnthropicScanState {
+            pending_bytes: Vec::new(),
+            partial: AssistantMessage::new(Api::AnthropicMessages, "anthropic", &model_name),
+            usage: Usage::default(),
+        };
+
         let stream = response
             .bytes_stream()
             .scan(
-                Vec::new(), // pending_bytes
-                move |pending_bytes, chunk: Result<bytes::Bytes, reqwest::Error>| {
+                initial_state,
+                move |state, chunk: Result<bytes::Bytes, reqwest::Error>| {
                     let events = match chunk {
                         Ok(bytes) => {
                             let mut combined =
-                                Vec::with_capacity(pending_bytes.len() + bytes.len());
-                            combined.extend_from_slice(pending_bytes);
+                                Vec::with_capacity(state.pending_bytes.len() + bytes.len());
+                            combined.extend_from_slice(&state.pending_bytes);
                             combined.extend_from_slice(&bytes);
                             let (text, trailing) = split_complete_lines(&combined);
-                            *pending_bytes = trailing;
-                            parse_anthropic_events(&text, &model_name)
+                            state.pending_bytes = trailing;
+                            parse_anthropic_events_stateful(
+                                &text,
+                                &mut state.partial,
+                                &mut state.usage,
+                            )
                         }
                         Err(e) => vec![ProviderEvent::Error {
                             reason: StopReason::Error,
@@ -434,13 +496,20 @@ impl Provider for AnthropicProvider {
 }
 
 /// Build messages in Anthropic format from normalized Message structs.
+///
+/// Key behavior for Anthropic compatibility:
+/// - Consecutive `ToolResult` messages are merged into a single `user` message
+///   with multiple `tool_result` content blocks (Anthropic API requirement).
+///   Matches pi's look-ahead pattern.
 fn build_anthropic_messages_from_normalized(
     _system_prompt: &Option<String>,
     messages_in: &[crate::Message],
 ) -> Result<Vec<JsonValue>, ProviderError> {
-    let mut messages = Vec::new();
+    let mut messages: Vec<JsonValue> = Vec::new();
+    let mut i = 0;
 
-    for msg in messages_in {
+    while i < messages_in.len() {
+        let msg = &messages_in[i];
         match msg {
             crate::Message::User(u) => {
                 let content = match &u.content {
@@ -448,12 +517,15 @@ fn build_anthropic_messages_from_normalized(
                         "type": "text",
                         "text": s,
                     })],
-                    crate::MessageContent::Blocks(blocks) => blocks_to_anthropic_content(blocks)?,
+                    crate::MessageContent::Blocks(blocks) => {
+                        blocks_to_anthropic_content(blocks)?
+                    }
                 };
                 messages.push(serde_json::json!({
                     "role": "user",
                     "content": content,
                 }));
+                i += 1;
             }
             crate::Message::Assistant(a) => {
                 let content = blocks_to_anthropic_content(&a.content)?;
@@ -461,17 +533,40 @@ fn build_anthropic_messages_from_normalized(
                     "role": "assistant",
                     "content": content,
                 }));
+                i += 1;
             }
             crate::Message::ToolResult(t) => {
+                // Anthropic requires consecutive tool_results to be grouped
+                // into a single user message (pi's look-ahead pattern).
+                let mut tool_results: Vec<JsonValue> = Vec::new();
                 let content = blocks_to_anthropic_content(&t.content)?;
+                tool_results.push(serde_json::json!({
+                    "type": "tool_result",
+                    "tool_use_id": t.tool_call_id,
+                    "content": content,
+                }));
+
+                // Look ahead for consecutive ToolResult messages
+                let mut j = i + 1;
+                while j < messages_in.len() {
+                    if let crate::Message::ToolResult(next_t) = &messages_in[j] {
+                        let next_content = blocks_to_anthropic_content(&next_t.content)?;
+                        tool_results.push(serde_json::json!({
+                            "type": "tool_result",
+                            "tool_use_id": next_t.tool_call_id,
+                            "content": next_content,
+                        }));
+                        j += 1;
+                    } else {
+                        break;
+                    }
+                }
+
                 messages.push(serde_json::json!({
                     "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": t.tool_call_id,
-                        "content": content,
-                    }],
+                    "content": tool_results,
                 }));
+                i = j;
             }
         }
     }
@@ -552,22 +647,24 @@ fn build_anthropic_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderErr
     Ok(serde_json::json!(items))
 }
 
-/// Parse Anthropic SSE event stream.
+/// Parse Anthropic SSE event stream (stateful across chunks).
 ///
-/// Optimizations:
-/// - Fast-line splitting via `split('\n')`.
-/// - Early exit on terminal events.
-/// - Pre-allocated events vector.
-/// - Accumulated usage tracked separately, only cloned into Done message.
-fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
+/// Unlike the old `parse_anthropic_events` which created a fresh `partial_message`
+/// per invocation, this version takes `&mut AssistantMessage` and `&mut Usage`
+/// so content accumulates correctly across HTTP chunk boundaries.
+///
+/// This matches pi's architecture where a single `output` object persists
+/// for the entire stream lifetime.
+fn parse_anthropic_events_stateful(
+    text: &str,
+    partial_message: &mut AssistantMessage,
+    accumulated_usage: &mut Usage,
+) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
-    let mut partial_message = AssistantMessage::new(Api::AnthropicMessages, "anthropic", model_id);
 
     // Pre-allocate based on data-line count
     let estimated = text.split('\n').filter(|l| l.starts_with("data: ")).count();
     events.reserve(estimated);
-
-    let mut accumulated_usage = Usage::default();
 
     for line in text.split('\n') {
         let line = line.trim_end_matches('\r');
@@ -593,10 +690,6 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
         let event_type = event.type_.as_deref();
 
         // ── Accumulate usage BEFORE the match statement ──────────────────
-        // This ensures Done events carry the latest usage snapshot.
-        // - Top-level `usage`: from `message_delta` events (output_tokens)
-        // - Nested `message.usage`: from `message_start` events (input_tokens)
-        //
         // Use max() to avoid overwriting values from earlier events with 0
         // when a later event only includes a subset of fields.
         if let Some(usage) = &event.usage {
@@ -606,7 +699,6 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
             accumulated_usage.cache_write = usage.cache_creation.max(accumulated_usage.cache_write);
             accumulated_usage.total_tokens = accumulated_usage.input + accumulated_usage.output;
         } else if let Some(msg) = &event.message {
-            // `message_start` carries usage nested inside `message`
             if let Some(usage) = &msg.usage {
                 accumulated_usage.input = usage.input_tokens.max(accumulated_usage.input);
                 accumulated_usage.output = usage.output_tokens.max(accumulated_usage.output);
@@ -625,7 +717,6 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
             }
             Some("content_block_start") => {
                 if let Some(block) = &event.content_block {
-                    // Use block-level index if present, fall back to event-level index
                     let idx = block.index.or(event.index).unwrap_or(0);
                     match block.type_.as_deref() {
                         Some("text") => {
@@ -648,12 +739,6 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                                 partial: partial_message.clone(),
                             });
                         }
-                        // Server-side tool results arrive whole in
-                        // content_block_start (no streaming delta).
-                        // Anthropic executes the tool and inlines the
-                        // structured result into the assistant turn.
-                        // We emit ToolCallEnd with the result so the agent
-                        // loop can store it for round-trip continuity.
                         Some(t) if t.ends_with("_tool_result") => {
                             let name = match t {
                                 "web_search_tool_result" => Some("web_search".to_string()),
@@ -707,7 +792,6 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                         }
                         Some("thinking_delta") => {
                             if let Some(text) = &delta.thinking {
-                                // Accumulate into partial_message
                                 let last_think_idx = partial_message
                                     .content
                                     .iter()
@@ -739,14 +823,9 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
                                 });
                             }
                         }
-                        // signature_delta — Anthropic extended thinking sends a signature
-                        // at the end of each thinking block for session continuity.
-                        // We emit it as a ThinkingEnd event so callers can persist it.
                         Some("signature_delta") => {
                             if let Some(_sig) = &delta.signature {
-                                // The signature is for session continuity; we track it
-                                // but don't need to emit a separate event for basic usage.
-                                // Advanced usage would store this in ThinkingContent.
+                                // Signature for session continuity
                             }
                         }
                         _ => {}
@@ -756,9 +835,12 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
             Some("message_delta") => {
                 if let Some(delta) = &event.delta {
                     let reason = match delta.stop_reason.as_deref() {
-                        Some("end_turn") => StopReason::Stop,
+                        Some("end_turn") | Some("stop_sequence") | Some("pause_turn") => {
+                            StopReason::Stop
+                        }
                         Some("max_tokens") => StopReason::Length,
-                        Some("stop_sequence") => StopReason::Stop,
+                        Some("tool_use") => StopReason::ToolUse,
+                        Some("refusal") | Some("sensitive") => StopReason::Error,
                         _ => StopReason::Stop,
                     };
 
@@ -778,6 +860,15 @@ fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
     }
 
     events
+}
+
+/// Test-friendly wrapper that creates fresh state for a single-chunk parse.
+/// Used by unit tests that pass complete SSE streams in one go.
+#[cfg(test)]
+fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
+    let mut partial = AssistantMessage::new(Api::AnthropicMessages, "anthropic", model_id);
+    let mut usage = Usage::default();
+    parse_anthropic_events_stateful(text, &mut partial, &mut usage)
 }
 
 /// Create error assistant message
@@ -1185,5 +1276,111 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    // ── Stateful multi-chunk parsing ────────────────────────────────────
+
+    /// Simulate how bytes_stream + scan works: parse two chunks with a
+    /// shared partial_message and verify content survives across chunks.
+    #[test]
+    fn parse_stateful_across_two_chunks() {
+        let chunk1 = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Let me\"}}\n",
+            "\n"
+        );
+        let chunk2 = concat!(
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" think.\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\" world\"}}\n",
+            "\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n",
+            "\n"
+        );
+
+        // State persists across chunks (mimics scan() state)
+        let mut partial = AssistantMessage::new(Api::AnthropicMessages, "anthropic", MODEL);
+        let mut usage = Usage::default();
+
+        let events1 = parse_anthropic_events_stateful(chunk1, &mut partial, &mut usage);
+        // Start + ThinkingStart + ThinkingDelta("Let me")
+        assert_eq!(events1.len(), 3);
+
+        // CRITICAL: partial_message should have accumulated thinking content
+        assert_eq!(partial.content.len(), 1);
+        match &partial.content[0] {
+            ContentBlock::Thinking(t) => assert_eq!(t.thinking, "Let me"),
+            other => panic!("Expected Thinking block, got {:?}", other),
+        }
+
+        let events2 = parse_anthropic_events_stateful(chunk2, &mut partial, &mut usage);
+        // ThinkingDelta(" think.") + TextStart + 2×TextDelta + Done
+        assert_eq!(events2.len(), 5);
+
+        // After both chunks, partial_message has both thinking AND text
+        assert_eq!(partial.content.len(), 2);
+        match &partial.content[0] {
+            ContentBlock::Thinking(t) => assert_eq!(t.thinking, "Let me think."),
+            other => panic!("Expected Thinking block, got {:?}", other),
+        }
+        match &partial.content[1] {
+            ContentBlock::Text(t) => assert_eq!(t.text, "Hello world"),
+            other => panic!("Expected Text block, got {:?}", other),
+        }
+
+        // Done event should carry the accumulated content
+        let done = events2.iter().find_map(|e| match e {
+            ProviderEvent::Done { message, .. } => Some(message.clone()),
+            _ => None,
+        });
+        let done_msg = done.expect("Should have Done event");
+        assert_eq!(done_msg.content.len(), 2);
+    }
+
+    #[test]
+    fn parse_stateful_tool_use_across_chunks() {
+        let chunk1 = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"I should search.\"}}\n",
+            "\n"
+        );
+        let chunk2 = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_1\",\"name\":\"search\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"rust\\\"}\"}}\n",
+            "\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n",
+            "\n"
+        );
+
+        let mut partial = AssistantMessage::new(Api::AnthropicMessages, "anthropic", MODEL);
+        let mut usage = Usage::default();
+
+        let events1 = parse_anthropic_events_stateful(chunk1, &mut partial, &mut usage);
+        assert_eq!(events1.len(), 3); // Start + ThinkingStart + ThinkingDelta
+
+        // Thinking persists into chunk2
+        assert_eq!(partial.content.len(), 1);
+
+        let events2 = parse_anthropic_events_stateful(chunk2, &mut partial, &mut usage);
+        // ToolCallStart + ToolCallDelta + Done
+        assert_eq!(events2.len(), 3);
+
+        // Done should have ToolUse stop reason
+        let done = events2.iter().find_map(|e| match e {
+            ProviderEvent::Done { reason, .. } => Some(reason.clone()),
+            _ => None,
+        });
+        assert_eq!(done, Some(StopReason::ToolUse));
     }
 }

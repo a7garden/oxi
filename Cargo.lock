@@ -3672,6 +3672,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
+name = "oxi"
+version = "0.23.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "async-trait",
+ "base64",
+ "chrono",
+ "clap",
+ "crossterm 0.28.1",
+ "dirs",
+ "extism",
+ "flate2",
+ "futures",
+ "image",
+ "lazy_static",
+ "libc",
+ "libloading",
+ "notify",
+ "once_cell",
+ "oxi-agent",
+ "oxi-ai",
+ "oxi-sdk",
+ "oxi-store",
+ "oxi-tui",
+ "parking_lot",
+ "predicates",
+ "rand 0.8.6",
+ "ratatui",
+ "regex",
+ "reqwest",
+ "semver",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "unicode-width",
+ "url",
+ "urlencoding",
+ "uuid",
+ "zip",
+]
+
+[[package]]
 name = "oxi-agent"
 version = "0.23.0"
 dependencies = [
@@ -3737,57 +3788,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
-]
-
-[[package]]
-name = "oxi-cli"
-version = "0.23.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "async-trait",
- "base64",
- "chrono",
- "clap",
- "crossterm 0.28.1",
- "dirs",
- "extism",
- "flate2",
- "futures",
- "image",
- "lazy_static",
- "libc",
- "libloading",
- "notify",
- "once_cell",
- "oxi-agent",
- "oxi-ai",
- "oxi-sdk",
- "oxi-store",
- "oxi-tui",
- "parking_lot",
- "predicates",
- "rand 0.8.6",
- "ratatui",
- "regex",
- "reqwest",
- "semver",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "tar",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "tracing-subscriber",
- "unicode-width",
- "url",
- "urlencoding",
- "uuid",
- "zip",
 ]
 
 [[package]]

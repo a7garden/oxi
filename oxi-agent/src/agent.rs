@@ -73,6 +73,25 @@ impl Clone for AgentInner {
 ///
 /// [`continue_with`]: Agent::continue_with
 /// [`run_tokio_stream`]: Agent::run_tokio_stream
+/// Deferred model switch request, stored when the agent is running.
+struct PendingModelSwitch {
+    model_id: String,
+    provider: Arc<dyn Provider>,
+    /// Whether messages need cross-provider transformation.
+    needs_transform: bool,
+    old_api: oxi_ai::Api,
+    new_api: oxi_ai::Api,
+}
+
+/// Agent runtime.
+///
+/// Manages provider, tool registry, state, and compaction, providing an
+/// agentic loop for prompt execution, model switching, tool calls, and fallback.
+///
+/// Supports session continuation, tokio-native event streaming, and deferred
+/// model switching (changes are queued while a loop is running and applied
+/// after it completes).
+#[allow(missing_docs)]
 pub struct Agent {
     inner: RwLock<AgentInner>,
     tools: Arc<ToolRegistry>,
@@ -87,6 +106,9 @@ pub struct Agent {
     /// Shared cancellation flag. Set by `cancel()` (e.g. on Ctrl+C),
     /// propagated to AgentLoop's `external_stop` during each run.
     cancel_flag: Arc<AtomicBool>,
+    /// Pending model switch — stored when the agent is running,
+    /// applied after the current loop completes.
+    pending_model_switch: RwLock<Option<PendingModelSwitch>>,
 }
 
 impl Agent {
@@ -144,6 +166,7 @@ impl Agent {
             is_running: AtomicBool::new(false),
             resolver,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            pending_model_switch: RwLock::new(None),
         }
     }
 
@@ -179,15 +202,19 @@ impl Agent {
 
     /// Switch the model used for future LLM calls.
     ///
+    /// Switch model mid-conversation.
+    ///
+    /// If the agent is currently running, the switch is deferred: the new
+    /// model and provider are stored in `pending_model_switch` and applied
+    /// automatically when the current loop finishes. This ensures the
+    /// running loop completes with a consistent provider/model without
+    /// interruption.
+    ///
+    /// If the agent is idle, the switch takes effect immediately.
+    ///
     /// If the new model uses a different provider API, the conversation
     /// history is automatically transformed for cross-provider compatibility
     /// (e.g. thinking blocks are converted to `<thinking>` tags).
-    ///
-    /// # Arguments
-    /// * `model_id` - New model ID in `provider/model` format
-    ///
-    /// # Returns
-    /// Switch model mid-conversation.
     ///
     /// # Arguments
     /// * `model_id` - New model ID in `provider/model` format
@@ -207,24 +234,47 @@ impl Agent {
             .resolve_provider(&new_model.provider)
             .ok_or_else(|| Error::msg(format!("Provider '{}' not found", new_model.provider)))?;
 
-        // Detect API change and transform messages if needed
-        {
+        // Detect API change
+        let (old_api, needs_transform) = {
             let inner = self.config();
-            let old_model_id = &inner.config.model_id;
             let old_api = self
                 .resolver
-                .resolve_model(old_model_id)
+                .resolve_model(&inner.config.model_id)
                 .map(|m| m.api)
                 .unwrap_or(oxi_ai::Api::AnthropicMessages);
+            (old_api, old_api != new_model.api)
+        };
 
-            if old_api != new_model.api {
-                // Transform existing messages for the new provider
-                let messages = self.state.get_state().messages.clone();
-                let transformed = transform_for_provider(&messages, &old_api, &new_model.api);
-                self.state.update(|s| {
-                    s.replace_messages(transformed);
-                });
+        // If the agent is currently running, defer the switch.
+        if self.is_running.load(Ordering::SeqCst) {
+            tracing::info!(
+                "[AGENT] Agent running, deferring model switch to '{}' until loop completes",
+                model_id
+            );
+            *self.pending_model_switch.write() = Some(PendingModelSwitch {
+                model_id: model_id.to_string(),
+                provider: new_provider,
+                needs_transform,
+                old_api,
+                new_api: new_model.api,
+            });
+            // Update config immediately so model_id() returns the new value,
+            // but leave provider unchanged so the running loop keeps its provider.
+            {
+                let mut inner = self.inner_mut();
+                inner.config.model_id = model_id.to_string();
+                inner.config.api_key = api_key;
             }
+            return Ok(());
+        }
+
+        // Agent is idle — apply immediately.
+        if needs_transform {
+            let messages = self.state.get_state().messages.clone();
+            let transformed = transform_for_provider(&messages, &old_api, &new_model.api);
+            self.state.update(|s| {
+                s.replace_messages(transformed);
+            });
         }
 
         // Update config and provider atomically
@@ -240,6 +290,11 @@ impl Agent {
     ///
     /// This is useful when the caller has already looked up the model
     /// and optionally created the provider.
+    ///
+    /// Like [`switch_model`], if the agent is currently running, the switch
+    /// is deferred until the current loop completes.
+    ///
+    /// [`switch_model`]: Agent::switch_model
     pub fn switch_to_model(&self, model: &oxi_ai::Model, api_key: Option<String>) -> Result<()> {
         let model_id = format!("{}/{}", model.provider, model.id);
         let new_provider = self
@@ -247,22 +302,43 @@ impl Agent {
             .resolve_provider(&model.provider)
             .ok_or_else(|| Error::msg(format!("Provider '{}' not found", model.provider)))?;
 
-        // Detect API change and transform messages if needed
-        {
+        // Detect API change
+        let (old_api, needs_transform) = {
             let inner = self.config();
             let old_api = self
                 .resolver
                 .resolve_model(&inner.config.model_id)
                 .map(|m| m.api)
                 .unwrap_or(oxi_ai::Api::AnthropicMessages);
+            (old_api, old_api != model.api)
+        };
 
-            if old_api != model.api {
-                let messages = self.state.get_state().messages.clone();
-                let transformed = transform_for_provider(&messages, &old_api, &model.api);
-                self.state.update(|s| {
-                    s.replace_messages(transformed);
-                });
-            }
+        // If the agent is currently running, defer the switch.
+        if self.is_running.load(Ordering::SeqCst) {
+            tracing::info!(
+                "[AGENT] Agent running, deferring model switch to '{}' until loop completes",
+                model_id
+            );
+            *self.pending_model_switch.write() = Some(PendingModelSwitch {
+                model_id: model_id.clone(),
+                provider: new_provider,
+                needs_transform,
+                old_api,
+                new_api: model.api,
+            });
+            let mut inner = self.inner_mut();
+            inner.config.model_id = model_id;
+            inner.config.api_key = api_key;
+            return Ok(());
+        }
+
+        // Agent is idle — apply immediately.
+        if needs_transform {
+            let messages = self.state.get_state().messages.clone();
+            let transformed = transform_for_provider(&messages, &old_api, &model.api);
+            self.state.update(|s| {
+                s.replace_messages(transformed);
+            });
         }
 
         let mut inner = self.inner_mut();
@@ -568,6 +644,11 @@ impl Agent {
                     *s = loop_state;
                 });
 
+                // Apply any pending model switch that was deferred during the run.
+                // This transforms messages (if cross-provider) and swaps the provider
+                // so the next run uses the new model.
+                self.apply_pending_model_switch();
+
                 // Extract final response text from state
                 let state = self.state.get_state();
                 let final_text = state
@@ -590,7 +671,12 @@ impl Agent {
                     stop_reason,
                 })
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                // Apply pending model switch even on error so the next run
+                // uses the new model.
+                self.apply_pending_model_switch();
+                Err(e)
+            }
         }
     }
 
@@ -616,6 +702,37 @@ impl Agent {
     /// Reset the cancellation flag before starting a new run.
     pub fn reset_cancel(&self) {
         self.cancel_flag.store(false, Ordering::SeqCst);
+    }
+
+    /// Apply any pending model switch that was deferred during a running loop.
+    ///
+    /// Called after `run_with_channel_inner` completes (success or error).
+    /// Transforms messages for cross-provider switches and swaps the provider
+    /// so the next run uses the new model.
+    fn apply_pending_model_switch(&self) {
+        let pending = self.pending_model_switch.write().take();
+        if let Some(pending) = pending {
+            tracing::info!(
+                "[AGENT] Applying deferred model switch to '{}' (transform={})",
+                pending.model_id,
+                pending.needs_transform
+            );
+
+            // Transform messages if cross-provider
+            if pending.needs_transform {
+                let messages = self.state.get_state().messages.clone();
+                let transformed =
+                    transform_for_provider(&messages, &pending.old_api, &pending.new_api);
+                self.state.update(|s| {
+                    s.replace_messages(transformed);
+                });
+            }
+
+            // Swap the provider
+            let mut inner = self.inner_mut();
+            inner.provider = pending.provider;
+            // model_id was already updated in switch_model()
+        }
     }
 
     /// Run the agent, invoking `on_event` for each [`AgentEvent`] produced.
