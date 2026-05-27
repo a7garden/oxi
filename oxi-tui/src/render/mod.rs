@@ -6,6 +6,7 @@
 
 pub mod ansi;
 pub mod diff;
+pub mod image;
 pub mod terminal;
 
 use std::fmt;
