@@ -3893,6 +3893,7 @@ version = "0.23.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "dirs",
  "fastrand",
  "futures",
  "oxi-agent",
@@ -3900,6 +3901,7 @@ dependencies = [
  "parking_lot",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

@@ -7,6 +7,7 @@
 //! ```
 
 pub use crate::agent_builder::AgentBuilder;
+pub use crate::agent_definition::{AgentDefinition, AgentDiscovery, AgentScope, DefaultContext};
 pub use crate::builder::{Oxi, OxiBuilder};
 pub use crate::multi_provider::{MultiProviderBuilder, RoutingConfig};
 pub use crate::tool_factory::{browsing_tools, coding_tools, full_tools, readonly_tools};
@@ -58,6 +59,9 @@ pub use crate::coordination::{
     Consensus, CoordinatedGroup, MemoryKey, SharedMemory, VoteResult, WorkQueue, WorkResult,
     WorkStatus,
 };
+
+// ── Workflow DSL ────────────────────────────────────────────────────────
+pub use crate::workflow_dsl::{WorkflowDefinition, WorkflowStepDef};
 
 // ── Runtime routing control ──────────────────────────────────────────────
 pub use crate::routing::RoutingControl;

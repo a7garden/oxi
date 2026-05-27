@@ -13,6 +13,7 @@
 //! ```
 
 pub mod agent_builder;
+pub mod agent_definition;
 pub mod agent_group;
 pub mod builder;
 pub mod closure_tool;
@@ -29,6 +30,7 @@ pub mod prelude;
 pub mod routing;
 pub mod security;
 pub mod tool_factory;
+pub mod workflow_dsl;
 
 // Re-export core SDK types
 pub use agent_builder::AgentBuilder;
