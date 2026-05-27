@@ -341,6 +341,8 @@ pub(crate) struct AppState {
     /// Component-based overlay (takes priority over AppOverlay variants for
     /// ModelSelect, LogoutSelect, ResumeSelect). Migrated from AppOverlay.
     pub overlay_state: Option<Box<dyn super::overlay::OverlayComponent>>,
+    /// Keybinding manager — maps keys to actions.
+    pub keybindings: oxi_tui::keybindings::KeybindingsManager,
     /// WASM extension manager for dynamic commands
     pub wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
     /// Session file path for the current session
@@ -400,6 +402,7 @@ impl AppState {
             message_count: 0,
             overlay: None,
             overlay_state: None,
+            keybindings: oxi_tui::keybindings::KeybindingsManager::new(),
             wasm_ext: None,
             session_file_path: None,
             next_action: None,

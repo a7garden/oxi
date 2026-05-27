@@ -195,6 +195,26 @@ impl InputState {
     pub fn redo(&mut self) {
         self.textarea.redo();
     }
+
+    /// Delete from cursor to the start of the line (Ctrl+U).
+    pub fn delete_to_line_start(&mut self) {
+        self.textarea.delete_line_by_head();
+    }
+
+    /// Delete from cursor to the end of the line (Ctrl+K).
+    pub fn delete_to_line_end(&mut self) {
+        self.textarea.delete_line_by_end();
+    }
+
+    /// Delete word before cursor (Ctrl+W / Ctrl+Backspace).
+    pub fn delete_word_backward(&mut self) {
+        self.textarea.delete_word();
+    }
+
+    /// Delete word after cursor (Ctrl+Delete).
+    pub fn delete_word_forward(&mut self) {
+        self.textarea.delete_next_word();
+    }
 }
 
 // ---------------------------------------------------------------------------

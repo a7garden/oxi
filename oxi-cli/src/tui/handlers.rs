@@ -90,89 +90,194 @@ async fn handle_key(
         return None;
     }
 
-    // Ctrl+Q: toggle queue panel
-    if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
-        state.queue_panel_visible = !state.queue_panel_visible;
-        if state.queue_panel_visible {
-            state.queue_panel_selected = state.steering_messages_snapshot.len().saturating_sub(1);
-        }
-        return None;
-    }
-
     // When queue panel is visible and has items, intercept navigation keys
     if state.queue_panel_visible && !state.steering_messages_snapshot.is_empty() {
-        match key.code {
-            KeyCode::Up if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if state.queue_panel_selected > 0 {
-                    state.queue_panel_selected -= 1;
-                }
-                return None;
-            }
-            KeyCode::Down if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if state.queue_panel_selected < state.steering_messages_snapshot.len() - 1 {
-                    state.queue_panel_selected += 1;
-                }
-                return None;
-            }
-            KeyCode::Delete | KeyCode::Char('d')
-                if !key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
-                // Remove selected item from queue
-                let idx = state.queue_panel_selected;
-                let removed = remove_from_steering_queue(session, idx);
-                if let Some(msg) = removed {
-                    let preview: String = msg.chars().take(40).collect();
-                    state.add_system_message(format!("Removed: {}", preview));
-                }
-                // Refresh snapshot
-                let msgs = session.steering_messages();
-                let fq = session.follow_up_messages();
-                let pending = msgs.len() + fq.len();
-                let mut all = msgs;
-                all.extend(fq);
-                state.pending_steering = pending;
-                state.steering_messages_snapshot = all;
-                if state.queue_panel_selected >= state.steering_messages_snapshot.len() {
-                    state.queue_panel_selected =
-                        state.steering_messages_snapshot.len().saturating_sub(1);
-                }
-                return None;
-            }
-            KeyCode::Char('e') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                // Edit: take selected item out of queue and put into input
-                let idx = state.queue_panel_selected;
-                let removed = remove_from_steering_queue(session, idx);
-                if let Some(msg) = removed {
-                    state.input_set_text(msg);
-                }
-                let msgs = session.steering_messages();
-                let fq = session.follow_up_messages();
-                let pending = msgs.len() + fq.len();
-                let mut all = msgs;
-                all.extend(fq);
-                state.pending_steering = pending;
-                state.steering_messages_snapshot = all;
-                state.queue_panel_selected =
-                    state.steering_messages_snapshot.len().saturating_sub(1);
-                state.queue_panel_visible = false;
-                return None;
-            }
-            KeyCode::Esc => {
-                state.queue_panel_visible = false;
-                return None;
-            }
-            _ => {} // fall through to normal handling
+        if let Some(action) = handle_queue_panel_key(key, state, session) {
+            return action;
         }
     }
 
-    match key.code {
-        KeyCode::Enter => {
-            let value = state.input_value().to_string();
-            if value.is_empty() {
-                return None;
-            }
+    use oxi_tui::keybindings::keys::KeyId;
+    let key_id = KeyId::from(key);
 
-            // Slash command popup
+    // Try keybinding lookup first
+    if let Some(action) = state.keybindings.match_action(&key_id) {
+        return dispatch_action(action, key, state, session, ui_tx, running).await;
+    }
+
+    // Fallback: printable character (no binding match)
+    if !key_id.ctrl && !key_id.alt && !key_id.super_ {
+        if let oxi_tui::keybindings::keys::BaseKey::Char(c) = key_id.base {
+            state.input.insert_char(c);
+            state.update_slash_completions();
+        }
+    }
+    None
+}
+
+/// Handle key events when the queue panel is visible.
+/// Returns Some(action) if the key was consumed, None to fall through.
+fn handle_queue_panel_key(
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    session: &AgentSession,
+) -> Option<Option<Action>> {
+    match key.code {
+        KeyCode::Up if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if state.queue_panel_selected > 0 {
+                state.queue_panel_selected -= 1;
+            }
+            Some(None)
+        }
+        KeyCode::Down if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if state.queue_panel_selected < state.steering_messages_snapshot.len() - 1 {
+                state.queue_panel_selected += 1;
+            }
+            Some(None)
+        }
+        KeyCode::Delete | KeyCode::Char('d') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let idx = state.queue_panel_selected;
+            let removed = remove_from_steering_queue(session, idx);
+            if let Some(msg) = removed {
+                let preview: String = msg.chars().take(40).collect();
+                state.add_system_message(format!("Removed: {}", preview));
+            }
+            refresh_queue_snapshot(state, session);
+            Some(None)
+        }
+        KeyCode::Char('e') if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let idx = state.queue_panel_selected;
+            let removed = remove_from_steering_queue(session, idx);
+            if let Some(msg) = removed {
+                state.input_set_text(msg);
+            }
+            refresh_queue_snapshot(state, session);
+            state.queue_panel_selected = state.steering_messages_snapshot.len().saturating_sub(1);
+            state.queue_panel_visible = false;
+            Some(None)
+        }
+        KeyCode::Esc => {
+            state.queue_panel_visible = false;
+            Some(None)
+        }
+        _ => None, // Fall through to normal keybinding handling
+    }
+}
+
+/// Refresh the queue panel snapshot from the session.
+fn refresh_queue_snapshot(state: &mut AppState, session: &AgentSession) {
+    let msgs = session.steering_messages();
+    let fq = session.follow_up_messages();
+    let pending = msgs.len() + fq.len();
+    let mut all = msgs;
+    all.extend(fq);
+    state.pending_steering = pending;
+    state.steering_messages_snapshot = all;
+    if state.queue_panel_selected >= state.steering_messages_snapshot.len() {
+        state.queue_panel_selected = state.steering_messages_snapshot.len().saturating_sub(1);
+    }
+}
+
+/// Dispatch a resolved keybinding action.
+async fn dispatch_action(
+    action: oxi_tui::keybindings::registry::Action,
+    key: crossterm::event::KeyEvent,
+    state: &mut AppState,
+    session: &AgentSession,
+    ui_tx: &mpsc::UnboundedSender<UiEvent>,
+    running: &mut bool,
+) -> Option<Action> {
+    use oxi_tui::keybindings::registry::Action as KAction;
+
+    match action {
+        // ── Submit ────────────────────────────────────────────
+        KAction::Submit => handle_submit(state, session, running, ui_tx).await,
+
+        // ── Quit ──────────────────────────────────────────────
+        KAction::Quit => {
+            tracing::debug!("[TUI-Handler] Ctrl+C setting running = false");
+            *running = false;
+            session.agent_ref().cancel();
+            session.abort_compaction_sync();
+            tracing::debug!("[TUI-Handler] Ctrl+C done, running = {}", *running);
+            None
+        }
+
+        // ── Cancel ────────────────────────────────────────────
+        KAction::Cancel => {
+            // Compaction cancel takes priority
+            if state.footer_state.data.is_compacting {
+                session.abort_compaction_sync();
+                state.footer_state.data.is_compacting = false;
+                state.add_system_message("Compaction cancelled".to_string());
+            } else if state.slash_completion_active {
+                state.clear_slash_completions();
+            }
+            None
+        }
+
+        // ── Editor navigation ─────────────────────────────────
+        KAction::CursorLeft => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                state.input.move_word_left();
+            } else {
+                state.input.move_left();
+            }
+            None
+        }
+        KAction::CursorRight => {
+            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                state.input.move_word_right();
+            } else {
+                state.input.move_right();
+            }
+            None
+        }
+        KAction::CursorWordLeft => {
+            state.input.move_word_left();
+            None
+        }
+        KAction::CursorWordRight => {
+            state.input.move_word_right();
+            None
+        }
+        KAction::CursorLineStart => {
+            state.input.move_home();
+            None
+        }
+        KAction::CursorLineEnd => {
+            state.input.move_end();
+            None
+        }
+
+        // ── Editor editing ────────────────────────────────────
+        KAction::DeleteCharBackward => {
+            state.input.backspace();
+            state.update_slash_completions();
+            None
+        }
+        KAction::DeleteCharForward => {
+            state.input.delete();
+            state.update_slash_completions();
+            None
+        }
+        KAction::DeleteToLineStart => {
+            state.input.delete_to_line_start();
+            state.update_slash_completions();
+            None
+        }
+        KAction::DeleteToLineEnd => {
+            state.input.delete_to_line_end();
+            state.update_slash_completions();
+            None
+        }
+        KAction::Undo => {
+            state.input.undo();
+            None
+        }
+
+        // ── Tab / Completion ──────────────────────────────────
+        KAction::Tab => {
             if state.slash_completion_active {
                 let cmd = state.selected_slash_command().map(|c| c.name.clone());
                 state.clear_slash_completions();
@@ -180,67 +285,60 @@ async fn handle_key(
                 if let Some(cmd) = cmd {
                     return Some(Action::ExecuteSlashCommand(cmd));
                 }
-                return None;
             }
-
-            // Slash command in input
-            if value.starts_with('/') {
-                let handled = slash::handle_slash_command(&value, session, state, running, ui_tx);
-                state.input_clear();
-                if handled {
-                    return None;
-                }
-            }
-
-            if state.is_agent_busy {
-                // Agent busy — queue as steering message
-                state.add_system_message(format!(
-                    "Queued: {}",
-                    value.chars().take(50).collect::<String>()
-                ));
-                state.input_history.insert(0, value.clone());
-                if state.input_history.len() > 100 {
-                    state.input_history.remove(0);
-                }
-                state.history_index = 0;
-                session.steer_sync(value.clone());
-                // Track locally — the agent will drain the session queue
-                // but we keep this snapshot for UI display until consumed.
-                state.steering_messages_snapshot.push(value);
-                state.pending_steering = state.steering_messages_snapshot.len();
-                state.input_clear();
-                return None;
-            }
-
-            // Not busy — send directly
-            Some(Action::SendPrompt(value))
-        }
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            tracing::debug!("[TUI-Handler] Ctrl+C setting running = false");
-            *running = false;
-            // Cancel the agent's active stream so it doesn't block cleanup.
-            // Without this, the spawned agent task inside the worker thread
-            // keeps waiting for LLM tokens, causing the app to hang on exit.
-            session.agent_ref().cancel();
-            session.abort_compaction_sync();
-            tracing::debug!("[TUI-Handler] Ctrl+C done, running = {}", *running);
             None
         }
-        // Escape during compaction → cancel compaction
-        KeyCode::Esc if state.footer_state.data.is_compacting => {
-            session.abort_compaction_sync();
-            state.footer_state.data.is_compacting = false;
-            state.add_system_message("Compaction cancelled".to_string());
+
+        // ── Cycle thinking ────────────────────────────────────
+        KAction::CycleThinking => {
+            if !state.slash_completion_active {
+                if let Some(next_level) = session.cycle_thinking_level() {
+                    state.footer_state.data.thinking_level =
+                        Some(format!("{:?}", next_level).to_lowercase());
+                    state.add_system_message(format!("Thinking: {:?}", next_level));
+                }
+            }
             None
         }
-        KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+
+        // ── View scrolling ────────────────────────────────────
+        KAction::ScrollUp => {
+            // Conditional: if input empty + has history → history up, else scroll
+            if state.slash_completion_active {
+                state.prev_slash_completion();
+            } else if state.input.text().is_empty() && !state.input_history.is_empty() {
+                navigate_history_up(state);
+            } else {
+                state.scroll_up(3);
+            }
+            None
+        }
+        KAction::ScrollDown => {
+            if state.slash_completion_active {
+                state.next_slash_completion();
+            } else if state.history_index > 0 {
+                navigate_history_down(state);
+            } else {
+                state.scroll_down(3);
+            }
+            None
+        }
+        KAction::ScrollPageUp => {
+            state.scroll_up(10);
+            None
+        }
+        KAction::ScrollPageDown => {
+            state.scroll_down(10);
+            None
+        }
+
+        // ── App actions ───────────────────────────────────────
+        KAction::OpenImage => {
             open_last_image(state);
             None
         }
-        // Ctrl+R: toggle routing status panel
-        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+        KAction::ToggleRouting => {
             state.overlay_state = None;
-
             let snap = oxi_ai::router::RouterProvider::get_snapshot();
             let data = if let Some(ref s) = snap {
                 use oxi_tui::widgets::routing::{ProviderHealth, ProviderInfo, RoutingStatusData};
@@ -259,33 +357,18 @@ async fn handle_key(
             } else {
                 oxi_tui::widgets::routing::RoutingStatusData::default()
             };
-
             state.overlay_state = Some(super::overlay::factories::routing_status(data));
-
             None
         }
-        // Shift+Tab: cycle thinking level
-        KeyCode::BackTab => {
-            if state.slash_completion_active {
-                return None;
-            }
-            if let Some(next_level) = session.cycle_thinking_level() {
-                state.footer_state.data.thinking_level =
-                    Some(format!("{:?}", next_level).to_lowercase());
-                state.add_system_message(format!("Thinking: {:?}", next_level));
+        KAction::ToggleQueue => {
+            state.queue_panel_visible = !state.queue_panel_visible;
+            if state.queue_panel_visible {
+                state.queue_panel_selected =
+                    state.steering_messages_snapshot.len().saturating_sub(1);
             }
             None
         }
-        KeyCode::PageUp => {
-            state.scroll_up(10);
-            None
-        }
-        KeyCode::PageDown => {
-            state.scroll_down(10);
-            None
-        }
-        KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            // Ctrl+Y: copy last code block to clipboard
+        KAction::CopyCodeBlock => {
             if let Some(ref code) = state.chat.last_code_block {
                 match clipboard_write::copy_to_clipboard(code) {
                     Ok(()) => state.add_system_message("\u{2713} Code block copied".to_string()),
@@ -296,97 +379,97 @@ async fn handle_key(
             }
             None
         }
-        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-            state.input.insert_char(c);
-            state.update_slash_completions();
-            None
-        }
-        KeyCode::Backspace => {
-            state.input.backspace();
-            state.update_slash_completions();
-            None
-        }
-        KeyCode::Delete => {
-            state.input.delete();
-            state.update_slash_completions();
-            None
-        }
-        KeyCode::Left => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                state.input.move_word_left();
-            } else {
-                state.input.move_left();
-            }
-            None
-        }
-        KeyCode::Right => {
-            if key.modifiers.contains(KeyModifiers::CONTROL) {
-                state.input.move_word_right();
-            } else {
-                state.input.move_right();
-            }
-            None
-        }
-        KeyCode::Home => {
-            state.input.move_home();
-            None
-        }
-        KeyCode::End => {
-            state.input.move_end();
-            None
-        }
-        KeyCode::Tab => {
-            if state.slash_completion_active {
-                let cmd = state.selected_slash_command().map(|c| c.name.clone());
-                state.clear_slash_completions();
-                state.input_clear();
-                if let Some(cmd) = cmd {
-                    return Some(Action::ExecuteSlashCommand(cmd));
-                }
-            }
-            None
-        }
-        KeyCode::Up => {
-            if state.slash_completion_active {
-                state.prev_slash_completion();
-            } else if state.input.text().is_empty() && !state.input_history.is_empty() {
-                if state.history_index == 0 {
-                    state.saved_input = state.input.text();
-                }
-                if state.history_index < state.input_history.len() {
-                    state.history_index += 1;
-                    state.input_set_text(state.input_history[state.history_index - 1].clone());
-                    state.clear_slash_completions();
-                }
-            } else {
-                state.scroll_up(3);
-            }
-            None
-        }
-        KeyCode::Down => {
-            if state.slash_completion_active {
-                state.next_slash_completion();
-            } else if state.history_index > 0 {
-                state.history_index -= 1;
-                if state.history_index == 0 {
-                    state.input_set_text(state.saved_input.clone());
-                } else {
-                    state.input_set_text(state.input_history[state.history_index - 1].clone());
-                }
-                state.clear_slash_completions();
-            } else {
-                state.scroll_down(3);
-            }
-            None
-        }
-        KeyCode::Esc => {
-            if state.slash_completion_active {
-                state.clear_slash_completions();
-            }
-            None
-        }
-        _ => None,
+
+        // ── Actions not bound in main input mode ──────────────
+        KAction::OpenModelSelect
+        | KAction::OpenProviderSetup
+        | KAction::NewLine
+        | KAction::DeleteWordBackward
+        | KAction::DeleteWordForward
+        | KAction::HistoryUp
+        | KAction::HistoryDown
+        | KAction::CompletionNext
+        | KAction::CompletionPrev
+        | KAction::CompletionDismiss
+        | KAction::CompletionAccept => None,
     }
+}
+
+/// Handle the Submit action (Enter key).
+async fn handle_submit(
+    state: &mut AppState,
+    session: &AgentSession,
+    running: &mut bool,
+    ui_tx: &mpsc::UnboundedSender<UiEvent>,
+) -> Option<Action> {
+    let value = state.input_value().to_string();
+    if value.is_empty() {
+        return None;
+    }
+
+    // Slash command popup
+    if state.slash_completion_active {
+        let cmd = state.selected_slash_command().map(|c| c.name.clone());
+        state.clear_slash_completions();
+        state.input_clear();
+        if let Some(cmd) = cmd {
+            return Some(Action::ExecuteSlashCommand(cmd));
+        }
+        return None;
+    }
+
+    // Slash command in input
+    if value.starts_with('/') {
+        let handled = slash::handle_slash_command(&value, session, state, running, ui_tx);
+        state.input_clear();
+        if handled {
+            return None;
+        }
+    }
+
+    if state.is_agent_busy {
+        // Agent busy — queue as steering message
+        state.add_system_message(format!(
+            "Queued: {}",
+            value.chars().take(50).collect::<String>()
+        ));
+        state.input_history.insert(0, value.clone());
+        if state.input_history.len() > 100 {
+            state.input_history.remove(0);
+        }
+        state.history_index = 0;
+        session.steer_sync(value.clone());
+        state.steering_messages_snapshot.push(value);
+        state.pending_steering = state.steering_messages_snapshot.len();
+        state.input_clear();
+        return None;
+    }
+
+    // Not busy — send directly
+    Some(Action::SendPrompt(value))
+}
+
+/// Navigate to previous history entry.
+fn navigate_history_up(state: &mut AppState) {
+    if state.history_index == 0 {
+        state.saved_input = state.input.text();
+    }
+    if state.history_index < state.input_history.len() {
+        state.history_index += 1;
+        state.input_set_text(state.input_history[state.history_index - 1].clone());
+        state.clear_slash_completions();
+    }
+}
+
+/// Navigate to next history entry.
+fn navigate_history_down(state: &mut AppState) {
+    state.history_index -= 1;
+    if state.history_index == 0 {
+        state.input_set_text(state.saved_input.clone());
+    } else {
+        state.input_set_text(state.input_history[state.history_index - 1].clone());
+    }
+    state.clear_slash_completions();
 }
 
 /// Handle an agent UI event.

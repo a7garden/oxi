@@ -3,6 +3,7 @@
 //! Provides a flicker-free terminal chat interface using ratatui.
 
 mod app;
+mod completion;
 mod handlers;
 mod overlay;
 mod render;

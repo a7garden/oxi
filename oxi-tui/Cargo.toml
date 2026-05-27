@@ -17,6 +17,7 @@ ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 ratatui-textarea = "0.9"
 crossterm = "0.28"
 tui-markdown = { version = "0.3", default-features = false, features = [] }
+strum = { version = "0.26", features = ["derive"] }
 
 
 # Serialization (for theme file loading)

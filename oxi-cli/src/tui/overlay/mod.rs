@@ -8,6 +8,7 @@ use crossterm::event::KeyEvent;
 use oxi_tui::Theme;
 use ratatui::{layout::Rect, Frame};
 
+pub mod anchor;
 pub mod factories;
 pub mod questionnaire;
 pub mod router_integration;
