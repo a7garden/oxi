@@ -179,13 +179,17 @@ impl OxiBuilder {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```no_run
+    /// use std::sync::Arc;
+    /// use oxi_sdk::{OxiBuilder, OpenAiProvider};
+    ///
     /// let oxi = OxiBuilder::new()
     ///     .with_builtins()
-    ///     .provider_factory("zai", || {
-    ///         let api_key = resolve_key("zai");
-    ///         let base_url = env::var("ZAI_BASE_URL").unwrap_or_default();
-    ///         Ok(Arc::new(OpenAiProvider::with_base_url_and_key(&base_url, api_key)))
+    ///     .provider_factory("custom", || {
+    ///         Ok(Arc::new(OpenAiProvider::with_base_url_and_key(
+    ///             "https://api.example.com",
+    ///             Some("key".into()),
+    ///         )))
     ///     })
     ///     .build();
     /// ```
@@ -206,11 +210,13 @@ impl OxiBuilder {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
+    /// use oxi_sdk::OxiBuilder;
+    ///
     /// let oxi = OxiBuilder::new()
     ///     .with_builtins()
-    ///     .api_key("anthropic", "sk-ant-...")
-    ///     .api_key("openai", "sk-...")
+    ///     .api_key("anthropic", "sk-ant-test-key")
+    ///     .api_key("openai", "sk-test-key")
     ///     .build();
     /// ```
     pub fn api_key(mut self, provider_name: &str, key: impl Into<String>) -> Self {
@@ -225,7 +231,9 @@ impl OxiBuilder {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
+    /// use oxi_sdk::OxiBuilder;
+    ///
     /// let oxi = OxiBuilder::new()
     ///     .with_builtins()
     ///     .base_url("openai", "https://my-proxy.example.com/v1")
@@ -243,10 +251,12 @@ impl OxiBuilder {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
+    /// use oxi_sdk::OxiBuilder;
+    ///
     /// let oxi = OxiBuilder::new()
     ///     .with_builtins()
-    ///     .credential("openai", "sk-...", Some("https://proxy.example.com/v1"))
+    ///     .credential("openai", "sk-test", Some("https://proxy.example.com/v1"))
     ///     .build();
     /// ```
     pub fn credential(
@@ -279,8 +289,8 @@ impl OxiBuilder {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use oxi_sdk::{RoutingConfig, create_builtin_provider};
+    /// ```rust
+    /// use oxi_sdk::{OxiBuilder, RoutingConfig};
     ///
     /// let oxi = OxiBuilder::new()
     ///     .with_builtins()
@@ -329,7 +339,11 @@ impl OxiBuilder {
     /// # Example
     ///
     /// ```ignore
-    /// let supervisor = oxi.supervisor()
+    /// use oxi_sdk::OxiBuilder;
+    ///
+    /// let (oxi, supervisor) = OxiBuilder::new()
+    ///     .with_builtins()
+    ///     .supervisor()
     ///     .snapshot_dir("/data/snapshots")
     ///     .build()?;
     /// ```

@@ -2,7 +2,7 @@
 //!
 //! Re-exports the most frequently used SDK types for convenient glob imports:
 //!
-//! ```ignore
+//! ```rust
 //! use oxi_sdk::prelude::*;
 //! ```
 
@@ -32,7 +32,7 @@ pub use oxi_ai::OpenAiProvider;
 pub use oxi_ai::OpenAiResponsesProvider;
 
 // ── Foundation Layer ───────────────────────────────────────────────────
-pub use crate::error::SdkError;
+pub use crate::error::{SdkError, SdkResult};
 pub use crate::lifecycle::{
     AgentHandle, AgentLifecycleEvent, AgentSnapshot, AgentStatus, AgentSupervisor,
     FileSnapshotStore, RestartBackoff, SnapshotStore, SupervisorPolicy, ToolManifest,

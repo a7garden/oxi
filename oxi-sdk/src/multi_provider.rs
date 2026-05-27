@@ -6,12 +6,10 @@
 //! # Example
 //!
 //! ```ignore
+//! // Requires provider instances — see oxi_ai::create_builtin_provider
 //! use oxi_sdk::multi_provider::{MultiProviderBuilder, RoutingConfig};
-//! use oxi_ai::create_builtin_provider;
 //!
 //! let provider = MultiProviderBuilder::new()
-//!     .provider("openai", create_builtin_provider("openai").unwrap())
-//!     .provider("anthropic", create_builtin_provider("anthropic").unwrap())
 //!     .prefer_cost_efficient()
 //!     .with_fallbacks(&["anthropic/claude-3-5-haiku-20241022"])
 //!     .build()
@@ -109,12 +107,10 @@ impl RoutingConfig {
 /// # Example
 ///
 /// ```ignore
+/// // Requires provider instances — see oxi_ai::create_builtin_provider
 /// use oxi_sdk::multi_provider::MultiProviderBuilder;
-/// use oxi_ai::create_builtin_provider;
 ///
 /// let provider = MultiProviderBuilder::new()
-///     .provider("openai", create_builtin_provider("openai").unwrap())
-///     .provider("anthropic", create_builtin_provider("anthropic").unwrap())
 ///     .prefer_cost_efficient()
 ///     .enable_auto_routing()
 ///     .build()
@@ -163,7 +159,8 @@ impl MultiProviderBuilder {
     /// # Example
     ///
     /// ```ignore
-    /// let provider = MultiProviderBuilder::new()
+    /// // Requires Arc<dyn Provider> instances
+    /// let provider = builder
     ///     .provider("openai", openai_provider)
     ///     .provider("anthropic", anthropic_provider)
     ///     .build()?;
@@ -183,11 +180,14 @@ impl MultiProviderBuilder {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// builder.with_fallbacks(&[
-    ///     "anthropic/claude-3-5-haiku-20241022",
-    ///     "openai/gpt-4o-mini",
-    /// ])
+    /// ```rust
+    /// use oxi_sdk::multi_provider::MultiProviderBuilder;
+    ///
+    /// let builder = MultiProviderBuilder::new()
+    ///     .with_fallbacks(&[
+    ///         "anthropic/claude-3-5-haiku-20241022",
+    ///         "openai/gpt-4o-mini",
+    ///     ]);
     /// ```
     pub fn with_fallbacks(self, ids: &[&str]) -> Self {
         let fallback = FallbackChain::from_ids(ids).unwrap_or_else(|_| FallbackChain::default());
@@ -241,14 +241,13 @@ impl MultiProviderBuilder {
     ///
     /// # Example
     ///
-    /// ```ignore
-    /// use oxi_ai::circuit_breaker::CircuitBreakerConfig;
+    /// ```rust
+    /// use oxi_sdk::CircuitBreakerConfig;
     ///
-    /// builder.with_circuit_breaker(CircuitBreakerConfig {
+    /// let config = CircuitBreakerConfig {
     ///     failure_threshold: 5,
-    ///     recovery_timeout_secs: 30,
     ///     ..Default::default()
-    /// })
+    /// };
     /// ```
     pub fn with_circuit_breaker(mut self, config: CircuitBreakerConfig) -> Self {
         self.config.circuit_breaker = config;

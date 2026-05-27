@@ -128,16 +128,20 @@ impl<'a> AgentBuilder<'a> {
     /// Creates a [`ClosureTool`] internally.
     ///
     /// # Example
-    /// ```ignore
-    /// .custom_tool(
+    /// ```rust
+    /// use oxi_sdk::{ClosureTool, AgentToolResult};
+    ///
+    /// // custom_tool creates a tool from a closure
+    /// let tool = ClosureTool::new_sync(
     ///     "memory_recall",
     ///     "Search long-term memory",
-    ///     json!({"type": "object", "properties": {"query": {"type": "string"}}}),
+    ///     serde_json::json!({"type": "object", "properties": {"query": {"type": "string"}}}),
     ///     |params, _ctx| {
     ///         let query = params["query"].as_str().unwrap();
     ///         Ok(AgentToolResult::success(format!("Recalled: {}", query)))
     ///     },
-    /// )
+    /// );
+    /// ```
     /// ```
     pub fn custom_tool(
         self,
@@ -176,7 +180,10 @@ impl<'a> AgentBuilder<'a> {
     /// # Example
     ///
     /// ```ignore
-    /// let engine = Arc::new(OxiBrowserEngine::new()?);
+    /// use oxi_sdk::prelude::*;
+    ///
+    /// // Requires a BrowserEngine implementation
+    /// let engine: Arc<dyn BrowserEngine> = /* ... */;
     /// let agent = oxi.agent(config)
     ///     .workspace("/project")
     ///     .coding_tools()
@@ -227,7 +234,10 @@ impl<'a> AgentBuilder<'a> {
     /// # Example
     ///
     /// ```ignore
-    /// let engine = Arc::new(OxiBrowserEngine::new()?);
+    /// use oxi_sdk::prelude::*;
+    ///
+    /// // Requires the native-browser feature and OxiBrowserEngine
+    /// let engine: Arc<dyn BrowserEngine> = /* ... */;
     /// let agent = oxi.agent(config)
     ///     .browsing_with_session(engine)
     ///     .build()?;

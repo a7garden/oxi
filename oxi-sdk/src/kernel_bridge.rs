@@ -61,9 +61,11 @@ impl KernelToolContext {
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust
+    /// use oxi_sdk::KernelToolContext;
+    ///
     /// let ctx = KernelToolContext::new("/workspace", "agent-001")
-    ///     .with_meta("space_id", serde_json::json!(uuid::Uuid::new_v4()))
+    ///     .with_meta("space_id", serde_json::json!("test-space"))
     ///     .with_meta("cspace_name", serde_json::json!("full"));
     /// ```
     pub fn with_meta(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {

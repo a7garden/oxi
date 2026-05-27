@@ -3,6 +3,7 @@
 //! Provides `AgentGroup` for running multiple agents with different
 //! strategies: pipeline (sequential), parallel, or orchestrated.
 
+use crate::error::SdkResult;
 use anyhow::Result;
 use oxi_agent::Agent;
 use std::sync::Arc;
@@ -115,7 +116,7 @@ impl AgentGroup {
     }
 
     /// Execute the group with the given prompt.
-    pub async fn run(&self, prompt: String) -> Result<GroupResult> {
+    pub async fn run(&self, prompt: String) -> SdkResult<GroupResult> {
         if self.agents.is_empty() {
             return Ok(GroupResult {
                 results: Vec::new(),

@@ -88,9 +88,7 @@ impl AnthropicProvider {
             client: shared_client(),
             api_key: None,
             base_url: Some(base_url.to_string()),
-            extra_headers: vec![
-                ("anthropic-version".to_string(), "2023-06-01".to_string()),
-            ],
+            extra_headers: vec![("anthropic-version".to_string(), "2023-06-01".to_string())],
             native: false,
         }
     }
@@ -110,9 +108,7 @@ impl AnthropicProvider {
         api_key: Option<String>,
         extra_headers: Vec<(String, String)>,
     ) -> Self {
-        let mut headers = vec![
-            ("anthropic-version".to_string(), "2023-06-01".to_string()),
-        ];
+        let mut headers = vec![("anthropic-version".to_string(), "2023-06-01".to_string())];
         headers.extend(extra_headers);
         Self {
             client: shared_client(),
@@ -298,8 +294,7 @@ impl Provider for AnthropicProvider {
         if model.reasoning {
             if let Some(current) = body.get("max_tokens").and_then(|v| v.as_u64()) {
                 if current < 16_384 {
-                    body["max_tokens"] =
-                        serde_json::json!(model.max_tokens.min(32_768));
+                    body["max_tokens"] = serde_json::json!(model.max_tokens.min(32_768));
                 }
             }
         }
@@ -517,9 +512,7 @@ fn build_anthropic_messages_from_normalized(
                         "type": "text",
                         "text": s,
                     })],
-                    crate::MessageContent::Blocks(blocks) => {
-                        blocks_to_anthropic_content(blocks)?
-                    }
+                    crate::MessageContent::Blocks(blocks) => blocks_to_anthropic_content(blocks)?,
                 };
                 messages.push(serde_json::json!({
                     "role": "user",

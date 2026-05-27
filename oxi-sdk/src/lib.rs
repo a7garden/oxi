@@ -40,7 +40,7 @@ pub use message_bus::{InterAgentMessage, LagAwareReceiver, MessageBus, PublishRe
 pub use metrics::{AgentMetrics, MetricsSnapshot};
 
 // Foundation Layer
-pub use error::SdkError;
+pub use error::{SdkError, SdkResult};
 pub use lifecycle::{
     AgentHandle, AgentLifecycleEvent, AgentSnapshot, AgentStatus, AgentSupervisor,
     FileSnapshotStore, RestartBackoff, SnapshotStore, SupervisorPolicy, ToolManifest,

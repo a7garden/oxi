@@ -1143,7 +1143,13 @@ fn scrub_tool_id(id: &str, is_mistral: bool, is_anthropic: bool) -> String {
         // Anthropic requires tool call IDs matching [a-zA-Z0-9_-]{1,64}.
         // pi: `id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64)`
         id.chars()
-            .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .take(64)
             .collect()
     } else {

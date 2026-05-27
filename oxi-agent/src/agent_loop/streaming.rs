@@ -266,6 +266,18 @@ pub(crate) async fn stream_assistant_response(
                 // complete response without errors.
                 loop_ref.circuit_breaker.record_success();
 
+                // Record token usage into shared state and emit event
+                let (input, output) = (message.usage.input, message.usage.output);
+                if input > 0 || output > 0 {
+                    loop_ref.state.update(|s| {
+                        s.record_usage(input, output);
+                    });
+                    emit(super::AgentEvent::Usage {
+                        input_tokens: input,
+                        output_tokens: output,
+                    });
+                }
+
                 tracing::info!(
                     "Stream event #{}: Done (stop_reason={:?})",
                     event_count,

@@ -35,7 +35,9 @@ pub fn readonly_tools(cwd: &Path) -> Arc<ToolRegistry> {
 /// # Example
 ///
 /// ```ignore
-/// let engine = Arc::new(MyBrowserEngine::new());
+/// // Requires a BrowserEngine implementation
+/// use oxi_sdk::browsing_tools;
+/// let engine: Arc<dyn BrowserEngine> = /* ... */;
 /// let tools = browsing_tools(engine);
 /// ```
 pub fn browsing_tools(engine: Arc<dyn BrowserEngine>) -> Arc<ToolRegistry> {
@@ -68,7 +70,9 @@ pub fn browsing_tools_with_config(
 /// # Example
 ///
 /// ```ignore
-/// let engine = Arc::new(MyBrowserEngine::new());
+/// // Requires a BrowserEngine implementation
+/// use oxi_sdk::full_tools;
+/// let engine: Arc<dyn BrowserEngine> = /* ... */;
 /// let tools = full_tools(Path::new("/workspace"), engine);
 /// ```
 pub fn full_tools(cwd: &Path, engine: Arc<dyn BrowserEngine>) -> Arc<ToolRegistry> {
@@ -92,6 +96,7 @@ pub fn full_tools(cwd: &Path, engine: Arc<dyn BrowserEngine>) -> Arc<ToolRegistr
 /// # Example
 ///
 /// ```ignore
+/// // Requires native-browser feature
 /// let tools = native_browser_tools().expect("browser init failed");
 /// ```
 #[cfg(feature = "native-browser")]

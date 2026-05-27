@@ -14,6 +14,10 @@ pub struct AgentMetrics {
     pub successful_runs: AtomicU64,
     /// Failed runs.
     pub failed_runs: AtomicU64,
+    /// Total input (prompt) tokens consumed.
+    pub total_input_tokens: AtomicU64,
+    /// Total output (completion) tokens consumed.
+    pub total_output_tokens: AtomicU64,
     /// Total tokens consumed (input + output).
     pub total_tokens: AtomicU64,
     /// Total tool calls made.
@@ -29,11 +33,22 @@ impl AgentMetrics {
     }
 
     /// Record a successful run.
-    pub fn record_success(&self, duration_ms: u64, tokens: u64, tools: u64) {
+    pub fn record_success(
+        &self,
+        duration_ms: u64,
+        input_tokens: u64,
+        output_tokens: u64,
+        tool_count: u64,
+    ) {
         self.total_runs.fetch_add(1, Ordering::Relaxed);
         self.successful_runs.fetch_add(1, Ordering::Relaxed);
-        self.total_tokens.fetch_add(tokens, Ordering::Relaxed);
-        self.tool_calls.fetch_add(tools, Ordering::Relaxed);
+        self.total_input_tokens
+            .fetch_add(input_tokens, Ordering::Relaxed);
+        self.total_output_tokens
+            .fetch_add(output_tokens, Ordering::Relaxed);
+        self.total_tokens
+            .fetch_add(input_tokens + output_tokens, Ordering::Relaxed);
+        self.tool_calls.fetch_add(tool_count, Ordering::Relaxed);
         self.total_duration_ms
             .fetch_add(duration_ms, Ordering::Relaxed);
     }
@@ -52,6 +67,8 @@ impl AgentMetrics {
             total_runs: self.total_runs.load(Ordering::Relaxed),
             successful_runs: self.successful_runs.load(Ordering::Relaxed),
             failed_runs: self.failed_runs.load(Ordering::Relaxed),
+            total_input_tokens: self.total_input_tokens.load(Ordering::Relaxed),
+            total_output_tokens: self.total_output_tokens.load(Ordering::Relaxed),
             total_tokens: self.total_tokens.load(Ordering::Relaxed),
             tool_calls: self.tool_calls.load(Ordering::Relaxed),
             total_duration_ms: self.total_duration_ms.load(Ordering::Relaxed),
@@ -63,6 +80,8 @@ impl AgentMetrics {
         self.total_runs.store(0, Ordering::Relaxed);
         self.successful_runs.store(0, Ordering::Relaxed);
         self.failed_runs.store(0, Ordering::Relaxed);
+        self.total_input_tokens.store(0, Ordering::Relaxed);
+        self.total_output_tokens.store(0, Ordering::Relaxed);
         self.total_tokens.store(0, Ordering::Relaxed);
         self.tool_calls.store(0, Ordering::Relaxed);
         self.total_duration_ms.store(0, Ordering::Relaxed);
@@ -78,7 +97,13 @@ pub struct MetricsSnapshot {
     pub successful_runs: u64,
     /// Failed runs.
     pub failed_runs: u64,
-    /// Total tokens consumed.
+    /// Total input (prompt) tokens consumed.
+    #[serde(default)]
+    pub total_input_tokens: u64,
+    /// Total output (completion) tokens consumed.
+    #[serde(default)]
+    pub total_output_tokens: u64,
+    /// Total tokens consumed (input + output).
     pub total_tokens: u64,
     /// Total tool calls made.
     pub tool_calls: u64,
@@ -127,13 +152,15 @@ mod tests {
     #[test]
     fn test_metrics_record_success() {
         let metrics = AgentMetrics::new();
-        metrics.record_success(100, 500, 3);
-        metrics.record_success(200, 800, 5);
+        metrics.record_success(100, 300, 200, 3);
+        metrics.record_success(200, 500, 300, 5);
 
         let snap = metrics.snapshot();
         assert_eq!(snap.total_runs, 2);
         assert_eq!(snap.successful_runs, 2);
         assert_eq!(snap.failed_runs, 0);
+        assert_eq!(snap.total_input_tokens, 800);
+        assert_eq!(snap.total_output_tokens, 500);
         assert_eq!(snap.total_tokens, 1300);
         assert_eq!(snap.tool_calls, 8);
         assert_eq!(snap.total_duration_ms, 300);
@@ -156,20 +183,35 @@ mod tests {
     #[test]
     fn test_metrics_reset() {
         let metrics = AgentMetrics::new();
-        metrics.record_success(100, 500, 3);
+        metrics.record_success(100, 300, 200, 3);
         metrics.reset();
 
         let snap = metrics.snapshot();
         assert_eq!(snap.total_runs, 0);
+        assert_eq!(snap.total_input_tokens, 0);
+        assert_eq!(snap.total_output_tokens, 0);
     }
 
     #[test]
     fn test_snapshot_serialization() {
         let metrics = AgentMetrics::new();
-        metrics.record_success(100, 500, 3);
+        metrics.record_success(100, 300, 200, 3);
         let snap = metrics.snapshot();
 
         let json = serde_json::to_string(&snap).unwrap();
         assert!(json.contains("\"total_runs\":1"));
+        assert!(json.contains("\"total_input_tokens\":300"));
+        assert!(json.contains("\"total_output_tokens\":200"));
+    }
+
+    #[test]
+    fn test_snapshot_deserialize_backward_compat() {
+        // Old JSON without new fields should deserialize with defaults
+        let old_json = r#"{"total_runs":5,"successful_runs":4,"failed_runs":1,"total_tokens":50000,"tool_calls":20,"total_duration_ms":30000}"#;
+        let snap: MetricsSnapshot = serde_json::from_str(old_json).unwrap();
+        assert_eq!(snap.total_runs, 5);
+        assert_eq!(snap.total_tokens, 50000);
+        assert_eq!(snap.total_input_tokens, 0);
+        assert_eq!(snap.total_output_tokens, 0);
     }
 }

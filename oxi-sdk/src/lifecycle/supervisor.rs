@@ -3,7 +3,7 @@
 //! Also contains `AgentHandle`: the per-agent lifecycle handle wrapping
 //! `Arc<Agent>` with atomic status transitions.
 
-use crate::error::SdkError;
+use crate::error::{SdkError, SdkResult};
 use crate::lifecycle::snapshot::SnapshotStore;
 use crate::lifecycle::{AgentLifecycleEvent, AgentSnapshot, AgentStatus, MetricsSnapshot};
 use crate::routing::RoutingControl;
@@ -166,7 +166,7 @@ impl AgentHandle {
     pub async fn run(
         &self,
         prompt: String,
-    ) -> anyhow::Result<(oxi_agent::types::Response, Vec<oxi_agent::AgentEvent>)> {
+    ) -> SdkResult<(oxi_agent::types::Response, Vec<oxi_agent::AgentEvent>)> {
         // CAS: Created → Running or Suspended → Running
         let prev = self
             .status
@@ -189,8 +189,7 @@ impl AgentHandle {
             return Err(SdkError::AgentNotRunnable {
                 agent_id: self.agent_id.clone(),
                 status: self.status().to_string(),
-            }
-            .into());
+            });
         }
 
         self.emit(AgentLifecycleEvent::RunStart {
@@ -204,10 +203,18 @@ impl AgentHandle {
 
         match result {
             Ok((response, events)) => {
+                let agent_state = self.agent.state();
+                let input_tokens = agent_state.input_tokens as u64;
+                let output_tokens = agent_state.output_tokens as u64;
+                let tool_count = events
+                    .iter()
+                    .filter(|e| matches!(e, oxi_agent::AgentEvent::ToolExecutionStart { .. }))
+                    .count() as u64;
                 self.metrics.record_success(
                     elapsed.as_millis() as u64,
-                    0, // TODO: extract token count from events
-                    events.len() as u64,
+                    input_tokens,
+                    output_tokens,
+                    tool_count,
                 );
                 self.transition(STATUS_CREATED);
                 self.emit(AgentLifecycleEvent::RunEnd {
@@ -215,7 +222,6 @@ impl AgentHandle {
                     timestamp_ms: AgentLifecycleEvent::now_ms(),
                     success: true,
                 });
-                // TODO: extract token/usage metrics from events
                 Ok((response, events))
             }
             Err(e) => {
@@ -225,7 +231,9 @@ impl AgentHandle {
                     timestamp_ms: AgentLifecycleEvent::now_ms(),
                     success: false,
                 });
-                Err(e)
+                Err(SdkError::ExecutionFailed {
+                    reason: e.to_string(),
+                })
             }
         }
     }
@@ -236,7 +244,7 @@ impl AgentHandle {
     pub async fn continue_with(
         &self,
         prompt: String,
-    ) -> anyhow::Result<(oxi_agent::types::Response, Vec<oxi_agent::AgentEvent>)> {
+    ) -> SdkResult<(oxi_agent::types::Response, Vec<oxi_agent::AgentEvent>)> {
         self.run(prompt).await
     }
 
@@ -250,14 +258,13 @@ impl AgentHandle {
     /// Suspend the agent and create a checkpoint snapshot.
     ///
     /// Transitions `Created`/`Running` → `Suspended`.
-    pub async fn suspend(&self) -> anyhow::Result<AgentSnapshot> {
+    pub async fn suspend(&self) -> SdkResult<AgentSnapshot> {
         let cur = self.status();
         if !cur.is_runnable() && cur != AgentStatus::Running {
             return Err(SdkError::AgentNotRunnable {
                 agent_id: self.agent_id.clone(),
                 status: cur.to_string(),
-            }
-            .into());
+            });
         }
 
         // Cancel running work first
@@ -286,13 +293,12 @@ impl AgentHandle {
     }
 
     /// Terminate the agent permanently (terminal state).
-    pub fn terminate(&self) -> anyhow::Result<()> {
+    pub fn terminate(&self) -> SdkResult<()> {
         if self.status().is_terminal() {
             return Err(SdkError::AgentNotRunnable {
                 agent_id: self.agent_id.clone(),
                 status: self.status().to_string(),
-            }
-            .into());
+            });
         }
         self.transition(STATUS_TERMINATED);
         self.emit(AgentLifecycleEvent::Terminated {
@@ -303,7 +309,7 @@ impl AgentHandle {
     }
 
     /// Take a snapshot without changing state.
-    pub fn snapshot(&self) -> anyhow::Result<AgentSnapshot> {
+    pub fn snapshot(&self) -> SdkResult<AgentSnapshot> {
         Ok(AgentSnapshot::from_agent(
             self.agent_id.clone(),
             &self.config.read(),

@@ -4,6 +4,9 @@
 
 use thiserror::Error;
 
+/// Unified SDK result type.
+pub type SdkResult<T> = Result<T, SdkError>;
+
 /// oxi-sdk structured error type.
 ///
 /// SDK consumers can use `match` to handle specific error cases.
@@ -71,6 +74,16 @@ pub enum SdkError {
     #[error("no route available for model: {model_id}")]
     NoRouteAvailable { model_id: String },
 
+    // ── Agent Execution ─────────────────────────────────────────────────
+    #[error("agent execution failed: {reason}")]
+    ExecutionFailed { reason: String },
+
+    #[error("agent group failed: {failed}/{total} agents")]
+    GroupExecutionFailed { failed: usize, total: usize },
+
+    #[error("run cancelled")]
+    Cancelled,
+
     // ── General ─────────────────────────────────────────────────────────────
     #[error("{0}")]
     Internal(#[from] anyhow::Error),
@@ -120,5 +133,44 @@ mod tests {
         assert!(msg.contains("counter"));
         assert!(msg.contains("5"));
         assert!(msg.contains("7"));
+    }
+
+    #[test]
+    fn test_execution_failed_display() {
+        let err = SdkError::ExecutionFailed {
+            reason: "provider timeout".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("agent execution failed"));
+        assert!(msg.contains("provider timeout"));
+    }
+
+    #[test]
+    fn test_group_execution_failed_display() {
+        let err = SdkError::GroupExecutionFailed {
+            failed: 2,
+            total: 5,
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("agent group failed"));
+        assert!(msg.contains("2/5"));
+    }
+
+    #[test]
+    fn test_cancelled_display() {
+        let err = SdkError::Cancelled;
+        assert_eq!(err.to_string(), "run cancelled");
+    }
+
+    #[test]
+    fn test_sdk_result_ok() {
+        let result: SdkResult<i32> = Ok(42);
+        assert_eq!(result.unwrap(), 42);
+    }
+
+    #[test]
+    fn test_sdk_result_err() {
+        let result: SdkResult<i32> = Err(SdkError::Cancelled);
+        assert!(matches!(result.unwrap_err(), SdkError::Cancelled));
     }
 }

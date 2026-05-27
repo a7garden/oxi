@@ -238,6 +238,8 @@ mod tests {
                 total_runs: 5,
                 successful_runs: 4,
                 failed_runs: 1,
+                total_input_tokens: 35_000,
+                total_output_tokens: 15_000,
                 total_tokens: 50_000,
                 tool_calls: 20,
                 total_duration_ms: 30_000,
