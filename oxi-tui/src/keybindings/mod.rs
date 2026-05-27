@@ -29,5 +29,5 @@ pub mod keys;
 pub mod registry;
 
 pub use conflict::{detect_conflicts, validate_user_bindings, KeybindingConflict};
-pub use keys::{as_char, is_printable, parse_key_id, BaseKey, KeyId};
+pub use keys::{as_char, is_printable, parse_key_id, parse_kitty_sequence, BaseKey, KeyId};
 pub use registry::{Action, KeybindingsManager};

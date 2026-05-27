@@ -285,6 +285,112 @@ pub fn as_char(key_id: &KeyId) -> Option<char> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Kitty keyboard protocol
+// ---------------------------------------------------------------------------
+
+/// Parse a Kitty keyboard protocol escape sequence into a KeyId.
+///
+/// Kitty encodes key events as `ESC [ codepoint ; modifiers event-type key-modifier \`.
+/// For example: `ESC [ 97 ; 131 u` = Ctrl+Shift+A.
+///
+/// Returns `None` if the input is not a valid Kitty sequence.
+///
+/// Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+pub fn parse_kitty_sequence(data: &[u8]) -> Option<KeyId> {
+    // Minimum: ESC [ 0 ; 0 u = 6 bytes
+    if data.len() < 6 {
+        return None;
+    }
+    if data[0] != 0x1b || data[1] != b'[' {
+        return None;
+    }
+
+    // Find the trailing 'u'
+    let s = std::str::from_utf8(data).ok()?;
+    if !s.ends_with('u') {
+        return None;
+    }
+
+    // Strip ESC [ prefix and 'u' suffix
+    let inner = &s[2..s.len() - 1];
+    let parts: Vec<&str> = inner.split(';').collect();
+    if parts.len() < 2 {
+        return None;
+    }
+
+    let codepoint: u32 = parts[0].parse().ok()?;
+    let modifier_field: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    // Decode modifiers: bits 0-3 of modifier_field
+    // bit 0 = shift, bit 1 = alt, bit 2 = ctrl, bit 3 = super
+    let shift = (modifier_field & (1 << 0)) != 0;
+    let alt = (modifier_field & (1 << 1)) != 0;
+    let ctrl = (modifier_field & (1 << 2)) != 0;
+    let super_ = (modifier_field & (1 << 3)) != 0;
+
+    // Decode base key from codepoint
+    let base = if (57344..=65533).contains(&codepoint) {
+        kitty_special_key(codepoint)?
+    } else if (1..=26).contains(&codepoint) {
+        // Ctrl+letter (1=A, 2=B, ... 26=Z)
+        BaseKey::Char((b'a' + (codepoint - 1) as u8) as char)
+    } else {
+        match codepoint {
+            13 => BaseKey::Enter,
+            27 => BaseKey::Escape,
+            8 => BaseKey::Backspace,
+            9 => BaseKey::Tab,
+            127 => BaseKey::Delete,
+            cp => {
+                if let Some(c) = char::from_u32(cp) {
+                    BaseKey::Char(c.to_ascii_lowercase())
+                } else {
+                    return None;
+                }
+            }
+        }
+    };
+
+    Some(KeyId {
+        base,
+        ctrl,
+        shift,
+        alt,
+        super_,
+    })
+}
+
+/// Map Kitty special key codepoints to BaseKey.
+fn kitty_special_key(cp: u32) -> Option<BaseKey> {
+    match cp {
+        57344 => Some(BaseKey::Up),
+        57345 => Some(BaseKey::Down),
+        57346 => Some(BaseKey::Left),
+        57347 => Some(BaseKey::Right),
+        57348 => Some(BaseKey::Insert),
+        57349 => Some(BaseKey::Delete),
+        57350 => Some(BaseKey::PageUp),
+        57351 => Some(BaseKey::PageDown),
+        57352 => Some(BaseKey::Home),
+        57353 => Some(BaseKey::End),
+        57358 => Some(BaseKey::F(1)),
+        57359 => Some(BaseKey::F(2)),
+        57360 => Some(BaseKey::F(3)),
+        57361 => Some(BaseKey::F(4)),
+        57362 => Some(BaseKey::F(5)),
+        57363 => Some(BaseKey::F(6)),
+        57364 => Some(BaseKey::F(7)),
+        57365 => Some(BaseKey::F(8)),
+        57366 => Some(BaseKey::F(9)),
+        57367 => Some(BaseKey::F(10)),
+        57368 => Some(BaseKey::F(11)),
+        57369 => Some(BaseKey::F(12)),
+        57370 => Some(BaseKey::BackTab),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,5 +494,48 @@ mod tests {
         assert_eq!(as_char(&k), Some('a'));
         let k = parse_key_id("Enter").unwrap();
         assert_eq!(as_char(&k), None);
+    }
+
+    #[test]
+    fn test_parse_kitty_simple() {
+        // ESC [ 97 ; 0 u = 'a' with no modifiers
+        let seq = b"\x1b[97;0u";
+        let key_id = parse_kitty_sequence(seq).unwrap();
+        assert_eq!(key_id.base, BaseKey::Char('a'));
+        assert!(!key_id.ctrl);
+    }
+
+    #[test]
+    fn test_parse_kitty_ctrl() {
+        // ESC [ 97 ; 4 u = Ctrl+A (bit 2 = ctrl)
+        let seq = b"\x1b[97;4u";
+        let key_id = parse_kitty_sequence(seq).unwrap();
+        assert_eq!(key_id.base, BaseKey::Char('a'));
+        assert!(key_id.ctrl);
+    }
+
+    #[test]
+    fn test_parse_kitty_shift_alt() {
+        // ESC [ 97 ; 3 u = Shift+Alt+A (bits 0+1)
+        let seq = b"\x1b[97;3u";
+        let key_id = parse_kitty_sequence(seq).unwrap();
+        assert!(key_id.shift);
+        assert!(key_id.alt);
+        assert!(!key_id.ctrl);
+    }
+
+    #[test]
+    fn test_parse_kitty_up() {
+        // ESC [ 57344 ; 0 u = Up arrow
+        let seq = b"\x1b[57344;0u";
+        let key_id = parse_kitty_sequence(seq).unwrap();
+        assert_eq!(key_id.base, BaseKey::Up);
+    }
+
+    #[test]
+    fn test_parse_kitty_invalid() {
+        assert!(parse_kitty_sequence(b"").is_none());
+        assert!(parse_kitty_sequence(b"hello").is_none());
+        assert!(parse_kitty_sequence(b"\x1b[u").is_none());
     }
 }

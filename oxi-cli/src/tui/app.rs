@@ -1264,12 +1264,42 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
 
-            // Post-render: terminal image protocol integration point
-            // Images are shown as placeholders in chat; Ctrl+I opens system viewer
+            // Post-render: display images via terminal protocol
+            // After ratatui draws, output inline images that won't be overwritten
             if !state.chat.pending_images.is_empty() {
                 let caps = oxi_tui::render::terminal::TerminalCapabilities::detect();
-                if caps.supports_images() {
-                    // Future: output inline images using Kitty/iTerm2 protocol here
+                if let Some(protocol) = caps.image_protocol {
+                    use base64::Engine;
+                    use oxi_tui::render::image::{
+                        detect_dimensions, encode_iterm2, encode_kitty, ImageOptions,
+                    };
+
+                    // Display only the latest image to avoid flooding the terminal
+                    if let Some((b64_data, _mime_type)) = state.chat.pending_images.last() {
+                        if let Ok(bytes) =
+                            base64::engine::general_purpose::STANDARD.decode(b64_data)
+                        {
+                            let dims = detect_dimensions(&bytes);
+                            let opts = ImageOptions {
+                                width_cells: dims.map(|d| (d.width / 10).min(40) as u16),
+                                height_cells: dims.map(|d| (d.height / 20).min(15) as u16),
+                                ..Default::default()
+                            };
+
+                            let encoded = match protocol {
+                                oxi_tui::render::terminal::ImageProtocol::Kitty => {
+                                    encode_kitty(b64_data, &opts)
+                                }
+                                oxi_tui::render::terminal::ImageProtocol::ITerm2 => {
+                                    encode_iterm2(b64_data, &opts)
+                                }
+                            };
+
+                            // Write directly to stdout — this bypasses ratatui's buffer
+                            let _ = std::io::stdout().write_all(encoded.as_bytes());
+                            let _ = std::io::stdout().flush();
+                        }
+                    }
                 }
             }
 

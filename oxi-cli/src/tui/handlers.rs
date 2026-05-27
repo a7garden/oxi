@@ -387,11 +387,21 @@ async fn dispatch_action(
         }
 
         // ── Actions not bound in main input mode ──────────────
+        KAction::DeleteWordBackward => {
+            state.input.delete_word_backward();
+            state.update_slash_completions();
+            update_file_completions(state);
+            None
+        }
+        KAction::DeleteWordForward => {
+            state.input.delete_word_forward();
+            state.update_slash_completions();
+            update_file_completions(state);
+            None
+        }
         KAction::OpenModelSelect
         | KAction::OpenProviderSetup
         | KAction::NewLine
-        | KAction::DeleteWordBackward
-        | KAction::DeleteWordForward
         | KAction::HistoryUp
         | KAction::HistoryDown
         | KAction::CompletionNext
