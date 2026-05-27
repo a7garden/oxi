@@ -26,6 +26,9 @@ struct Provider {
 struct Model {
     id: String,
     name: String,
+    /// Per-model API override. If absent, use the provider's default API.
+    #[serde(default)]
+    api: Option<String>,
     #[serde(default)]
     reasoning: bool,
     input: Vec<String>,
@@ -233,7 +236,7 @@ fn main() {
                  \x20\x20\x20\x20}},\n",
                 model.id,
                 model.name,
-                api_variant(&provider.api),
+                api_variant(model.api.as_deref().unwrap_or(&provider.api)),
                 provider.name,
                 model.reasoning,
                 input_slice,
