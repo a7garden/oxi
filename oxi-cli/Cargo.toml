@@ -75,6 +75,9 @@ semver = { version = "1", features = ["serde"] }
 
 # HTTP client for version check
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+
+# Self-update (optional)
+self_update = { version = "0.41", features = ["archive-tar", "compression-flate2"], optional = true }
 serde_yaml = "0.9"
 
 # OAuth support
@@ -91,6 +94,10 @@ zip = "2"
 # Unix primitives for SIGTSTP
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[features]
+default = ["self-update"]
+self-update = ["dep:self_update"]
 
 [dev-dependencies]
 tempfile = "3"

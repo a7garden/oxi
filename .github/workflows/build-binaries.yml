@@ -1,0 +1,52 @@
+name: Build Binaries
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            use_cross: true
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --locked
+
+      - name: Build
+        run: |
+          ${{ matrix.use_cross && 'cross' || 'cargo' }} build \
+            --release \
+            --target ${{ matrix.target }} \
+            -p oxi-cli
+
+      - name: Strip binary
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release/oxi || true
+
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../oxi-${{ matrix.target }}.tar.gz oxi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oxi-${{ matrix.target }}
+          path: oxi-${{ matrix.target }}.tar.gz

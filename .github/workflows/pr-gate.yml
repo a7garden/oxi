@@ -1,0 +1,29 @@
+name: PR Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  check:
+    name: PR Quality Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          LINES=$(git diff --numstat origin/main...HEAD | awk '{sum+=$1+$2} END {print sum+0}')
+          if [ "$LINES" -gt 2000 ]; then
+            echo "::warning::PR is large ($LINES lines changed). Consider splitting."
+          else
+            echo "PR size: $LINES lines changed. OK."
+          fi
+
+      - name: Check conventional commits
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          echo "$TITLE" | grep -qE '^(feat|fix|docs|refactor|perf|test|chore|ci|build)(\(.+\))?: .+' || \
+            echo "::warning::PR title should follow conventional commits format: $TITLE"
