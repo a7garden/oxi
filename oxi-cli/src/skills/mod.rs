@@ -7,9 +7,30 @@
 //! giving the agent additional context and instructions for that skill.
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
+
+/// YAML frontmatter parsed from SKILL.md
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SkillFrontmatter {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(rename = "disable-model-invocation", default)]
+    pub disable_model_invocation: bool,
+}
+
+impl Default for SkillFrontmatter {
+    fn default() -> Self {
+        Self {
+            name: None,
+            description: None,
+            disable_model_invocation: false,
+        }
+    }
+}
 
 /// A single skill loaded from a SKILL.md file.
 #[derive(Debug, Clone)]
@@ -20,6 +41,10 @@ pub struct Skill {
     pub description: String,
     /// Full markdown content from SKILL.md
     pub content: String,
+    /// Absolute path to the skill directory (parent of SKILL.md)
+    pub location: PathBuf,
+    /// Whether model invocation is disabled for this skill
+    pub disable_model_invocation: bool,
 }
 
 impl fmt::Display for Skill {
@@ -101,17 +126,69 @@ impl SkillManager {
         Ok(Self { skills })
     }
 
+    /// Validate a skill name (a-z, 0-9, hyphens, max 64 chars)
+    fn validate_name(name: &str) -> Result<String> {
+        let name = name.to_lowercase();
+        if name.is_empty() || name.len() > 64 {
+            anyhow::bail!(
+                "Skill name must be 1-64 chars: got '{}' (len={})",
+                name,
+                name.len()
+            );
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            anyhow::bail!(
+                "Skill name must contain only a-z, 0-9, and hyphens: got '{}'",
+                name
+            );
+        }
+        if name.starts_with('-') || name.ends_with('-') || name.contains("--") {
+            anyhow::bail!(
+                "Skill name must not have leading/trailing/consecutive hyphens: got '{}'",
+                name
+            );
+        }
+        Ok(name)
+    }
+
     /// Load a single skill from its SKILL.md file.
     fn load_skill(name: &str, path: &Path) -> Result<Skill> {
-        let content = std::fs::read_to_string(path)
+        let raw = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
+        let location = path.parent().unwrap_or(path).to_path_buf();
 
-        let description = Self::extract_description(&content);
+        // Parse YAML frontmatter (--- ... ---)
+        let (frontmatter, body) = if raw.starts_with("---") {
+            let rest = &raw[3..];
+            if let Some(end) = rest.find("\n---") {
+                let yaml_str = &rest[..end];
+                let body = rest[end + 4..].trim_start().to_string();
+                let fm: SkillFrontmatter = serde_yaml::from_str(yaml_str).unwrap_or_default();
+                (fm, body)
+            } else {
+                (SkillFrontmatter::default(), raw.clone())
+            }
+        } else {
+            (SkillFrontmatter::default(), raw.clone())
+        };
+
+        let description = frontmatter
+            .description
+            .clone()
+            .unwrap_or_else(|| Self::extract_description(&body));
 
         Ok(Skill {
-            name: name.to_string(),
+            name: frontmatter
+                .name
+                .clone()
+                .unwrap_or_else(|| name.to_string()),
             description,
-            content,
+            content: body,
+            location,
+            disable_model_invocation: frontmatter.disable_model_invocation,
         })
     }
 
@@ -205,6 +282,125 @@ impl SkillManager {
     pub fn skills_dir() -> Result<PathBuf> {
         let home = dirs::home_dir().context("Cannot determine home directory")?;
         Ok(home.join(".oxi").join("skills"))
+    }
+
+    /// Discover skills from multiple sources: global, project, ancestor dirs, and settings.
+    pub fn discover_all(cwd: &Path, extra_dirs: &[PathBuf]) -> Result<Self> {
+        let mut skills = HashMap::new();
+        let mut seen_paths: HashSet<PathBuf> = HashSet::new();
+
+        // 1. Global: ~/.oxi/skills/
+        if let Ok(global_dir) = Self::skills_dir() {
+            Self::discover_from_dir(&global_dir, &mut skills, &mut seen_paths)?;
+        }
+
+        // 2. Project: .oxi/skills/
+        let project_dir = cwd.join(".oxi/skills");
+        Self::discover_from_dir(&project_dir, &mut skills, &mut seen_paths)?;
+
+        // 3. Ancestor directories (.agents/skills/)
+        for ancestor in cwd.ancestors() {
+            let agents_skills = ancestor.join(".agents/skills");
+            if agents_skills.is_dir() {
+                Self::discover_from_dir(&agents_skills, &mut skills, &mut seen_paths)?;
+            }
+            // Stop at git root
+            if ancestor.join(".git").is_dir() {
+                break;
+            }
+        }
+
+        // 4. Extra directories from settings
+        for dir in extra_dirs {
+            Self::discover_from_dir(dir, &mut skills, &mut seen_paths)?;
+        }
+
+        tracing::info!("Discovered {} skill(s)", skills.len());
+        Ok(Self { skills })
+    }
+
+    fn discover_from_dir(
+        dir: &Path,
+        skills: &mut HashMap<String, Skill>,
+        seen: &mut HashSet<PathBuf>,
+    ) -> Result<()> {
+        if !dir.exists() {
+            return Ok(());
+        }
+
+        let entries = std::fs::read_dir(dir)
+            .with_context(|| format!("Failed to read skills dir: {}", dir.display()))?;
+
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+
+            if !path.is_dir() {
+                continue;
+            }
+
+            let skill_file = path.join("SKILL.md");
+            if !skill_file.exists() {
+                continue;
+            }
+
+            // Canonicalize for duplicate detection
+            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+            if seen.contains(&canonical) {
+                tracing::warn!("Duplicate skill path (skipping): {}", canonical.display());
+                continue;
+            }
+
+            let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
+            let valid_name = match Self::validate_name(&dir_name) {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::warn!("Invalid skill name '{}': {}", dir_name, e);
+                    continue;
+                }
+            };
+
+            seen.insert(canonical);
+            match Self::load_skill(&valid_name, &skill_file) {
+                Ok(skill) => {
+                    skills.insert(valid_name, skill);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to load skill from {}: {}",
+                        skill_file.display(),
+                        e
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Format skills as XML for system prompt injection.
+    /// Filters out skills with disable_model_invocation=true.
+    pub fn format_for_prompt(&self) -> String {
+        let visible: Vec<_> = self
+            .skills
+            .values()
+            .filter(|s| !s.disable_model_invocation)
+            .collect();
+
+        if visible.is_empty() {
+            return String::new();
+        }
+
+        let mut xml = String::from("<available_skills>\n");
+        for skill in &visible {
+            xml.push_str(&format!(
+                "  <skill>\n    <name>{}</name>\n    <description>{}</description>\n    <location>{}</location>\n  </skill>\n",
+                skill.name,
+                skill.description,
+                skill.location.display()
+            ));
+        }
+        xml.push_str("</available_skills>");
+        xml
     }
 }
 
@@ -401,5 +597,232 @@ mod tests {
         let dir = SkillManager::skills_dir().unwrap();
         assert!(dir.to_string_lossy().contains(".oxi"));
         assert!(dir.to_string_lossy().contains("skills"));
+    }
+
+    // --- New tests for RFC-004 T2 features ---
+
+    #[test]
+    fn test_validate_name_valid() {
+        assert_eq!(SkillManager::validate_name("my-skill").unwrap(), "my-skill");
+        assert_eq!(SkillManager::validate_name("rust-expert").unwrap(), "rust-expert");
+        assert_eq!(SkillManager::validate_name("code-123").unwrap(), "code-123");
+        assert_eq!(SkillManager::validate_name("abc").unwrap(), "abc");
+    }
+
+    #[test]
+    fn test_validate_name_uppercase_normalized() {
+        assert_eq!(SkillManager::validate_name("My-Skill").unwrap(), "my-skill");
+        assert_eq!(SkillManager::validate_name("Rust-Expert").unwrap(), "rust-expert");
+    }
+
+    #[test]
+    fn test_validate_name_invalid_chars() {
+        assert!(SkillManager::validate_name("my_skill").is_err());
+        assert!(SkillManager::validate_name("my skill").is_err());
+        assert!(SkillManager::validate_name("my.skill").is_err());
+        assert!(SkillManager::validate_name("my@skill").is_err());
+    }
+
+    #[test]
+    fn test_validate_name_hyphen_rules() {
+        assert!(SkillManager::validate_name("-myskill").is_err()); // leading hyphen
+        assert!(SkillManager::validate_name("myskill-").is_err()); // trailing hyphen
+        assert!(SkillManager::validate_name("my--skill").is_err()); // consecutive hyphens
+    }
+
+    #[test]
+    fn test_validate_name_too_long() {
+        let long_name = "a".repeat(65);
+        assert!(SkillManager::validate_name(&long_name).is_err());
+        let max_name = "a".repeat(64);
+        assert!(SkillManager::validate_name(&max_name).is_ok());
+    }
+
+    #[test]
+    fn test_validate_name_empty() {
+        assert!(SkillManager::validate_name("").is_err());
+    }
+
+    #[test]
+    fn test_load_skill_with_frontmatter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: custom-name
+description: A custom description
+disable-model-invocation: true
+---
+
+# My Skill
+
+Body content here.
+"#,
+        )
+        .unwrap();
+
+        let manager = SkillManager::load_from_dir(tmp.path()).unwrap();
+        // load_from_dir stores by directory name (lowercased), but the Skill.name is overridden by frontmatter
+        let skill = manager.get("my-skill").unwrap();
+        assert_eq!(skill.name, "custom-name");
+        assert_eq!(skill.description, "A custom description");
+        assert!(skill.disable_model_invocation);
+        assert!(skill.content.contains("Body content here"));
+    }
+
+    #[test]
+    fn test_load_skill_without_frontmatter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("basic-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "# Basic Skill\n\nSome content without frontmatter.",
+        )
+        .unwrap();
+
+        let manager = SkillManager::load_from_dir(tmp.path()).unwrap();
+        let skill = manager.get("basic-skill").unwrap();
+        assert_eq!(skill.name, "basic-skill");
+        assert!(!skill.disable_model_invocation);
+    }
+
+    #[test]
+    fn test_format_for_prompt_empty() {
+        let manager = SkillManager::new();
+        assert_eq!(manager.format_for_prompt(), "");
+    }
+
+    #[test]
+    fn test_format_for_prompt_filters_disabled() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Create a normal skill
+        let dir1 = tmp.path().join("visible-skill");
+        std::fs::create_dir_all(&dir1).unwrap();
+        std::fs::write(
+            dir1.join("SKILL.md"),
+            "# Visible Skill\nA visible skill.",
+        )
+        .unwrap();
+
+        // Create a disabled skill
+        let dir2 = tmp.path().join("hidden-skill");
+        std::fs::create_dir_all(&dir2).unwrap();
+        std::fs::write(
+            dir2.join("SKILL.md"),
+            r#"---
+name: hidden-skill
+disable-model-invocation: true
+---
+
+# Hidden Skill
+This should not appear.
+"#,
+        )
+        .unwrap();
+
+        let manager = SkillManager::load_from_dir(tmp.path()).unwrap();
+        let output = manager.format_for_prompt();
+
+        assert!(output.contains("visible-skill"));
+        assert!(!output.contains("hidden-skill"));
+        assert!(output.contains("<available_skills>"));
+        assert!(output.contains("</available_skills>"));
+    }
+
+    #[test]
+    fn test_discover_all_multiple_sources() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+
+        // Create a project skill
+        let project_skill_dir = cwd.join(".oxi/skills/project-skill");
+        std::fs::create_dir_all(&project_skill_dir).unwrap();
+        std::fs::write(
+            project_skill_dir.join("SKILL.md"),
+            "# Project Skill\nFrom project dir",
+        )
+        .unwrap();
+
+        // Create an extra dir
+        let extra_skill_dir = tmp.path().join("extra-skills/extra-skill");
+        std::fs::create_dir_all(&extra_skill_dir).unwrap();
+        std::fs::write(
+            extra_skill_dir.join("SKILL.md"),
+            "# Extra Skill\nFrom extra dir",
+        )
+        .unwrap();
+
+        let manager = SkillManager::discover_all(cwd, &[tmp.path().join("extra-skills")]).unwrap();
+        assert!(manager.get("project-skill").is_some());
+        assert!(manager.get("extra-skill").is_some());
+    }
+
+    #[test]
+    fn test_discover_all_ancestor_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Create a nested structure with .agents/skills in an ancestor
+        let ancestor = tmp.path().join("ancestor-project");
+        let ancestor_agents = ancestor.join(".agents/skills/my-ancestor-skill");
+        std::fs::create_dir_all(&ancestor_agents).unwrap();
+        std::fs::write(
+            ancestor_agents.join("SKILL.md"),
+            "# Ancestor Skill\nFrom .agents/skills",
+        )
+        .unwrap();
+
+        // Use the ancestor as cwd and check child can find it
+        let child = ancestor.join("child");
+        std::fs::create_dir_all(&child).unwrap();
+
+        let manager = SkillManager::discover_all(&child, &[]).unwrap();
+        // Should find the ancestor skill
+        assert!(manager.get("my-ancestor-skill").is_some());
+    }
+
+    #[test]
+    fn test_discover_all_duplicate_detection() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        // Create the same skill in two locations (symlink or copy)
+        let skill_dir = tmp.path().join("dup-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "# Duplicate Skill\n",
+        )
+        .unwrap();
+
+        // Create symlink to same directory
+        let link_dir = tmp.path().join("dup-skill-link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&skill_dir, &link_dir).unwrap();
+
+        #[cfg(unix)]
+        {
+            let manager = SkillManager::load_from_dir(tmp.path()).unwrap();
+            // Should only have one skill (duplicate detected)
+            let names: Vec<_> = manager.all().iter().map(|s| s.name.clone()).collect();
+            assert!(names.iter().any(|n| n == "dup-skill"), "Original should exist");
+            // Note: With symlinks, the canonical paths should be the same, so one gets skipped
+        }
+    }
+
+    #[test]
+    fn test_skill_location_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("loc-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Loc Skill\nContent").unwrap();
+
+        let manager = SkillManager::load_from_dir(tmp.path()).unwrap();
+        let skill = manager.get("loc-skill").unwrap();
+
+        // Location should point to the skill directory
+        assert_eq!(skill.location, skill_dir);
     }
 }

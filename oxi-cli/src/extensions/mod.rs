@@ -7,6 +7,7 @@ pub mod context;
 pub mod ext_cli;
 pub mod loading;
 pub mod registry;
+pub mod stale;
 pub mod types;
 #[allow(missing_docs)]
 pub mod wasm;
@@ -37,6 +38,17 @@ pub use crate::extensions::wasm_tool::WasmTool;
 
 // Re-export from oxi-agent
 pub use oxi_agent::{AgentEvent, AgentTool, AgentToolResult};
+
+/// A keyboard shortcut registered by an extension.
+#[derive(Debug, Clone)]
+pub struct ExtensionShortcut {
+    /// Key combination (e.g. "ctrl+shift+x")
+    pub key: String,
+    /// Human-readable description
+    pub description: String,
+    /// Action identifier (used to dispatch events)
+    pub action: String,
+}
 
 // The Extension trait
 /// Core trait that every oxi extension must implement.
@@ -177,6 +189,11 @@ pub trait Extension: Send + Sync {
         _event: &crate::extensions::types::InputEvent,
     ) -> crate::extensions::types::InputEventResult {
         crate::extensions::types::InputEventResult::Continue
+    }
+    /// Register keyboard shortcuts for this extension.
+    /// Default returns no shortcuts.
+    fn register_shortcuts(&self) -> Vec<ExtensionShortcut> {
+        vec![]
     }
 }
 
