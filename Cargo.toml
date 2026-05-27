@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["oxi-ai", "oxi-agent", "oxi-store", "oxi-tui", "oxi-cli", "oxi-sdk"]
+exclude = ["scripts"]
 
 [workspace.dependencies]
 thiserror = "2"
