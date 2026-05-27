@@ -164,6 +164,30 @@ pub enum FileOp {
     Editing,
 }
 
+/// Tool execution mode for parallel safety.
+#[derive(Debug, Clone)]
+pub enum ToolExecutionMode {
+    /// Safe to run in parallel with any other tool
+    ParallelSafe,
+    /// Must run sequentially — no parallel execution
+    SequentialOnly,
+    /// Mutates a specific file — file_mutation_queue serializes same-file access
+    MutatesFile(std::path::PathBuf),
+    /// Read-only — always parallel safe
+    ReadOnly,
+}
+
+/// Render output for TUI visualization.
+#[derive(Debug, Clone)]
+pub struct RenderOutput {
+    /// Rendered text content (markdown or plain)
+    pub content: String,
+    /// Whether to show collapsed by default
+    pub collapsed: bool,
+    /// Optional summary text for TUI footer
+    pub summary: Option<String>,
+}
+
 /// Structured progress callback (alongside existing String callback)
 pub type StructuredProgressCallback = Arc<dyn Fn(ToolProgress) + Send + Sync>;
 
@@ -238,6 +262,24 @@ pub trait AgentTool: Send + Sync {
     /// Default implementation is no-op. Override in tools that support
     /// structured progress (e.g., BashTool for partial output streaming).
     fn on_structured_progress(&self, _callback: StructuredProgressCallback) {}
+
+    /// Custom rendering for tool call (TUI visualization).
+    /// Return None to use the default tool_renderer.rs formatter.
+    fn render_call(&self, _params: &serde_json::Value) -> Option<RenderOutput> {
+        None
+    }
+
+    /// Custom rendering for tool result (TUI visualization).
+    /// Return None to use the default tool_renderer.rs formatter.
+    fn render_result(&self, _result: &AgentToolResult) -> Option<RenderOutput> {
+        None
+    }
+
+    /// Execution mode for parallel safety.
+    /// Defaults to ParallelSafe. Override for file-mutating or sequential tools.
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::ParallelSafe
+    }
 
     /// Convert to ToolDefinition
     fn to_definition(&self) -> ToolDefinition {

@@ -95,6 +95,21 @@ impl McpLogLevel {
     }
 }
 
+/// MCP sampling request — server asks oxi to make an LLM call.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct McpSamplingRequest {
+    /// Sampling messages to send to the LLM.
+    pub messages: Vec<serde_json::Value>,
+    /// Optional system prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// Maximum tokens to generate.
+    pub max_tokens: u32,
+    /// Optional sampling temperature.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+}
+
 /// An MCP client connected to a single server via stdio.
 pub struct McpClient {
     /// Child process handle (kept alive to prevent process death).
@@ -363,6 +378,18 @@ impl McpClient {
         let params = serde_json::json!({ "level": level.as_str() });
         self.send_request("logging/setLevel", Some(params)).await?;
         Ok(())
+    }
+
+    /// Request the host to create a message via LLM sampling.
+    /// Corresponds to `sampling/createMessage` capability.
+    /// The MCP server delegates an LLM call to oxi.
+    pub async fn create_sample(
+        &mut self,
+        request: McpSamplingRequest,
+    ) -> Result<serde_json::Value> {
+        let params = serde_json::to_value(&request)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize sampling request: {}", e))?;
+        self.send_request("sampling/createMessage", Some(params)).await
     }
 
     /// Shut down the client gracefully.

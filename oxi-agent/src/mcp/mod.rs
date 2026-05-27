@@ -39,7 +39,7 @@ pub mod content;
 pub mod tool;
 pub mod types;
 
-pub use client::{McpClient, McpLogLevel, McpPrompt, McpPromptArgument};
+pub use client::{McpClient, McpLogLevel, McpPrompt, McpPromptArgument, McpSamplingRequest};
 pub use tool::McpTool;
 pub use types::{
     effective_prefix_mode, format_schema, format_tool_name, get_server_prefix, McpCallResult,
