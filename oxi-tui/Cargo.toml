@@ -34,6 +34,8 @@ anyhow = "1"
 # Utilities
 parking_lot = "0.12"
 unicode-width = "0.2"
+unicode-segmentation = "1"
+base64 = "0.22"
 dirs = "5"
 pulldown-cmark = "0.13.3"
 

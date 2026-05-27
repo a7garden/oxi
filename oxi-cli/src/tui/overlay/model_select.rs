@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use super::{centered_popup, OverlayAction, OverlayComponent};
+use super::{centered_layout, OverlayAction, OverlayComponent};
 use oxi_tui::Theme;
 
 // ---------------------------------------------------------------------------
@@ -120,7 +120,7 @@ impl OverlayComponent for ModelSelectOverlay {
                 .unwrap_or(0)
         };
 
-        let popup = centered_popup(area, 0.7, 0.7);
+        let popup = centered_layout(area, 0.7, 0.7);
         frame.render_widget(Clear, popup);
 
         let border_block = Block::default()

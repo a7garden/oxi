@@ -11,7 +11,7 @@ use oxi_tui::widgets::routing::{
     RoutingStatus as RoutingStatusWidget, RoutingStatusData, RoutingStatusState,
 };
 
-use super::{centered_popup, OverlayAction, OverlayComponent};
+use super::{centered_layout, OverlayAction, OverlayComponent};
 use crate::app::agent_session::{AgentSession, AgentSessionHandle};
 use oxi_store::session::SessionInfo;
 use oxi_store::settings::Settings;
@@ -172,7 +172,7 @@ impl OverlayComponent for ModelSelectOverlay {
                 .unwrap_or(0)
         };
 
-        let popup = centered_popup(area, 0.7, 0.7);
+        let popup = centered_layout(area, 0.7, 0.7);
         frame.render_widget(Clear, popup);
         let border_block = Block::default()
             .title(title_line(&self.filter))
@@ -339,7 +339,7 @@ impl OverlayComponent for LogoutSelectOverlay {
             widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
         };
         let styles = theme.to_styles();
-        let popup = centered_popup(area, 0.5, 0.5);
+        let popup = centered_layout(area, 0.5, 0.5);
         frame.render_widget(Clear, popup);
         let border_block = Block::default()
             .title(title_line_logout())
@@ -452,7 +452,7 @@ impl OverlayComponent for ResumeSelectOverlay {
             widgets::{Block, Borders, Clear, Paragraph},
         };
         let styles = theme.to_styles();
-        let popup = centered_popup(area, 0.85, 0.85);
+        let popup = centered_layout(area, 0.85, 0.85);
         frame.render_widget(Clear, popup);
         let border_block = Block::default()
             .title(title_line_resume())

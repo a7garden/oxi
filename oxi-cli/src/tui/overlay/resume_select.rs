@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
-use super::{centered_popup, OverlayAction, OverlayComponent};
+use super::{centered_layout, OverlayAction, OverlayComponent};
 use oxi_tui::Theme;
 
 use oxi_store::session::SessionInfo;
@@ -96,7 +96,7 @@ impl OverlayComponent for ResumeSelectOverlay {
 
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let styles = theme.to_styles();
-        let popup = centered_popup(area, 0.85, 0.85);
+        let popup = centered_layout(area, 0.85, 0.85);
         frame.render_widget(Clear, popup);
 
         let border_block = Block::default()

@@ -3,7 +3,7 @@
 //! Implements `OverlayComponent` to display one or more questions
 //! with options, tabs, and inline text input (allowOther).
 
-use super::{centered_popup, OverlayAction, OverlayComponent};
+use super::{centered_layout, OverlayAction, OverlayComponent};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use oxi_agent::tools::questionnaire::{Answer, Question, QuestionnaireResponse};
 use oxi_tui::theme::{Theme, ThemeStyles};
@@ -291,7 +291,7 @@ impl OverlayComponent for QuestionnaireOverlay {
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let popup = centered_popup(area, 0.85, 0.80);
+        let popup = centered_layout(area, 0.85, 0.80);
 
         frame.render_widget(Clear, popup);
 

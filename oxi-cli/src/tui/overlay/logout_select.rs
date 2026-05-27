@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
 };
 
-use super::{centered_popup, OverlayAction, OverlayComponent};
+use super::{centered_layout, OverlayAction, OverlayComponent};
 use oxi_tui::Theme;
 
 // ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ impl OverlayComponent for LogoutSelectOverlay {
 
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let styles = theme.to_styles();
-        let popup = centered_popup(area, 0.5, 0.5);
+        let popup = centered_layout(area, 0.5, 0.5);
         frame.render_widget(Clear, popup);
 
         let border_block = Block::default()

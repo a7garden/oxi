@@ -10,7 +10,7 @@ use ratatui::{
     Frame,
 };
 
-use super::{centered_popup, OverlayAction, OverlayComponent};
+use super::{centered_layout, OverlayAction, OverlayComponent};
 
 /// Router profile data captured from the setup form.
 #[derive(Debug, Clone, Default)]
@@ -443,7 +443,7 @@ impl OverlayComponent for RouterSetupOverlay {
 
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let styles = theme.to_styles();
-        let popup = centered_popup(area, 0.72, 0.75);
+        let popup = centered_layout(area, 0.72, 0.75);
         frame.render_widget(Clear, popup);
 
         let border_block = Block::default()
@@ -616,7 +616,7 @@ impl OverlayComponent for RouterSetupOverlay {
 
         // Model picker overlay.
         if self.picking_for.is_some() {
-            let picker_popup = centered_popup(inner, 0.9, 0.65);
+            let picker_popup = centered_layout(inner, 0.9, 0.65);
             frame.render_widget(Clear, picker_popup);
 
             let picker_block = Block::default()

@@ -68,6 +68,8 @@ pub trait OverlayComponent: std::fmt::Debug {
 // ---------------------------------------------------------------------------
 
 /// Helper to center a popup in an area with given size ratios.
+/// Kept for backward compatibility — prefer `centered_layout`.
+#[allow(dead_code)]
 pub fn centered_popup(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
     let w = (area.width as f32 * width_pct) as u16;
     let h = (area.height as f32 * height_pct) as u16;
@@ -77,4 +79,21 @@ pub fn centered_popup(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
         width: w.min(area.width),
         height: h.min(area.height),
     }
+}
+
+/// Create a centered layout using the new anchor system.
+/// Drop-in replacement for `centered_popup` that delegates to `resolve_overlay_layout`.
+pub fn centered_layout(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
+    use oxi_tui::overlay_anchor::{
+        resolve_overlay_layout, OverlayAnchor, OverlayLayout, SizeValue,
+    };
+    let layout = OverlayLayout {
+        anchor: OverlayAnchor::Center,
+        width: SizeValue::Percent(width_pct),
+        max_height: Some((area.height as f32 * height_pct) as u16),
+        min_width: None,
+        margin: 0,
+        ..Default::default()
+    };
+    resolve_overlay_layout(&layout, area.width, area.height)
 }

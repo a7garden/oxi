@@ -199,6 +199,13 @@ pub struct Settings {
     /// Circuit breaker open duration in seconds
     #[serde(default = "default_circuit_open_duration_secs")]
     pub circuit_breaker_open_duration_secs: u64,
+
+    // ── Keybindings ────────────────────────────────────────────────────
+    /// User-defined keybinding overrides.
+    /// Format: `{ "ActionName": ["Ctrl+x", "Alt+y"] }`
+    /// Actions are matched case-insensitively to the Action enum in oxi-tui.
+    #[serde(default)]
+    pub keybindings: HashMap<String, Vec<String>>,
 }
 
 fn default_theme() -> String {
@@ -269,6 +276,7 @@ impl Default for Settings {
             disable_fallback: false,
             circuit_breaker_failure_threshold: 5,
             circuit_breaker_open_duration_secs: 30,
+            keybindings: HashMap::new(),
         }
     }
 }

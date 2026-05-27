@@ -70,6 +70,7 @@ pub async fn handle_input(
             } else {
                 state.input.insert_str(&text);
                 state.update_slash_completions();
+                update_file_completions(state);
                 None
             }
         }
@@ -110,6 +111,7 @@ async fn handle_key(
         if let oxi_tui::keybindings::keys::BaseKey::Char(c) = key_id.base {
             state.input.insert_char(c);
             state.update_slash_completions();
+            update_file_completions(state);
         }
     }
     None
@@ -254,21 +256,25 @@ async fn dispatch_action(
         KAction::DeleteCharBackward => {
             state.input.backspace();
             state.update_slash_completions();
+            update_file_completions(state);
             None
         }
         KAction::DeleteCharForward => {
             state.input.delete();
             state.update_slash_completions();
+            update_file_completions(state);
             None
         }
         KAction::DeleteToLineStart => {
             state.input.delete_to_line_start();
             state.update_slash_completions();
+            update_file_completions(state);
             None
         }
         KAction::DeleteToLineEnd => {
             state.input.delete_to_line_end();
             state.update_slash_completions();
+            update_file_completions(state);
             None
         }
         KAction::Undo => {
@@ -1572,4 +1578,25 @@ fn handle_click(col: u16, row: u16, state: &mut AppState) {
         }
     }
     let _ = (col, row); // unused column
+}
+
+// ── File completion helpers ─────────────────────────────────────────────
+
+/// Update file path completions based on current input text.
+fn update_file_completions(state: &mut AppState) {
+    let text = state.input.text();
+    if text.starts_with("./")
+        || text.starts_with("../")
+        || text.starts_with('~')
+        || (text.contains('/') && !text.starts_with('/'))
+    {
+        let results = state.completion_manager.get_completions(text.as_str());
+        state.file_completions = results;
+        state.file_completion_index = 0;
+        state.file_completion_active = !state.file_completions.is_empty();
+    } else if !text.starts_with('/') {
+        // Not a slash command and not a path — clear file completions
+        state.file_completions.clear();
+        state.file_completion_active = false;
+    }
 }

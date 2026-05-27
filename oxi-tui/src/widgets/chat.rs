@@ -2419,9 +2419,12 @@ impl Widget for EntryWidget<'_> {
                 mime_type,
                 size_str,
             } => {
+                // Try terminal image protocol if supported
+                // For now, show placeholder with image info
+                // Actual protocol output happens post-render in app.rs
                 let lines = vec![
                     Line::from(Span::styled(
-                        format!("[image: {}, {}]", mime_type, size_str),
+                        format!("\u{1F5BC} [image: {}, {}]", mime_type, size_str),
                         self.styles.normal,
                     )),
                     Line::from(Span::styled(

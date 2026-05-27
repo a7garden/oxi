@@ -15,7 +15,7 @@ use ratatui::{
     Frame,
 };
 
-use super::{centered_popup, OverlayAction, OverlayComponent};
+use super::{centered_layout, OverlayAction, OverlayComponent};
 
 // ── Category definitions ─────────────────────────────────────────────────
 
@@ -317,7 +317,7 @@ impl OverlayComponent for ProviderSelectOverlay {
 
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let styles = theme.to_styles();
-        let popup = centered_popup(area, 0.85, 0.90);
+        let popup = centered_layout(area, 0.85, 0.90);
         frame.render_widget(Clear, popup);
 
         let border_block = Block::default()
@@ -575,7 +575,7 @@ impl ProviderSelectOverlay {
             provider_name,
         } = &self.sub_mode
         {
-            let popup = centered_popup(area, 0.50, 0.32);
+            let popup = centered_layout(area, 0.50, 0.32);
             frame.render_widget(Clear, popup);
 
             let block = Block::default()

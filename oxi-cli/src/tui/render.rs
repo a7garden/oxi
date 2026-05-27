@@ -32,7 +32,7 @@ fn render_popup_frame(
 }
 
 /// Compute a centered popup Rect covering `pct` of the screen.
-fn centered_popup(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
+fn centered_layout(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
     let w = (area.width as f32 * width_pct) as u16;
     let h = (area.height as f32 * height_pct) as u16;
     Rect {
@@ -475,6 +475,11 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         render_slash_popup_overlay(f, chunks[1], state, theme);
     }
 
+    // File path completion popup
+    if state.file_completion_active {
+        render_file_completion_popup(f, chunks[1], state, theme);
+    }
+
     // Status bar
     f.render_stateful_widget(Footer::new(theme), chunks[2], &mut state.footer_state);
 }
@@ -875,6 +880,74 @@ fn render_slash_popup_overlay(f: &mut Frame, input_area: Rect, state: &AppState,
     }
 }
 
+// ── File completion popup ───────────────────────────────────────────────
+
+fn render_file_completion_popup(f: &mut Frame, input_area: Rect, state: &AppState, theme: &Theme) {
+    if state.file_completions.is_empty() {
+        return;
+    }
+    let selected = state.file_completion_index;
+    let total = state.file_completions.len();
+    let max_show = 8usize.min(total);
+
+    let window_start = if selected >= max_show {
+        selected - max_show + 1
+    } else {
+        0
+    };
+
+    let popup_width = input_area.width;
+    let popup_height = max_show as u16 + 2; // border + items
+    let popup_x = input_area.x;
+    let popup_y = input_area.y.saturating_sub(popup_height);
+
+    let popup_area = Rect {
+        x: popup_x,
+        y: popup_y,
+        width: popup_width,
+        height: popup_height,
+    };
+
+    f.render_widget(Clear, popup_area);
+
+    let visible: Vec<_> = state
+        .file_completions
+        .iter()
+        .enumerate()
+        .skip(window_start)
+        .take(max_show)
+        .collect();
+
+    let styles = theme.to_styles();
+    let bg = theme.colors.background.to_ratatui();
+
+    let items: Vec<Line> = visible
+        .iter()
+        .map(|(idx, item)| {
+            let is_selected = *idx == selected;
+            let style = if is_selected {
+                styles.primary
+            } else {
+                styles.muted
+            };
+            let label = if let Some(desc) = &item.description {
+                format!(" {} {}", item.label, desc)
+            } else {
+                format!(" {}", item.label)
+            };
+            Line::from(Span::styled(label, style))
+        })
+        .collect();
+
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(styles.muted)
+        .style(ratatui::style::Style::default().bg(bg));
+
+    let list = ratatui::widgets::List::new(items).block(block);
+    f.render_widget(list, popup_area);
+}
+
 // ── Overlay dispatch ────────────────────────────────────────────────────
 
 fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
@@ -1063,7 +1136,7 @@ fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &
             .unwrap_or(0)
     };
 
-    let popup = centered_popup(area, 0.7, 0.7);
+    let popup = centered_layout(area, 0.7, 0.7);
     let inner = render_popup_frame(
         f,
         popup,
@@ -1121,7 +1194,7 @@ fn render_logout_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
         _ => return,
     };
 
-    let popup = centered_popup(area, 0.5, 0.5);
+    let popup = centered_layout(area, 0.5, 0.5);
     let inner = render_popup_frame(
         f,
         popup,
@@ -1184,7 +1257,7 @@ fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
         })
         .collect();
 
-    let popup = centered_popup(area, 0.6, 0.6);
+    let popup = centered_layout(area, 0.6, 0.6);
     let inner = render_popup_frame(
         f,
         popup,

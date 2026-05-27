@@ -34,6 +34,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use oxi_tui::render::DiffBackend;
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 // ── Terminal Lifecycle ───────────────────────────────────────────────────
@@ -41,7 +42,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 /// Terminal wrapper following ratatui best practices.
 /// Encapsulates setup/teardown, panic hook, and mouse tracking.
 struct Tui {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+    terminal: Terminal<DiffBackend<io::Stdout>>,
     tty_ok: bool,
 }
 
@@ -68,7 +69,7 @@ impl Tui {
             let _ = stdout.flush();
         }
 
-        let backend = CrosstermBackend::new(stdout);
+        let backend = DiffBackend::new(CrosstermBackend::new(stdout));
         let mut terminal = Terminal::new(backend)?;
         if tty_ok {
             let _ = terminal.clear();
@@ -114,7 +115,7 @@ impl Tui {
 }
 
 impl std::ops::Deref for Tui {
-    type Target = Terminal<CrosstermBackend<io::Stdout>>;
+    type Target = Terminal<DiffBackend<io::Stdout>>;
     fn deref(&self) -> &Self::Target {
         &self.terminal
     }
@@ -343,6 +344,14 @@ pub(crate) struct AppState {
     pub overlay_state: Option<Box<dyn super::overlay::OverlayComponent>>,
     /// Keybinding manager — maps keys to actions.
     pub keybindings: oxi_tui::keybindings::KeybindingsManager,
+    /// File path completion manager
+    pub completion_manager: crate::tui::completion::CompletionManager,
+    /// General completion items (file paths, fuzzy search)
+    pub file_completions: Vec<crate::tui::completion::CompletionItem>,
+    /// Selected index in file completions
+    pub file_completion_index: usize,
+    /// Whether file completion popup is active
+    pub file_completion_active: bool,
     /// WASM extension manager for dynamic commands
     pub wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
     /// Session file path for the current session
@@ -386,7 +395,7 @@ pub(crate) struct AppState {
 
 impl AppState {
     pub fn new() -> Self {
-        Self {
+        let mut state = Self {
             chat: ChatViewState::default(),
             input: InputState::default(),
             footer_state: FooterState::default(),
@@ -403,6 +412,12 @@ impl AppState {
             overlay: None,
             overlay_state: None,
             keybindings: oxi_tui::keybindings::KeybindingsManager::new(),
+            completion_manager: crate::tui::completion::CompletionManager::new(
+                std::env::current_dir().unwrap_or_default(),
+            ),
+            file_completions: Vec::new(),
+            file_completion_index: 0,
+            file_completion_active: false,
             wasm_ext: None,
             session_file_path: None,
             next_action: None,
@@ -417,7 +432,16 @@ impl AppState {
             snapshot_text_block_created: false,
             questionnaire_bridge: None,
             tool_start_times: std::collections::HashMap::new(),
+        };
+
+        // Load user keybindings from settings
+        if let Ok(settings) = oxi_store::settings::Settings::load() {
+            if !settings.keybindings.is_empty() {
+                state.keybindings.set_user_bindings(&settings.keybindings);
+            }
         }
+
+        state
     }
 
     // ── Input helpers ──
@@ -1239,6 +1263,15 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             state.footer_state.data.session_duration_secs = session_start.elapsed().as_secs();
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
+
+            // Post-render: terminal image protocol integration point
+            // Images are shown as placeholders in chat; Ctrl+I opens system viewer
+            if !state.chat.pending_images.is_empty() {
+                let caps = oxi_tui::render::terminal::TerminalCapabilities::detect();
+                if caps.supports_images() {
+                    // Future: output inline images using Kitty/iTerm2 protocol here
+                }
+            }
 
             if event::poll(poll_timeout)? {
                 let ev = event::read()?;
