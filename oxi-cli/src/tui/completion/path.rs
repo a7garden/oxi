@@ -175,7 +175,11 @@ mod tests {
     #[test]
     fn test_split_dir_prefix_trailing_slash() {
         let (dir, prefix) = split_dir_prefix(Path::new("src/"), Path::new("/project"));
-        assert!(dir.to_string_lossy().ends_with("src"));
+        let dir_str = dir.to_string_lossy();
+        // cwd.join("src/") may preserve trailing slash on some platforms,
+        // so strip it before checking.
+        assert!(dir_str.trim_end_matches('/').ends_with("src"),
+            "dir should end with 'src', got: {}", dir_str);
         assert_eq!(prefix, "");
     }
 

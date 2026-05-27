@@ -119,6 +119,9 @@ impl EditTool {
         }
 
         // Content-based conflict detection
+        // Note: We do a synchronous read for the hash check, then reuse the
+        // content below via the async read. The gap is minimal and the
+        // file_mutation_queue serializes concurrent edits to the same file.
         if let Some(ref expected) = input.expected_hash {
             let current_content = std::fs::read_to_string(path)
                 .map_err(|e| format!("Failed to read file for hash check: {}", e))?;

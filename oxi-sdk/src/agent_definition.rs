@@ -151,11 +151,10 @@ pub fn validate_agent_name(name: &str) -> Result<()> {
 
 /// Extract YAML frontmatter and body from markdown content.
 fn extract_frontmatter(content: &str) -> (String, String) {
-    if !content.starts_with("---") {
+    let Some(rest) = content.strip_prefix("---") else {
         return (String::new(), content.to_string());
-    }
+    };
 
-    let rest = &content[3..];
     if let Some(end) = rest.find("\n---") {
         let yaml_str = rest[..end].to_string();
         let body = rest[end + 4..].trim().to_string();

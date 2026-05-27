@@ -12,7 +12,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 /// YAML frontmatter parsed from SKILL.md
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct SkillFrontmatter {
     #[serde(default)]
     pub name: Option<String>,
@@ -20,16 +20,6 @@ pub struct SkillFrontmatter {
     pub description: Option<String>,
     #[serde(rename = "disable-model-invocation", default)]
     pub disable_model_invocation: bool,
-}
-
-impl Default for SkillFrontmatter {
-    fn default() -> Self {
-        Self {
-            name: None,
-            description: None,
-            disable_model_invocation: false,
-        }
-    }
 }
 
 /// A single skill loaded from a SKILL.md file.
@@ -105,16 +95,24 @@ impl SkillManager {
                 continue;
             }
 
-            let name = path
+            let dir_name = path
                 .file_name()
-                .unwrap_or_default()
+            .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
 
-            match Self::load_skill(&name, &skill_file) {
+            let valid_name = match Self::validate_name(&dir_name) {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::debug!("Invalid skill name '{}': {}", dir_name, e);
+                    continue;
+                }
+            };
+
+            match Self::load_skill(&valid_name, &skill_file) {
                 Ok(skill) => {
                     tracing::debug!("Loaded skill: {}", skill.name);
-                    skills.insert(name.to_lowercase(), skill);
+                    skills.insert(valid_name, skill);
                 }
                 Err(e) => {
                     tracing::warn!("Failed to load skill from {}: {}", skill_file.display(), e);
@@ -161,8 +159,7 @@ impl SkillManager {
         let location = path.parent().unwrap_or(path).to_path_buf();
 
         // Parse YAML frontmatter (--- ... ---)
-        let (frontmatter, body) = if raw.starts_with("---") {
-            let rest = &raw[3..];
+        let (frontmatter, body) = if let Some(rest) = raw.strip_prefix("---") {
             if let Some(end) = rest.find("\n---") {
                 let yaml_str = &rest[..end];
                 let body = rest[end + 4..].trim_start().to_string();

@@ -141,16 +141,35 @@ pub type ProgressCallback = Arc<dyn Fn(String) + Send + Sync>;
 #[derive(Debug, Clone)]
 pub enum ToolProgress {
     /// Status message (progress in progress)
-    Status { message: String },
+    Status {
+        /// The status text.
+        message: String,
+    },
     /// Partial output (e.g., bash stdout streaming)
-    PartialOutput { output: String, is_error: bool },
+    PartialOutput {
+        /// The partial output text.
+        output: String,
+        /// Whether this came from stderr.
+        is_error: bool,
+    },
     /// Progress percentage (0.0 - 1.0)
-    Percentage { current: f64, total: Option<f64>, message: Option<String> },
+    Percentage {
+        /// Current progress value.
+        current: f64,
+        /// Optional total value.
+        total: Option<f64>,
+        /// Optional human-readable message.
+        message: Option<String>,
+    },
     /// File operation progress
     FileOperation {
+        /// Type of file operation.
         operation: FileOp,
+        /// File path being operated on.
         path: std::path::PathBuf,
+        /// Bytes processed so far.
         bytes_processed: Option<u64>,
+        /// Total bytes to process.
         total_bytes: Option<u64>,
     },
 }
@@ -158,9 +177,13 @@ pub enum ToolProgress {
 /// File operation types for progress reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileOp {
+    /// Reading a file.
     Reading,
+    /// Writing a file.
     Writing,
+    /// Searching file contents.
     Searching,
+    /// Editing a file.
     Editing,
 }
 

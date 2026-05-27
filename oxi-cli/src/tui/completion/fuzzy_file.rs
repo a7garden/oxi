@@ -226,7 +226,10 @@ mod tests {
 
     #[test]
     fn test_score_case_insensitive() {
-        assert_eq!(score_path("Main.rs", "main"), 100);
+        // "main.rs" (basename lowered) starts with "main" → 80
+        assert_eq!(score_path("Main.rs", "main"), 80);
+        // Exact case-insensitive match of full filename → 100
+        assert_eq!(score_path("Main.rs", "main.rs"), 100);
     }
 
     #[test]

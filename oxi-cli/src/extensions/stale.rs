@@ -16,6 +16,7 @@ pub struct InvalidationToken {
 }
 
 impl InvalidationToken {
+    /// Create a new invalidation token (generation 0).
     pub fn new() -> Self {
         Self {
             inner: Arc::new(AtomicU64::new(0)),

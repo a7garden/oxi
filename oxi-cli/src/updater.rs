@@ -69,7 +69,7 @@ impl Updater {
             let status = self_update::backends::github::Update::configure()
                 .repo_owner(&repo_owner)
                 .repo_name(&repo_name)
-                .target(&target)
+                .target(target)
                 .bin_name("oxi")
                 .show_download_progress(true)
                 .current_version(&current)
