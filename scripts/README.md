@@ -1,28 +1,39 @@
-# Model DB Generator
+# Model DB Tooling
 
-Generates `oxi-ai/src/model_db.rs` from `models.json`.
+Tools for managing `oxi-ai/src/model_db.rs` — a static database of 544 models across 28 providers.
 
-## Usage
+## Round-trip workflow
 
-Compile and run the generator, piping output to the target file:
-
-```bash
-# From the workspace root
-cargo run --manifest-path scripts/Cargo.toml --bin generate-models < scripts/models.json > oxi-ai/src/model_db.rs
+```
+model_db.rs ──extract──→ models.json ──generate──→ model_db.rs
 ```
 
-Or run from the `scripts/` directory:
+Both directions are lossless. All 544 models, per-model API overrides, and provider metadata are preserved.
+
+## Extract (Rust → JSON)
+
+One-time migration or sync from hand-edited `model_db.rs`:
 
 ```bash
-cd scripts
-cargo run --bin generate-models < models.json > ../oxi-ai/src/model_db.rs
+python3 scripts/extract-models.py
+# Output: scripts/models.json (544 models, 28 providers)
+```
+
+## Generate (JSON → Rust)
+
+Regenerate `model_db.rs` from JSON:
+
+```bash
+cargo run --manifest-path scripts/Cargo.toml --bin generate-models < scripts/models.json > oxi-ai/src/model_db.rs
+# Verify:
+cargo check -p oxi-ai
 ```
 
 ## Adding models
 
 1. Edit `scripts/models.json` — add models under the appropriate provider, or add a new provider block.
 2. Regenerate: `cargo run --manifest-path scripts/Cargo.toml --bin generate-models < scripts/models.json > oxi-ai/src/model_db.rs`
-3. Verify: `cargo build -p oxi-ai`
+3. Verify: `cargo check -p oxi-ai && cargo test -p oxi-ai`
 
 ## JSON schema
 
@@ -36,6 +47,7 @@ cargo run --bin generate-models < models.json > ../oxi-ai/src/model_db.rs
         {
           "id": "model-id",
           "name": "Human-readable name",
+          "api": "optional-per-model-override",
           "reasoning": false,
           "input": ["text", "image"],
           "cost_input": 3.0,
@@ -47,6 +59,21 @@ cargo run --bin generate-models < models.json > ../oxi-ai/src/model_db.rs
         }
       ]
     }
+  ]
+}
+```
+
+### Per-model API overrides
+
+When a provider hosts models with different APIs (e.g., GitHub Copilot serves both OpenAI and Anthropic models), add an `"api"` field to the individual model:
+
+```json
+{
+  "name": "github-copilot",
+  "api": "openai-responses",
+  "models": [
+    { "id": "gpt-4o", "name": "GPT-4o", ... },
+    { "id": "claude-sonnet-4", "name": "Claude Sonnet 4", "api": "anthropic-messages", ... }
   ]
 }
 ```
@@ -76,3 +103,4 @@ cargo run --bin generate-models < models.json > ../oxi-ai/src/model_db.rs
 - This is a standalone code generation tool — it is **not** part of the workspace.
 - The generated `model_db.rs` is committed to the repo. Regenerate only when model data changes.
 - All costs are in USD per million tokens.
+- `extract-models.py` requires Python 3.6+ (no external dependencies).
