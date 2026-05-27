@@ -32,6 +32,69 @@ const BLOCKED_ENV_VARS: &[&str] = &[
     "DYLD_LIBRARY_PATH",
 ];
 
+/// MCP prompt template.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct McpPrompt {
+    /// Prompt name.
+    pub name: String,
+    /// Human-readable description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Accepted arguments.
+    #[serde(default)]
+    pub arguments: Vec<McpPromptArgument>,
+}
+
+/// MCP prompt template argument.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct McpPromptArgument {
+    /// Argument name.
+    pub name: String,
+    /// Human-readable description.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Whether this argument is required.
+    #[serde(default)]
+    pub required: bool,
+}
+
+/// MCP log level for `logging/setLevel`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpLogLevel {
+    /// Debug-level messages.
+    Debug,
+    /// Informational messages.
+    Info,
+    /// Normal-but-notable messages.
+    Notice,
+    /// Warning conditions.
+    Warning,
+    /// Error conditions.
+    Error,
+    /// Critical conditions.
+    Critical,
+    /// Action must be taken immediately.
+    Alert,
+    /// System is unusable.
+    Emergency,
+}
+
+impl McpLogLevel {
+    /// Return the string representation used in the MCP protocol.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            McpLogLevel::Debug => "debug",
+            McpLogLevel::Info => "info",
+            McpLogLevel::Notice => "notice",
+            McpLogLevel::Warning => "warning",
+            McpLogLevel::Error => "error",
+            McpLogLevel::Critical => "critical",
+            McpLogLevel::Alert => "alert",
+            McpLogLevel::Emergency => "emergency",
+        }
+    }
+}
+
 /// An MCP client connected to a single server via stdio.
 pub struct McpClient {
     /// Child process handle (kept alive to prevent process death).
@@ -261,6 +324,45 @@ impl McpClient {
             }
         }
         Ok(content)
+    }
+
+    /// List prompt templates available on the MCP server.
+    /// Corresponds to `prompts/list` capability.
+    pub async fn list_prompts(&mut self) -> Result<Vec<McpPrompt>> {
+        let result = self.send_request("prompts/list", None).await?;
+        let prompts = result
+            .get("prompts")
+            .cloned()
+            .unwrap_or(serde_json::Value::Array(vec![]));
+        serde_json::from_value(prompts)
+            .map_err(|e| anyhow::anyhow!("Failed to parse prompts/list response: {}", e))
+    }
+
+    /// Get a prompt template with arguments applied.
+    /// Corresponds to `prompts/get` capability.
+    pub async fn get_prompt(
+        &mut self,
+        name: &str,
+        args: std::collections::HashMap<String, String>,
+    ) -> Result<Vec<serde_json::Value>> {
+        let params = serde_json::json!({
+            "name": name,
+            "arguments": args
+        });
+        let result = self.send_request("prompts/get", Some(params)).await?;
+        let messages = result
+            .get("messages")
+            .cloned()
+            .unwrap_or(serde_json::Value::Array(vec![]));
+        Ok(serde_json::from_value(messages).unwrap_or_default())
+    }
+
+    /// Set the minimum log level for MCP server notifications.
+    /// Corresponds to `logging/setLevel` capability.
+    pub async fn set_log_level(&mut self, level: McpLogLevel) -> Result<()> {
+        let params = serde_json::json!({ "level": level.as_str() });
+        self.send_request("logging/setLevel", Some(params)).await?;
+        Ok(())
     }
 
     /// Shut down the client gracefully.

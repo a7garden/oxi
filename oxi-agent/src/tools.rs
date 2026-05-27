@@ -137,6 +137,36 @@ impl fmt::Display for AgentToolResult {
 /// Callback type for progress updates
 pub type ProgressCallback = Arc<dyn Fn(String) + Send + Sync>;
 
+/// Structured progress event for tool execution streaming.
+#[derive(Debug, Clone)]
+pub enum ToolProgress {
+    /// Status message (progress in progress)
+    Status { message: String },
+    /// Partial output (e.g., bash stdout streaming)
+    PartialOutput { output: String, is_error: bool },
+    /// Progress percentage (0.0 - 1.0)
+    Percentage { current: f64, total: Option<f64>, message: Option<String> },
+    /// File operation progress
+    FileOperation {
+        operation: FileOp,
+        path: std::path::PathBuf,
+        bytes_processed: Option<u64>,
+        total_bytes: Option<u64>,
+    },
+}
+
+/// File operation types for progress reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileOp {
+    Reading,
+    Writing,
+    Searching,
+    Editing,
+}
+
+/// Structured progress callback (alongside existing String callback)
+pub type StructuredProgressCallback = Arc<dyn Fn(ToolProgress) + Send + Sync>;
+
 /// Core trait for all agent tools
 #[async_trait]
 pub trait AgentTool: Send + Sync {
@@ -203,6 +233,11 @@ pub trait AgentTool: Send + Sync {
     fn on_progress(&self, _callback: ProgressCallback) {
         // Default no-op
     }
+
+    /// Structured progress callback for streaming tool execution updates.
+    /// Default implementation is no-op. Override in tools that support
+    /// structured progress (e.g., BashTool for partial output streaming).
+    fn on_structured_progress(&self, _callback: StructuredProgressCallback) {}
 
     /// Convert to ToolDefinition
     fn to_definition(&self) -> ToolDefinition {

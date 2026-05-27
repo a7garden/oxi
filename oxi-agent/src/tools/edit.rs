@@ -89,10 +89,16 @@ impl EditTool {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
+        let expected_hash = params
+            .get("expected_hash")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         EditInput {
             path,
             edits,
             dry_run,
+            expected_hash,
         }
     }
 
@@ -110,6 +116,25 @@ impl EditTool {
             return Err(
                 "No edits provided. Either use old_text/new_text or edits array.".to_string(),
             );
+        }
+
+        // Content-based conflict detection
+        if let Some(ref expected) = input.expected_hash {
+            let current_content = std::fs::read_to_string(path)
+                .map_err(|e| format!("Failed to read file for hash check: {}", e))?;
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            current_content.hash(&mut hasher);
+            let current_hash = format!("{:016x}", hasher.finish());
+            if current_hash != *expected {
+                return Ok(EditOutput {
+                    diff: String::new(),
+                    first_changed_line: None,
+                    applied: false,
+                    message: "File has been modified since last read. Re-read the file and retry."
+                        .to_string(),
+                });
+            }
         }
 
         // Read file content
@@ -186,6 +211,9 @@ struct EditInput {
     path: String,
     edits: Vec<EditEntry>,
     dry_run: bool,
+    /// Hash of file content at last read. If provided, edit will be
+    /// rejected if the file has been modified since.
+    expected_hash: Option<String>,
 }
 
 /// A single edit entry
@@ -266,6 +294,10 @@ impl AgentTool for EditTool {
                     "type": "boolean",
                     "description": "If true, preview the change without applying it",
                     "default": false
+                },
+                "expected_hash": {
+                    "type": "string",
+                    "description": "Hash of the file content at last read. If provided, the edit will be rejected if the file was modified since the hash was computed."
                 }
             },
             "required": ["path"]
@@ -367,6 +399,7 @@ mod tests {
                 new_text: "bar".to_string(),
             }],
             dry_run: false,
+            expected_hash: None,
         };
         let result = EditTool::apply_edits(Path::new("."), &input).await;
         assert!(result.is_err());
@@ -386,6 +419,7 @@ mod tests {
                 new_text: "goodbye".to_string(),
             }],
             dry_run: true,
+            expected_hash: None,
         };
         let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(!output.applied);
@@ -412,6 +446,7 @@ mod tests {
                 new_text: "goodbye".to_string(),
             }],
             dry_run: false,
+            expected_hash: None,
         };
         let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(output.applied);
@@ -440,6 +475,7 @@ mod tests {
                 },
             ],
             dry_run: false,
+            expected_hash: None,
         };
         let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
         assert!(output.applied);
@@ -462,6 +498,7 @@ mod tests {
                 new_text: "goodbye".to_string(),
             }],
             dry_run: false,
+            expected_hash: None,
         };
         EditTool::apply_edits(Path::new("."), &input).await.unwrap();
 
@@ -484,11 +521,97 @@ mod tests {
                 new_text: "goodbye".to_string(),
             }],
             dry_run: false,
+            expected_hash: None,
         };
         EditTool::apply_edits(Path::new("."), &input).await.unwrap();
 
         let content = fs::read_to_string(&file_path).await.unwrap();
         assert!(content.starts_with('\u{feff}'));
         assert!(content.contains("goodbye"));
+    }
+
+    #[test]
+    fn test_prepare_arguments_expected_hash() {
+        let params = json!({
+            "path": "/tmp/test.txt",
+            "old_text": "hello",
+            "new_text": "world",
+            "expected_hash": "abcd1234"
+        });
+        let input = EditTool::prepare_arguments(&params);
+        assert_eq!(input.expected_hash.as_deref(), Some("abcd1234"));
+    }
+
+    #[test]
+    fn test_prepare_arguments_no_expected_hash() {
+        let params = json!({
+            "path": "/tmp/test.txt",
+            "old_text": "hello",
+            "new_text": "world"
+        });
+        let input = EditTool::prepare_arguments(&params);
+        assert!(input.expected_hash.is_none());
+    }
+
+    fn compute_hash(content: &str) -> String {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        content.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+
+    #[tokio::test]
+    async fn test_conflict_detection_hash_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "hello world\n").await.unwrap();
+
+        let hash = compute_hash("hello world\n");
+
+        // Modify the file after computing the hash
+        fs::write(&file_path, "hello modified world\n")
+            .await
+            .unwrap();
+
+        let input = EditInput {
+            path: file_path.to_str().unwrap().to_string(),
+            edits: vec![EditEntry {
+                old_text: "hello".to_string(),
+                new_text: "goodbye".to_string(),
+            }],
+            dry_run: false,
+            expected_hash: Some(hash),
+        };
+        let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
+        assert!(!output.applied);
+        assert!(output.message.contains("modified since last read"));
+
+        // Verify file was NOT modified by the edit attempt
+        let content = fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(content, "hello modified world\n");
+    }
+
+    #[tokio::test]
+    async fn test_conflict_detection_hash_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.txt");
+        fs::write(&file_path, "hello world\n").await.unwrap();
+
+        let hash = compute_hash("hello world\n");
+
+        let input = EditInput {
+            path: file_path.to_str().unwrap().to_string(),
+            edits: vec![EditEntry {
+                old_text: "hello".to_string(),
+                new_text: "goodbye".to_string(),
+            }],
+            dry_run: false,
+            expected_hash: Some(hash),
+        };
+        let output = EditTool::apply_edits(Path::new("."), &input).await.unwrap();
+        assert!(output.applied);
+
+        let content = fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(content, "goodbye world\n");
     }
 }
