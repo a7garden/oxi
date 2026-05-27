@@ -4,7 +4,7 @@
 //! Supports both static built-in models and dynamic runtime registration
 //! for custom OpenAI-compatible providers.
 
-use crate::{Api, Cost, InputModality, Model};
+use crate::{Api, CompatSettings, Cost, InputModality, MaxTokensField, Model, ThinkingFormat};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -12,6 +12,37 @@ use std::collections::HashMap;
 /// Extract the model name after the last '/', or return the whole id if no '/' is present.
 fn extract_model_name(id: &str) -> &str {
     id.rsplit_once('/').map(|(_, name)| name).unwrap_or(id)
+}
+
+/// Return provider-specific compatibility defaults.
+///
+/// Internal helper used by `add_*_models()` functions so that every model
+/// from the same provider gets the same `compat` baseline.
+fn default_compat_for_provider(provider: &str) -> Option<CompatSettings> {
+    match provider {
+        "openai" | "openai-responses" | "openai-completions" => Some(CompatSettings {
+            thinking_format: Some(ThinkingFormat::OpenAI),
+            max_tokens_field: Some(MaxTokensField::MaxCompletionTokens),
+            ..CompatSettings::default()
+        }),
+        "openrouter" => Some(CompatSettings {
+            thinking_format: Some(ThinkingFormat::OpenRouter),
+            requires_tool_result_name: true,
+            ..CompatSettings::default()
+        }),
+        "deepseek" => Some(CompatSettings {
+            thinking_format: Some(ThinkingFormat::DeepSeek),
+            max_tokens_field: Some(MaxTokensField::MaxTokens),
+            ..CompatSettings::default()
+        }),
+        "zai" => Some(CompatSettings {
+            thinking_format: Some(ThinkingFormat::Zai),
+            ..CompatSettings::default()
+        }),
+        // azure-openai already has explicit CompatSettings in add_azure_models()
+        // All other providers: use defaults (return None)
+        _ => None,
+    }
 }
 
 /// Global model registry (static built-in models)
@@ -95,7 +126,7 @@ fn add_openai_models(map: &mut HashMap<String, Model>) {
                 context_window: 128_000,
                 max_tokens: 32_000,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("openai"),
             },
         );
     }
@@ -174,7 +205,7 @@ fn add_anthropic_models(map: &mut HashMap<String, Model>) {
                 context_window: 200_000,
                 max_tokens: 8192,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("anthropic"),
             },
         );
     }
@@ -240,7 +271,7 @@ fn add_google_models(map: &mut HashMap<String, Model>) {
                 context_window: ctx,
                 max_tokens: 8192,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("google"),
             },
         );
     }
@@ -292,7 +323,7 @@ fn add_deepseek_models(map: &mut HashMap<String, Model>) {
                 context_window: 64_000,
                 max_tokens: 8192,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("deepseek"),
             },
         );
     }
@@ -366,7 +397,7 @@ fn add_mistral_models(map: &mut HashMap<String, Model>) {
                 context_window: 128_000,
                 max_tokens: 32_000,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("mistral"),
             },
         );
     }
@@ -434,7 +465,7 @@ fn add_groq_models(map: &mut HashMap<String, Model>) {
                 context_window: 128_000,
                 max_tokens: 8192,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("groq"),
             },
         );
     }
@@ -468,7 +499,7 @@ fn add_cerebras_models(map: &mut HashMap<String, Model>) {
                 context_window: 128_000,
                 max_tokens: 8192,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("cerebras"),
             },
         );
     }
@@ -502,7 +533,7 @@ fn add_xai_models(map: &mut HashMap<String, Model>) {
                 context_window: 131_072,
                 max_tokens: 8192,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("xai"),
             },
         );
     }
@@ -594,7 +625,7 @@ fn add_openrouter_models(map: &mut HashMap<String, Model>) {
                 ]
                 .into_iter()
                 .collect(),
-                compat: None,
+                compat: default_compat_for_provider("openrouter"),
             },
         );
     }
@@ -672,7 +703,7 @@ fn add_zai_models(map: &mut HashMap<String, Model>) {
                 context_window: 200_000,
                 max_tokens: 131_072,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("zai"),
             },
         );
     }
@@ -710,7 +741,7 @@ fn add_minimax_models(map: &mut HashMap<String, Model>) {
                 context_window: 204_800,
                 max_tokens: 131_072,
                 headers: Default::default(),
-                compat: None,
+                compat: default_compat_for_provider("minimax"),
             },
         );
     }
