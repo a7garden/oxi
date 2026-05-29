@@ -36,6 +36,11 @@ pub struct AfterToolCallResult {
     pub is_error: Option<bool>,
     /// Signal that the agent should stop after this batch.
     pub terminate: Option<bool>,
+    /// Arbitrary structured details returned by the hook.
+    ///
+    /// Consumers (e.g. telemetry, middleware) can use this to attach
+    /// extra context without extending the struct.
+    pub details: Option<serde_json::Value>,
 }
 
 /// Hook context for `beforeToolCall`.
@@ -60,6 +65,11 @@ pub struct AfterToolCallContext {
     pub result: String,
     /// Whether the result is an error.
     pub is_error: bool,
+    /// Arbitrary structured details provided to the hook.
+    ///
+    /// Set by the agent loop before invoking the hook so that consumers
+    /// receive extra context (e.g. execution timing, tool-specific metadata).
+    pub details: Option<serde_json::Value>,
 }
 
 /// Callback hooks for the agent loop.

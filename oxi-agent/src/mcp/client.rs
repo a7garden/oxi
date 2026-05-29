@@ -389,7 +389,8 @@ impl McpClient {
     ) -> Result<serde_json::Value> {
         let params = serde_json::to_value(&request)
             .map_err(|e| anyhow::anyhow!("Failed to serialize sampling request: {}", e))?;
-        self.send_request("sampling/createMessage", Some(params)).await
+        self.send_request("sampling/createMessage", Some(params))
+            .await
     }
 
     /// Shut down the client gracefully.

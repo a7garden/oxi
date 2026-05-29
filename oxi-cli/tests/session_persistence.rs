@@ -1,8 +1,6 @@
 //! Session persistence tests — verifies create → persist → reload cycle.
 
-use oxi_store::session::{
-    AgentMessage, AssistantContentBlock, ContentValue, SessionManager,
-};
+use oxi_store::session::{AgentMessage, AssistantContentBlock, ContentValue, SessionManager};
 use tempfile::TempDir;
 
 fn make_user_message(text: &str) -> AgentMessage {
@@ -82,10 +80,7 @@ fn test_session_roundtrip_preserves_assistant_content() {
     // Reload
     let loaded = SessionManager::open(&session_file, Some(dir_path), None);
     let entry = loaded.get_entry(&aid);
-    assert!(
-        entry.is_some(),
-        "assistant entry should survive roundtrip"
-    );
+    assert!(entry.is_some(), "assistant entry should survive roundtrip");
     assert_eq!(entry.unwrap().content(), "answer");
 }
 

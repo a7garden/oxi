@@ -329,6 +329,60 @@ impl ToolResult {
     }
 }
 
+/// Images API provider type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ImagesApi {
+    /// OpenRouter API (supports multiple image generation models).
+    OpenRouter,
+}
+
+impl std::fmt::Display for ImagesApi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ImagesApi::OpenRouter => write!(f, "openrouter"),
+        }
+    }
+}
+
+/// Request for image generation via an Images API provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ImageGenerationRequest {
+    /// The text prompt describing the desired image.
+    pub prompt: String,
+    /// Model identifier (e.g. `"openai/dall-e-3"`, `"black-forest-labs/flux-1-dev"`).
+    pub model: Option<String>,
+    /// Output size. Provider-dependent. Examples: `"1024x1024"`, `"1024x1792"`.
+    pub size: Option<String>,
+    /// Number of images to generate (default 1).
+    pub n: Option<u32>,
+    /// Output format: `"url"` (default) or `"b64_json"`.
+    pub response_format: Option<String>,
+}
+
+impl Default for ImageGenerationRequest {
+    fn default() -> Self {
+        Self {
+            prompt: String::new(),
+            model: None,
+            size: None,
+            n: Some(1),
+            response_format: Some("b64_json".to_string()),
+        }
+    }
+}
+
+/// Response from an image generation API call.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct ImageGenerationResponse {
+    /// Vector of generated image bytes (one per `n`). Raw PNG/JPEG data.
+    pub images: Vec<Vec<u8>>,
+    /// Revised prompt from the model (providers may rewrite prompts).
+    pub revised_prompt: Option<String>,
+}
+
 /// LLM model definition.
 ///
 /// Describes a model's capabilities, endpoint, and cost structure.

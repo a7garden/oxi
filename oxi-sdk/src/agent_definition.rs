@@ -87,8 +87,9 @@ impl AgentDefinition {
                 default_context: DefaultContext::default(),
             }
         } else {
-            serde_yaml::from_str(&frontmatter)
-                .with_context(|| format!("Failed to parse YAML frontmatter in {}", path.display()))?
+            serde_yaml::from_str(&frontmatter).with_context(|| {
+                format!("Failed to parse YAML frontmatter in {}", path.display())
+            })?
         };
 
         // Use body as system_prompt if not set in frontmatter
@@ -189,10 +190,7 @@ impl AgentDiscovery {
         Ok(agents.into_iter().collect())
     }
 
-    fn discover_from_dir(
-        dir: &Path,
-        agents: &mut HashMap<String, AgentDefinition>,
-    ) -> Result<()> {
+    fn discover_from_dir(dir: &Path, agents: &mut HashMap<String, AgentDefinition>) -> Result<()> {
         if !dir.is_dir() {
             return Ok(());
         }
@@ -291,10 +289,7 @@ mod tests {
         assert_eq!(def.model, Some("gpt-4o".to_string()));
         assert_eq!(def.tools, vec!["read", "bash"]);
         assert_eq!(def.max_subagent_depth, 5);
-        assert_eq!(
-            def.system_prompt,
-            Some("You are a test agent.".to_string())
-        );
+        assert_eq!(def.system_prompt, Some("You are a test agent.".to_string()));
     }
 
     #[test]

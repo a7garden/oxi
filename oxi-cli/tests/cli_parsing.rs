@@ -42,8 +42,8 @@ mod tests {
 
     #[test]
     fn test_provider_and_model_flags() {
-        let args = CliArgs::try_parse_from(["oxi", "-p", "anthropic", "-m", "claude-sonnet-4"])
-            .unwrap();
+        let args =
+            CliArgs::try_parse_from(["oxi", "-p", "anthropic", "-m", "claude-sonnet-4"]).unwrap();
         assert_eq!(args.provider.as_deref(), Some("anthropic"));
         assert_eq!(args.model.as_deref(), Some("claude-sonnet-4"));
     }
@@ -226,8 +226,7 @@ mod tests {
 
     #[test]
     fn test_fork_subcommand() {
-        let args =
-            CliArgs::try_parse_from(["oxi", "fork", "parent-123", "entry-456"]).unwrap();
+        let args = CliArgs::try_parse_from(["oxi", "fork", "parent-123", "entry-456"]).unwrap();
         match args.command {
             Some(Commands::Fork {
                 parent_id,

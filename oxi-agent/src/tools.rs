@@ -327,8 +327,10 @@ pub mod edit;
 pub mod edit_diff;
 /// Serialised file-mutation queue.
 pub mod file_mutation_queue;
-/// File-system find tool.
+/// File-fsystem find tool.
 pub mod find;
+/// Image generation tool (OpenRouter API).
+pub mod generate_image;
 /// GitHub integration tool (gh CLI-based).
 pub mod github;
 /// GitHub repository search tool (legacy REST API).
@@ -540,6 +542,7 @@ impl ToolRegistry {
         all_tools.push(Box::new(crate::mcp::McpTool::new(mcp_manager)));
         all_tools.push(Box::new(context7::Context7ResolveLibraryIdTool::new()));
         all_tools.push(Box::new(context7::Context7QueryDocsTool::new()));
+        all_tools.push(Box::new(generate_image::GenerateImageTool::new()));
 
         for tool in all_tools {
             if tool.essential() || !disabled.contains(tool.name()) {

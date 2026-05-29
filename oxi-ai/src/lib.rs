@@ -28,11 +28,12 @@ pub mod router;
 pub mod secret;
 mod tools;
 mod transform;
-mod types;
+pub mod types;
 pub mod utils;
 
 /// Standard imports for oxi-ai usage.
 pub mod prelude {
+    pub use crate::compaction::generate_branch_summary;
     pub use crate::compaction::{
         CompactedContext, CompactionManager, CompactionStrategy, Compactor, LlmCompactor,
     };
@@ -103,6 +104,7 @@ pub use providers::normalize_messages;
 /// Tool definition and argument validation.
 pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ToolValidationError};
 
+pub use compaction::generate_branch_summary;
 /// Core type definitions (tokens, cost, etc.).
 pub use types::*;
 

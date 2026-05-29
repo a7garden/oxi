@@ -23,6 +23,74 @@ fn safe_truncate(s: &str, max_chars: usize) -> String {
         .unwrap_or(0);
     format!("{}...", &s[..boundary])
 }
+
+/// Generate a concise summary of the last N conversation messages.
+///
+/// Returns a string summarizing key topics and decisions without
+/// requiring a full compaction step.
+pub fn generate_branch_summary(messages: &[Message], n: usize) -> String {
+    if messages.is_empty() {
+        return "(empty conversation)".to_string();
+    }
+
+    let last_n: Vec<_> = if n > 0 {
+        messages.iter().rev().take(n).collect()
+    } else {
+        messages.iter().collect()
+    };
+
+    let mut topics = Vec::new();
+    let mut decisions = Vec::new();
+
+    for msg in last_n.iter().rev() {
+        let role = match msg {
+            Message::User(_) => "user",
+            Message::Assistant(_) => "assistant",
+            Message::ToolResult(_) => "tool",
+        };
+        let content = msg.text_content().unwrap_or_default();
+        let preview = safe_truncate(&content, 120);
+
+        // Detect code/file references
+        if content.contains("created file") || content.contains("edited file") {
+            topics.push("file modifications".to_string());
+        }
+        if content.contains("implemented") || content.contains("added feature") {
+            topics.push("feature implementation".to_string());
+        }
+        if content.contains("decided") || content.contains("chose") || content.contains("agreed") {
+            decisions.push(preview);
+        }
+        if content.contains("search") || content.contains("debug") || content.contains("fix") {
+            topics.push(format!("inquiry/analysis by {}", role));
+        }
+    }
+
+    // Deduplicate topics
+    topics.dedup();
+    decisions.dedup();
+
+    let summary = if topics.is_empty() && decisions.is_empty() {
+        // Fallback: just the last message preview
+        messages
+            .last()
+            .and_then(|m| m.text_content().ok())
+            .map(|c| safe_truncate(&c, 200))
+            .unwrap_or_else(|| "(no content)".to_string())
+    } else {
+        let mut parts = Vec::new();
+        if !topics.is_empty() {
+            parts.push(format!("Topics: {}", topics.join(", ")));
+        }
+        if !decisions.is_empty() {
+            parts.push(format!("Decisions: {}", decisions.join("; ")));
+        }
+        parts.join(" | ")
+    };
+
+    format!("[Branch summary of {} msgs] {}", messages.len(), summary)
+}
+
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

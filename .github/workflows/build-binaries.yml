@@ -13,12 +13,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ── Linux ──
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
             use_cross: true
+            artifact_name: oxi
+            archive_ext: tar.gz
           - target: aarch64-unknown-linux-musl
             os: ubuntu-latest
             use_cross: true
+            artifact_name: oxi
+            archive_ext: tar.gz
+          # ── macOS ──
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use_cross: false
+            artifact_name: oxi
+            archive_ext: tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-13
+            use_cross: false
+            artifact_name: oxi
+            archive_ext: tar.gz
+          # ── Windows ──
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            use_cross: false
+            artifact_name: oxi.exe
+            archive_ext: zip
 
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +52,10 @@ jobs:
         if: matrix.use_cross
         run: cargo install cross --locked
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
       - name: Build
         run: |
           ${{ matrix.use_cross && 'cross' || 'cargo' }} build \
@@ -39,14 +65,22 @@ jobs:
 
       - name: Strip binary
         if: runner.os != 'Windows'
-        run: strip target/${{ matrix.target }}/release/oxi || true
+        run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
 
-      - name: Package
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../oxi-${{ matrix.target }}.tar.gz oxi
+          tar czf ../../../oxi-${{ matrix.target }}.tar.gz ${{ matrix.artifact_name }}
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ../../../oxi-${{ matrix.target }}.zip ${{ matrix.artifact_name }}
+        shell: pwsh
 
       - uses: actions/upload-artifact@v4
         with:
           name: oxi-${{ matrix.target }}
-          path: oxi-${{ matrix.target }}.tar.gz
+          path: oxi-${{ matrix.target }}.${{ matrix.archive_ext }}

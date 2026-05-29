@@ -97,7 +97,7 @@ impl SkillManager {
 
             let dir_name = path
                 .file_name()
-            .unwrap_or_default()
+                .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
 
@@ -178,10 +178,7 @@ impl SkillManager {
             .unwrap_or_else(|| Self::extract_description(&body));
 
         Ok(Skill {
-            name: frontmatter
-                .name
-                .clone()
-                .unwrap_or_else(|| name.to_string()),
+            name: frontmatter.name.clone().unwrap_or_else(|| name.to_string()),
             description,
             content: body,
             location,
@@ -363,11 +360,7 @@ impl SkillManager {
                     skills.insert(valid_name, skill);
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "Failed to load skill from {}: {}",
-                        skill_file.display(),
-                        e
-                    );
+                    tracing::warn!("Failed to load skill from {}: {}", skill_file.display(), e);
                 }
             }
         }
@@ -601,7 +594,10 @@ mod tests {
     #[test]
     fn test_validate_name_valid() {
         assert_eq!(SkillManager::validate_name("my-skill").unwrap(), "my-skill");
-        assert_eq!(SkillManager::validate_name("rust-expert").unwrap(), "rust-expert");
+        assert_eq!(
+            SkillManager::validate_name("rust-expert").unwrap(),
+            "rust-expert"
+        );
         assert_eq!(SkillManager::validate_name("code-123").unwrap(), "code-123");
         assert_eq!(SkillManager::validate_name("abc").unwrap(), "abc");
     }
@@ -609,7 +605,10 @@ mod tests {
     #[test]
     fn test_validate_name_uppercase_normalized() {
         assert_eq!(SkillManager::validate_name("My-Skill").unwrap(), "my-skill");
-        assert_eq!(SkillManager::validate_name("Rust-Expert").unwrap(), "rust-expert");
+        assert_eq!(
+            SkillManager::validate_name("Rust-Expert").unwrap(),
+            "rust-expert"
+        );
     }
 
     #[test]
@@ -699,11 +698,7 @@ Body content here.
         // Create a normal skill
         let dir1 = tmp.path().join("visible-skill");
         std::fs::create_dir_all(&dir1).unwrap();
-        std::fs::write(
-            dir1.join("SKILL.md"),
-            "# Visible Skill\nA visible skill.",
-        )
-        .unwrap();
+        std::fs::write(dir1.join("SKILL.md"), "# Visible Skill\nA visible skill.").unwrap();
 
         // Create a disabled skill
         let dir2 = tmp.path().join("hidden-skill");
@@ -788,11 +783,7 @@ This should not appear.
         // Create the same skill in two locations (symlink or copy)
         let skill_dir = tmp.path().join("dup-skill");
         std::fs::create_dir_all(&skill_dir).unwrap();
-        std::fs::write(
-            skill_dir.join("SKILL.md"),
-            "# Duplicate Skill\n",
-        )
-        .unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# Duplicate Skill\n").unwrap();
 
         // Create symlink to same directory
         let link_dir = tmp.path().join("dup-skill-link");
@@ -804,7 +795,10 @@ This should not appear.
             let manager = SkillManager::load_from_dir(tmp.path()).unwrap();
             // Should only have one skill (duplicate detected)
             let names: Vec<_> = manager.all().iter().map(|s| s.name.clone()).collect();
-            assert!(names.iter().any(|n| n == "dup-skill"), "Original should exist");
+            assert!(
+                names.iter().any(|n| n == "dup-skill"),
+                "Original should exist"
+            );
             // Note: With symlinks, the canonical paths should be the same, so one gets skipped
         }
     }

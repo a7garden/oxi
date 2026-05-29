@@ -104,6 +104,13 @@ async fn execute_tool_calls_sequential(
 
             if let Some(ref hook) = loop_ref.after_tool_call {
                 if let Some(modified) = hook(&tc_name, &result).await.ok().flatten() {
+                    if let Some(ref details) = modified.metadata {
+                        tracing::debug!(
+                            tool = %tc_name,
+                            details = %details,
+                            "after_tool_call hook returned details"
+                        );
+                    }
                     result = modified;
                     is_error = !result.success;
                 }
@@ -308,6 +315,13 @@ pub(crate) async fn execute_prepared_tool_call_static(
 
     if let Some(ref hook) = after_hook {
         if let Some(modified) = hook(&tool_call.name, &result).await.ok().flatten() {
+            if let Some(ref details) = modified.metadata {
+                tracing::debug!(
+                    tool = %tool_call.name,
+                    details = %details,
+                    "after_tool_call hook returned details"
+                );
+            }
             result = modified;
             is_error = !result.success;
         }

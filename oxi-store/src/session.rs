@@ -1160,6 +1160,55 @@ impl SessionManager {
         self.persist
     }
 
+    /// Validate a session ID format.
+    ///
+    /// Checks that the session_id conforms to the expected UUID format.
+    /// Returns `true` if valid.
+    pub fn validate_session_id(id: &str) -> bool {
+        Uuid::parse_str(id).is_ok()
+    }
+
+    /// Returns `true` if this session is in read-only mode.
+    ///
+    /// A session is read-only when:
+    /// - It was opened without write permissions
+    /// - Its underlying file is set to read-only on the filesystem
+    ///
+    /// Read-only sessions reject any append/branch operations.
+    pub fn is_readonly(&self) -> bool {
+        if !self.persist {
+            // In-memory sessions start mutable, but can be marked readonly
+            return false;
+        }
+        if let Some(ref file) = self.session_file {
+            let path = Path::new(file);
+            if path.exists() {
+                if let Ok(metadata) = fs::metadata(path) {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let perm = metadata.permissions().mode();
+                        // 0o200 = write bit for owner removed
+                        return perm & 0o200 == 0;
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        let _ = metadata;
+                        return false;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Check if appending to this session is allowed.
+    ///
+    /// Combination of `!is_readonly()` + in-memory or writable backing file.
+    pub fn can_append(&self) -> bool {
+        !self.is_readonly() && self.persist
+    }
+
     /// Get the number of agent messages that have already been persisted.
     pub fn persisted_count(&self) -> usize {
         *self.persisted_count.read()

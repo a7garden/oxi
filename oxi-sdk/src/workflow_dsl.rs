@@ -43,9 +43,7 @@ pub enum WorkflowStepDef {
         concurrency: Option<usize>,
     },
     /// Run agents sequentially, passing results forward.
-    Chain {
-        steps: Vec<WorkflowStepDef>,
-    },
+    Chain { steps: Vec<WorkflowStepDef> },
     /// Fan-out: run an agent for each item in a SharedMemory key.
     ForEach {
         items_key: String,
@@ -82,8 +80,8 @@ impl WorkflowDefinition {
 
     /// Parse a workflow definition from a YAML string.
     pub fn from_yaml_str(yaml: &str) -> Result<Self> {
-        let def: WorkflowDefinition = serde_yaml::from_str(yaml)
-            .with_context(|| "Failed to parse workflow YAML")?;
+        let def: WorkflowDefinition =
+            serde_yaml::from_str(yaml).with_context(|| "Failed to parse workflow YAML")?;
         def.validate()?;
         Ok(def)
     }

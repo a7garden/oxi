@@ -27,8 +27,8 @@ pub use storage::packages::PackageManager;
 pub use storage::packages::ResourceKind;
 pub mod tui; // public for main.rs
 pub(crate) mod ui;
-pub(crate) mod util;
 pub mod updater;
+pub(crate) mod util;
 
 // ─── oxi-store re-exports (shared persistent state) ─────────────────────────
 pub use oxi_store::{
