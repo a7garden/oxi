@@ -894,6 +894,35 @@ async fn handle_overlay_key(
                 ));
                 return None;
             }
+            OverlayAction::ForkFromEntry { entry_id } => {
+                state.overlay_state = None;
+                if let Some(ref path) = state.session_file_path {
+                    let sm = oxi_store::session::SessionManager::open(path, None, None);
+                    match sm.branch_from_entry(&entry_id) {
+                        Ok(new_path) => {
+                            state.next_action =
+                                Some(super::app::TuiNextAction::SwitchSession(new_path));
+                            state.add_system_message(format!(
+                                "Forked from [{}]\nStarting new session...",
+                                &entry_id[..8.min(entry_id.len())]
+                            ));
+                        }
+                        Err(e) => {
+                            state.add_system_message(format!("Error forking: {}", e));
+                        }
+                    }
+                }
+                return None;
+            }
+            OverlayAction::NavigateToEntry { entry_id } => {
+                state.overlay_state = None;
+                // TODO: integrate with SessionNavigator::navigate_tree() for branch switching
+                state.add_system_message(format!(
+                    "Selected entry: {}",
+                    &entry_id[..8.min(entry_id.len())]
+                ));
+                return None;
+            }
             _ => {}
         }
         return None;

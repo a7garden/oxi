@@ -10,12 +10,18 @@ use ratatui::{layout::Rect, Frame};
 
 pub mod anchor;
 pub mod factories;
+pub mod fork_select;
+pub mod loader;
 pub mod questionnaire;
 pub mod router_integration;
 pub mod router_setup;
+pub mod tree_navigator;
 #[allow(unused_imports)]
 pub use factories::{logout_select, model_select, resume_select, routing_status};
+pub use fork_select::ForkSelectOverlay;
+pub use loader::CancellableLoader;
 pub use router_setup::{router_setup, RouterSetupData};
+pub use tree_navigator::{tree_navigator, TreeNavigatorOverlay};
 
 // ---------------------------------------------------------------------------
 // Overlay action
@@ -41,6 +47,14 @@ pub enum OverlayAction {
     OpenRouterSetup {
         initial: crate::tui::overlay::RouterSetupData,
         models: Vec<String>,
+    },
+    /// Fork session from the selected entry ID.
+    ForkFromEntry {
+        entry_id: String,
+    },
+    /// Navigate to the selected tree node entry ID.
+    NavigateToEntry {
+        entry_id: String,
     },
 }
 

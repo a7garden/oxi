@@ -18,7 +18,7 @@ use ratatui::{
 };
 
 use super::{centered_layout, OverlayAction, OverlayComponent};
-use crate::app::agent_session::AgentSessionHandle;
+use crate::app::agent_session::{AgentSession, AgentSessionHandle};
 
 // ─────────────────────────────────────────────────────────────────────────
 // SharedAppState (same pattern as factories.rs)
@@ -245,12 +245,15 @@ impl TreeNavigatorOverlay {
             });
 
             if has_children && !is_folded {
-                self.flatten_children(
+                Self::flatten_children_impl(
                     &root.id,
                     1,
                     &children_map,
                     is_last,
                     &filtered_ids,
+                    &self.folded,
+                    &self.active_path,
+                    &mut self.flat_nodes,
                 );
             }
         }
@@ -299,13 +302,16 @@ impl TreeNavigatorOverlay {
         }
     }
 
-    fn flatten_children(
-        &mut self,
+    /// Static version that accepts explicit parameters to avoid borrow conflicts.
+    fn flatten_children_impl(
         parent_id: &str,
         indent: usize,
         children_map: &HashMap<Option<String>, Vec<&SessionEntry>>,
         _parent_is_last: bool,
         _filtered_ids: &HashSet<String>,
+        folded: &HashSet<String>,
+        active_path: &HashSet<String>,
+        flat_nodes: &mut Vec<FlatNode>,
     ) {
         let children = match children_map.get(&Some(parent_id.to_string())) {
             Some(c) => c,
@@ -317,26 +323,29 @@ impl TreeNavigatorOverlay {
             let has_children = children_map
                 .get(&Some(child.id.clone()))
                 .map_or(false, |c| !c.is_empty());
-            let is_folded = self.folded.contains(&child.id);
+            let is_folded = folded.contains(&child.id);
 
-            self.flat_nodes.push(FlatNode {
+            flat_nodes.push(FlatNode {
                 entry_id: child.id.clone(),
                 parent_id: child.parent_id.clone(),
                 indent,
                 is_last_child: is_last,
                 is_folded: is_folded && has_children,
                 has_children,
-                content: make_content_line(child, &self.active_path),
+                content: make_content_line(child, active_path),
                 entry_type: EntryType::from_message(&child.message),
             });
 
             if has_children && !is_folded {
-                self.flatten_children(
+                Self::flatten_children_impl(
                     &child.id,
                     indent + 1,
                     children_map,
                     is_last,
                     _filtered_ids,
+                    folded,
+                    active_path,
+                    flat_nodes,
                 );
             }
         }
@@ -664,7 +673,7 @@ impl OverlayComponent for TreeNavigatorOverlay {
 pub fn tree_navigator(
     entries: Vec<SessionEntry>,
     current_leaf: Option<String>,
-    session: &AgentSessionHandle,
+    session: &AgentSession,
     app_state: &mut crate::tui::app::AppState,
 ) -> Box<dyn OverlayComponent> {
     let shared = Arc::new(Mutex::new(app_state as *mut _));

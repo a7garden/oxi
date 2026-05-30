@@ -407,17 +407,27 @@ pub(crate) fn handle_slash_command(
                         }
                     }
                 } else {
+                    // No arg: open interactive fork selector overlay
                     if user_entries.is_empty() {
                         state.add_system_message("No user messages to fork from.".to_string());
                     } else {
-                        let mut out = "Fork from which message?\n\n".to_string();
-                        for (i, entry) in user_entries.iter().enumerate() {
-                            let preview: String = entry.content().chars().take(60).collect();
-                            let short_id = &entry.id[..8.min(entry.id.len())];
-                            out.push_str(&format!("  {}. [{}] {}\n", i + 1, short_id, preview));
-                        }
-                        out.push_str("\n/fork <number or id> to fork from a message");
-                        state.add_system_message(out);
+                        let entries: Vec<(String, String)> = user_entries
+                            .iter()
+                            .map(|e| {
+                                let preview: String = e.content().chars().take(60).collect();
+                                (e.id.clone(), preview)
+                            })
+                            .collect();
+                        let shared = std::sync::Arc::new(std::sync::Mutex::new(
+                            state as *mut super::app::AppState
+                        ));
+                        state.overlay_state = Some(Box::new(
+                            super::overlay::ForkSelectOverlay::new(
+                                entries,
+                                session.clone_handle(),
+                                shared,
+                            ),
+                        ));
                     }
                 }
             } else {
@@ -460,38 +470,16 @@ pub(crate) fn handle_slash_command(
                         if roots.is_empty() {
                             state.add_system_message("Empty session.".to_string());
                         } else {
-                            let mut out = "Session tree:\n\n".to_string();
-                            fn render_node(
-                                node: &oxi_store::session::SessionTreeNode,
-                                depth: usize,
-                                out: &mut String,
-                            ) {
-                                let indent = "  ".repeat(depth);
-                                let role = match &node.entry.message {
-                                    oxi_store::session::AgentMessage::User { .. } => "U",
-                                    oxi_store::session::AgentMessage::Assistant { .. } => "A",
-                                    _ => "-",
-                                };
-                                let preview: String =
-                                    node.entry.content().chars().take(50).collect();
-                                let label = node
-                                    .label
-                                    .as_ref()
-                                    .map(|l| format!(" [{}]", l))
-                                    .unwrap_or_default();
-                                let short_id = &node.entry.id[..8.min(node.entry.id.len())];
-                                out.push_str(&format!(
-                                    "{}{} [{}] {}{}\n",
-                                    indent, role, short_id, preview, label
-                                ));
-                                for child in &node.children {
-                                    render_node(child, depth + 1, out);
-                                }
-                            }
-                            for root in &roots {
-                                render_node(root, 0, &mut out);
-                            }
-                            state.add_system_message(out);
+                            // Collect all entries from the tree for the overlay
+                            let entries = collect_tree_entries(&roots);
+                            state.overlay_state = Some(
+                                super::overlay::tree_navigator(
+                                    entries,
+                                    None, // current leaf detection
+                                    session,
+                                    state,
+                                )
+                            );
                         }
                     }
                     Err(e) => {
@@ -997,6 +985,24 @@ fn handle_tool_command(
             ));
         }
     }
+}
+
+/// Collect all entries from a tree of SessionTreeNodes into a flat Vec<SessionEntry>.
+/// Preserves tree order (depth-first traversal).
+fn collect_tree_entries(
+    roots: &[oxi_store::session::SessionTreeNode],
+) -> Vec<oxi_store::session::SessionEntry> {
+    let mut entries = Vec::new();
+    fn visit(node: &oxi_store::session::SessionTreeNode, entries: &mut Vec<oxi_store::session::SessionEntry>) {
+        entries.push(node.entry.clone());
+        for child in &node.children {
+            visit(child, entries);
+        }
+    }
+    for root in roots {
+        visit(root, &mut entries);
+    }
+    entries
 }
 
 /// Try to re-register a previously disabled built-in tool.
