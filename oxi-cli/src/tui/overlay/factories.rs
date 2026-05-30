@@ -63,10 +63,14 @@ impl OverlayComponent for ModelSelectOverlay {
             return OverlayAction::None;
         }
         match key.code {
-            KeyCode::Up => { self.list.select_previous(); }
-            KeyCode::Down => { self.list.select_next(); }
+            KeyCode::Up => {
+                self.list.select_previous();
+            }
+            KeyCode::Down => {
+                self.list.select_next();
+            }
             KeyCode::Enter => {
-                if let Some(model_id) = self.list.selected().map(|s| s.clone()) {
+                if let Some(model_id) = self.list.selected().cloned() {
                     if model_id.starts_with("router/") {
                         let gd = dirs::config_dir().unwrap_or_default().join("oxi");
                         let pd = std::env::current_dir().unwrap_or_default();
@@ -76,7 +80,9 @@ impl OverlayComponent for ModelSelectOverlay {
                             if let Ok(ptr) = self.app_state.lock() {
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
-                                        app.add_system_message("Opening router setup...".to_string());
+                                        app.add_system_message(
+                                            "Opening router setup...".to_string(),
+                                        );
                                     }
                                 }
                             }
@@ -114,9 +120,15 @@ impl OverlayComponent for ModelSelectOverlay {
                 }
                 return OverlayAction::Close;
             }
-            KeyCode::Esc => { return OverlayAction::Close; }
-            KeyCode::Backspace => { self.list.filter_backspace(); }
-            KeyCode::Char(c) => { self.list.filter_input(c); }
+            KeyCode::Esc => {
+                return OverlayAction::Close;
+            }
+            KeyCode::Backspace => {
+                self.list.filter_backspace();
+            }
+            KeyCode::Char(c) => {
+                self.list.filter_input(c);
+            }
             _ => {}
         }
         OverlayAction::None
@@ -147,10 +159,17 @@ impl OverlayComponent for ModelSelectOverlay {
                     .fg(theme.colors.primary.to_ratatui())
                     .add_modifier(Modifier::BOLD),
             )),
-            Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 },
+            Rect {
+                x: inner.x,
+                y: inner.y,
+                width: inner.width,
+                height: 1,
+            },
         );
 
-        let items: Vec<ListItem> = self.list.items()
+        let items: Vec<ListItem> = self
+            .list
+            .items()
             .map(|m| ListItem::new(Span::styled(m.as_str(), styles.normal)))
             .collect();
 
@@ -171,8 +190,10 @@ impl OverlayComponent for ModelSelectOverlay {
         frame.render_stateful_widget(
             list,
             Rect {
-                x: inner.x, y: inner.y + 2,
-                width: inner.width, height: inner.height.saturating_sub(3),
+                x: inner.x,
+                y: inner.y + 2,
+                width: inner.width,
+                height: inner.height.saturating_sub(3),
             },
             &mut list_state,
         );
@@ -184,12 +205,17 @@ impl OverlayComponent for ModelSelectOverlay {
 
         frame.render_widget(
             Paragraph::new(Span::styled(
-                format!(" {} models  |  Up/Down  |  type to filter  |  Enter select  |  Esc cancel", count),
+                format!(
+                    " {} models  |  Up/Down  |  type to filter  |  Enter select  |  Esc cancel",
+                    count
+                ),
                 styles.muted,
             )),
             Rect {
-                x: inner.x, y: inner.y + inner.height.saturating_sub(1),
-                width: inner.width, height: 1,
+                x: inner.x,
+                y: inner.y + inner.height.saturating_sub(1),
+                width: inner.width,
+                height: 1,
             },
         );
     }
@@ -232,10 +258,14 @@ impl OverlayComponent for LogoutSelectOverlay {
             return OverlayAction::None;
         }
         match key.code {
-            KeyCode::Up => { self.list.select_previous(); }
-            KeyCode::Down => { self.list.select_next(); }
+            KeyCode::Up => {
+                self.list.select_previous();
+            }
+            KeyCode::Down => {
+                self.list.select_next();
+            }
             KeyCode::Enter => {
-                if let Some(provider) = self.list.selected().map(|s| s.clone()) {
+                if let Some(provider) = self.list.selected().cloned() {
                     oxi_store::auth_storage::shared_auth_storage().remove(&provider);
                     if let Ok(ptr) = self.app_state.lock() {
                         unsafe {
@@ -247,7 +277,9 @@ impl OverlayComponent for LogoutSelectOverlay {
                 }
                 return OverlayAction::Close;
             }
-            KeyCode::Esc => { return OverlayAction::Close; }
+            KeyCode::Esc => {
+                return OverlayAction::Close;
+            }
             _ => {}
         }
         OverlayAction::None
@@ -270,7 +302,9 @@ impl OverlayComponent for LogoutSelectOverlay {
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
-        let items: Vec<ListItem> = self.list.items()
+        let items: Vec<ListItem> = self
+            .list
+            .items()
             .map(|p| ListItem::new(Span::styled(p.as_str(), styles.normal)))
             .collect();
 
@@ -298,8 +332,10 @@ impl OverlayComponent for LogoutSelectOverlay {
                 styles.muted,
             )),
             Rect {
-                x: inner.x, y: inner.y + inner.height.saturating_sub(1),
-                width: inner.width, height: 1,
+                x: inner.x,
+                y: inner.y + inner.height.saturating_sub(1),
+                width: inner.width,
+                height: 1,
             },
         );
     }
@@ -314,7 +350,10 @@ impl OverlayComponent for LogoutSelectOverlay {
 // ─────────────────────────────────────────────────────────────────────────
 
 pub fn resume_select(sessions: Vec<SessionInfo>) -> Box<dyn OverlayComponent> {
-    Box::new(ResumeSelectOverlay { sessions, selected: 0 })
+    Box::new(ResumeSelectOverlay {
+        sessions,
+        selected: 0,
+    })
 }
 
 struct ResumeSelectOverlay {
@@ -351,7 +390,9 @@ impl OverlayComponent for ResumeSelectOverlay {
                     return OverlayAction::SwitchSession(s.path.clone());
                 }
             }
-            KeyCode::Esc => { return OverlayAction::Close; }
+            KeyCode::Esc => {
+                return OverlayAction::Close;
+            }
             _ => {}
         }
         OverlayAction::None
@@ -385,8 +426,10 @@ impl OverlayComponent for ResumeSelectOverlay {
                 header_style,
             )),
             Rect {
-                x: inner.x + 1, y: inner.y,
-                width: inner.width.saturating_sub(2), height: 1,
+                x: inner.x + 1,
+                y: inner.y,
+                width: inner.width.saturating_sub(2),
+                height: 1,
             },
         );
 
@@ -395,7 +438,8 @@ impl OverlayComponent for ResumeSelectOverlay {
             .bg(theme.colors.primary.to_ratatui())
             .add_modifier(Modifier::BOLD);
 
-        let items: Vec<ListItem> = self.sessions
+        let items: Vec<ListItem> = self
+            .sessions
             .iter()
             .map(|s| {
                 let row = format!(
@@ -417,8 +461,10 @@ impl OverlayComponent for ResumeSelectOverlay {
         let mut list_state = ratatui::widgets::ListState::default();
         list_state.select(Some(self.selected));
         let list_area = Rect {
-            x: inner.x, y: inner.y + 1,
-            width: inner.width, height: inner.height.saturating_sub(2),
+            x: inner.x,
+            y: inner.y + 1,
+            width: inner.width,
+            height: inner.height.saturating_sub(2),
         };
         frame.render_stateful_widget(list, list_area, &mut list_state);
         if let Some(s) = list_state.selected() {
@@ -427,12 +473,17 @@ impl OverlayComponent for ResumeSelectOverlay {
 
         frame.render_widget(
             Paragraph::new(Span::styled(
-                format!(" {} sessions  |  Up/Down  |  Enter switch  |  Esc cancel", self.sessions.len()),
+                format!(
+                    " {} sessions  |  Up/Down  |  Enter switch  |  Esc cancel",
+                    self.sessions.len()
+                ),
                 styles.muted,
             )),
             Rect {
-                x: inner.x, y: inner.y + inner.height.saturating_sub(1),
-                width: inner.width, height: 1,
+                x: inner.x,
+                y: inner.y + inner.height.saturating_sub(1),
+                width: inner.width,
+                height: 1,
             },
         );
     }
@@ -463,7 +514,9 @@ struct RoutingOverlay {
 
 impl std::fmt::Debug for RoutingOverlay {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RoutingOverlay").field("data", &self.data).finish()
+        f.debug_struct("RoutingOverlay")
+            .field("data", &self.data)
+            .finish()
     }
 }
 
@@ -482,7 +535,11 @@ impl OverlayComponent for RoutingOverlay {
             return OverlayAction::None;
         }
         match key.code {
-            KeyCode::Char('r') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('r')
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
+            {
                 OverlayAction::Close
             }
             KeyCode::Esc => OverlayAction::Close,
@@ -500,7 +557,9 @@ impl OverlayComponent for RoutingOverlay {
         frame.render_stateful_widget(widget, panel_area, &mut self.widget_state);
     }
 
-    fn hint(&self) -> &str { " Esc or Ctrl+R to close" }
+    fn hint(&self) -> &str {
+        " Esc or Ctrl+R to close"
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -508,8 +567,11 @@ impl OverlayComponent for RoutingOverlay {
 // ─────────────────────────────────────────────────────────────────────────
 
 fn title_text(filter: &str) -> String {
-    if filter.is_empty() { " Select a model ".to_string() }
-    else { format!(" Filter: {} ", filter) }
+    if filter.is_empty() {
+        " Select a model ".to_string()
+    } else {
+        format!(" Filter: {} ", filter)
+    }
 }
 
 fn title_line(filter: &str) -> ratatui::text::Line<'static> {
@@ -536,15 +598,27 @@ fn title_line_resume() -> ratatui::text::Line<'static> {
 fn truncate(text: &str, max_width: usize) -> String {
     let len = text.chars().count();
     if len > max_width {
-        format!("{}...", text.chars().take(max_width.saturating_sub(3)).collect::<String>())
-    } else { text.to_string() }
+        format!(
+            "{}...",
+            text.chars()
+                .take(max_width.saturating_sub(3))
+                .collect::<String>()
+        )
+    } else {
+        text.to_string()
+    }
 }
 
 fn relative_time(dt: DateTime<Utc>) -> String {
     let now = chrono::Utc::now();
     let diff = (now - dt).num_seconds();
-    if diff < 60 { "< 1m ago".to_string() }
-    else if diff < 3600 { format!("{}m ago", diff / 60) }
-    else if diff < 86400 { format!("{}h ago", diff / 3600) }
-    else { format!("{}d ago", diff / 86400) }
+    if diff < 60 {
+        "< 1m ago".to_string()
+    } else if diff < 3600 {
+        format!("{}m ago", diff / 60)
+    } else if diff < 86400 {
+        format!("{}h ago", diff / 3600)
+    } else {
+        format!("{}d ago", diff / 86400)
+    }
 }

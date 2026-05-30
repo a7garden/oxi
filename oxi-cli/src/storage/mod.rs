@@ -2,7 +2,6 @@
 pub(crate) mod export;
 pub mod packages;
 pub(crate) mod resource_loader;
-pub(crate) mod resource_loader_compat;
 
 // Re-exports for convenience
 pub use export::{ExportMeta, HtmlExportOptions};

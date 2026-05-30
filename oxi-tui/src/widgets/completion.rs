@@ -51,7 +51,7 @@ pub struct CompletionItem {
 // ---------------------------------------------------------------------------
 
 /// Tracks completion items, list selection, and visibility.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CompletionState {
     /// Current completion candidates.
     pub items: Vec<CompletionItem>,
@@ -59,16 +59,6 @@ pub struct CompletionState {
     pub list_state: ratatui::widgets::ListState,
     /// Whether the popup is currently shown.
     pub visible: bool,
-}
-
-impl Default for CompletionState {
-    fn default() -> Self {
-        Self {
-            items: Vec::new(),
-            list_state: ratatui::widgets::ListState::default(), // selected = None
-            visible: false,
-        }
-    }
 }
 
 impl CompletionState {
@@ -89,9 +79,7 @@ impl CompletionState {
 
     /// Return the currently selected item, if any.
     pub fn selected_item(&self) -> Option<&CompletionItem> {
-        self.list_state
-            .selected()
-            .and_then(|i| self.items.get(i))
+        self.list_state.selected().and_then(|i| self.items.get(i))
     }
 
     /// Move the selection down by one (wraps to top).
@@ -168,11 +156,7 @@ impl<'a> CompletionPopup<'a> {
     ///
     /// Returns the area occupied by the popup, or `None` if the popup
     /// is not visible or has no items.
-    pub fn render(
-        &mut self,
-        frame: &mut ratatui::Frame,
-        input_area: Rect,
-    ) -> Option<Rect> {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, input_area: Rect) -> Option<Rect> {
         if !self.state.visible || self.state.items.is_empty() {
             return None;
         }
@@ -210,8 +194,7 @@ impl<'a> CompletionPopup<'a> {
                     CompletionKind::Directory => "📁",
                     CompletionKind::Model => "🤖",
                 };
-                let label =
-                    Span::styled(format!("{} ", item.label), Style::default().bold());
+                let label = Span::styled(format!("{} ", item.label), Style::default().bold());
                 let desc = item.description.as_ref().map(|d| {
                     Span::styled(
                         format!(" {}", d),
@@ -232,9 +215,7 @@ impl<'a> CompletionPopup<'a> {
 
         let list = List::new(items)
             .block(
-                Block::bordered().style(
-                    Style::default().fg(self.theme.colors.border.to_ratatui()),
-                ),
+                Block::bordered().style(Style::default().fg(self.theme.colors.border.to_ratatui())),
             )
             .highlight_style(
                 Style::default()

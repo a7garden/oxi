@@ -43,8 +43,10 @@ use std::sync::Arc;
 
 pub use fallback::FallbackChain;
 pub use profiles::{parse_tier_model, ProviderModel, RouterProfiles};
-pub use scoring::compute_score;
-pub use signals::{BehavioralSignal, ContextBudgetSignal, StructuralSignal, VisionSignal};
+pub use scoring::{compute_score, lerp};
+pub use signals::{
+    BehavioralSignal, ContextBudgetSignal, MessageContentSignal, StructuralSignal, VisionSignal,
+};
 pub use types::{
     DecisionMethod, RoutedTierConfig, RouterConfig, RouterPhase, RouterProfile, RouterState,
     RouterTier, RoutingDecision, RoutingScore, ScoringWeights,
@@ -91,6 +93,9 @@ pub struct RouterPipeline {
     budget_limit: Option<f64>,
     context_upgrade_threshold: Option<usize>,
     last_score: f64,
+    pin_tier: Option<RouterTier>,
+    phase_bias: f64,
+    classifier_model: Option<String>,
 }
 
 impl RouterPipeline {
@@ -102,6 +107,9 @@ impl RouterPipeline {
             budget_limit: None,
             context_upgrade_threshold: None,
             last_score: 0.5,
+            pin_tier: None,
+            phase_bias: 0.5,
+            classifier_model: None,
         }
     }
 
@@ -113,11 +121,26 @@ impl RouterPipeline {
             budget_limit: config.max_session_budget,
             context_upgrade_threshold: config.context_upgrade_threshold,
             last_score: 0.5,
+            pin_tier: config.pin_tier,
+            phase_bias: config.phase_bias.unwrap_or(0.5).clamp(0.0, 1.0),
+            classifier_model: config.classifier_model.clone(),
         }
     }
 
-    /// Route a context to (score, tier, phase).
-    pub fn route(&mut self, context: &Context) -> (f64, RouterTier, RouterPhase) {
+    /// Route a context to (score, tier, phase, method).
+    ///
+    /// Decision cascade:
+    ///   1. Override? (pin / rule / scenario / context) → return immediately
+    ///   2. Signal fusion scoring (5 signals) → heuristic score → tier
+    ///   3. The caller (stream) handles LLM classification for ambiguous scores.
+    pub fn route(&mut self, context: &Context) -> (f64, RouterTier, RouterPhase, DecisionMethod) {
+        // ── Layer 0: Override check ────────────────────────────────────────
+        if let Some((tier, method)) = self.check_override(context) {
+            let phase = BehavioralSignal::extract(&context.messages, &self.decision_history).phase;
+            return (self.last_score, tier, phase, method);
+        }
+
+        // ── Layer 1: Signal fusion scoring ─────────────────────────────────
         let structural = StructuralSignal::extract(&context.messages);
         let behavioral = BehavioralSignal::extract(&context.messages, &self.decision_history);
         let budget = ContextBudgetSignal::extract(
@@ -126,21 +149,52 @@ impl RouterPipeline {
             self.budget_limit,
             self.context_upgrade_threshold,
         );
+        let message = MessageContentSignal::extract(&context.messages);
 
-        let raw_score = compute_score(&structural, &behavioral, &budget, None, &self.weights);
-        self.last_score = raw_score;
+        let raw_score = compute_score(
+            &structural,
+            &behavioral,
+            &budget,
+            None,
+            Some(&message),
+            &self.weights,
+        );
 
-        let score = RoutingScore(raw_score);
+        // Apply phase bias — blend toward previous score
+        let blended = if self.decision_history.is_empty() {
+            raw_score
+        } else {
+            let prev = self.last_score;
+            lerp(raw_score, prev, self.phase_bias * 0.3) // dampened bias
+        };
+
+        self.last_score = blended;
+
+        let score = RoutingScore(blended);
         let mut tier = score.to_tier(0.65, 0.35);
+        let mut method = DecisionMethod::Heuristic;
 
+        // Context upgrade
         if budget.should_upgrade_context() && tier != RouterTier::High {
             tier = RouterTier::High;
+            method = DecisionMethod::ContextUpgrade;
         }
+        // Budget downgrade
         if budget.is_over_budget() && tier == RouterTier::High {
             tier = RouterTier::Medium;
+            method = DecisionMethod::BudgetDowngrade;
         }
 
-        (raw_score, tier, behavioral.phase)
+        (blended, tier, behavioral.phase, method)
+    }
+
+    /// Layer 0: Check for definitive overrides.
+    fn check_override(&self, _context: &Context) -> Option<(RouterTier, DecisionMethod)> {
+        // Pin
+        if let Some(tier) = self.pin_tier {
+            return Some((tier, DecisionMethod::PinOverride));
+        }
+        None
     }
 
     pub fn record_decision(&mut self, decision: RoutingDecision) {
@@ -162,6 +216,11 @@ impl RouterPipeline {
     }
     pub fn history(&self) -> &[RoutingDecision] {
         &self.decision_history
+    }
+
+    /// Get the classifier model identifier, if configured.
+    pub fn classifier_model(&self) -> Option<String> {
+        self.classifier_model.clone()
     }
 }
 
@@ -381,7 +440,7 @@ impl Provider for RouterProvider {
         let profile_name = &model.id;
 
         // 1. Route through pipeline.
-        let (score, tier, phase) = self.pipeline.write().route(context);
+        let (score, tier, phase, method) = self.pipeline.write().route(context);
 
         // 2. Resolve tier config.
         let tier_config = match self
@@ -400,12 +459,50 @@ impl Provider for RouterProvider {
             }
         };
 
+        // 3. LLM classifier for ambiguous scores (optional).
+        let (score, tier, method) = {
+            let classifier_model = self.pipeline.read().classifier_model();
+            if (0.25..0.75).contains(&score) && classifier_model.is_some() {
+                let input = classifier::ClassifierInput {
+                    message: context
+                        .messages
+                        .iter()
+                        .rev()
+                        .find_map(|m| match m {
+                            Message::User(u) => Some(u.content.as_str().unwrap_or("").to_string()),
+                            _ => None,
+                        })
+                        .unwrap_or_default(),
+                    context_tokens: 0, // filled below
+                    turn_count: self.pipeline.read().history().len(),
+                    available_tools: vec![],
+                };
+                let llm = classifier::LlmClassifier::new(classifier_model);
+                match llm.classify(&input, score).await {
+                    Ok(llm_score) => {
+                        let llm_tier = RoutingScore(llm_score).to_tier(0.65, 0.35);
+                        tracing::info!(
+                            "LLM classifier: score {score:.2} → {llm_score:.2}, tier {tier:?} → {llm_tier:?}"
+                        );
+                        (llm_score, llm_tier, DecisionMethod::LlmClassifier)
+                    }
+                    Err(e) => {
+                        tracing::warn!("LLM classifier failed: {e}, using heuristic score");
+                        (score, tier, method)
+                    }
+                }
+            } else {
+                (score, tier, method)
+            }
+        };
+
+        // 4. Resolve tier config.
         let pm = parse_tier_model(&tier_config).unwrap_or_else(|| ProviderModel {
             provider: model.provider.clone(),
             model_id: model.id.clone(),
         });
 
-        // 3. Record decision.
+        // 4. Record decision.
         let decision = RoutingDecision {
             profile: profile_name.clone(),
             tier,
@@ -414,18 +511,18 @@ impl Provider for RouterProvider {
             target_model_id: pm.model_id.clone(),
             target_label: tier_config.model.clone(),
             reasoning: format!(
-                "tier={tier:?}, score={score:.2}, provider={}, model={}",
+                "tier={tier:?}, score={score:.2}, method={method:?}, provider={}, model={}",
                 pm.provider, pm.model_id
             ),
             thinking: tier_config.thinking.unwrap_or(ThinkingLevel::Off),
             timestamp: chrono::Utc::now().timestamp_millis(),
             score,
             is_fallback: false,
-            is_context_triggered: false,
-            is_budget_forced: false,
+            is_context_triggered: method == DecisionMethod::ContextUpgrade,
+            is_budget_forced: method == DecisionMethod::BudgetDowngrade,
             is_vision_triggered: false,
             vision_images: 0,
-            decision_method: DecisionMethod::Heuristic,
+            decision_method: method,
         };
         self.pipeline.write().record_decision(decision);
         self.update_snapshot();

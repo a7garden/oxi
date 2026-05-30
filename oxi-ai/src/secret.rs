@@ -1,6 +1,6 @@
 //! Wrapper type to prevent accidental exposure of sensitive data (e.g., API keys).
 //!
-//! `Secret<T>` masks values in [`Debug`] and [`Display`] implementations.
+//! `Secret<T>` masks values in `Debug` and `Display` implementations.
 //! The actual value is only accessible via [`expose()`](Secret::expose).
 
 use std::fmt;

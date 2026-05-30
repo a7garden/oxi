@@ -125,7 +125,7 @@ impl<'a> AgentBuilder<'a> {
 
     /// Register a custom tool from a closure (synchronous handler).
     ///
-    /// Creates a [`ClosureTool`] internally.
+    /// Creates a `ClosureTool` internally.
     ///
     /// # Example
     /// ```rust
@@ -141,7 +141,6 @@ impl<'a> AgentBuilder<'a> {
     ///         Ok(AgentToolResult::success(format!("Recalled: {}", query)))
     ///     },
     /// );
-    /// ```
     /// ```
     pub fn custom_tool(
         self,
@@ -174,7 +173,7 @@ impl<'a> AgentBuilder<'a> {
     /// This is the primary entry point for SDK consumers that want built-in
     /// web browsing. Pass any [`BrowserEngine`] implementation — when the
     /// `native-browser` feature is enabled on `oxi-agent`, use
-    /// [`OxiBrowserEngine`](oxi_agent::tools::browse::OxiBrowserEngine) for
+    /// `oxi_agent::tools::browse::OxiBrowserEngine` for
     /// the built-in headless browser.
     ///
     /// # Example

@@ -1,10 +1,10 @@
-//! Reusable wrapper around ratatui's [`List`] + [`ListState`].
+//! Reusable wrapper around ratatui's `List` + `ListState`.
 //!
 //! All overlay selectors (model picker, theme picker, skill picker, etc.)
 //! should use this to share filtering, navigation, and rendering logic.
 
-use ratatui::widgets::ListState;
 use ratatui::style::Style;
+use ratatui::widgets::ListState;
 
 // ---------------------------------------------------------------------------
 // ListStyles
@@ -130,13 +130,19 @@ impl<T> StatefulList<T> {
 
     /// Return a reference to the currently-selected item (after filtering).
     pub fn selected(&self) -> Option<&T> {
-        let idx = *self.state.selected().and_then(|i| self.filtered_indices.get(i))?;
+        let idx = *self
+            .state
+            .selected()
+            .and_then(|i| self.filtered_indices.get(i))?;
         self.items.get(idx)
     }
 
     /// Return a mutable reference to the currently-selected item (after filtering).
     pub fn selected_mut(&mut self) -> Option<&mut T> {
-        let idx = *self.state.selected().and_then(|i| self.filtered_indices.get(i))?;
+        let idx = *self
+            .state
+            .selected()
+            .and_then(|i| self.filtered_indices.get(i))?;
         self.items.get_mut(idx)
     }
 

@@ -3,8 +3,6 @@
 use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
 use super::overlay::router_integration;
 use crate::app::agent_session::{AgentSession, ScopedModel};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use crate::media::clipboard_write;
 use crate::storage::export::{self, ExportMeta, HtmlExportOptions};
 use oxi_tui::widgets::chat::{ContentBlock, MessageRole};
@@ -349,7 +347,11 @@ pub(crate) fn handle_slash_command(
         }
         "/share" => {
             // Check if gh CLI is available
-            match std::process::Command::new("gh").arg("auth").arg("status").output() {
+            match std::process::Command::new("gh")
+                .arg("auth")
+                .arg("status")
+                .output()
+            {
                 Ok(output) if output.status.success() => {
                     // Export session to HTML first
                     let meta = ExportMeta {
@@ -386,9 +388,11 @@ pub(crate) fn handle_slash_command(
                             let temp_path = std::env::temp_dir().join("oxi-share.html");
                             match std::fs::write(&temp_path, &html) {
                                 Ok(()) => {
-                                    state.add_system_message("Creating Gist... (Esc to cancel)".to_string());
+                                    state.add_system_message(
+                                        "Creating Gist... (Esc to cancel)".to_string(),
+                                    );
                                     // Show loader overlay during gist creation
-                                    let sh = session.clone_handle();
+                                    let _sh = session.clone_handle();
                                     let tx = ui_tx.clone();
                                     tokio::spawn(async move {
                                         let result = tokio::process::Command::new("gh")
@@ -398,22 +402,27 @@ pub(crate) fn handle_slash_command(
                                         let _ = std::fs::remove_file(&temp_path);
                                         match result {
                                             Ok(output) if output.status.success() => {
-                                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                                let stdout =
+                                                    String::from_utf8_lossy(&output.stdout);
                                                 let gist_url = stdout.trim().to_string();
-                                                let _ = tx.send(UiEvent::SystemMessage(
-                                                    format!("Gist created: {}", gist_url)
-                                                ));
+                                                let _ = tx.send(UiEvent::SystemMessage(format!(
+                                                    "Gist created: {}",
+                                                    gist_url
+                                                )));
                                             }
                                             Ok(output) => {
-                                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                                let _ = tx.send(UiEvent::SystemMessage(
-                                                    format!("Gist failed: {}", stderr.trim())
-                                                ));
+                                                let stderr =
+                                                    String::from_utf8_lossy(&output.stderr);
+                                                let _ = tx.send(UiEvent::SystemMessage(format!(
+                                                    "Gist failed: {}",
+                                                    stderr.trim()
+                                                )));
                                             }
                                             Err(e) => {
-                                                let _ = tx.send(UiEvent::SystemMessage(
-                                                    format!("Gist failed: {}", e)
-                                                ));
+                                                let _ = tx.send(UiEvent::SystemMessage(format!(
+                                                    "Gist failed: {}",
+                                                    e
+                                                )));
                                             }
                                         }
                                     });
@@ -428,7 +437,7 @@ pub(crate) fn handle_slash_command(
                         }
                     }
                 }
-                Ok(output) => {
+                Ok(_output) => {
                     state.add_system_message(
                         "GitHub CLI not authenticated. Run: gh auth login".to_string(),
                     );
@@ -512,16 +521,16 @@ pub(crate) fn handle_slash_command(
                                 (e.id.clone(), preview)
                             })
                             .collect();
+                        #[allow(clippy::arc_with_non_send_sync)]
                         let shared = std::sync::Arc::new(std::sync::Mutex::new(
-                            state as *mut super::app::AppState
+                            state as *mut super::app::AppState,
                         ));
-                        state.overlay_state = Some(Box::new(
-                            super::overlay::ForkSelectOverlay::new(
+                        state.overlay_state =
+                            Some(Box::new(super::overlay::ForkSelectOverlay::new(
                                 entries,
                                 session.clone_handle(),
                                 shared,
-                            ),
-                        ));
+                            )));
                     }
                 }
             } else {
@@ -566,14 +575,10 @@ pub(crate) fn handle_slash_command(
                         } else {
                             // Collect all entries from the tree for the overlay
                             let entries = collect_tree_entries(&roots);
-                            state.overlay_state = Some(
-                                super::overlay::tree_navigator(
-                                    entries,
-                                    None, // current leaf detection
-                                    session,
-                                    state,
-                                )
-                            );
+                            state.overlay_state = Some(super::overlay::tree_navigator(
+                                entries, None, // current leaf detection
+                                session, state,
+                            ));
                         }
                     }
                     Err(e) => {
@@ -1087,7 +1092,10 @@ fn collect_tree_entries(
     roots: &[oxi_store::session::SessionTreeNode],
 ) -> Vec<oxi_store::session::SessionEntry> {
     let mut entries = Vec::new();
-    fn visit(node: &oxi_store::session::SessionTreeNode, entries: &mut Vec<oxi_store::session::SessionEntry>) {
+    fn visit(
+        node: &oxi_store::session::SessionTreeNode,
+        entries: &mut Vec<oxi_store::session::SessionEntry>,
+    ) {
         entries.push(node.entry.clone());
         for child in &node.children {
             visit(child, entries);

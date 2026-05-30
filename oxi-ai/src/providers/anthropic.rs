@@ -100,8 +100,8 @@ impl AnthropicProvider {
     /// Note: Anthropic-specific beta headers (`interleaved-thinking`,
     /// `fine-grained-tool-streaming`) are NOT included here because
     /// third-party compatible providers may not support them, leading
-    /// to stream hangs or protocol errors. Use [`new`] or
-    /// [`with_api_key`] for the native Anthropic endpoint which includes
+    /// to stream hangs or protocol errors. Use [`Self::new`] or
+    /// [`Self::with_api_key`] for the native Anthropic endpoint which includes
     /// beta headers.
     pub fn with_config(
         base_url: &str,

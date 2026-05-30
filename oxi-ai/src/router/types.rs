@@ -61,10 +61,14 @@ impl RouterPhase {
 pub enum DecisionMethod {
     /// Heuristic scoring from structural / behavioral signals.
     Heuristic,
-    /// LLM-based classifier (future).
+    /// LLM-based classifier for ambiguous cases.
     LlmClassifier,
     /// Explicit pin override from user config.
     PinOverride,
+    /// Custom rule matched.
+    RuleMatch,
+    /// Tool-type scenario matched (web_search, thinking, etc.).
+    ScenarioMatch,
     /// Automatic upgrade due to context length.
     ContextUpgrade,
     /// Automatic downgrade due to budget constraints.
@@ -203,19 +207,25 @@ pub struct ScoringWeights {
     /// Weight for vision signal (image content requiring vision-capable model).
     #[serde(default = "default_vision")]
     pub vision: f64,
+    /// Weight for message content signal (language-agnostic structural analysis).
+    #[serde(default = "default_message")]
+    pub message: f64,
 }
 
 fn default_structural() -> f64 {
-    0.35
+    0.25
 }
 fn default_behavioral() -> f64 {
-    0.35
+    0.20
 }
 fn default_context() -> f64 {
-    0.20
+    0.15
 }
 fn default_vision() -> f64 {
     0.10
+}
+fn default_message() -> f64 {
+    0.30
 }
 
 impl Default for ScoringWeights {
@@ -225,6 +235,7 @@ impl Default for ScoringWeights {
             behavioral: default_behavioral(),
             context_budget: default_context(),
             vision: default_vision(),
+            message: default_message(),
         }
     }
 }
@@ -237,7 +248,7 @@ pub struct RouterConfig {
     /// Default profile name to use.
     #[serde(default = "default_profile_name")]
     pub default_profile: String,
-    /// Optional classifier model for LLM-based routing (future).
+    /// Optional classifier model for LLM-based routing.
     #[serde(default)]
     pub classifier_model: Option<String>,
     /// Context token threshold that triggers automatic upgrade.
@@ -252,6 +263,12 @@ pub struct RouterConfig {
     /// Scoring weights.
     #[serde(default)]
     pub weights: ScoringWeights,
+    /// Pinned tier (manual override).
+    #[serde(default)]
+    pub pin_tier: Option<RouterTier>,
+    /// Phase bias: 0 = immediate tier switching, 1 = extreme stickiness.
+    #[serde(default)]
+    pub phase_bias: Option<f64>,
 }
 
 fn default_profile_name() -> String {
@@ -267,12 +284,14 @@ impl Default for RouterConfig {
             max_session_budget: None,
             profiles: HashMap::new(),
             weights: ScoringWeights::default(),
+            pin_tier: None,
+            phase_bias: None,
         }
     }
 }
 
 impl RouterConfig {
-    /// Construct a full router config from loaded parts.
+    /// Construct a basic router config (no pin/phase_bias).
     pub fn new(
         default_profile: String,
         classifier_model: Option<String>,
@@ -288,6 +307,32 @@ impl RouterConfig {
             max_session_budget,
             profiles,
             weights,
+            pin_tier: None,
+            phase_bias: None,
+        }
+    }
+
+    /// Construct with full config including pin_tier and phase_bias.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_pinning(
+        default_profile: String,
+        classifier_model: Option<String>,
+        context_upgrade_threshold: Option<usize>,
+        max_session_budget: Option<f64>,
+        profiles: HashMap<String, RouterProfile>,
+        weights: ScoringWeights,
+        pin_tier: Option<RouterTier>,
+        phase_bias: Option<f64>,
+    ) -> Self {
+        Self {
+            default_profile,
+            classifier_model,
+            context_upgrade_threshold,
+            max_session_budget,
+            profiles,
+            weights,
+            pin_tier,
+            phase_bias,
         }
     }
 }

@@ -9,7 +9,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::Span,
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, ListItem, Paragraph},
     Frame,
 };
 
@@ -46,7 +46,11 @@ impl SettingsItem {
     fn value_str(&self) -> String {
         match self {
             SettingsItem::Toggle { value, .. } => {
-                if *value { "● on".to_string() } else { "○ off".to_string() }
+                if *value {
+                    "● on".to_string()
+                } else {
+                    "○ off".to_string()
+                }
             }
             SettingsItem::Choice { value, .. } => value.clone(),
             SettingsItem::ReadOnly { value, .. } => value.clone(),
@@ -54,10 +58,7 @@ impl SettingsItem {
         }
     }
     fn is_editable(&self) -> bool {
-        match self {
-            SettingsItem::ReadOnly { .. } => false,
-            _ => true,
-        }
+        !matches!(self, SettingsItem::ReadOnly { .. })
     }
 }
 
@@ -133,21 +134,34 @@ impl OverlayComponent for SettingsOverlay {
         let count = self.visible_count();
         match key.code {
             KeyCode::Up => {
-                self.selected = if count == 0 { 0 } else { self.selected.saturating_sub(1) };
+                self.selected = if count == 0 {
+                    0
+                } else {
+                    self.selected.saturating_sub(1)
+                };
             }
             KeyCode::Down => {
                 self.selected = (self.selected + 1).min(count.saturating_sub(1));
             }
             KeyCode::PageUp => {
-                self.selected = self.selected.saturating_sub(10).min(count.saturating_sub(1));
+                self.selected = self
+                    .selected
+                    .saturating_sub(10)
+                    .min(count.saturating_sub(1));
             }
             KeyCode::PageDown => {
                 self.selected = (self.selected + 10).min(count.saturating_sub(1));
             }
-            KeyCode::Home => { self.selected = 0; }
-            KeyCode::End => { self.selected = count.saturating_sub(1); }
+            KeyCode::Home => {
+                self.selected = 0;
+            }
+            KeyCode::End => {
+                self.selected = count.saturating_sub(1);
+            }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                if count == 0 { return OverlayAction::None; }
+                if count == 0 {
+                    return OverlayAction::None;
+                }
                 let item_idx = self.filtered_indices[self.selected];
                 let item = &mut self.all_items[item_idx];
                 match item {
@@ -207,7 +221,11 @@ impl OverlayComponent for SettingsOverlay {
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         use ratatui::widgets::List;
         let styles = theme.to_styles();
-        let filter_text = if self.filter.is_empty() { "Settings".to_string() } else { format!("Settings: {}", self.filter) };
+        let filter_text = if self.filter.is_empty() {
+            "Settings".to_string()
+        } else {
+            format!("Settings: {}", self.filter)
+        };
 
         let popup = centered_layout(area, 0.75, 0.8);
         frame.render_widget(Clear, popup);
@@ -227,8 +245,10 @@ impl OverlayComponent for SettingsOverlay {
                     .add_modifier(Modifier::BOLD),
             )),
             Rect {
-                x: inner.x + 1, y: inner.y,
-                width: inner.width.saturating_sub(2), height: 1,
+                x: inner.x + 1,
+                y: inner.y,
+                width: inner.width.saturating_sub(2),
+                height: 1,
             },
         );
 
@@ -260,13 +280,17 @@ impl OverlayComponent for SettingsOverlay {
             .scroll_padding(2);
 
         let mut list_state = ratatui::widgets::ListState::default();
-        let selected = self.selected.min(self.filtered_indices.len().saturating_sub(1));
+        let selected = self
+            .selected
+            .min(self.filtered_indices.len().saturating_sub(1));
         list_state.select(Some(selected));
         frame.render_stateful_widget(
             list,
             Rect {
-                x: inner.x, y: inner.y + 1,
-                width: inner.width, height: inner.height.saturating_sub(3),
+                x: inner.x,
+                y: inner.y + 1,
+                width: inner.width,
+                height: inner.height.saturating_sub(3),
             },
             &mut list_state,
         );
@@ -279,8 +303,10 @@ impl OverlayComponent for SettingsOverlay {
         frame.render_widget(
             Paragraph::new(Span::styled(hint, styles.muted)),
             Rect {
-                x: inner.x, y: inner.y + inner.height.saturating_sub(1),
-                width: inner.width, height: 1,
+                x: inner.x,
+                y: inner.y + inner.height.saturating_sub(1),
+                width: inner.width,
+                height: 1,
             },
         );
     }
@@ -313,12 +339,10 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
         oxi_store::settings::ThinkingLevel::XHigh => "XHigh",
     };
 
-    let mut items = Vec::new();
-
-    items.push(SettingsItem::Choice {
+    let mut items = vec![SettingsItem::Choice {
         label: "thinking".to_string(),
         value: thinking_str.to_string(),
-    });
+    }];
 
     items.push(SettingsItem::Choice {
         label: "theme".to_string(),
@@ -360,12 +384,16 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
 
     items.push(SettingsItem::ReadOnly {
         label: "last_used_model".to_string(),
-        value: settings.last_used_model.unwrap_or_else(|| "none".to_string()),
+        value: settings
+            .last_used_model
+            .unwrap_or_else(|| "none".to_string()),
     });
 
     items.push(SettingsItem::ReadOnly {
         label: "last_used_provider".to_string(),
-        value: settings.last_used_provider.unwrap_or_else(|| "none".to_string()),
+        value: settings
+            .last_used_provider
+            .unwrap_or_else(|| "none".to_string()),
     });
 
     items.push(SettingsItem::ReadOnly {

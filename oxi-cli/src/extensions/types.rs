@@ -510,7 +510,7 @@ pub struct Command {
     pub name: String,
     /// Short description shown in help.
     pub description: String,
-    /// Usage string (e.g. "/my-cmd <arg>").
+    /// Usage string (e.g. "/my-cmd \<arg>").
     pub usage: String,
 }
 impl Command {

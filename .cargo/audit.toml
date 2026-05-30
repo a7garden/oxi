@@ -1,0 +1,43 @@
+# oxi cargo-audit configuration
+#
+# All ignored advisories below are wasmtime 41.x vulnerabilities pulled in
+# through extism 1.21 (WASM extension runtime). extism hard-pins wasmtime = "41"
+# and no newer extism release exists yet that uses wasmtime >= 43.
+#
+# Risk assessment:
+#   - These vulns are only exploitable when a MALICIOUS WASM plugin is loaded.
+#   - oxi extensions are user-installed and explicitly trusted.
+#   - There is no untrusted plugin input path in oxi.
+#   - Removing extism would disable WASM extensions entirely, which is not acceptable.
+#
+# When extism releases a version with wasmtime >= 43, remove these ignores.
+
+[advisories]
+ignore = [
+    # wasmtime 41.x — sandbox escape on aarch64 Cranelift (critical)
+    "RUSTSEC-2026-0096",
+    # wasmtime 41.x — Winch sandbox-escaping memory access (critical)
+    "RUSTSEC-2026-0095",
+    # wasmtime 41.x — host data leakage with 64-bit tables and Winch (low)
+    "RUSTSEC-2026-0086",
+    # wasmtime 41.x — panic transcoding misaligned UTF-16 (medium)
+    "RUSTSEC-2026-0092",
+    # wasmtime 41.x — heap OOB read UTF-16 transcoding (medium)
+    "RUSTSEC-2026-0093",
+    # wasmtime 41.x — panic on oversized table allocation (medium)
+    "RUSTSEC-2026-0114",
+    # wasmtime 41.x — segfault with f64x2.splat on Cranelift x86-64 (medium)
+    "RUSTSEC-2026-0087",
+    # wasmtime 41.x — pooling allocator data leakage (low)
+    "RUSTSEC-2026-0088",
+    # wasmtime 41.x — panic on Winch table.fill (medium)
+    "RUSTSEC-2026-0089",
+    # wasmtime 41.x — Winch table.grow return value masking (medium)
+    "RUSTSEC-2026-0094",
+    # wasmtime 41.x — panic lifting component model flags (medium)
+    "RUSTSEC-2026-0085",
+    # wasmtime 41.x — OOB write transcoding component model strings (medium)
+    "RUSTSEC-2026-0091",
+    # rsa — Marvin Attack timing sidechannel (medium, no fix available)
+    "RUSTSEC-2023-0071",
+]

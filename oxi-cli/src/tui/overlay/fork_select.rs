@@ -28,6 +28,7 @@ type SharedAppState = Arc<Mutex<*mut crate::tui::app::AppState>>;
 // Fork entry
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 struct ForkEntry {
     entry_id: String,
     index: usize,
@@ -42,7 +43,9 @@ struct ForkEntry {
 pub struct ForkSelectOverlay {
     list_state: ListState,
     entries: Vec<ForkEntry>,
+    #[allow(dead_code)]
     session_handle: AgentSessionHandle,
+    #[allow(dead_code)]
     app_state: SharedAppState,
 }
 
@@ -95,17 +98,13 @@ impl OverlayComponent for ForkSelectOverlay {
         }
         let len = self.entries.len();
         match key.code {
-            KeyCode::Up => {
-                if len > 0 {
-                    let cur = self.list_state.selected().unwrap_or(0);
-                    self.list_state.select(Some(cur.saturating_sub(1)));
-                }
+            KeyCode::Up if len > 0 => {
+                let cur = self.list_state.selected().unwrap_or(0);
+                self.list_state.select(Some(cur.saturating_sub(1)));
             }
-            KeyCode::Down => {
-                if len > 0 {
-                    let cur = self.list_state.selected().unwrap_or(0);
-                    self.list_state.select(Some((cur + 1).min(len - 1)));
-                }
+            KeyCode::Down if len > 0 => {
+                let cur = self.list_state.selected().unwrap_or(0);
+                self.list_state.select(Some((cur + 1).min(len - 1)));
             }
             KeyCode::Enter => {
                 // Integration point: the app layer reads the selected entry

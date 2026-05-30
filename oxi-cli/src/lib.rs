@@ -27,7 +27,6 @@ pub use storage::packages::PackageManager;
 pub use storage::packages::ResourceKind;
 pub mod tui; // public for main.rs
 pub(crate) mod ui;
-pub mod updater;
 pub(crate) mod util;
 
 // ─── oxi-store re-exports (shared persistent state) ─────────────────────────
@@ -214,40 +213,10 @@ impl InteractiveSession {
 
 // ─── System prompt builder ───────────────────────────────────────────────────
 
-// TODO: This build_system_prompt duplicates the one in
-// app/agent_session_runtime.rs. Both delegate to prompt::system_prompt::build_system_prompt
-// but with different options (this one passes skills; the other passes tool_snippets).
-// Unify into a single shared utility that accepts all options.
 fn build_system_prompt(
     thinking_level: oxi_store::settings::ThinkingLevel,
     skill_contents: &[String],
 ) -> String {
-    let custom_prompt = match thinking_level {
-        oxi_store::settings::ThinkingLevel::Off => Some(String::from(
-            "You are a helpful AI assistant. Provide direct, concise answers.",
-        )),
-        oxi_store::settings::ThinkingLevel::Minimal => Some(String::from(
-            "You are a helpful AI assistant. Provide clear and helpful answers.",
-        )),
-        oxi_store::settings::ThinkingLevel::Low => Some(String::from(
-            "You are a helpful AI assistant. Provide brief, actionable responses.",
-        )),
-        oxi_store::settings::ThinkingLevel::Medium => Some(String::from(
-            "You are a helpful AI coding assistant. Think through problems \
-             step by step when helpful, but keep responses focused and actionable.",
-        )),
-        oxi_store::settings::ThinkingLevel::High => Some(String::from(
-            "You are an expert AI coding assistant. Take time to thoroughly \
-             analyze problems, consider edge cases, and provide comprehensive \
-             solutions with explanations. Think deeply before responding.",
-        )),
-        oxi_store::settings::ThinkingLevel::XHigh => Some(String::from(
-            "You are an expert AI coding assistant. Use maximum reasoning depth. \
-             Consider all alternatives, edge cases, and potential implications. \
-             Provide the most thorough, comprehensive analysis possible.",
-        )),
-    };
-
     let skills: Vec<prompt::system_prompt::Skill> = skill_contents
         .iter()
         .enumerate()
@@ -258,7 +227,7 @@ fn build_system_prompt(
         .collect();
 
     let options = prompt::system_prompt::BuildSystemPromptOptions {
-        custom_prompt,
+        custom_prompt: prompt::system_prompt::thinking_level_prompt(thinking_level),
         skills,
         cwd: std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())

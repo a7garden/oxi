@@ -386,7 +386,7 @@ impl Agent {
 
     /// Run the agent with a prompt, collecting all events into a vector.
     ///
-    /// Convenience wrapper around [`run_with_channel`] that gathers every
+    /// Convenience wrapper around [`run_with_channel`](Self::run_with_channel) that gathers every
     /// [`AgentEvent`] produced during the run.
     pub async fn run(&self, prompt: String) -> Result<(Response, Vec<AgentEvent>)> {
         let mut events = Vec::new();
@@ -400,7 +400,7 @@ impl Agent {
 
     /// Run the agent, delivering events through the provided channel.
     ///
-    /// Delegates to [`AgentLoop`] which implements the same 2-level agentic
+    /// Delegates to the agent loop which implements the same 2-level agentic
     /// loop matching pi-mono's architecture:
     ///
     /// ```text

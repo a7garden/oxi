@@ -280,7 +280,7 @@ impl OxiBuilder {
 
     /// Enable multi-provider routing with automatic complexity-based model selection.
     ///
-    /// This registers a [`MultiProvider`] that routes requests based on task complexity,
+    /// This registers a [`MultiProvider`](oxi_ai::multi_provider::MultiProvider) that routes requests based on task complexity,
     /// with configurable fallback chains and circuit breaker protection.
     ///
     /// # Arguments

@@ -296,7 +296,7 @@ pub fn as_char(key_id: &KeyId) -> Option<char> {
 ///
 /// Returns `None` if the input is not a valid Kitty sequence.
 ///
-/// Reference: https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+/// Reference: <https://sw.kovidgoyal.net/kitty/keyboard-protocol/>
 pub fn parse_kitty_sequence(data: &[u8]) -> Option<KeyId> {
     // Minimum: ESC [ 0 ; 0 u = 6 bytes
     if data.len() < 6 {

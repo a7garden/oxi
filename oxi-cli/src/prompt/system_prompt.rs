@@ -3,6 +3,7 @@
 //! Originally inspired by pi-mono's system prompt construction.
 
 use chrono::Local;
+use oxi_store::settings::ThinkingLevel;
 
 /// A skill that can be included in the system prompt.
 #[derive(Debug, Clone)]
@@ -47,6 +48,74 @@ pub struct BuildSystemPromptOptions {
     pub docs_path: Option<String>,
     /// Path to examples.
     pub examples_path: Option<String>,
+}
+
+/// Convert a [`ThinkingLevel`] to its default custom prompt string.
+///
+/// This is the single source of truth for the thinking-level-to-prompt mapping.
+pub fn thinking_level_prompt(level: ThinkingLevel) -> Option<String> {
+    match level {
+        ThinkingLevel::Off => {
+            Some("You are a helpful AI assistant. Provide direct, concise answers.".into())
+        }
+        ThinkingLevel::Minimal => {
+            Some("You are a helpful AI assistant. Provide clear and helpful answers.".into())
+        }
+        ThinkingLevel::Low => {
+            Some("You are a helpful AI assistant. Provide brief, actionable responses.".into())
+        }
+        ThinkingLevel::Medium => Some(
+            "You are a helpful AI coding assistant. Think through problems \
+             step by step when helpful, but keep responses focused and actionable."
+                .into(),
+        ),
+        ThinkingLevel::High => Some(
+            "You are an expert AI coding assistant. Take time to thoroughly \
+             analyze problems, consider edge cases, and provide comprehensive \
+             solutions with explanations. Think deeply before responding."
+                .into(),
+        ),
+        ThinkingLevel::XHigh => Some(
+            "You are an expert AI coding assistant. Use maximum reasoning depth. \
+             Consider all alternatives, edge cases, and potential implications. \
+             Provide the most thorough, comprehensive analysis possible."
+                .into(),
+        ),
+    }
+}
+
+/// Default tool snippets used when building prompts for the agent loop.
+pub fn default_tool_snippets() -> std::collections::HashMap<String, String> {
+    let mut m = std::collections::HashMap::new();
+    m.insert("read".into(), "Read file contents (text or image)".into());
+    m.insert("bash".into(), "Execute bash commands".into());
+    m.insert(
+        "edit".into(),
+        "Edit files with exact text replacement".into(),
+    );
+    m.insert("write".into(), "Write content to files".into());
+    m.insert("grep".into(), "Search file contents with regex".into());
+    m.insert("find".into(), "Find files by name/pattern".into());
+    m.insert("ls".into(), "List directory contents".into());
+    m.insert(
+        "web_search".into(),
+        "Search the web (DuckDuckGo, Wikipedia, Bing, Brave)".into(),
+    );
+    m
+}
+
+/// Default tool names used when building prompts for the agent loop.
+pub fn default_tool_names() -> Vec<String> {
+    vec![
+        "read".into(),
+        "bash".into(),
+        "edit".into(),
+        "write".into(),
+        "grep".into(),
+        "find".into(),
+        "ls".into(),
+        "web_search".into(),
+    ]
 }
 
 impl Default for BuildSystemPromptOptions {

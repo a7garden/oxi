@@ -739,73 +739,14 @@ fn parse_model_id(model_id: &str) -> (String, String) {
 /// Build the system prompt based on thinking level.
 ///
 /// Delegates to [`crate::prompt::system_prompt::build_system_prompt`].
-///
-/// TODO: This build_system_prompt duplicates the one in crate::lib (root).
-/// Both delegate to prompt::system_prompt::build_system_prompt but with different
-/// options (this one passes tool_snippets; lib passes skills).
-/// Unify into a single shared utility that accepts all options.
 fn build_system_prompt(thinking_level: ThinkingLevel) -> String {
-    let custom_prompt = match thinking_level {
-        ThinkingLevel::Off => {
-            Some("You are a helpful AI assistant. Provide direct, concise answers.".to_string())
-        }
-        ThinkingLevel::Minimal => {
-            Some("You are a helpful AI assistant. Provide clear and helpful answers.".to_string())
-        }
-        ThinkingLevel::Low => {
-            Some("You are a helpful AI assistant. Provide brief, actionable responses.".to_string())
-        }
-        ThinkingLevel::Medium => Some(
-            "You are a helpful AI coding assistant. Think through problems \
-             step by step when helpful, but keep responses focused and actionable."
-                .to_string(),
-        ),
-        ThinkingLevel::High => Some(
-            "You are an expert AI coding assistant. Take time to thoroughly \
-             analyze problems, consider edge cases, and provide comprehensive \
-             solutions with explanations. Think deeply before responding."
-                .to_string(),
-        ),
-        ThinkingLevel::XHigh => Some(
-            "You are an expert AI coding assistant. Use maximum reasoning depth. \
-             Consider all alternatives, edge cases, and potential implications. \
-             Provide the most thorough, comprehensive analysis possible."
-                .to_string(),
-        ),
-    };
-
-    let mut tool_snippets = std::collections::HashMap::new();
-    tool_snippets.insert("read".into(), "Read file contents (text or image)".into());
-    tool_snippets.insert("bash".into(), "Execute bash commands".into());
-    tool_snippets.insert(
-        "edit".into(),
-        "Edit files with exact text replacement".into(),
-    );
-    tool_snippets.insert("write".into(), "Write content to files".into());
-    tool_snippets.insert("grep".into(), "Search file contents with regex".into());
-    tool_snippets.insert("find".into(), "Find files by name/pattern".into());
-    tool_snippets.insert("ls".into(), "List directory contents".into());
-    tool_snippets.insert(
-        "web_search".into(),
-        "Search the web (DuckDuckGo, Wikipedia, Bing, Brave)".into(),
-    );
-
     let options = crate::prompt::system_prompt::BuildSystemPromptOptions {
-        custom_prompt,
+        custom_prompt: crate::prompt::system_prompt::thinking_level_prompt(thinking_level),
         cwd: std::env::current_dir()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default(),
-        selected_tools: vec![
-            "read".into(),
-            "bash".into(),
-            "edit".into(),
-            "write".into(),
-            "grep".into(),
-            "find".into(),
-            "ls".into(),
-            "web_search".into(),
-        ],
-        tool_snippets,
+        selected_tools: crate::prompt::system_prompt::default_tool_names(),
+        tool_snippets: crate::prompt::system_prompt::default_tool_snippets(),
         ..Default::default()
     };
 

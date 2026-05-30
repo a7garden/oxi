@@ -248,7 +248,7 @@ pub fn truncate_tail(content: &str, options: &TruncationOptions) -> TruncationRe
 }
 
 /// Truncate a single line to a maximum character length.
-/// Appends "... [truncated]" if truncated.
+/// Appends "... \[truncated\]" if truncated.
 pub fn truncate_line(line: &str, max_chars: usize) -> String {
     if line.chars().count() <= max_chars {
         return line.to_string();

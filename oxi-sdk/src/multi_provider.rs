@@ -31,7 +31,7 @@ use oxi_ai::{
 
 /// Routing configuration for enabling complexity-based routing.
 ///
-/// Used with [`OxiBuilder::enable_routing()`] to configure automatic
+/// Used with [`OxiBuilder::enable_routing`](crate::builder::OxiBuilder::enable_routing) to configure automatic
 /// model selection based on task complexity.
 pub struct RoutingConfig {
     /// Enable automatic complexity-based routing.

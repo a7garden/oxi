@@ -75,7 +75,7 @@ pub type ProviderFactory = Box<dyn Fn() -> anyhow::Result<Arc<dyn Provider>> + S
 ///
 /// This is an instance-based alternative to the global `CUSTOM_PROVIDERS` static.
 /// It supports `register()`, `get()`, `remove()`, and `names()`, falling back
-/// to built-in providers from [`register_builtins`] when a name isn't found locally.
+/// to built-in providers from the built-in provider factory when a name isn't found locally.
 ///
 /// Providers can also be registered as **factories** via [`Self::register_factory`].
 /// A factory is a closure that lazily creates the provider on first access. The
@@ -124,8 +124,7 @@ impl ProviderRegistry {
 
     /// Get a provider by name.
     ///
-    /// Checks local custom providers first, then falls back to built-in providers
-    /// from [`register_builtins`].
+    /// Checks local custom providers first, then falls back to built-in providers.
     pub fn get(&self, name: &str) -> Option<Arc<dyn Provider>> {
         // 1. Check local custom providers
         {
@@ -234,7 +233,7 @@ pub fn custom_provider_names() -> Vec<String> {
 /// Get a provider by name
 ///
 /// Checks custom providers first (global registry), then falls back to the
-/// data-driven built-in provider factory in [`register_builtins`].
+/// data-driven built-in provider factory.
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
     // 1. Check custom providers first (higher priority than builtins)
     {

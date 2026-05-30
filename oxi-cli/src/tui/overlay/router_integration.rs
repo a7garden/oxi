@@ -47,7 +47,7 @@ pub fn store_config_to_ai_config(
             },
         );
     }
-    oxi_ai::router::RouterConfig::new(
+    oxi_ai::router::RouterConfig::with_pinning(
         c.default_profile().to_string(),
         c.classifier_model().map(String::from),
         c.context_upgrade_threshold(),
@@ -58,7 +58,15 @@ pub fn store_config_to_ai_config(
             behavioral: c.weights().behavioral,
             context_budget: c.weights().context_budget,
             vision: c.weights().vision,
+            message: c.weights().message,
         },
+        c.pin_tier().and_then(|s| match s {
+            "high" => Some(oxi_ai::router::RouterTier::High),
+            "medium" => Some(oxi_ai::router::RouterTier::Medium),
+            "low" => Some(oxi_ai::router::RouterTier::Low),
+            _ => None,
+        }),
+        c.phase_bias(),
     )
 }
 

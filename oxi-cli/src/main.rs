@@ -1250,7 +1250,7 @@ fn register_router_provider(settings: &Settings) {
             },
         );
     }
-    let ai_cfg = oxi_ai::router::RouterConfig::new(
+    let ai_cfg = oxi_ai::router::RouterConfig::with_pinning(
         store_cfg.default_profile().to_string(),
         store_cfg.classifier_model().map(String::from),
         store_cfg.context_upgrade_threshold(),
@@ -1261,7 +1261,15 @@ fn register_router_provider(settings: &Settings) {
             behavioral: store_cfg.weights().behavioral,
             context_budget: store_cfg.weights().context_budget,
             vision: store_cfg.weights().vision,
+            message: store_cfg.weights().message,
         },
+        store_cfg.pin_tier().and_then(|s| match s {
+            "high" => Some(oxi_ai::router::RouterTier::High),
+            "medium" => Some(oxi_ai::router::RouterTier::Medium),
+            "low" => Some(oxi_ai::router::RouterTier::Low),
+            _ => None,
+        }),
+        store_cfg.phase_bias(),
     );
 
     oxi_ai::router::register_router(&ai_cfg);

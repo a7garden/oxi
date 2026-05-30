@@ -10,7 +10,7 @@
 
 use crate::messages::{ContentBlock, Message};
 
-use super::types::{RouterPhase, RoutingDecision};
+use super::types::{RouterPhase, RouterTier, RoutingDecision};
 
 // ── Structural Signal ─────────────────────────────────────────────────────────
 
@@ -339,6 +339,167 @@ impl VisionSignal {
     }
 }
 
+// ── Message Content Signal ────────────────────────────────────────────────────
+
+/// Signal derived from the **structural** properties of the last user message.
+///
+/// Language-agnostic — measures length, line count, code blocks, file paths,
+/// symbol density, etc. No keyword matching.
+#[derive(Debug, Clone, Default)]
+pub struct MessageContentSignal {
+    /// Character count of the last user message.
+    pub message_length: usize,
+    /// Number of lines.
+    pub line_count: usize,
+    /// Whether the message contains code fences (``` ```).
+    pub has_code_blocks: bool,
+    /// Number of distinct file path references detected.
+    pub file_path_count: usize,
+    /// Ratio of code-like symbols to total characters.
+    pub symbol_density: f64,
+    /// Whether the message ends with '?'.
+    pub is_question: bool,
+    /// Whether it's a short single-sentence (≤3 words, no newlines).
+    pub is_single_sentence: bool,
+}
+
+impl MessageContentSignal {
+    /// Extract from the last user message in the conversation.
+    pub fn extract(messages: &[Message]) -> Self {
+        let last_user_text = messages
+            .iter()
+            .rev()
+            .find_map(|m| match m {
+                Message::User(u) => Some(u.content.as_str().unwrap_or("").to_string()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        Self::from_text(&last_user_text)
+    }
+
+    /// Analyze a raw text string.
+    pub fn from_text(text: &str) -> Self {
+        let bytes = text.as_bytes();
+        let message_length = text.len();
+        let line_count = text.lines().count().max(1);
+        let has_code_blocks = text.contains("```");
+
+        // Count file paths: /foo/bar.rs or \foo\bar.rs
+        let mut file_path_count = 0usize;
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'/' || bytes[i] == b'\\' {
+                for j in (i + 1)..std::cmp::min(i + 20, bytes.len()) {
+                    if bytes[j] == b'.' && j + 1 < bytes.len() && bytes[j + 1].is_ascii_alphabetic()
+                    {
+                        file_path_count += 1;
+                        i = j + 1;
+                        break;
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        // Symbol density
+        let code_symbols: &[u8] = b"{}()[]<>=;|&!@#$%^*+-/:\\";
+        let symbol_count = text.bytes().filter(|b| code_symbols.contains(b)).count();
+        let symbol_density = if text.is_empty() {
+            0.0
+        } else {
+            symbol_count as f64 / text.len() as f64
+        };
+
+        let trimmed = text.trim();
+        let is_question = trimmed.ends_with('?');
+        let is_single_sentence = !trimmed.contains('\n') && trimmed.split_whitespace().count() <= 3;
+
+        Self {
+            message_length,
+            line_count,
+            has_code_blocks,
+            file_path_count,
+            symbol_density,
+            is_question,
+            is_single_sentence,
+        }
+    }
+
+    /// Normalize to `[0, 1]` for scoring.
+    ///
+    /// Contributions:
+    /// - length: 0–0.25
+    /// - line count: 0–0.15
+    /// - code blocks: 0 or 0.15
+    /// - file paths: 0–0.15
+    /// - symbol density: 0–0.15
+    /// - down-weight: question/short → −0.08/−0.06
+    pub fn normalized(&self) -> f64 {
+        let mut score = 0.0;
+
+        // Length
+        score += match self.message_length {
+            0..=20 => 0.0,
+            21..=60 => 0.05,
+            61..=200 => 0.10,
+            201..=600 => 0.15,
+            601..=2000 => 0.20,
+            _ => 0.25,
+        };
+
+        // Line count
+        score += match self.line_count {
+            1 => 0.0,
+            2..=3 => 0.03,
+            4..=10 => 0.08,
+            _ => 0.15,
+        };
+
+        // Code blocks
+        if self.has_code_blocks {
+            score += 0.15;
+        }
+
+        // File paths
+        score += (0.05 * self.file_path_count.min(3) as f64).min(0.15);
+
+        // Symbol density
+        score += match self.symbol_density {
+            d if d < 0.03 => 0.0,
+            d if d < 0.08 => 0.03,
+            d if d < 0.15 => 0.08,
+            _ => 0.15,
+        };
+
+        // Down-weight simple patterns
+        if self.is_single_sentence {
+            score -= 0.08;
+        }
+        if self.is_question && self.message_length < 80 {
+            score -= 0.06;
+        }
+
+        score.clamp(0.0, 1.0)
+    }
+
+    /// Quick override: returns `Some(tier)` if the signal is decisive enough
+    /// to skip the full scoring pipeline.
+    ///
+    /// Used by Layer 0 ("확실한가?") — only triggers when the signal is
+    /// overwhelmingly simple or complex.
+    pub fn decisive_tier(&self) -> Option<RouterTier> {
+        // Very short, no structure → definitely low
+        if self.message_length < 15 && self.is_single_sentence && !self.has_code_blocks {
+            return Some(RouterTier::Low);
+        }
+        // Long + code blocks + file paths → definitely high
+        if self.message_length > 500 && self.has_code_blocks && self.file_path_count >= 2 {
+            return Some(RouterTier::High);
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod vision_tests {
     use super::*;
@@ -475,5 +636,147 @@ mod vision_tests {
         let msgs = vec![text_user_msg("run"), text_tool_result()];
         let signal = VisionSignal::extract(&msgs, 10);
         assert!(!signal.requires_vision());
+    }
+}
+
+#[cfg(test)]
+mod message_content_tests {
+    use super::*;
+    use crate::messages::UserMessage;
+
+    fn text_user_msg(s: &str) -> Message {
+        Message::User(UserMessage {
+            role: crate::messages::UserRole::User,
+            content: crate::messages::MessageContent::Text(s.to_string()),
+            timestamp: 0,
+        })
+    }
+
+    // ── Low-tier: short, simple messages ─────────────────────────────
+
+    #[test]
+    fn msg_empty() {
+        let sig = MessageContentSignal::from_text("");
+        assert!(sig.normalized() < 0.05);
+    }
+
+    #[test]
+    fn msg_greeting() {
+        let sig = MessageContentSignal::from_text("hello");
+        assert!(sig.normalized() < 0.1);
+        assert!(sig.is_single_sentence);
+    }
+
+    #[test]
+    fn msg_korean_greeting() {
+        let sig = MessageContentSignal::from_text("안녕하세요");
+        assert!(sig.normalized() < 0.1);
+    }
+
+    #[test]
+    fn msg_short_question() {
+        let sig = MessageContentSignal::from_text("what is rust?");
+        assert!(sig.normalized() < 0.1);
+        assert!(sig.is_question);
+    }
+
+    // ── Medium-tier: moderate length ─────────────────────────────────
+
+    #[test]
+    fn msg_moderate() {
+        let sig = MessageContentSignal::from_text(
+            "Modify the config file to add the new endpoint for the auth service",
+        );
+        assert!((0.02..0.25).contains(&sig.normalized()));
+    }
+
+    #[test]
+    fn msg_multiline() {
+        let sig =
+            MessageContentSignal::from_text("I need to update:\n- config\n- router\n- middleware");
+        assert!(sig.normalized() > 0.05);
+        assert_eq!(sig.line_count, 4);
+    }
+
+    // ── High-tier: code, files, technical ─────────────────────────────
+
+    #[test]
+    fn msg_code_blocks() {
+        let sig = MessageContentSignal::from_text(
+            "Debug:\n```rust\nfn main() { panic!() }\n```\nStack trace shows null.",
+        );
+        assert!(sig.normalized() > 0.2);
+        assert!(sig.has_code_blocks);
+    }
+
+    #[test]
+    fn msg_multi_file() {
+        let sig =
+            MessageContentSignal::from_text("Update src/main.rs and lib/config.rs for the new API");
+        assert!(sig.file_path_count >= 2);
+        assert!(sig.normalized() > 0.1);
+    }
+
+    #[test]
+    fn msg_high_symbol_density() {
+        let sig = MessageContentSignal::from_text(
+            "{\"type\": \"router\", \"config\": {\"high\": {\"model\": \"opus\"}}}",
+        );
+        assert!(sig.symbol_density > 0.15);
+    }
+
+    // ── Extract from messages ────────────────────────────────────────
+
+    #[test]
+    fn extract_from_messages() {
+        let msgs = vec![
+            text_user_msg("system prompt"),
+            text_user_msg("update src/main.rs"),
+        ];
+        let sig = MessageContentSignal::extract(&msgs);
+        assert_eq!(sig.message_length, 18); // "update src/main.rs"
+    }
+
+    // ── Decisive tier ────────────────────────────────────────────────
+
+    #[test]
+    fn decisive_low() {
+        let sig = MessageContentSignal::from_text("hi");
+        assert_eq!(sig.decisive_tier(), Some(RouterTier::Low));
+    }
+
+    #[test]
+    fn decisive_high() {
+        let code = "x".repeat(600);
+        let text = format!(
+            "Refactor this:\n```rust\nfn main() {{}}\n```\n\nIn src/main.rs and lib/core.rs:\n{code}"
+        );
+        let sig = MessageContentSignal::from_text(&text);
+        assert_eq!(sig.decisive_tier(), Some(RouterTier::High));
+    }
+
+    #[test]
+    fn decisive_none_for_medium() {
+        let sig = MessageContentSignal::from_text("Please update the router config");
+        assert_eq!(sig.decisive_tier(), None);
+    }
+
+    // ── Score bounds ─────────────────────────────────────────────────
+
+    #[test]
+    fn normalized_always_in_bounds() {
+        let inputs = [
+            "",
+            "x",
+            "hello",
+            &"x".repeat(10000),
+            "```python\nprint('hello')\n```",
+            "안녕하세요 세계",
+        ];
+        for input in &inputs {
+            let sig = MessageContentSignal::from_text(input);
+            let n = sig.normalized();
+            assert!((0.0..=1.0).contains(&n), "out of bounds for '{input}': {n}");
+        }
     }
 }

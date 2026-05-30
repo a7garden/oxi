@@ -98,8 +98,9 @@ impl FilterMode {
         match self {
             FilterMode::Default | FilterMode::All => true,
             FilterMode::NoTools => entry_type != EntryType::Tool,
-            FilterMode::UserOnly => entry_type == EntryType::User
-                || entry_type == EntryType::Assistant,
+            FilterMode::UserOnly => {
+                entry_type == EntryType::User || entry_type == EntryType::Assistant
+            }
         }
     }
 }
@@ -108,14 +109,17 @@ impl FilterMode {
 // FlatNode — a single row in the flattened tree
 // ─────────────────────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 struct FlatNode {
     entry_id: String,
+    #[allow(dead_code)]
     parent_id: Option<String>,
     indent: usize,
     is_last_child: bool,
     is_folded: bool,
     has_children: bool,
     content: Line<'static>,
+    #[allow(dead_code)]
     entry_type: EntryType,
 }
 
@@ -131,8 +135,11 @@ pub struct TreeNavigatorOverlay {
     filter_mode: FilterMode,
     search_query: String,
     active_path: HashSet<String>,
+    #[allow(dead_code)]
     current_leaf_id: Option<String>,
+    #[allow(dead_code)]
     session_handle: AgentSessionHandle,
+    #[allow(dead_code)]
     app_state: SharedAppState,
 }
 
@@ -230,7 +237,7 @@ impl TreeNavigatorOverlay {
             let is_last = i == roots.len() - 1;
             let has_children = children_map
                 .get(&Some(root.id.clone()))
-                .map_or(false, |c| !c.is_empty());
+                .is_some_and(|c| !c.is_empty());
             let is_folded = self.folded.contains(&root.id);
 
             self.flat_nodes.push(FlatNode {
@@ -286,7 +293,7 @@ impl TreeNavigatorOverlay {
             if is_orphan && !root_ids.contains(&entry.id) {
                 let has_children = children_map
                     .get(&Some(entry.id.clone()))
-                    .map_or(false, |c| !c.is_empty());
+                    .is_some_and(|c| !c.is_empty());
                 let is_folded = self.folded.contains(&entry.id);
                 self.flat_nodes.push(FlatNode {
                     entry_id: entry.id.clone(),
@@ -303,6 +310,7 @@ impl TreeNavigatorOverlay {
     }
 
     /// Static version that accepts explicit parameters to avoid borrow conflicts.
+    #[allow(clippy::too_many_arguments)]
     fn flatten_children_impl(
         parent_id: &str,
         indent: usize,
@@ -322,7 +330,7 @@ impl TreeNavigatorOverlay {
             let is_last = i == children.len() - 1;
             let has_children = children_map
                 .get(&Some(child.id.clone()))
-                .map_or(false, |c| !c.is_empty());
+                .is_some_and(|c| !c.is_empty());
             let is_folded = folded.contains(&child.id);
 
             flat_nodes.push(FlatNode {
@@ -397,10 +405,7 @@ impl TreeNavigatorOverlay {
         self.build_flat_tree();
         // Re-select the same node if it still exists
         if let Some(id) = selected_id {
-            let idx = self
-                .flat_nodes
-                .iter()
-                .position(|n| n.entry_id == id);
+            let idx = self.flat_nodes.iter().position(|n| n.entry_id == id);
             if let Some(i) = idx {
                 self.list_state.select(Some(i));
             } else if !self.flat_nodes.is_empty() {
@@ -420,19 +425,13 @@ impl TreeNavigatorOverlay {
 // Helper functions
 // ─────────────────────────────────────────────────────────────────────────
 
-fn compute_active_path(
-    entries: &[SessionEntry],
-    leaf_id: Option<&str>,
-) -> HashSet<String> {
+fn compute_active_path(entries: &[SessionEntry], leaf_id: Option<&str>) -> HashSet<String> {
     let mut path = HashSet::new();
     let Some(mut current_id) = leaf_id.map(|s| s.to_string()) else {
         return path;
     };
 
-    let by_id: HashMap<&str, &SessionEntry> = entries
-        .iter()
-        .map(|e| (e.id.as_str(), e))
-        .collect();
+    let by_id: HashMap<&str, &SessionEntry> = entries.iter().map(|e| (e.id.as_str(), e)).collect();
 
     while let Some(entry) = by_id.get(current_id.as_str()) {
         path.insert(entry.id.clone());
@@ -523,16 +522,11 @@ impl OverlayComponent for TreeNavigatorOverlay {
             KeyCode::PageDown => {
                 self.list_state.scroll_down_by(10);
             }
-            KeyCode::Home => {
-                if !self.flat_nodes.is_empty() {
-                    self.list_state.select(Some(0));
-                }
+            KeyCode::Home if !self.flat_nodes.is_empty() => {
+                self.list_state.select(Some(0));
             }
-            KeyCode::End => {
-                if !self.flat_nodes.is_empty() {
-                    self.list_state
-                        .select(Some(self.flat_nodes.len() - 1));
-                }
+            KeyCode::End if !self.flat_nodes.is_empty() => {
+                self.list_state.select(Some(self.flat_nodes.len() - 1));
             }
             KeyCode::Enter => {
                 return OverlayAction::Close;

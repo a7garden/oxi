@@ -19,8 +19,111 @@ use std::time::Instant;
 
 use parking_lot::RwLock;
 
-// Re-export types from resource_loader_compat
-pub use super::resource_loader_compat::{Prompt, Skill, Theme};
+// Types for skills, themes, and prompts (moved from resource_loader_compat)
+
+/// Resource type
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ResourceType {
+    /// skill variant.
+    Skill,
+    /// extension variant.
+    Extension,
+    /// theme variant.
+    Theme,
+    /// prompt variant.
+    Prompt,
+}
+
+/// Resource loading result
+#[derive(Debug)]
+pub struct LoadResult<T> {
+    /// Loaded items
+    pub items: Vec<T>,
+    /// Any errors encountered
+    pub errors: Vec<LoadError>,
+    /// Diagnostics
+    pub diagnostics: Vec<ResourceDiagnostic>,
+}
+
+/// Load error
+#[derive(Debug, Clone)]
+pub struct LoadError {
+    /// pub.
+    pub path: PathBuf,
+    /// pub.
+    pub error: String,
+}
+
+/// Resource diagnostic
+#[derive(Debug, Clone)]
+pub struct ResourceDiagnostic {
+    /// pub.
+    pub severity: DiagnosticSeverity,
+    /// pub.
+    pub message: String,
+    /// pub.
+    pub path: Option<PathBuf>,
+}
+
+/// Diagnostic severity
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticSeverity {
+    /// warning variant.
+    Warning,
+    /// error variant.
+    Error,
+    /// info variant.
+    Info,
+}
+
+/// A loaded skill
+#[derive(Debug, Clone)]
+pub struct Skill {
+    /// pub.
+    pub id: String,
+    /// pub.
+    pub path: PathBuf,
+    /// pub.
+    pub content: String,
+    /// pub.
+    pub name: Option<String>,
+    /// pub.
+    pub description: Option<String>,
+    /// pub.
+    pub source: String,
+}
+
+/// A loaded theme
+#[derive(Debug, Clone)]
+pub struct Theme {
+    /// pub.
+    pub id: String,
+    /// pub.
+    pub name: String,
+    /// pub.
+    pub path: PathBuf,
+    /// pub.
+    pub content: serde_json::Value,
+    /// pub.
+    pub source: String,
+}
+
+/// A loaded prompt template
+#[derive(Debug, Clone)]
+pub struct Prompt {
+    /// pub.
+    pub id: String,
+    /// pub.
+    pub name: String,
+    /// pub.
+    pub path: PathBuf,
+    /// pub.
+    pub content: String,
+    /// pub.
+    pub description: Option<String>,
+    /// pub.
+    pub source: String,
+}
 
 // ============================================================================
 // Context Files
@@ -1314,38 +1417,210 @@ pub fn prompts_dir(base: &std::path::Path) -> std::path::PathBuf {
 
 /// Load skills from a directory
 pub fn load_skills_from_dir(dir: &std::path::Path) -> LoadResult<Skill> {
-    super::resource_loader_compat::load_skills_from_dir_impl(dir)
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    let mut diagnostics = Vec::new();
+
+    if !dir.exists() {
+        return LoadResult {
+            items,
+            errors,
+            diagnostics,
+        };
+    }
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() || path.extension().map(|e| e == "md").unwrap_or(false) {
+                match load_skill(&path) {
+                    Ok(skill) => items.push(skill),
+                    Err(e) => {
+                        errors.push(LoadError {
+                            path: path.clone(),
+                            error: e.clone(),
+                        });
+                        diagnostics.push(ResourceDiagnostic {
+                            severity: DiagnosticSeverity::Error,
+                            message: e,
+                            path: Some(path),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    LoadResult {
+        items,
+        errors,
+        diagnostics,
+    }
 }
 
 /// Load a single skill
 pub fn load_skill(path: &std::path::Path) -> Result<Skill, String> {
-    super::resource_loader_compat::load_skill_impl(path)
+    let content = if path.is_file() {
+        fs::read_to_string(path).map_err(|e| e.to_string())?
+    } else if path.is_dir() {
+        let skill_md = path.join("SKILL.md");
+        if skill_md.exists() {
+            fs::read_to_string(&skill_md).map_err(|e| e.to_string())?
+        } else {
+            return Err("No SKILL.md found in directory".to_string());
+        }
+    } else {
+        return Err("Invalid skill path".to_string());
+    };
+
+    let id = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let name = extract_yaml_field(&content, "name").or_else(|| Some(id.clone()));
+    let description = extract_yaml_field(&content, "description");
+
+    Ok(Skill {
+        id,
+        path: path.to_path_buf(),
+        content,
+        name,
+        description,
+        source: "local".to_string(),
+    })
 }
 
 /// Load themes from a directory
 pub fn load_themes_from_dir(dir: &std::path::Path) -> LoadResult<Theme> {
-    super::resource_loader_compat::load_themes_from_dir_impl(dir)
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    let mut diagnostics = Vec::new();
+
+    if !dir.exists() {
+        return LoadResult {
+            items,
+            errors,
+            diagnostics,
+        };
+    }
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                match load_theme(&path) {
+                    Ok(theme) => items.push(theme),
+                    Err(e) => {
+                        errors.push(LoadError {
+                            path: path.clone(),
+                            error: e.clone(),
+                        });
+                        diagnostics.push(ResourceDiagnostic {
+                            severity: DiagnosticSeverity::Warning,
+                            message: e,
+                            path: Some(path),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    LoadResult {
+        items,
+        errors,
+        diagnostics,
+    }
 }
 
 /// Load a single theme
 pub fn load_theme(path: &std::path::Path) -> Result<Theme, String> {
-    super::resource_loader_compat::load_theme_impl(path)
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+    let name = json
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unnamed")
+                .to_string()
+        });
+
+    Ok(Theme {
+        id: name.to_lowercase().replace(' ', "_"),
+        name,
+        path: path.to_path_buf(),
+        content: json,
+        source: "local".to_string(),
+    })
 }
 
 /// Load prompts from a directory
 pub fn load_prompts_from_dir(dir: &std::path::Path) -> LoadResult<Prompt> {
-    super::resource_loader_compat::load_prompts_from_dir_impl(dir)
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    let mut diagnostics = Vec::new();
+
+    if !dir.exists() {
+        return LoadResult {
+            items,
+            errors,
+            diagnostics,
+        };
+    }
+
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().map(|e| e == "md").unwrap_or(false) {
+                match load_prompt(&path) {
+                    Ok(prompt) => items.push(prompt),
+                    Err(e) => {
+                        errors.push(LoadError {
+                            path: path.clone(),
+                            error: e.clone(),
+                        });
+                        diagnostics.push(ResourceDiagnostic {
+                            severity: DiagnosticSeverity::Warning,
+                            message: e,
+                            path: Some(path),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    LoadResult {
+        items,
+        errors,
+        diagnostics,
+    }
 }
 
 /// Load a single prompt
 pub fn load_prompt(path: &std::path::Path) -> Result<Prompt, String> {
-    super::resource_loader_compat::load_prompt_impl(path)
-}
+    let content = fs::read_to_string(path).map_err(|e| e.to_string())?;
 
-/// Load all resources from default locations
-#[allow(dead_code)]
-pub fn load_all_resources(base_dir: &std::path::Path) -> LoadAllResourcesResult {
-    super::resource_loader_compat::load_all_resources_impl(base_dir)
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    Ok(Prompt {
+        id: name.clone(),
+        name,
+        path: path.to_path_buf(),
+        content,
+        description: None,
+        source: "local".to_string(),
+    })
 }
 
 /// Resolve a path with ~ expansion
@@ -1358,6 +1633,26 @@ pub fn resolve_path(path: &std::path::Path) -> std::path::PathBuf {
         }
     }
     path.to_path_buf()
+}
+
+/// Extract a YAML frontmatter field
+fn extract_yaml_field(content: &str, field: &str) -> Option<String> {
+    if !content.starts_with("---") {
+        return None;
+    }
+
+    if let Some(end) = content[3..].find("---") {
+        let frontmatter = &content[3..end + 3];
+        for line in frontmatter.lines() {
+            if let Some(value) = line.strip_prefix(&format!("{}:", field)) {
+                let value = value.trim();
+                let value = value.trim_matches('"').trim_matches('\'');
+                return Some(value.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 // ============================================================================
@@ -1434,13 +1729,7 @@ fn dedupe_prompts(prompts: Vec<Prompt>) -> (Vec<Prompt>, Vec<ResourceCollision>)
     (result, collisions)
 }
 
-// ============================================================================
-// Re-exports from compat module
-// ============================================================================
-
-pub use super::resource_loader_compat::{
-    LoadAllResourcesResult, LoadError, LoadResult, ResourceDiagnostic, ResourceType,
-};
+// compat module removed — all types and functions are now in this file.
 
 // ============================================================================
 // Tests

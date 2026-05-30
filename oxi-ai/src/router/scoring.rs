@@ -1,6 +1,8 @@
 //! Scoring functions for routing decisions.
 
-use super::signals::{BehavioralSignal, ContextBudgetSignal, StructuralSignal, VisionSignal};
+use super::signals::{
+    BehavioralSignal, ContextBudgetSignal, MessageContentSignal, StructuralSignal, VisionSignal,
+};
 use super::types::ScoringWeights;
 
 /// Sigmoid function with configurable center and steepness.
@@ -22,19 +24,21 @@ pub fn lerp(a: f64, b: f64, t: f64) -> f64 {
 
 /// Compute a composite routing score from all signals.
 ///
-/// If `vision` is `None`, behaves identically to the old 3-signal formula
-/// (vision weight is treated as 0).
+/// If `vision` or `message` is `None`, those weights are effectively zero
+/// (the remaining weights are renormalized).
 pub fn compute_score(
     structural: &StructuralSignal,
     behavioral: &BehavioralSignal,
     budget: &ContextBudgetSignal,
     vision: Option<&VisionSignal>,
+    message: Option<&MessageContentSignal>,
     weights: &ScoringWeights,
 ) -> f64 {
     let s_raw = structural.normalized();
     let b_raw = behavioral.normalized();
     let c_raw = budget.normalized();
     let v_raw = vision.map(|v| v.normalized()).unwrap_or(0.0);
+    let m_raw = message.map(|m| m.normalized()).unwrap_or(0.0);
 
     // Sigmoid sharpening.
     let s_sharp = sigmoid(s_raw, 0.5, 4.0);
@@ -42,12 +46,19 @@ pub fn compute_score(
     let c_sharp = sigmoid(c_raw, 0.5, 4.0);
     // Sharper sigmoid for vision — binary-like activation
     let v_sharp = sigmoid(v_raw, 0.3, 8.0);
+    // Message signal
+    let m_sharp = sigmoid(m_raw, 0.5, 4.0);
 
     let raw = weights.structural * s_sharp
         + weights.behavioral * b_sharp
         + weights.context_budget * c_sharp
-        + weights.vision * v_sharp;
-    let total = weights.structural + weights.behavioral + weights.context_budget + weights.vision;
+        + weights.vision * v_sharp
+        + weights.message * m_sharp;
+    let total = weights.structural
+        + weights.behavioral
+        + weights.context_budget
+        + weights.vision
+        + weights.message;
 
     if total > 0.0 {
         (raw / total).clamp(0.0, 1.0)
@@ -102,7 +113,7 @@ mod tests {
         let behavioral = BehavioralSignal::default();
         let budget = ContextBudgetSignal::default();
         let weights = ScoringWeights::default();
-        let score = compute_score(&structural, &behavioral, &budget, None, &weights);
+        let score = compute_score(&structural, &behavioral, &budget, None, None, &weights);
         assert!(
             (0.0..=1.0).contains(&score),
             "score out of range: {}",
@@ -127,7 +138,7 @@ mod tests {
             context_upgrade_threshold: Some(50_000),
         };
         let weights = ScoringWeights::default();
-        let score = compute_score(&structural, &behavioral, &budget, None, &weights);
+        let score = compute_score(&structural, &behavioral, &budget, None, None, &weights);
         assert!(
             (0.0..=1.0).contains(&score),
             "score out of range: {}",
@@ -142,13 +153,20 @@ mod tests {
         let budget = ContextBudgetSignal::default();
         let weights = ScoringWeights::default();
 
-        let without_vision = compute_score(&structural, &behavioral, &budget, None, &weights);
+        let without_vision = compute_score(&structural, &behavioral, &budget, None, None, &weights);
         let vision = VisionSignal {
             recent_image_count: 2,
             has_image_in_latest_turn: true,
             image_producing_tools: vec!["browse".to_string()],
         };
-        let with_vision = compute_score(&structural, &behavioral, &budget, Some(&vision), &weights);
+        let with_vision = compute_score(
+            &structural,
+            &behavioral,
+            &budget,
+            Some(&vision),
+            None,
+            &weights,
+        );
         assert!(
             with_vision > without_vision,
             "vision should increase score: {} vs {}",
@@ -169,13 +187,49 @@ mod tests {
             has_image_in_latest_turn: true,
             image_producing_tools: vec![],
         };
-        let with = compute_score(&structural, &behavioral, &budget, Some(&vision), &weights);
-        let without = compute_score(&structural, &behavioral, &budget, None, &weights);
+        let with = compute_score(
+            &structural,
+            &behavioral,
+            &budget,
+            Some(&vision),
+            None,
+            &weights,
+        );
+        let without = compute_score(&structural, &behavioral, &budget, None, None, &weights);
         assert!(
             (with - without).abs() < 1e-6,
             "vision=0.0 should have no effect: {} vs {}",
             with,
             without
+        );
+    }
+
+    #[test]
+    fn compute_score_message_increases_score() {
+        let structural = StructuralSignal::default();
+        let behavioral = BehavioralSignal::default();
+        let budget = ContextBudgetSignal::default();
+        let weights = ScoringWeights::default();
+
+        let without_message =
+            compute_score(&structural, &behavioral, &budget, None, None, &weights);
+        let msg = MessageContentSignal::from_text(&format!(
+            "Debug this:\n```rust\nfn main() {{ panic!() }}\n```\n{}",
+            "x".repeat(300)
+        ));
+        let with_message = compute_score(
+            &structural,
+            &behavioral,
+            &budget,
+            None,
+            Some(&msg),
+            &weights,
+        );
+        assert!(
+            with_message > without_message,
+            "message signal should increase score: {} vs {}",
+            with_message,
+            without_message
         );
     }
 }

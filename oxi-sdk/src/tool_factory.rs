@@ -29,7 +29,7 @@ pub fn readonly_tools(cwd: &Path) -> Arc<ToolRegistry> {
 
 /// Create browser tools: browse, browse_extract.
 ///
-/// Requires a [`BrowserEngine`] implementation. Use [`native_browser_tools()`]
+/// Requires a [`BrowserEngine`] implementation. Use `native_browser_tools()`
 /// when the `native-browser` feature is enabled.
 ///
 /// # Example

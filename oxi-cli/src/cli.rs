@@ -249,7 +249,7 @@ pub enum ConfigCommands {
     AddProvider {
         /// Provider name (e.g. minimax)
         name: String,
-        /// Base URL (e.g. https://api.minimax.chat/v1)
+        /// Base URL (e.g. <https://api.minimax.chat/v1>)
         base_url: String,
         /// Environment variable name for API key (e.g. MINIMAX_API_KEY)
         api_key_env: String,

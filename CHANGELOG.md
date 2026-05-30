@@ -5,6 +5,20 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-05-30
+
+### Changed — workspace
+
+- Bumped all crate versions to 0.24.0
+- Fixed 18 doc warnings across all crates (unresolved links, bare URLs, HTML tags)
+- Added `.cargo/audit.toml` with documented vulnerability ignore rationale (wasmtime 41.x via extism)
+- Updated README version badge to 0.24.0
+- Updated AGENTS.md version to 0.24.0
+
+### Unreleased
+
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.24.0...HEAD
+
 ## [Unreleased]
 
 ### Changed — workspace

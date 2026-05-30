@@ -18,6 +18,8 @@ pub struct RouterConfigFile {
     pub max_session_budget: Option<f64>,
     pub profiles: Option<toml::Value>,
     pub weights: Option<toml::Value>,
+    pub pin_tier: Option<String>,
+    pub phase_bias: Option<f64>,
 }
 
 /// Fully resolved router config with all required fields.
@@ -29,6 +31,8 @@ pub struct RouterConfig {
     max_session_budget: Option<f64>,
     profiles: HashMap<String, RouterProfile>,
     weights: ScoringWeights,
+    pin_tier: Option<String>,
+    phase_bias: Option<f64>,
 }
 
 impl RouterConfig {
@@ -71,6 +75,16 @@ impl RouterConfig {
     pub fn max_session_budget(&self) -> Option<f64> {
         self.max_session_budget
     }
+
+    /// Get pinned tier as string ("high", "medium", "low").
+    pub fn pin_tier(&self) -> Option<&str> {
+        self.pin_tier.as_deref()
+    }
+
+    /// Get phase bias.
+    pub fn phase_bias(&self) -> Option<f64> {
+        self.phase_bias
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -111,28 +125,34 @@ pub struct ScoringWeights {
     pub context_budget: f64,
     #[serde(default = "default_vision")]
     pub vision: f64,
+    #[serde(default = "default_message")]
+    pub message: f64,
 }
 
 fn default_structural() -> f64 {
-    0.35
+    0.25
 }
 fn default_behavioral() -> f64 {
-    0.35
+    0.20
 }
 fn default_context() -> f64 {
-    0.20
+    0.15
 }
 fn default_vision() -> f64 {
     0.10
+}
+fn default_message() -> f64 {
+    0.30
 }
 
 impl Default for ScoringWeights {
     fn default() -> Self {
         Self {
-            structural: 0.35,
-            behavioral: 0.35,
-            context_budget: 0.20,
-            vision: 0.10,
+            structural: default_structural(),
+            behavioral: default_behavioral(),
+            context_budget: default_context(),
+            vision: default_vision(),
+            message: default_message(),
         }
     }
 }
@@ -204,6 +224,17 @@ pub fn load_router_config(global_dir: &Path, project_dir: &Path) -> Option<Route
         })
         .unwrap_or_default();
 
+    let pin_tier = project_cfg
+        .as_ref()
+        .and_then(|c| c.pin_tier.as_ref())
+        .or_else(|| global_cfg.as_ref().and_then(|c| c.pin_tier.as_ref()))
+        .and_then(|s| parse_tier_str(s));
+
+    let phase_bias = project_cfg
+        .as_ref()
+        .and_then(|c| c.phase_bias)
+        .or_else(|| global_cfg.as_ref().and_then(|c| c.phase_bias));
+
     Some(RouterConfig {
         default_profile: default_name,
         classifier_model: project_cfg
@@ -224,6 +255,8 @@ pub fn load_router_config(global_dir: &Path, project_dir: &Path) -> Option<Route
             .or_else(|| global_cfg.as_ref().and_then(|c| c.max_session_budget)),
         profiles,
         weights,
+        pin_tier,
+        phase_bias,
     })
 }
 
@@ -264,14 +297,25 @@ fn parse_tier(value: Option<&toml::Value>) -> Option<RoutedTierConfig> {
 fn parse_weights(value: &toml::Value) -> Option<ScoringWeights> {
     let table = value.as_table()?;
     Some(ScoringWeights {
-        structural: table.get("structural")?.as_float().unwrap_or(0.35),
-        behavioral: table.get("behavioral")?.as_float().unwrap_or(0.35),
-        context_budget: table.get("context_budget")?.as_float().unwrap_or(0.20),
+        structural: table.get("structural")?.as_float().unwrap_or(0.25),
+        behavioral: table.get("behavioral")?.as_float().unwrap_or(0.20),
+        context_budget: table.get("context_budget")?.as_float().unwrap_or(0.15),
         vision: table
             .get("vision")
             .and_then(|v| v.as_float())
             .unwrap_or(0.10),
+        message: table
+            .get("message")
+            .and_then(|v| v.as_float())
+            .unwrap_or(0.30),
     })
+}
+
+fn parse_tier_str(s: &str) -> Option<String> {
+    match s.to_lowercase().as_str() {
+        "high" | "medium" | "low" => Some(s.to_lowercase()),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -310,11 +354,13 @@ value = 1
 
     #[test]
     fn load_router_config_merges_profiles() {
-        let global_dir = std::env::temp_dir();
-        let project_dir = std::env::temp_dir();
+        let global_dir = tempfile::tempdir().unwrap();
+        let project_dir = tempfile::tempdir().unwrap();
+        let oxi_dir = project_dir.path().join(".oxi");
+        std::fs::create_dir_all(&oxi_dir).unwrap();
 
         std::fs::write(
-            global_dir.join("settings.toml"),
+            global_dir.path().join("settings.toml"),
             r#"
 [router]
 enabled = true
@@ -328,7 +374,7 @@ low.model = "google/gemini-2.0-flash"
         )
         .unwrap();
         std::fs::write(
-            project_dir.join(".oxi/settings.toml"),
+            oxi_dir.join("settings.toml"),
             r#"
 [router]
 enabled = true
@@ -336,13 +382,12 @@ enabled = true
         )
         .unwrap();
 
-        let config = load_router_config(&global_dir, &project_dir);
+        let config = load_router_config(global_dir.path(), project_dir.path());
         assert!(config.is_some());
         let config = config.unwrap();
         assert_eq!(config.default_profile, "auto");
         assert!(config.profiles.contains_key("auto"));
 
-        std::fs::remove_file(global_dir.join("settings.toml")).ok();
-        std::fs::remove_file(project_dir.join(".oxi/settings.toml")).ok();
+        // tempdir::TempDir drops clean up automatically
     }
 }
