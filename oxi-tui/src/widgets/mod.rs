@@ -9,10 +9,14 @@
 #[allow(missing_docs)]
 pub mod chat;
 #[allow(missing_docs)]
+pub mod completion;
+#[allow(missing_docs)]
 pub mod footer;
 #[allow(missing_docs)]
 pub mod input;
 #[allow(missing_docs)]
 pub mod routing;
+#[allow(missing_docs)]
+pub mod stateful_list;
 #[allow(missing_docs)]
 pub mod tool_renderer;
