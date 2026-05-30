@@ -111,12 +111,9 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/settings" => {
-            state.add_system_message(format!(
-                "Model: {}\nThinking: {:?}\nAuto-compact: {}\nAuto-retry: {}",
-                session.model_id(),
-                session.thinking_level(),
-                session.auto_compaction_enabled(),
-                session.auto_retry_enabled(),
+            state.overlay_state = Some(super::overlay::settings_overlay(
+                &session.clone_handle(),
+                state,
             ));
             true
         }
@@ -345,6 +342,101 @@ pub(crate) fn handle_slash_command(
                     }
                 }
                 Err(e) => state.add_system_message(format!("Error: Export failed: {}", e)),
+            }
+            true
+        }
+        "/share" => {
+            // Check if gh CLI is available
+            match std::process::Command::new("gh").arg("auth").arg("status").output() {
+                Ok(output) if output.status.success() => {
+                    // Export session to HTML first
+                    let meta = ExportMeta {
+                        model: Some(session.model_id()),
+                        provider: None,
+                        exported_at: chrono::Utc::now().timestamp_millis(),
+                        total_user_tokens: None,
+                        total_assistant_tokens: None,
+                    };
+                    let entries: Vec<oxi_store::session::SessionEntry> = state
+                        .messages()
+                        .iter()
+                        .map(|msg| {
+                            let role = match msg.role {
+                                MessageRole::User => "user",
+                                MessageRole::Assistant => "assistant",
+                                MessageRole::System => "system",
+                            };
+                            let content: String = msg
+                                .content_blocks
+                                .iter()
+                                .filter_map(|b| match b {
+                                    ContentBlock::Text { content } => Some(content.as_str()),
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            oxi_store::session::SessionEntry::simple_message(role, &content)
+                        })
+                        .collect();
+                    match export::export_to_html(&entries, &meta, &HtmlExportOptions::default()) {
+                        Ok(html) => {
+                            // Write to temp file and create gist
+                            let temp_path = std::env::temp_dir().join("oxi-share.html");
+                            match std::fs::write(&temp_path, &html) {
+                                Ok(()) => {
+                                    state.add_system_message("Creating Gist... (Esc to cancel)".to_string());
+                                    // Show loader overlay during gist creation
+                                    let sh = session.clone_handle();
+                                    let tx = ui_tx.clone();
+                                    tokio::spawn(async move {
+                                        let result = tokio::process::Command::new("gh")
+                                            .args(["gist", "create", &temp_path.to_string_lossy()])
+                                            .output()
+                                            .await;
+                                        let _ = std::fs::remove_file(&temp_path);
+                                        match result {
+                                            Ok(output) if output.status.success() => {
+                                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                                let gist_url = stdout.trim().to_string();
+                                                let _ = tx.send(UiEvent::SystemMessage(
+                                                    format!("Gist created: {}", gist_url)
+                                                ));
+                                            }
+                                            Ok(output) => {
+                                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                                let _ = tx.send(UiEvent::SystemMessage(
+                                                    format!("Gist failed: {}", stderr.trim())
+                                                ));
+                                            }
+                                            Err(e) => {
+                                                let _ = tx.send(UiEvent::SystemMessage(
+                                                    format!("Gist failed: {}", e)
+                                                ));
+                                            }
+                                        }
+                                    });
+                                }
+                                Err(e) => {
+                                    state.add_system_message(format!("Error: {}", e));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            state.add_system_message(format!("Error: {}", e));
+                        }
+                    }
+                }
+                Ok(output) => {
+                    state.add_system_message(
+                        "GitHub CLI not authenticated. Run: gh auth login".to_string(),
+                    );
+                }
+                Err(e) => {
+                    state.add_system_message(format!(
+                        "GitHub CLI (gh) not found: {}. Install from https://cli.github.com",
+                        e
+                    ));
+                }
             }
             true
         }
