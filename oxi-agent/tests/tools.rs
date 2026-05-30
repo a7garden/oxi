@@ -1093,16 +1093,17 @@ fn test_registry_with_builtins() {
     assert!(names.contains(&"mcp".to_string()));
     assert!(names.contains(&"context7_resolve-library-id".to_string()));
     assert!(names.contains(&"context7_query-docs".to_string()));
+    assert!(names.contains(&"generate_image".to_string()));
 
     // Keep this in sync with ToolRegistry::with_builtins_cwd()
-    assert_eq!(names.len(), 14);
+    assert_eq!(names.len(), 15);
 }
 
 #[test]
 fn test_registry_definitions() {
     let registry = ToolRegistry::with_builtins();
     let defs = registry.definitions();
-    assert_eq!(defs.len(), 14);
+    assert_eq!(defs.len(), 15);
 
     // Each should have name, description, and input_schema
     for def in &defs {

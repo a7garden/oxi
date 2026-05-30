@@ -1,7 +1,20 @@
 [build]
-# Use a faster linker on macOS
-# target."aarch64-apple-darwin".linker = "clang"
+# sccache for distributed compilation cache
+# Enable via RUSTC_WRAPPER=sccache (set in CI)
 
 [term]
-# Show progress during builds
 verbose = false
+
+# Optimization hints
+[profile.dev]
+opt-level = 0
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
+strip = false
+
+# Faster incremental builds in dev
+[profile.dev.package."*"]
+opt-level = 1

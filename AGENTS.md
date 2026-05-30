@@ -10,7 +10,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Workspace crates | `oxi-ai`, `oxi-agent`, `oxi-store`, `oxi-tui`, `oxi-sdk`, `oxi-cli` |
 | Version | 0.21.0 |
 | License | MIT |
-| CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo test`, `cargo audit` |
+| CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit` |
 
 ## Workspace Layout
 
@@ -147,7 +147,9 @@ Extension system (`src/extensions/types.rs`):
 - Unit tests in `#[cfg(test)] mod tests` within each module.
 - Integration tests in `<crate>/tests/*.rs` (e.g., `oxi-agent/tests/agent_loop_full.rs`).
 - Mock providers (`MockProvider`) for agent/loop testing.
-- `cargo test --workspace` must pass before merge.
+- **Test runner: `cargo-nextest`** — parallel execution, per-test timeouts.
+- Config: `.config/nextest.toml` (profiles: `default`, `ci`, `release`).
+- `cargo nextest run --workspace` must pass before merge.
 
 ### Adding a New LLM Provider
 
@@ -173,12 +175,21 @@ Extension system (`src/extensions/types.rs`):
 ## Common Commands
 
 ```bash
+# Build & Test
 cargo build                          # Debug build
 cargo build --release                # Release binary
-cargo test --workspace               # Run all tests
-cargo test -p oxi-agent              # Test single crate
+cargo nextest run --workspace        # Run all tests (parallel)
+cargo nextest run -p oxi-agent       # Test single crate
+cargo nextest run --profile ci       # CI profile (retries, no fail-fast)
+cargo nextest run -j 1               # Sequential (debug race conditions)
+
+# Lint & Format
 cargo clippy --workspace -- -D warnings   # Lint
 cargo fmt --all -- --check           # Format check
+
+# Docs
+cargo doc --workspace --no-deps      # Build docs
+cargo test --workspace --doc         # Doc tests
 ```
 
 ## File Locations
@@ -192,6 +203,7 @@ cargo fmt --all -- --check           # Format check
 | Skills | `~/.oxi/skills/<name>/SKILL.md` |
 | MCP config | `~/.config/oxi/mcp.json` or `.oxi/mcp.json` |
 | Logs | `~/.oxi/logs/` |
+| Nextest config | `.config/nextest.toml` |
 
 ## Design Principles
 

@@ -1,0 +1,40 @@
+# cargo-nextest configuration for oxi workspace
+# Docs: https://nexte.st/book/configuration.html
+
+[store]
+dir = "target/nextest"
+
+# ── Default profile (local dev) ─────────────────────────────────────
+
+[profile.default]
+failure-output = "immediate-final"
+success-output = "never"
+fail-fast = true
+slow-timeout = { period = "30s", terminate-after = 2 }
+leak-timeout = "100ms"
+test-threads = "num-cpus"
+retries = 0
+
+# Timeout-heavy tests: bash timeout tests sleep ~1s on purpose
+[[profile.default.overrides]]
+filter = "test(test_timeout_kills_process) + test(test_bash_timeout)"
+slow-timeout = { period = "10s", terminate-after = 3 }
+
+# ── CI profile ──────────────────────────────────────────────────────
+
+[profile.ci]
+fail-fast = false
+failure-output = "immediate"
+retries = 1
+slow-timeout = { period = "60s", terminate-after = 2 }
+test-threads = "num-cpus"
+
+[profile.ci.junit]
+path = "target/nextest/junit.xml"
+
+# ── Release profile (heavier builds) ────────────────────────────────
+
+[profile.release]
+fail-fast = false
+retries = 1
+test-threads = "num-cpus"
