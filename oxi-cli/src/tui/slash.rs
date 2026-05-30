@@ -3,6 +3,8 @@
 use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
 use super::overlay::router_integration;
 use crate::app::agent_session::{AgentSession, ScopedModel};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use crate::media::clipboard_write;
 use crate::storage::export::{self, ExportMeta, HtmlExportOptions};
 use oxi_tui::widgets::chat::{ContentBlock, MessageRole};
@@ -20,7 +22,7 @@ pub(crate) fn handle_slash_command(
     input: &str,
     session: &AgentSession,
     state: &mut AppState,
-    running: &mut bool,
+    running: &Arc<AtomicBool>,
     ui_tx: &mpsc::UnboundedSender<UiEvent>,
 ) -> bool {
     let trimmed = input.trim();
@@ -37,7 +39,7 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/quit" | "/exit" | "/q" => {
-            *running = false;
+            running.store(false, Ordering::SeqCst);
             true
         }
         "/model" => {
