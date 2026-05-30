@@ -113,9 +113,8 @@ pub(crate) fn handle_slash_command(
                 session.thinking_level(), session.auto_compaction_enabled(), session.auto_retry_enabled(),
             );
             state.overlay = None;
-            state.overlay_state = Some(super::overlay::text_viewer::TextViewerOverlay::new(
-                " Session Info ",
-                content,
+            state.overlay_state = Some(Box::new(
+                super::overlay::text_viewer::TextViewerOverlay::new(" Session Info ", content),
             ));
             true
         }
@@ -677,11 +676,12 @@ pub(crate) fn handle_slash_command(
                                 snap.turn_count,
                             );
                             state.overlay = None;
-                            state.overlay_state =
-                                Some(super::overlay::text_viewer::TextViewerOverlay::new(
+                            state.overlay_state = Some(Box::new(
+                                super::overlay::text_viewer::TextViewerOverlay::new(
                                     " Router Status ",
                                     content,
-                                ));
+                                ),
+                            ));
                         } else {
                             state.add_notification(
                                 "Router not active. Use /router to configure.".to_string(),
@@ -703,11 +703,12 @@ pub(crate) fn handle_slash_command(
                     }
                     _ => {
                         state.overlay = None;
-                        state.overlay_state =
-                            Some(super::overlay::text_viewer::TextViewerOverlay::new(
+                        state.overlay_state = Some(Box::new(
+                            super::overlay::text_viewer::TextViewerOverlay::new(
                                 " Router Help ",
                                 router_help(),
-                            ));
+                            ),
+                        ));
                     }
                 }
             } else {
@@ -729,11 +730,12 @@ pub(crate) fn handle_slash_command(
                             snap.turn_count,
                         );
                         state.overlay = None;
-                        state.overlay_state =
-                            Some(super::overlay::text_viewer::TextViewerOverlay::new(
+                        state.overlay_state = Some(Box::new(
+                            super::overlay::text_viewer::TextViewerOverlay::new(
                                 " Router Status ",
                                 content,
-                            ));
+                            ),
+                        ));
                     } else {
                         state.add_notification(
                             "Router configured but not yet active".to_string(),
@@ -897,12 +899,16 @@ pub(crate) fn handle_slash_command(
                 }
             }
             // /reload shows config in chat (multi-line summary)
-            state.add_system_message(format!(
-                "OK: Reloaded configuration\n  Model: {}\n  Provider: {}\n  Theme: {}\n  Thinking: {:?}\n  Extensions: {}\n  Stream: {}\n  Auto-compact: {}",
+            let content = format!(
+                "Reloaded Configuration\n\nModel: {}\nProvider: {}\nTheme: {}\nThinking: {:?}\nExtensions: {}\nStream: {}\nAuto-compact: {}",
                 state.footer_state.data.model_name,
                 state.footer_state.data.provider_name,
                 theme_name, reloaded.thinking_level,
                 reloaded.extensions_enabled, reloaded.stream_responses, reloaded.auto_compaction,
+            );
+            state.overlay = None;
+            state.overlay_state = Some(Box::new(
+                super::overlay::text_viewer::TextViewerOverlay::new(" Reload ", content),
             ));
             true
         }
@@ -1022,6 +1028,7 @@ fn router_help() -> String {
         .to_string()
 }
 
+#[allow(dead_code)]
 fn format_help() -> String {
     r#"
   Session
@@ -1075,6 +1082,7 @@ fn format_help() -> String {
     .to_string()
 }
 
+#[allow(dead_code)]
 fn format_hotkeys() -> String {
     r#"
   Navigation

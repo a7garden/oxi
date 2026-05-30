@@ -3,7 +3,7 @@
 
 use super::{centered_layout, OverlayAction, OverlayComponent};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use oxi_tui::Theme;
+// use oxi_tui::Theme; // unused — kept for future use
 use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
@@ -15,24 +15,14 @@ use ratatui::{
 pub struct TextViewerOverlay {
     title: String,
     lines: Vec<Line<'static>>,
-    scroll: u16,
-    total_lines: u16,
+    scroll: usize,
+    total_lines: usize,
 }
 
 impl TextViewerOverlay {
     pub fn new(title: impl Into<String>, content: String) -> Self {
         let lines: Vec<Line<'static>> = content.lines().map(|l| Line::raw(l.to_string())).collect();
-        let total_lines = lines.len() as u16;
-        Self {
-            title: title.into(),
-            lines,
-            scroll: 0,
-            total_lines,
-        }
-    }
-
-    pub fn with_styled_content(title: impl Into<String>, lines: Vec<Line<'static>>) -> Self {
-        let total_lines = lines.len() as u16;
+        let total_lines = lines.len();
         Self {
             title: title.into(),
             lines,
@@ -61,10 +51,10 @@ impl OverlayComponent for TextViewerOverlay {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.scroll = self.scroll.saturating_sub(1);
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if self.scroll < self.total_lines.saturating_sub(1) {
-                    self.scroll += 1;
-                }
+            KeyCode::Down | KeyCode::Char('j')
+                if self.scroll < self.total_lines.saturating_sub(1) =>
+            {
+                self.scroll += 1;
             }
             KeyCode::PageUp => {
                 self.scroll = self.scroll.saturating_sub(20);
@@ -105,9 +95,9 @@ impl OverlayComponent for TextViewerOverlay {
 
         // Calculate visible area
         let visible_height = (inner.height.saturating_sub(2)) as usize;
-        let start = self.scroll as usize;
+        let start = self.scroll;
         let end = (start + visible_height).min(self.lines.len());
-        let visible_lines: Vec<_> = self.lines[start..end].iter().collect();
+        let visible_lines: Vec<Line<'_>> = self.lines[start..end].to_vec();
 
         // Content
         let content_height = (end - start) as u16;
@@ -124,7 +114,7 @@ impl OverlayComponent for TextViewerOverlay {
         frame.render_widget(paragraph, content_area);
 
         // Scrollbar
-        if self.total_lines > visible_height as u16 {
+        if self.total_lines > visible_height {
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
             frame.render_stateful_widget(
                 scrollbar,
@@ -134,8 +124,7 @@ impl OverlayComponent for TextViewerOverlay {
                     width: 1,
                     height: inner.height.saturating_sub(1),
                 },
-                &mut ratatui::widgets::ScrollbarState::new(self.total_lines as u16)
-                    .position(self.scroll),
+                &mut ratatui::widgets::ScrollbarState::new(self.total_lines).position(self.scroll),
             );
         }
 
@@ -162,11 +151,14 @@ impl OverlayComponent for TextViewerOverlay {
 // ── Convenience constructors for common text viewers ─────────────────────
 
 pub fn help_overlay() -> Box<dyn OverlayComponent> {
-    Box::new(TextViewerOverlay::new(" Help ", HELP_CONTENT))
+    Box::new(TextViewerOverlay::new(" Help ", HELP_CONTENT.to_string()))
 }
 
 pub fn hotkeys_overlay() -> Box<dyn OverlayComponent> {
-    Box::new(TextViewerOverlay::new(" Key Shortcuts ", HOTKEYS_CONTENT))
+    Box::new(TextViewerOverlay::new(
+        " Key Shortcuts ",
+        HOTKEYS_CONTENT.to_string(),
+    ))
 }
 
 pub fn changelog_overlay(entries: Vec<(String, String)>) -> Box<dyn OverlayComponent> {

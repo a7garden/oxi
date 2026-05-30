@@ -1,6 +1,6 @@
 //! Event handlers for the TUI.
 
-use super::app::{AppOverlay, AppState, ProviderInfo, SetupStep, UiEvent};
+use super::app::{AppOverlay, AppState, NotificationKind, ProviderInfo, SetupStep, UiEvent};
 use super::overlay::router_integration;
 use super::slash;
 use crate::app::agent_session::{AgentSession, SessionEvent};
@@ -142,7 +142,7 @@ fn handle_queue_panel_key(
             let removed = remove_from_steering_queue(session, idx);
             if let Some(msg) = removed {
                 let preview: String = msg.chars().take(40).collect();
-                state.add_system_message(format!("Removed: {}", preview));
+                state.add_notification(format!("Removed: {}", preview), NotificationKind::Info);
             }
             refresh_queue_snapshot(state, session);
             Some(None)
@@ -211,7 +211,7 @@ async fn dispatch_action(
             if state.footer_state.data.is_compacting {
                 session.abort_compaction_sync();
                 state.footer_state.data.is_compacting = false;
-                state.add_system_message("Compaction cancelled".to_string());
+                state.add_notification("Compaction cancelled".to_string(), NotificationKind::Info);
             } else if state.slash_completion_active {
                 state.clear_slash_completions();
             }
@@ -301,7 +301,10 @@ async fn dispatch_action(
                 if let Some(next_level) = session.cycle_thinking_level() {
                     state.footer_state.data.thinking_level =
                         Some(format!("{:?}", next_level).to_lowercase());
-                    state.add_system_message(format!("Thinking: {:?}", next_level));
+                    state.add_notification(
+                        format!("Thinking: {:?}", next_level),
+                        NotificationKind::Info,
+                    );
                 }
             }
             None
@@ -377,11 +380,18 @@ async fn dispatch_action(
         KAction::CopyCodeBlock => {
             if let Some(ref code) = state.chat.last_code_block {
                 match clipboard_write::copy_to_clipboard(code) {
-                    Ok(()) => state.add_system_message("\u{2713} Code block copied".to_string()),
-                    Err(e) => state.add_system_message(format!("\u{2717} Copy failed: {}", e)),
+                    Ok(()) => state.add_notification(
+                        "Code block copied".to_string(),
+                        NotificationKind::Success,
+                    ),
+                    Err(e) => state
+                        .add_notification(format!("Copy failed: {}", e), NotificationKind::Error),
                 }
             } else {
-                state.add_system_message("No code block to copy".to_string());
+                state.add_notification(
+                    "No code block to copy".to_string(),
+                    NotificationKind::Warning,
+                );
             }
             None
         }
@@ -445,10 +455,10 @@ async fn handle_submit(
 
     if state.is_agent_busy {
         // Agent busy — queue as steering message
-        state.add_system_message(format!(
-            "Queued: {}",
-            value.chars().take(50).collect::<String>()
-        ));
+        state.add_notification(
+            format!("Queued: {}", value.chars().take(50).collect::<String>()),
+            NotificationKind::Info,
+        );
         state.input_history.insert(0, value.clone());
         if state.input_history.len() > 100 {
             state.input_history.remove(0);
@@ -623,7 +633,7 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         }
         UiEvent::Error(msg) => {
             state.cancel_streaming();
-            state.add_system_message(format!("Error: {}", msg));
+            state.add_notification(format!("Error: {}", msg), NotificationKind::Error);
         }
 
         // ── Session events ────────────────────────────────────────
@@ -635,7 +645,7 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
                 CompactionReason::Overflow => "Context overflow, compacting...",
                 CompactionReason::Iteration { .. } => "Auto-compacting (iteration)...",
             };
-            state.add_system_message(format!("{} (Esc to cancel)", label));
+            state.add_notification(format!("{} (Esc to cancel)", label), NotificationKind::Info);
         }
         UiEvent::CompactionEnd {
             _reason,
@@ -643,7 +653,10 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
         } => {
             state.footer_state.data.is_compacting = false;
             if let Some(err) = error_message {
-                state.add_system_message(format!("Compaction failed: {}", err));
+                state.add_notification(
+                    format!("Compaction failed: {}", err),
+                    NotificationKind::Error,
+                );
             } else {
                 // Compaction succeeded — flag chat rebuild so the main loop
                 // can reconstruct ChatViewState from the agent's new messages.
@@ -655,17 +668,17 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             max_attempts,
             error_message,
         } => {
-            state.add_system_message(format!(
-                "Retry ({}/{}): {}",
-                attempt, max_attempts, error_message
-            ));
+            state.add_notification(
+                format!("Retry ({}/{}): {}", attempt, max_attempts, error_message),
+                NotificationKind::Warning,
+            );
         }
         UiEvent::ModelChanged { model_id } => {
-            state.add_system_message(format!("Model: {}", model_id));
+            state.add_notification(format!("Model: {}", model_id), NotificationKind::Success);
             state.footer_state.data.model_name = model_id;
         }
         UiEvent::ThinkingLevelChanged { level } => {
-            state.add_system_message(format!("Thinking: {}", level));
+            state.add_notification(format!("Thinking: {}", level), NotificationKind::Info);
             state.footer_state.data.thinking_level = Some(level.to_lowercase());
         }
         UiEvent::QueueUpdate { pending, messages } => {
@@ -718,7 +731,7 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             }
         }
         UiEvent::SystemMessage(msg) => {
-            state.add_system_message(msg);
+            state.add_notification(msg, NotificationKind::Info);
         }
         UiEvent::TokenUsage {
             input_tokens,
@@ -835,19 +848,31 @@ fn open_last_image(state: &mut AppState) {
                                 .spawn()
                                 .ok();
                         }
-                        state.add_system_message("Opened image in viewer".to_string());
+                        state.add_notification(
+                            "Opened image in viewer".to_string(),
+                            NotificationKind::Success,
+                        );
                     }
                     Err(e) => {
-                        state.add_system_message(format!("Failed to write image: {}", e));
+                        state.add_notification(
+                            format!("Failed to write image: {}", e),
+                            NotificationKind::Error,
+                        );
                     }
                 }
             }
             Err(e) => {
-                state.add_system_message(format!("Failed to decode image: {}", e));
+                state.add_notification(
+                    format!("Failed to decode image: {}", e),
+                    NotificationKind::Error,
+                );
             }
         }
     } else {
-        state.add_system_message("No images to display".to_string());
+        state.add_notification(
+            "No images to display".to_string(),
+            NotificationKind::Warning,
+        );
     }
 }
 
@@ -902,13 +927,16 @@ async fn handle_overlay_key(
                         Ok(new_path) => {
                             state.next_action =
                                 Some(super::app::TuiNextAction::SwitchSession(new_path));
-                            state.add_system_message(format!(
-                                "Forked from [{}]\nStarting new session...",
-                                &entry_id[..8.min(entry_id.len())]
-                            ));
+                            state.add_notification(
+                                format!("Forked from [{}]", &entry_id[..8.min(entry_id.len())]),
+                                NotificationKind::Success,
+                            );
                         }
                         Err(e) => {
-                            state.add_system_message(format!("Error forking: {}", e));
+                            state.add_notification(
+                                format!("Error forking: {}", e),
+                                NotificationKind::Error,
+                            );
                         }
                     }
                 }
@@ -917,10 +945,10 @@ async fn handle_overlay_key(
             OverlayAction::NavigateToEntry { entry_id } => {
                 state.overlay_state = None;
                 // TODO: integrate with SessionNavigator::navigate_tree() for branch switching
-                state.add_system_message(format!(
-                    "Selected entry: {}",
-                    &entry_id[..8.min(entry_id.len())]
-                ));
+                state.add_notification(
+                    format!("Selected entry: {}", &entry_id[..8.min(entry_id.len())]),
+                    NotificationKind::Info,
+                );
                 return None;
             }
             _ => {}
@@ -1225,7 +1253,7 @@ async fn handle_wizard_step_key(
                                     },
                                 );
                             } else {
-                                state.add_system_message(format!("{} API key saved.", provider));
+                                state.add_notification(format!("{} API key saved.", provider), NotificationKind::Success);
                                 state.overlay = None;
                             }
                         } else {
@@ -1329,9 +1357,9 @@ async fn handle_wizard_step_key(
                             } else {
                                 // Actually switch the model in the running session
                                 if let Err(e) = session.set_model(&full_model) {
-                                    state.add_system_message(format!("Error switching model: {}", e));
+                                    state.add_notification(format!("Error switching model: {}", e), NotificationKind::Error);
                                 } else {
-                                    state.add_system_message(format!("Model set to {}", full_model));
+                                    state.add_notification(format!("Model set to {}", full_model), NotificationKind::Success);
                                 }
                                 state.overlay = None;
                             }
@@ -1360,7 +1388,7 @@ async fn handle_wizard_step_key(
             // Done
             if key.code == KeyCode::Enter => {
                 state.overlay = None;
-                state.add_system_message(" Ready to chat. Type a message to start.".to_string());
+                state.add_notification("Ready to chat".to_string(), NotificationKind::Info);
             }
 
         _ => {}
@@ -1433,12 +1461,15 @@ async fn handle_model_select_key(
                 let model_id = (*model_id).clone();
                 match session.set_model(&model_id) {
                     Ok(()) => {
-                        state.add_system_message(format!("Model: {}", model_id));
+                        state.add_notification(
+                            format!("Model: {}", model_id),
+                            NotificationKind::Success,
+                        );
                         state.footer_state.data.model_name = model_id.clone();
                         oxi_store::settings::Settings::save_last_used(&model_id);
                     }
                     Err(e) => {
-                        state.add_system_message(format!("Error: {}", e));
+                        state.add_notification(format!("Error: {}", e), NotificationKind::Error);
                     }
                 }
             }
@@ -1513,7 +1544,10 @@ async fn handle_resume_select_key(
                 state.next_action = Some(super::app::TuiNextAction::SwitchSession(
                     session_info.path.clone(),
                 ));
-                state.add_system_message(format!("Switching to session: {}", session_info.path));
+                state.add_notification(
+                    format!("Switching to session: {}", session_info.path),
+                    NotificationKind::Info,
+                );
             }
             state.overlay = None;
         }
@@ -1565,7 +1599,7 @@ async fn handle_logout_select_key(
             if let Some(provider) = providers.get(selected) {
                 let auth = oxi_store::auth_storage::shared_auth_storage();
                 auth.remove(provider);
-                state.add_system_message(format!("Removed {}", provider));
+                state.add_notification(format!("Removed {}", provider), NotificationKind::Success);
             }
             state.overlay = None;
         }

@@ -184,7 +184,10 @@ impl OverlayComponent for SettingsOverlay {
                             if let Ok(ptr) = self.app_state.lock() {
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
-                                        app.add_system_message("Settings reloaded.".to_string());
+                                        app.add_notification(
+                                            "Settings reloaded.".to_string(),
+                                            crate::tui::app::NotificationKind::Success,
+                                        );
                                     }
                                 }
                             }
@@ -198,7 +201,10 @@ impl OverlayComponent for SettingsOverlay {
                     if let Ok(ptr) = self.app_state.lock() {
                         unsafe {
                             if let Some(ref mut app) = (*ptr).as_mut() {
-                                app.add_system_message("Settings saved.".to_string());
+                                app.add_notification(
+                                    "Settings saved.".to_string(),
+                                    crate::tui::app::NotificationKind::Success,
+                                );
                             }
                         }
                     }

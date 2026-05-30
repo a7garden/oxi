@@ -188,6 +188,32 @@ pub(crate) async fn stream_assistant_response(
                 });
             }
 
+            // ── Fallback events ───────────────────────────────────────
+            ProviderEvent::FallbackStart { from_model, to_model, .. } => {
+                tracing::info!(
+                    "Stream event #{}: Fallback from {} to {}",
+                    event_count, from_model, to_model
+                );
+                emit(super::AgentEvent::Fallback {
+                    from_model,
+                    to_model,
+                });
+            }
+
+            ProviderEvent::FallbackExhausted { models_tried, final_error } => {
+                tracing::warn!(
+                    "Stream event #{}: All fallback models exhausted. Tried: {:?}, error: {}",
+                    event_count, models_tried, final_error
+                );
+                // Emit a fallback event for the last failed model
+                if let Some(last_model) = models_tried.last() {
+                    emit(super::AgentEvent::Fallback {
+                        from_model: last_model.clone(),
+                        to_model: "none".to_string(),
+                    });
+                }
+            }
+
             ProviderEvent::TextDelta { delta, partial, .. } => {
                 // Replace the last assistant message with the provider's
                 // accumulated snapshot (pi-mono: content grows in partial).

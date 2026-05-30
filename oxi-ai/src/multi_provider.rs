@@ -66,7 +66,7 @@ use crate::{
     error::ProviderError,
     fallback_chain::FallbackChain,
     model_db::ModelEntry,
-    providers::{Provider, ProviderEvent, StreamOptions},
+    providers::{FallbackReason, Provider, ProviderEvent, StreamOptions},
     Model,
 };
 
@@ -488,6 +488,130 @@ pub struct MultiProviderDiagnostics {
 }
 
 // ============================================================================
+// Fallback Event Stream Wrapper
+// ============================================================================
+
+use futures::stream::Stream as StreamTrait;
+
+/// A wrapper stream that injects a `FallbackStart` event at the beginning,
+/// then forwards all subsequent events from the underlying stream.
+struct FallbackStream {
+    /// The injected fallback event (always emitted first).
+    fallback_event: ProviderEvent,
+    /// Whether the fallback event has been emitted yet.
+    emitted: bool,
+    /// The inner stream we're wrapping.
+    inner: Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>,
+}
+
+impl FallbackStream {
+    /// Create a new wrapper stream that will emit `FallbackStart` first.
+    fn new(
+        from_model: String,
+        to_model: String,
+        reason: FallbackReason,
+        inner: Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>,
+    ) -> Self {
+        Self {
+            fallback_event: ProviderEvent::FallbackStart {
+                from_model,
+                to_model,
+                reason,
+            },
+            emitted: false,
+            inner,
+        }
+    }
+}
+
+impl StreamTrait for FallbackStream {
+    type Item = ProviderEvent;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        // Emit the fallback event on the first poll
+        if !self.emitted {
+            self.emitted = true;
+            return std::task::Poll::Ready(Some(self.fallback_event.clone()));
+        }
+
+        // Then delegate to the inner stream
+        Stream::poll_next(self.inner.as_mut(), cx)
+    }
+}
+
+/// A wrapper stream that emits `FallbackExhausted` and then terminates.
+/// Used when all fallback candidates have been exhausted.
+struct FallbackExhaustedStream {
+    /// The exhausted event to emit.
+    exhausted_event: ProviderEvent,
+    /// Whether we've emitted the exhausted event.
+    emitted: bool,
+    /// The inner error stream (may emit additional error events before terminating).
+    inner: Option<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>>,
+}
+
+impl FallbackExhaustedStream {
+    /// Create a new wrapper stream that will emit `FallbackExhausted` first.
+    fn new(models_tried: Vec<String>, final_error: String) -> Self {
+        Self {
+            exhausted_event: ProviderEvent::FallbackExhausted {
+                models_tried,
+                final_error,
+            },
+            emitted: false,
+            inner: None,
+        }
+    }
+
+    /// Set the inner error stream to forward events from.
+    #[allow(dead_code)]
+    fn with_inner(mut self, inner: Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>) -> Self {
+        self.inner = Some(inner);
+        self
+    }
+}
+
+impl StreamTrait for FallbackExhaustedStream {
+    type Item = ProviderEvent;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        // Emit the exhausted event on the first poll
+        if !self.emitted {
+            self.emitted = true;
+            return std::task::Poll::Ready(Some(self.exhausted_event.clone()));
+        }
+
+        // Then forward from inner stream if present, otherwise terminate
+        if let Some(ref mut inner) = self.inner {
+            Stream::poll_next(inner.as_mut(), cx)
+        } else {
+            std::task::Poll::Ready(None)
+        }
+    }
+}
+
+/// Determine the fallback reason from a provider error.
+fn error_to_fallback_reason(error: &ProviderError) -> FallbackReason {
+    match error {
+        ProviderError::HttpError(429, _) => FallbackReason::RateLimit,
+        ProviderError::HttpError(code, _) if *code >= 500 => FallbackReason::ServerError,
+        ProviderError::HttpError(code, _) if *code == 401 || *code == 403 => {
+            FallbackReason::AuthError
+        }
+        ProviderError::RequestFailed(_) => FallbackReason::NetworkError,
+        ProviderError::Timeout => FallbackReason::NetworkError,
+        ProviderError::ContextOverflow => FallbackReason::ContextOverflow,
+        _ => FallbackReason::Unknown,
+    }
+}
+
+// ============================================================================
 // Provider Trait Implementation
 // ============================================================================
 
@@ -518,14 +642,16 @@ impl Provider for MultiProvider {
 
         // Try each candidate in order
         let mut errors: Vec<(String, ProviderError)> = Vec::new();
+        let mut current_candidate_idx: usize = 0;
 
-        for candidate in candidates {
+        while current_candidate_idx < candidates.len() {
+            let candidate = &candidates[current_candidate_idx];
             let provider_name = &candidate.provider;
-            let candidate_model = candidate.model;
+            let candidate_model = candidate.model.clone();
 
             // Get provider
             let Some(provider) = self.providers.get(provider_name) else {
-                // Provider not registered, skip
+                current_candidate_idx += 1;
                 continue;
             };
 
@@ -536,12 +662,13 @@ impl Provider for MultiProvider {
                         // Circuit allows request, proceed
                     }
                     Err(e) => {
-                        // Circuit is open, skip this provider
+                        // Circuit is open - skip this provider
                         tracing::debug!(
                             provider = %provider_name,
                             remaining = ?e.remaining,
                             "Circuit breaker open, skipping provider"
                         );
+                        current_candidate_idx += 1;
                         continue;
                     }
                 }
@@ -556,7 +683,7 @@ impl Provider for MultiProvider {
                     .stream(&candidate_model, context, options.clone())
                     .await
                 {
-                    Ok(stream) => {
+                    Ok(inner_stream) => {
                         // Success! Record to circuit breaker
                         if let Some(breaker) = self.breakers.get(provider_name) {
                             breaker.record_success();
@@ -566,7 +693,26 @@ impl Provider for MultiProvider {
                             model = %candidate_model.id,
                             "MultiProvider: stream successful"
                         );
-                        return Ok(stream);
+
+                        // Wrap stream with fallback event if we attempted a previous candidate
+                        if current_candidate_idx > 0 {
+                            let from_model = format!(
+                                "{}/{}",
+                                candidates[current_candidate_idx - 1].provider,
+                                candidates[current_candidate_idx - 1].model.id
+                            );
+                            let to_model = format!("{}/{}", provider_name, candidate_model.id);
+                            let reason = errors
+                                .last()
+                                .map(|(_, e)| error_to_fallback_reason(e))
+                                .unwrap_or(FallbackReason::Unknown);
+
+                            let wrapped =
+                                FallbackStream::new(from_model, to_model, reason, inner_stream);
+                            return Ok(Box::pin(wrapped) as Pin<Box<_>>);
+                        }
+
+                        return Ok(inner_stream);
                     }
                     Err(e) => {
                         // Check if error is retryable
@@ -599,7 +745,7 @@ impl Provider for MultiProvider {
                             return Err(e);
                         }
 
-                        // Max retries exceeded
+                        // Max retries exceeded - try next candidate
                         tracing::debug!(
                             provider = %provider_name,
                             model = %candidate_model.id,
@@ -612,6 +758,8 @@ impl Provider for MultiProvider {
                     }
                 }
             }
+
+            current_candidate_idx += 1;
         }
 
         // All candidates exhausted
@@ -626,10 +774,21 @@ impl Provider for MultiProvider {
                 ))
             }
         } else {
-            Err(ProviderError::UnknownProvider(format!(
-                "multi-provider: all {} candidates exhausted",
-                errors.len()
-            )))
+            // Emit FallbackExhausted event
+            let models_tried: Vec<String> = errors.iter().map(|(m, _)| m.clone()).collect();
+            let final_error = errors
+                .last()
+                .map(|(_, e)| e.to_string())
+                .unwrap_or_else(|| "Unknown error".to_string());
+
+            tracing::warn!(
+                models_tried = ?models_tried,
+                error = %final_error,
+                "All fallback models exhausted"
+            );
+
+            let stream = FallbackExhaustedStream::new(models_tried, final_error);
+            Ok(Box::pin(stream) as Pin<Box<_>>)
         }
     }
 

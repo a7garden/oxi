@@ -39,6 +39,7 @@ pub use anthropic::AnthropicProvider;
 pub use azure::AzureProvider;
 #[allow(unused_imports)]
 pub use bedrock::BedrockProvider;
+pub use event::FallbackReason;
 pub use event::ProviderEvent;
 #[allow(unused_imports)]
 pub use google::GoogleProvider;

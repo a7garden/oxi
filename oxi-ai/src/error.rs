@@ -49,6 +49,10 @@ pub enum ProviderError {
     #[error("Network error: {0}")]
     NetworkError(String),
 
+    /// Context window overflow.
+    #[error("Context overflow")]
+    ContextOverflow,
+
     /// Request timed out.
     #[error("Request timed out")]
     Timeout,

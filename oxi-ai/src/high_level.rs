@@ -187,6 +187,8 @@ pub async fn complete(
                         .unwrap_or_else(|| "Unknown error".to_string()),
                 )));
             }
+            // Fallback events are informational — ignore in high-level API.
+            ProviderEvent::FallbackStart { .. } | ProviderEvent::FallbackExhausted { .. } => {}
         }
     }
 

@@ -80,8 +80,9 @@ impl OverlayComponent for ModelSelectOverlay {
                             if let Ok(ptr) = self.app_state.lock() {
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
-                                        app.add_system_message(
+                                        app.add_notification(
                                             "Opening router setup...".to_string(),
+                                            crate::tui::app::NotificationKind::Info,
                                         );
                                     }
                                 }
@@ -100,7 +101,10 @@ impl OverlayComponent for ModelSelectOverlay {
                             if let Ok(ptr) = self.app_state.lock() {
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
-                                        app.add_system_message(format!("Model: {}", model_id));
+                                        app.add_notification(
+                                            format!("Model: {}", model_id),
+                                            crate::tui::app::NotificationKind::Success,
+                                        );
                                         app.footer_state.data.model_name = model_id.clone();
                                     }
                                 }
@@ -111,7 +115,10 @@ impl OverlayComponent for ModelSelectOverlay {
                             if let Ok(ptr) = self.app_state.lock() {
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
-                                        app.add_system_message(format!("Error: {}", e));
+                                        app.add_notification(
+                                            format!("Error: {}", e),
+                                            crate::tui::app::NotificationKind::Error,
+                                        );
                                     }
                                 }
                             }
@@ -270,7 +277,10 @@ impl OverlayComponent for LogoutSelectOverlay {
                     if let Ok(ptr) = self.app_state.lock() {
                         unsafe {
                             if let Some(ref mut app) = (*ptr).as_mut() {
-                                app.add_system_message(format!("Removed {}", provider));
+                                app.add_notification(
+                                    format!("Removed {}", provider),
+                                    crate::tui::app::NotificationKind::Success,
+                                );
                             }
                         }
                     }
