@@ -15,12 +15,14 @@ pub mod loader;
 pub mod questionnaire;
 pub mod router_integration;
 pub mod router_setup;
+pub mod settings;
 pub mod tree_navigator;
 #[allow(unused_imports)]
 pub use factories::{logout_select, model_select, resume_select, routing_status};
 pub use fork_select::ForkSelectOverlay;
 pub use loader::CancellableLoader;
 pub use router_setup::{router_setup, RouterSetupData};
+pub use settings::settings_overlay;
 pub use tree_navigator::{tree_navigator, TreeNavigatorOverlay};
 
 // ---------------------------------------------------------------------------

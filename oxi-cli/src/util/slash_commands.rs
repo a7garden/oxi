@@ -54,6 +54,10 @@ pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
         description: "Show session info and stats",
     },
     BuiltinSlashCommand {
+        name: "share",
+        description: "Share session as a GitHub Gist (requires gh CLI)",
+    },
+    BuiltinSlashCommand {
         name: "changelog",
         description: "Show changelog entries",
     },
