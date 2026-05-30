@@ -1,6 +1,6 @@
 //! Rendering functions for the TUI.
 
-use super::app::{AppOverlay, AppState, ProviderInfo, SetupStep};
+use super::app::{AppOverlay, AppState, NotificationKind, ProviderInfo, SetupStep};
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
 use ratatui::{
@@ -456,12 +456,17 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
         0
     };
 
+    // Calculate dynamic input height based on content
+    let content_width = inner.width.saturating_sub(2); // 1 left + 1 right padding
+    let input_height = state.input.required_height(content_width, INPUT_MAX_HEIGHT);
+    let input_area_height = 1 + queue_lines + input_height; // status + queue + input
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(3),                  // Chat
-            Constraint::Length(2 + queue_lines), // Status + queue + input
-            Constraint::Length(3),               // Footer
+            Constraint::Min(3),                    // Chat
+            Constraint::Length(input_area_height), // Status + queue + input (dynamic)
+            Constraint::Length(3),                 // Footer
         ])
         .split(inner);
 
@@ -482,9 +487,15 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
 
     // Status bar
     f.render_stateful_widget(Footer::new(theme), chunks[2], &mut state.footer_state);
+
+    // Notifications (toasts) — rendered on top of everything
+    render_notifications(f, size, state, theme);
 }
 
 // ── Input area ──────────────────────────────────────────────────────────
+
+/// Maximum height for the input text area (in rows).
+const INPUT_MAX_HEIGHT: u16 = 8;
 
 fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
     let queue_count = state.steering_messages_snapshot.len();
@@ -498,7 +509,6 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
     } else {
         0
     };
-    let _total_lines = 2 + queue_lines;
 
     // Row 0: status line (Working/Idle + queue count)
     let status_row = Rect {
@@ -516,16 +526,14 @@ fn render_input_area(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Th
         render_queue_compact(f, area, state, theme);
     }
 
-    // NOTE: The status line above (render_status_line) already draws a
-    // ── ○ Idle ────── separator line with the status text embedded.
-    // No additional separator is needed between status and input.
-
-    // Last row: input
+    // Input: height is whatever remains after status + queue
+    let input_y = area.y + 1 + queue_lines;
+    let input_height = area.height.saturating_sub(1 + queue_lines);
     let input_row = Rect {
         x: area.x,
-        y: area.y + 1 + queue_lines,
+        y: input_y,
         width: area.width,
-        height: 1,
+        height: input_height,
     };
     state.input.set_placeholder(None);
     f.render_stateful_widget(Input::new(theme), input_row, &mut state.input);
@@ -1277,4 +1285,86 @@ fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
     let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
     let hint = format!(" Up/Down select  |  Enter resume  |  Esc cancel{}", pos);
     render_hint(f, inner, &hint, styles.muted);
+}
+
+// ── Notifications (Toasts) ───────────────────────────────────────────────
+
+const NOTIFICATION_WIDTH: u16 = 50;
+const NOTIFICATION_MAX_HEIGHT: u16 = 3;
+
+fn render_notifications(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
+    if state.notifications.is_empty() {
+        return;
+    }
+
+    let styles = theme.to_styles();
+
+    // Position: bottom-right, above the footer
+    let notif_width = NOTIFICATION_WIDTH.min(area.width.saturating_sub(4));
+    let x = area.x + area.width.saturating_sub(notif_width) - 1;
+    let y = area.y + area.height.saturating_sub(6); // Above footer (3) + spacing (1)
+
+    // Stack notifications from bottom to top
+    let visible: Vec<_> = state.notifications.iter().rev().take(3).collect();
+    let stack_height = (visible.len() as u16).min(NOTIFICATION_MAX_HEIGHT);
+
+    let notif_area = Rect {
+        x,
+        y: y.saturating_sub(stack_height),
+        width: notif_width,
+        height: stack_height,
+    };
+
+    // Semi-transparent dark background
+    let bg_style = Style::default().bg(ratatui::style::Color::Rgb(20, 20, 20));
+    f.render_widget(
+        ratatui::widgets::Paragraph::new("").style(bg_style).block(
+            ratatui::widgets::Block::default()
+                .borders(ratatui::widgets::Borders::ALL)
+                .border_style(Style::default().fg(match visible.first().map(|n| &n.kind) {
+                    Some(NotificationKind::Error) => ratatui::style::Color::Red,
+                    Some(NotificationKind::Warning) => ratatui::style::Color::Yellow,
+                    Some(NotificationKind::Success) => ratatui::style::Color::Green,
+                    _ => theme.colors.border.to_ratatui(),
+                })),
+        ),
+        notif_area,
+    );
+
+    // Render each notification
+    for (i, notif) in visible.iter().enumerate().take(stack_height as usize) {
+        let row_y = notif_area.y + 1 + i as u16;
+        let text = if notif.message.len() > (notif_width - 2) as usize {
+            let end = notif
+                .message
+                .char_indices()
+                .take((notif_width - 5) as usize)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
+            format!("{}...", &notif.message[..end])
+        } else {
+            notif.message.clone()
+        };
+
+        let color = match notif.kind {
+            NotificationKind::Error => ratatui::style::Color::Red,
+            NotificationKind::Warning => ratatui::style::Color::Yellow,
+            NotificationKind::Success => ratatui::style::Color::Green,
+            NotificationKind::Info => styles
+                .normal
+                .fg
+                .unwrap_or(theme.colors.foreground.to_ratatui()),
+        };
+
+        f.render_widget(
+            ratatui::widgets::Paragraph::new(Line::from(Span::styled(text, color))),
+            Rect {
+                x: notif_area.x + 1,
+                y: row_y,
+                width: notif_width.saturating_sub(2),
+                height: 1,
+            },
+        );
+    }
 }

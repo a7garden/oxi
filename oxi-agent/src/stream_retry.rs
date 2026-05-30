@@ -60,9 +60,20 @@ pub async fn stream_with_retry_core(
                 on_failure();
                 let msg = e.to_string();
                 let is_rate_limit = matches!(e, oxi_ai::ProviderError::HttpError(429, _));
+                let is_server_error =
+                    matches!(e, oxi_ai::ProviderError::HttpError(code, _) if code >= 500);
 
-                // Non-retryable on the first attempt → bail immediately.
-                if !is_rate_limit && attempt == 0 {
+                // Non-retryable on the first attempt:
+                // Only bail immediately for clear client errors (4xx except 429).
+                // Server errors (5xx) and rate limits (429) should be retried.
+                // Connection-level failures (RequestFailed) are also retried
+                // since they may be transient.
+                let is_retryable = is_rate_limit
+                    || is_server_error
+                    || matches!(e, oxi_ai::ProviderError::RequestFailed(_))
+                    || matches!(e, oxi_ai::ProviderError::MissingApiKey);
+
+                if !is_retryable && attempt == 0 {
                     return Err(AgentError::Stream(msg));
                 }
 

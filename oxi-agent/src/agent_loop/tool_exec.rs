@@ -1,6 +1,7 @@
 /// Tool execution logic for agent loop
 use crate::{AgentEvent, AgentToolResult};
 use anyhow::Result;
+use futures::{FutureExt, StreamExt};
 use oxi_ai::{progress_callback, AssistantMessage, Message, ToolCall, ToolResultMessage};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -255,22 +256,51 @@ async fn execute_tool_calls_parallel(
     }
 
     if !pending_futures.is_empty() {
-        let indexed_results: Vec<(usize, FinalizedToolCall)> = futures::future::join_all(
-            pending_futures
-                .into_iter()
-                .map(|(i, f)| async move { (i, f.await) }),
-        )
-        .await;
+        // Poll futures with periodic cancel checks.
+        // Uses `FuturesUnordered` so we can drain completed results as they
+        // arrive and detect cancellation without waiting for all futures.
+        let mut active = futures::stream::FuturesUnordered::new();
+        for (i, f) in pending_futures {
+            active.push(async move { (i, f.await) });
+        }
 
-        for (idx, finalized) in indexed_results {
-            slots[idx] = Some(finalized);
+        // Check cancel every 100ms so Ctrl+C is responsive even when
+        // tool calls are slow.
+        let mut cancel_interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+        cancel_interval.tick().await; // consume immediate first tick
+
+        loop {
+            tokio::select! {
+                result = active.next() => {
+                    match result {
+                        Some((idx, finalized)) => {
+                            slots[idx] = Some(finalized);
+                        }
+                        None => break, // all futures completed
+                    }
+                }
+                _ = cancel_interval.tick() => {
+                    if loop_ref.is_cancelled() {
+                        tracing::info!(
+                            "[TOOL-EXEC-PARALLEL] Cancelled during parallel execution, waiting for {} pending futures",
+                            active.len()
+                        );
+                        // Don't abort futures — let them finish (they may have
+                        // side effects). But skip waiting and return what we have.
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Drain any remaining futures that completed before cancellation.
+        while let Some(result) = active.next().now_or_never().flatten() {
+            slots[result.0] = Some(result.1);
         }
     }
 
-    let ordered_finalized_calls: Vec<FinalizedToolCall> = slots
-        .into_iter()
-        .map(|s| s.expect("all slots should be filled after join_all"))
-        .collect();
+    // Slots for futures that were still running at cancellation time remain None.
+    let ordered_finalized_calls: Vec<FinalizedToolCall> = slots.into_iter().flatten().collect();
 
     let mut tool_result_messages = Vec::new();
     for finalized in &ordered_finalized_calls {

@@ -9,9 +9,11 @@
 //! Behavior:
 //! - Enter submits text
 //! - Shift+Enter inserts newline (multiline mode)
+//! - Dynamic height: expands based on content up to max_height
 
 use crate::Theme;
 use ratatui::prelude::*;
+use ratatui::widgets::Paragraph;
 use ratatui_textarea::{Input as TextAreaInput, Key, TextArea};
 
 // ---------------------------------------------------------------------------
@@ -40,6 +42,8 @@ impl Default for InputState {
         textarea.remove_line_number();
         // Disable cursor line highlight for cleaner look
         textarea.set_cursor_line_style(Style::default());
+        // Enable soft-wrap so multi-line input expands vertically
+        textarea.set_wrap_mode(ratatui_textarea::WrapMode::Word);
         Self { textarea }
     }
 }
@@ -215,6 +219,26 @@ impl InputState {
     pub fn delete_word_forward(&mut self) {
         self.textarea.delete_next_word();
     }
+
+    /// Calculate the exact height (in rows) needed to display the current text
+    /// with word-wrap at the given width, using `Paragraph::line_count`.
+    ///
+    /// `width` should be the available content width (excluding padding).
+    pub fn required_height(&self, width: u16, max_height: u16) -> u16 {
+        if width < 1 {
+            return 1;
+        }
+
+        let lines = self.textarea.lines();
+        if lines.is_empty() || (lines.len() == 1 && lines[0].is_empty()) {
+            return 1;
+        }
+
+        let text = Text::from(lines.join("\n"));
+        let paragraph = Paragraph::new(text).wrap(ratatui::widgets::Wrap { trim: true });
+        let count = paragraph.line_count(width) as u16;
+        count.clamp(1, max_height)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -346,5 +370,78 @@ mod tests {
         assert_eq!(state.text(), "");
         state.redo();
         assert_eq!(state.text(), "hello");
+    }
+
+    // ── required_height tests ──
+
+    #[test]
+    fn required_height_empty() {
+        let state = InputState::default();
+        assert_eq!(state.required_height(80, 8), 1);
+    }
+
+    #[test]
+    fn required_height_short_text() {
+        let mut state = InputState::default();
+        state.insert_str("hello world");
+        // Short text that fits on one line
+        assert_eq!(state.required_height(80, 8), 1);
+    }
+
+    #[test]
+    fn required_height_long_line_wraps() {
+        let mut state = InputState::default();
+        // Fill with text longer than width
+        let long_text = "a".repeat(200);
+        state.insert_str(&long_text);
+        // With width 80, this should wrap
+        let height = state.required_height(80, 8);
+        assert!(
+            height >= 2,
+            "Long text should wrap to multiple lines, got {}",
+            height
+        );
+    }
+
+    #[test]
+    fn required_height_explicit_newlines() {
+        let mut state = InputState::default();
+        state.insert_str("line1\nline2\nline3");
+        // 3 explicit lines
+        assert_eq!(state.required_height(80, 8), 3);
+    }
+
+    #[test]
+    #[allow(trivial_casts)]
+    fn required_height_mixed_wrapping() {
+        let mut state = InputState::default();
+        state.insert_str("short\n");
+        state.insert_str(&"a".repeat(200)); // Long line that wraps
+                                            // 1 short line + wrapped long line
+        let height = state.required_height(80, 8);
+        assert!(
+            height >= 2,
+            "Mixed content should need multiple lines, got {}",
+            height
+        );
+    }
+
+    #[test]
+    fn required_height_max_height_clamp() {
+        let mut state = InputState::default();
+        // Add many lines
+        for i in 0..20 {
+            state.insert_str(&format!("line {}\n", i));
+        }
+        // Should be clamped to max_height
+        assert_eq!(state.required_height(80, 5), 5);
+    }
+
+    #[test]
+    fn required_height_zero_width() {
+        let mut state = InputState::default();
+        state.insert_str("hello");
+        // Zero width should return 1
+        assert_eq!(state.required_height(0, 8), 1);
     }
 }

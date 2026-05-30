@@ -15,6 +15,7 @@ pub mod questionnaire;
 pub mod router_integration;
 pub mod router_setup;
 pub mod settings;
+pub mod text_viewer;
 pub mod tree_navigator;
 #[allow(unused_imports)]
 pub use factories::{logout_select, model_select, resume_select, routing_status};
@@ -23,6 +24,10 @@ pub use fork_select::ForkSelectOverlay;
 pub use router_setup::{router_setup, RouterSetupData};
 #[allow(unused_imports)]
 pub use settings::settings_overlay;
+#[allow(unused_imports)]
+pub use text_viewer::{
+    changelog_overlay, extensions_overlay, help_overlay, hotkeys_overlay, tools_overlay,
+};
 #[allow(unused_imports)]
 pub use tree_navigator::{tree_navigator, TreeNavigatorOverlay};
 

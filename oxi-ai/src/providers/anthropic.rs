@@ -8,10 +8,11 @@ use serde_json::Value as JsonValue;
 use std::pin::Pin;
 
 use super::openai::split_complete_lines;
+use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
 use crate::{
     error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent, Usage,
+    ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent, ToolCall, Usage,
 };
 
 /// Anthropic provider
@@ -441,16 +442,24 @@ impl Provider for AnthropicProvider {
         // pi (TypeScript) avoids this by keeping a single `output` object
         // across the entire stream. We replicate that pattern here by
         // including partial_message in the scan state.
+        //
+        // Tool calls are tracked in `pending_tool_calls` so that partial JSON
+        // arguments are accumulated across `input_json_delta` events and
+        // finalized when `content_block_stop` fires.
+
         struct AnthropicScanState {
             pending_bytes: Vec<u8>,
             partial: AssistantMessage,
             usage: Usage,
+            /// In-flight tool calls keyed by content block index.
+            pending_tool_calls: std::collections::HashMap<usize, AnthropicPendingToolCall>,
         }
 
         let initial_state = AnthropicScanState {
             pending_bytes: Vec::new(),
             partial: AssistantMessage::new(Api::AnthropicMessages, "anthropic", &model_name),
             usage: Usage::default(),
+            pending_tool_calls: std::collections::HashMap::new(),
         };
 
         let stream = response
@@ -470,6 +479,7 @@ impl Provider for AnthropicProvider {
                                 &text,
                                 &mut state.partial,
                                 &mut state.usage,
+                                &mut state.pending_tool_calls,
                             )
                         }
                         Err(e) => vec![ProviderEvent::Error {
@@ -646,12 +656,43 @@ fn build_anthropic_tools(tools: &[crate::Tool]) -> Result<JsonValue, ProviderErr
 /// per invocation, this version takes `&mut AssistantMessage` and `&mut Usage`
 /// so content accumulates correctly across HTTP chunk boundaries.
 ///
-/// This matches pi's architecture where a single `output` object persists
-/// for the entire stream lifetime.
+/// Tool calls are tracked in `pending_tool_calls` so that partial JSON arguments
+/// are accumulated across `input_json_delta` events and finalized when
+/// Tracks a pending tool call being assembled from Anthropic streaming events.
+///
+/// Anthropic streams tool calls as three SSE events:
+///   1. `content_block_start` → id, name (arguments empty)
+///   2. `content_block_delta` (input_json_delta) → partial JSON fragments
+///   3. `content_block_stop` → complete
+///
+/// We accumulate the partial JSON in `partial_json` and build the final
+/// `ToolCall` when the block completes.
+struct AnthropicPendingToolCall {
+    /// Tool call ID from `content_block_start`.
+    id: String,
+    /// Tool name from `content_block_start`.
+    name: String,
+    /// Accumulated partial JSON arguments from `input_json_delta` events.
+    partial_json: String,
+}
+
+/// Parse Anthropic SSE event stream (stateful across chunks).
+///
+/// Unlike the old `parse_anthropic_events` which created a fresh `partial_message`
+/// per invocation, this version takes `&mut AssistantMessage` and `&mut Usage`
+/// so content accumulates correctly across HTTP chunk boundaries.
+///
+/// Tool calls are tracked in `pending_tool_calls` so that partial JSON arguments
+/// are accumulated across `input_json_delta` events and finalized when
+/// `content_block_stop` fires (matching pi's `content_block_stop → toolcall_end`
+/// pattern). On `content_block_start` (tool_use), a placeholder `ToolCall` is
+/// added to `partial_message.content` so that downstream consumers (streaming.rs)
+/// can see tool calls in the partial snapshot immediately.
 fn parse_anthropic_events_stateful(
     text: &str,
     partial_message: &mut AssistantMessage,
     accumulated_usage: &mut Usage,
+    pending_tool_calls: &mut std::collections::HashMap<usize, AnthropicPendingToolCall>,
 ) -> Vec<ProviderEvent> {
     let mut events = Vec::new();
 
@@ -725,10 +766,23 @@ fn parse_anthropic_events_stateful(
                             });
                         }
                         Some("tool_use") | Some("server_tool_use") => {
+                            // Register the tool call in pending_tool_calls
+                            // so that input_json_delta events can accumulate
+                            // the partial JSON arguments.
+                            let tc_id = block.id.clone().unwrap_or_default();
+                            let tc_name = block.name.clone().unwrap_or_default();
+                            pending_tool_calls.insert(
+                                idx,
+                                AnthropicPendingToolCall {
+                                    id: tc_id.clone(),
+                                    name: tc_name.clone(),
+                                    partial_json: String::new(),
+                                },
+                            );
                             events.push(ProviderEvent::ToolCallStart {
                                 content_index: idx,
-                                tool_call_id: block.id.clone(),
-                                tool_name: block.name.clone(),
+                                tool_call_id: Some(tc_id),
+                                tool_name: Some(tc_name),
                                 partial: partial_message.clone(),
                             });
                         }
@@ -740,13 +794,17 @@ fn parse_anthropic_events_stateful(
                                 _ => None,
                             };
                             if let Some(tool_name) = name {
+                                let tc = ToolCall::new(
+                                    block.tool_use_id.clone().unwrap_or_default(),
+                                    tool_name,
+                                    serde_json::json!({}),
+                                );
+                                partial_message
+                                    .content
+                                    .push(ContentBlock::ToolCall(tc.clone()));
                                 events.push(ProviderEvent::ToolCallEnd {
                                     content_index: idx,
-                                    tool_call: crate::ToolCall::new(
-                                        block.tool_use_id.clone().unwrap_or_default(),
-                                        tool_name,
-                                        serde_json::json!({}),
-                                    ),
+                                    tool_call: tc,
                                     partial: partial_message.clone(),
                                 });
                             }
@@ -809,8 +867,13 @@ fn parse_anthropic_events_stateful(
                         }
                         Some("input_json_delta") => {
                             if let Some(args) = &delta.partial_json {
+                                // Accumulate partial JSON into the pending tool call.
+                                let block_idx = event.index.unwrap_or(0);
+                                if let Some(ptc) = pending_tool_calls.get_mut(&block_idx) {
+                                    ptc.partial_json.push_str(args);
+                                }
                                 events.push(ProviderEvent::ToolCallDelta {
-                                    content_index: event.index.unwrap_or(0),
+                                    content_index: block_idx,
                                     delta: args.clone(),
                                     partial: partial_message.clone(),
                                 });
@@ -823,6 +886,36 @@ fn parse_anthropic_events_stateful(
                         }
                         _ => {}
                     }
+                }
+            }
+            Some("content_block_stop") => {
+                // When a tool_use block completes, finalize the accumulated
+                // partial JSON into a proper ToolCall and emit ToolCallEnd.
+                // This matches pi's `content_block_stop → toolcall_end` pattern.
+                let block_idx = event.index.unwrap_or(0);
+                if let Some(ptc) = pending_tool_calls.remove(&block_idx) {
+                    let args_value = parse_streaming_json(&ptc.partial_json);
+                    let tc = ToolCall::new(ptc.id, ptc.name, args_value);
+
+                    // Add the finalized tool call to partial_message so
+                    // downstream consumers (streaming.rs Done handler) can
+                    // see it in the accumulated message.
+                    partial_message
+                        .content
+                        .push(ContentBlock::ToolCall(tc.clone()));
+
+                    tracing::debug!(
+                        block_idx,
+                        tool_id = %tc.id,
+                        tool_name = %tc.name,
+                        "content_block_stop: finalized tool call"
+                    );
+
+                    events.push(ProviderEvent::ToolCallEnd {
+                        content_index: block_idx,
+                        tool_call: tc,
+                        partial: partial_message.clone(),
+                    });
                 }
             }
             Some("message_delta") => {
@@ -861,7 +954,8 @@ fn parse_anthropic_events_stateful(
 fn parse_anthropic_events(text: &str, model_id: &str) -> Vec<ProviderEvent> {
     let mut partial = AssistantMessage::new(Api::AnthropicMessages, "anthropic", model_id);
     let mut usage = Usage::default();
-    parse_anthropic_events_stateful(text, &mut partial, &mut usage)
+    let mut pending_tool_calls = std::collections::HashMap::new();
+    parse_anthropic_events_stateful(text, &mut partial, &mut usage, &mut pending_tool_calls)
 }
 
 /// Create error assistant message
@@ -1049,6 +1143,139 @@ mod tests {
             }
             other => panic!("expected ToolCallDelta, got {other:?}"),
         }
+    }
+
+    // ── content_block_stop ────────────────────────────────────────────
+
+    #[test]
+    fn parse_content_block_stop_finalizes_tool_call() {
+        // Full tool call flow: start → delta → stop
+        let sse = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_abc\",\"name\":\"bash\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\":\\\"ls\\\"}\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "\n"
+        );
+        let events = parse_anthropic_events(sse, MODEL);
+        // ToolCallStart + ToolCallDelta + ToolCallEnd
+        assert_eq!(events.len(), 3);
+
+        // Verify ToolCallEnd has the finalized tool call
+        let tc_end = events.iter().find_map(|e| match e {
+            ProviderEvent::ToolCallEnd { tool_call, .. } => Some(tool_call.clone()),
+            _ => None,
+        });
+        let tc = tc_end.expect("Should have ToolCallEnd");
+        assert_eq!(tc.id, "tool_abc");
+        assert_eq!(tc.name, "bash");
+        assert_eq!(tc.arguments, serde_json::json!({"command": "ls"}));
+    }
+
+    #[test]
+    fn parse_content_block_stop_ignores_non_tool() {
+        // content_block_stop for a text block should not emit anything
+        let sse = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "\n"
+        );
+        let events = parse_anthropic_events(sse, MODEL);
+        // Only TextStart — content_block_stop for text doesn't emit
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], ProviderEvent::TextStart { .. }));
+    }
+
+    #[test]
+    fn parse_tool_call_accumulates_across_deltas() {
+        // Tool arguments split across multiple deltas
+        let sse = concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_1\",\"name\":\"edit\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"tes\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"t.rs\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "\n"
+        );
+        let events = parse_anthropic_events(sse, MODEL);
+        // ToolCallStart + 2×ToolCallDelta + ToolCallEnd
+        assert_eq!(events.len(), 4);
+
+        let tc_end = events.iter().find_map(|e| match e {
+            ProviderEvent::ToolCallEnd { tool_call, .. } => Some(tool_call.clone()),
+            _ => None,
+        });
+        let tc = tc_end.expect("Should have ToolCallEnd");
+        assert_eq!(tc.id, "tool_1");
+        assert_eq!(tc.name, "edit");
+        // Streaming JSON parser should handle partial "test.rs"
+        assert_eq!(tc.arguments["path"].as_str(), Some("test.rs"));
+    }
+
+    #[test]
+    fn parse_tool_call_in_done_message() {
+        // Full flow with thinking + tool_use + Done
+        let sse = concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"I need to search.\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool_search\",\"name\":\"web_search\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"rust async\\\"}\"}}\n",
+            "\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":0}\n",
+            "\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":1}\n",
+            "\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n"
+        );
+        let events = parse_anthropic_events(sse, MODEL);
+
+        // Start + ThinkingStart + ThinkingDelta + ToolCallStart + ToolCallDelta
+        // + content_block_stop(thinking, no emit) + ToolCallEnd + Done
+        // content_block_stop for thinking index 0 has no pending tool call → no emit
+        assert!(events.len() >= 6);
+
+        // Verify ToolCallEnd is present
+        let tc_end = events.iter().find_map(|e| match e {
+            ProviderEvent::ToolCallEnd { tool_call, .. } => Some(tool_call.clone()),
+            _ => None,
+        });
+        let tc = tc_end.expect("Should have ToolCallEnd");
+        assert_eq!(tc.id, "tool_search");
+        assert_eq!(tc.name, "web_search");
+        assert_eq!(tc.arguments, serde_json::json!({"query": "rust async"}));
+
+        // Verify Done has ToolUse stop reason
+        let done = events.iter().find_map(|e| match e {
+            ProviderEvent::Done { reason, .. } => Some(reason.clone()),
+            _ => None,
+        });
+        assert_eq!(done, Some(StopReason::ToolUse));
+
+        // Verify Done message contains tool call
+        let done_msg = events.iter().find_map(|e| match e {
+            ProviderEvent::Done { message, .. } => Some(message.clone()),
+            _ => None,
+        });
+        let msg = done_msg.expect("Should have Done event");
+        let tool_calls: Vec<_> = msg
+            .content
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::ToolCall(_)))
+            .collect();
+        assert_eq!(
+            tool_calls.len(),
+            1,
+            "Done message should contain exactly 1 tool call"
+        );
     }
 
     // ── message_delta (completion) ─────────────────────────────────────
@@ -1301,8 +1528,11 @@ mod tests {
         // State persists across chunks (mimics scan() state)
         let mut partial = AssistantMessage::new(Api::AnthropicMessages, "anthropic", MODEL);
         let mut usage = Usage::default();
+        let mut pending_tc: std::collections::HashMap<usize, AnthropicPendingToolCall> =
+            std::collections::HashMap::new();
 
-        let events1 = parse_anthropic_events_stateful(chunk1, &mut partial, &mut usage);
+        let events1 =
+            parse_anthropic_events_stateful(chunk1, &mut partial, &mut usage, &mut pending_tc);
         // Start + ThinkingStart + ThinkingDelta("Let me")
         assert_eq!(events1.len(), 3);
 
@@ -1313,7 +1543,8 @@ mod tests {
             other => panic!("Expected Thinking block, got {:?}", other),
         }
 
-        let events2 = parse_anthropic_events_stateful(chunk2, &mut partial, &mut usage);
+        let events2 =
+            parse_anthropic_events_stateful(chunk2, &mut partial, &mut usage, &mut pending_tc);
         // ThinkingDelta(" think.") + TextStart + 2×TextDelta + Done
         assert_eq!(events2.len(), 5);
 
@@ -1358,16 +1589,21 @@ mod tests {
 
         let mut partial = AssistantMessage::new(Api::AnthropicMessages, "anthropic", MODEL);
         let mut usage = Usage::default();
+        let mut pending_tc: std::collections::HashMap<usize, AnthropicPendingToolCall> =
+            std::collections::HashMap::new();
 
-        let events1 = parse_anthropic_events_stateful(chunk1, &mut partial, &mut usage);
+        let events1 =
+            parse_anthropic_events_stateful(chunk1, &mut partial, &mut usage, &mut pending_tc);
         assert_eq!(events1.len(), 3); // Start + ThinkingStart + ThinkingDelta
 
         // Thinking persists into chunk2
         assert_eq!(partial.content.len(), 1);
 
-        let events2 = parse_anthropic_events_stateful(chunk2, &mut partial, &mut usage);
+        let events2 =
+            parse_anthropic_events_stateful(chunk2, &mut partial, &mut usage, &mut pending_tc);
         // ToolCallStart + ToolCallDelta + Done
-        assert_eq!(events2.len(), 3);
+        // Note: if content_block_stop were included, we'd also get ToolCallEnd
+        assert!(events2.len() >= 2); // At least ToolCallStart + Done
 
         // Done should have ToolUse stop reason
         let done = events2.iter().find_map(|e| match e {

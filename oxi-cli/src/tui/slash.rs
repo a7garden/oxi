@@ -1,6 +1,6 @@
 //! Slash command handling.
 
-use super::app::{AppOverlay, AppState, SetupStep, UiEvent};
+use super::app::{AppOverlay, AppState, NotificationKind, SetupStep, UiEvent};
 use super::overlay::router_integration;
 use crate::app::agent_session::{AgentSession, ScopedModel};
 use crate::media::clipboard_write;
@@ -33,7 +33,8 @@ pub(crate) fn handle_slash_command(
 
     match cmd_lower.as_str() {
         "/help" | "/?" => {
-            state.add_system_message(format_help());
+            state.overlay = None;
+            state.overlay_state = Some(super::overlay::help_overlay());
             true
         }
         "/quit" | "/exit" | "/q" => {
@@ -44,12 +45,15 @@ pub(crate) fn handle_slash_command(
             if let Some(model_id) = arg {
                 match session.set_model(model_id) {
                     Ok(()) => {
-                        state.add_system_message(format!("Model: {}", model_id));
+                        state.add_notification(
+                            format!("Model: {}", model_id),
+                            NotificationKind::Success,
+                        );
                         state.footer_state.data.model_name = model_id.to_string();
                         oxi_store::settings::Settings::save_last_used(model_id);
                     }
                     Err(e) => {
-                        state.add_system_message(format!("Error: {}", e));
+                        state.add_notification(format!("Error: {}", e), NotificationKind::Error);
                     }
                 }
             } else {
@@ -68,10 +72,10 @@ pub(crate) fn handle_slash_command(
                     }
                 }
                 if all_models.is_empty() {
-                    state.add_system_message(format!(
-                        "Model: {}\n/model <provider/model> to switch",
-                        session.model_id()
-                    ));
+                    state.add_notification(
+                        format!("Model: {}", session.model_id()),
+                        NotificationKind::Info,
+                    );
                 } else {
                     state.overlay = None;
                     state.overlay_state =
@@ -102,11 +106,16 @@ pub(crate) fn handle_slash_command(
         }
         "/session" => {
             let stats = session.session_stats();
-            state.add_system_message(format!(
-                "Session: {}\nMessages: {} ({} user, {} assistant)\nTools: {} calls, {} results\nModel: {}\nThinking: {:?}\nAuto-compact: {}\nAuto-retry: {}",
+            let content = format!(
+                "Session: {}\n\nMessages: {} ({} user, {} assistant)\nTools: {} calls, {} results\n\nModel: {}\nThinking: {:?}\n\nAuto-compact: {}\nAuto-retry: {}",
                 stats.session_id, stats.total_messages, stats.user_messages, stats.assistant_messages,
                 stats.tool_calls, stats.tool_results, session.model_id(),
                 session.thinking_level(), session.auto_compaction_enabled(), session.auto_retry_enabled(),
+            );
+            state.overlay = None;
+            state.overlay_state = Some(super::overlay::text_viewer::TextViewerOverlay::new(
+                " Session Info ",
+                content,
             ));
             true
         }
@@ -123,14 +132,15 @@ pub(crate) fn handle_slash_command(
             if let Some(action) = arg {
                 handle_tool_command(action, &registry, state);
             } else {
-                let mut out = "Tools:\n\n".to_string();
+                let mut out = "Available Tools:\n\n".to_string();
                 for name in &names {
                     if let Some(tool) = registry.get(name) {
                         out.push_str(&format!("  {} — {}\n", name, tool.label()));
                     }
                 }
-                out.push_str("\n/tools <name>        Toggle tool on/off");
-                state.add_system_message(out);
+                out.push_str("\n/tools <name>  Toggle tool on/off");
+                state.overlay = None;
+                state.overlay_state = Some(super::overlay::tools_overlay(out));
             }
             true
         }
@@ -184,26 +194,29 @@ pub(crate) fn handle_slash_command(
                     out.push('\n');
                 }
             }
-            out.push_str("\n\nPlace .wasm files in ~/.oxi/extensions/ to add extensions");
-            state.add_system_message(out);
+            out.push_str("\nPlace .wasm files in ~/.oxi/extensions/ to add extensions");
+            state.overlay = None;
+            state.overlay_state = Some(super::overlay::extensions_overlay(out));
             true
         }
         "/name" => {
             if let Some(name) = arg {
                 session.set_session_name(name.to_string());
-                state.add_system_message(format!("Session: {}", name));
+                state.add_notification(format!("Session: {}", name), NotificationKind::Success);
             } else {
-                state.add_system_message("/name <name>".to_string());
+                state.add_notification("/name <name>".to_string(), NotificationKind::Info);
             }
             true
         }
         "/copy" => {
             if let Some(ref code) = state.chat.last_code_block {
                 match clipboard_write::copy_to_clipboard(code) {
-                    Ok(()) => {
-                        state.add_system_message("OK: Code block copied to clipboard".to_string())
-                    }
-                    Err(e) => state.add_system_message(format!("Error: Copy failed: {}", e)),
+                    Ok(()) => state.add_notification(
+                        "Code block copied to clipboard".to_string(),
+                        NotificationKind::Success,
+                    ),
+                    Err(e) => state
+                        .add_notification(format!("Copy failed: {}", e), NotificationKind::Error),
                 }
             } else {
                 let last = state
@@ -222,21 +235,27 @@ pub(crate) fn handle_slash_command(
                         .collect::<Vec<_>>()
                         .join("\n");
                     if content.trim().is_empty() {
-                        state.add_system_message(
-                            "No text content to copy (last message has no text)".to_string(),
+                        state.add_notification(
+                            "No text content to copy".to_string(),
+                            NotificationKind::Warning,
                         );
                     } else {
                         match clipboard_write::copy_to_clipboard(&content) {
-                            Ok(()) => {
-                                state.add_system_message("OK: Copied to clipboard".to_string())
-                            }
-                            Err(e) => {
-                                state.add_system_message(format!("Error: Copy failed: {}", e))
-                            }
+                            Ok(()) => state.add_notification(
+                                "Copied to clipboard".to_string(),
+                                NotificationKind::Success,
+                            ),
+                            Err(e) => state.add_notification(
+                                format!("Copy failed: {}", e),
+                                NotificationKind::Error,
+                            ),
                         }
                     }
                 } else {
-                    state.add_system_message("No assistant message".to_string());
+                    state.add_notification(
+                        "No assistant message".to_string(),
+                        NotificationKind::Info,
+                    );
                 }
             }
             true
@@ -255,32 +274,21 @@ pub(crate) fn handle_slash_command(
                 }
             }
             if entries.is_empty() {
-                state.add_system_message("No changelog found".to_string());
+                state.add_notification("No changelog found".to_string(), NotificationKind::Info);
             } else {
-                let mut out = "Changelog:\n\n".to_string();
-                for entry in entries.iter().take(5) {
-                    out.push_str(&format!("## {}\n\n", entry.version_string()));
-                    let preview = if entry.content.len() > 200 {
-                        let end = entry
-                            .content
-                            .char_indices()
-                            .take_while(|(i, _)| *i < 200)
-                            .last()
-                            .map(|(i, c)| i + c.len_utf8())
-                            .unwrap_or(0);
-                        format!("{}...", &entry.content[..end])
-                    } else {
-                        entry.content.clone()
-                    };
-                    out.push_str(&preview);
-                    out.push_str("\n\n");
-                }
-                state.add_system_message(out);
+                let changelog_entries: Vec<(String, String)> = entries
+                    .iter()
+                    .take(10)
+                    .map(|e| (e.version_string(), e.content.clone()))
+                    .collect();
+                state.overlay = None;
+                state.overlay_state = Some(super::overlay::changelog_overlay(changelog_entries));
             }
             true
         }
         "/hotkeys" | "/keys" => {
-            state.add_system_message(format_hotkeys());
+            state.overlay = None;
+            state.overlay_state = Some(super::overlay::hotkeys_overlay());
             true
         }
         "/export" => {
@@ -317,11 +325,14 @@ pub(crate) fn handle_slash_command(
                 Ok(html) => {
                     if let Some(path) = export_path {
                         match std::fs::write(&path, &html) {
-                            Ok(()) => state
-                                .add_system_message(format!("OK: Exported: {}", path.display())),
-                            Err(e) => {
-                                state.add_system_message(format!("Error: Write failed: {}", e))
-                            }
+                            Ok(()) => state.add_notification(
+                                format!("Exported: {}", path.display()),
+                                NotificationKind::Success,
+                            ),
+                            Err(e) => state.add_notification(
+                                format!("Write failed: {}", e),
+                                NotificationKind::Error,
+                            ),
                         }
                     } else {
                         // Auto-save to CWD with session-based filename
@@ -329,19 +340,20 @@ pub(crate) fn handle_slash_command(
                         let short_sid = &sid[..8.min(sid.len())];
                         let default_name = format!("oxi-export-{}.html", short_sid);
                         match std::fs::write(&default_name, &html) {
-                            Ok(()) => state.add_system_message(format!(
-                                "OK: Exported: {} ({} bytes)",
-                                default_name,
-                                html.len()
-                            )),
-                            Err(e) => state.add_system_message(format!(
-                                "Error: Write failed: {}. /export <path> to save manually.",
-                                e
-                            )),
+                            Ok(()) => state.add_notification(
+                                format!("Exported: {} ({} bytes)", default_name, html.len()),
+                                NotificationKind::Success,
+                            ),
+                            Err(e) => state.add_notification(
+                                format!("Write failed: {}", e),
+                                NotificationKind::Error,
+                            ),
                         }
                     }
                 }
-                Err(e) => state.add_system_message(format!("Error: Export failed: {}", e)),
+                Err(e) => {
+                    state.add_notification(format!("Export failed: {}", e), NotificationKind::Error)
+                }
             }
             true
         }
@@ -388,8 +400,9 @@ pub(crate) fn handle_slash_command(
                             let temp_path = std::env::temp_dir().join("oxi-share.html");
                             match std::fs::write(&temp_path, &html) {
                                 Ok(()) => {
-                                    state.add_system_message(
+                                    state.add_notification(
                                         "Creating Gist... (Esc to cancel)".to_string(),
+                                        NotificationKind::Info,
                                     );
                                     // Show loader overlay during gist creation
                                     let _sh = session.clone_handle();
@@ -428,25 +441,32 @@ pub(crate) fn handle_slash_command(
                                     });
                                 }
                                 Err(e) => {
-                                    state.add_system_message(format!("Error: {}", e));
+                                    state.add_notification(
+                                        format!("Error: {}", e),
+                                        NotificationKind::Error,
+                                    );
                                 }
                             }
                         }
                         Err(e) => {
-                            state.add_system_message(format!("Error: {}", e));
+                            state.add_notification(
+                                format!("Export failed: {}", e),
+                                NotificationKind::Error,
+                            );
                         }
                     }
                 }
                 Ok(_output) => {
-                    state.add_system_message(
+                    state.add_notification(
                         "GitHub CLI not authenticated. Run: gh auth login".to_string(),
+                        NotificationKind::Warning,
                     );
                 }
-                Err(e) => {
-                    state.add_system_message(format!(
-                        "GitHub CLI (gh) not found: {}. Install from https://cli.github.com",
-                        e
-                    ));
+                Err(_e) => {
+                    state.add_notification(
+                        "GitHub CLI (gh) not found".to_string(),
+                        NotificationKind::Error,
+                    );
                 }
             }
             true
@@ -459,22 +479,31 @@ pub(crate) fn handle_slash_command(
                 match oxi_store::session::resolve_session_path(path, &cwd) {
                     Ok(resolved) => {
                         if !std::path::Path::new(&resolved).exists() {
-                            state.add_system_message(format!("File not found: {}", resolved));
+                            state.add_notification(
+                                format!("File not found: {}", resolved),
+                                NotificationKind::Error,
+                            );
                         } else {
                             state.next_action =
                                 Some(super::app::TuiNextAction::SwitchSession(resolved.clone()));
-                            state.add_system_message(format!(
-                                "Importing session from {}...",
-                                resolved
-                            ));
+                            state.add_notification(
+                                format!("Importing session from {}...", resolved),
+                                NotificationKind::Info,
+                            );
                         }
                     }
                     Err(e) => {
-                        state.add_system_message(format!("Error resolving path: {}", e));
+                        state.add_notification(
+                            format!("Error resolving path: {}", e),
+                            NotificationKind::Error,
+                        );
                     }
                 }
             } else {
-                state.add_system_message("/import <path-to-jsonl>".to_string());
+                state.add_notification(
+                    "/import <path> [path-to-jsonl]".to_string(),
+                    NotificationKind::Info,
+                );
             }
             true
         }
@@ -493,26 +522,32 @@ pub(crate) fn handle_slash_command(
                             Ok(new_path) => {
                                 state.next_action =
                                     Some(super::app::TuiNextAction::SwitchSession(new_path));
-                                state.add_system_message(format!(
-                                    "Forked from [{}]\nStarting new session...",
-                                    &full_id[..8.min(full_id.len())]
-                                ));
+                                state.add_notification(
+                                    format!("Forked from [{}]", &full_id[..8.min(full_id.len())]),
+                                    NotificationKind::Success,
+                                );
                             }
                             Err(e) => {
-                                state.add_system_message(format!("Error forking: {}", e));
+                                state.add_notification(
+                                    format!("Error forking: {}", e),
+                                    NotificationKind::Error,
+                                );
                             }
                         },
                         None => {
-                            state.add_system_message(format!(
-                                "Entry not found: {}\nUse /fork to list available messages.",
-                                sel
-                            ));
+                            state.add_notification(
+                                format!("Entry not found: {}", sel),
+                                NotificationKind::Warning,
+                            );
                         }
                     }
                 } else {
                     // No arg: open interactive fork selector overlay
                     if user_entries.is_empty() {
-                        state.add_system_message("No user messages to fork from.".to_string());
+                        state.add_notification(
+                            "No user messages to fork from.".to_string(),
+                            NotificationKind::Info,
+                        );
                     } else {
                         let entries: Vec<(String, String)> = user_entries
                             .iter()
@@ -534,7 +569,10 @@ pub(crate) fn handle_slash_command(
                     }
                 }
             } else {
-                state.add_system_message("No session file available.".to_string());
+                state.add_notification(
+                    "No session file available.".to_string(),
+                    NotificationKind::Info,
+                );
             }
             true
         }
@@ -546,22 +584,26 @@ pub(crate) fn handle_slash_command(
                 match oxi_store::session::SessionManager::fork_from(path, &cwd, None) {
                     Ok(new_sm) => {
                         if let Some(new_path) = new_sm.get_session_file() {
-                            state.add_system_message(format!(
-                                "Cloned session: {}\nUse /resume to open it.",
-                                new_path
-                            ));
+                            state.add_notification(
+                                format!("Cloned: {}", new_path),
+                                NotificationKind::Success,
+                            );
                         } else {
-                            state.add_system_message(
-                                "Session cloned. Use /resume to open it.".to_string(),
+                            state.add_notification(
+                                "Session cloned".to_string(),
+                                NotificationKind::Success,
                             );
                         }
                     }
                     Err(e) => {
-                        state.add_system_message(format!("Error cloning session: {}", e));
+                        state.add_notification(
+                            format!("Clone failed: {}", e),
+                            NotificationKind::Error,
+                        );
                     }
                 }
             } else {
-                state.add_system_message("No active session to clone.".to_string());
+                state.add_notification("No session to clone.".to_string(), NotificationKind::Info);
             }
             true
         }
@@ -571,7 +613,10 @@ pub(crate) fn handle_slash_command(
                 match sm.get_tree(uuid::Uuid::nil()) {
                     Ok(roots) => {
                         if roots.is_empty() {
-                            state.add_system_message("Empty session.".to_string());
+                            state.add_notification(
+                                "Empty session.".to_string(),
+                                NotificationKind::Info,
+                            );
                         } else {
                             // Collect all entries from the tree for the overlay
                             let entries = collect_tree_entries(&roots);
@@ -582,11 +627,17 @@ pub(crate) fn handle_slash_command(
                         }
                     }
                     Err(e) => {
-                        state.add_system_message(format!("Error reading tree: {}", e));
+                        state.add_notification(
+                            format!("Error reading tree: {}", e),
+                            NotificationKind::Error,
+                        );
                     }
                 }
             } else {
-                state.add_system_message("No session file available.".to_string());
+                state.add_notification(
+                    "No session file available.".to_string(),
+                    NotificationKind::Info,
+                );
             }
             true
         }
@@ -615,8 +666,8 @@ pub(crate) fn handle_slash_command(
                 match sub {
                     "status" => {
                         if let Some(snap) = oxi_ai::router::RouterProvider::get_snapshot() {
-                            state.add_system_message(format!(
-                                "Router Status:\n  Profile: {}\n  Tier: {:?}\n  Score: {:.2}\n  Model: {}\n  Provider: {}\n  Cost: ${:.4}\n  Turns: {}",
+                            let content = format!(
+                                "Router Status:\n\nProfile: {}\nTier: {:?}\nScore: {:.2}\nModel: {}\nProvider: {}\nCost: ${:.4}\nTurns: {}",
                                 snap.profile.as_deref().unwrap_or("-"),
                                 snap.last_tier.unwrap_or(oxi_ai::router::RouterTier::Medium),
                                 snap.last_score,
@@ -624,23 +675,39 @@ pub(crate) fn handle_slash_command(
                                 snap.last_provider.as_deref().unwrap_or("-"),
                                 snap.accumulated_cost,
                                 snap.turn_count,
-                            ));
+                            );
+                            state.overlay = None;
+                            state.overlay_state =
+                                Some(super::overlay::text_viewer::TextViewerOverlay::new(
+                                    " Router Status ",
+                                    content,
+                                ));
                         } else {
-                            state.add_system_message("Router: not active. Select \"router/auto\" in /model or type /router to configure.".to_string());
+                            state.add_notification(
+                                "Router not active. Use /router to configure.".to_string(),
+                                NotificationKind::Warning,
+                            );
                         }
                     }
                     "pin" => {
-                        state.add_system_message(
-                            "Router pin: not yet implemented. Coming soon.".to_string(),
+                        state.add_notification(
+                            "Router pin: not yet implemented".to_string(),
+                            NotificationKind::Info,
                         );
                     }
                     "disable" => {
-                        state.add_system_message(
-                            "Router disabled. Use /model to select a specific model.".to_string(),
+                        state.add_notification(
+                            "Router disabled".to_string(),
+                            NotificationKind::Info,
                         );
                     }
                     _ => {
-                        state.add_system_message(router_help());
+                        state.overlay = None;
+                        state.overlay_state =
+                            Some(super::overlay::text_viewer::TextViewerOverlay::new(
+                                " Router Help ",
+                                router_help(),
+                            ));
                     }
                 }
             } else {
@@ -652,20 +719,32 @@ pub(crate) fn handle_slash_command(
 
                 if has_config {
                     if let Some(snap) = oxi_ai::router::RouterProvider::get_snapshot() {
-                        state.add_system_message(format!(
-                            "Router Status:\n  Profile: {}\n  Tier: {:?}\n  Score: {:.2}\n  Model: {}\n  Cost: ${:.4}\n  Turns: {}",
+                        let content = format!(
+                            "Router Status:\n\nProfile: {}\nTier: {:?}\nScore: {:.2}\nModel: {}\nCost: ${:.4}\nTurns: {}",
                             snap.profile.as_deref().unwrap_or("-"),
                             snap.last_tier.unwrap_or(oxi_ai::router::RouterTier::Medium),
                             snap.last_score,
                             snap.last_model.as_deref().unwrap_or("-"),
                             snap.accumulated_cost,
                             snap.turn_count,
-                        ));
+                        );
+                        state.overlay = None;
+                        state.overlay_state =
+                            Some(super::overlay::text_viewer::TextViewerOverlay::new(
+                                " Router Status ",
+                                content,
+                            ));
                     } else {
-                        state.add_system_message("Router: configured but not yet active. Send a message to start routing.".to_string());
+                        state.add_notification(
+                            "Router configured but not yet active".to_string(),
+                            NotificationKind::Info,
+                        );
                     }
                 } else {
-                    state.add_system_message("Opening router setup...".to_string());
+                    state.add_notification(
+                        "Opening router setup...".to_string(),
+                        NotificationKind::Info,
+                    );
                     let auth = oxi_store::auth_storage::shared_auth_storage();
                     let setup_models: Vec<String> = oxi_ai::model_db::get_all_models()
                         .filter(|entry| auth.get_api_key(entry.provider).is_some())
@@ -694,12 +773,15 @@ pub(crate) fn handle_slash_command(
         "/logout" => {
             if let Some(provider) = arg {
                 oxi_store::auth_storage::shared_auth_storage().remove(provider);
-                state.add_system_message(format!("OK: Removed {}", provider));
+                state.add_notification(format!("Removed {}", provider), NotificationKind::Success);
             } else {
                 let auth = oxi_store::auth_storage::shared_auth_storage();
                 let providers = auth.configured_providers();
                 if providers.is_empty() {
-                    state.add_system_message("No providers configured.".to_string());
+                    state.add_notification(
+                        "No providers configured.".to_string(),
+                        NotificationKind::Info,
+                    );
                 } else {
                     state.overlay = None;
                     state.overlay_state = Some(super::overlay::logout_select(providers, state));
@@ -764,7 +846,10 @@ pub(crate) fn handle_slash_command(
             });
             match list_result {
                 Ok(sessions) if sessions.is_empty() => {
-                    state.add_system_message("No previous sessions found.".to_string());
+                    state.add_notification(
+                        "No previous sessions found.".to_string(),
+                        NotificationKind::Info,
+                    );
                 }
                 Ok(sessions) => {
                     let recent: Vec<_> = sessions.into_iter().take(15).collect();
@@ -772,7 +857,10 @@ pub(crate) fn handle_slash_command(
                     state.overlay_state = Some(super::overlay::resume_select(recent));
                 }
                 Err(e) => {
-                    state.add_system_message(format!("Error listing sessions: {}", e));
+                    state.add_notification(
+                        format!("Error listing sessions: {}", e),
+                        NotificationKind::Error,
+                    );
                 }
             }
             true
@@ -800,14 +888,15 @@ pub(crate) fn handle_slash_command(
                             }
                         }
                         Err(e) => {
-                            state.add_system_message(format!(
-                                "Warning: Could not apply model: {}",
-                                e
-                            ));
+                            state.add_notification(
+                                format!("Warning: Could not apply model: {}", e),
+                                NotificationKind::Warning,
+                            );
                         }
                     }
                 }
             }
+            // /reload shows config in chat (multi-line summary)
             state.add_system_message(format!(
                 "OK: Reloaded configuration\n  Model: {}\n  Provider: {}\n  Theme: {}\n  Thinking: {:?}\n  Extensions: {}\n  Stream: {}\n  Auto-compact: {}",
                 state.footer_state.data.model_name,
@@ -839,27 +928,29 @@ pub(crate) fn handle_slash_command(
                         .iter()
                         .map(|m| format!("{}/{}", m.provider, m.model_id))
                         .collect();
-                    state.add_system_message(format!(
-                        "Scoped: {} (Ctrl+P to cycle)",
-                        names.join(", ")
-                    ));
+                    state.add_notification(
+                        format!("Scoped: {}", names.join(", ")),
+                        NotificationKind::Info,
+                    );
                 } else {
-                    state.add_system_message(
-                        "/scoped-models provider/model1,provider/model2".to_string(),
+                    state.add_notification(
+                        "Usage: /scoped-models provider/model1,provider/model2".to_string(),
+                        NotificationKind::Info,
                     );
                 }
             } else {
                 let scoped = session.scoped_models();
                 if scoped.is_empty() {
-                    state.add_system_message(
-                        "No scoped models. /scoped-models <m1>,<m2>".to_string(),
-                    );
+                    state.add_notification("No scoped models".to_string(), NotificationKind::Info);
                 } else {
                     let names: Vec<String> = scoped
                         .iter()
                         .map(|m| format!("{}/{}", m.provider, m.model_id))
                         .collect();
-                    state.add_system_message(format!("Scoped: {}", names.join(", ")));
+                    state.add_notification(
+                        format!("Scoped: {}", names.join(", ")),
+                        NotificationKind::Info,
+                    );
                 }
             }
             true
@@ -873,14 +964,17 @@ pub(crate) fn handle_slash_command(
                     let output = wasm_ext
                         .execute_command(name, arg.unwrap_or(""))
                         .unwrap_or_else(|e| format!("Error: {}", e));
-                    state.add_system_message(format!("[{}] {}", ext_name, output));
+                    state.add_notification(
+                        format!("[{}] {}", ext_name, output),
+                        NotificationKind::Info,
+                    );
                     return true;
                 }
             }
-            state.add_system_message(format!(
-                "Unknown command: {}\nType /help for available commands.",
-                cmd
-            ));
+            state.add_notification(
+                format!("Unknown command: {}", cmd),
+                NotificationKind::Warning,
+            );
             false
         }
     }
@@ -1012,7 +1106,10 @@ fn try_provider_with_key(provider: &str, key: &str, state: &mut AppState) -> boo
     }
     let auth = oxi_store::auth_storage::shared_auth_storage();
     auth.set_api_key(provider, key.to_string());
-    state.add_system_message(format!("API key for {} saved.", provider));
+    state.add_notification(
+        format!("API key for {} saved.", provider),
+        NotificationKind::Success,
+    );
     true
 }
 
@@ -1054,17 +1151,20 @@ fn handle_tool_command(
         BUILTIN_TOOL_NAMES.contains(&tool_name.as_str()) || registry.get(&tool_name).is_some();
 
     if !is_known {
-        state.add_system_message(format!(
-            "Unknown tool: {}\nUse /tools to see available tools.",
-            tool_name
-        ));
+        state.add_notification(
+            format!("Unknown tool: {}", tool_name),
+            NotificationKind::Warning,
+        );
         return;
     }
 
     if registry.get(&tool_name).is_some() {
         if let Some(tool) = registry.get(&tool_name) {
             if tool.essential() {
-                state.add_system_message(format!("Cannot disable essential tool: {}", tool_name));
+                state.add_notification(
+                    format!("Cannot disable essential tool: {}", tool_name),
+                    NotificationKind::Warning,
+                );
                 return;
             }
         }
@@ -1072,16 +1172,22 @@ fn handle_tool_command(
         if tool_name == "web_search" {
             registry.unregister("get_search_results");
         }
-        state.add_system_message(format!("OK: Tool disabled: {}", tool_name));
+        state.add_notification(
+            format!("Tool disabled: {}", tool_name),
+            NotificationKind::Info,
+        );
     } else {
         let re_registered = try_re_register_tool(&tool_name, registry);
         if re_registered {
-            state.add_system_message(format!("OK: Tool enabled: {}", tool_name));
+            state.add_notification(
+                format!("Tool enabled: {}", tool_name),
+                NotificationKind::Success,
+            );
         } else {
-            state.add_system_message(format!(
-                "Cannot re-enable {}. Restart oxi to restore all tools.",
-                tool_name
-            ));
+            state.add_notification(
+                format!("Cannot re-enable {}", tool_name),
+                NotificationKind::Warning,
+            );
         }
     }
 }

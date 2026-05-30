@@ -283,19 +283,22 @@ pub(crate) async fn stream_assistant_response(
                     event_count,
                     message.stop_reason
                 );
+                // Merge strategy: providers accumulate tool calls differently.
+                //   - Anthropic: ToolCallEnd adds to partial_message; Done clones it.
+                //     Both `messages[last]` and `message` contain the same tool calls.
+                //   - OpenAI: ToolCallEnd is emitted just before Done (not accumulated).
+                //     `messages[last]` has tool calls from ToolCallEnd; Done's message
+                //     may or may not include them.
+                //   - Some providers: Only Done carries tool calls.
+                //
+                // We merge by ID-based union: take the Done message as base, then
+                // add any tool calls from the accumulated partial that aren't already
+                // in the Done message.
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        // Preserve tool calls we may have injected via ToolCallEnd.
-                        // Some providers also include ToolCall blocks in the final Done message,
-                        // so dedupe by tool_call_id to avoid executing the same tool twice.
-                        let mut preserved_tool_calls: Vec<ContentBlock> = m
-                            .content
-                            .drain(..)
-                            .filter(|b| matches!(b, ContentBlock::ToolCall(_)))
-                            .collect();
-
-                        let mut seen: HashSet<String> = message
+                        // Collect tool-call IDs already present in the Done message.
+                        let mut seen_ids: HashSet<String> = message
                             .content
                             .iter()
                             .filter_map(|b| match b {
@@ -304,21 +307,28 @@ pub(crate) async fn stream_assistant_response(
                             })
                             .collect();
 
-                        preserved_tool_calls.retain(|b| match b {
-                            ContentBlock::ToolCall(tc) => seen.insert(tc.id.clone()),
-                            _ => true,
-                        });
+                        // Collect tool calls from the accumulated partial that
+                        // the Done message doesn't already have.
+                        let extra_tool_calls: Vec<ContentBlock> = m
+                            .content
+                            .iter()
+                            .filter(|b| match b {
+                                ContentBlock::ToolCall(tc) => seen_ids.insert(tc.id.clone()),
+                                _ => false,
+                            })
+                            .cloned()
+                            .collect();
 
-                        tracing::info!(
-                            "Done: preserving {} tool_calls (deduped), Done message has {} content blocks",
-                            preserved_tool_calls.len(),
-                            message.content.len()
-                        );
+                        let tc_count = extra_tool_calls.len();
 
+                        // Replace with the Done message (authoritative for text,
+                        // usage, stop_reason) then append missing tool calls.
                         *m = message.clone();
-                        m.content.extend(preserved_tool_calls);
+                        m.content.extend(extra_tool_calls);
+
                         tracing::info!(
-                            "Done: final message has {} content blocks, stop_reason={:?}",
+                            "Done: merged {} extra tool_calls, final has {} content blocks, stop_reason={:?}",
+                            tc_count,
                             m.content.len(),
                             m.stop_reason
                         );

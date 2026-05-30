@@ -742,6 +742,15 @@ impl AgentLoop {
                     tool_results = executed_batch.messages;
                     has_more_tool_calls = !executed_batch.terminate;
 
+                    if executed_batch.terminate {
+                        tracing::warn!(
+                            session_id = ?self.session_id,
+                            "Tool batch terminated early (terminate flag set by after_tool_call hook). \
+                             This halts the tool-calling loop. If this is unexpected, \
+                             check after_tool_call hooks for unintended terminate: true."
+                        );
+                    }
+
                     for result in &tool_results {
                         messages.push(Message::ToolResult(result.clone()));
                         new_messages.push(Message::ToolResult(result.clone()));

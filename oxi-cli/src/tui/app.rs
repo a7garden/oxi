@@ -391,6 +391,73 @@ pub(crate) struct AppState {
         Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
     /// Tool execution start times for measuring duration.
     pub(crate) tool_start_times: std::collections::HashMap<String, std::time::Instant>,
+    /// Active notifications (toast messages).
+    pub notifications: Vec<Notification>,
+}
+
+/// A toast notification to display temporarily.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct Notification {
+    /// Unique ID for this notification.
+    pub id: u64,
+    /// Message text to display.
+    pub message: String,
+    /// Notification type (affects styling).
+    pub kind: NotificationKind,
+    /// Timestamp when this notification was created.
+    pub created_at: std::time::Instant,
+    /// How long to display (if not auto-dismissed).
+    pub duration: std::time::Duration,
+}
+
+impl Notification {
+    /// Create a new notification.
+    pub fn new(message: String, kind: NotificationKind) -> Self {
+        Self {
+            id: rand_u64(),
+            message,
+            kind,
+            created_at: std::time::Instant::now(),
+            duration: kind.default_duration(),
+        }
+    }
+
+    /// Check if this notification should be auto-dismissed.
+    pub fn is_expired(&self) -> bool {
+        self.created_at.elapsed() > self.duration
+    }
+}
+
+/// Notification display level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NotificationKind {
+    /// Short status message (e.g., "Model: x"): 2 seconds
+    Success,
+    /// Warning message: 4 seconds
+    Warning,
+    /// Error message: 5 seconds (errors persist longer)
+    Error,
+    /// Informational message (e.g., "Cloned session"): 3 seconds
+    Info,
+}
+
+impl NotificationKind {
+    /// Default display duration for this kind.
+    pub fn default_duration(&self) -> std::time::Duration {
+        match self {
+            NotificationKind::Success => std::time::Duration::from_secs(2),
+            NotificationKind::Warning => std::time::Duration::from_secs(4),
+            NotificationKind::Error => std::time::Duration::from_secs(5),
+            NotificationKind::Info => std::time::Duration::from_secs(3),
+        }
+    }
+}
+
+fn rand_u64() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
 impl AppState {
@@ -432,6 +499,7 @@ impl AppState {
             snapshot_text_block_created: false,
             questionnaire_bridge: None,
             tool_start_times: std::collections::HashMap::new(),
+            notifications: Vec::new(),
         };
 
         // Load user keybindings from settings
@@ -534,6 +602,16 @@ impl AppState {
             content_blocks: vec![ContentBlock::Text { content }],
             timestamp: now_millis(),
         });
+    }
+
+    /// Add a notification (toast message) instead of a chat message.
+    pub fn add_notification(&mut self, message: String, kind: NotificationKind) {
+        self.notifications.push(Notification::new(message, kind));
+    }
+
+    /// Remove expired notifications.
+    pub fn cleanup_notifications(&mut self) {
+        self.notifications.retain(|n| !n.is_expired());
     }
 
     pub fn start_streaming(&mut self) {
@@ -1261,6 +1339,9 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
             // Update session duration in footer
             state.footer_state.data.session_duration_secs = session_start.elapsed().as_secs();
+
+            // Clean up expired notifications
+            state.cleanup_notifications();
 
             tui.draw(|f| render::draw(f, &mut state, &theme))?;
 
