@@ -63,11 +63,9 @@ pub struct CompletionState {
 
 impl Default for CompletionState {
     fn default() -> Self {
-        let mut list_state = ratatui::widgets::ListState::default();
-        list_state.select(Some(0));
         Self {
             items: Vec::new(),
-            list_state,
+            list_state: ratatui::widgets::ListState::default(), // selected = None
             visible: false,
         }
     }
