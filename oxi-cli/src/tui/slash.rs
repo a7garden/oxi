@@ -22,7 +22,7 @@ pub(crate) fn handle_slash_command(
     input: &str,
     session: &AgentSession,
     state: &mut AppState,
-    running: &Arc<AtomicBool>,
+    running: &mut bool,
     ui_tx: &mpsc::UnboundedSender<UiEvent>,
 ) -> bool {
     let trimmed = input.trim();
@@ -39,7 +39,7 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/quit" | "/exit" | "/q" => {
-            running.store(false, Ordering::SeqCst);
+            *running = false;
             true
         }
         "/model" => {
