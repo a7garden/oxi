@@ -12,6 +12,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 // re-uses the same deserialization types.
 
 use oxi_ai::ProviderEvent;
+use std::sync::Arc;
 
 /// Minimal replicated OpenAI SSE chunk for benchmarking parse performance.
 /// This mirrors `oxi_ai::providers::openai::parse_sse_events`.
@@ -105,7 +106,7 @@ mod openai_parser {
                         events.push(ProviderEvent::TextDelta {
                             content_index: choice.index,
                             delta: content.clone(),
-                            partial: partial_message.clone(),
+                            partial: Arc::new(partial_message.clone()),
                         });
                     }
                 }
@@ -215,7 +216,7 @@ mod anthropic_parser {
             match event.type_.as_deref() {
                 Some("message_start") => {
                     events.push(ProviderEvent::Start {
-                        partial: partial_message.clone(),
+                        partial: Arc::new(partial_message.clone()),
                     });
                 }
                 Some("content_block_start") => {
@@ -224,20 +225,20 @@ mod anthropic_parser {
                             Some("text") => {
                                 events.push(ProviderEvent::TextStart {
                                     content_index: block.index.unwrap_or(0),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                             Some("thinking") => {
                                 events.push(ProviderEvent::ThinkingStart {
                                     content_index: block.index.unwrap_or(0),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                             Some("tool_use") => {
                                 events.push(ProviderEvent::ToolCallStart {
                                     content_index: block.index.unwrap_or(0),
                                     tool_call_id: None,
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                             _ => {}
@@ -252,7 +253,7 @@ mod anthropic_parser {
                                     events.push(ProviderEvent::TextDelta {
                                         content_index: event.index.unwrap_or(0),
                                         delta: text.clone(),
-                                        partial: partial_message.clone(),
+                                        partial: Arc::new(partial_message.clone()),
                                     });
                                 }
                             }

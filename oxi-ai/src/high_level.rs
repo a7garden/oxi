@@ -36,14 +36,14 @@ pub async fn complete(
     while let Some(event) = stream.next().await {
         match event {
             ProviderEvent::Start { partial } => {
-                final_message = Some(partial);
+                final_message = Some((*partial).clone());
             }
             ProviderEvent::TextStart {
                 content_index,
                 partial,
             } => {
                 if final_message.is_none() {
-                    final_message = Some(partial);
+                    final_message = Some((*partial).clone());
                 }
                 current_text_index = Some(content_index);
                 text_buffer.clear();
@@ -77,7 +77,7 @@ pub async fn complete(
                 partial,
             } => {
                 if final_message.is_none() {
-                    final_message = Some(partial);
+                    final_message = Some((*partial).clone());
                 }
             }
             ProviderEvent::ThinkingDelta {
@@ -123,7 +123,7 @@ pub async fn complete(
                 ..
             } => {
                 if final_message.is_none() {
-                    final_message = Some(partial);
+                    final_message = Some((*partial).clone());
                 }
                 // Initialize tool call — use provider ID if available, otherwise generate
                 let id = tool_call_id.unwrap_or_else(|| format!("tool_call_{}", content_index));

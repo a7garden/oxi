@@ -5,10 +5,10 @@
 use crate::Theme;
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
+    widgets::{Block, Borders, Paragraph, Sparkline, StatefulWidget, Widget},
 };
 
 /// Footer data — shared state for token counts and session info.
@@ -31,6 +31,9 @@ pub struct FooterData {
     pub session_duration_secs: u64,
     pub is_busy: bool,
     pub is_compacting: bool,
+    /// Sparkline data: recent token output rate history (tokens/sec, max 60 samples).
+    /// Updated by the app layer during streaming.
+    pub token_rate_history: Vec<u64>,
     pub version: String,
 }
 
@@ -54,12 +57,21 @@ impl Default for FooterData {
             session_duration_secs: 0,
             is_busy: false,
             is_compacting: false,
+            token_rate_history: Vec::new(),
             version: String::new(),
         }
     }
 }
 
 impl FooterData {
+    /// Add a token-rate sample, keeping at most 60 entries.
+    pub fn push_token_rate(&mut self, rate: u64) {
+        self.token_rate_history.push(rate);
+        if self.token_rate_history.len() > 60 {
+            self.token_rate_history.remove(0);
+        }
+    }
+
     pub fn fmt_count(count: u32) -> String {
         if count < 1000 {
             count.to_string()
@@ -128,20 +140,17 @@ impl StatefulWidget for Footer<'_> {
         let styles = self.theme.to_styles();
         let d = &state.data;
 
-        let rows = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(1), // separator
-                Constraint::Length(1), // line 1: tokens + duration
-                Constraint::Length(1), // line 2: path + git ... model
-            ])
-            .split(area);
+        let [sep_row, row1, row2] = area.layout(&Layout::vertical([
+            Constraint::Length(1), // separator
+            Constraint::Length(1), // line 1: tokens + duration
+            Constraint::Length(1), // line 2: path + git ... model
+        ]));
 
         // Separator
         Block::default()
             .borders(Borders::TOP)
             .border_style(styles.border)
-            .render(rows[0], buf);
+            .render(sep_row, buf);
 
         // ── Row 1: tokens + duration ──
         {
@@ -194,9 +203,34 @@ impl StatefulWidget for Footer<'_> {
                 ));
             }
 
-            Paragraph::new(Line::from(left_spans))
-                .alignment(Alignment::Left)
-                .render(rows[1], buf);
+            // Show sparkline if we have enough samples during streaming
+            let show_sparkline = has_tokens && d.token_rate_history.len() >= 3;
+
+            if show_sparkline {
+                let [info_area, spark_area] = row1.layout(&Layout::horizontal([
+                    Constraint::Min(30), // token text (minimum 30 chars)
+                    Constraint::Min(10), // sparkline (remaining space)
+                ]));
+
+                Paragraph::new(Line::from(left_spans))
+                    .alignment(Alignment::Left)
+                    .render(info_area, buf);
+
+                let sparkline_style = if pct > 0.8 {
+                    self.theme.colors.warning.to_ratatui()
+                } else {
+                    self.theme.colors.primary.to_ratatui()
+                };
+
+                Sparkline::default()
+                    .data(&d.token_rate_history)
+                    .style(sparkline_style)
+                    .render(spark_area, buf);
+            } else {
+                Paragraph::new(Line::from(left_spans))
+                    .alignment(Alignment::Left)
+                    .render(row1, buf);
+            }
         }
 
         // ── Row 2: path + git ... model + thinking ──
@@ -251,18 +285,18 @@ impl StatefulWidget for Footer<'_> {
                 }
             }
 
-            let cols = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([Constraint::Min(1), Constraint::Min(1)])
-                .split(rows[2]);
+            let [left_col, right_col] = row2.layout(&Layout::horizontal([
+                Constraint::Min(1),
+                Constraint::Min(1),
+            ]));
 
             Paragraph::new(Line::from(left_spans))
                 .alignment(Alignment::Left)
-                .render(cols[0], buf);
+                .render(left_col, buf);
 
             Paragraph::new(Line::from(right_spans))
                 .alignment(Alignment::Right)
-                .render(cols[1], buf);
+                .render(right_col, buf);
         }
     }
 }

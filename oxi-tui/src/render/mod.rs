@@ -28,7 +28,7 @@ use crossterm::{
     },
 };
 use ratatui::{
-    backend::{Backend, WindowSize},
+    backend::{Backend, IntoCrossterm, WindowSize},
     buffer::Cell,
     layout::{Position, Size},
     style::{Color, Modifier},
@@ -109,32 +109,11 @@ fn color_to_bytes(color: &Color) -> [u8; 4] {
     }
 }
 
+/// Convert ratatui Color to crossterm Color using ratatui 0.30's IntoCrossterm trait.
+/// Color is Copy, so &Color auto-derefs for `into_crossterm(self)`.
+#[inline]
 fn ratatui_color_to_crossterm(color: &Color) -> CColor {
-    match color {
-        Color::Reset => CColor::Reset,
-        Color::Black => CColor::Black,
-        Color::Red => CColor::DarkRed,
-        Color::Green => CColor::DarkGreen,
-        Color::Yellow => CColor::DarkYellow,
-        Color::Blue => CColor::DarkBlue,
-        Color::Magenta => CColor::DarkMagenta,
-        Color::Cyan => CColor::DarkCyan,
-        Color::Gray => CColor::Grey,
-        Color::DarkGray => CColor::DarkGrey,
-        Color::LightRed => CColor::Red,
-        Color::LightGreen => CColor::Green,
-        Color::LightYellow => CColor::Yellow,
-        Color::LightBlue => CColor::Blue,
-        Color::LightMagenta => CColor::Magenta,
-        Color::LightCyan => CColor::Cyan,
-        Color::White => CColor::White,
-        Color::Indexed(i) => CColor::AnsiValue(*i),
-        Color::Rgb(r, g, b) => CColor::Rgb {
-            r: *r,
-            g: *g,
-            b: *b,
-        },
-    }
+    color.into_crossterm()
 }
 
 // ---------------------------------------------------------------------------

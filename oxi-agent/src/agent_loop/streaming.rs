@@ -181,7 +181,7 @@ pub(crate) async fn stream_assistant_response(
         match event {
             ProviderEvent::Start { partial } => {
                 tracing::info!("Stream event #{}: Start", event_count);
-                messages.push(Message::Assistant(partial));
+                messages.push(Message::Assistant((*partial).clone()));
                 added_partial = true;
                 emit(super::AgentEvent::MessageStart {
                     message: messages.last().expect("non-empty after push").clone(),
@@ -220,7 +220,7 @@ pub(crate) async fn stream_assistant_response(
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = partial;
+                        *m = (*partial).clone();
                     }
                 }
                 let last_msg = messages.last().expect("non-empty").clone();
@@ -236,7 +236,7 @@ pub(crate) async fn stream_assistant_response(
                 if added_partial => {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = partial;
+                        *m = (*partial).clone();
                     }
                 }
 
@@ -244,7 +244,7 @@ pub(crate) async fn stream_assistant_response(
                 if added_partial {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = partial;
+                        *m = (*partial).clone();
                     }
                 }
                 let last_msg = messages.last().expect("non-empty").clone();
@@ -258,7 +258,7 @@ pub(crate) async fn stream_assistant_response(
                 if added_partial => {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = partial;
+                        *m = (*partial).clone();
                     }
                 }
 
@@ -266,7 +266,7 @@ pub(crate) async fn stream_assistant_response(
                 if added_partial => {
                     let last_idx = messages.len() - 1;
                     if let Message::Assistant(ref mut m) = messages[last_idx] {
-                        *m = partial;
+                        *m = (*partial).clone();
                     }
                 }
 

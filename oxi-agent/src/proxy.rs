@@ -513,7 +513,7 @@ impl ProxyEventReconstructor {
                         name: tool_event.tool_name,
                         arguments: serde_json::from_value(tool_event.args).unwrap_or_default(),
                     },
-                    partial: self.partial.clone(),
+                    partial: Arc::new(self.partial.clone()),
                 }]
             }
             ProxyEvent::Error(msg) => {
@@ -566,7 +566,7 @@ impl ProxyEventReconstructor {
         };
 
         self.content_states.insert(content_index, state);
-        vec![ProviderEvent::Start { partial: self.partial.clone() }]
+        vec![ProviderEvent::Start { partial: Arc::new(self.partial.clone()) }]
     }
 
     fn handle_text_delta(&mut self, content_index: usize, delta: String) -> Vec<ProviderEvent> {
@@ -579,7 +579,7 @@ impl ProxyEventReconstructor {
                     }
                 }
                 return vec![ProviderEvent::TextDelta {
-                    content_index, delta, partial: self.partial.clone(),
+                    content_index, delta, partial: Arc::new(self.partial.clone()),
                 }];
             }
         }
@@ -596,7 +596,7 @@ impl ProxyEventReconstructor {
                     }
                 }
                 return vec![ProviderEvent::ThinkingDelta {
-                    content_index, delta, partial: self.partial.clone(),
+                    content_index, delta, partial: Arc::new(self.partial.clone()),
                 }];
             }
         }
@@ -615,7 +615,7 @@ impl ProxyEventReconstructor {
                     }
                 }
                 return vec![ProviderEvent::ToolCallDelta {
-                    content_index, delta, partial: self.partial.clone(),
+                    content_index, delta, partial: Arc::new(self.partial.clone()),
                 }];
             }
         }

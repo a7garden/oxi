@@ -7,6 +7,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
@@ -253,7 +254,11 @@ impl Provider for OpenAiProvider {
 
         // Emit Start event once at the beginning of the stream (matches pi's behavior)
         let start_event = ProviderEvent::Start {
-            partial: AssistantMessage::new(Api::OpenAiCompletions, &provider_name, &model_id),
+            partial: Arc::new(AssistantMessage::new(
+                Api::OpenAiCompletions,
+                &provider_name,
+                &model_id,
+            )),
         };
 
         // Stateful stream parser that accumulates tool calls across chunks.
@@ -321,11 +326,11 @@ impl Provider for OpenAiProvider {
                                             *thinking_started = true;
                                             processed.push(ProviderEvent::ThinkingStart {
                                                 content_index: *content_index,
-                                                partial: AssistantMessage::new(
+                                                partial: Arc::new(AssistantMessage::new(
                                                     Api::OpenAiCompletions,
                                                     &provider_name,
                                                     &model_id,
-                                                ),
+                                                )),
                                             });
                                         }
                                         processed.push(event);
@@ -411,11 +416,11 @@ impl Provider for OpenAiProvider {
                                                         arguments: args_value,
                                                         thought_signature: None,
                                                     },
-                                                    partial: AssistantMessage::new(
+                                                    partial: Arc::new(AssistantMessage::new(
                                                         Api::OpenAiCompletions,
                                                         &provider_name,
                                                         &model_id,
-                                                    ),
+                                                    )),
                                                 });
                                             }
                                         }
@@ -738,7 +743,7 @@ fn parse_sse_events(
                     events.push(ProviderEvent::TextDelta {
                         content_index: choice.index,
                         delta: content.clone(),
-                        partial: output.clone(),
+                        partial: Arc::new(output.clone()),
                     });
                 }
 
@@ -764,7 +769,7 @@ fn parse_sse_events(
                         events.push(ProviderEvent::ThinkingDelta {
                             content_index: choice.index,
                             delta: reasoning.clone(),
-                            partial: output.clone(),
+                            partial: Arc::new(output.clone()),
                         });
                     }
                 }
@@ -781,7 +786,7 @@ fn parse_sse_events(
                                 content_index: tc_index,
                                 tool_call_id: tc.id.clone(),
                                 tool_name: tc.function.as_ref().and_then(|f| f.name.clone()),
-                                partial: output.clone(),
+                                partial: Arc::new(output.clone()),
                             });
                         }
 
@@ -790,7 +795,7 @@ fn parse_sse_events(
                             events.push(ProviderEvent::ToolCallDelta {
                                 content_index: tc_index,
                                 delta: func.arguments.clone().unwrap_or_default(),
-                                partial: output.clone(),
+                                partial: Arc::new(output.clone()),
                             });
                         }
                     }

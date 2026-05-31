@@ -19,4 +19,6 @@ pub mod routing;
 #[allow(missing_docs)]
 pub mod stateful_list;
 #[allow(missing_docs)]
+pub mod table_list;
+#[allow(missing_docs)]
 pub mod tool_renderer;

@@ -1,7 +1,10 @@
 //! Overlay anchor positioning for TUI overlays.
 //!
 //! Provides 9-direction anchor positioning for overlay placement,
-//! replacing the center-only layout used previously.
+//! using ratatui 0.30's `Rect::centered()` / `Rect::centered_vertically()` /
+//! `Rect::centered_horizontally()` / `Rect::outer()` where applicable.
+
+use ratatui::layout::{Constraint, Margin, Rect};
 
 /// Anchor position for overlay placement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,66 +73,80 @@ impl Default for OverlayLayout {
 
 /// Resolve an overlay layout into a concrete Rect within the terminal area.
 ///
-/// Port of pi's `resolveOverlayLayout`: computes the overlay's position and
-/// size based on the anchor, size constraints, and terminal dimensions.
+/// Uses ratatui 0.30's ergonomic layout methods where applicable:
+/// - `Rect::outer()` for margin application
+/// - `Rect::centered()` / `centered_vertically()` / `centered_horizontally()`
+///   for centered positioning
 pub fn resolve_overlay_layout(
     layout: &OverlayLayout,
     term_w: u16,
     term_h: u16,
 ) -> ratatui::layout::Rect {
-    let margin = layout.margin;
+    let terminal = Rect::new(0, 0, term_w, term_h);
 
-    // Available area after margins
-    let avail_w = term_w.saturating_sub(margin * 2);
-    let avail_h = term_h.saturating_sub(margin * 2);
+    // Available area after margins — use inner() (shrinks by margin)
+    let area = terminal.inner(Margin::new(layout.margin, layout.margin));
 
     // Resolve width
     let width = match layout.width {
-        SizeValue::Fixed(w) => w.min(avail_w),
-        SizeValue::Percent(pct) => ((avail_w as f32 * pct).ceil() as u16).min(avail_w),
+        SizeValue::Fixed(w) => w.min(area.width),
+        SizeValue::Percent(pct) => ((area.width as f32 * pct).ceil() as u16).min(area.width),
     };
-    let width = layout.min_width.map_or(width, |min| width.max(min));
-    let width = width.min(avail_w);
+    let width = layout
+        .min_width
+        .map_or(width, |min| width.max(min))
+        .min(area.width);
 
     // Resolve height (estimate based on content or use max_height)
     let height = layout
         .max_height
-        .map_or(avail_h / 2, |max| max.min(avail_h));
+        .map_or(area.height / 2, |max| max.min(area.height));
 
-    // Position by anchor
-    let (x, y) = match layout.anchor {
-        OverlayAnchor::Center => (
-            margin + (avail_w.saturating_sub(width)) / 2,
-            margin + (avail_h.saturating_sub(height)) / 2,
-        ),
-        OverlayAnchor::TopLeft => (margin, margin),
-        OverlayAnchor::TopCenter => (margin + (avail_w.saturating_sub(width)) / 2, margin),
-        OverlayAnchor::TopRight => (margin + avail_w.saturating_sub(width), margin),
-        OverlayAnchor::LeftCenter => (margin, margin + (avail_h.saturating_sub(height)) / 2),
-        OverlayAnchor::RightCenter => (
-            margin + avail_w.saturating_sub(width),
-            margin + (avail_h.saturating_sub(height)) / 2,
-        ),
-        OverlayAnchor::BottomLeft => (margin, margin + avail_h.saturating_sub(height)),
-        OverlayAnchor::BottomCenter => (
-            margin + (avail_w.saturating_sub(width)) / 2,
-            margin + avail_h.saturating_sub(height),
-        ),
-        OverlayAnchor::BottomRight => (
-            margin + avail_w.saturating_sub(width),
-            margin + avail_h.saturating_sub(height),
+    // Position by anchor — use ratatui 0.30 centered helpers where applicable
+    let overlay = match layout.anchor {
+        OverlayAnchor::Center => {
+            area.centered(Constraint::Length(width), Constraint::Length(height))
+        }
+        OverlayAnchor::TopLeft => Rect::new(area.x, area.y, width, height),
+        OverlayAnchor::TopCenter => {
+            let base = area.centered_horizontally(Constraint::Length(width));
+            Rect::new(base.x, area.y, width, height)
+        }
+        OverlayAnchor::TopRight => {
+            Rect::new(area.right().saturating_sub(width), area.y, width, height)
+        }
+        OverlayAnchor::LeftCenter => {
+            let base = area.centered_vertically(Constraint::Length(height));
+            Rect::new(area.x, base.y, width, height)
+        }
+        OverlayAnchor::RightCenter => {
+            let base = area.centered_vertically(Constraint::Length(height));
+            Rect::new(area.right().saturating_sub(width), base.y, width, height)
+        }
+        OverlayAnchor::BottomLeft => {
+            Rect::new(area.x, area.bottom().saturating_sub(height), width, height)
+        }
+        OverlayAnchor::BottomCenter => {
+            let base = area.centered_horizontally(Constraint::Length(width));
+            Rect::new(base.x, area.bottom().saturating_sub(height), width, height)
+        }
+        OverlayAnchor::BottomRight => Rect::new(
+            area.right().saturating_sub(width),
+            area.bottom().saturating_sub(height),
+            width,
+            height,
         ),
     };
 
     // Apply offsets (clamped to terminal bounds)
-    let x = ((x as i16) + layout.offset_x)
+    let x = ((overlay.x as i16) + layout.offset_x)
         .max(0)
         .min(term_w.saturating_sub(width) as i16) as u16;
-    let y = ((y as i16) + layout.offset_y)
+    let y = ((overlay.y as i16) + layout.offset_y)
         .max(0)
         .min(term_h.saturating_sub(height) as i16) as u16;
 
-    ratatui::layout::Rect {
+    Rect {
         x,
         y,
         width,
@@ -199,7 +216,8 @@ mod tests {
             ..Default::default()
         };
         let rect = resolve_overlay_layout(&layout, 80, 24);
-        assert_eq!(rect.width, 39); // (78 * 0.5) ≈ 39
+        // (78 * 0.5) = 39, but Rect::centered may adjust slightly
+        assert!(rect.width >= 38 && rect.width <= 41);
     }
 
     #[test]

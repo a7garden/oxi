@@ -1,5 +1,7 @@
 //! Provider streaming events
 
+use std::sync::Arc;
+
 use crate::{AssistantMessage, StopReason, ToolCall};
 
 /// Reason for a model fallback in MultiProvider.
@@ -54,7 +56,7 @@ pub enum ProviderEvent {
     /// Stream started with partial assistant message.
     Start {
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Text content block started.
@@ -62,7 +64,7 @@ pub enum ProviderEvent {
         /// Index of the content block in the message.
         content_index: usize,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Incremental text delta received.
@@ -72,7 +74,7 @@ pub enum ProviderEvent {
         /// The text delta to append.
         delta: String,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Text content block finished.
@@ -82,7 +84,7 @@ pub enum ProviderEvent {
         /// The complete text content.
         content: String,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Thinking content block started.
@@ -90,7 +92,7 @@ pub enum ProviderEvent {
         /// Index of the content block in the message.
         content_index: usize,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Incremental thinking delta received.
@@ -100,7 +102,7 @@ pub enum ProviderEvent {
         /// The thinking text delta to append.
         delta: String,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Thinking content block finished.
@@ -110,7 +112,7 @@ pub enum ProviderEvent {
         /// The complete thinking content.
         content: String,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Tool call block started.
@@ -123,7 +125,7 @@ pub enum ProviderEvent {
         /// The tool name, if available at start time.
         tool_name: Option<String>,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Tool call delta received (partial JSON arguments).
@@ -133,7 +135,7 @@ pub enum ProviderEvent {
         /// The delta string to append to tool arguments.
         delta: String,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Tool call block finished.
@@ -143,7 +145,7 @@ pub enum ProviderEvent {
         /// The complete tool call with resolved arguments.
         tool_call: ToolCall,
         /// Partial assistant message state.
-        partial: AssistantMessage,
+        partial: Arc<AssistantMessage>,
     },
 
     /// Stream completed successfully.

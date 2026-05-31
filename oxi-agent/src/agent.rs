@@ -99,7 +99,7 @@ pub struct Agent {
     compaction_manager: CompactionManager,
     hooks: parking_lot::RwLock<crate::config::AgentHooks>,
     /// Guard: true while a run is in progress. Prevents concurrent runs.
-    is_running: AtomicBool,
+    is_running: Arc<AtomicBool>,
     /// Provider/model resolver. Uses global functions by default,
     /// or a custom resolver when created via `new_with_resolver()`.
     resolver: Arc<dyn ProviderResolver>,
@@ -163,7 +163,7 @@ impl Agent {
             state: SharedState::new(),
             compaction_manager,
             hooks: parking_lot::RwLock::new(crate::config::AgentHooks::default()),
-            is_running: AtomicBool::new(false),
+            is_running: Arc::new(AtomicBool::new(false)),
             resolver,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             pending_model_switch: RwLock::new(None),
@@ -830,7 +830,6 @@ impl Agent {
 
         let should_stop_hook = self.hooks.read().should_stop_after_turn.clone();
 
-        let state = self.state.clone();
         let inner = self.inner.read().clone();
         let tools = Arc::clone(&self.tools);
         let resolver = Arc::clone(&self.resolver);
@@ -861,24 +860,32 @@ impl Agent {
 
         let provider: Arc<dyn Provider> = Arc::clone(&inner.provider);
 
-        // Create fresh state from current
-        let fresh_state = SharedState::new();
-        let current = state.get_state();
-        fresh_state.update(|s| *s = current);
+        // Share the SAME SharedState (Arc<RwLock<AgentState>>) with the
+        // agent loop so that state mutations inside the spawned task are
+        // visible through self.state() without an explicit sync step.
+        //
+        // Unlike run_with_channel_inner which creates a fresh SharedState
+        // and syncs back on completion, the tokio streaming API cannot
+        // access `self` inside the `'static` spawned task, so we share
+        // the underlying Arc instead.
+        //
+        // Pre-load current state into the shared Arc (in case it was
+        // modified by a previous run that used a different SharedState).
+        let shared_state = self.state.clone();
 
         let agent_loop = crate::agent_loop::AgentLoop::new_with_resolver(
             provider,
             loop_config,
             tools,
-            fresh_state,
+            shared_state.clone(),
             resolver,
         );
 
         let maybe_hook = should_stop_hook;
         let ext_stop = agent_loop.external_stop().clone();
 
-        let is_running = Arc::new(AtomicBool::new(true));
-        let is_running_clone = Arc::clone(&is_running);
+        // Clone the is_running Arc so the spawned task can clear it.
+        let is_running_flag = Arc::clone(&self.is_running);
 
         let handle = tokio::task::spawn(async move {
             let result = agent_loop
@@ -916,13 +923,13 @@ impl Agent {
                 })
                 .await;
 
-            // Clear the running flag
-            is_running_clone.store(false, Ordering::SeqCst);
+            // Clear the Agent's running flag
+            is_running_flag.store(false, Ordering::SeqCst);
 
             match result {
                 Ok(_events) => {
-                    // State is shared via SharedState (Arc<RwLock>),
-                    // so the caller can read it from agent.state() after completion.
+                    // State is already shared via the same SharedState Arc,
+                    // so self.state() will reflect all mutations.
                     Ok(Response {
                         content: String::new(),
                         stop_reason: StopReason::Stop,

@@ -21,6 +21,10 @@ pub enum GroupStrategy {
     },
 
     /// Leader agent distributes work to worker agents.
+    ///
+    /// **Current status**: Stub — only the leader agent is executed.
+    /// Full worker delegation (task decomposition → distribution → collection)
+    /// is planned but not yet implemented.
     Orchestrated {
         /// Index of the leader agent in the group.
         leader: usize,
@@ -239,6 +243,16 @@ impl AgentGroup {
     }
 
     /// Orchestrated: leader delegates to workers.
+    ///
+    /// **NOTE**: Currently a stub. Only the leader agent executes the prompt.
+    /// Full implementation will:
+    /// 1. Leader analyzes and decomposes the prompt into subtasks
+    /// 2. Subtasks are distributed to worker agents
+    /// 3. Workers execute in parallel via MessageBus
+    /// 4. Leader collects and merges results
+    //
+    // TODO: Implement full orchestrated delegation
+    //       See: https://github.com/a7garden/oxi/issues/XXX
     async fn run_orchestrated(
         &self,
         prompt: String,

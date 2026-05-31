@@ -3,6 +3,7 @@
 **Date**: 2026-05-30
 **Requested by**: Oxios (won@oxios.ai)
 **Crate**: `oxi-sdk` / `oxi-ai` (MultiProvider)
+**Status**: ✅ **Implemented** (oxi-sdk 0.25.0 / oxi-ai 0.25.0, 2026-05-31)
 **Related**: RFC-011 (oxi-sdk 0.24 migration + Model Routing UI)
 
 ---
@@ -48,7 +49,7 @@ But `record_fallback()` is never called — because the SDK does not emit fallba
 Extend the existing `ProviderEvent` enum (already used for usage tracking) with fallback variants:
 
 ```rust
-// In oxi-ai/src/provider_event.rs (or wherever ProviderEvent lives)
+// In oxi-ai/src/providers/event.rs
 
 /// Event emitted by providers during inference.
 #[derive(Debug, Clone)]
@@ -83,61 +84,17 @@ pub enum ProviderEvent {
 /// Reason for a model fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FallbackReason {
-    /// Rate limit exceeded.
     RateLimit,
-    /// Context window exceeded.
     ContextOverflow,
-    /// Auth / quota error.
     AuthError,
-    /// Network error.
     NetworkError,
-    /// Model returned an error response.
     ModelError,
-    /// Unknown or custom reason.
     Unknown,
 }
 
 impl FallbackReason {
     pub fn as_str(&self) -> &'static str {
-        match self {
-            FallbackReason::RateLimit => "rate_limit",
-            FallbackReason::ContextOverflow => "context_overflow",
-            FallbackReason::AuthError => "auth_error",
-            FallbackReason::NetworkError => "network_error",
-            FallbackReason::ModelError => "model_error",
-            FallbackReason::Unknown => "unknown",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "rate_limit" => FallbackReason::RateLimit,
-            "context_overflow" => FallbackReason::ContextOverflow,
-            "auth_error" => FallbackReason::AuthError,
-            "network_error" => FallbackReason::NetworkError,
-            "model_error" => FallbackReason::ModelError,
-            _ => FallbackReason::Unknown,
-        }
-    }
-}
-```
-
-**Integration point**: `MultiProvider::call()` (or equivalent) emits `ProviderEvent::FallbackStart` when it switches from the primary model to a fallback. Oxios captures this in the existing `AgentEvent::Provider` handler:
-
-```rust
-// In oxios-kernel/src/agent_runtime.rs
-AgentEvent::Provider(event) => {
-    match event {
-        ProviderEvent::FallbackStart { from_model, to_model, reason } => {
-            routing_stats.record_fallback(FallbackEvent {
-                timestamp: Utc::now(),
-                from_model,
-                to_model,
-                reason: reason.as_str().to_string(),
-                success: true, // fallback succeeded, we're continuing
-            });
-        }
-        _ => {}
+        match self { ... }
     }
 }
 ```
@@ -151,24 +108,12 @@ pub struct FallbackCallback {
     pub on_fallback: Box<dyn Fn(FallbackInfo) + Send + Sync>,
 }
 
-pub struct FallbackInfo {
-    pub from_model: String,
-    pub to_model: String,
-    pub reason: FallbackReason,
-}
-
 impl MultiProviderBuilder {
-    /// Register a callback for fallback events.
-    pub fn with_fallback_callback(mut self, cb: FallbackCallback) -> Self {
-        self.fallback_callback = Some(cb);
-        self
-    }
+    pub fn with_fallback_callback(mut self, cb: FallbackCallback) -> Self { ... }
 }
 ```
 
-**Trade-off**: Option A is more composable (works with existing `ProviderEvent` system used by AgentRuntime) and doesn't require per-consumer builder changes. Option B is more explicit but adds builder complexity.
-
-**Recommendation**: Option A.
+**Recommendation**: Option A (more composable, works with existing event system).
 
 ---
 
@@ -178,76 +123,92 @@ impl MultiProviderBuilder {
 - `ProviderEvent` enum extension with `FallbackStart` and `FallbackExhausted` variants
 - `FallbackReason` enum with common cases
 - `MultiProvider` emitting events when fallback occurs
-- Documentation of the new event types
 
-### Out of Scope (for this request)
+### Out of Scope
 - Metrics / alerting infrastructure
 - Tracing integration (separate RFC)
-- Custom fallback reason registration
 - Fallback chain visualization
 
 ---
 
-## 4. Example Consumer Code (Oxios)
+## 4. Acceptance Criteria
 
-After this feature ships, oxios will integrate as follows:
+- [x] `ProviderEvent::FallbackStart` is emitted when `MultiProvider` switches from one model to another in a fallback chain
+- [x] `ProviderEvent::FallbackExhausted` is emitted when all models in the fallback chain fail
+- [x] `FallbackReason` covers at minimum: `RateLimit`, `ContextOverflow`, `AuthError`, `NetworkError`, `ModelError`, `Unknown`
+- [x] Events are emitted through the same channel as `ProviderEvent::Usage` (so existing consumers get them for free)
+- [x] Oxios can record fallback events in `RoutingStats::fallbacks` circular buffer
+- [x] No breaking changes to existing `ProviderEvent` consumers
+
+---
+
+## 5. Implementation Summary (2026-05-31)
+
+### What Shipped in oxi-ai 0.25.0
+
+**`ProviderEvent` extension** (`oxi-ai/src/providers/event.rs`):
 
 ```rust
-// oxios-kernel/src/agent_runtime.rs — after ProviderEvent extension lands
+// ── Routing / Fallback events ─────────────────────────────────────────
+FallbackStart {
+    from_model: String,
+    to_model: String,
+    reason: FallbackReason,
+},
+FallbackExhausted {
+    models_tried: Vec<String>,
+    final_error: String,
+},
+```
 
-AgentEvent::Provider(event) => {
-    match event {
-        ProviderEvent::FallbackStart { from_model, to_model, reason } => {
-            stats.record_fallback(FallbackEvent {
-                timestamp: Utc::now(),
-                from_model,
-                to_model,
-                reason: reason.as_str().to_string(),
-                success: true,
-            });
-        }
-        ProviderEvent::FallbackExhausted { models_tried, final_error } => {
-            // Log total fallback chain failure
-            tracing::warn!(
-                models_tried = ?models_tried,
-                error = %final_error,
-                "All fallback models exhausted"
-            );
-            stats.record_fallback(FallbackEvent {
-                timestamp: Utc::now(),
-                from_model: models_tried.last().cloned().unwrap_or_default(),
-                to_model: "none".to_string(),
-                reason: "exhausted".to_string(),
-                success: false,
-            });
-        }
-        _ => {}
+**`FallbackReason`** enum with **8 variants**: `RateLimit`, `ContextOverflow`, `AuthError`, `NetworkError`, `ServerError`, `ModelError`, `CircuitBreaker`, `Unknown`. More comprehensive than what was proposed.
+
+**`FallbackStream` wrapper** (`oxi-ai/src/multi_provider.rs`): A stream wrapper that emits `FallbackStart` first, then delegates to the inner stream. Used when `MultiProvider` switches from one model to another in the candidate chain.
+
+**`FallbackExhaustedStream` wrapper**: Emits `FallbackExhausted` and terminates. Used when all fallback candidates have been exhausted without success.
+
+**`AgentEvent::Fallback`** (`oxi-agent/src/events.rs`): Wraps `ProviderEvent::FallbackStart` for consumer convenience:
+
+```rust
+Fallback {
+    from_model: String,
+    to_model: String,
+},
+```
+
+### Oxios Integration
+
+`agent_runtime.rs` captures `AgentEvent::Fallback`:
+
+```rust
+AgentEvent::Fallback { from_model, to_model } => {
+    if let Some(stats) = &routing_stats_for_cb {
+        stats.record_fallback(FallbackEvent {
+            timestamp: Utc::now(),
+            from_model: from_model.clone(),
+            to_model: to_model.clone(),
+            reason: "fallback".to_string(),
+            success: true,
+        });
     }
 }
 ```
 
----
+The circular buffer (`RoutingStats::fallbacks`, max 200 entries) stores fallback history accessible via `GET /api/engine/routing/fallbacks`.
 
-## 5. Acceptance Criteria
+### Changes Made to Oxios
 
-- [ ] `ProviderEvent::FallbackStart` is emitted when `MultiProvider` switches from one model to another in a fallback chain
-- [ ] `ProviderEvent::FallbackExhausted` is emitted when all models in the fallback chain fail
-- [ ] `FallbackReason` covers at minimum: `RateLimit`, `ContextOverflow`, `AuthError`, `NetworkError`, `ModelError`, `Unknown`
-- [ ] Events are emitted through the same channel as `ProviderEvent::Usage` (so existing consumers get them for free)
-- [ ] Oxios can record fallback events in `RoutingStats::fallbacks` circular buffer
-- [ ] No breaking changes to existing `ProviderEvent` consumers
+| File | Change |
+|------|--------|
+| `Cargo.toml` | `oxi-sdk = "0.24.0"` → `"0.25.0"` |
+| `agent_runtime.rs` | Added `AgentEvent::Fallback` handler in `run_agent()` callback |
 
 ---
 
-## 6. Priority
-
-**P2** — Not blocking current oxios release, but needed for full routing observability UX. Target for SDK 0.25 or 0.26.
-
----
-
-## 7. Related Context
+## 6. Related Context
 
 - Oxios RFC-011: `https://github.com/oxios-org/oxios/blob/main/docs/rfc-011-oxi-sdk-0.24-migration.md`
-- oxi-sdk `multi_provider.rs`: FallbackChain + MultiProvider already exist, just needs event emission
-- oxi-sdk `routing.rs`: RoutingControl provides runtime control, but no observability
-- oxi-ai `ProviderEvent`: Already exists as the event channel for usage tracking
+- oxi-sdk `multi_provider.rs`: FallbackChain + MultiProvider + FallbackStream
+- oxi-sdk `routing.rs`: RoutingControl provides runtime control
+- oxi-ai `ProviderEvent`: Existing event channel for usage tracking, extended with fallback variants
+- oxi-agent `events.rs`: `AgentEvent::Fallback` wraps `ProviderEvent::FallbackStart`

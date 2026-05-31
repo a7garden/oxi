@@ -165,7 +165,7 @@ mod tests {
 
             let events: Vec<ProviderEvent> = vec![
                 ProviderEvent::Start {
-                    partial: assistant.clone(),
+                    partial: std::sync::Arc::new(assistant.clone()),
                 },
                 ProviderEvent::Done {
                     reason: stop_reason,

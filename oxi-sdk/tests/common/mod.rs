@@ -47,7 +47,7 @@ impl Provider for MockProvider {
             cost: Default::default(),
         };
 
-        let partial = msg.clone();
+        let partial = std::sync::Arc::new(msg.clone());
         let events: Vec<ProviderEvent> = vec![
             ProviderEvent::Start {
                 partial: partial.clone(),

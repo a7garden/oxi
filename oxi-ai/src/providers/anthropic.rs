@@ -6,6 +6,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use super::openai::split_complete_lines;
 use super::openai_responses_shared::parse_streaming_json;
@@ -746,7 +747,7 @@ fn parse_anthropic_events_stateful(
         match event_type {
             Some("message_start") => {
                 events.push(ProviderEvent::Start {
-                    partial: partial_message.clone(),
+                    partial: Arc::new(partial_message.clone()),
                 });
             }
             Some("content_block_start") => {
@@ -756,13 +757,13 @@ fn parse_anthropic_events_stateful(
                         Some("text") => {
                             events.push(ProviderEvent::TextStart {
                                 content_index: idx,
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                         }
                         Some("thinking") => {
                             events.push(ProviderEvent::ThinkingStart {
                                 content_index: idx,
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                         }
                         Some("tool_use") | Some("server_tool_use") => {
@@ -783,7 +784,7 @@ fn parse_anthropic_events_stateful(
                                 content_index: idx,
                                 tool_call_id: Some(tc_id),
                                 tool_name: Some(tc_name),
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                         }
                         Some(t) if t.ends_with("_tool_result") => {
@@ -805,7 +806,7 @@ fn parse_anthropic_events_stateful(
                                 events.push(ProviderEvent::ToolCallEnd {
                                     content_index: idx,
                                     tool_call: tc,
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }
@@ -837,7 +838,7 @@ fn parse_anthropic_events_stateful(
                                 events.push(ProviderEvent::TextDelta {
                                     content_index: event.index.unwrap_or(0),
                                     delta: text.clone(),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }
@@ -861,7 +862,7 @@ fn parse_anthropic_events_stateful(
                                 events.push(ProviderEvent::ThinkingDelta {
                                     content_index: event.index.unwrap_or(0),
                                     delta: text.clone(),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }
@@ -875,7 +876,7 @@ fn parse_anthropic_events_stateful(
                                 events.push(ProviderEvent::ToolCallDelta {
                                     content_index: block_idx,
                                     delta: args.clone(),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }
@@ -914,7 +915,7 @@ fn parse_anthropic_events_stateful(
                     events.push(ProviderEvent::ToolCallEnd {
                         content_index: block_idx,
                         tool_call: tc,
-                        partial: partial_message.clone(),
+                        partial: Arc::new(partial_message.clone()),
                     });
                 }
             }

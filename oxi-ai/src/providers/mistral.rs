@@ -11,6 +11,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::{
     Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderError, ProviderEvent,
@@ -388,7 +389,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     events.push(ProviderEvent::TextDelta {
                         content_index: choice.index,
                         delta: content.clone(),
-                        partial: partial_message.clone(),
+                        partial: Arc::new(partial_message.clone()),
                     });
                 }
 
@@ -401,7 +402,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                                 events.push(ProviderEvent::ToolCallDelta {
                                     content_index: choice.index,
                                     delta: func.arguments.clone().unwrap_or_default(),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         } else if let Some(func) = &tc.function {
@@ -409,7 +410,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                             events.push(ProviderEvent::ToolCallDelta {
                                 content_index: choice.index,
                                 delta: func.arguments.clone().unwrap_or_default(),
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                         }
                     }

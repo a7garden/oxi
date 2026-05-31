@@ -20,6 +20,9 @@
 //! assert!(all.len() > 926);
 //! ```
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
 use crate::{Api, InputModality};
 
 /// A static model entry in the database.
@@ -13305,7 +13308,46 @@ static ALL_PROVIDER_MODELS: &[(&str, &[ModelEntry])] = &[
     ("together", TOGETHER_MODELS),
 ];
 
+// ── Lazy-initialized indexes for O(1) lookups ──────────────────────────
+
+/// Maps `"provider/id"` → `&'static ModelEntry` for O(1) model lookups.
+static MODEL_INDEX: OnceLock<HashMap<&'static str, &'static ModelEntry>> = OnceLock::new();
+
+fn model_index() -> &'static HashMap<&'static str, &'static ModelEntry> {
+    MODEL_INDEX.get_or_init(|| {
+        let mut map = HashMap::with_capacity(model_count());
+        for (provider, models) in ALL_PROVIDER_MODELS.iter() {
+            for model in models.iter() {
+                let key = format!("{}/{}", provider, model.id);
+                // Leak the formatted key to obtain `&'static str`.
+                // This happens once at first access; the total leaked memory
+                // is bounded by the model database size (~60 KiB).
+                let key_static: &'static str = Box::leak(key.into_boxed_str());
+                map.insert(key_static, model);
+            }
+        }
+        map
+    })
+}
+
+/// Maps provider name → its model slice for O(1) provider lookups.
+static PROVIDER_INDEX: OnceLock<HashMap<&'static str, &'static [ModelEntry]>> = OnceLock::new();
+
+fn provider_index() -> &'static HashMap<&'static str, &'static [ModelEntry]> {
+    PROVIDER_INDEX.get_or_init(|| {
+        let mut map = HashMap::with_capacity(ALL_PROVIDER_MODELS.len());
+        for (provider, models) in ALL_PROVIDER_MODELS.iter() {
+            map.insert(*provider, *models);
+        }
+        map
+    })
+}
+
+// ── Public API ───────────────────────────────────────────────────────────
+
 /// Look up a specific model entry by provider and model ID.
+///
+/// Uses an O(1) index internally. Falls back gracefully if not found.
 ///
 /// # Arguments
 /// * `provider` - The provider name (e.g., "anthropic", "openai")
@@ -13321,15 +13363,13 @@ static ALL_PROVIDER_MODELS: &[(&str, &[ModelEntry])] = &[
 /// assert_eq!(m.name, "GPT-4o");
 /// ```
 pub fn get_model_entry(provider: &str, id: &str) -> Option<&'static ModelEntry> {
-    for (prov, models) in ALL_PROVIDER_MODELS.iter() {
-        if *prov == provider {
-            return models.iter().find(|m| m.id == id);
-        }
-    }
-    None
+    let key = format!("{}/{}", provider, id);
+    model_index().get(key.as_str()).copied()
 }
 
 /// Get all model entries for a given provider.
+///
+/// Uses an O(1) index internally.
 ///
 /// # Arguments
 /// * `provider` - The provider name (e.g., "anthropic", "openai")
@@ -13337,12 +13377,7 @@ pub fn get_model_entry(provider: &str, id: &str) -> Option<&'static ModelEntry> 
 /// # Returns
 /// A slice of `ModelEntry` for the provider, or an empty slice if not found.
 pub fn get_provider_models(provider: &str) -> &'static [ModelEntry] {
-    for (prov, models) in ALL_PROVIDER_MODELS.iter() {
-        if *prov == provider {
-            return models;
-        }
-    }
-    &[]
+    provider_index().get(provider).copied().unwrap_or(&[])
 }
 
 /// Get all model entries across all providers.

@@ -11,6 +11,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
@@ -643,7 +644,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
             Some("messageStart") => {
                 seen_start = true;
                 events.push(ProviderEvent::Start {
-                    partial: partial_message.clone(),
+                    partial: Arc::new(partial_message.clone()),
                 });
             }
             Some("contentBlockStart") => {
@@ -654,7 +655,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                         Some("text") => {
                             events.push(ProviderEvent::TextStart {
                                 content_index: event.index.unwrap_or(0),
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                         }
                         Some("toolUse") => {
@@ -662,13 +663,13 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                                 content_index: event.index.unwrap_or(0),
                                 tool_call_id: block.id.clone(),
                                 tool_name: None,
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                         }
                         Some("thinking") => {
                             events.push(ProviderEvent::ThinkingStart {
                                 content_index: event.index.unwrap_or(0),
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                         }
                         _ => {}
@@ -699,7 +700,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                                 events.push(ProviderEvent::TextDelta {
                                     content_index: event.index.unwrap_or(0),
                                     delta: text.clone(),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }
@@ -710,7 +711,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                                     events.push(ProviderEvent::ToolCallDelta {
                                         content_index: event.index.unwrap_or(0),
                                         delta: format!("name:{}:DELIMITER", name),
-                                        partial: partial_message.clone(),
+                                        partial: Arc::new(partial_message.clone()),
                                     });
                                 }
                                 // Emit arguments
@@ -718,7 +719,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                                     events.push(ProviderEvent::ToolCallDelta {
                                         content_index: event.index.unwrap_or(0),
                                         delta: input.clone(),
-                                        partial: partial_message.clone(),
+                                        partial: Arc::new(partial_message.clone()),
                                     });
                                 }
                             }
@@ -744,7 +745,7 @@ fn parse_bedrock_events(text: &str, provider: &str, model_id: &str) -> Vec<Provi
                                 events.push(ProviderEvent::ThinkingDelta {
                                     content_index: event.index.unwrap_or(0),
                                     delta: thinking.clone(),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }

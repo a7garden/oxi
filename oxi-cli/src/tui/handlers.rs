@@ -500,7 +500,13 @@ fn navigate_history_down(state: &mut AppState) {
 
 /// Handle an agent UI event.
 /// pi-mono pattern: MessageUpdate drives rendering (not TextChunk deltas).
-pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
+///
+/// `session` is passed for event-driven persist on `MessageEnd`.
+pub fn handle_ui_event(
+    event: UiEvent,
+    state: &mut AppState,
+    session: &crate::app::agent_session::AgentSession,
+) {
     match event {
         // ── Agent lifecycle ───────────────────────────────────────
         UiEvent::AgentStart => {
@@ -511,9 +517,9 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             // Always clear busy state — AutoProcessStart will re-set it
             // if a queued message is being auto-processed.
             state.is_agent_busy = false;
-            // Persist any remaining messages after the agent run completes
-            // and state has been synced back from the agent loop.
-            state.needs_persist = true;
+            // Safety-net persist: catch any messages missed by event-driven
+            // persist (e.g., if a MessageEnd event was dropped).
+            session.persist();
         }
 
         // ── Turn lifecycle ────────────────────────────────────────
@@ -549,8 +555,11 @@ pub fn handle_ui_event(event: UiEvent, state: &mut AppState) {
             // pi-mono: message_end — finalize the message
             state.finalize_streaming_message(&message);
 
-            // Persist session data (pi-mono: persist on every message_end)
-            state.needs_persist = true;
+            // Event-driven persist: convert the event message directly to
+            // a session entry and append to the JSONL file. This matches pi's
+            // approach and avoids the race condition where persist_session()
+            // reads a stale agent.state() snapshot.
+            session.persist_event_message(&message);
 
             // Finalize moves the message to the permanent list
             let was_streaming = state.chat.is_streaming();

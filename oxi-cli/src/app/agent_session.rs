@@ -766,11 +766,108 @@ impl AgentSession {
         Arc::clone(&self.agent)
     }
 
+    /// Persist a single message from an event directly to session manager.
+    ///
+    /// This is the **event-driven persist** path, matching pi's approach:
+    /// each `MessageEnd` event carries the full message snapshot, and we
+    /// convert + append it to the session file immediately.
+    ///
+    /// This avoids the race condition where `persist_session()` reads
+    /// `agent.state()` which may be stale during a running agent loop
+    /// (the agent loop operates on a separate `fresh_state`).
+    pub fn persist_event_message(&self, message: &oxi_ai::Message) {
+        let mut sm = self.session_manager.write();
+        match message {
+            Message::User(u) => {
+                let content = match &u.content {
+                    oxi_ai::MessageContent::Text(t) => t.clone(),
+                    oxi_ai::MessageContent::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| b.as_text())
+                        .collect::<Vec<_>>()
+                        .join(""),
+                };
+                sm.append_message(AgentMessage::User {
+                    content: oxi_store::session::ContentValue::String(content),
+                });
+            }
+            Message::Assistant(a) => {
+                let content_blocks: Vec<oxi_store::session::AssistantContentBlock> = a
+                    .content
+                    .iter()
+                    .map(|b| match b {
+                        oxi_ai::ContentBlock::Text(t) => {
+                            oxi_store::session::AssistantContentBlock::Text {
+                                text: t.text.clone(),
+                            }
+                        }
+                        oxi_ai::ContentBlock::Thinking(t) => {
+                            oxi_store::session::AssistantContentBlock::Thinking {
+                                thinking: t.thinking.clone(),
+                            }
+                        }
+                        oxi_ai::ContentBlock::ToolCall(tc) => {
+                            oxi_store::session::AssistantContentBlock::ToolCall {
+                                id: tc.id.clone(),
+                                name: tc.name.clone(),
+                                arguments: tc.arguments.clone(),
+                            }
+                        }
+                        oxi_ai::ContentBlock::Image(img) => {
+                            oxi_store::session::AssistantContentBlock::ImageResult {
+                                data: img.data.clone(),
+                                media_type: img.mime_type.clone(),
+                            }
+                        }
+                        oxi_ai::ContentBlock::Unknown(v) => {
+                            oxi_store::session::AssistantContentBlock::Text {
+                                text: v.to_string(),
+                            }
+                        }
+                    })
+                    .collect();
+
+                sm.append_message(AgentMessage::Assistant {
+                    content: content_blocks,
+                    provider: Some(a.provider.clone()),
+                    model_id: Some(a.model.clone()),
+                    usage: Some(oxi_store::session::Usage {
+                        input: Some(a.usage.input as i64),
+                        output: Some(a.usage.output as i64),
+                        cache_read: Some(a.usage.cache_read as i64),
+                        cache_write: Some(a.usage.cache_write as i64),
+                        total_tokens: Some(a.usage.total_tokens as i64),
+                    }),
+                    stop_reason: Some(format!("{:?}", a.stop_reason)),
+                });
+            }
+            Message::ToolResult(t) => {
+                let content = t
+                    .content
+                    .iter()
+                    .filter_map(|b| b.as_text())
+                    .collect::<Vec<_>>()
+                    .join("");
+                sm.append_message(AgentMessage::ToolResult {
+                    content: oxi_store::session::ContentValue::String(content),
+                    tool_call_id: t.tool_call_id.clone(),
+                });
+            }
+        }
+        // Increment persisted_count so the fallback persist_session()
+        // does not re-add this message on AgentEnd.
+        let count = sm.persisted_count();
+        sm.set_persisted_count(count + 1);
+    }
+
     /// Persist the current agent state to the session file.
     ///
-    /// Called by the TUI event loop after `MessageEnd` events to ensure
-    /// session data is saved incrementally, matching pi-mono's behavior
-    /// of persisting on every `message_end`.
+    /// Uses the state-snapshot approach: reads `agent.state().messages` and
+    /// appends only messages not yet tracked by `persisted_count`.
+    ///
+    /// **Note:** This is kept as a safety-net fallback, called on `AgentEnd`
+    /// to catch any messages that might have been missed by event-driven
+    /// persist. The primary persist path is now `persist_event_message()`.
     pub fn persist(&self) {
         self.persist_session();
     }

@@ -14,6 +14,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::{
     error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
@@ -412,7 +413,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         partial_message.response_id = Some(id);
                     }
                     events.push(ProviderEvent::Start {
-                        partial: partial_message.clone(),
+                        partial: Arc::new(partial_message.clone()),
                     });
                 }
                 ResponsesEvent::OutputItemAdded { output_item } => {
@@ -422,7 +423,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                                 content_index: output_item.index,
                                 tool_call_id: output_item.id.clone(),
                                 tool_name: None,
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                             current_tool_call_index = Some(output_item.index);
                         }
@@ -431,14 +432,14 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                                 content_index: output_item.index,
                                 tool_call_id: output_item.id.clone(),
                                 tool_name: None,
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                             current_tool_call_index = Some(output_item.index);
                         }
                         "reasoning" => {
                             events.push(ProviderEvent::ThinkingStart {
                                 content_index: output_item.index,
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                         }
                         // Hosted (provider-executed) tool calls: web_search,
@@ -451,7 +452,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                                 content_index: output_item.index,
                                 tool_call_id: output_item.id.clone(),
                                 tool_name: Some(tool_name.clone()),
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                             current_tool_call_index = Some(output_item.index);
                         }
@@ -463,7 +464,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         "output_text" => {
                             events.push(ProviderEvent::TextStart {
                                 content_index: content_part.index,
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                             current_text_index = Some(content_part.index);
                         }
@@ -472,7 +473,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                                 content_index: content_part.index,
                                 tool_call_id: None,
                                 tool_name: None,
-                                partial: partial_message.clone(),
+                                partial: Arc::new(partial_message.clone()),
                             });
                             current_tool_call_index = Some(content_part.index);
                         }
@@ -501,7 +502,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     events.push(ProviderEvent::TextDelta {
                         content_index: content_idx,
                         delta: text,
-                        partial: partial_message.clone(),
+                        partial: Arc::new(partial_message.clone()),
                     });
                     // Update the current text index if not already set
                     if current_text_index.is_none() {
@@ -516,7 +517,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     events.push(ProviderEvent::ToolCallDelta {
                         content_index: content_idx,
                         delta: delta.arguments.unwrap_or_default(),
-                        partial: partial_message.clone(),
+                        partial: Arc::new(partial_message.clone()),
                     });
                     // Update the current tool call index if not set
                     if current_tool_call_index.is_none() {
@@ -532,7 +533,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                         events.push(ProviderEvent::TextEnd {
                             content_index: idx,
                             content: text_content,
-                            partial: partial_message.clone(),
+                            partial: Arc::new(partial_message.clone()),
                         });
                         current_text_index = None;
                     }
@@ -544,7 +545,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                                 events.push(ProviderEvent::ThinkingEnd {
                                     content_index: 0,
                                     content: item.text.unwrap_or_default(),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }
@@ -563,7 +564,7 @@ fn parse_sse_events(text: &str, provider: &str, model_id: &str) -> Vec<ProviderE
                     events.push(ProviderEvent::ToolCallEnd {
                         content_index: output_item.index,
                         tool_call: crate::ToolCall::new(tc_id, tool_name, serde_json::json!({})),
-                        partial: partial_message.clone(),
+                        partial: Arc::new(partial_message.clone()),
                     });
                 }
                 ResponsesEvent::ResponseWithUsage { response } => {

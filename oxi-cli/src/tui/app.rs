@@ -366,8 +366,6 @@ pub(crate) struct AppState {
     pub queue_panel_visible: bool,
     /// Selected index in the queue panel
     pub queue_panel_selected: usize,
-    /// Whether session needs to be persisted to disk
-    pub needs_persist: bool,
     /// Whether TUI chat needs to be rebuilt from agent state (after compaction)
     pub needs_chat_rebuild: bool,
     /// Length of text already rendered from the snapshot's Text block.
@@ -492,7 +490,6 @@ impl AppState {
             steering_messages_snapshot: Vec::new(),
             queue_panel_visible: false,
             queue_panel_selected: 0,
-            needs_persist: false,
             needs_chat_rebuild: false,
             snapshot_text_rendered: 0,
             snapshot_thinking_rendered: Vec::new(),
@@ -1464,12 +1461,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 if matches!(ui_event, UiEvent::AgentEnd) {
                     saw_agent_end = true;
                 }
-                handlers::handle_ui_event(ui_event, &mut state);
-                // Persist session after message_end events (pi-mono: persist on every message_end)
-                if state.needs_persist {
-                    agent_session.persist();
-                    state.needs_persist = false;
-                }
+                handlers::handle_ui_event(ui_event, &mut state, &agent_session);
                 // Rebuild chat from agent state after compaction
                 if state.needs_chat_rebuild {
                     rebuild_chat(&mut state, &agent_session);

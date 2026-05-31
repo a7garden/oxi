@@ -6,6 +6,7 @@
 
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
+use std::sync::Arc;
 
 use super::{ProviderError, ProviderEvent};
 use crate::{
@@ -388,7 +389,7 @@ pub fn parse_google_events(
                                     events.push(ProviderEvent::ThinkingDelta {
                                         content_index: index,
                                         delta: text.clone(),
-                                        partial: partial_message.clone(),
+                                        partial: Arc::new(partial_message.clone()),
                                     });
                                 } else {
                                     // Accumulate into partial_message
@@ -410,7 +411,7 @@ pub fn parse_google_events(
                                     events.push(ProviderEvent::TextDelta {
                                         content_index: index,
                                         delta: text.clone(),
-                                        partial: partial_message.clone(),
+                                        partial: Arc::new(partial_message.clone()),
                                     });
                                 }
                             }
@@ -420,7 +421,7 @@ pub fn parse_google_events(
                                     content_index: index,
                                     delta: serde_json::to_string(&function_call.args)
                                         .unwrap_or_default(),
-                                    partial: partial_message.clone(),
+                                    partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }

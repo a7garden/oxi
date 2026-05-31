@@ -1,5 +1,6 @@
 //! Session resume / switch overlay.
 
+use chrono::{DateTime, Utc};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
     Frame, layout::Rect,
@@ -28,12 +29,9 @@ impl ResumeSelectOverlay {
         Self { sessions, selected: 0 }
     }
 
-    fn relative_time(created: i64) -> String {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        let diff = now.saturating_sub(created);
+    fn relative_time(created: DateTime<Utc>) -> String {
+        let now = Utc::now();
+        let diff = now.signed_duration_since(created).num_seconds();
         if diff < 60 {
             "< 1m ago".to_string()
         } else if diff < 3600 {

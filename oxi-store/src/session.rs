@@ -1277,15 +1277,22 @@ impl SessionManager {
             return;
         };
 
-        // Only persist once we have at least one message entry.
-        // This avoids writing header-only stubs to disk.
-        let has_message = self
-            .file_entries
-            .read()
-            .iter()
-            .any(|e| matches!(e, FileEntry::Entry(SessionEntryEnum::Message(_))));
+        // pi deferred-flush pattern: only write to disk once we have at
+        // least one assistant message. Before that, keep entries in memory
+        // and set flushed = false so the full buffer is written when the
+        // first assistant arrives.
+        let has_assistant = self.file_entries.read().iter().any(|e| {
+            matches!(
+                e,
+                FileEntry::Entry(SessionEntryEnum::Message(m))
+                    if m.message.is_assistant()
+            )
+        });
 
-        if !has_message {
+        if !has_assistant {
+            // Keep in memory, don't write yet.
+            // When the first assistant arrives, all accumulated entries
+            // (header + user + this entry) will be flushed at once.
             self.flushed = false;
             return;
         }
@@ -2565,6 +2572,7 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
 
     let stats = fs::metadata(file_path).ok()?;
     let mut message_count = 0i64;
+    let mut assistant_count = 0i64;
     let mut first_message = String::new();
     let mut all_messages = Vec::new();
     let mut name: Option<String> = None;
@@ -2590,13 +2598,22 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
                             first_message = text;
                         }
                     }
+                } else if m.message.is_assistant() {
+                    assistant_count += 1;
+                    // Use assistant text as first_message fallback
+                    if first_message.is_empty() {
+                        let text = m.message.content();
+                        if !text.is_empty() {
+                            first_message = text;
+                        }
+                    }
                 }
             }
         }
     }
 
-    // Skip sessions with no real messages
-    if message_count == 0 {
+    // Skip sessions with no messages at all (user or assistant)
+    if message_count == 0 && assistant_count == 0 {
         return None;
     }
 
