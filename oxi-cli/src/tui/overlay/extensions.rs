@@ -41,10 +41,8 @@ struct ExtensionEntry {
 
 impl ExtensionEntry {
     fn status_icon(&self) -> &str {
-        if !self.toggleable {
-            "●" // always on
-        } else if self.enabled {
-            "●" // enabled
+        if !self.toggleable || self.enabled {
+            "●" // active
         } else {
             "○" // disabled
         }
@@ -158,7 +156,10 @@ impl ExtensionsOverlay {
     }
 
     fn entry_count(&self) -> usize {
-        self.rows.iter().filter(|r| matches!(r, ListRow::Entry { .. })).count()
+        self.rows
+            .iter()
+            .filter(|r| matches!(r, ListRow::Entry { .. }))
+            .count()
     }
 
     /// Get the entry index of the nth selectable (Entry) row.
@@ -216,7 +217,10 @@ impl ExtensionsOverlay {
             if re_registered {
                 entry.enabled = true;
                 self.active_count = self.all_entries.iter().filter(|e| e.enabled).count();
-                self.notify(format!("Enabled: {}", entry_name), NotificationKind::Success);
+                self.notify(
+                    format!("Enabled: {}", entry_name),
+                    NotificationKind::Success,
+                );
             } else {
                 self.notify(
                     format!("Cannot re-enable: {}", entry_name),
@@ -275,8 +279,17 @@ fn collect_entries(session: &crate::app::agent_session::AgentSession) -> Vec<Ext
     let names = registry.names();
 
     let builtin_names: std::collections::HashSet<&str> = [
-        "read", "write", "edit", "bash", "grep", "find", "ls",
-        "web_search", "get_search_results", "github", "subagent",
+        "read",
+        "write",
+        "edit",
+        "bash",
+        "grep",
+        "find",
+        "ls",
+        "web_search",
+        "get_search_results",
+        "github",
+        "subagent",
     ]
     .into_iter()
     .collect();
@@ -314,7 +327,9 @@ fn collect_entries(session: &crate::app::agent_session::AgentSession) -> Vec<Ext
             EntryCategory::Optional => 1,
             EntryCategory::Wasm => 2,
         };
-        ord(&a.category).cmp(&ord(&b.category)).then_with(|| a.name.cmp(&b.name))
+        ord(&a.category)
+            .cmp(&ord(&b.category))
+            .then_with(|| a.name.cmp(&b.name))
     });
 
     entries
@@ -347,9 +362,9 @@ fn try_re_register_tool(name: &str, registry: &std::sync::Arc<oxi_agent::ToolReg
             true
         }
         "subagent" => {
-            registry.register(oxi_agent::SubagentTool::with_cwd(
-                std::path::PathBuf::from("."),
-            ));
+            registry.register(oxi_agent::SubagentTool::with_cwd(std::path::PathBuf::from(
+                ".",
+            )));
             true
         }
         _ => false,
@@ -376,7 +391,10 @@ impl OverlayComponent for ExtensionsOverlay {
                 self.detail_scroll = 0;
             }
             KeyCode::PageUp => {
-                self.selected = self.selected.saturating_sub(10).min(count.saturating_sub(1));
+                self.selected = self
+                    .selected
+                    .saturating_sub(10)
+                    .min(count.saturating_sub(1));
                 self.detail_scroll = 0;
             }
             KeyCode::PageDown => {
@@ -426,7 +444,10 @@ impl OverlayComponent for ExtensionsOverlay {
         let title_text = if self.filter.is_empty() {
             format!(" Extensions ({}/{}) ", active, total)
         } else {
-            format!(" Extensions ({}/{}) filter: {} ", active, total, self.filter)
+            format!(
+                " Extensions ({}/{}) filter: {} ",
+                active, total, self.filter
+            )
         };
 
         let border_block = Block::default()
@@ -455,7 +476,12 @@ impl OverlayComponent for ExtensionsOverlay {
                     "│",
                     Style::default().fg(theme.colors.border.to_ratatui()),
                 )),
-                Rect { x: sep_x, y, width: 1, height: 1 },
+                Rect {
+                    x: sep_x,
+                    y,
+                    width: 1,
+                    height: 1,
+                },
             );
         }
 
@@ -484,7 +510,14 @@ impl OverlayComponent for ExtensionsOverlay {
 
         // ── Detail panel ──
         if let Some(entry) = self.selected_entry() {
-            render_detail_panel(frame, detail_area, entry, theme, &styles, self.detail_scroll);
+            render_detail_panel(
+                frame,
+                detail_area,
+                entry,
+                theme,
+                &styles,
+                self.detail_scroll,
+            );
         } else {
             frame.render_widget(
                 Paragraph::new(Span::styled(
@@ -528,9 +561,10 @@ impl ExtensionsOverlay {
                     let section_style = Style::default()
                         .fg(theme.colors.primary.to_ratatui())
                         .add_modifier(Modifier::BOLD);
-                    items.push(ListItem::new(Line::from(vec![
-                        Span::styled(format!(" {} ", label), section_style),
-                    ])));
+                    items.push(ListItem::new(Line::from(vec![Span::styled(
+                        format!(" {} ", label),
+                        section_style,
+                    )])));
                 }
                 ListRow::Entry { entry_idx } => {
                     let entry = &self.all_entries[*entry_idx];
@@ -559,7 +593,8 @@ impl ExtensionsOverlay {
 
                     let max_label_len = (list_width as usize).saturating_sub(16);
                     let truncated_label: String = entry.name.chars().take(max_label_len).collect();
-                    let padded_label = format!("{:<width$}", truncated_label, width = max_label_len);
+                    let padded_label =
+                        format!("{:<width$}", truncated_label, width = max_label_len);
 
                     let mut spans = vec![
                         Span::styled(format!(" {} ", icon), Style::default().fg(icon_color)),

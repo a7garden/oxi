@@ -1248,8 +1248,8 @@ async fn handle_wizard_step_key(
                                 let model_id = "default".to_string();
                                 let full_model = format!("{}/{}", provider, model_id);
                                 if let Ok(mut settings) = oxi_store::settings::Settings::load() {
-                                    settings.default_model = Some(model_id.clone());
-                                    settings.default_provider = Some(provider.clone());
+                                    settings.last_used_model = Some(model_id.clone());
+                                    settings.last_used_provider = Some(provider.clone());
                                     let _ = settings.save();
                                 }
                                 state.footer_state.data.model_name = full_model.clone();
@@ -1349,8 +1349,8 @@ async fn handle_wizard_step_key(
                         if let Some(model_id) = models.get(*selected) {
                             let full_model = format!("{}/{}", provider, model_id);
                             if let Ok(mut settings) = oxi_store::settings::Settings::load() {
-                                settings.default_model = Some(model_id.to_string());
-                                settings.default_provider = Some(provider.clone());
+                                settings.last_used_model = Some(model_id.to_string());
+                                settings.last_used_provider = Some(provider.clone());
                                 let _ = settings.save();
                             }
                             state.footer_state.data.model_name = full_model.clone();

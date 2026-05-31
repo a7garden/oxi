@@ -365,27 +365,46 @@ impl PackageManager {
 
 ## Slash Commands
 
-Slash commands provide in-session shortcuts:
-
-```rust
-pub struct SlashCommand {
-    pub name: String,
-    pub description: String,
-    pub handler: Box<dyn Fn(&str, &mut AgentSession) -> Result<()>>,
-}
-```
+Slash commands provide in-session shortcuts. Defined in `util/slash_commands.rs`,
+handled in `tui/slash.rs`.
 
 ### Built-in Commands
 
 | Command | Description |
 |---------|-------------|
-| `/model <model>` | Switch model |
-| `/provider <provider>` | Switch provider |
-| `/session` | Show current session info |
-| `/clear` | Clear conversation |
-| `/compact` | Trigger compaction |
-| `/save <name>` | Save conversation |
-| `/load <name>` | Load conversation |
+| `/help` | Show help and available commands |
+| `/quit` | Quit oxi (aliases: /exit, /q) |
+| `/model [id]` | Switch or show model |
+| `/scoped-models` | Set/get models for Ctrl+P cycling |
+| `/router` | Configure model router |
+| `/router pin <tier>` | Pin router tier (low/medium/high/off) |
+| `/router disable` | Switch away from router |
+| `/router enable` | Switch to router/auto |
+| `/skill` | List skills with active status |
+| `/skill <name>` | Activate a skill |
+| `/skill off <name>` | Deactivate a skill |
+| `/compact [instr]` | Manually compact context |
+| `/tools [name]` | List active tools or toggle on/off |
+| `/extensions` | List extensions & WASM tools |
+| `/export [path]` | Export session to HTML |
+| `/import <path>` | Import session from JSONL |
+| `/share` | Share session as GitHub Gist |
+| `/copy` | Copy code block / last reply to clipboard |
+| `/new` | Start a new session |
+| `/clone` | Duplicate current session |
+| `/resume` | Resume a different session |
+| `/fork [id]` | Fork from a previous message |
+| `/tree` | Show session tree structure |
+| `/session` | Show session info and stats |
+| `/name <name>` | Set session display name |
+| `/provider` | Configure API key for a provider |
+| `/logout` | Remove provider authentication |
+| `/settings` | Show current settings |
+| `/reload` | Reload settings, theme, and extensions |
+| `/changelog` | Show changelog entries |
+| `/hotkeys` | Show all keyboard shortcuts |
+
+Extensions can register additional slash commands via `Extension::register_commands()`.
 
 ## Telemetry
 

@@ -113,7 +113,7 @@ impl Settings {
         //    However, values injected via env vars may bypass this, so add a safety check.
         //    (ThinkingLevel is already an enum, so invalid values are rejected at deserialization)
 
-        // 5. default_model — model name only (no provider prefix expected)
+        // 5. last_used_model — may contain provider/model or bare model name.
         // No validation needed: model name may or may not contain '/' depending on user input.
 
         // 6. session_history_size — minimum 1
@@ -264,12 +264,12 @@ mod tests {
         assert!(settings.validate().is_valid());
     }
 
-    // ── default_model (now model-only, no slash validation) ──────
+    // ── last_used_model ────────────────────────────────────────────
 
     #[test]
     fn test_model_without_slash_is_ok() {
         let mut settings = Settings::default();
-        settings.default_model = Some("claude-3".to_string());
+        settings.last_used_model = Some("claude-3".to_string());
         let report = settings.validate();
         assert!(report.is_valid());
         assert!(report.warnings.is_empty());
@@ -307,14 +307,14 @@ mod tests {
         let mut settings = Settings::default();
         settings.default_temperature = Some(5.0);
         settings.tool_timeout_seconds = 0;
-        settings.default_model = Some("badmodel".to_string());
+        settings.last_used_model = Some("badmodel".to_string());
         settings.session_history_size = 0;
 
         let report = settings.validate();
         assert!(!report.is_valid());
         // 3 errors: temperature, tool_timeout, session_history_size
         assert_eq!(report.errors.len(), 3);
-        // No warnings (default_model no longer warns for missing slash)
+        // No warnings (last_used_model no longer warns for missing slash)
         assert_eq!(report.warnings.len(), 0);
     }
 

@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn test_settings_merge_cli() {
         let mut settings = Settings::default();
-        settings.default_model = Some("claude-3-5-sonnet".to_string());
+        settings.last_used_model = Some("claude-3-5-sonnet".to_string());
 
         settings.merge_cli(
             Some("gpt-4o".to_string()),
@@ -68,8 +68,8 @@ mod tests {
             None,
         );
 
-        assert_eq!(settings.default_model.as_deref(), Some("gpt-4o"));
-        assert_eq!(settings.default_provider.as_deref(), Some("openai"));
+        assert_eq!(settings.last_used_model.as_deref(), Some("gpt-4o"));
+        assert_eq!(settings.last_used_provider.as_deref(), Some("openai"));
     }
 
     #[test]

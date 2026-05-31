@@ -718,10 +718,10 @@ pub fn find_initial_model(
         };
     }
 
-    // 3. Try saved default from settings
+    // 3. Try last used model from settings
     if let Some(s) = settings {
-        if let Some(default_model) = &s.default_model {
-            let parsed = parse_model_pattern(default_model, available_models);
+        if let Some(last_used) = &s.last_used_model {
+            let parsed = parse_model_pattern(last_used, available_models);
             if let Some(ref p) = parsed.provider {
                 let model = available_models
                     .iter()

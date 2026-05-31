@@ -23,8 +23,8 @@ fn test_settings_save_and_reload_json() {
     let settings_path = tmp.path().join("settings.json");
 
     let mut settings = Settings::default();
-    settings.default_model = Some("claude-sonnet-4-20250514".to_string());
-    settings.default_provider = Some("anthropic".to_string());
+    settings.last_used_model = Some("claude-sonnet-4-20250514".to_string());
+    settings.last_used_provider = Some("anthropic".to_string());
     settings.theme = "monokai".to_string();
     settings.stream_responses = false;
     settings.tool_timeout_seconds = 60;
@@ -40,10 +40,10 @@ fn test_settings_save_and_reload_json() {
     let loaded: Settings = serde_json::from_str(&content).expect("parse settings JSON");
 
     assert_eq!(
-        loaded.default_model,
+        loaded.last_used_model,
         Some("claude-sonnet-4-20250514".to_string())
     );
-    assert_eq!(loaded.default_provider, Some("anthropic".to_string()));
+    assert_eq!(loaded.last_used_provider, Some("anthropic".to_string()));
     assert_eq!(loaded.theme, "monokai");
     assert!(!loaded.stream_responses);
     assert_eq!(loaded.tool_timeout_seconds, 60);
@@ -55,8 +55,8 @@ fn test_settings_save_and_reload_toml() {
     let settings_path = tmp.path().join("settings.toml");
 
     let mut settings = Settings::default();
-    settings.default_model = Some("gpt-4o".to_string());
-    settings.default_provider = Some("openai".to_string());
+    settings.last_used_model = Some("gpt-4o".to_string());
+    settings.last_used_provider = Some("openai".to_string());
 
     settings
         .save_to(&settings_path)
@@ -67,8 +67,8 @@ fn test_settings_save_and_reload_toml() {
     let content = fs::read_to_string(&settings_path).expect("read settings");
     let loaded: Settings = toml::from_str(&content).expect("parse settings TOML");
 
-    assert_eq!(loaded.default_model, Some("gpt-4o".to_string()));
-    assert_eq!(loaded.default_provider, Some("openai".to_string()));
+    assert_eq!(loaded.last_used_model, Some("gpt-4o".to_string()));
+    assert_eq!(loaded.last_used_provider, Some("openai".to_string()));
 }
 
 #[test]
@@ -78,8 +78,8 @@ fn test_settings_roundtrip_preserves_all_fields() {
 
     let mut original = Settings::default();
     original.version = 4;
-    original.default_model = Some("test-model".to_string());
-    original.default_provider = Some("test-provider".to_string());
+    original.last_used_model = Some("test-model".to_string());
+    original.last_used_provider = Some("test-provider".to_string());
     original.max_tokens = Some(4096);
     original.temperature = Some(0.7);
     original.default_temperature = Some(0.8);
@@ -105,8 +105,8 @@ fn test_settings_roundtrip_preserves_all_fields() {
     let loaded: Settings = serde_json::from_str(&content).expect("parse");
 
     assert_eq!(loaded.version, 4);
-    assert_eq!(loaded.default_model, Some("test-model".to_string()));
-    assert_eq!(loaded.default_provider, Some("test-provider".to_string()));
+    assert_eq!(loaded.last_used_model, Some("test-model".to_string()));
+    assert_eq!(loaded.last_used_provider, Some("test-provider".to_string()));
     assert_eq!(loaded.max_tokens, Some(4096));
     assert_eq!(loaded.default_temperature, Some(0.8));
     assert_eq!(loaded.max_response_tokens, Some(8192));
@@ -285,22 +285,18 @@ fn test_settings_effective_model() {
     assert!(settings.effective_model(None).is_none());
 
     // CLI override takes precedence
-    settings.default_model = Some("gpt-4o".to_string());
-    settings.default_provider = Some("openai".to_string());
+    settings.last_used_model = Some("gpt-4o".to_string());
+    settings.last_used_provider = Some("openai".to_string());
     assert_eq!(
         settings.effective_model(Some("cli-model")),
         Some("cli-model".to_string())
     );
 
-    // No CLI, uses provider/model combo
+    // No CLI, uses last_used_model
     assert_eq!(
         settings.effective_model(None),
-        Some("openai/gpt-4o".to_string())
+        Some("gpt-4o".to_string())
     );
-
-    // Only model, no provider
-    settings.default_provider = None;
-    assert_eq!(settings.effective_model(None), Some("gpt-4o".to_string()));
 }
 
 #[test]
@@ -426,8 +422,8 @@ fn test_thinking_level_serialization() {
 #[test]
 fn test_settings_merge_cli() {
     let mut settings = Settings::default();
-    assert!(settings.default_model.is_none());
-    assert!(settings.default_provider.is_none());
+    assert!(settings.last_used_model.is_none());
+    assert!(settings.last_used_provider.is_none());
 
     settings.merge_cli(
         Some("gpt-4o".to_string()),
@@ -437,13 +433,13 @@ fn test_settings_merge_cli() {
         None,
         None,
     );
-    assert_eq!(settings.default_model, Some("gpt-4o".to_string()));
-    assert_eq!(settings.default_provider, Some("openai".to_string()));
+    assert_eq!(settings.last_used_model, Some("gpt-4o".to_string()));
+    assert_eq!(settings.last_used_provider, Some("openai".to_string()));
 
     // Override again
     settings.merge_cli(Some("claude-3".to_string()), None, None, None, None, None);
-    assert_eq!(settings.default_model, Some("claude-3".to_string()));
-    assert_eq!(settings.default_provider, Some("openai".to_string())); // unchanged
+    assert_eq!(settings.last_used_model, Some("claude-3".to_string()));
+    assert_eq!(settings.last_used_provider, Some("openai".to_string())); // unchanged
 }
 
 // ═══════════════════════════════════════════════════════════════════

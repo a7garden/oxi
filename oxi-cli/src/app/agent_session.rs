@@ -488,15 +488,15 @@ impl AgentSession {
             }
         }
 
-        // Update settings default
+        // Update settings: persist as last_used
         {
             let mut settings = self.settings.write();
             let parts: Vec<&str> = model_id.split('/').collect();
             if parts.len() >= 2 {
-                settings.default_provider = Some(parts[0].to_string());
-                settings.default_model = Some(parts[1..].join("/"));
+                settings.last_used_provider = Some(parts[0].to_string());
+                settings.last_used_model = Some(parts[1..].join("/"));
             } else {
-                settings.default_model = Some(model_id.to_string());
+                settings.last_used_model = Some(model_id.to_string());
             }
         }
 

@@ -198,6 +198,14 @@ pub const HELP_CONTENT: &str = r#" Session
   /model [id]       Switch or show model
   /scoped-models    Models for Ctrl+P cycling
   /router           Configure model router
+  /router pin <t>   Pin router tier (low/medium/high/off)
+  /router disable   Switch away from router
+  /router enable    Switch to router/auto
+
+ Skills
+  /skill            List skills with active status
+  /skill <name>     Activate a skill
+  /skill off <name> Deactivate a skill
 
  Context
   /compact [instr]  Compact context
@@ -222,7 +230,7 @@ pub const HELP_CONTENT: &str = r#" Session
   /hotkeys          Key shortcuts
   /changelog        Changelog
   /settings         Current settings
-  /reload           Reload config
+  /reload           Reload settings & extensions
   /quit             Quit
 
  Keys

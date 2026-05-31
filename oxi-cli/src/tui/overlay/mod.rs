@@ -9,9 +9,9 @@ use oxi_tui::Theme;
 use ratatui::{layout::Rect, Frame};
 
 pub mod anchor;
+pub mod extensions;
 pub mod factories;
 pub mod fork_select;
-pub mod extensions;
 pub mod questionnaire;
 pub mod router_integration;
 pub mod router_setup;

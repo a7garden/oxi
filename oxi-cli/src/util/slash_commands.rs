@@ -1,41 +1,94 @@
 //! Built-in slash command definitions.
 //!
-//! Built-in slash command definitions.
+//! Single source of truth for all slash command names and descriptions.
+//! Used by both the TUI completion system and help overlays.
 
 /// A built-in slash command definition.
 #[derive(Debug, Clone)]
 pub struct BuiltinSlashCommand {
-    /// pub.
+    /// Command name (without the leading `/`).
     pub name: &'static str,
-    /// pub.
+    /// Short description shown in completions and help.
     pub description: &'static str,
 }
 
 /// All built-in slash commands available in oxi.
+///
+/// Keep in sync with `handle_slash_command()` in `tui/slash.rs`.
 pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
+    // ── Session ────────────────────────────────────────────────
     BuiltinSlashCommand {
         name: "help",
         description: "Show help and available commands",
     },
     BuiltinSlashCommand {
         name: "quit",
-        description: "Quit oxi",
+        description: "Quit oxi (aliases: /exit, /q)",
     },
     BuiltinSlashCommand {
-        name: "settings",
-        description: "Show current settings",
+        name: "new",
+        description: "Start a new session",
     },
+    BuiltinSlashCommand {
+        name: "clone",
+        description: "Duplicate the current session at the current position",
+    },
+    BuiltinSlashCommand {
+        name: "resume",
+        description: "Resume a different session",
+    },
+    BuiltinSlashCommand {
+        name: "fork",
+        description: "Create a new fork from a previous user message",
+    },
+    BuiltinSlashCommand {
+        name: "tree",
+        description: "Show session tree structure",
+    },
+    BuiltinSlashCommand {
+        name: "session",
+        description: "Show session info and stats",
+    },
+    BuiltinSlashCommand {
+        name: "name",
+        description: "Set session display name",
+    },
+    // ── Model ──────────────────────────────────────────────────
     BuiltinSlashCommand {
         name: "model",
-        description: "Select model (opens selector UI)",
+        description: "Select or switch model (opens selector UI)",
     },
     BuiltinSlashCommand {
         name: "scoped-models",
-        description: "Enable/disable models for Ctrl+P cycling",
+        description: "Set/get models for Ctrl+P cycling (alias: /models)",
     },
     BuiltinSlashCommand {
+        name: "router",
+        description: "Configure or inspect model router",
+    },
+    // ── Skills ─────────────────────────────────────────────────
+    BuiltinSlashCommand {
+        name: "skill",
+        description: "List, activate, or deactivate skills",
+    },
+    // ── Context ────────────────────────────────────────────────
+    BuiltinSlashCommand {
+        name: "compact",
+        description: "Manually compact the session context",
+    },
+    // ── Tools ──────────────────────────────────────────────────
+    BuiltinSlashCommand {
+        name: "tools",
+        description: "List active tools or toggle tool on/off",
+    },
+    BuiltinSlashCommand {
+        name: "extensions",
+        description: "List extensions & WASM tools (alias: /ext)",
+    },
+    // ── Export ─────────────────────────────────────────────────
+    BuiltinSlashCommand {
         name: "export",
-        description: "Export session (HTML default, or specify path: .html/.jsonl)",
+        description: "Export session to HTML",
     },
     BuiltinSlashCommand {
         name: "import",
@@ -46,37 +99,10 @@ pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
         description: "Copy last agent message to clipboard",
     },
     BuiltinSlashCommand {
-        name: "name",
-        description: "Set session display name",
-    },
-    BuiltinSlashCommand {
-        name: "session",
-        description: "Show session info and stats",
-    },
-    BuiltinSlashCommand {
         name: "share",
         description: "Share session as a GitHub Gist (requires gh CLI)",
     },
-    BuiltinSlashCommand {
-        name: "changelog",
-        description: "Show changelog entries",
-    },
-    BuiltinSlashCommand {
-        name: "hotkeys",
-        description: "Show all keyboard shortcuts",
-    },
-    BuiltinSlashCommand {
-        name: "fork",
-        description: "Create a new fork from a previous user message",
-    },
-    BuiltinSlashCommand {
-        name: "clone",
-        description: "Duplicate the current session at the current position",
-    },
-    BuiltinSlashCommand {
-        name: "tree",
-        description: "Show session tree structure",
-    },
+    // ── Auth ───────────────────────────────────────────────────
     BuiltinSlashCommand {
         name: "provider",
         description: "Configure API key for a provider",
@@ -85,29 +111,22 @@ pub static BUILTIN_SLASH_COMMANDS: &[BuiltinSlashCommand] = &[
         name: "logout",
         description: "Remove provider authentication",
     },
+    // ── Info ───────────────────────────────────────────────────
     BuiltinSlashCommand {
-        name: "new",
-        description: "Start a new session",
+        name: "settings",
+        description: "Show current settings",
     },
     BuiltinSlashCommand {
-        name: "compact",
-        description: "Manually compact the session context",
+        name: "hotkeys",
+        description: "Show all keyboard shortcuts (alias: /keys)",
     },
     BuiltinSlashCommand {
-        name: "resume",
-        description: "Resume a different session",
+        name: "changelog",
+        description: "Show changelog entries",
     },
     BuiltinSlashCommand {
         name: "reload",
         description: "Reload settings, theme, and extensions",
-    },
-    BuiltinSlashCommand {
-        name: "tools",
-        description: "List active tools or toggle tool on/off",
-    },
-    BuiltinSlashCommand {
-        name: "extensions",
-        description: "List extensions & WASM tools",
     },
 ];
 

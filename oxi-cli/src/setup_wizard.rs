@@ -328,12 +328,12 @@ fn save_settings(
 ) -> Result<()> {
     let mut settings = oxi_store::settings::Settings::load().unwrap_or_default();
 
-    // Split "provider/model" into separate fields
+    // Split "provider/model" and store as last_used
     if let Some((provider, model_name)) = model_id.split_once('/') {
-        settings.default_provider = Some(provider.to_string());
-        settings.default_model = Some(model_name.to_string());
+        settings.last_used_provider = Some(provider.to_string());
+        settings.last_used_model = Some(model_name.to_string());
     } else {
-        settings.default_model = Some(model_id.to_string());
+        settings.last_used_model = Some(model_id.to_string());
     }
     settings.theme = theme_name.to_string();
 
@@ -1085,7 +1085,7 @@ pub fn run() -> Result<()> {
     // Find the index of the current default model
     let current_model = oxi_store::settings::Settings::load()
         .ok()
-        .and_then(|s| s.default_model.clone())
+        .and_then(|s| s.last_used_model.clone())
         .unwrap_or_default();
 
     let model_selected = models

@@ -211,6 +211,24 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         Commands::Setup { reset } => {
             handle_setup_command(*reset)?;
         }
+        Commands::Reset {
+            yes,
+            include_project,
+        } => {
+            handle_reset_command(*yes, *include_project)?;
+        }
+        Commands::Export {
+            session_id,
+            output,
+        } => {
+            handle_export_command(session_id.as_deref(), output.as_deref())?;
+        }
+        Commands::Import { path } => {
+            handle_import_command(path)?;
+        }
+        Commands::Share { session_id } => {
+            handle_share_command(session_id.as_deref()).await?;
+        }
     }
 
     Ok(())
@@ -564,11 +582,11 @@ fn config_set(key: &str, value: &str) -> Result<()> {
         "theme" => {
             settings.theme = value.to_string();
         }
-        "default_model" | "model" => {
-            settings.default_model = Some(value.to_string());
+        "model" => {
+            settings.last_used_model = Some(value.to_string());
         }
-        "default_provider" | "provider" => {
-            settings.default_provider = Some(value.to_string());
+        "provider" => {
+            settings.last_used_provider = Some(value.to_string());
         }
         "thinking_level" | "thinking" => {
             let level = oxi_store::settings::parse_thinking_level(value).ok_or_else(|| {
@@ -614,7 +632,9 @@ fn config_set(key: &str, value: &str) -> Result<()> {
         }
         _ => {
             anyhow::bail!(
-                "Unknown setting: '{}'. Valid keys: theme, default_model, default_provider,                  thinking_level, extensions_enabled, stream_responses, auto_compaction,                  tool_timeout, max_tokens, temperature, session_history_size",
+                "Unknown setting: '{}'. Valid keys: theme, model, provider,\
+                  thinking_level, extensions_enabled, stream_responses, auto_compaction,\
+                  tool_timeout, max_tokens, temperature, session_history_size",
                 key
             );
         }
@@ -631,12 +651,12 @@ fn config_get(key: &str) -> Result<()> {
 
     let value = match key {
         "theme" => settings.theme.clone(),
-        "default_model" | "model" => settings
-            .default_model
+        "model" => settings
+            .last_used_model
             .clone()
             .unwrap_or_else(|| "(not set)".to_string()),
-        "default_provider" | "provider" => settings
-            .default_provider
+        "provider" => settings
+            .last_used_provider
             .clone()
             .unwrap_or_else(|| "(not set)".to_string()),
         "thinking_level" | "thinking" => format!("{:?}", settings.thinking_level).to_lowercase(),
@@ -673,7 +693,10 @@ fn config_get(key: &str) -> Result<()> {
         }
         _ => {
             anyhow::bail!(
-                "Unknown setting: '{}'. Valid keys: theme, default_model, default_provider,                  thinking_level, extensions_enabled, stream_responses, auto_compaction,                  tool_timeout, max_tokens, temperature, session_history_size,                  extensions, skills, prompts, themes, custom_providers",
+                "Unknown setting: '{}'. Valid keys: theme, model, provider,\
+                  thinking_level, extensions_enabled, stream_responses, auto_compaction,\
+                  tool_timeout, max_tokens, temperature, session_history_size,\
+                  extensions, skills, prompts, themes, custom_providers",
                 key
             );
         }
@@ -738,6 +761,285 @@ fn handle_setup_command(reset: bool) -> Result<()> {
         handle_config_reset(true)?;
     }
     oxi::setup_wizard::run()
+}
+
+/// Target descriptor for the reset command.
+struct ResetTarget {
+    label: String,
+    path: std::path::PathBuf,
+    description: String,
+}
+
+/// Handle `oxi reset [--yes] [--include-project]`
+///
+/// Factory-reset: deletes ALL oxi data.
+/// Optionally also deletes the project-local `.oxi/` directory.
+fn handle_reset_command(yes: bool, include_project: bool) -> Result<()> {
+    use std::io::{self, Write};
+
+    // ── Collect targets ──────────────────────────────────────────
+    let home =
+        dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+
+    let oxi_dir = home.join(".oxi");
+    let config_oxi_dir = dirs::config_dir()
+        .unwrap_or_else(|| home.join(".config"))
+        .join("oxi");
+    let cache_oxi_dir = dirs::cache_dir()
+        .unwrap_or_else(|| home.join(".cache"))
+        .join("oxi");
+
+    let mut targets: Vec<ResetTarget> = vec![];
+
+    // ~/.oxi/ — split into sub-items for clarity
+    if oxi_dir.exists() {
+        let sub_items = [
+            ("settings.toml", "global settings"),
+            ("settings.json", "global settings (JSON)"),
+            ("auth.json", "credentials (API keys, OAuth tokens)"),
+            ("sessions", "session history"),
+            ("skills", "skills"),
+            ("extensions", "extensions"),
+            ("packages", "packages"),
+        ];
+        let mut has_sub = false;
+        for (name, desc) in &sub_items {
+            let p = oxi_dir.join(name);
+            if p.exists() {
+                has_sub = true;
+                targets.push(ResetTarget {
+                    label: format!("~/.oxi/{}", name),
+                    path: p,
+                    description: desc.to_string(),
+                });
+            }
+        }
+        // If no known sub-items found, target the whole directory
+        if !has_sub {
+            targets.push(ResetTarget {
+                label: "~/.oxi".to_string(),
+                path: oxi_dir.clone(),
+                description: "oxi home (settings, sessions, skills, extensions, packages)"
+                    .to_string(),
+            });
+        }
+    }
+
+    // ~/.config/oxi/ — MCP config, alternative auth location
+    if config_oxi_dir.exists() {
+        targets.push(ResetTarget {
+            label: display_path(&config_oxi_dir),
+            path: config_oxi_dir,
+            description: "MCP config, credentials".to_string(),
+        });
+    }
+
+    // ~/.cache/oxi/ — logs
+    if cache_oxi_dir.exists() {
+        targets.push(ResetTarget {
+            label: display_path(&cache_oxi_dir),
+            path: cache_oxi_dir,
+            description: "logs, cache".to_string(),
+        });
+    }
+
+    // Project-local .oxi/
+    let project_oxi = std::env::current_dir().unwrap_or_default().join(".oxi");
+    let mut project_target: Option<ResetTarget> = None;
+    if include_project && project_oxi.exists() {
+        project_target = Some(ResetTarget {
+            label: display_path(&project_oxi),
+            path: project_oxi.clone(),
+            description: "project settings".to_string(),
+        });
+    }
+
+    let total_count = targets.len() + usize::from(project_target.is_some());
+    if total_count == 0 {
+        println!("Nothing to reset — no oxi data found.");
+        return Ok(());
+    }
+
+    // ── Calculate total size ─────────────────────────────────────
+    let mut total_bytes: u64 = 0;
+    for t in &targets {
+        total_bytes += dir_size_bytes(&t.path);
+    }
+    if let Some(ref pt) = project_target {
+        total_bytes += dir_size_bytes(&pt.path);
+    }
+
+    // ── Show what will be deleted ────────────────────────────────
+    eprintln!();
+    eprintln!("     ⚠ Warning: The following will be permanently deleted:");
+    eprintln!();
+    for (i, t) in targets.iter().enumerate() {
+        eprintln!(
+            "       {}. {} ({})",
+            i + 1,
+            display_path(&t.path),
+            dir_size_human(&t.path)
+        );
+        eprintln!("          {}", t.description);
+    }
+    if let Some(ref pt) = project_target {
+        eprintln!(
+            "       {}. {} ({})",
+            total_count,
+            display_path(&pt.path),
+            dir_size_human(&pt.path)
+        );
+        eprintln!("          {}", pt.description);
+    }
+    eprintln!();
+    eprintln!(
+        "     Total: {} item(s), {}",
+        total_count,
+        bytes_human(total_bytes)
+    );
+    eprintln!();
+    eprintln!(
+        "     This cannot be undone. All sessions, skills, extensions, and settings will be deleted."
+    );
+    eprintln!();
+
+    if !yes {
+        eprint!("     Type RESET to continue: ");
+        io::stdout().flush()?;
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        if input.trim() != "RESET" {
+            eprintln!();
+            eprintln!();
+            eprintln!("     Cancelled.");
+            return Ok(());
+        }
+    }
+
+    // ── Delete ───────────────────────────────────────────────────
+    eprintln!();
+    let mut errors = Vec::new();
+
+    for t in &targets {
+        eprint!("     ● Deleting {}...", t.label);
+        io::stdout().flush()?;
+        match remove_path(&t.path) {
+            Ok(()) => eprintln!(" done"),
+            Err(e) => {
+                eprintln!(" failed");
+                eprintln!("       ✗ {}: {}", t.label, e);
+                errors.push(format!("{}: {}", t.label, e));
+            }
+        }
+    }
+    if let Some(ref pt) = project_target {
+        eprint!("     ● Deleting {}...", pt.label);
+        io::stdout().flush()?;
+        match remove_path(&pt.path) {
+            Ok(()) => eprintln!(" done"),
+            Err(e) => {
+                eprintln!(" failed");
+                eprintln!("       ✗ {}: {}", pt.label, e);
+                errors.push(format!("{}: {}", pt.label, e));
+            }
+        }
+    }
+
+    eprintln!();
+    if errors.is_empty() {
+        eprintln!("     ✓ All oxi data has been reset.");
+        eprintln!("     → Run 'oxi setup' to reconfigure.");
+    } else {
+        eprintln!("     ⚠ {} item(s) failed to delete:", errors.len());
+        for err in &errors {
+            eprintln!("       • {}", err);
+        }
+        eprintln!("     Some data may need manual cleanup.");
+    }
+
+    Ok(())
+}
+
+/// Remove a file or directory (including all contents).
+fn remove_path(path: &std::path::Path) -> Result<()> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)?;
+    } else {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+/// Display path with ~/ abbreviation for home directory.
+fn display_path(path: &std::path::Path) -> String {
+    if let Some(home) = dirs::home_dir() {
+        let home_str = home.to_string_lossy();
+        let path_str = path.to_string_lossy();
+        if let Some(rest) = path_str.strip_prefix(home_str.as_ref()) {
+            return format!("~{}", rest);
+        }
+    }
+    path.display().to_string()
+}
+
+/// Calculate total bytes in a directory or file.
+fn dir_size_bytes(path: &std::path::Path) -> u64 {
+    let mut total: u64 = 0;
+    if path.is_dir() {
+        if let Ok(entries) = walkdir_recursive(path) {
+            for entry in entries {
+                if let Ok(meta) = std::fs::metadata(&entry) {
+                    if meta.is_file() {
+                        total += meta.len();
+                    }
+                }
+            }
+        }
+    } else if let Ok(meta) = std::fs::metadata(path) {
+        total = meta.len();
+    }
+    total
+}
+
+/// Calculate a human-readable directory or file size.
+fn dir_size_human(path: &std::path::Path) -> String {
+    bytes_human(dir_size_bytes(path))
+}
+
+/// Format bytes as a human-readable string.
+fn bytes_human(bytes: u64) -> String {
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+/// Walk a directory recursively, collecting all file paths.
+fn walkdir_recursive(dir: &std::path::Path) -> Result<Vec<std::path::PathBuf>> {
+    let mut result = Vec::new();
+    if dir.is_dir() {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                result.extend(walkdir_recursive(&path)?);
+            } else {
+                result.push(path);
+            }
+        }
+    }
+    Ok(result)
 }
 
 /// Handle `oxi config reset [--all]`
@@ -1277,4 +1579,211 @@ fn register_router_provider(settings: &Settings) {
     if let Some(profile) = settings.router_profile() {
         tracing::info!("Router active with profile: {profile}");
     }
+}
+
+// ── Export / Import / Share ──────────────────────────────────────────────────
+
+/// Handle `oxi export [SESSION_ID] [--output PATH]`
+fn handle_export_command(session_id: Option<&str>, output_path: Option<&std::path::Path>) -> Result<()> {
+    use oxi_store::session::SessionManager;
+
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+
+    // Resolve session file
+    let session_path = if let Some(sid) = session_id {
+        // Try as a direct path first
+        let direct = std::path::Path::new(sid);
+        if direct.exists() {
+            direct.to_path_buf()
+        } else {
+            anyhow::bail!("Session not found: {}", sid);
+        }
+    } else {
+        // Find the most recent session for this CWD
+        // SessionManager::list is async but only does std::fs I/O internally.
+        let sessions = std::thread::scope(|s| {
+            s.spawn(|| {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()?;
+                rt.block_on(SessionManager::list(&cwd, None))
+            })
+            .join()
+            .map_err(|e| anyhow::anyhow!("thread panicked: {:?}", e))?
+        })?;
+        let most_recent = sessions
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No sessions found for this project"))?;
+        // Reconstruct the path from session_dir + id
+        let session_dir: std::path::PathBuf = oxi_store::session::get_default_session_dir(&cwd).into();
+        session_dir.join(format!("{}.jsonl", most_recent.id))
+    };
+
+    if !session_path.exists() {
+        anyhow::bail!("Session file not found: {}", session_path.display());
+    }
+
+    // Load session entries
+    let sm = SessionManager::open(&session_path.to_string_lossy(), None, Some(&cwd));
+    let branch = sm.get_branch(None);
+
+    // Build metadata
+    let meta = oxi::storage::export::ExportMeta {
+        model: None,
+        provider: None,
+        exported_at: chrono::Utc::now().timestamp_millis(),
+        total_user_tokens: None,
+        total_assistant_tokens: None,
+    };
+
+    let entries: Vec<oxi_store::session::SessionEntry> = branch.into_iter().collect();
+    let html = oxi::storage::export::export_to_html(
+        &entries,
+        &meta,
+        &oxi::storage::export::HtmlExportOptions::default(),
+    )?;
+
+    // Determine output path
+    let out = if let Some(p) = output_path {
+        p.to_path_buf()
+    } else {
+        let sid_short = session_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("session");
+        let short = &sid_short[..8.min(sid_short.len())];
+        std::path::PathBuf::from(format!("oxi-export-{}.html", short))
+    };
+
+    std::fs::write(&out, &html)?;
+    println!("Exported {} entries to {} ({} bytes)", entries.len(), out.display(), html.len());
+    Ok(())
+}
+
+/// Handle `oxi import <PATH>`
+fn handle_import_command(path: &std::path::Path) -> Result<()> {
+    if !path.exists() {
+        anyhow::bail!("File not found: {}", path.display());
+    }
+
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+
+    let resolved = oxi_store::session::resolve_session_path(
+        &path.to_string_lossy(),
+        &cwd,
+    ).map_err(|e| anyhow::anyhow!("Error resolving path: {}", e))?;
+
+    if !std::path::Path::new(&resolved).exists() {
+        anyhow::bail!("File not found: {}", resolved);
+    }
+
+    // Copy the session file into the sessions directory
+    let sessions_dir: std::path::PathBuf = oxi_store::session::get_default_session_dir(&cwd).into();
+    std::fs::create_dir_all(&sessions_dir)?;
+
+    let filename = path
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new("imported.jsonl"));
+    let dest = sessions_dir.join(filename);
+
+    // Avoid overwriting existing sessions
+    if dest.exists() {
+        let stem = dest
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("imported");
+        let ext = dest.extension().and_then(|s| s.to_str()).unwrap_or("jsonl");
+        let unique_name = format!("{}-{}.{}", stem, chrono::Utc::now().format("%Y%m%d%H%M%S"), ext);
+        let alt_dest = sessions_dir.join(&unique_name);
+        std::fs::copy(path, &alt_dest)?;
+        println!("Imported session to {}", alt_dest.display());
+    } else {
+        std::fs::copy(path, &dest)?;
+        println!("Imported session to {}", dest.display());
+    }
+    Ok(())
+}
+
+/// Handle `oxi share [SESSION_ID]`
+async fn handle_share_command(session_id: Option<&str>) -> Result<()> {
+    // Check if gh CLI is available
+    let gh_check = std::process::Command::new("gh")
+        .args(["auth", "status"])
+        .output()?;
+
+    if !gh_check.status.success() {
+        anyhow::bail!(
+            "GitHub CLI (gh) is not authenticated. Run: gh auth login"
+        );
+    }
+
+    let cwd = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .to_string_lossy()
+        .to_string();
+
+    // Resolve session
+    let session_path = if let Some(sid) = session_id {
+        let direct = std::path::Path::new(sid);
+        if direct.exists() {
+            direct.to_path_buf()
+        } else {
+            anyhow::bail!("Session not found: {}", sid);
+        }
+    } else {
+        let sessions = oxi_store::session::SessionManager::list(&cwd, None).await?;
+        let most_recent = sessions
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No sessions found for this project"))?;
+        let session_dir: std::path::PathBuf = oxi_store::session::get_default_session_dir(&cwd).into();
+        session_dir.join(format!("{}.jsonl", most_recent.id))
+    };
+
+    if !session_path.exists() {
+        anyhow::bail!("Session file not found: {}", session_path.display());
+    }
+
+    let sm = oxi_store::session::SessionManager::open(&session_path.to_string_lossy(), None, Some(&cwd));
+    let branch = sm.get_branch(None);
+    let entries: Vec<oxi_store::session::SessionEntry> = branch.into_iter().collect();
+
+    let meta = oxi::storage::export::ExportMeta {
+        model: None,
+        provider: None,
+        exported_at: chrono::Utc::now().timestamp_millis(),
+        total_user_tokens: None,
+        total_assistant_tokens: None,
+    };
+
+    let html = oxi::storage::export::export_to_html(
+        &entries,
+        &meta,
+        &oxi::storage::export::HtmlExportOptions::default(),
+    )?;
+
+    let temp_path = std::env::temp_dir().join("oxi-share-export.html");
+    std::fs::write(&temp_path, &html)?;
+
+    // Create gist
+    let output = tokio::process::Command::new("gh")
+        .args(["gist", "create", &temp_path.to_string_lossy()])
+        .output()
+        .await?;
+
+    let _ = std::fs::remove_file(&temp_path);
+
+    if output.status.success() {
+        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        println!("Gist created: {}", url);
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Failed to create gist: {}", stderr.trim());
+    }
+    Ok(())
 }

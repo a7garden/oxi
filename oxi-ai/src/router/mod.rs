@@ -25,6 +25,10 @@ use crate::{register_model, register_provider, Api, Provider, ProviderEvent, Thi
 static ROUTER_SNAPSHOT: parking_lot::RwLock<Option<RouterSnapshot>> =
     parking_lot::RwLock::new(None);
 
+/// Global pin tier override — set by /router pin command.
+static ROUTER_PIN_TIER: parking_lot::RwLock<Option<RouterTier>> =
+    parking_lot::RwLock::new(None);
+
 /// Snapshot of the current router state for UI display.
 #[derive(Debug, Clone, Default)]
 pub struct RouterSnapshot {
@@ -190,7 +194,11 @@ impl RouterPipeline {
 
     /// Layer 0: Check for definitive overrides.
     fn check_override(&self, _context: &Context) -> Option<(RouterTier, DecisionMethod)> {
-        // Pin
+        // Global pin (set by /router pin)
+        if let Some(tier) = *ROUTER_PIN_TIER.read() {
+            return Some((tier, DecisionMethod::PinOverride));
+        }
+        // Config pin
         if let Some(tier) = self.pin_tier {
             return Some((tier, DecisionMethod::PinOverride));
         }
@@ -601,4 +609,14 @@ pub fn register_router(config: &RouterConfig) {
         register_model(model);
         tracing::debug!("Registered router model: router/{}", name);
     }
+}
+
+/// Set the global router pin tier. Used by `/router pin <tier>`.
+pub fn set_router_pin(tier: Option<RouterTier>) {
+    *ROUTER_PIN_TIER.write() = tier;
+}
+
+/// Get the current global router pin tier.
+pub fn get_router_pin() -> Option<RouterTier> {
+    *ROUTER_PIN_TIER.read()
 }

@@ -354,6 +354,10 @@ pub(crate) struct AppState {
     pub file_completion_active: bool,
     /// WASM extension manager for dynamic commands
     pub wasm_ext: Option<std::sync::Arc<crate::extensions::WasmExtensionManager>>,
+    /// Skill manager for /skill command
+    pub skills: std::sync::Arc<parking_lot::RwLock<crate::skills::SkillManager>>,
+    /// Currently active skill names
+    pub active_skills: std::sync::Arc<parking_lot::RwLock<Vec<String>>>,
     /// Session file path for the current session
     pub session_file_path: Option<String>,
     /// Requested session switch action (checked by outer loop)
@@ -484,6 +488,10 @@ impl AppState {
             file_completion_index: 0,
             file_completion_active: false,
             wasm_ext: None,
+            skills: std::sync::Arc::new(parking_lot::RwLock::new(
+                crate::skills::SkillManager::new(),
+            )),
+            active_skills: std::sync::Arc::new(parking_lot::RwLock::new(Vec::new())),
             session_file_path: None,
             next_action: None,
             pending_steering: 0,
@@ -1246,6 +1254,13 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         state.footer_state.data.thinking_level =
             Some(format!("{:?}", settings.thinking_level).to_lowercase());
         state.wasm_ext = wasm_ext.clone();
+
+        // Share skill manager and active skills from App
+        {
+            let app_skills = app.skills();
+            *state.skills.write() = app_skills.clone();
+        }
+        *state.active_skills.write() = app.active_skills();
         state.questionnaire_bridge = questionnaire_bridge.clone();
 
         // Push welcome message (only for new sessions, not resumed)

@@ -77,17 +77,35 @@ Inside the REPL, type `/` followed by a command:
 | `/help` | Show available commands |
 | `/model` | Show current model |
 | `/model <provider/model>` | Switch model (e.g., `openai/gpt-4o`) |
-| `/models` | List available models |
-| `/sessions` | List all sessions |
-| `/tree` | Show current session tree |
-| `/fork <entry_id>` | Fork a new session from an entry |
-| `/skill` | List available skills |
+| `/scoped-models` | Set/get models for Ctrl+P cycling |
+| `/router` | Configure model router |
+| `/router pin <tier>` | Pin router tier (low/medium/high/off) |
+| `/router disable` | Switch away from router |
+| `/router enable` | Switch to router/auto |
+| `/skill` | List skills with active status |
 | `/skill <name>` | Activate a skill |
 | `/skill off <name>` | Deactivate a skill |
-| `/template` | List prompt templates |
-| `/template <name> [key=val ...]` | Expand and send a template |
-| `/history` | Show conversation history |
-| `exit` / `quit` | Exit the REPL |
+| `/new` | Start a new session |
+| `/clone` | Duplicate current session |
+| `/resume` | Resume a different session |
+| `/fork [id]` | Fork a new session from a previous message |
+| `/tree` | Show session tree |
+| `/session` | Show session info and stats |
+| `/compact` | Compact context |
+| `/tools` | List/toggle tools |
+| `/extensions` | List extensions & WASM tools |
+| `/export [path]` | Export session to HTML |
+| `/import <path>` | Import session from JSONL |
+| `/share` | Share session as GitHub Gist |
+| `/copy` | Copy last response to clipboard |
+| `/name <name>` | Set session name |
+| `/provider` | Configure API key |
+| `/logout` | Remove provider authentication |
+| `/settings` | Show current settings |
+| `/reload` | Reload settings, theme, and extensions |
+| `/changelog` | Show changelog |
+| `/hotkeys` | Show key shortcuts |
+| `/quit` | Quit oxi |
 
 ## Provider Setup
 
@@ -152,9 +170,22 @@ Subcommands:
   tree [SESSION_ID]            Show session tree structure
   fork <PARENT_ID> <ENTRY_ID>  Fork a session from a specific entry
   delete <SESSION_ID>          Delete a session
+  export [SESSION_ID]          Export session to HTML
+  import <PATH>                Import session from JSONL
+  share [SESSION_ID]           Share session as GitHub Gist
   pkg install <SOURCE>         Install a package
   pkg list                     List installed packages
   pkg uninstall <NAME>         Uninstall a package
+  config show                  Show current settings
+  config set <KEY> <VALUE>     Set a config value
+  config enable <TYPE> <NAME>  Enable a resource
+  config disable <TYPE> <NAME> Disable a resource
+  models [--provider]          List available models
+  setup [--reset]              Run setup wizard
+  reset [--yes]                Reset to factory defaults
+  ext install <SOURCE>         Install WASM extension
+  ext list                     List extensions
+  ext remove <NAME>            Remove extension
 ```
 
 ## Settings

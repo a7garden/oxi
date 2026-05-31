@@ -19,7 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 [Unreleased]: https://github.com/a7garden/oxi/compare/v0.24.0...HEAD
 
-## [Unreleased]
+## [0.25.4] - 2026-05-31
+
+### Added — oxi-sdk
+
+- `oxi-sdk/examples/builder_demo.rs` — end-to-end SDK usage example
 
 ### Changed — workspace
 
@@ -27,9 +31,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated LICENSE.md with dual copyright notice (pi + oxi contributors)
 - Added NOTICE.md with detailed attribution of derived architecture
 - Updated README.md, AGENTS.md, CONTRIBUTING.md to reflect port provenance
-
-### Changed — workspace
-
 - Root repository cleaned up: removed 75+ analysis/report markdown files and orphaned source files
 - All Korean comments and doc strings translated to English across 15 source files
 - `.gitignore` expanded with editor, OS, and profiling exclusions
@@ -39,18 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `.cargo/config.toml` added for build configuration
 - CI pipeline enhanced with `cargo doc`, `cargo test --doc`, and `cargo deny` jobs
 - `docs.rs` metadata added to all library crate Cargo.toml files
-
-### Added — workspace
-
-- `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1)
-- `CONTRIBUTING.md` expanded with full development guide, architecture, and conventions
-- GitHub issue templates (bug report, feature request, config)
-- GitHub pull request template
-- `oxi-ai/examples/basic_streaming.rs`
-- `oxi-agent/examples/custom_tool.rs`
-- `oxi-tui/examples/theme_demo.rs`
-- `oxi-store/examples/settings_demo.rs`
-- `oxi-sdk/examples/builder_demo.rs`
+- Bumped all crate versions to 0.25.4
 
 ### Fixed — oxi-agent
 
@@ -63,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `input.rs` CJK input tests updated with ASCII equivalents
 - `text.rs` CJK truncation tests updated with ASCII equivalents
 
-## [0.20.0] - 2026-05-19
+## [0.24.0] - 2026-05-19
 
 ### Added — oxi-sdk
 

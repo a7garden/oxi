@@ -612,7 +612,9 @@ pub(crate) fn handle_slash_command(
         }
         "/router" => {
             if let Some(sub) = arg {
-                match sub {
+                let mut parts = sub.split_whitespace();
+                let cmd = parts.next().unwrap_or("");
+                match cmd {
                     "status" => {
                         if let Some(snap) = oxi_ai::router::RouterProvider::get_snapshot() {
                             let content = format!(
@@ -640,16 +642,102 @@ pub(crate) fn handle_slash_command(
                         }
                     }
                     "pin" => {
-                        state.add_notification(
-                            "Router pin: not yet implemented".to_string(),
-                            NotificationKind::Info,
-                        );
+                        // /router pin <low|medium|high|off>
+                        if let Some(tier_arg) = parts.next() {
+                            match tier_arg.to_lowercase().as_str() {
+                                "low" => {
+                                    oxi_ai::router::set_router_pin(Some(oxi_ai::router::RouterTier::Low));
+                                    state.add_notification(
+                                        "Router pinned to LOW tier".to_string(),
+                                        NotificationKind::Success,
+                                    );
+                                }
+                                "medium" => {
+                                    oxi_ai::router::set_router_pin(Some(oxi_ai::router::RouterTier::Medium));
+                                    state.add_notification(
+                                        "Router pinned to MEDIUM tier".to_string(),
+                                        NotificationKind::Success,
+                                    );
+                                }
+                                "high" => {
+                                    oxi_ai::router::set_router_pin(Some(oxi_ai::router::RouterTier::High));
+                                    state.add_notification(
+                                        "Router pinned to HIGH tier".to_string(),
+                                        NotificationKind::Success,
+                                    );
+                                }
+                                "off" | "none" | "clear" => {
+                                    oxi_ai::router::set_router_pin(None);
+                                    state.add_notification(
+                                        "Router pin cleared (auto-routing resumed)".to_string(),
+                                        NotificationKind::Success,
+                                    );
+                                }
+                                _ => {
+                                    state.add_notification(
+                                        "Usage: /router pin <low|medium|high|off>".to_string(),
+                                        NotificationKind::Info,
+                                    );
+                                }
+                            }
+                        } else {
+                            let current = oxi_ai::router::get_router_pin();
+                            let msg = match current {
+                                Some(t) => format!("Router pin: {:?}", t),
+                                None => "Router pin: none (auto)".to_string(),
+                            };
+                            state.add_notification(msg, NotificationKind::Info);
+                        }
                     }
                     "disable" => {
-                        state.add_notification(
-                            "Router disabled".to_string(),
-                            NotificationKind::Info,
-                        );
+                        // Switch away from router to the default model
+                        let settings = oxi_store::settings::Settings::load().unwrap_or_default();
+                        if let Some(default_model) = settings.effective_model(None) {
+                            let full_id = if default_model.contains('/') {
+                                default_model.clone()
+                            } else {
+                                let p = settings.effective_provider(None).unwrap_or_default();
+                                format!("{}/{}", p, default_model)
+                            };
+                            match session.set_model(&full_id) {
+                                Ok(()) => {
+                                    state.footer_state.data.model_name = full_id.clone();
+                                    state.add_notification(
+                                        format!("Router disabled, using {}", full_id),
+                                        NotificationKind::Success,
+                                    );
+                                }
+                                Err(e) => {
+                                    state.add_notification(
+                                        format!("Error switching model: {}", e),
+                                        NotificationKind::Error,
+                                    );
+                                }
+                            }
+                        } else {
+                            state.add_notification(
+                                "No default model configured".to_string(),
+                                NotificationKind::Warning,
+                            );
+                        }
+                    }
+                    "enable" => {
+                        // Switch to router/auto
+                        match session.set_model("router/auto") {
+                            Ok(()) => {
+                                state.footer_state.data.model_name = "router/auto".to_string();
+                                state.add_notification(
+                                    "Router enabled (router/auto)".to_string(),
+                                    NotificationKind::Success,
+                                );
+                            }
+                            Err(e) => {
+                                state.add_notification(
+                                    format!("Error enabling router: {}", e),
+                                    NotificationKind::Error,
+                                );
+                            }
+                        }
                     }
                     _ => {
                         state.overlay = None;
@@ -824,7 +912,6 @@ pub(crate) fn handle_slash_command(
             // Apply model change to the active agent session
             if let Some(m) = reloaded.effective_model(None) {
                 if !m.is_empty() {
-                    // effective_model may already include provider ("provider/model")
                     let full_id = if m.contains('/') {
                         m
                     } else {
@@ -848,18 +935,170 @@ pub(crate) fn handle_slash_command(
                     }
                 }
             }
-            // /reload shows config in chat (multi-line summary)
+
+            // Reload WASM extensions
+            let ext_status = if reloaded.extensions_enabled {
+                let cwd_path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd_path);
+                if wasm_paths.is_empty() {
+                    state.wasm_ext = None;
+                    "No extensions found".to_string()
+                } else {
+                    let mut mgr = crate::extensions::WasmExtensionManager::new();
+                    let (loaded, errors) = mgr.load_all(&wasm_paths);
+                    let loaded_count = loaded.len();
+                    let error_count = errors.len();
+                    if mgr.is_empty() {
+                        state.wasm_ext = None;
+                        format!("0 loaded, {} error(s)", error_count)
+                    } else {
+                        // Unregister old WASM tools
+                        let tools = session.agent_ref().tools();
+                        let old_names: Vec<String> = if let Some(ref old_ext) = state.wasm_ext {
+                            old_ext.all_tool_defs().iter().map(|d| d.name.clone()).collect()
+                        } else {
+                            vec![]
+                        };
+                        for name in &old_names {
+                            tools.unregister(name);
+                        }
+
+                        // Register new WASM tools
+                        let arc_mgr = std::sync::Arc::new(mgr);
+                        for tool_def in arc_mgr.all_tool_defs() {
+                            let wasm_tool = crate::extensions::WasmTool::new(
+                                arc_mgr.clone(),
+                                tool_def.name.clone(),
+                                tool_def.description.clone(),
+                                tool_def.schema.clone(),
+                            );
+                            tools.register(wasm_tool);
+                        }
+                        state.wasm_ext = Some(arc_mgr);
+                        format!("{} loaded, {} error(s)", loaded_count, error_count)
+                    }
+                }
+            } else {
+                state.wasm_ext = None;
+                "Disabled".to_string()
+            };
+
+            // Reload skills
+            let skill_count = {
+                let new_mgr = crate::skills::SkillManager::discover_all(
+                    &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+                    &[],
+                )
+                .unwrap_or_else(|_| crate::skills::SkillManager::new());
+                let count = new_mgr.len();
+                *state.skills.write() = new_mgr;
+                count
+            };
+
             let content = format!(
-                "Reloaded Configuration\n\nModel: {}\nProvider: {}\nTheme: {}\nThinking: {:?}\nExtensions: {}\nStream: {}\nAuto-compact: {}",
+                "Reloaded Configuration\n\nModel: {}\nProvider: {}\nTheme: {}\nThinking: {:?}\nExtensions: {}\nSkills: {}\nStream: {}\nAuto-compact: {}",
                 state.footer_state.data.model_name,
                 state.footer_state.data.provider_name,
                 theme_name, reloaded.thinking_level,
-                reloaded.extensions_enabled, reloaded.stream_responses, reloaded.auto_compaction,
+                ext_status, skill_count,
+                reloaded.stream_responses, reloaded.auto_compaction,
             );
             state.overlay = None;
             state.overlay_state = Some(Box::new(
                 super::overlay::text_viewer::TextViewerOverlay::new(" Reload ", content),
             ));
+            true
+        }
+        "/skill" => {
+            if let Some(sub) = arg {
+                let parts: Vec<&str> = sub.splitn(2, ' ').collect();
+                if parts[0].eq_ignore_ascii_case("off") {
+                    // Deactivate a skill
+                    let name = parts.get(1).unwrap_or(&"").trim();
+                    if name.is_empty() {
+                        state.add_notification("/skill off <name>".to_string(), NotificationKind::Info);
+                    } else {
+                        let mut active = state.active_skills.write();
+                        let name_lower = name.to_lowercase();
+                        if active.iter().any(|n| n.eq_ignore_ascii_case(&name_lower)) {
+                            active.retain(|n| !n.eq_ignore_ascii_case(&name_lower));
+                            drop(active);
+                            state.add_notification(
+                                format!("Skill deactivated: {}", name),
+                                NotificationKind::Success,
+                            );
+                        } else {
+                            drop(active);
+                            state.add_notification(
+                                format!("Skill '{}' is not active", name),
+                                NotificationKind::Warning,
+                            );
+                        }
+                    }
+                } else {
+                    // Activate a skill
+                    let skills = state.skills.read();
+                    if let Some(skill) = skills.get(sub.trim()) {
+                        let name = skill.name.clone();
+                        drop(skills);
+                        let mut active = state.active_skills.write();
+                        let name_lower = name.to_lowercase();
+                        if active.iter().any(|n| n.eq_ignore_ascii_case(&name_lower)) {
+                            drop(active);
+                            state.add_notification(
+                                format!("Skill '{}' is already active", name),
+                                NotificationKind::Info,
+                            );
+                        } else {
+                            active.push(name_lower);
+                            drop(active);
+                            state.add_notification(
+                                format!("Skill activated: {}", name),
+                                NotificationKind::Success,
+                            );
+                        }
+                    } else {
+                        drop(skills);
+                        state.add_notification(
+                            format!("Skill '{}' not found", sub.trim()),
+                            NotificationKind::Warning,
+                        );
+                    }
+                }
+            } else {
+                // List all skills with status
+                let (is_empty, listing) = {
+                    let skills = state.skills.read();
+                    let active = state.active_skills.read();
+                    if skills.is_empty() {
+                        (true, String::new())
+                    } else {
+                        let mut out = String::from("Skills:\n\n");
+                        for skill in skills.all() {
+                            let is_active = active.iter().any(|n| n.eq_ignore_ascii_case(&skill.name));
+                            let status = if is_active { "\u{2713}" } else { " " };
+                            out.push_str(&format!(
+                                "  [{}] {} — {}\n",
+                                status, skill.name, skill.description
+                            ));
+                        }
+                        out.push_str("\n/skill <name>  Activate a skill");
+                        out.push_str("\n/skill off <name>  Deactivate a skill");
+                        (false, out)
+                    }
+                };
+                if is_empty {
+                    state.add_notification(
+                        "No skills found. Place skills in ~/.oxi/skills/<name>/SKILL.md"
+                            .to_string(),
+                        NotificationKind::Info,
+                    );
+                } else {
+                    state.overlay = None;
+                    state.overlay_state =
+                        Some(super::overlay::tools_overlay(listing));
+                }
+            }
             true
         }
         "/scoped-models" | "/models" => {
@@ -1094,6 +1333,7 @@ const BUILTIN_TOOL_NAMES: &[&str] = &[
     "web_search",
     "get_search_results",
     "github",
+    "github_search",
     "subagent",
 ];
 

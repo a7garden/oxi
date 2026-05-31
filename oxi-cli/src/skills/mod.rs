@@ -44,6 +44,7 @@ impl fmt::Display for Skill {
 }
 
 /// Manages loading and querying skills from the filesystem.
+#[derive(Clone)]
 pub struct SkillManager {
     skills: HashMap<String, Skill>,
 }

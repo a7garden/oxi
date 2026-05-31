@@ -81,17 +81,20 @@ pub struct Settings {
     #[serde(default = "default_theme")]
     pub theme: String,
 
-    /// Default model name without provider prefix (e.g., "claude-sonnet-4-20250514")
+    /// Deprecated: use `last_used_model` instead. Kept for serde backward compat.
+    #[serde(default, skip_serializing)]
     pub default_model: Option<String>,
 
-    /// Default provider to use (e.g., "anthropic", "openai")
+    /// Deprecated: use `last_used_provider` instead. Kept for serde backward compat.
+    #[serde(default, skip_serializing)]
     pub default_provider: Option<String>,
 
-    /// Last used model (automatically updated when user selects a model)
+    /// Model selected by the user (last used = current default).
+    /// Set during onboarding and updated every time the user switches model.
     #[serde(default)]
     pub last_used_model: Option<String>,
 
-    /// Last used provider (automatically updated when user selects a model)
+    /// Provider for the last used model.
     #[serde(default)]
     pub last_used_provider: Option<String>,
 
@@ -246,10 +249,10 @@ impl Default for Settings {
             version: SETTINGS_VERSION,
             thinking_level: ThinkingLevel::Medium,
             theme: default_theme(),
-            default_model: None,
-            default_provider: None,
             last_used_model: None,
             last_used_provider: None,
+            default_model: None,
+            default_provider: None,
             max_tokens: None,
             temperature: None,
             default_temperature: None,
@@ -665,10 +668,10 @@ impl Settings {
         disable_fallback: Option<bool>,
     ) {
         if let Some(m) = model {
-            self.default_model = Some(m);
+            self.last_used_model = Some(m);
         }
         if let Some(p) = provider {
-            self.default_provider = Some(p);
+            self.last_used_provider = Some(p);
         }
         if let Some(r) = enable_routing {
             self.enable_routing = r;
@@ -691,20 +694,10 @@ impl Settings {
     }
 
     /// Get the effective model ID (provider/model format).
-    /// Combines `default_provider` + `default_model` when both are set.
     /// Returns None if no model is configured.
     pub fn effective_model(&self, cli_model: Option<&str>) -> Option<String> {
         cli_model
             .map(String::from)
-            .or_else(|| {
-                // Combine provider + model when both are present
-                if let (Some(provider), Some(model)) = (&self.default_provider, &self.default_model)
-                {
-                    Some(format!("{}/{}", provider, model))
-                } else {
-                    self.default_model.clone()
-                }
-            })
             .or_else(|| self.last_used_model.clone())
     }
 
@@ -713,7 +706,6 @@ impl Settings {
     pub fn effective_provider(&self, cli_provider: Option<&str>) -> Option<String> {
         cli_provider
             .map(String::from)
-            .or_else(|| self.default_provider.clone())
             .or_else(|| self.last_used_provider.clone())
     }
 
@@ -797,19 +789,18 @@ impl Settings {
                 );
             }
             3 => {
-                // Version 3 → 4: split default_model "provider/model" into separate fields.
+                // Version 3 → 4: migrate default_model → last_used_model.
                 if let Some(model) = settings.default_model.take() {
                     if let Some((provider, model_name)) = model.split_once('/') {
-                        settings.default_provider = Some(provider.to_string());
-                        settings.default_model = Some(model_name.to_string());
+                        settings.last_used_provider = Some(provider.to_string());
+                        settings.last_used_model = Some(model_name.to_string());
                     } else {
-                        // No slash — keep as-is (bare model name)
-                        settings.default_model = Some(model);
+                        settings.last_used_model = Some(model);
                     }
                 }
                 settings.version = SETTINGS_VERSION;
                 tracing::info!(
-                    "Migrated settings from version 3 to {} (split default_model into provider + model)",
+                    "Migrated settings from version 3 to {} (default_model → last_used_model)",
                     SETTINGS_VERSION
                 );
             }
@@ -976,8 +967,8 @@ mod tests {
         assert_eq!(settings.version, SETTINGS_VERSION);
         assert_eq!(settings.thinking_level, ThinkingLevel::Medium);
         assert_eq!(settings.theme, "default");
-        assert!(settings.default_model.is_none());
-        assert!(settings.default_provider.is_none());
+        assert!(settings.last_used_model.is_none());
+        assert!(settings.last_used_provider.is_none());
         assert!(settings.extensions_enabled);
         assert!(settings.auto_compaction);
         assert_eq!(settings.tool_timeout_seconds, 120);
@@ -987,13 +978,13 @@ mod tests {
     #[test]
     fn test_merge_cli() {
         let mut settings = Settings::default();
-        settings.default_model = Some("gpt-4o".to_string());
+        settings.last_used_model = Some("gpt-4o".to_string());
 
         settings.merge_cli(Some("claude".to_string()), None, None, None, None, None);
-        assert_eq!(settings.default_model, Some("claude".to_string()));
+        assert_eq!(settings.last_used_model, Some("claude".to_string()));
 
         settings.merge_cli(None, Some("google".to_string()), None, None, None, None);
-        assert_eq!(settings.default_provider, Some("google".to_string()));
+        assert_eq!(settings.last_used_provider, Some("google".to_string()));
 
         // Test routing flags
         settings.merge_cli(
@@ -1024,13 +1015,13 @@ mod tests {
 
         let tmp = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
         let toml_content = r#"
-default_model = "openai/gpt-4o"
+last_used_model = "openai/gpt-4o"
 theme = "dracula"
 "#;
         tmp.as_file().write_all(toml_content.as_bytes()).unwrap();
 
         let merged = Settings::layer_file(&base, tmp.path()).unwrap();
-        assert_eq!(merged.default_model, Some("openai/gpt-4o".to_string()));
+        assert_eq!(merged.last_used_model, Some("openai/gpt-4o".to_string()));
         assert_eq!(merged.theme, "dracula");
         // Unchanged fields retain defaults
         assert_eq!(merged.thinking_level, ThinkingLevel::Medium);
@@ -1040,7 +1031,7 @@ theme = "dracula"
     #[test]
     fn test_layer_file_preserves_unset() {
         let mut base = Settings::default();
-        base.default_provider = Some("deepseek".to_string());
+        base.last_used_provider = Some("deepseek".to_string());
 
         let tmp = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
         // Only override theme — provider should remain
@@ -1049,7 +1040,7 @@ theme = "dracula"
 
         let merged = Settings::layer_file(&base, tmp.path()).unwrap();
         assert_eq!(merged.theme, "monokai");
-        assert_eq!(merged.default_provider, Some("deepseek".to_string()));
+        assert_eq!(merged.last_used_provider, Some("deepseek".to_string()));
     }
 
     #[test]
@@ -1077,9 +1068,9 @@ theme = "dracula"
         .unwrap();
 
         let settings = Settings::load_from(tmp.path()).unwrap();
-        // Migration splits provider from model
-        assert_eq!(settings.default_model, Some("gemini-2.0-flash".to_string()));
-        assert_eq!(settings.default_provider, Some("google".to_string()));
+        // Migration moves default_model → last_used_model
+        assert_eq!(settings.last_used_model, Some("gemini-2.0-flash".to_string()));
+        assert_eq!(settings.last_used_provider, Some("google".to_string()));
     }
 
     #[test]
@@ -1119,7 +1110,7 @@ theme = "dracula"
 
         let settings = Settings::from_env();
         // All fields should be at defaults since env overrides are disabled
-        assert_eq!(settings.default_model, None);
+        assert_eq!(settings.last_used_model, None);
         assert_eq!(settings.theme, "default");
         assert_eq!(settings.tool_timeout_seconds, 120);
     }
@@ -1155,11 +1146,9 @@ theme = "dracula"
     fn test_env_does_not_override_when_unset() {
         let _guard = EnvGuard::new(&["OXI_MODEL", "OXI_PROVIDER", "OXI_THEME", "OXI_TEMPERATURE"]);
         let settings = Settings::from_env();
-        assert!(settings.default_model.is_none());
-        assert!(settings.default_provider.is_none());
+        assert!(settings.last_used_model.is_none());
+        assert!(settings.last_used_provider.is_none());
     }
-
-    // ── Helpers ──────────────────────────────────────────────────────
 
     #[test]
     fn test_parse_thinking_level() {
@@ -1198,10 +1187,9 @@ theme = "dracula"
     // ── Effective accessors ──────────────────────────────────────────
 
     #[test]
-    fn test_effective_model_combines_provider_and_model() {
+    fn test_effective_model_returns_last_used() {
         let mut settings = Settings::default();
-        settings.default_provider = Some("openai".to_string());
-        settings.default_model = Some("gpt-4o".to_string());
+        settings.last_used_model = Some("openai/gpt-4o".to_string());
         assert_eq!(
             settings.effective_model(None),
             Some("openai/gpt-4o".to_string())
@@ -1211,8 +1199,7 @@ theme = "dracula"
     #[test]
     fn test_effective_model_cli_overrides() {
         let mut settings = Settings::default();
-        settings.default_provider = Some("openai".to_string());
-        settings.default_model = Some("gpt-4o".to_string());
+        settings.last_used_model = Some("openai/gpt-4o".to_string());
         assert_eq!(
             settings.effective_model(Some("anthropic/claude-3")),
             Some("anthropic/claude-3".to_string())
@@ -1220,10 +1207,9 @@ theme = "dracula"
     }
 
     #[test]
-    fn test_effective_model_no_provider_returns_bare() {
-        let mut settings = Settings::default();
-        settings.default_model = Some("gpt-4o".to_string());
-        assert_eq!(settings.effective_model(None), Some("gpt-4o".to_string()));
+    fn test_effective_model_none_when_unset() {
+        let settings = Settings::default();
+        assert_eq!(settings.effective_model(None), None);
     }
 
     #[test]
@@ -1234,6 +1220,12 @@ theme = "dracula"
             settings.effective_model(None),
             Some("anthropic/claude-3".to_string())
         );
+    }
+
+    #[test]
+    fn test_effective_model_returns_none_when_nothing_set() {
+        let settings = Settings::default();
+        assert_eq!(settings.effective_model(None), None);
     }
 
     #[test]
@@ -1332,8 +1324,8 @@ theme = "dracula"
 
         let migrated = Settings::migrate(settings).unwrap();
         assert_eq!(migrated.version, SETTINGS_VERSION);
-        assert_eq!(migrated.default_model, Some("gpt-4o".to_string()));
-        assert_eq!(migrated.default_provider, Some("openai".to_string()));
+        assert_eq!(migrated.last_used_model, Some("gpt-4o".to_string()));
+        assert_eq!(migrated.last_used_provider, Some("openai".to_string()));
     }
 
     #[test]
@@ -1344,7 +1336,7 @@ theme = "dracula"
 
         let migrated = Settings::migrate(settings).unwrap();
         assert_eq!(migrated.version, SETTINGS_VERSION);
-        assert_eq!(migrated.default_model, Some("bare-model-name".to_string()));
+        assert_eq!(migrated.last_used_model, Some("bare-model-name".to_string()));
     }
 
     #[test]
@@ -1362,8 +1354,8 @@ theme = "dracula"
         let settings_path = tmp.path().join("settings.toml");
 
         let mut original = Settings::default();
-        original.default_model = Some("gpt-4o".to_string());
-        original.default_provider = Some("openai".to_string());
+        original.last_used_model = Some("gpt-4o".to_string());
+        original.last_used_provider = Some("openai".to_string());
         original.theme = "dracula".to_string();
         original.tool_timeout_seconds = 60;
 
@@ -1375,7 +1367,7 @@ theme = "dracula"
         let loaded_content = fs::read_to_string(&settings_path).unwrap();
         let loaded: Settings = toml::from_str(&loaded_content).unwrap();
 
-        assert_eq!(loaded.default_model, original.default_model);
+        assert_eq!(loaded.last_used_model, original.last_used_model);
         assert_eq!(loaded.theme, original.theme);
         assert_eq!(loaded.tool_timeout_seconds, original.tool_timeout_seconds);
     }
@@ -1404,8 +1396,8 @@ theme = "dracula"
     #[test]
     fn test_json_roundtrip() {
         let mut settings = Settings::default();
-        settings.default_model = Some("gpt-4o".to_string());
-        settings.default_provider = Some("openai".to_string());
+        settings.last_used_model = Some("gpt-4o".to_string());
+        settings.last_used_provider = Some("openai".to_string());
         settings.theme = "dracula".to_string();
         settings.tool_timeout_seconds = 60;
         settings.default_temperature = Some(0.8);
@@ -1414,7 +1406,7 @@ theme = "dracula"
         let json_str = serde_json::to_string_pretty(&settings).unwrap();
         let parsed: Settings = serde_json::from_str(&json_str).unwrap();
 
-        assert_eq!(parsed.default_model, settings.default_model);
+        assert_eq!(parsed.last_used_model, settings.last_used_model);
         assert_eq!(parsed.theme, settings.theme);
         assert_eq!(parsed.tool_timeout_seconds, settings.tool_timeout_seconds);
         assert_eq!(parsed.default_temperature, settings.default_temperature);
@@ -1424,43 +1416,43 @@ theme = "dracula"
     #[test]
     fn test_json_serialize_for_format() {
         let mut settings = Settings::default();
-        settings.default_model = Some("claude-3".to_string());
-        settings.default_provider = Some("anthropic".to_string());
+        settings.last_used_model = Some("claude-3".to_string());
+        settings.last_used_provider = Some("anthropic".to_string());
         settings.thinking_level = ThinkingLevel::Minimal;
 
         let json_content = Settings::serialize_for_format(&settings, SettingsFormat::Json).unwrap();
         let parsed: Settings = serde_json::from_str(&json_content).unwrap();
 
-        assert_eq!(parsed.default_model, Some("claude-3".to_string()));
+        assert_eq!(parsed.last_used_model, Some("claude-3".to_string()));
         assert_eq!(parsed.thinking_level, ThinkingLevel::Minimal);
     }
 
     #[test]
     fn test_toml_serialize_for_format() {
         let mut settings = Settings::default();
-        settings.default_model = Some("gemini-pro".to_string());
-        settings.default_provider = Some("google".to_string());
+        settings.last_used_model = Some("gemini-pro".to_string());
+        settings.last_used_provider = Some("google".to_string());
         settings.thinking_level = ThinkingLevel::High;
 
         let toml_content = Settings::serialize_for_format(&settings, SettingsFormat::Toml).unwrap();
         let parsed: Settings = toml::from_str(&toml_content).unwrap();
 
-        assert_eq!(parsed.default_model, Some("gemini-pro".to_string()));
+        assert_eq!(parsed.last_used_model, Some("gemini-pro".to_string()));
         assert_eq!(parsed.thinking_level, ThinkingLevel::High);
     }
 
     #[test]
     fn test_parse_from_str_json() {
         let json_content = r#"{
-            "default_model": "gpt-4",
-            "default_provider": "openai",
+            "last_used_model": "gpt-4",
+            "last_used_provider": "openai",
             "theme": "nord",
             "tool_timeout_seconds": 90
         }"#;
 
         let settings = Settings::parse_from_str(json_content, SettingsFormat::Json).unwrap();
-        assert_eq!(settings.default_model, Some("gpt-4".to_string()));
-        assert_eq!(settings.default_provider, Some("openai".to_string()));
+        assert_eq!(settings.last_used_model, Some("gpt-4".to_string()));
+        assert_eq!(settings.last_used_provider, Some("openai".to_string()));
         assert_eq!(settings.theme, "nord");
         assert_eq!(settings.tool_timeout_seconds, 90);
         // Unchanged fields retain defaults
@@ -1471,15 +1463,15 @@ theme = "dracula"
     #[test]
     fn test_parse_from_str_toml() {
         let toml_content = r#"
-default_model = "claude-opus"
-default_provider = "anthropic"
+last_used_model = "claude-opus"
+last_used_provider = "anthropic"
 theme = "monokai"
 tool_timeout_seconds = 45
 "#;
 
         let settings = Settings::parse_from_str(toml_content, SettingsFormat::Toml).unwrap();
-        assert_eq!(settings.default_model, Some("claude-opus".to_string()));
-        assert_eq!(settings.default_provider, Some("anthropic".to_string()));
+        assert_eq!(settings.last_used_model, Some("claude-opus".to_string()));
+        assert_eq!(settings.last_used_provider, Some("anthropic".to_string()));
         assert_eq!(settings.theme, "monokai");
         assert_eq!(settings.tool_timeout_seconds, 45);
         assert_eq!(settings.thinking_level, ThinkingLevel::Medium);
@@ -1491,16 +1483,16 @@ tool_timeout_seconds = 45
 
         let tmp = tempfile::NamedTempFile::with_suffix(".json").unwrap();
         let json_content = r#"{
-            "default_model": "gpt-4o",
-            "default_provider": "openai",
+            "last_used_model": "gpt-4o",
+            "last_used_provider": "openai",
             "theme": "dracula",
             "auto_compaction": false
         }"#;
         tmp.as_file().write_all(json_content.as_bytes()).unwrap();
 
         let merged = Settings::layer_file(&base, tmp.path()).unwrap();
-        assert_eq!(merged.default_model, Some("gpt-4o".to_string()));
-        assert_eq!(merged.default_provider, Some("openai".to_string()));
+        assert_eq!(merged.last_used_model, Some("gpt-4o".to_string()));
+        assert_eq!(merged.last_used_provider, Some("openai".to_string()));
         assert_eq!(merged.theme, "dracula");
         assert!(!merged.auto_compaction);
         // Unchanged fields retain defaults
@@ -1512,7 +1504,7 @@ tool_timeout_seconds = 45
     #[test]
     fn test_layer_file_json_preserves_unset() {
         let mut base = Settings::default();
-        base.default_provider = Some("deepseek".to_string());
+        base.last_used_provider = Some("deepseek".to_string());
 
         let tmp = tempfile::NamedTempFile::with_suffix(".json").unwrap();
         let json_content = r#"{ "theme": "nord" }"#;
@@ -1520,7 +1512,7 @@ tool_timeout_seconds = 45
 
         let merged = Settings::layer_file(&base, tmp.path()).unwrap();
         assert_eq!(merged.theme, "nord");
-        assert_eq!(merged.default_provider, Some("deepseek".to_string()));
+        assert_eq!(merged.last_used_provider, Some("deepseek".to_string()));
     }
 
     #[test]
@@ -1529,8 +1521,8 @@ tool_timeout_seconds = 45
         let settings_path = tmp.path().join("settings.json");
 
         let mut settings = Settings::default();
-        settings.default_model = Some("gpt-4o".to_string());
-        settings.default_provider = Some("openai".to_string());
+        settings.last_used_model = Some("gpt-4o".to_string());
+        settings.last_used_provider = Some("openai".to_string());
         settings.theme = "dracula".to_string();
         settings.tool_timeout_seconds = 60;
 
@@ -1539,7 +1531,7 @@ tool_timeout_seconds = 45
         // Verify it's valid JSON
         let content = fs::read_to_string(&settings_path).unwrap();
         let parsed: Settings = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed.default_model, Some("gpt-4o".to_string()));
+        assert_eq!(parsed.last_used_model, Some("gpt-4o".to_string()));
         assert_eq!(parsed.theme, "dracula");
         assert_eq!(parsed.tool_timeout_seconds, 60);
     }
@@ -1550,8 +1542,8 @@ tool_timeout_seconds = 45
         let settings_path = tmp.path().join("settings.toml");
 
         let mut settings = Settings::default();
-        settings.default_model = Some("gemini-pro".to_string());
-        settings.default_provider = Some("google".to_string());
+        settings.last_used_model = Some("gemini-pro".to_string());
+        settings.last_used_provider = Some("google".to_string());
         settings.theme = "monokai".to_string();
         settings.tool_timeout_seconds = 90;
 
@@ -1560,7 +1552,7 @@ tool_timeout_seconds = 45
         // Verify it's valid TOML
         let content = fs::read_to_string(&settings_path).unwrap();
         let parsed: Settings = toml::from_str(&content).unwrap();
-        assert_eq!(parsed.default_model, Some("gemini-pro".to_string()));
+        assert_eq!(parsed.last_used_model, Some("gemini-pro".to_string()));
         assert_eq!(parsed.theme, "monokai");
         assert_eq!(parsed.tool_timeout_seconds, 90);
     }
@@ -1588,8 +1580,8 @@ tool_timeout_seconds = 45
 
         let settings = Settings::load_from(tmp.path()).unwrap();
         // Migration splits provider from model
-        assert_eq!(settings.default_model, Some("gemini-2.0-flash".to_string()));
-        assert_eq!(settings.default_provider, Some("google".to_string()));
+        assert_eq!(settings.last_used_model, Some("gemini-2.0-flash".to_string()));
+        assert_eq!(settings.last_used_provider, Some("google".to_string()));
     }
 
     #[test]
@@ -1676,13 +1668,13 @@ tool_timeout_seconds = 45
         let toml_path = oxi_dir.join("settings.toml");
 
         // JSON has model set to "json-model"
-        fs::write(&json_path, r#"{ "default_model": "json-model" }"#).unwrap();
+        fs::write(&json_path, r#"{ "last_used_model": "json-model" }"#).unwrap();
         // TOML has model set to "toml-model"
-        fs::write(&toml_path, r#"default_model = "toml-model""#).unwrap();
+        fs::write(&toml_path, r#"last_used_model = "toml-model""#).unwrap();
 
         // JSON takes priority
         let settings = Settings::load_from(tmp.path()).unwrap();
-        assert_eq!(settings.default_model, Some("json-model".to_string()));
+        assert_eq!(settings.last_used_model, Some("json-model".to_string()));
     }
 
     #[test]
@@ -1690,14 +1682,14 @@ tool_timeout_seconds = 45
         // Test loading a TOML file through the generic layer_file
         let tmp = tempfile::NamedTempFile::with_suffix(".toml").unwrap();
         let toml_content = r#"
-default_model = "loaded-via-toml"
+last_used_model = "loaded-via-toml"
 theme = "loaded-theme"
 stream_responses = false
 "#;
         tmp.as_file().write_all(toml_content.as_bytes()).unwrap();
 
         let merged = Settings::layer_file(&Settings::default(), tmp.path()).unwrap();
-        assert_eq!(merged.default_model, Some("loaded-via-toml".to_string()));
+        assert_eq!(merged.last_used_model, Some("loaded-via-toml".to_string()));
         assert_eq!(merged.theme, "loaded-theme");
         assert!(!merged.stream_responses);
     }

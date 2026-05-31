@@ -149,6 +149,36 @@ pub enum Commands {
         #[arg(long)]
         reset: bool,
     },
+    /// Reset all settings and data to factory defaults
+    ///
+    /// Use when configuration has become tangled and you want a clean start.
+    /// An interactive confirmation prompt will be shown.
+    Reset {
+        /// Skip the confirmation prompt
+        #[arg(long, short)]
+        yes: bool,
+        /// Also delete the project-local .oxi/ directory
+        #[arg(long)]
+        include_project: bool,
+    },
+    /// Export a session to HTML
+    Export {
+        /// Session ID to export (default: most recent for this project)
+        session_id: Option<String>,
+        /// Output file path (default: oxi-export-{id}.html in CWD)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Import a session from a JSONL file
+    Import {
+        /// Path to the JSONL session file
+        path: PathBuf,
+    },
+    /// Share a session as a GitHub Gist (requires gh CLI)
+    Share {
+        /// Session ID to share (default: most recent for this project)
+        session_id: Option<String>,
+    },
 }
 
 // ── Package subcommands ────────────────────────────────────────────
@@ -235,7 +265,7 @@ pub enum ConfigCommands {
     },
     /// Set a configuration value
     Set {
-        /// Setting key (e.g. theme, default_model, thinking_level)
+        /// Setting key (e.g. theme, model, thinking_level)
         key: String,
         /// Setting value
         value: String,
@@ -761,5 +791,52 @@ mod tests {
             vec!["openai/gpt-4o", "anthropic/claude-3"]
         );
         assert!(args.disable_fallback);
+    }
+
+    // ── Reset command ────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_reset_command() {
+        let args = parse_args_from(["oxi", "reset"]).unwrap();
+        match args.command {
+            Some(Commands::Reset {
+                yes,
+                include_project,
+            }) => {
+                assert!(!yes);
+                assert!(!include_project);
+            }
+            _ => panic!("Expected Reset command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reset_yes_flag() {
+        let args = parse_args_from(["oxi", "reset", "--yes"]).unwrap();
+        match args.command {
+            Some(Commands::Reset {
+                yes,
+                include_project,
+            }) => {
+                assert!(yes);
+                assert!(!include_project);
+            }
+            _ => panic!("Expected Reset command with --yes"),
+        }
+    }
+
+    #[test]
+    fn test_parse_reset_include_project() {
+        let args = parse_args_from(["oxi", "reset", "--yes", "--include-project"]).unwrap();
+        match args.command {
+            Some(Commands::Reset {
+                yes,
+                include_project,
+            }) => {
+                assert!(yes);
+                assert!(include_project);
+            }
+            _ => panic!("Expected Reset command with all flags"),
+        }
     }
 }
