@@ -681,7 +681,7 @@ fn render_detail_panel(
     );
 
     // Label row
-    let desc_start = 3usize;
+    let desc_start = 3u16;
     if !entry.label.is_empty() {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
@@ -703,7 +703,7 @@ fn render_detail_panel(
     // Full description with word wrap
     if !entry.description.is_empty() {
         let desc_y = area.y + desc_start + 1;
-        let desc_height = area.height.saturating_sub(desc_start as u16 + 1);
+        let desc_height = area.height.saturating_sub(desc_start + 1);
 
         let desc_lines: Vec<Line> = wrap_text(&entry.description, area.width as usize);
         let visible_start = scroll.min(desc_lines.len().saturating_sub(1));
