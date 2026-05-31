@@ -1439,13 +1439,9 @@ fn render_notifications(f: &mut Frame, area: Rect, state: &AppState, theme: &The
         // Clear behind the notification
         f.render_widget(ratatui::widgets::Clear, notif_area);
 
-        // Background card with left accent border
+        // Background card with all borders
         let card_block = ratatui::widgets::Block::default()
-            .borders(
-                ratatui::widgets::Borders::LEFT
-                    | ratatui::widgets::Borders::TOP
-                    | ratatui::widgets::Borders::BOTTOM,
-            )
+            .borders(ratatui::widgets::Borders::ALL)
             .border_style(Style::default().fg(border_color))
             .style(Style::default().bg(bg_color));
         let inner = card_block.inner(notif_area);

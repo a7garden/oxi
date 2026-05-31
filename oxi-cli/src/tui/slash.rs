@@ -860,6 +860,7 @@ pub(crate) fn handle_slash_command(
             }
             state.chat.clear();
             session.reset();
+            state.add_notification("New session started".to_string(), NotificationKind::Success);
             state.next_action = Some(super::app::TuiNextAction::NewSession);
             true
         }
@@ -913,7 +914,7 @@ pub(crate) fn handle_slash_command(
         }
         "/reload" => {
             let reloaded = oxi_store::settings::Settings::load().unwrap_or_default();
-            let theme_name = reloaded.theme.clone();
+            let _theme_name = reloaded.theme.clone();
             session.set_thinking_level(reloaded.thinking_level);
             // Apply model change to the active agent session
             if let Some(m) = reloaded.effective_model(None) {
@@ -943,22 +944,16 @@ pub(crate) fn handle_slash_command(
             }
 
             // Reload WASM extensions
-            let ext_status = if reloaded.extensions_enabled {
+            if reloaded.extensions_enabled {
                 let cwd_path =
                     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
                 let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd_path);
-                if wasm_paths.is_empty() {
-                    state.wasm_ext = None;
-                    "No extensions found".to_string()
-                } else {
+                if !wasm_paths.is_empty() {
                     let mut mgr = crate::extensions::WasmExtensionManager::new();
                     let (loaded, errors) = mgr.load_all(&wasm_paths);
                     let loaded_count = loaded.len();
                     let error_count = errors.len();
-                    if mgr.is_empty() {
-                        state.wasm_ext = None;
-                        format!("0 loaded, {} error(s)", error_count)
-                    } else {
+                    if !mgr.is_empty() {
                         // Unregister old WASM tools
                         let tools = session.agent_ref().tools();
                         let old_names: Vec<String> = if let Some(ref old_ext) = state.wasm_ext {
@@ -986,16 +981,22 @@ pub(crate) fn handle_slash_command(
                             tools.register(wasm_tool);
                         }
                         state.wasm_ext = Some(arc_mgr);
-                        format!("{} loaded, {} error(s)", loaded_count, error_count)
+                        state.add_notification(
+                            format!("{} loaded, {} error(s)", loaded_count, error_count),
+                            NotificationKind::Info,
+                        );
+                    } else {
+                        state.wasm_ext = None;
                     }
+                } else {
+                    state.wasm_ext = None;
                 }
             } else {
                 state.wasm_ext = None;
-                "Disabled".to_string()
-            };
+            }
 
             // Reload skills
-            let skill_count = {
+            {
                 let new_mgr = crate::skills::SkillManager::discover_all(
                     &std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
                     &[],
@@ -1003,21 +1004,15 @@ pub(crate) fn handle_slash_command(
                 .unwrap_or_else(|_| crate::skills::SkillManager::new());
                 let count = new_mgr.len();
                 *state.skills.write() = new_mgr;
-                count
-            };
+                if count > 0 {
+                    state.add_notification(
+                        format!("{} skill(s) loaded", count),
+                        NotificationKind::Info,
+                    );
+                }
+            }
 
-            let content = format!(
-                "Reloaded Configuration\n\nModel: {}\nProvider: {}\nTheme: {}\nThinking: {:?}\nExtensions: {}\nSkills: {}\nStream: {}\nAuto-compact: {}",
-                state.footer_state.data.model_name,
-                state.footer_state.data.provider_name,
-                theme_name, reloaded.thinking_level,
-                ext_status, skill_count,
-                reloaded.stream_responses, reloaded.auto_compaction,
-            );
-            state.overlay = None;
-            state.overlay_state = Some(Box::new(
-                super::overlay::text_viewer::TextViewerOverlay::new(" Reload ", content),
-            ));
+            state.add_notification("Settings reloaded".to_string(), NotificationKind::Success);
             true
         }
         "/skill" => {
