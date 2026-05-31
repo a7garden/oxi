@@ -217,10 +217,7 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
         } => {
             handle_reset_command(*yes, *include_project)?;
         }
-        Commands::Export {
-            session_id,
-            output,
-        } => {
+        Commands::Export { session_id, output } => {
             handle_export_command(session_id.as_deref(), output.as_deref())?;
         }
         Commands::Import { path } => {
@@ -1584,7 +1581,10 @@ fn register_router_provider(settings: &Settings) {
 // ── Export / Import / Share ──────────────────────────────────────────────────
 
 /// Handle `oxi export [SESSION_ID] [--output PATH]`
-fn handle_export_command(session_id: Option<&str>, output_path: Option<&std::path::Path>) -> Result<()> {
+fn handle_export_command(
+    session_id: Option<&str>,
+    output_path: Option<&std::path::Path>,
+) -> Result<()> {
     use oxi_store::session::SessionManager;
 
     let cwd = std::env::current_dir()
@@ -1618,7 +1618,8 @@ fn handle_export_command(session_id: Option<&str>, output_path: Option<&std::pat
             .first()
             .ok_or_else(|| anyhow::anyhow!("No sessions found for this project"))?;
         // Reconstruct the path from session_dir + id
-        let session_dir: std::path::PathBuf = oxi_store::session::get_default_session_dir(&cwd).into();
+        let session_dir: std::path::PathBuf =
+            oxi_store::session::get_default_session_dir(&cwd).into();
         session_dir.join(format!("{}.jsonl", most_recent.id))
     };
 
@@ -1659,7 +1660,12 @@ fn handle_export_command(session_id: Option<&str>, output_path: Option<&std::pat
     };
 
     std::fs::write(&out, &html)?;
-    println!("Exported {} entries to {} ({} bytes)", entries.len(), out.display(), html.len());
+    println!(
+        "Exported {} entries to {} ({} bytes)",
+        entries.len(),
+        out.display(),
+        html.len()
+    );
     Ok(())
 }
 
@@ -1674,10 +1680,8 @@ fn handle_import_command(path: &std::path::Path) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    let resolved = oxi_store::session::resolve_session_path(
-        &path.to_string_lossy(),
-        &cwd,
-    ).map_err(|e| anyhow::anyhow!("Error resolving path: {}", e))?;
+    let resolved = oxi_store::session::resolve_session_path(&path.to_string_lossy(), &cwd)
+        .map_err(|e| anyhow::anyhow!("Error resolving path: {}", e))?;
 
     if !std::path::Path::new(&resolved).exists() {
         anyhow::bail!("File not found: {}", resolved);
@@ -1699,7 +1703,12 @@ fn handle_import_command(path: &std::path::Path) -> Result<()> {
             .and_then(|s| s.to_str())
             .unwrap_or("imported");
         let ext = dest.extension().and_then(|s| s.to_str()).unwrap_or("jsonl");
-        let unique_name = format!("{}-{}.{}", stem, chrono::Utc::now().format("%Y%m%d%H%M%S"), ext);
+        let unique_name = format!(
+            "{}-{}.{}",
+            stem,
+            chrono::Utc::now().format("%Y%m%d%H%M%S"),
+            ext
+        );
         let alt_dest = sessions_dir.join(&unique_name);
         std::fs::copy(path, &alt_dest)?;
         println!("Imported session to {}", alt_dest.display());
@@ -1718,9 +1727,7 @@ async fn handle_share_command(session_id: Option<&str>) -> Result<()> {
         .output()?;
 
     if !gh_check.status.success() {
-        anyhow::bail!(
-            "GitHub CLI (gh) is not authenticated. Run: gh auth login"
-        );
+        anyhow::bail!("GitHub CLI (gh) is not authenticated. Run: gh auth login");
     }
 
     let cwd = std::env::current_dir()
@@ -1741,7 +1748,8 @@ async fn handle_share_command(session_id: Option<&str>) -> Result<()> {
         let most_recent = sessions
             .first()
             .ok_or_else(|| anyhow::anyhow!("No sessions found for this project"))?;
-        let session_dir: std::path::PathBuf = oxi_store::session::get_default_session_dir(&cwd).into();
+        let session_dir: std::path::PathBuf =
+            oxi_store::session::get_default_session_dir(&cwd).into();
         session_dir.join(format!("{}.jsonl", most_recent.id))
     };
 
@@ -1749,7 +1757,8 @@ async fn handle_share_command(session_id: Option<&str>) -> Result<()> {
         anyhow::bail!("Session file not found: {}", session_path.display());
     }
 
-    let sm = oxi_store::session::SessionManager::open(&session_path.to_string_lossy(), None, Some(&cwd));
+    let sm =
+        oxi_store::session::SessionManager::open(&session_path.to_string_lossy(), None, Some(&cwd));
     let branch = sm.get_branch(None);
     let entries: Vec<oxi_store::session::SessionEntry> = branch.into_iter().collect();
 

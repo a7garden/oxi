@@ -293,10 +293,7 @@ fn test_settings_effective_model() {
     );
 
     // No CLI, uses last_used_model
-    assert_eq!(
-        settings.effective_model(None),
-        Some("gpt-4o".to_string())
-    );
+    assert_eq!(settings.effective_model(None), Some("gpt-4o".to_string()));
 }
 
 #[test]

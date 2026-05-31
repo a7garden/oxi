@@ -646,21 +646,27 @@ pub(crate) fn handle_slash_command(
                         if let Some(tier_arg) = parts.next() {
                             match tier_arg.to_lowercase().as_str() {
                                 "low" => {
-                                    oxi_ai::router::set_router_pin(Some(oxi_ai::router::RouterTier::Low));
+                                    oxi_ai::router::set_router_pin(Some(
+                                        oxi_ai::router::RouterTier::Low,
+                                    ));
                                     state.add_notification(
                                         "Router pinned to LOW tier".to_string(),
                                         NotificationKind::Success,
                                     );
                                 }
                                 "medium" => {
-                                    oxi_ai::router::set_router_pin(Some(oxi_ai::router::RouterTier::Medium));
+                                    oxi_ai::router::set_router_pin(Some(
+                                        oxi_ai::router::RouterTier::Medium,
+                                    ));
                                     state.add_notification(
                                         "Router pinned to MEDIUM tier".to_string(),
                                         NotificationKind::Success,
                                     );
                                 }
                                 "high" => {
-                                    oxi_ai::router::set_router_pin(Some(oxi_ai::router::RouterTier::High));
+                                    oxi_ai::router::set_router_pin(Some(
+                                        oxi_ai::router::RouterTier::High,
+                                    ));
                                     state.add_notification(
                                         "Router pinned to HIGH tier".to_string(),
                                         NotificationKind::Success,
@@ -938,7 +944,8 @@ pub(crate) fn handle_slash_command(
 
             // Reload WASM extensions
             let ext_status = if reloaded.extensions_enabled {
-                let cwd_path = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                let cwd_path =
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
                 let wasm_paths = crate::extensions::WasmExtensionManager::discover(&cwd_path);
                 if wasm_paths.is_empty() {
                     state.wasm_ext = None;
@@ -955,7 +962,11 @@ pub(crate) fn handle_slash_command(
                         // Unregister old WASM tools
                         let tools = session.agent_ref().tools();
                         let old_names: Vec<String> = if let Some(ref old_ext) = state.wasm_ext {
-                            old_ext.all_tool_defs().iter().map(|d| d.name.clone()).collect()
+                            old_ext
+                                .all_tool_defs()
+                                .iter()
+                                .map(|d| d.name.clone())
+                                .collect()
                         } else {
                             vec![]
                         };
@@ -1016,7 +1027,10 @@ pub(crate) fn handle_slash_command(
                     // Deactivate a skill
                     let name = parts.get(1).unwrap_or(&"").trim();
                     if name.is_empty() {
-                        state.add_notification("/skill off <name>".to_string(), NotificationKind::Info);
+                        state.add_notification(
+                            "/skill off <name>".to_string(),
+                            NotificationKind::Info,
+                        );
                     } else {
                         let mut active = state.active_skills.write();
                         let name_lower = name.to_lowercase();
@@ -1075,7 +1089,8 @@ pub(crate) fn handle_slash_command(
                     } else {
                         let mut out = String::from("Skills:\n\n");
                         for skill in skills.all() {
-                            let is_active = active.iter().any(|n| n.eq_ignore_ascii_case(&skill.name));
+                            let is_active =
+                                active.iter().any(|n| n.eq_ignore_ascii_case(&skill.name));
                             let status = if is_active { "\u{2713}" } else { " " };
                             out.push_str(&format!(
                                 "  [{}] {} — {}\n",
@@ -1095,8 +1110,7 @@ pub(crate) fn handle_slash_command(
                     );
                 } else {
                     state.overlay = None;
-                    state.overlay_state =
-                        Some(super::overlay::tools_overlay(listing));
+                    state.overlay_state = Some(super::overlay::tools_overlay(listing));
                 }
             }
             true

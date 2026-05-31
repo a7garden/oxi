@@ -26,8 +26,7 @@ static ROUTER_SNAPSHOT: parking_lot::RwLock<Option<RouterSnapshot>> =
     parking_lot::RwLock::new(None);
 
 /// Global pin tier override — set by /router pin command.
-static ROUTER_PIN_TIER: parking_lot::RwLock<Option<RouterTier>> =
-    parking_lot::RwLock::new(None);
+static ROUTER_PIN_TIER: parking_lot::RwLock<Option<RouterTier>> = parking_lot::RwLock::new(None);
 
 /// Snapshot of the current router state for UI display.
 #[derive(Debug, Clone, Default)]

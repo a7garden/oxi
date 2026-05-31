@@ -1069,7 +1069,10 @@ theme = "dracula"
 
         let settings = Settings::load_from(tmp.path()).unwrap();
         // Migration moves default_model → last_used_model
-        assert_eq!(settings.last_used_model, Some("gemini-2.0-flash".to_string()));
+        assert_eq!(
+            settings.last_used_model,
+            Some("gemini-2.0-flash".to_string())
+        );
         assert_eq!(settings.last_used_provider, Some("google".to_string()));
     }
 
@@ -1336,7 +1339,10 @@ theme = "dracula"
 
         let migrated = Settings::migrate(settings).unwrap();
         assert_eq!(migrated.version, SETTINGS_VERSION);
-        assert_eq!(migrated.last_used_model, Some("bare-model-name".to_string()));
+        assert_eq!(
+            migrated.last_used_model,
+            Some("bare-model-name".to_string())
+        );
     }
 
     #[test]
@@ -1580,7 +1586,10 @@ tool_timeout_seconds = 45
 
         let settings = Settings::load_from(tmp.path()).unwrap();
         // Migration splits provider from model
-        assert_eq!(settings.last_used_model, Some("gemini-2.0-flash".to_string()));
+        assert_eq!(
+            settings.last_used_model,
+            Some("gemini-2.0-flash".to_string())
+        );
         assert_eq!(settings.last_used_provider, Some("google".to_string()));
     }
 

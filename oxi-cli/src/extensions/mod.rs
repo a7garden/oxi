@@ -200,10 +200,8 @@ pub trait Extension: Send + Sync {
     /// Called when a bash command is about to be executed.
     fn bash(&self, _event: &crate::extensions::types::BashEvent) {}
     /// Called for every user input keystroke. Return
-    /// [`InputEventResult::Handled`](crate::extensions::types::InputEventResult::Handled)
-    /// to suppress the default input handling, or
-    /// [`InputEventResult::Transform { text }`](crate::extensions::types::InputEventResult::Transform)
-    /// to replace the input text.
+    /// [`InputEventResult::Handled`] to suppress the default input handling, or
+    /// [`InputEventResult::Transform { text }`] to replace the input text.
     fn input(
         &self,
         _event: &crate::extensions::types::InputEvent,
