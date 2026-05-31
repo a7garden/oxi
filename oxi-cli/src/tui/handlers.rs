@@ -1254,7 +1254,7 @@ async fn handle_wizard_step_key(
 
                         let models: Vec<String> = oxi_ai::model_db::get_all_models()
                             .filter(|e| model_providers.contains(&e.provider))
-                            .map(|e| e.id.to_string())
+                            .map(|e| format!("{}/{}", e.provider, e.id))
                             .collect();
 
                         if models.is_empty() {
@@ -1366,14 +1366,16 @@ async fn handle_wizard_step_key(
                     }) = extract_step(&state.overlay)
                     {
                         if let Some(model_id) = models.get(*selected) {
-                            let full_model = format!("{}/{}", provider, model_id);
+                            let full_model = model_id.clone();
                             if let Ok(mut settings) = oxi_store::settings::Settings::load() {
                                 settings.last_used_model = Some(model_id.to_string());
-                                settings.last_used_provider = Some(provider.clone());
+                                let model_provider = model_id.split('/').next().unwrap_or(&provider);
+                                settings.last_used_provider = Some(model_provider.to_string());
                                 let _ = settings.save();
                             }
                             state.footer_state.data.model_name = full_model.clone();
-                            state.footer_state.data.provider_name = provider.clone();
+                            state.footer_state.data.provider_name =
+                                full_model.split('/').next().unwrap_or("").to_string();
                             if !is_config {
                                 state.overlay = wrap_step(
                                     &state.overlay,
