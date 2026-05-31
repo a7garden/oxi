@@ -2572,7 +2572,6 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
 
     let stats = fs::metadata(file_path).ok()?;
     let mut message_count = 0i64;
-    let mut assistant_count = 0i64;
     let mut first_message = String::new();
     let mut all_messages = Vec::new();
     let mut name: Option<String> = None;
@@ -2599,7 +2598,6 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
                         }
                     }
                 } else if m.message.is_assistant() {
-                    assistant_count += 1;
                     // Use assistant text as first_message fallback
                     if first_message.is_empty() {
                         let text = m.message.content();
@@ -2612,8 +2610,9 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
         }
     }
 
-    // Skip sessions with no messages at all (user or assistant)
-    if message_count == 0 && assistant_count == 0 {
+    // Skip sessions with no user messages — these are incomplete/empty sessions
+    // that shouldn't appear in the resume list
+    if message_count == 0 {
         return None;
     }
 
