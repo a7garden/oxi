@@ -124,6 +124,40 @@ impl SettingsOverlay {
     fn visible_count(&self) -> usize {
         self.filtered_indices.len()
     }
+
+    /// Persist toggle/choice changes back to disk.
+    fn persist_changes(&self) {
+        if let Ok(mut settings) = oxi_store::settings::Settings::load() {
+            for item in &self.all_items {
+                match item {
+                    SettingsItem::Toggle { label, value } => match label.as_str() {
+                        "stream_responses" => settings.stream_responses = *value,
+                        "extensions" => settings.extensions_enabled = *value,
+                        "auto_compact" => settings.auto_compaction = *value,
+                        "routing" => settings.enable_routing = *value,
+                        _ => {}
+                    },
+                    SettingsItem::Choice { label, value } => match label.as_str() {
+                        "thinking" => {
+                            settings.thinking_level = match value.as_str() {
+                                "Off" => oxi_store::settings::ThinkingLevel::Off,
+                                "Minimal" => oxi_store::settings::ThinkingLevel::Minimal,
+                                "Low" => oxi_store::settings::ThinkingLevel::Low,
+                                "Medium" => oxi_store::settings::ThinkingLevel::Medium,
+                                "High" => oxi_store::settings::ThinkingLevel::High,
+                                "XHigh" => oxi_store::settings::ThinkingLevel::XHigh,
+                                _ => settings.thinking_level,
+                            };
+                        }
+                        "theme" => settings.theme = value.clone(),
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+            let _ = settings.save();
+        }
+    }
 }
 
 impl OverlayComponent for SettingsOverlay {
@@ -194,6 +228,19 @@ impl OverlayComponent for SettingsOverlay {
                                     }
                                 }
                             }
+                        } else if *id == "router_setup" {
+                            let auth = oxi_store::auth_storage::shared_auth_storage();
+                            let models: Vec<String> = oxi_ai::model_db::get_all_models()
+                                .filter(|entry| auth.get_api_key(entry.provider).is_some())
+                                .map(|entry| format!("{}/{}", entry.provider, entry.id))
+                                .collect();
+                            return OverlayAction::OpenRouterSetup {
+                                initial: crate::tui::overlay::RouterSetupData {
+                                    profile_name: "auto".to_string(),
+                                    ..Default::default()
+                                },
+                                models,
+                            };
                         }
                     }
                     SettingsItem::ReadOnly { .. } => {}
@@ -201,6 +248,7 @@ impl OverlayComponent for SettingsOverlay {
             }
             KeyCode::Esc => {
                 if self.changed {
+                    self.persist_changes();
                     if let Ok(ptr) = self.app_state.lock() {
                         // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
                         // The raw pointer is valid for the lock's lifetime.
@@ -373,6 +421,42 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
     items.push(SettingsItem::Toggle {
         label: "auto_compact".to_string(),
         value: settings.auto_compaction,
+    });
+
+    // ── Routing ─────────────────────────────────────────────────────────
+    let gd = dirs::config_dir().unwrap_or_default().join("oxi");
+    let pd = std::env::current_dir().unwrap_or_default();
+    let has_router = oxi_store::router_config::load_router_config(&gd, &pd).is_some();
+
+    items.push(SettingsItem::ReadOnly {
+        label: "───────────────────".to_string(),
+        value: "─────────────────────".to_string(),
+    });
+
+    if has_router {
+        items.push(SettingsItem::Toggle {
+            label: "routing".to_string(),
+            value: settings.enable_routing,
+        });
+        items.push(SettingsItem::Action {
+            label: "► Configure router".to_string(),
+            id: "router_setup",
+        });
+    } else {
+        items.push(SettingsItem::ReadOnly {
+            label: "routing".to_string(),
+            value: "not configured".to_string(),
+        });
+        items.push(SettingsItem::Action {
+            label: "► Set up router".to_string(),
+            id: "router_setup",
+        });
+    }
+
+    // ── Info ─────────────────────────────────────────────────────────────
+    items.push(SettingsItem::ReadOnly {
+        label: "───────────────────".to_string(),
+        value: "─────────────────────".to_string(),
     });
 
     let max_tokens = settings

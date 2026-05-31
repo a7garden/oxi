@@ -64,6 +64,10 @@ pub struct ColorScheme {
     pub cursor_bg: Color,
     /// Selection / highlight background.
     pub selection_bg: Color,
+    /// Code (inline `code`) foreground color.
+    pub code_fg: Color,
+    /// Code (inline `code`) background color.
+    pub code_bg: Color,
     /// Tool call pending background (waiting state).
     pub tool_pending_bg: Color,
     /// Tool call executing background (running state).
@@ -99,6 +103,8 @@ impl ColorScheme {
             cursor_fg: Color::Rgb(0, 0, 0),            // #000000
             cursor_bg: Color::Rgb(205, 214, 244),      // #cdd6f4
             selection_bg: Color::Rgb(40, 40, 60),      // #28283c
+            code_fg: Color::Rgb(255, 200, 100),      // #ffc864 warm amber
+            code_bg: Color::Rgb(35, 30, 20),         // #231e14 warm dark
             tool_pending_bg: Color::Rgb(18, 20, 28),   // #12141c subtle
             tool_executing_bg: Color::Rgb(28, 24, 14), // #1c1810 amber tint
             tool_success_bg: Color::Rgb(16, 26, 14),   // #101a0e green tint
@@ -124,6 +130,8 @@ impl ColorScheme {
             cursor_fg: Color::Rgb(239, 241, 245),
             cursor_bg: Color::Rgb(76, 79, 105),
             selection_bg: Color::Rgb(204, 208, 218),
+            code_fg: Color::Rgb(180, 60, 60),        // #b43c3c dark red
+            code_bg: Color::Rgb(240, 240, 245),       // #f0f0f5 off-white
             tool_pending_bg: Color::Rgb(235, 238, 245), // #ebeeff subtle blue tint
             tool_executing_bg: Color::Rgb(255, 248, 230), // #fff8e6 amber tint
             tool_success_bg: Color::Rgb(230, 248, 230), // #e6f8e6 green tint
@@ -322,6 +330,10 @@ pub struct ThemeFileColors {
     pub cursor_bg: Option<String>,
     /// Selection background color.
     pub selection_bg: Option<String>,
+    /// Code (inline `code`) foreground color.
+    pub code_fg: Option<String>,
+    /// Code (inline `code`) background color.
+    pub code_bg: Option<String>,
     /// Tool call pending background (waiting state).
     pub tool_pending_bg: Option<String>,
     /// Tool call executing background (running state).
@@ -400,6 +412,8 @@ impl ThemeFile {
                 defaults.selection_bg,
                 "selection_bg",
             ),
+            code_fg: resolve(self.colors.code_fg, defaults.code_fg, "code_fg"),
+            code_bg: resolve(self.colors.code_bg, defaults.code_bg, "code_bg"),
             tool_pending_bg: resolve(
                 self.colors.tool_pending_bg,
                 defaults.tool_pending_bg,

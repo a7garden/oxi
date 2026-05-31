@@ -1054,7 +1054,7 @@ fn build_provider_list(is_config: bool) -> Vec<ProviderInfo> {
     providers.sort_by(|a, b| {
         category_rank(&a.category)
             .cmp(&category_rank(&b.category))
-            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.display_name.cmp(&b.display_name))
     });
 
     providers

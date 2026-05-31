@@ -8,7 +8,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 |------|-------|
 | Language | Rust 2021 edition |
 | Workspace crates | `oxi-ai`, `oxi-agent`, `oxi-store`, `oxi-tui`, `oxi-sdk`, `oxi-cli` |
-| Version | 0.24.0 |
+| Version | 0.25.7 |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit` |
 
@@ -55,8 +55,8 @@ pub trait Provider: Send + Sync + 'static {
 }
 ```
 
-**20 built-in providers** in `src/providers/`: openai, openai-responses, openai-completions, anthropic, google, vertex, mistral, azure, bedrock, deepseek, groq, cerebras, + 10 more.
-`model_db.rs` contains pricing/context/feature data for 544+ models across 28+ providers.
+**8 built-in providers** in `src/providers/`: openai, openai-responses, anthropic, google, vertex, mistral, azure, bedrock.
+`model_db.rs` contains pricing/context/feature data for 934 models across 29 providers.
 `compaction.rs` summarizes old messages when context grows too large.
 `ProviderRegistry` in `mod.rs` supports both custom providers (via `register()`) and built-in fallback (via `register_builtins.rs`).
 
@@ -84,7 +84,7 @@ pub trait AgentTool: Send + Sync {
 }
 ```
 
-**20 tools** in `src/tools/`: bash, read, write, edit, edit_diff, ls, find, grep, github, github_search, subagent, questionnaire, context7 (2 sub-tools), web_search, get_search_results, file_mutation_queue.
+**17 tools** in `src/tools/`: bash, read, write, edit, edit_diff, ls, find, grep, github, github_search, subagent, questionnaire, context7 (2 sub-tools), web_search, get_search_results, generate_image, search_cache.
 **7 essential tools** (cannot be disabled): read, write, edit, bash, grep, find, ls.
 `agent_loop/` contains streaming, tool execution, retry logic, and queue management.
 `mcp/` implements Model Context Protocol client.
@@ -105,7 +105,7 @@ Key types: `SessionEntry`, `AgentMessage`, `Settings`, `SessionManager`.
 
 Built on `ratatui` + `crossterm`. Theme system with hot-reload from TOML/JSON files.
 Markdown rendering via `pulldown-cmark`. Fuzzy search for file/command completion.
-`widgets/chat.rs` is the main conversation widget (107K).
+`widgets/chat/` is the main conversation widget (3166 lines across 8 files).
 
 Key types: `Theme`, `ThemeManager`, `ChatWidget`, `ToolRenderer`.
 
@@ -224,6 +224,6 @@ cargo test --workspace --doc         # Doc tests
 - Session entries form a tree via `parent_id`, not a flat list. Always traverse with this in mind.
 - Provider message formats differ significantly (Anthropic vs OpenAI). Use `transform.rs` for conversion.
 - The tool-calling loop in `agent_loop/` has retry logic — tool implementations must be idempotent.
-- `model_db.rs` is large (585 entries). Manual edits may be overwritten by regeneration scripts.
+- `model_db.rs` is large (934 models). Manual edits may be overwritten by regeneration scripts.
 - SSE parsing handles partial UTF-8 lines. Do not assume line boundaries are clean.
 - `Agent::is_running` field prevents concurrent agent runs — check this before spawning parallel tasks.

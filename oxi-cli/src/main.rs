@@ -1495,7 +1495,17 @@ fn register_router_provider(settings: &Settings) {
     let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
     let project_dir = std::env::current_dir().unwrap_or_default();
 
-    // Always register the discoverable model entry.
+    let store_cfg = match oxi_store::router_config::load_router_config(&global_dir, &project_dir) {
+        Some(cfg) => cfg,
+        None => {
+            tracing::debug!(
+                "No router config found — router/auto will not appear in model list"
+            );
+            return;
+        }
+    };
+
+    // Register router models only when configured.
     oxi_ai::register_model(oxi_ai::Model::new(
         "auto",
         "Router (auto)".to_string(),
@@ -1503,16 +1513,6 @@ fn register_router_provider(settings: &Settings) {
         "router",
         "router://local",
     ));
-
-    let store_cfg = match oxi_store::router_config::load_router_config(&global_dir, &project_dir) {
-        Some(cfg) => cfg,
-        None => {
-            tracing::debug!(
-                "No router config found — router/auto is discoverable but not configured"
-            );
-            return;
-        }
-    };
 
     // Convert store config to AI config.
     let mut ai_profiles = std::collections::HashMap::new();

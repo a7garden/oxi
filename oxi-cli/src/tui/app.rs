@@ -1321,7 +1321,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         let has_model = !model_id.is_empty() && model_id.contains('/');
         if !has_model {
             let auth = oxi_store::auth_storage::shared_auth_storage();
-            let providers: Vec<ProviderInfo> = oxi_ai::register_builtins::get_builtin_providers()
+            let mut providers: Vec<ProviderInfo> = oxi_ai::register_builtins::get_builtin_providers()
                 .iter()
                 .map(|builtin| ProviderInfo {
                     name: builtin.name.to_string(),
@@ -1331,6 +1331,25 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                     description: builtin.description.to_string(),
                 })
                 .collect();
+
+            // Sort by category order (must match render_provider_list's category_order)
+            // so that selected index aligns with the visual position.
+            let category_rank = |cat: &str| -> usize {
+                match cat {
+                    "primary" => 0,
+                    "chinese" => 1,
+                    "open" => 2,
+                    "cloud" => 3,
+                    "enterprise" => 4,
+                    "specialized" => 5,
+                    _ => 6,
+                }
+            };
+            providers.sort_by(|a, b| {
+                category_rank(&a.category)
+                    .cmp(&category_rank(&b.category))
+                    .then_with(|| a.display_name.cmp(&b.display_name))
+            });
             state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider {
                 providers,
                 selected: 0,
