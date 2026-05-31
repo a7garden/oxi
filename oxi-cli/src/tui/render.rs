@@ -1116,12 +1116,13 @@ fn render_setup_step(
 fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
     let styles = theme.to_styles();
 
-    let (models, filter, selected) = match &state.overlay {
+    let (_provider, models, filter, selected) = match &state.overlay {
         Some(AppOverlay::ModelSelect {
+            provider,
             models,
             filter,
             selected,
-        }) => (models.clone(), filter.clone(), *selected),
+        }) => (provider.clone(), models.clone(), filter.clone(), *selected),
         _ => return,
     };
 

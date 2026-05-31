@@ -259,9 +259,12 @@ impl ChatViewState {
                 } else {
                     text.to_string()
                 };
+                // Push to the END so the rendering order matches arrival order.
+                // Previously `insert(0, ...)` put new text at the TOP, which
+                // caused the response to appear ABOVE thinking blocks.
                 s.message
                     .content_blocks
-                    .insert(0, ContentBlock::Text { content: truncated });
+                    .push(ContentBlock::Text { content: truncated });
             }
         }
     }

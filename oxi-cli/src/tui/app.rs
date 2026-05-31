@@ -288,6 +288,9 @@ pub(crate) enum AppOverlay {
     Setup(SetupStep),
     /// Model selector overlay
     ModelSelect {
+        /// Provider name for the models being shown.
+        /// Used to construct the full model ID (provider/model) when selecting.
+        provider: String,
         models: Vec<String>,
         filter: String,
         selected: usize,

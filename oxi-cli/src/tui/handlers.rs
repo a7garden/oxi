@@ -1419,12 +1419,13 @@ async fn handle_model_select_key(
     state: &mut AppState,
     session: &AgentSession,
 ) -> Option<Action> {
-    let (models, filter, selected) = match &state.overlay {
+    let (provider, models, filter, selected) = match &state.overlay {
         Some(AppOverlay::ModelSelect {
+            provider,
             models,
             filter,
             selected,
-        }) => (models.clone(), filter.clone(), *selected),
+        }) => (provider.clone(), models.clone(), filter.clone(), *selected),
         _ => return None,
     };
 
@@ -1448,6 +1449,7 @@ async fn handle_model_select_key(
                 selected.saturating_sub(1)
             };
             state.overlay = Some(AppOverlay::ModelSelect {
+                provider,
                 models,
                 filter,
                 selected: new_sel,
@@ -1460,6 +1462,7 @@ async fn handle_model_select_key(
                 (selected + 1).min(filtered.len() - 1)
             };
             state.overlay = Some(AppOverlay::ModelSelect {
+                provider,
                 models,
                 filter,
                 selected: new_sel,
@@ -1468,14 +1471,17 @@ async fn handle_model_select_key(
         KeyCode::Enter => {
             if let Some((_idx, model_id)) = filtered.get(selected) {
                 let model_id = (*model_id).clone();
-                match session.set_model(&model_id) {
+                // Construct full model ID (provider/model) so set_model() can find it.
+                let full_model = format!("{}/{}", provider, model_id);
+                match session.set_model(&full_model) {
                     Ok(()) => {
                         state.add_notification(
-                            format!("Model: {}", model_id),
+                            format!("Model: {}", full_model),
                             NotificationKind::Success,
                         );
-                        state.footer_state.data.model_name = model_id.clone();
-                        oxi_store::settings::Settings::save_last_used(&model_id);
+                        state.footer_state.data.model_name = full_model.clone();
+                        state.footer_state.data.provider_name = provider.clone();
+                        oxi_store::settings::Settings::save_last_used(&full_model);
                     }
                     Err(e) => {
                         state.add_notification(format!("Error: {}", e), NotificationKind::Error);
@@ -1491,6 +1497,7 @@ async fn handle_model_select_key(
             let mut new_filter = filter;
             new_filter.pop();
             state.overlay = Some(AppOverlay::ModelSelect {
+                provider,
                 models,
                 filter: new_filter,
                 selected: 0,
@@ -1500,6 +1507,7 @@ async fn handle_model_select_key(
             let mut new_filter = filter;
             new_filter.push(c);
             state.overlay = Some(AppOverlay::ModelSelect {
+                provider,
                 models,
                 filter: new_filter,
                 selected: 0,

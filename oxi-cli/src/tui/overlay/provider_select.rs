@@ -77,7 +77,8 @@ enum VisibleRow {
 #[allow(clippy::type_complexity)]
 pub struct ProviderSelectOverlay {
     pub providers: Vec<ProviderEntry>,
-    /// Index into `providers` (skips category headers).
+    /// Index into `build_visible_items()` output (includes category headers).
+    /// This makes keyboard navigation match the visual order.
     pub selected: usize,
     /// Vertical scroll offset in `VisibleRow` units.
     scroll_offset: usize,
@@ -194,22 +195,56 @@ impl ProviderSelectOverlay {
 
     // ── Navigation ────────────────────────────────────────────────────
 
+    /// Navigate to the previous provider item (skip category headers).
     fn prev_provider(&mut self) {
-        if self.providers.is_empty() {
+        let items = self.build_visible_items();
+        if items.is_empty() {
             return;
         }
-        if self.selected == 0 {
-            self.selected = self.providers.len() - 1;
+        // Search backward for a Provider row
+        let start = if self.selected == 0 {
+            items.len()
         } else {
-            self.selected -= 1;
+            self.selected
+        };
+        for i in (0..start).rev() {
+            if matches!(items[i], VisibleRow::Provider { .. }) {
+                self.selected = i;
+                return;
+            }
+        }
+        // Wrap: find last Provider
+        for i in (0..items.len()).rev() {
+            if matches!(items[i], VisibleRow::Provider { .. }) {
+                self.selected = i;
+                return;
+            }
         }
     }
 
+    /// Navigate to the next provider item (skip category headers).
     fn next_provider(&mut self) {
-        if self.providers.is_empty() {
+        let items = self.build_visible_items();
+        if items.is_empty() {
             return;
         }
-        self.selected = (self.selected + 1) % self.providers.len();
+        let n = items.len();
+        for i in 1..=n {
+            let idx = (self.selected + i) % n;
+            if matches!(items[idx], VisibleRow::Provider { .. }) {
+                self.selected = idx;
+                return;
+            }
+        }
+    }
+
+    /// Return the provider index for the currently-selected visible row.
+    fn selected_provider_index(&self) -> Option<usize> {
+        let items = self.build_visible_items();
+        items.get(self.selected).and_then(|item| match item {
+            VisibleRow::Provider { global_index, .. } => Some(*global_index),
+            _ => None,
+        })
     }
 
     // ── Static helpers ────────────────────────────────────────────────
@@ -417,7 +452,8 @@ impl ProviderSelectOverlay {
                 self.selected = self.providers.len() - 1;
             }
             KeyCode::Enter => {
-                if let Some(entry) = self.providers.get(self.selected).cloned() {
+                if let Some(idx) = self.selected_provider_index() {
+                    if let Some(entry) = self.providers.get(idx).cloned() {
                     self.sub_mode = SubMode::EnteringKey {
                         provider_name: entry.name,
                         display_name: entry.display_name,

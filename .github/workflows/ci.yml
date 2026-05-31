@@ -62,6 +62,9 @@ jobs:
     name: Test (nextest)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Override RUSTFLAGS for test runs — clippy checks run separately in the clippy job
+      RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -75,6 +78,8 @@ jobs:
   test-doc:
     name: Doc Tests
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
