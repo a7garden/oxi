@@ -9,9 +9,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
-  # sccache: share compilation cache across jobs
-  RUSTC_WRAPPER: "sccache"
-  SCCACHE_GHA_ENABLED: "true"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
