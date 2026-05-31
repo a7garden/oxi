@@ -61,6 +61,7 @@ jobs:
   test:
     name: Test (nextest)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -88,15 +89,15 @@ jobs:
   build-release:
     name: Build (Release)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "build-release"
-      - uses: taiki-e/install-action@nextest
       - name: Build release binary
-        run: cargo nextest run --workspace --profile release --no-run
+        run: cargo build --release -p oxi-cli
       - name: Build docs
         run: cargo doc --workspace --no-deps
         env:
