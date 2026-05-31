@@ -62,9 +62,25 @@ pub(crate) fn handle_slash_command(
                 }
             } else {
                 let auth = oxi_store::auth_storage::shared_auth_storage();
+
+                // Build a set of provider names that have a configured key,
+                // including all providers sharing the same env_key.
+                // This handles the case where a user sets a key for "zai-coding-global"
+                // but model DB entries have provider "zai" (both share ZAI_API_KEY).
+                let mut providers_with_key = std::collections::HashSet::new();
+                for p in oxi_ai::register_builtins::get_builtin_providers() {
+                    if auth.get_api_key(p.name).is_some() {
+                        for p2 in oxi_ai::register_builtins::get_builtin_providers() {
+                            if p2.env_key == p.env_key {
+                                providers_with_key.insert(p2.name.to_string());
+                            }
+                        }
+                    }
+                }
+
                 // Static models filtered by API key
                 let mut all_models: Vec<String> = oxi_ai::model_db::get_all_models()
-                    .filter(|entry| auth.get_api_key(entry.provider).is_some())
+                    .filter(|entry| providers_with_key.contains(entry.provider))
                     .map(|entry| format!("{}/{}", entry.provider, entry.id))
                     .collect();
 

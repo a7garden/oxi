@@ -639,7 +639,46 @@ impl AuthStorage {
             };
         }
 
-        // 5. Fallback resolver
+        // 5. Cross-provider alias lookup:
+        //    If the key is stored under a different provider name that shares
+        //    the same env_key (e.g. key stored as "zai-coding-global" but
+        //    looked up as "zai"), check those providers' stored credentials.
+        if let Some(builtin) = oxi_ai::register_builtins::get_builtin_provider(provider) {
+            let env_key = builtin.env_key;
+            let credentials = self.credentials.read();
+            for other in oxi_ai::register_builtins::get_builtin_providers() {
+                if other.name == provider {
+                    continue; // already checked above
+                }
+                if other.env_key == env_key {
+                    if let Some(cred) = credentials.get(other.name) {
+                        return match cred {
+                            AuthCredential::ApiKey { key } => Some(key.clone()),
+                            AuthCredential::OAuth {
+                                access_token, expires_at, ..
+                            } => {
+                                if *expires_at > now_secs() {
+                                    Some(access_token.clone())
+                                } else {
+                                    None
+                                }
+                            }
+                            AuthCredential::Session {
+                                token, expires_at, ..
+                            } => {
+                                if *expires_at == 0 || *expires_at > now_secs() {
+                                    Some(token.clone())
+                                } else {
+                                    None
+                                }
+                            }
+                        };
+                    }
+                }
+            }
+        }
+
+        // 6. Fallback resolver
         if include_fallback {
             if let Some(ref resolver) = *self.fallback_resolver.read() {
                 return resolver.resolve(provider);
