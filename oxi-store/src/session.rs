@@ -2610,9 +2610,10 @@ async fn build_session_info(file_path: &str) -> Option<SessionInfo> {
         }
     }
 
-    // Skip sessions with no user messages — these are incomplete/empty sessions
-    // that shouldn't appear in the resume list
-    if message_count == 0 {
+    // Skip sessions with no readable content at all — these are sessions
+    // where the assistant returned empty content (e.g. only thinking blocks)
+    // and the user never sent a message. Not useful for resuming.
+    if first_message.is_empty() {
         return None;
     }
 

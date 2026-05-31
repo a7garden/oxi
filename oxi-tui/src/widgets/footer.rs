@@ -146,10 +146,10 @@ impl StatefulWidget for Footer<'_> {
             Constraint::Length(1), // line 2: path + git ... model
         ]));
 
-        // Separator
+        // Separator — use muted to match the status line above the input area
         Block::default()
             .borders(Borders::TOP)
-            .border_style(styles.border)
+            .border_style(styles.muted)
             .render(sep_row, buf);
 
         // ── Row 1: tokens + duration ──

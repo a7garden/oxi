@@ -1,6 +1,6 @@
 [package]
 name = "oxi-store"
-version = "0.25.1"
+version = "0.25.2"
 edition = "2021"
 description = "Shared persistent state for oxi — sessions, settings, auth, model registry"
 readme = "README.md"
@@ -12,7 +12,7 @@ categories = ["development-tools", "asynchronous"]
 exclude = ["target/"]
 
 [dependencies]
-oxi-ai = { version = "0.25.1", path = "../oxi-ai" }
+oxi-ai = { version = "0.25.2", path = "../oxi-ai" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
