@@ -698,7 +698,22 @@ impl Settings {
     pub fn effective_model(&self, cli_model: Option<&str>) -> Option<String> {
         cli_model
             .map(String::from)
-            .or_else(|| self.last_used_model.clone())
+            .or_else(|| {
+                // Reconstruct full model ID from separate fields.
+                // Handles both cases:
+                //   - last_used_model = "anthropic/claude-sonnet-4" (full ID, stored by save_last_used)
+                //   - last_used_model = "claude-sonnet-4" + last_used_provider = "anthropic" (split)
+                let model = self.last_used_model.as_ref()?;
+                if model.contains('/') {
+                    // Already a full model ID
+                    Some(model.clone())
+                } else if let Some(ref provider) = self.last_used_provider {
+                    // Reconstruct from separate fields
+                    Some(format!("{}/{}", provider, model))
+                } else {
+                    Some(model.clone())
+                }
+            })
     }
 
     /// Get the effective provider.
@@ -731,11 +746,16 @@ impl Settings {
     // ── Theme persistence ─────────────────────────────────────────────
 
     /// Save the last used model/provider and persist to disk.
+    ///
+    /// Splits the model_id on first `/` to store provider and model separately.
     pub fn save_last_used(model_id: &str) {
         if let Ok(mut settings) = Self::load() {
-            let parts: Vec<&str> = model_id.splitn(2, '/').collect();
-            settings.last_used_model = Some(model_id.to_string());
-            settings.last_used_provider = parts.first().map(|s| s.to_string());
+            if let Some((provider, model)) = model_id.split_once('/') {
+                settings.last_used_provider = Some(provider.to_string());
+                settings.last_used_model = Some(model.to_string());
+            } else {
+                settings.last_used_model = Some(model_id.to_string());
+            }
             let _ = settings.save();
         }
     }

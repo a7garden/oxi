@@ -292,8 +292,8 @@ fn test_settings_effective_model() {
         Some("cli-model".to_string())
     );
 
-    // No CLI, uses last_used_model
-    assert_eq!(settings.effective_model(None), Some("gpt-4o".to_string()));
+    // No CLI, reconstructs full model ID from last_used_model + last_used_provider
+    assert_eq!(settings.effective_model(None), Some("openai/gpt-4o".to_string()));
 }
 
 #[test]

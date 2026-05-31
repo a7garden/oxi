@@ -1259,11 +1259,13 @@ async fn handle_wizard_step_key(
 
                         if models.is_empty() {
                             if !is_config {
+                                // No models found — use the provider name as a passthrough.
+                                // The model ID "default" will be sent as-is to the provider.
                                 let model_id = "default".to_string();
                                 let full_model = format!("{}/{}", provider, model_id);
                                 if let Ok(mut settings) = oxi_store::settings::Settings::load() {
-                                    settings.last_used_model = Some(model_id.clone());
                                     settings.last_used_provider = Some(provider.clone());
+                                    settings.last_used_model = Some(model_id.clone());
                                     let _ = settings.save();
                                 }
                                 state.footer_state.data.model_name = full_model.clone();
