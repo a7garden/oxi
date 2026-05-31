@@ -1,6 +1,6 @@
 [package]
 name = "oxi-agent"
-version = "0.25.5"
+version = "0.25.7"
 edition = "2021"
 description = "Agent runtime with tool-calling loop for AI coding assistants"
 readme = "README.md"

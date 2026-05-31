@@ -17,7 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Unreleased
 
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.25.7...HEAD
+
+## [0.25.7] - 2026-05-31
+
+### Changed — oxi-cli
+
+- **Provider select overlay improvements**: Updated handler logic, factory enhancements, and slash command integration
+- Bumped all crate versions to 0.25.7
 
 ## [0.25.4] - 2026-05-31
 

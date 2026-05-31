@@ -1,6 +1,6 @@
 [package]
 name = "oxi-cli"
-version = "0.25.6"
+version = "0.25.7"
 edition = "2021"
 description = "Terminal-based AI coding assistant — multi-provider, streaming-first, extensible"
 readme = "README.md"
