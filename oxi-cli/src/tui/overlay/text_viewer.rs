@@ -170,10 +170,6 @@ pub fn tools_overlay(content: String) -> Box<dyn OverlayComponent> {
     Box::new(TextViewerOverlay::new(" Tools ", content))
 }
 
-pub fn extensions_overlay(content: String) -> Box<dyn OverlayComponent> {
-    Box::new(TextViewerOverlay::new(" Extensions & WASM Tools ", content))
-}
-
 fn format_changelog_entries(entries: Vec<(String, String)>) -> String {
     let mut out = String::new();
     for (version, changelog) in entries {

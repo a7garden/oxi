@@ -2,6 +2,7 @@
 
 use super::app::{AppOverlay, AppState, NotificationKind, ProviderInfo, SetupStep};
 use oxi_tui::theme::Theme;
+use oxi_tui::truncate_to_width;
 use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin, Rect},
@@ -10,6 +11,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
     Frame,
 };
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // ── Reusable UI components ──────────────────────────────────────────────
 
@@ -486,6 +488,7 @@ pub fn draw(f: &mut Frame, state: &mut AppState, theme: &Theme) {
     }
 
     // Status bar
+    state.footer_state.data.is_busy = state.is_agent_busy;
     f.render_stateful_widget(Footer::new(theme), chunks[2], &mut state.footer_state);
 
     // Notifications (toasts) — rendered on top of everything
@@ -1289,82 +1292,171 @@ fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: 
 
 // ── Notifications (Toasts) ───────────────────────────────────────────────
 
-const NOTIFICATION_WIDTH: u16 = 50;
-const NOTIFICATION_MAX_HEIGHT: u16 = 3;
+const NOTIF_MIN_WIDTH: u16 = 36;
+const NOTIF_MAX_WIDTH: u16 = 60;
+const NOTIF_PADDING: u16 = 2;
+const NOTIF_GAP: u16 = 1;
+const NOTIF_RIGHT_MARGIN: u16 = 2;
+const NOTIF_BOTTOM_OFFSET: u16 = 5;
+
+fn split_line_by_width(text: &str, max_width: usize) -> (String, String) {
+    if max_width == 0 {
+        return (String::new(), text.to_string());
+    }
+
+    let mut width = 0usize;
+    let mut end = 0usize;
+    for (idx, ch) in text.char_indices() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw > max_width {
+            break;
+        }
+        width += cw;
+        end = idx + ch.len_utf8();
+    }
+
+    let line = text[..end].to_string();
+    let rest = text[end..].trim_start().to_string();
+    (line, rest)
+}
 
 fn render_notifications(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
     if state.notifications.is_empty() {
         return;
     }
 
-    let styles = theme.to_styles();
+    let available_width = area.width.saturating_sub(NOTIF_RIGHT_MARGIN);
+    if area.height < 4 || available_width < 8 {
+        return;
+    }
 
-    // Position: bottom-right, above the footer
-    let notif_width = NOTIFICATION_WIDTH.min(area.width.saturating_sub(4));
-    let x = area.x + area.width.saturating_sub(notif_width) - 1;
-    let y = area.y + area.height.saturating_sub(6); // Above footer (3) + spacing (1)
-
-    // Stack notifications from bottom to top
+    // Stack notifications from bottom to top (most recent first)
     let visible: Vec<_> = state.notifications.iter().rev().take(3).collect();
-    let stack_height = (visible.len() as u16).min(NOTIFICATION_MAX_HEIGHT);
+    let max_inner_width = NOTIF_MAX_WIDTH.min(available_width.saturating_sub(1));
+    let min_inner_width = NOTIF_MIN_WIDTH.min(max_inner_width);
 
-    let notif_area = Rect {
-        x,
-        y: y.saturating_sub(stack_height),
-        width: notif_width,
-        height: stack_height,
-    };
+    if max_inner_width == 0 {
+        return;
+    }
 
-    // Semi-transparent dark background
-    let bg_style = Style::default().bg(ratatui::style::Color::Rgb(20, 20, 20));
-    f.render_widget(
-        ratatui::widgets::Paragraph::new("").style(bg_style).block(
-            ratatui::widgets::Block::default()
-                .borders(ratatui::widgets::Borders::ALL)
-                .border_style(Style::default().fg(match visible.first().map(|n| &n.kind) {
-                    Some(NotificationKind::Error) => ratatui::style::Color::Red,
-                    Some(NotificationKind::Warning) => ratatui::style::Color::Yellow,
-                    Some(NotificationKind::Success) => ratatui::style::Color::Green,
-                    _ => theme.colors.border.to_ratatui(),
-                })),
-        ),
-        notif_area,
-    );
+    let mut y_offset = 0u16;
+    let base_y = area.y + area.height.saturating_sub(NOTIF_BOTTOM_OFFSET);
+    let text_style = Style::default().fg(theme.colors.foreground.to_ratatui());
 
-    // Render each notification
-    for (i, notif) in visible.iter().enumerate().take(stack_height as usize) {
-        let row_y = notif_area.y + 1 + i as u16;
-        let text = if notif.message.len() > (notif_width - 2) as usize {
-            let end = notif
-                .message
-                .char_indices()
-                .take((notif_width - 5) as usize)
-                .last()
-                .map(|(i, c)| i + c.len_utf8())
-                .unwrap_or(0);
-            format!("{}...", &notif.message[..end])
-        } else {
-            notif.message.clone()
+    for notif in &visible {
+        let (icon, fg_color, bg_color, border_color) = match notif.kind {
+            NotificationKind::Success => (
+                "\u{2713}", // ✓
+                theme.colors.success.to_ratatui(),
+                theme.colors.tool_success_bg.to_ratatui(),
+                theme.colors.success.to_ratatui(),
+            ),
+            NotificationKind::Warning => (
+                "\u{26A0}", // ⚠
+                theme.colors.warning.to_ratatui(),
+                theme.colors.tool_executing_bg.to_ratatui(),
+                theme.colors.warning.to_ratatui(),
+            ),
+            NotificationKind::Error => (
+                "\u{2717}", // ✗
+                theme.colors.error.to_ratatui(),
+                theme.colors.tool_error_bg.to_ratatui(),
+                theme.colors.error.to_ratatui(),
+            ),
+            NotificationKind::Info => (
+                "\u{2139}", // ℹ
+                theme.colors.primary.to_ratatui(),
+                theme.colors.tool_pending_bg.to_ratatui(),
+                theme.colors.primary.to_ratatui(),
+            ),
         };
 
-        let color = match notif.kind {
-            NotificationKind::Error => ratatui::style::Color::Red,
-            NotificationKind::Warning => ratatui::style::Color::Yellow,
-            NotificationKind::Success => ratatui::style::Color::Green,
-            NotificationKind::Info => styles
-                .normal
-                .fg
-                .unwrap_or(theme.colors.foreground.to_ratatui()),
+        let icon_label = icon.to_string();
+        let icon_width = UnicodeWidthStr::width(icon_label.as_str()) as u16;
+        let icon_gap_width = icon_width.saturating_add(1);
+        let message_width = UnicodeWidthStr::width(notif.message.as_str()) as u16;
+
+        let desired_inner_width = message_width
+            .saturating_add(icon_gap_width)
+            .saturating_add(NOTIF_PADDING * 2)
+            .max(min_inner_width)
+            .min(max_inner_width);
+        let notif_width = desired_inner_width.saturating_add(1).min(available_width);
+
+        let inner_width = notif_width.saturating_sub(1);
+        let text_area_width = inner_width.saturating_sub(NOTIF_PADDING * 2);
+        if text_area_width == 0 {
+            continue;
+        }
+        let line1_width = text_area_width.saturating_sub(icon_gap_width);
+        let line2_width = text_area_width;
+
+        let padding = " ".repeat(NOTIF_PADDING as usize);
+        let icon_pad = " ".repeat(icon_gap_width as usize);
+
+        let (line1_text, remainder) = split_line_by_width(&notif.message, line1_width as usize);
+
+        let mut lines = Vec::new();
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(
+                icon_label.clone(),
+                Style::default().fg(fg_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(line1_text, text_style),
+        ]));
+
+        if !remainder.is_empty() && line2_width > 0 {
+            let line2_text = truncate_to_width(&remainder, line2_width as usize);
+            lines.push(Line::from(vec![
+                Span::raw(padding.clone()),
+                Span::raw(icon_pad.clone()),
+                Span::styled(line2_text, text_style),
+            ]));
+        }
+
+        let card_height = 2 + lines.len() as u16;
+        let notif_y = base_y.saturating_sub(y_offset + card_height);
+        if notif_y < area.y {
+            break;
+        }
+
+        let notif_x = area.x
+            + area
+                .width
+                .saturating_sub(notif_width)
+                .saturating_sub(NOTIF_RIGHT_MARGIN);
+
+        let notif_area = Rect {
+            x: notif_x,
+            y: notif_y,
+            width: notif_width,
+            height: card_height,
         };
 
+        // Clear behind the notification
+        f.render_widget(ratatui::widgets::Clear, notif_area);
+
+        // Background card with left accent border
+        let card_block = ratatui::widgets::Block::default()
+            .borders(
+                ratatui::widgets::Borders::LEFT
+                    | ratatui::widgets::Borders::TOP
+                    | ratatui::widgets::Borders::BOTTOM,
+            )
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(bg_color));
+        let inner = card_block.inner(notif_area);
         f.render_widget(
-            ratatui::widgets::Paragraph::new(Line::from(Span::styled(text, color))),
-            Rect {
-                x: notif_area.x + 1,
-                y: row_y,
-                width: notif_width.saturating_sub(2),
-                height: 1,
-            },
+            ratatui::widgets::Paragraph::new("")
+                .style(Style::default().bg(bg_color))
+                .block(card_block),
+            notif_area,
         );
+
+        f.render_widget(ratatui::widgets::Paragraph::new(lines), inner);
+
+        y_offset += card_height + NOTIF_GAP;
     }
 }

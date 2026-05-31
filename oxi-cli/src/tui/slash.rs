@@ -144,58 +144,8 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/extensions" | "/ext" => {
-            let registry = session.agent_ref().tools();
-            let names = registry.names();
-            let mut essential_lines = Vec::new();
-            let mut optional_lines = Vec::new();
-            let mut wasm_lines = Vec::new();
-            let builtin_names: std::collections::HashSet<&str> = [
-                "read",
-                "write",
-                "edit",
-                "bash",
-                "grep",
-                "find",
-                "ls",
-                "web_search",
-                "get_search_results",
-                "github",
-                "subagent",
-            ]
-            .into_iter()
-            .collect();
-            for name in &names {
-                if let Some(tool) = registry.get(name) {
-                    let line = format!("  {} — {}", name, tool.label());
-                    if tool.essential() {
-                        essential_lines.push(format!("{} [essential]", line));
-                    } else if builtin_names.contains(name.as_str()) {
-                        optional_lines.push(format!("{} [toggle]", line));
-                    } else {
-                        wasm_lines.push(format!("{} [wasm]", line));
-                    }
-                }
-            }
-            let mut out = "Essential (always on):\n\n".to_string();
-            for line in &essential_lines {
-                out.push_str(line);
-                out.push('\n');
-            }
-            out.push_str("\nOptional (toggle with /tools <name>):\n\n");
-            for line in &optional_lines {
-                out.push_str(line);
-                out.push('\n');
-            }
-            if !wasm_lines.is_empty() {
-                out.push_str("\nWASM Extensions:\n\n");
-                for line in &wasm_lines {
-                    out.push_str(line);
-                    out.push('\n');
-                }
-            }
-            out.push_str("\nPlace .wasm files in ~/.oxi/extensions/ to add extensions");
             state.overlay = None;
-            state.overlay_state = Some(super::overlay::extensions_overlay(out));
+            state.overlay_state = Some(super::overlay::extensions_overlay(session, state));
             true
         }
         "/name" => {

@@ -86,7 +86,6 @@ impl AgentLoop {
     /// Creates a new `AgentLoop` with an explicit provider resolver.
     /// Use this when the model ID needs to be resolved to a provider+model pair
     /// using custom logic (e.g., per-session routing).
-    /// Create a new AgentLoop with an explicit resolver.
     pub fn new_with_resolver(
         provider: Arc<dyn Provider>,
         config: AgentLoopConfig,

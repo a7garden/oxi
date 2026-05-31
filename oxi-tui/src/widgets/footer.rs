@@ -146,10 +146,15 @@ impl StatefulWidget for Footer<'_> {
             Constraint::Length(1), // line 2: path + git ... model
         ]));
 
-        // Separator — use muted to match the status line above the input area
+        // Separator — match the input status line (accent when busy, muted when idle)
+        let separator_style = if d.is_busy {
+            styles.accent
+        } else {
+            styles.muted
+        };
         Block::default()
             .borders(Borders::TOP)
-            .border_style(styles.muted)
+            .border_style(separator_style)
             .render(sep_row, buf);
 
         // ── Row 1: tokens + duration ──
