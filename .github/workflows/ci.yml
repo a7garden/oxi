@@ -56,14 +56,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-deny && cargo deny check
 
-  # ── Test jobs (run in parallel) ──────────────────────────────────
+  # ── Test jobs (run in parallel batches) ─────────────────────────
+  # Split tests into 3 batches for parallel execution on 2-core runners.
+  # Each batch runs 2 crates simultaneously, reducing total CI time.
+  #
+  # Batch 1: oxi-ai + oxi-agent (~900 tests, heaviest)
+  # Batch 2: oxi-tui + oxi-sdk (~400 tests)
+  # Batch 3: oxi-cli + oxi-store (~400 tests)
+  #
+  # Estimated improvement: ~20min → ~8-10min (2-2.5x faster)
 
-  test:
-    name: Test (nextest)
+  test-batch-1:
+    name: Test (oxi-ai, oxi-agent)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
-      # Override RUSTFLAGS for test runs — clippy checks run separately in the clippy job
       RUSTFLAGS: ""
     steps:
       - uses: actions/checkout@v4
@@ -73,7 +80,42 @@ jobs:
           shared-key: "test"
       - uses: taiki-e/install-action@nextest
       - name: Run tests
-        run: cargo nextest run --workspace --profile ci
+        run: |
+          cargo nextest run -p oxi-ai -p oxi-agent --workspace --profile ci
+
+  test-batch-2:
+    name: Test (oxi-tui, oxi-sdk)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test"
+      - uses: taiki-e/install-action@nextest
+      - name: Run tests
+        run: |
+          cargo nextest run -p oxi-tui -p oxi-sdk --workspace --profile ci
+
+  test-batch-3:
+    name: Test (oxi-cli, oxi-store)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test"
+      - uses: taiki-e/install-action@nextest
+      - name: Run tests
+        run: |
+          cargo nextest run -p oxi-cli -p oxi-store --workspace --profile ci
 
   test-doc:
     name: Doc Tests
