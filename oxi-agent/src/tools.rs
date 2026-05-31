@@ -87,7 +87,7 @@ pub struct AgentToolResult {
 }
 
 impl AgentToolResult {
-    /// TODO.
+    /// Creates a successful tool result with the given output text.
     pub fn success(output: impl Into<String>) -> Self {
         Self {
             success: true,
@@ -98,7 +98,7 @@ impl AgentToolResult {
         }
     }
 
-    /// TODO.
+    /// Creates an error tool result with the given error message.
     pub fn error(output: impl Into<String>) -> Self {
         Self {
             success: false,
@@ -109,13 +109,13 @@ impl AgentToolResult {
         }
     }
 
-    /// TODO: document this function.
+    /// Attaches structured metadata (JSON) to this result.
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = Some(metadata);
         self
     }
 
-    /// TODO: document this function.
+    /// Attaches rich content blocks (images, code, etc.) to this result.
     pub fn with_content_blocks(mut self, blocks: Vec<oxi_ai::ContentBlock>) -> Self {
         self.content_blocks = Some(blocks);
         self
@@ -392,7 +392,7 @@ impl Default for ToolRegistry {
 }
 
 impl ToolRegistry {
-    /// TODO.
+    /// Creates an empty tool registry.
     pub fn new() -> Self {
         Self {
             tools: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),

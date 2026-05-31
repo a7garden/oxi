@@ -138,6 +138,10 @@ Extension system (`src/extensions/types.rs`):
 - `cargo clippy --workspace -- -D warnings` must pass clean.
 - Module structure: `mod.rs` re-exports public API, implementation in sibling files.
 - Prefer `anyhow::Result` for application code, custom error enums (`thiserror`) for library crates.
+  - **Library crates** (oxi-ai, oxi-agent, oxi-store, oxi-sdk): define typed error enums with `thiserror::Error` for public API functions. Internal helpers may use `anyhow`.
+  - **Application crate** (oxi-cli): use `anyhow::Result` everywhere.
+  - **Leaf crate** (oxi-tui): `anyhow` is acceptable — no public error types needed.
+  - Never create a shared workspace error crate. Each library owns its own error type.
 - Use `parking_lot::RwLock` instead of `std::sync::RwLock`.
 - Atomic file writes: use `atomic_write()` helper (write to temp, then rename).
 - Async: `tokio` runtime with `#[tokio::main]`. Use `async_trait` for trait objects.

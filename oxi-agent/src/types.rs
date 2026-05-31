@@ -14,7 +14,7 @@ pub struct ToolDefinition {
 }
 
 impl ToolDefinition {
-    /// TODO.
+    /// Creates a new tool definition with the given name, description, and JSON schema.
     pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -40,7 +40,7 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
-    /// TODO.
+    /// Creates a new tool call with the given ID, name, and JSON arguments.
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -66,7 +66,7 @@ pub struct ToolResult {
 }
 
 impl ToolResult {
-    /// TODO.
+    /// Creates a successful tool result.
     pub fn success(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             tool_call_id: tool_call_id.into(),
@@ -75,7 +75,7 @@ impl ToolResult {
         }
     }
 
-    /// TODO.
+    /// Creates an error tool result.
     pub fn error(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             tool_call_id: tool_call_id.into(),

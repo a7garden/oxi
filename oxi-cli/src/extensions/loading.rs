@@ -130,11 +130,14 @@ pub fn load_extension(path: &Path) -> anyhow::Result<Arc<dyn Extension>> {
         );
     }
 
-    // Load the library
+    // SAFETY: Library::new loads a shared library from the given path.
+    // This is unsafe because the loaded code can perform arbitrary operations.
+    // We trust the user-installed extension at the given path.
     let library = unsafe { Library::new(path) }
         .map_err(|e| anyhow::anyhow!("Failed to load library '{}': {}", path_display, e))?;
 
-    // Get the entry point symbol
+    // SAFETY: library.get looks up a symbol by name in the loaded shared library.
+    // The symbol name is a static constant, not user-controlled.
     let create: libloading::Symbol<CreateFn> =
         unsafe { library.get(ENTRY_SYMBOL) }.map_err(|e| {
             anyhow::anyhow!(
@@ -144,13 +147,17 @@ pub fn load_extension(path: &Path) -> anyhow::Result<Arc<dyn Extension>> {
             )
         })?;
 
-    // Call the entry point
+    // SAFETY: Calling the extension's oxi_extension_create entry point.
+    // The function signature is `unsafe fn() -> *mut dyn Extension`.
+    // We check the returned pointer for null below.
     let raw_ptr = unsafe { create() };
     if raw_ptr.is_null() {
         anyhow::bail!("oxi_extension_create returned null in '{}'", path_display);
     }
 
-    // Wrap in Arc (take ownership from the raw pointer)
+    // SAFETY: Box::from_raw takes ownership of the pointer returned by
+    // oxi_extension_create. The extension must have allocated this with
+    // Box::new (documented contract). Null was checked above.
     let extension: Arc<dyn Extension> = unsafe {
         let boxed: Box<dyn Extension> = Box::from_raw(raw_ptr);
         Arc::from(boxed)

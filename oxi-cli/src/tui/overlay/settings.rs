@@ -182,6 +182,9 @@ impl OverlayComponent for SettingsOverlay {
                             self.all_items = build_settings_items(&self.session);
                             self.apply_filter();
                             if let Ok(ptr) = self.app_state.lock() {
+                                // SAFETY: We hold the Mutex lock, guaranteeing exclusive
+                                // access. The raw pointer was created from a valid &mut AppState
+                                // via share_state() and is only dereferenced while locked.
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
                                         app.add_notification(
@@ -199,6 +202,8 @@ impl OverlayComponent for SettingsOverlay {
             KeyCode::Esc => {
                 if self.changed {
                     if let Ok(ptr) = self.app_state.lock() {
+                        // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
+                        // The raw pointer is valid for the lock's lifetime.
                         unsafe {
                             if let Some(ref mut app) = (*ptr).as_mut() {
                                 app.add_notification(

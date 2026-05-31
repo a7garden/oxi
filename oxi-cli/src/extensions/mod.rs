@@ -53,43 +53,57 @@ pub struct ExtensionShortcut {
 // The Extension trait
 /// Core trait that every oxi extension must implement.
 pub trait Extension: Send + Sync {
-    /// TODO: document.
+    /// Returns the extension's unique identifier.
     fn name(&self) -> &str;
-    /// TODO: document.
+    /// Returns a human-readable description of what this extension does.
     fn description(&self) -> &str;
-    /// TODO: document.
+    /// Returns the extension manifest containing metadata and permissions.
+    /// Default implementation constructs a minimal manifest from [`name()`](Extension::name) and
+    /// [`description()`](Extension::description).
     fn manifest(&self) -> ExtensionManifest {
         ExtensionManifest::new(self.name(), "0.0.0").with_description(self.description())
     }
-    /// TODO: document.
+    /// Registers custom tools exposed by this extension.
+    /// Each returned tool becomes available to the agent at runtime.
+    /// Default returns an empty vector (no custom tools).
     fn register_tools(&self) -> Vec<std::sync::Arc<dyn oxi_agent::AgentTool>> {
         vec![]
     }
-    /// TODO: document.
+    /// Registers slash commands exposed by this extension.
+    /// Each returned command becomes available as `/<name>` in the input field.
+    /// Default returns an empty vector (no custom commands).
     fn register_commands(&self) -> Vec<Command> {
         vec![]
     }
-    /// TODO: document.
+    /// Called once when the extension is first loaded into a session.
+    /// Use this to initialize resources, read config, or register with external services.
     fn on_load(&self, _ctx: &ExtensionContext) {}
-    /// TODO: document.
+    /// Called once when the extension is unloaded or the session ends.
+    /// Use this to clean up resources allocated in [`on_load()`](Extension::on_load).
     fn on_unload(&self) {}
-    /// TODO: document.
+    /// Called after the agent sends a message to the LLM.
+    /// `_msg` is the raw message content string.
     fn on_message_sent(&self, _msg: &str) {}
-    /// TODO: document.
+    /// Called after receiving a response from the LLM.
+    /// `_msg` is the raw response content string.
     fn on_message_received(&self, _msg: &str) {}
-    /// TODO: document.
+    /// Called immediately before a tool is executed.
+    /// `_tool` is the tool name and `_params` are the JSON arguments.
     fn on_tool_call(&self, _tool: &str, _params: &serde_json::Value) {}
-    /// TODO: document.
+    /// Called immediately after a tool execution completes.
+    /// `_tool` is the tool name and `_result` contains the output or error.
     fn on_tool_result(&self, _tool: &str, _result: &oxi_agent::AgentToolResult) {}
-    /// TODO: document.
+    /// Called when a new session starts.
+    /// `_session_id` uniquely identifies the session.
     fn on_session_start(&self, _session_id: &str) {}
-    /// TODO: document.
+    /// Called when a session ends.
+    /// `_session_id` uniquely identifies the session that ended.
     fn on_session_end(&self, _session_id: &str) {}
-    /// TODO: document.
+    /// Called whenever the user saves or updates settings.
     fn on_settings_changed(&self, _settings: &oxi_store::settings::Settings) {}
-    /// TODO: document.
+    /// Catch-all hook for any agent event not covered by a specific method.
     fn on_event(&self, _event: &oxi_agent::AgentEvent) {}
-    /// TODO: document.
+    /// Called before a tool is executed. Return `Err` to block the tool call.
     fn on_before_tool_call(
         &self,
         _tool: &str,
@@ -97,7 +111,7 @@ pub trait Extension: Send + Sync {
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called after a tool completes. Return `Err` to surface an error to the agent.
     fn on_after_tool_call(
         &self,
         _tool: &str,
@@ -105,93 +119,99 @@ pub trait Extension: Send + Sync {
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called before the context window is compacted. Return `Err` to abort compaction.
     fn on_before_compaction(&self, _ctx: &crate::CompactionContext) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called after the context window is compacted with the generated summary.
     fn on_after_compaction(&self, _summary: &str) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called when any error occurs in the agent loop.
     fn on_error(&self, _error: &anyhow::Error) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called before the active session switches to a different branch or parent.
     fn session_before_switch(
         &self,
         _event: &crate::extensions::types::SessionBeforeSwitchEvent,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called before a session is forked (branched) into a new subtree.
     fn session_before_fork(
         &self,
         _event: &crate::extensions::types::SessionBeforeForkEvent,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called before the context window is compacted.
     fn session_before_compact(
         &self,
         _event: &crate::extensions::types::SessionBeforeCompactEvent,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called when the context window is being compacted.
     fn session_compact(
         &self,
         _event: &crate::extensions::types::SessionCompactEvent,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called when a session is shutting down.
     fn session_shutdown(&self, _event: &crate::extensions::types::SessionShutdownEvent) {}
-    /// TODO: document.
+    /// Called before a tree navigation action (branch listing, traversal, etc.).
     fn session_before_tree(
         &self,
         _event: &crate::extensions::types::SessionBeforeTreeEvent,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called during a tree navigation action.
     fn session_tree(&self, _event: &crate::extensions::types::SessionTreeEvent) {}
-    /// TODO: document.
+    /// Emits into the agent context. Return `Err` to signal that the event was handled.
     fn context(
         &self,
         _event: &mut crate::extensions::types::ContextEvent,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called before every LLM provider request. Allows the extension to mutate
+    /// the request parameters (model, temperature, tools, etc.).
     fn before_provider_request(
         &self,
         _event: &mut crate::extensions::types::BeforeProviderRequestEvent,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called after every LLM provider response. Allows the extension to read or
+    /// annotate the response before it is processed by the agent loop.
     fn after_provider_response(
         &self,
         _event: &crate::extensions::types::AfterProviderResponseEvent,
     ) -> Result<(), anyhow::Error> {
         Ok(())
     }
-    /// TODO: document.
+    /// Called when the user or agent selects a model (via `/model` or auto-routing).
     fn model_select(&self, _event: &crate::extensions::types::ModelSelectEvent) {}
-    /// TODO: document.
+    /// Called when the thinking level is changed.
     fn thinking_level_select(&self, _event: &crate::extensions::types::ThinkingLevelSelectEvent) {}
-    /// TODO: document.
+    /// Called when a bash command is about to be executed.
     fn bash(&self, _event: &crate::extensions::types::BashEvent) {}
-    /// TODO: document.
+    /// Called for every user input keystroke. Return
+    /// [`InputEventResult::Handled`](crate::extensions::types::InputEventResult::Handled)
+    /// to suppress the default input handling, or
+    /// [`InputEventResult::Transform { text }`](crate::extensions::types::InputEventResult::Transform)
+    /// to replace the input text.
     fn input(
         &self,
         _event: &crate::extensions::types::InputEvent,
     ) -> crate::extensions::types::InputEventResult {
         crate::extensions::types::InputEventResult::Continue
     }
-    /// Register keyboard shortcuts for this extension.
-    /// Default returns no shortcuts.
+    /// Registers keyboard shortcuts exposed by this extension.
+    /// Default returns an empty vector (no shortcuts).
     fn register_shortcuts(&self) -> Vec<ExtensionShortcut> {
         vec![]
     }

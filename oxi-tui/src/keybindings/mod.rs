@@ -8,12 +8,14 @@
 //!
 //! ## Usage
 //!
-//! ```rust
+//! ```rust,no_run
+//! use crossterm::event::{KeyEvent, KeyCode, KeyModifiers};
 //! use oxi_tui::keybindings::{KeybindingsManager, keys::KeyId, registry::Action};
 //!
 //! let mgr = KeybindingsManager::new();
 //!
 //! // Look up action from a crossterm KeyEvent
+//! let event = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
 //! let key_id = KeyId::from(event);
 //! if let Some(action) = mgr.match_action(&key_id) {
 //!     match action {

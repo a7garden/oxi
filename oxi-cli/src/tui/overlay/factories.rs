@@ -78,6 +78,7 @@ impl OverlayComponent for ModelSelectOverlay {
                             oxi_store::router_config::load_router_config(&gd, &pd).is_some();
                         if !has_config {
                             if let Ok(ptr) = self.app_state.lock() {
+                                // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
                                         app.add_notification(
@@ -99,6 +100,7 @@ impl OverlayComponent for ModelSelectOverlay {
                     match self.session.set_model(&model_id) {
                         Ok(()) => {
                             if let Ok(ptr) = self.app_state.lock() {
+                                // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
                                         app.add_notification(
@@ -113,6 +115,7 @@ impl OverlayComponent for ModelSelectOverlay {
                         }
                         Err(e) => {
                             if let Ok(ptr) = self.app_state.lock() {
+                                // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
                                 unsafe {
                                     if let Some(ref mut app) = (*ptr).as_mut() {
                                         app.add_notification(
@@ -275,6 +278,7 @@ impl OverlayComponent for LogoutSelectOverlay {
                 if let Some(provider) = self.list.selected().cloned() {
                     oxi_store::auth_storage::shared_auth_storage().remove(&provider);
                     if let Ok(ptr) = self.app_state.lock() {
+                        // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
                         unsafe {
                             if let Some(ref mut app) = (*ptr).as_mut() {
                                 app.add_notification(

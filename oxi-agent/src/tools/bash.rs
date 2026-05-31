@@ -318,6 +318,9 @@ impl BashTool {
         {
             if let Some(pid) = child.id() {
                 let pgid = -(pid as i32);
+                // SAFETY: libc::kill sends SIGKILL to the process group. The negative PID
+                // targets the entire group (shell + child processes). PID comes from
+                // child.id() which is a valid running process owned by this process.
                 unsafe {
                     libc::kill(pgid, libc::SIGKILL);
                 }

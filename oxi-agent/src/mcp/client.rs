@@ -404,6 +404,9 @@ impl McpClient {
         #[cfg(unix)]
         {
             if let Some(id) = self._child.id() {
+                // SAFETY: libc::kill sends a signal to a process. The PID comes from
+                // child.id() which is a valid running process. SIGTERM requests graceful
+                // termination. On race (process already exited), kill returns ESRCH harmlessly.
                 unsafe {
                     libc::kill(id as libc::pid_t, libc::SIGTERM);
                 }

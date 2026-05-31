@@ -1,11 +1,17 @@
 [advisories]
 # Vulnerabilities that are currently accepted.
 # Each entry should have a brief note explaining why.
-
-# fxhash - unmaintained, used indirectly via a3s-search/scraper/selectors
-# No known exploit; tracked for future removal when a3s-search updates.
 ignore = [
-    "RUSTSEC-2025-0057",  # fxhash unmaintained
+    # fxhash - unmaintained, transitive via a3s-search → scraper → selectors.
+    # No known exploit. Re-evaluate when a3s-search updates its dependencies.
+    "RUSTSEC-2025-0057",
+    # number_prefix - unmaintained, transitive via indicatif → self_update → oxi-cli.
+    # No known exploit. self_update has no maintained alternative; re-evaluate periodically.
+    "RUSTSEC-2025-0119",
+    # paste - unmaintained, transitive via oxibrowser-core → rav1e / boa_engine.
+    # oxibrowser-core is pinned; paste is only used for CSS selector engine internals.
+    # Re-evaluate when oxibrowser-core updates.
+    "RUSTSEC-2024-0436",
 ]
 
 [licenses]

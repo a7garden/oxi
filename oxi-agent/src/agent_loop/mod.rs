@@ -83,7 +83,9 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
-    /// TODO.
+    /// Creates a new `AgentLoop` with an explicit provider resolver.
+    /// Use this when the model ID needs to be resolved to a provider+model pair
+    /// using custom logic (e.g., per-session routing).
     /// Create a new AgentLoop with an explicit resolver.
     pub fn new_with_resolver(
         provider: Arc<dyn Provider>,
@@ -144,13 +146,15 @@ impl AgentLoop {
         )
     }
 
-    /// TODO: document this function.
+    /// Registers a hook called before every tool execution.
+    /// The hook can inspect and modify tool arguments, or reject the call entirely.
     pub fn with_before_tool_call(mut self, hook: BeforeToolCallHook) -> Self {
         self.before_tool_call = Some(hook);
         self
     }
 
-    /// TODO: document this function.
+    /// Registers a hook called after every tool execution.
+    /// The hook receives the tool name, arguments, and result.
     pub fn with_after_tool_call(mut self, hook: AfterToolCallHook) -> Self {
         self.after_tool_call = Some(hook);
         self
@@ -178,17 +182,19 @@ impl AgentLoop {
         }
     }
 
-    /// TODO: document this function.
+    /// Removes all pending steering messages from the queue.
+    /// See [`steer()`](Self::steer) for an explanation of steering messages.
     pub fn clear_steering_queue(&self) {
         clear_steering_queue(self);
     }
 
-    /// TODO: document this function.
+    /// Removes all pending follow-up messages from the queue.
+    /// See [`follow_up()`](Self::follow_up) for an explanation of follow-up messages.
     pub fn clear_follow_up_queue(&self) {
         clear_follow_up_queue(self);
     }
 
-    /// TODO: document this function.
+    /// Removes all pending messages from both the steering and follow-up queues.
     pub fn clear_all_queues(&self) {
         clear_all_queues(self);
     }
@@ -216,12 +222,15 @@ impl AgentLoop {
         drain_follow_up_queue(self)
     }
 
-    /// TODO: document this function.
+    /// Cancels any in-progress auto-retry countdown.
+    /// After calling this, the agent will not automatically retry
+    /// on the next turn.
     pub fn cancel_auto_retry(&self) {
         cancel_auto_retry(self);
     }
 
-    /// TODO: document this function.
+    /// Returns the current auto-retry attempt number (0-based).
+    /// Useful for displaying retry status in the UI.
     pub fn auto_retry_attempt(&self) -> usize {
         auto_retry_attempt_method(self)
     }
@@ -290,7 +299,8 @@ impl AgentLoop {
         }
     }
 
-    /// TODO: document this function.
+    /// Runs the agent loop with a single user prompt.
+    /// Convenience wrapper around [`run_messages()`](Self::run_messages).
     pub async fn run(
         &self,
         prompt: String,
@@ -365,7 +375,8 @@ impl AgentLoop {
         self.run_messages(vec![message], emit).await
     }
 
-    /// TODO: document this function.
+    /// Runs the agent loop with a list of pre-constructed messages.
+    /// This is the primary entry point for executing agent turns.
     pub async fn run_messages(
         &self,
         prompts: Vec<Message>,
@@ -420,7 +431,8 @@ impl AgentLoop {
         Ok(all_events)
     }
 
-    /// TODO: document this function.
+    /// Resumes the agent loop after a previous turn ended in a paused state
+    /// (e.g., waiting for user confirmation). Emits events to the provided callback.
     pub async fn continue_loop(
         &self,
         emit: impl Fn(AgentEvent) + Send + Sync + 'static,

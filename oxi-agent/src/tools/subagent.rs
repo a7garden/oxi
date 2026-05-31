@@ -356,6 +356,9 @@ async fn terminate_child(
     #[cfg(unix)]
     {
         if let Some(pid) = child.id() {
+            // SAFETY: libc::kill sends SIGTERM to the child process. PID comes from
+            // child.id() which is a valid running process. Used for graceful shutdown
+            // before force-killing. Race (process exited) returns ESRCH harmlessly.
             unsafe {
                 libc::kill(pid as i32, libc::SIGTERM);
             }

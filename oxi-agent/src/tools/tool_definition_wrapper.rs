@@ -112,15 +112,15 @@ impl AgentTool for DynamicTool {
 
 /// Trait for tool definitions that can be wrapped into `AgentTool`.
 pub trait ToolDefinitionLike: Send + Sync {
-    /// TODO: document this function.
+    /// Returns the tool name used in LLM function-calling.
     fn tool_name(&self) -> &str;
-    /// TODO: document this function.
+    /// Returns a human-readable label for UI display.
     fn tool_label(&self) -> &str;
-    /// TODO: document this function.
+    /// Returns the tool description sent to the LLM.
     fn tool_description(&self) -> &str;
-    /// TODO: document this function.
+    /// Returns the JSON schema for the tool's parameters.
     fn tool_parameters(&self) -> Value;
-    /// TODO: document this function.
+    /// Executes the tool with the given call ID, parameters, and optional cancellation signal.
     fn tool_execute(
         &self,
         tool_call_id: &str,
