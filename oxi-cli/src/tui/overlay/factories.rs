@@ -108,6 +108,11 @@ impl OverlayComponent for ModelSelectOverlay {
                                             crate::tui::app::NotificationKind::Success,
                                         );
                                         app.footer_state.data.model_name = model_id.clone();
+                                        // Also set provider_name if model_id is in "provider/model" format
+                                        if let Some((provider, _)) = model_id.split_once('/') {
+                                            app.footer_state.data.provider_name =
+                                                provider.to_string();
+                                        }
                                     }
                                 }
                             }

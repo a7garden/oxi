@@ -77,8 +77,8 @@ enum VisibleRow {
 #[allow(clippy::type_complexity)]
 pub struct ProviderSelectOverlay {
     pub providers: Vec<ProviderEntry>,
-    /// Index into `build_visible_items()` output (includes category headers).
-    /// This makes keyboard navigation match the visual order.
+    /// Index into `self.providers` (original provider list, NOT build_visible_items output).
+    /// This ensures selected index matches global_index used in rendering.
     pub selected: usize,
     /// Vertical scroll offset in `VisibleRow` units.
     scroll_offset: usize,
@@ -156,6 +156,7 @@ impl ProviderSelectOverlay {
     fn ensure_selected_visible(&mut self, list_height: usize) {
         let items = self.build_visible_items();
 
+        // Find the visual position of the selected provider (by global_index)
         let selected_pos = items
             .iter()
             .position(|r| {
@@ -197,54 +198,68 @@ impl ProviderSelectOverlay {
 
     /// Navigate to the previous provider item (skip category headers).
     fn prev_provider(&mut self) {
-        let items = self.build_visible_items();
-        if items.is_empty() {
+        if self.providers.is_empty() {
             return;
         }
-        // Search backward for a Provider row
-        let start = if self.selected == 0 {
-            items.len()
-        } else {
-            self.selected
+        // self.selected is an index into self.providers, not items
+        let current_idx = self.selected;
+
+        // Build category rank map
+        let category_rank = |cat: &str| -> usize {
+            CATEGORIES
+                .iter()
+                .position(|(c, _, _)| *c == cat)
+                .unwrap_or(CATEGORIES.len())
         };
-        for i in (0..start).rev() {
-            if matches!(items[i], VisibleRow::Provider { .. }) {
-                self.selected = i;
-                return;
+
+        // Find previous provider with potentially different category (to skip headers)
+        let current_rank = category_rank(&self.providers[current_idx].category);
+        let mut best_idx = None;
+
+        for i in 0..self.providers.len() {
+            let idx = (current_idx + self.providers.len() - 1 - i) % self.providers.len();
+            let rank = category_rank(&self.providers[idx].category);
+            // Stop when we find a provider in a different (or same) category
+            // The goal is to find the previous provider, wrapping around
+            if idx != current_idx {
+                if best_idx.is_none() {
+                    best_idx = Some(idx);
+                }
+                // If we found a provider from a different category (before current), stop
+                if rank != current_rank {
+                    break;
+                }
+                best_idx = Some(idx);
             }
         }
-        // Wrap: find last Provider
-        for i in (0..items.len()).rev() {
-            if matches!(items[i], VisibleRow::Provider { .. }) {
-                self.selected = i;
-                return;
-            }
+
+        if let Some(idx) = best_idx {
+            self.selected = idx;
         }
     }
 
     /// Navigate to the next provider item (skip category headers).
     fn next_provider(&mut self) {
-        let items = self.build_visible_items();
-        if items.is_empty() {
+        if self.providers.is_empty() {
             return;
         }
-        let n = items.len();
-        for i in 1..=n {
-            let idx = (self.selected + i) % n;
-            if matches!(items[idx], VisibleRow::Provider { .. }) {
-                self.selected = idx;
-                return;
-            }
-        }
+        let n = self.providers.len();
+        let current_idx = self.selected;
+
+        // Simple wrap-around to next provider
+        // Since providers are sorted by category, consecutive same-category
+        // providers are fine to step through
+        self.selected = (current_idx + 1) % n;
     }
 
-    /// Return the provider index for the currently-selected visible row.
+    /// Return the provider index for the currently-selected provider.
+    /// This is simply self.selected (index into self.providers).
     fn selected_provider_index(&self) -> Option<usize> {
-        let items = self.build_visible_items();
-        items.get(self.selected).and_then(|item| match item {
-            VisibleRow::Provider { global_index, .. } => Some(*global_index),
-            _ => None,
-        })
+        if self.selected < self.providers.len() {
+            Some(self.selected)
+        } else {
+            None
+        }
     }
 
     // ── Static helpers ────────────────────────────────────────────────
@@ -525,6 +540,8 @@ impl ProviderSelectOverlay {
                     entry,
                     global_index,
                 } => {
+                    // Compare global_index (provider's index in self.providers)
+                    // with self.selected (also index in self.providers)
                     let is_sel = *global_index == self.selected;
                     let check = if entry.has_key {
                         "\u{2713}"

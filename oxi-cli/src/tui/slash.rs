@@ -50,6 +50,10 @@ pub(crate) fn handle_slash_command(
                             NotificationKind::Success,
                         );
                         state.footer_state.data.model_name = model_id.to_string();
+                        // Also set provider_name if model_id is in "provider/model" format
+                        if let Some((provider, _model)) = model_id.split_once('/') {
+                            state.footer_state.data.provider_name = provider.to_string();
+                        }
                         oxi_store::settings::Settings::save_last_used(model_id);
                     }
                     Err(e) => {

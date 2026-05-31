@@ -1262,7 +1262,10 @@ async fn handle_wizard_step_key(
                                     },
                                 );
                             } else {
-                                state.add_notification(format!("{} API key saved.", provider), NotificationKind::Success);
+                                state.add_notification(
+                                    format!("{} API key saved.", provider),
+                                    NotificationKind::Success,
+                                );
                                 state.overlay = None;
                             }
                         } else {
@@ -1366,9 +1369,15 @@ async fn handle_wizard_step_key(
                             } else {
                                 // Actually switch the model in the running session
                                 if let Err(e) = session.set_model(&full_model) {
-                                    state.add_notification(format!("Error switching model: {}", e), NotificationKind::Error);
+                                    state.add_notification(
+                                        format!("Error switching model: {}", e),
+                                        NotificationKind::Error,
+                                    );
                                 } else {
-                                    state.add_notification(format!("Model set to {}", full_model), NotificationKind::Success);
+                                    state.add_notification(
+                                        format!("Model set to {}", full_model),
+                                        NotificationKind::Success,
+                                    );
                                 }
                                 state.overlay = None;
                             }
@@ -1393,12 +1402,24 @@ async fn handle_wizard_step_key(
             }
         }
 
-        4
-            // Done
-            if key.code == KeyCode::Enter => {
+        4 => {
+            // Done — only respond to Enter to close the setup wizard
+            #[allow(clippy::collapsible_match)]
+            if key.code == KeyCode::Enter {
+                // Extract the model from the Done step and apply to session
+                if let Some(SetupStep::Done { model, .. }) = extract_step(&state.overlay) {
+                    if let Err(e) = session.set_model(model) {
+                        state.add_notification(
+                            format!("Error applying model: {}", e),
+                            NotificationKind::Warning,
+                        );
+                    }
+                }
+
                 state.overlay = None;
                 state.add_notification("Ready to chat".to_string(), NotificationKind::Info);
             }
+        }
 
         _ => {}
     }
