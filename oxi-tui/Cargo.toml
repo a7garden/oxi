@@ -1,6 +1,6 @@
 [package]
 name = "oxi-tui"
-version = "0.26.0"
+version = "0.26.1"
 edition = "2021"
 description = "Terminal UI widgets and theme system for oxi, built on ratatui"
 readme = "README.md"
