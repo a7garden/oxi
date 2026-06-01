@@ -655,7 +655,9 @@ impl AuthStorage {
                         return match cred {
                             AuthCredential::ApiKey { key } => Some(key.clone()),
                             AuthCredential::OAuth {
-                                access_token, expires_at, ..
+                                access_token,
+                                expires_at,
+                                ..
                             } => {
                                 if *expires_at > now_secs() {
                                     Some(access_token.clone())

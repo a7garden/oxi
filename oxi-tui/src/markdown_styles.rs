@@ -32,8 +32,8 @@ impl StyleSheet for OxiStyleSheet {
         // Warm amber text on subtle dark background.
         // Avoids pure yellow which can cause vibration/eyestrain on dark bg.
         Style::new()
-            .fg(Color::Rgb(255, 200, 100))  // #ffc864 warm amber
-            .bg(Color::Rgb(35, 30, 20))     // #231e14 warm dark (not gray!)
+            .fg(Color::Rgb(255, 200, 100)) // #ffc864 warm amber
+            .bg(Color::Rgb(35, 30, 20)) // #231e14 warm dark (not gray!)
             .add_modifier(Modifier::BOLD)
     }
 

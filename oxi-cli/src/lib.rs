@@ -333,7 +333,6 @@ impl App {
         })
     }
 
-
     /// Get the current settings
     pub fn settings(&self) -> &Settings {
         &self.settings

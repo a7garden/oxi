@@ -1324,16 +1324,17 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         let has_model = !model_id.is_empty() && model_id.contains('/') && model_resolved;
         if !has_model {
             let auth = oxi_store::auth_storage::shared_auth_storage();
-            let mut providers: Vec<ProviderInfo> = oxi_ai::register_builtins::get_builtin_providers()
-                .iter()
-                .map(|builtin| ProviderInfo {
-                    name: builtin.name.to_string(),
-                    display_name: builtin.display_name.to_string(),
-                    has_key: auth.get_api_key(builtin.name).is_some(),
-                    category: builtin.category.to_string(),
-                    description: builtin.description.to_string(),
-                })
-                .collect();
+            let mut providers: Vec<ProviderInfo> =
+                oxi_ai::register_builtins::get_builtin_providers()
+                    .iter()
+                    .map(|builtin| ProviderInfo {
+                        name: builtin.name.to_string(),
+                        display_name: builtin.display_name.to_string(),
+                        has_key: auth.get_api_key(builtin.name).is_some(),
+                        category: builtin.category.to_string(),
+                        description: builtin.description.to_string(),
+                    })
+                    .collect();
 
             // Sort by category order (must match render_provider_list's category_order)
             // so that selected index aligns with the visual position.
@@ -1609,11 +1610,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                     tracing::warn!("GotoEntry: no session file path");
                     continue;
                 };
-                let sm = oxi_store::session::SessionManager::open(
-                    path,
-                    None,
-                    Some(&cwd),
-                );
+                let sm = oxi_store::session::SessionManager::open(path, None, Some(&cwd));
                 sm.set_leaf_from_entry(&entry_id)
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
                 // Reload messages from the new leaf position

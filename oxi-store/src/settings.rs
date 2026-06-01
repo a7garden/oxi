@@ -696,24 +696,22 @@ impl Settings {
     /// Get the effective model ID (provider/model format).
     /// Returns None if no model is configured.
     pub fn effective_model(&self, cli_model: Option<&str>) -> Option<String> {
-        cli_model
-            .map(String::from)
-            .or_else(|| {
-                // Reconstruct full model ID from separate fields.
-                // Handles both cases:
-                //   - last_used_model = "anthropic/claude-sonnet-4" (full ID, stored by save_last_used)
-                //   - last_used_model = "claude-sonnet-4" + last_used_provider = "anthropic" (split)
-                let model = self.last_used_model.as_ref()?;
-                if model.contains('/') {
-                    // Already a full model ID
-                    Some(model.clone())
-                } else if let Some(ref provider) = self.last_used_provider {
-                    // Reconstruct from separate fields
-                    Some(format!("{}/{}", provider, model))
-                } else {
-                    Some(model.clone())
-                }
-            })
+        cli_model.map(String::from).or_else(|| {
+            // Reconstruct full model ID from separate fields.
+            // Handles both cases:
+            //   - last_used_model = "anthropic/claude-sonnet-4" (full ID, stored by save_last_used)
+            //   - last_used_model = "claude-sonnet-4" + last_used_provider = "anthropic" (split)
+            let model = self.last_used_model.as_ref()?;
+            if model.contains('/') {
+                // Already a full model ID
+                Some(model.clone())
+            } else if let Some(ref provider) = self.last_used_provider {
+                // Reconstruct from separate fields
+                Some(format!("{}/{}", provider, model))
+            } else {
+                Some(model.clone())
+            }
+        })
     }
 
     /// Get the effective provider.

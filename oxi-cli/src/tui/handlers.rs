@@ -953,8 +953,7 @@ async fn handle_overlay_key(
             }
             OverlayAction::NavigateToEntry { entry_id } => {
                 state.overlay_state = None;
-                state.next_action =
-                    Some(super::app::TuiNextAction::GotoEntry(entry_id));
+                state.next_action = Some(super::app::TuiNextAction::GotoEntry(entry_id));
                 return None;
             }
             _ => {}
@@ -1236,15 +1235,16 @@ async fn handle_wizard_step_key(
                         // The provider the user selected (e.g. "zai-coding-global") may differ
                         // from the provider name in the model DB (e.g. "zai") if they share
                         // the same env_key. Expand to all providers sharing the env_key.
-                        let model_providers = oxi_ai::register_builtins::get_builtin_provider(&provider)
-                            .map(|bp| {
-                                oxi_ai::register_builtins::get_builtin_providers()
-                                    .iter()
-                                    .filter(|p| p.env_key == bp.env_key)
-                                    .map(|p| p.name)
-                                    .collect::<Vec<_>>()
-                            })
-                            .unwrap_or_else(|| vec![provider.as_str()]);
+                        let model_providers =
+                            oxi_ai::register_builtins::get_builtin_provider(&provider)
+                                .map(|bp| {
+                                    oxi_ai::register_builtins::get_builtin_providers()
+                                        .iter()
+                                        .filter(|p| p.env_key == bp.env_key)
+                                        .map(|p| p.name)
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_else(|| vec![provider.as_str()]);
 
                         let models: Vec<String> = oxi_ai::model_db::get_all_models()
                             .filter(|e| model_providers.contains(&e.provider))

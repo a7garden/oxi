@@ -1498,9 +1498,7 @@ fn register_router_provider(settings: &Settings) {
     let store_cfg = match oxi_store::router_config::load_router_config(&global_dir, &project_dir) {
         Some(cfg) => cfg,
         None => {
-            tracing::debug!(
-                "No router config found — router/auto will not appear in model list"
-            );
+            tracing::debug!("No router config found — router/auto will not appear in model list");
             return;
         }
     };
