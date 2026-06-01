@@ -324,6 +324,8 @@ pub(crate) enum TuiNextAction {
     SwitchSession(String),
     /// Start a fresh session.
     NewSession,
+    /// Navigate to a specific entry within the current session (branch switch).
+    GotoEntry(String),
 }
 
 pub(crate) struct AppState {
@@ -1599,6 +1601,47 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                     }
                 }
                 session_target = None;
+                continue;
+            }
+            Some(TuiNextAction::GotoEntry(entry_id)) => {
+                tracing::info!("Navigating to entry: {}", entry_id);
+                let sm = oxi_store::session::SessionManager::open(
+                    session_target.as_ref().unwrap(),
+                    None,
+                    Some(&cwd),
+                );
+                sm.set_leaf_from_entry(&entry_id)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                // Reload messages from the new leaf position
+                state.chat.clear();
+                let branch = sm.get_branch(Some(&entry_id));
+                for entry in &branch {
+                    match &entry.message {
+                        oxi_store::session::AgentMessage::User { content } => {
+                            state.add_user_message(content.as_str().to_string());
+                        }
+                        oxi_store::session::AgentMessage::Assistant { content, .. } => {
+                            let text: String = content
+                                .iter()
+                                .filter_map(|b| match b {
+                                    oxi_store::session::AssistantContentBlock::Text { text } => {
+                                        Some(text.as_str())
+                                    }
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>()
+                                .join("");
+                            if !text.is_empty() {
+                                state.add_system_message(text);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                state.add_notification(
+                    format!("Jumped to entry {}", &entry_id[..8.min(entry_id.len())]),
+                    NotificationKind::Success,
+                );
                 continue;
             }
             None => break,

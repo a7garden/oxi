@@ -78,7 +78,6 @@ impl CompactionContext {
 // ─── Module-level imports ────────────────────────────────────────────────────
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
-use oxi_sdk::OxiBuilder;
 use parking_lot::RwLock;
 use skills::SkillManager;
 use std::sync::Arc;
@@ -88,9 +87,6 @@ use uuid::Uuid;
 
 /// Application state and entry point
 pub struct App {
-    /// SDK engine for provider/model resolution
-    #[allow(dead_code)]
-    engine: oxi_sdk::Oxi,
     agent: Arc<Agent>,
     settings: Settings,
     skills: RwLock<SkillManager>,
@@ -257,23 +253,20 @@ impl App {
             (String::new(), String::new())
         };
 
-        // Build SDK engine with built-in providers and models
-        let engine = OxiBuilder::new().with_builtins().build();
-
-        // Resolve model via SDK (validation only)
+        // Resolve model (validation only)
         if !provider_name.is_empty() && !model_name.is_empty() {
-            let _ = engine.resolve_model(&format!("{}/{}", provider_name, model_name));
+            let _ = oxi_ai::lookup_model(&provider_name, &model_name);
         }
 
-        // Resolve provider via SDK
-        let provider: Arc<dyn oxi_ai::Provider> = if !provider_name.is_empty() {
-            engine
-                .create_provider(&provider_name)
-                .map_err(|e| Error::msg(format!("{}", e)))?
-        } else {
-            engine
-                .create_provider("anthropic")
-                .map_err(|e| Error::msg(format!("{}", e)))?
+        // Resolve provider via oxi-ai built-in factory
+        let provider: Arc<dyn oxi_ai::Provider> = {
+            let name = if provider_name.is_empty() {
+                "anthropic"
+            } else {
+                &provider_name
+            };
+            oxi_ai::get_provider_arc(name)
+                .ok_or_else(|| Error::msg(format!("Provider '{}' not found", name)))?
         };
 
         let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
@@ -331,7 +324,6 @@ impl App {
             .register_arc(std::sync::Arc::new(questionnaire_tool));
 
         Ok(Self {
-            engine,
             agent,
             settings,
             skills: RwLock::new(skills),
@@ -341,11 +333,6 @@ impl App {
         })
     }
 
-    /// Access the SDK engine (for provider/model resolution)
-    #[allow(dead_code)]
-    pub(crate) fn engine(&self) -> &oxi_sdk::Oxi {
-        &self.engine
-    }
 
     /// Get the current settings
     pub fn settings(&self) -> &Settings {

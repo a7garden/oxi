@@ -3842,7 +3842,6 @@ dependencies = [
  "once_cell",
  "oxi-agent",
  "oxi-ai",
- "oxi-sdk",
  "oxi-store",
  "oxi-tui",
  "parking_lot",

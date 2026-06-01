@@ -1006,7 +1006,8 @@ fn render_setup_step(
             render_title(f, area, 2, " How would you like to authenticate?", fg, bg);
             let items = vec![
                 " API Key    Enter an API key manually".to_string(),
-                " OAuth      Sign in with your account (coming soon)".to_string(),
+                // OAuth — not yet implemented. Uncomment when browser redirect → callback → token exchange is built.
+                // " OAuth      Sign in with your account".to_string(),
             ];
             let _ = render_selectable_list(f, area, 4, &items, *selected, &styles, theme, None);
             render_hint(

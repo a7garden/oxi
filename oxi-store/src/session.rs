@@ -1511,6 +1511,20 @@ impl SessionManager {
         self.leaf_id.read().clone()
     }
 
+    /// Set the leaf pointer to a specific entry, navigating to that branch.
+    ///
+    /// Validates that the entry exists in the session tree and updates
+    /// the internal leaf pointer. Used for TUI branch navigation —
+    /// after calling this, `get_branch(None)` returns the path from
+    /// root to the target entry.
+    pub fn set_leaf_from_entry(&self, entry_id: &str) -> Result<(), String> {
+        if !self.by_id.read().contains_key(entry_id) {
+            return Err(format!("Entry {} not found", entry_id));
+        }
+        *self.leaf_id.write() = Some(entry_id.to_string());
+        Ok(())
+    }
+
     /// Get the current leaf entry
     pub fn get_leaf_entry(&self) -> Option<SessionEntry> {
         self.leaf_id

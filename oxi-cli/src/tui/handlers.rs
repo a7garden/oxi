@@ -953,11 +953,8 @@ async fn handle_overlay_key(
             }
             OverlayAction::NavigateToEntry { entry_id } => {
                 state.overlay_state = None;
-                // TODO: integrate with SessionNavigator::navigate_tree() for branch switching
-                state.add_notification(
-                    format!("Selected entry: {}", &entry_id[..8.min(entry_id.len())]),
-                    NotificationKind::Info,
-                );
+                state.next_action =
+                    Some(super::app::TuiNextAction::GotoEntry(entry_id));
                 return None;
             }
             _ => {}
@@ -1104,7 +1101,7 @@ async fn handle_wizard_step_key(
                     {
                         match *selected {
                             0 => {
-                                // API Key flow
+                                // API Key — proceed to provider select
                                 let providers = build_provider_list(is_config);
                                 state.overlay = wrap_step(
                                     &state.overlay,
@@ -1115,18 +1112,18 @@ async fn handle_wizard_step_key(
                                     },
                                 );
                             }
-                            1 => {
-                                // OAuth — not yet implemented, just go to provider select
-                                let providers = build_provider_list(is_config);
-                                state.overlay = wrap_step(
-                                    &state.overlay,
-                                    SetupStep::SelectProvider {
-                                        providers,
-                                        selected: 0,
-                                        filter: String::new(),
-                                    },
-                                );
-                            }
+                            // OAuth — not yet implemented. Comment out the choice until
+                            // the full flow (browser redirect → callback → token exchange) is built.
+                            // 1 => {
+                            //     state.overlay = wrap_step(
+                            //         &state.overlay,
+                            //         SetupStep::SelectProvider {
+                            //             providers: build_provider_list(is_config),
+                            //             selected: 0,
+                            //             filter: String::new(),
+                            //         },
+                            //     );
+                            // }
                             _ => {}
                         }
                     }
