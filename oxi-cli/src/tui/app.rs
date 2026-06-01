@@ -1605,8 +1605,12 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             }
             Some(TuiNextAction::GotoEntry(entry_id)) => {
                 tracing::info!("Navigating to entry: {}", entry_id);
+                let Some(path) = session_target.as_ref() else {
+                    tracing::warn!("GotoEntry: no session file path");
+                    continue;
+                };
                 let sm = oxi_store::session::SessionManager::open(
-                    session_target.as_ref().unwrap(),
+                    path,
                     None,
                     Some(&cwd),
                 );

@@ -1099,33 +1099,30 @@ async fn handle_wizard_step_key(
                     if let Some(SetupStep::SelectAuthType { selected, .. }) =
                         extract_step(&state.overlay)
                     {
-                        match *selected {
-                            0 => {
-                                // API Key — proceed to provider select
-                                let providers = build_provider_list(is_config);
-                                state.overlay = wrap_step(
-                                    &state.overlay,
-                                    SetupStep::SelectProvider {
-                                        providers,
-                                        selected: 0,
-                                        filter: String::new(),
-                                    },
-                                );
-                            }
-                            // OAuth — not yet implemented. Comment out the choice until
-                            // the full flow (browser redirect → callback → token exchange) is built.
-                            // 1 => {
-                            //     state.overlay = wrap_step(
-                            //         &state.overlay,
-                            //         SetupStep::SelectProvider {
-                            //             providers: build_provider_list(is_config),
-                            //             selected: 0,
-                            //             filter: String::new(),
-                            //         },
-                            //     );
-                            // }
-                            _ => {}
+                        if *selected == 0 {
+                            // API Key — proceed to provider select
+                            let providers = build_provider_list(is_config);
+                            state.overlay = wrap_step(
+                                &state.overlay,
+                                SetupStep::SelectProvider {
+                                    providers,
+                                    selected: 0,
+                                    filter: String::new(),
+                                },
+                            );
                         }
+                        // OAuth — not yet implemented. Comment out the choice until
+                        // the full flow (browser redirect → callback → token exchange) is built.
+                        // if *selected == 1 {
+                        //     state.overlay = wrap_step(
+                        //         &state.overlay,
+                        //         SetupStep::SelectProvider {
+                        //             providers: build_provider_list(is_config),
+                        //             selected: 0,
+                        //             filter: String::new(),
+                        //         },
+                        //     );
+                        // }
                     }
                 }
                 KeyCode::Char('q') | KeyCode::Esc => {
@@ -1366,7 +1363,7 @@ async fn handle_wizard_step_key(
                             let full_model = model_id.clone();
                             if let Ok(mut settings) = oxi_store::settings::Settings::load() {
                                 settings.last_used_model = Some(model_id.to_string());
-                                let model_provider = model_id.split('/').next().unwrap_or(&provider);
+                                let model_provider = model_id.split('/').next().unwrap_or(provider);
                                 settings.last_used_provider = Some(model_provider.to_string());
                                 let _ = settings.save();
                             }
