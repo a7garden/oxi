@@ -121,4 +121,31 @@ mod tests {
         let total: usize = root.models.values().map(|v| v.len()).sum();
         assert!(total >= 900, "expected >= 900 models, got {total}");
     }
+
+    #[test]
+    fn sentinel_pricing_counted() {
+        // After the price-backfill pass, 11 openclaw-sourced providers have
+        // unverified `0.0` upstream values. These must surface as
+        // `pricing_unverified` in the model DB.
+        use crate::model_db::{builtin_model_count_sentinel, get_all_models};
+        let mut s = 0;
+        let mut z = 0;
+        let mut v = 0;
+        for m in get_all_models() {
+            if m.pricing_unverified() {
+                s += 1;
+            } else if m.cost_input == 0.0 && m.cost_output == 0.0 {
+                z += 1;
+            } else {
+                v += 1;
+            }
+        }
+        let helper = builtin_model_count_sentinel();
+        assert_eq!(
+            s, helper,
+            "helper and direct count disagree: {s} vs {helper}"
+        );
+        println!("verified={v} sentinel={s} zero={z}");
+        assert!(s >= 30, "expected at least 30 sentinel entries, got {s}");
+    }
 }

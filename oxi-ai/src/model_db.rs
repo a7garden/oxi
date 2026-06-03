@@ -62,7 +62,7 @@ fn parse_input_modality(s: &str) -> InputModality {
 impl From<&BuiltinModelEntry> for ModelEntry {
     fn from(e: &BuiltinModelEntry) -> Self {
         // Leak the strings to obtain `&'static str`. Bounded by total model
-        // count (currently 934) and amortized once at startup.
+        // count (currently 1099) and amortized once at startup.
         let id: &'static str = Box::leak(e.id.clone().into_boxed_str());
         let name: &'static str = Box::leak(e.name.clone().into_boxed_str());
         let provider: &'static str = Box::leak(e.provider.clone().into_boxed_str());
@@ -73,6 +73,26 @@ impl From<&BuiltinModelEntry> for ModelEntry {
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
         );
+        // Sentinel transform: openclaw-sourced models with cost = 0 are
+        // NOT verified as free — they're unverified. We translate upstream
+        // `0.0` to the sentinel `-1.0` only for openclaw-imported providers.
+        // Oxi-original verified data is left at 0.0 (truly free).
+        let (ci, co) = if is_openclaw_sourced(&e.provider) {
+            (
+                if e.cost_input == 0.0 {
+                    UNVERIFIED_PRICE
+                } else {
+                    e.cost_input
+                },
+                if e.cost_output == 0.0 {
+                    UNVERIFIED_PRICE
+                } else {
+                    e.cost_output
+                },
+            )
+        } else {
+            (e.cost_input, e.cost_output)
+        };
         ModelEntry {
             id,
             name,
@@ -80,14 +100,52 @@ impl From<&BuiltinModelEntry> for ModelEntry {
             provider,
             reasoning: e.reasoning,
             input,
-            cost_input: e.cost_input,
-            cost_output: e.cost_output,
+            cost_input: ci,
+            cost_output: co,
             cost_cache_read: e.cost_cache_read,
             cost_cache_write: e.cost_cache_write,
             context_window: e.context_window,
             max_tokens: e.max_tokens,
         }
     }
+}
+
+/// Sentinel value used when a model entry has no verified price.
+///
+/// Negative values are reserved for sentinel meanings. The two real
+/// interpretations of `cost_input` are now:
+///
+/// - `cost_input < 0.0` — price is unverified, see [`ModelEntry::pricing_unverified`].
+/// - `cost_input == 0.0` — verified as zero (truly free local model, etc.).
+/// - `cost_input > 0.0` — verified price in USD per million tokens.
+pub const UNVERIFIED_PRICE: f64 = -1.0;
+
+/// Returns true if a provider id came from the openclaw port.
+///
+/// These are the providers we don't have first-party pricing data for;
+/// their `0.0` cost values in the upstream are placeholder, not
+/// verified-free. Oxi-original providers and standard cloud APIs (anthropic,
+/// openai, google, ...) are NOT in this set — their `0.0` values are
+/// hand-curated as "truly free" (e.g. local ollama models we added).
+///
+/// See `data/catalog/README.md` for the data-quality breakdown.
+fn is_openclaw_sourced(provider: &str) -> bool {
+    matches!(
+        provider,
+        // The 11 openclaw providers for which we could not verify prices.
+        // venice and novita were backfilled by price_backfill.py.
+        "gmi"
+            | "kilocode"
+            | "moonshot"
+            | "nvidia"
+            | "ollama-cloud"
+            | "qianfan"
+            | "qwen-oauth"
+            | "stepfun"
+            | "byteplus"
+            | "chutes"
+            | "deepinfra"
+    )
 }
 
 /// A static model entry in the database.
@@ -132,7 +190,12 @@ impl ModelEntry {
         self.reasoning
     }
 
-    /// Calculate the cost for a given token usage
+    /// Calculate the cost for a given token usage.
+    ///
+    /// Returns 0.0 for any field that is the unverified sentinel
+    /// (`UNVERIFIED_PRICE`, i.e. negative). Callers that care about
+    /// unverified prices should check [`ModelEntry::pricing_unverified`]
+    /// first and warn the user.
     pub fn calculate_cost(
         &self,
         input_tokens: u64,
@@ -140,11 +203,33 @@ impl ModelEntry {
         cache_read: u64,
         cache_write: u64,
     ) -> f64 {
-        let in_cost = (input_tokens as f64 / 1_000_000.0) * self.cost_input;
-        let out_cost = (output_tokens as f64 / 1_000_000.0) * self.cost_output;
-        let cr_cost = (cache_read as f64 / 1_000_000.0) * self.cost_cache_read;
-        let cw_cost = (cache_write as f64 / 1_000_000.0) * self.cost_cache_write;
+        let in_cost = (input_tokens as f64 / 1_000_000.0) * self.cost_input.max(0.0);
+        let out_cost = (output_tokens as f64 / 1_000_000.0) * self.cost_output.max(0.0);
+        let cr_cost = (cache_read as f64 / 1_000_000.0) * self.cost_cache_read.max(0.0);
+        let cw_cost = (cache_write as f64 / 1_000_000.0) * self.cost_cache_write.max(0.0);
         in_cost + out_cost + cr_cost + cw_cost
+    }
+
+    /// Sentinel value indicating "price unknown" / "not verified".
+    ///
+    /// Distinguishes upstream-supplied zero (e.g. a free local model) from
+    /// "we don't have the price yet, use with caution". The convention is:
+    ///
+    /// - `cost_input = -1.0` (or any negative) means: price is unverified.
+    ///   UIs should warn the user. Cost calculations may return 0 or refuse.
+    /// - `cost_input = 0.0` means: price is verified as zero (truly free).
+    /// - `cost_input > 0.0` means: verified price per million tokens.
+    ///
+    /// The `BuiltinModelEntry → ModelEntry` converter applies this
+    /// transformation: upstream `0.0` for a known paid provider becomes `-1.0`
+    /// here. The `pricing_verified` method lets callers check.
+    pub fn pricing_verified(&self) -> bool {
+        self.cost_input >= 0.0 && self.cost_output >= 0.0
+    }
+
+    /// Returns true if either cost field is the unverified sentinel.
+    pub fn pricing_unverified(&self) -> bool {
+        self.cost_input < 0.0 || self.cost_output < 0.0
     }
 }
 
@@ -274,6 +359,15 @@ pub fn get_all_models() -> impl Iterator<Item = &'static ModelEntry> {
 /// Get the total number of models in the database.
 pub fn model_count() -> usize {
     all_provider_models().iter().map(|(_, m)| m.len()).sum()
+}
+
+/// Count of models with the unverified-pricing sentinel
+/// (`cost_input < 0.0 || cost_output < 0.0`).
+///
+/// These are openclaw-sourced entries where the upstream shipped `0.0`
+/// prices that we could not verify. The UI should display a warning.
+pub fn builtin_model_count_sentinel() -> usize {
+    get_all_models().filter(|m| m.pricing_unverified()).count()
 }
 
 /// Get all known provider names.
