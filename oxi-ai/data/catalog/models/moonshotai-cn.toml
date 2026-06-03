@@ -1,0 +1,100 @@
+# Moonshot AI (China) models (7 entries)
+provider = "moonshotai-cn"
+
+[[model]]
+id = "kimi-k2-0711-preview"
+name = "Kimi K2 0711"
+api = "openai-completions"
+provider = "moonshotai-cn"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.15
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 16384
+
+[[model]]
+id = "kimi-k2-0905-preview"
+name = "Kimi K2 0905"
+api = "openai-completions"
+provider = "moonshotai-cn"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.15
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 262144
+
+[[model]]
+id = "kimi-k2-thinking"
+name = "Kimi K2 Thinking"
+api = "openai-completions"
+provider = "moonshotai-cn"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.15
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 262144
+
+[[model]]
+id = "kimi-k2-thinking-turbo"
+name = "Kimi K2 Thinking Turbo"
+api = "openai-completions"
+provider = "moonshotai-cn"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.15
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 262144
+
+[[model]]
+id = "kimi-k2-turbo-preview"
+name = "Kimi K2 Turbo"
+api = "openai-completions"
+provider = "moonshotai-cn"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.6
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 262144
+
+[[model]]
+id = "kimi-k2.5"
+name = "Kimi K2.5"
+api = "openai-completions"
+provider = "moonshotai-cn"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.1
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 262144
+
+[[model]]
+id = "kimi-k2.6"
+name = "Kimi K2.6"
+api = "openai-completions"
+provider = "moonshotai-cn"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.16
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 262144

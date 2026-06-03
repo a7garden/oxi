@@ -23,7 +23,7 @@
 pub mod provider;
 pub mod model;
 
-pub use provider::{BuiltinProviderEntry, load_builtin_providers, builtin_providers_count};
+pub use provider::{AuthMethod, BuiltinProviderEntry, load_builtin_providers, builtin_providers_count};
 pub use model::{BuiltinModelEntry, load_builtin_models, builtin_model_count};
 
 use std::sync::OnceLock;

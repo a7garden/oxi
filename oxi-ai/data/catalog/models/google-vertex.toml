@@ -1,0 +1,184 @@
+# Google Vertex models (13 entries)
+provider = "google-vertex"
+
+[[model]]
+id = "gemini-1.5-flash"
+name = "Gemini 1.5 Flash (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.01875
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 8192
+
+[[model]]
+id = "gemini-1.5-flash-8b"
+name = "Gemini 1.5 Flash-8B (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.01
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 8192
+
+[[model]]
+id = "gemini-1.5-pro"
+name = "Gemini 1.5 Pro (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3125
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 8192
+
+[[model]]
+id = "gemini-2.0-flash"
+name = "Gemini 2.0 Flash (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0375
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 8192
+
+[[model]]
+id = "gemini-2.0-flash-lite"
+name = "Gemini 2.0 Flash Lite (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.01875
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 65536
+
+[[model]]
+id = "gemini-2.5-flash"
+name = "Gemini 2.5 Flash (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.03
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 65536
+
+[[model]]
+id = "gemini-2.5-flash-lite"
+name = "Gemini 2.5 Flash Lite (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.01
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 65536
+
+[[model]]
+id = "gemini-2.5-flash-lite-preview-09-2025"
+name = "Gemini 2.5 Flash Lite Preview 09-25 (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.01
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 65536
+
+[[model]]
+id = "gemini-2.5-pro"
+name = "Gemini 2.5 Pro (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.125
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 65536
+
+[[model]]
+id = "gemini-3-flash-preview"
+name = "Gemini 3 Flash Preview (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.05
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 65536
+
+[[model]]
+id = "gemini-3-pro-preview"
+name = "Gemini 3 Pro Preview (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.2
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 64000
+
+[[model]]
+id = "gemini-3.1-pro-preview"
+name = "Gemini 3.1 Pro Preview (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.2
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 65536
+
+[[model]]
+id = "gemini-3.1-pro-preview-customtools"
+name = "Gemini 3.1 Pro Preview Custom Tools (Vertex)"
+api = "google-vertex"
+provider = "google-vertex"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.2
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 65536

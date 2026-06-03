@@ -1,0 +1,30 @@
+# MiniMax (China) models (2 entries)
+provider = "minimax-cn"
+
+[[model]]
+id = "MiniMax-M2.7"
+name = "MiniMax-M2.7"
+api = "anthropic-messages"
+provider = "minimax-cn"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.06
+cost_cache_write = 0.375
+context_window = 204800
+max_tokens = 131072
+
+[[model]]
+id = "MiniMax-M2.7-highspeed"
+name = "MiniMax-M2.7-highspeed"
+api = "anthropic-messages"
+provider = "minimax-cn"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.06
+cost_cache_write = 0.375
+context_window = 204800
+max_tokens = 131072
