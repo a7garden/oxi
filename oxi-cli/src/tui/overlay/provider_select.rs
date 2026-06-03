@@ -302,7 +302,6 @@ impl OverlayComponent for ProviderSelectOverlay {
         };
 
         let mut key_text = ktext;
-        let mut close = false;
         let mut back_to_browsing = false;
         let mut do_save = false;
 
@@ -347,22 +346,21 @@ impl OverlayComponent for ProviderSelectOverlay {
             }
 
             if self.is_initial_setup {
-                let configured = self.providers.iter().filter(|p| p.has_key).count();
-                if configured == 1 {
-                    close = true;
-                }
+                // In initial setup mode, the first key save transitions to
+                // model selection. Emit a dedicated action so the TUI main
+                // loop can swap the overlay to a model selector for this
+                // provider instead of closing outright.
+                return OverlayAction::ProviderKeySaved {
+                    provider_name: pname,
+                };
             }
         }
 
-        if back_to_browsing && !close {
+        if back_to_browsing {
             self.sub_mode = SubMode::Browsing;
         }
 
-        if close {
-            OverlayAction::Close
-        } else {
-            OverlayAction::None
-        }
+        OverlayAction::None
     }
 
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -373,13 +371,13 @@ impl OverlayComponent for ProviderSelectOverlay {
         let border_block = Block::default()
             .title(Self::title_line())
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
         // Title row
         let title_style = Style::default()
-            .fg(theme.colors.primary.to_ratatui())
+            .fg(theme.colors.primary)
             .add_modifier(Modifier::BOLD);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
@@ -469,11 +467,12 @@ impl ProviderSelectOverlay {
             KeyCode::Enter => {
                 if let Some(idx) = self.selected_provider_index() {
                     if let Some(entry) = self.providers.get(idx).cloned() {
-                    self.sub_mode = SubMode::EnteringKey {
-                        provider_name: entry.name,
-                        display_name: entry.display_name,
-                        key_text: String::new(),
-                    };
+                        self.sub_mode = SubMode::EnteringKey {
+                            provider_name: entry.name,
+                            display_name: entry.display_name,
+                            key_text: String::new(),
+                        };
+                    }
                 }
             }
             KeyCode::Esc => {
@@ -500,10 +499,7 @@ impl ProviderSelectOverlay {
         // Separator after title
         let sep = "\u{2500}".repeat(inner.width.saturating_sub(2) as usize);
         frame.render_widget(
-            Paragraph::new(Span::styled(
-                sep,
-                Style::default().fg(theme.colors.border.to_ratatui()),
-            )),
+            Paragraph::new(Span::styled(sep, Style::default().fg(theme.colors.border))),
             Rect {
                 x: inner.x + 1,
                 y: inner.y + 1,
@@ -525,7 +521,7 @@ impl ProviderSelectOverlay {
                         Paragraph::new(Span::styled(
                             line,
                             Style::default()
-                                .fg(theme.colors.muted.to_ratatui())
+                                .fg(theme.colors.muted)
                                 .add_modifier(Modifier::BOLD),
                         )),
                         Rect {
@@ -552,17 +548,17 @@ impl ProviderSelectOverlay {
 
                     let row_style = if is_sel {
                         Style::default()
-                            .fg(theme.colors.background.to_ratatui())
-                            .bg(theme.colors.primary.to_ratatui())
+                            .fg(theme.colors.background)
+                            .bg(theme.colors.primary)
                             .add_modifier(Modifier::BOLD)
                     } else {
                         styles.normal
                     };
 
                     let check_style = if entry.has_key {
-                        Style::default().fg(theme.colors.success.to_ratatui())
+                        Style::default().fg(theme.colors.success)
                     } else {
-                        Style::default().fg(theme.colors.muted.to_ratatui())
+                        Style::default().fg(theme.colors.muted)
                     };
 
                     let name_col_w = 18usize;
@@ -597,7 +593,7 @@ impl ProviderSelectOverlay {
                             if is_sel {
                                 row_style
                             } else {
-                                Style::default().fg(theme.colors.success.to_ratatui())
+                                Style::default().fg(theme.colors.success)
                             },
                         ));
                     } else {
@@ -634,7 +630,7 @@ impl ProviderSelectOverlay {
             let block = Block::default()
                 .borders(Borders::ALL)
                 .title(format!(" {} ", display_name))
-                .border_style(Style::default().fg(theme.colors.accent.to_ratatui()));
+                .border_style(Style::default().fg(theme.colors.accent));
             let inner = block.inner(popup);
             frame.render_widget(block, popup);
 
@@ -673,7 +669,7 @@ impl ProviderSelectOverlay {
                 Paragraph::new(Span::styled(
                     " API Key:",
                     Style::default()
-                        .fg(theme.colors.foreground.to_ratatui())
+                        .fg(theme.colors.foreground)
                         .add_modifier(Modifier::BOLD),
                 )),
                 Rect {
@@ -690,8 +686,8 @@ impl ProviderSelectOverlay {
             let display: String = masked.chars().take(field_width).collect();
 
             let input_style = Style::default()
-                .fg(theme.colors.foreground.to_ratatui())
-                .bg(theme.colors.selection_bg.to_ratatui());
+                .fg(theme.colors.foreground)
+                .bg(theme.colors.selection_bg);
 
             frame.render_widget(
                 Paragraph::new(Line::from(vec![
@@ -743,8 +739,8 @@ impl ProviderSelectOverlay {
         let thumb_pos = ((self.scroll_offset as f32 / max_offset as f32)
             * (track_height.saturating_sub(thumb_size)) as f32) as usize;
 
-        let thumb_style = Style::default().fg(theme.colors.primary.to_ratatui());
-        let track_style = Style::default().fg(theme.colors.border.to_ratatui());
+        let thumb_style = Style::default().fg(theme.colors.primary);
+        let track_style = Style::default().fg(theme.colors.border);
 
         for i in 0..track_height {
             let is_thumb = i >= thumb_pos && i < thumb_pos + thumb_size;

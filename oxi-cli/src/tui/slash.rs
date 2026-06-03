@@ -1,6 +1,6 @@
 //! Slash command handling.
 
-use super::app::{AppOverlay, AppState, NotificationKind, SetupStep, UiEvent};
+use super::app::{AppState, NotificationKind, UiEvent};
 use super::overlay::router_integration;
 use crate::app::agent_session::{AgentSession, ScopedModel};
 use crate::media::clipboard_write;
@@ -616,17 +616,28 @@ pub(crate) fn handle_slash_command(
                 if parts.len() == 2 {
                     try_provider_with_key(parts[0], parts[1], state);
                 } else {
-                    state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey {
-                        provider: parts[0].to_string(),
-                        key: String::new(),
-                        masked_cursor: 0,
-                    }));
+                    // Open provider-select overlay with the named provider pre-selected
+                    let provider_name = parts[0].to_string();
+                    let entries = super::overlay::provider_select::build_provider_entries();
+                    let mut overlay = super::overlay::provider_select::ProviderSelectOverlay::new(
+                        entries, false, // not initial setup
+                    );
+                    // Try to pre-select the named provider
+                    if let Some(idx) = overlay
+                        .providers
+                        .iter()
+                        .position(|p| p.name == provider_name)
+                    {
+                        overlay.selected = idx;
+                    }
+                    state.overlay_state = Some(Box::new(overlay));
                 }
             } else {
-                state.overlay = Some(AppOverlay::ProviderConfig(SetupStep::SelectAuthType {
-                    auth_type: None,
-                    selected: 0,
-                }));
+                // Open full provider-select overlay
+                let entries = super::overlay::provider_select::build_provider_entries();
+                state.overlay_state = Some(Box::new(
+                    super::overlay::provider_select::ProviderSelectOverlay::new(entries, false),
+                ));
             }
             true
         }

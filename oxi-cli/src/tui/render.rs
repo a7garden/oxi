@@ -1,6 +1,6 @@
 //! Rendering functions for the TUI.
 
-use super::app::{AppOverlay, AppState, NotificationKind, ProviderInfo, SetupStep};
+use super::app::{AppState, NotificationKind};
 use oxi_tui::theme::Theme;
 use oxi_tui::truncate_to_width;
 use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
@@ -12,421 +12,6 @@ use ratatui::{
     Frame,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
-// ── Reusable UI components ──────────────────────────────────────────────
-
-/// Render a centered popup frame: clear + dimmed background + border.
-fn render_popup_frame(
-    f: &mut Frame,
-    area: Rect,
-    bg: ratatui::style::Color,
-    border: ratatui::style::Color,
-) -> Rect {
-    f.render_widget(Clear, area);
-    let dimmed = Block::default().style(Style::default().bg(bg));
-    f.render_widget(dimmed, area);
-    let border_block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border));
-    let inner = border_block.inner(area);
-    f.render_widget(border_block, area);
-    inner
-}
-
-/// Compute a centered popup Rect covering `pct` of the screen.
-fn centered_layout(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
-    let w = (area.width as f32 * width_pct) as u16;
-    let h = (area.height as f32 * height_pct) as u16;
-    Rect {
-        x: area.x + area.width.saturating_sub(w) / 2,
-        y: area.y + area.height.saturating_sub(h) / 2,
-        width: w.min(area.width),
-        height: h.min(area.height),
-    }
-}
-
-/// Render a bold title line.
-fn render_title(
-    f: &mut Frame,
-    area: Rect,
-    y_offset: u16,
-    text: &str,
-    fg: ratatui::style::Color,
-    bg: ratatui::style::Color,
-) {
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            text,
-            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-        )),
-        Rect {
-            x: area.x,
-            y: area.y + y_offset,
-            width: area.width,
-            height: 1,
-        },
-    );
-}
-
-/// Render a hint line at the bottom of the area.
-fn render_hint(f: &mut Frame, area: Rect, text: &str, style: Style) {
-    let y = area.y + area.height.saturating_sub(1);
-    f.render_widget(
-        Paragraph::new(Span::styled(text, style)),
-        Rect {
-            x: area.x,
-            y,
-            width: area.width,
-            height: 1,
-        },
-    );
-}
-
-/// Render a selectable list with pointer, scrolling window, and highlight.
-#[allow(clippy::too_many_arguments)]
-/// Scroll position info returned by [`render_selectable_list`].
-struct ScrollInfo {
-    total: usize,
-    visible: usize,
-    window_start: usize,
-}
-
-impl ScrollInfo {
-    /// Number of items scrolled off the bottom of the visible window.
-    fn below(&self) -> usize {
-        self.total.saturating_sub(self.window_start + self.visible)
-    }
-
-    /// Number of items scrolled off the top of the visible window.
-    #[allow(dead_code)]
-    fn above(&self) -> usize {
-        self.window_start
-    }
-
-    /// Human-readable position string like "(5/28, 12 below)" or empty if everything fits.
-    fn hint(&self) -> String {
-        if self.total <= self.visible {
-            return String::new();
-        }
-        let below = self.below();
-        let above = self.window_start;
-        match (above, below) {
-            (0, 0) => String::new(),
-            (0, b) => format!(" ({} below)", b),
-            (a, 0) => format!(" ({} above)", a),
-            (a, b) => format!(" ({} above, {} below)", a, b),
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-#[must_use]
-fn render_selectable_list(
-    f: &mut Frame,
-    area: Rect,
-    y_offset: u16,
-    items: &[String],
-    selected: usize,
-    styles: &oxi_tui::theme::ThemeStyles,
-    theme: &Theme,
-    highlight_color: Option<ratatui::style::Color>,
-) -> Option<ScrollInfo> {
-    if items.is_empty() {
-        return None;
-    }
-
-    let list_area = Rect {
-        x: area.x,
-        y: area.y + y_offset,
-        width: area.width,
-        height: area.height.saturating_sub(y_offset).saturating_sub(1),
-    };
-
-    let max_show = list_area.height as usize;
-    let window_start = if selected >= max_show {
-        selected - max_show + 1
-    } else {
-        0
-    };
-
-    let list_items: Vec<ListItem> = items
-        .iter()
-        .enumerate()
-        .skip(window_start)
-        .take(max_show)
-        .map(|(i, text)| {
-            let is_sel = i == selected;
-            let pointer = if is_sel { "-> " } else { "   " };
-            let content = format!("{}{}", pointer, text);
-
-            let style = if is_sel {
-                let hl = highlight_color.unwrap_or_else(|| theme.colors.primary.to_ratatui());
-                Style::default()
-                    .fg(theme.colors.background.to_ratatui())
-                    .bg(hl)
-                    .bold()
-            } else {
-                styles.normal
-            };
-
-            ListItem::new(Span::styled(content, style))
-        })
-        .collect();
-
-    f.render_widget(List::new(list_items), list_area);
-
-    Some(ScrollInfo {
-        total: items.len(),
-        visible: max_show.min(items.len()),
-        window_start,
-    })
-}
-
-/// Render a list with status indicators (filled/empty circle).
-#[allow(clippy::too_many_arguments)]
-#[allow(dead_code)]
-fn render_status_list(
-    f: &mut Frame,
-    area: Rect,
-    y_offset: u16,
-    items: &[(String, bool)],
-    selected: usize,
-    styles: &oxi_tui::theme::ThemeStyles,
-    theme: &Theme,
-    highlight_color: Option<ratatui::style::Color>,
-) {
-    let strings: Vec<String> = items
-        .iter()
-        .map(|(name, has_key)| {
-            let status = if *has_key { "*" } else { "o" };
-            format!("{} {}", status, name)
-        })
-        .collect();
-    let _ = render_selectable_list(
-        f,
-        area,
-        y_offset,
-        &strings,
-        selected,
-        styles,
-        theme,
-        highlight_color,
-    );
-}
-
-/// A single row in the provider list — either a category header or an item.
-enum ProviderRow {
-    /// Category header line.
-    Header { label: String },
-    /// Provider item. `provider_idx` is the index into the `providers` slice.
-    Item { provider_idx: usize },
-}
-
-/// Render provider selection list grouped by category with descriptions.
-///
-/// Uses `List` widget with scroll window — fully scrollable.
-#[must_use]
-fn render_provider_list(
-    f: &mut Frame,
-    area: Rect,
-    providers: &[ProviderInfo],
-    selected: usize,
-    _styles: &oxi_tui::theme::ThemeStyles,
-    theme: &Theme,
-) -> Option<ScrollInfo> {
-    if providers.is_empty() {
-        return None;
-    }
-
-    // Category display order and labels
-    let category_order = [
-        ("primary", "Primary Providers"),
-        ("chinese", "Chinese AI"),
-        ("open", "Open Providers"),
-        ("cloud", "Cloud"),
-        ("enterprise", "Enterprise"),
-        ("specialized", "Other"),
-    ];
-
-    // Build flat row list and index mapping
-    let mut rows: Vec<ProviderRow> = Vec::new();
-    // Map: provider index → row index (for scroll calculation)
-    let mut provider_to_row: Vec<usize> = vec![0; providers.len()];
-
-    for (cat_key, cat_label) in &category_order {
-        let cat_providers: Vec<(usize, &ProviderInfo)> = providers
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.category == *cat_key)
-            .collect();
-        if cat_providers.is_empty() {
-            continue;
-        }
-
-        // Category header
-        rows.push(ProviderRow::Header {
-            label: cat_label.to_string(),
-        });
-
-        for (pi, _p) in &cat_providers {
-            provider_to_row[*pi] = rows.len();
-            rows.push(ProviderRow::Item { provider_idx: *pi });
-        }
-    }
-
-    // Calculate list area (leave 1 row for hint at bottom)
-    let list_area = Rect {
-        x: area.x,
-        y: area.y,
-        width: area.width,
-        height: area.height.saturating_sub(1),
-    };
-
-    let max_show = list_area.height as usize;
-    let selected_line = provider_to_row[selected];
-    let window_start = if selected_line >= max_show {
-        selected_line.saturating_sub(max_show - 1)
-    } else {
-        0
-    };
-
-    let accent_color = theme.colors.accent.to_ratatui();
-    let fg_color = theme.colors.foreground.to_ratatui();
-    let muted_color = theme.colors.muted.to_ratatui();
-    let bg_color = theme.colors.background.to_ratatui();
-    let success_color = theme.colors.success.to_ratatui();
-
-    let list_items: Vec<ListItem> = rows
-        .iter()
-        .enumerate()
-        .skip(window_start)
-        .take(max_show)
-        .map(|(_row_idx, row)| match row {
-            ProviderRow::Header { label } => {
-                // ── Category Header ────────── style
-                let dash_count = area.width as usize;
-                let header_text = format!(" {:} ", label);
-                let header_len = header_text.chars().count();
-                let trailing = dash_count.saturating_sub(header_len + 4); // "── " + " ─"
-                let line = format!("── {} {}", header_text, "─".repeat(trailing));
-                ListItem::new(Span::styled(
-                    line,
-                    Style::default()
-                        .fg(accent_color)
-                        .add_modifier(Modifier::BOLD),
-                ))
-            }
-            ProviderRow::Item { provider_idx } => {
-                let is_sel = *provider_idx == selected;
-                let p = &providers[*provider_idx];
-                let check = if p.has_key { "✓" } else { "○" };
-
-                let mut spans: Vec<Span<'_>> = Vec::new();
-
-                // Pointer
-                let pointer = if is_sel { "› " } else { "  " };
-                spans.push(Span::styled(
-                    pointer,
-                    if is_sel {
-                        Style::default()
-                            .fg(accent_color)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default()
-                    },
-                ));
-
-                // Check + name
-                let name_str = format!("{} {}", check, p.display_name);
-                spans.push(Span::styled(
-                    format!(" {:<16}", name_str),
-                    if is_sel {
-                        Style::default()
-                            .fg(bg_color)
-                            .bg(accent_color)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(fg_color)
-                    },
-                ));
-
-                // Description
-                if !p.description.is_empty() {
-                    let desc_style = if is_sel {
-                        Style::default().fg(bg_color).bg(accent_color)
-                    } else {
-                        Style::default().fg(muted_color)
-                    };
-                    spans.push(Span::styled(format!(" {}", p.description), desc_style));
-                }
-
-                // Key badge
-                if p.has_key {
-                    let badge_style = if is_sel {
-                        Style::default().fg(bg_color).bg(accent_color)
-                    } else {
-                        Style::default().fg(success_color)
-                    };
-                    spans.push(Span::styled(" [key]", badge_style));
-                }
-
-                ListItem::new(Line::from(spans))
-            }
-        })
-        .collect();
-
-    f.render_widget(List::new(list_items), list_area);
-
-    Some(ScrollInfo {
-        total: providers.len(),
-        visible: max_show.min(rows.len()),
-        window_start,
-    })
-}
-
-/// Render a text input field with label and cursor.
-#[allow(dead_code)]
-fn render_input_field(
-    f: &mut Frame,
-    area: Rect,
-    y_offset: u16,
-    label: &str,
-    value: &str,
-    theme: &Theme,
-    styles: &oxi_tui::theme::ThemeStyles,
-) {
-    let field_y = area.y + y_offset;
-    let field_w = area.width.saturating_sub(4);
-    let display: String = value.chars().take(field_w as usize).collect();
-    let input_line = format!(" {}: {}", label, display);
-
-    f.render_widget(
-        Paragraph::new(Span::styled(input_line, styles.normal)),
-        Rect {
-            x: area.x + 2,
-            y: field_y,
-            width: field_w,
-            height: 1,
-        },
-    );
-
-    // Cursor
-    let cursor_col = (label.len() as u16) + 3 + (display.len().min(field_w as usize) as u16);
-    f.render_widget(
-        Paragraph::new(Span::styled(
-            " ",
-            Style::default()
-                .fg(theme.colors.cursor_fg.to_ratatui())
-                .bg(theme.colors.cursor_bg.to_ratatui()),
-        )),
-        Rect {
-            x: area.x + 2 + cursor_col,
-            y: field_y,
-            width: 1,
-            height: 1,
-        },
-    );
-}
 
 // ── Main draw function ──────────────────────────────────────────────────
 
@@ -573,24 +158,21 @@ fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &The
 
         let mut spans: Vec<Span<'_>> = Vec::new();
         // Number
-        spans.push(Span::styled(
-            num,
-            Style::default().fg(theme.colors.muted.to_ratatui()),
-        ));
+        spans.push(Span::styled(num, Style::default().fg(theme.colors.muted)));
         // "next" badge for first item
         if i == 0 {
             spans.push(Span::styled(
                 "next ",
                 Style::default()
-                    .fg(theme.colors.accent.to_ratatui())
+                    .fg(theme.colors.accent)
                     .add_modifier(Modifier::ITALIC),
             ));
         }
         // Message text
         let msg_style = if i == 0 {
-            Style::default().fg(theme.colors.foreground.to_ratatui())
+            Style::default().fg(theme.colors.foreground)
         } else {
-            Style::default().fg(theme.colors.muted.to_ratatui())
+            Style::default().fg(theme.colors.muted)
         };
         spans.push(Span::styled(
             format!("{}{}", truncated, ellipsis),
@@ -604,7 +186,7 @@ fn render_queue_compact(f: &mut Frame, area: Rect, state: &AppState, theme: &The
                 Paragraph::new(Span::styled(
                     hint_text,
                     Style::default()
-                        .fg(theme.colors.muted.to_ratatui())
+                        .fg(theme.colors.muted)
                         .add_modifier(Modifier::ITALIC),
                 )),
                 Rect {
@@ -656,7 +238,7 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
             pointer,
             if is_sel {
                 Style::default()
-                    .fg(theme.colors.accent.to_ratatui())
+                    .fg(theme.colors.accent)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
@@ -667,11 +249,11 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
             num,
             if is_sel {
                 Style::default()
-                    .fg(theme.colors.background.to_ratatui())
-                    .bg(theme.colors.accent.to_ratatui())
+                    .fg(theme.colors.background)
+                    .bg(theme.colors.accent)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(theme.colors.muted.to_ratatui())
+                Style::default().fg(theme.colors.muted)
             },
         ));
         // "next" badge for first
@@ -680,12 +262,12 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
                 badge,
                 if is_sel {
                     Style::default()
-                        .fg(theme.colors.background.to_ratatui())
-                        .bg(theme.colors.accent.to_ratatui())
+                        .fg(theme.colors.background)
+                        .bg(theme.colors.accent)
                         .add_modifier(Modifier::ITALIC)
                 } else {
                     Style::default()
-                        .fg(theme.colors.accent.to_ratatui())
+                        .fg(theme.colors.accent)
                         .add_modifier(Modifier::ITALIC)
                 },
             ));
@@ -693,13 +275,13 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
         // Message text
         let msg_style = if is_sel {
             Style::default()
-                .fg(theme.colors.background.to_ratatui())
-                .bg(theme.colors.accent.to_ratatui())
+                .fg(theme.colors.background)
+                .bg(theme.colors.accent)
                 .add_modifier(Modifier::BOLD)
         } else if i == 0 {
-            Style::default().fg(theme.colors.foreground.to_ratatui())
+            Style::default().fg(theme.colors.foreground)
         } else {
-            Style::default().fg(theme.colors.muted.to_ratatui())
+            Style::default().fg(theme.colors.muted)
         };
         spans.push(Span::styled(
             format!("{}{}", truncated, ellipsis),
@@ -719,10 +301,7 @@ fn render_queue_active(f: &mut Frame, area: Rect, state: &AppState, theme: &Them
         };
         let hint = " ↑↓ nav · d del · e edit · Esc close";
         f.render_widget(
-            Paragraph::new(Span::styled(
-                hint,
-                Style::default().fg(theme.colors.muted.to_ratatui()),
-            )),
+            Paragraph::new(Span::styled(hint, Style::default().fg(theme.colors.muted))),
             row,
         );
     }
@@ -748,10 +327,7 @@ fn render_status_line(f: &mut Frame, row: Rect, state: &AppState, theme: &Theme)
         let dash_count = row.width.saturating_sub(label_len + 2) as usize;
         let line = format!("── {} {}", label, "─".repeat(dash_count));
         f.render_widget(
-            Paragraph::new(Span::styled(
-                line,
-                Style::default().fg(theme.colors.accent.to_ratatui()),
-            )),
+            Paragraph::new(Span::styled(line, Style::default().fg(theme.colors.accent))),
             row,
         );
     } else {
@@ -767,10 +343,7 @@ fn render_status_line(f: &mut Frame, row: Rect, state: &AppState, theme: &Theme)
         let dash_count = row.width.saturating_sub(label_len + 2) as usize;
         let line = format!("── {} {}", label, "─".repeat(dash_count));
         f.render_widget(
-            Paragraph::new(Span::styled(
-                line,
-                Style::default().fg(theme.colors.muted.to_ratatui()),
-            )),
+            Paragraph::new(Span::styled(line, Style::default().fg(theme.colors.muted))),
             row,
         );
     }
@@ -836,25 +409,25 @@ fn render_slash_popup_overlay(f: &mut Frame, input_area: Rect, state: &AppState,
                 ListItem::new(Line::from(vec![
                     Span::styled(
                         format!(" {} ", pointer),
-                        Style::default().fg(theme.colors.accent.to_ratatui()),
+                        Style::default().fg(theme.colors.accent),
                     ),
                     Span::styled(
                         format!(" {}  ", name_padded),
                         Style::default()
-                            .fg(theme.colors.background.to_ratatui())
-                            .bg(theme.colors.primary.to_ratatui())
+                            .fg(theme.colors.background)
+                            .bg(theme.colors.primary)
                             .bold(),
                     ),
-                    Span::styled(desc, Style::default().fg(theme.colors.muted.to_ratatui())),
+                    Span::styled(desc, Style::default().fg(theme.colors.muted)),
                 ]))
             } else {
                 ListItem::new(Line::from(vec![
                     Span::styled(format!(" {} ", pointer), Style::default()),
                     Span::styled(
                         format!(" {}  ", name_padded),
-                        Style::default().fg(theme.colors.foreground.to_ratatui()),
+                        Style::default().fg(theme.colors.foreground),
                     ),
-                    Span::styled(desc, Style::default().fg(theme.colors.muted.to_ratatui())),
+                    Span::styled(desc, Style::default().fg(theme.colors.muted)),
                 ]))
             }
         })
@@ -862,7 +435,7 @@ fn render_slash_popup_overlay(f: &mut Frame, input_area: Rect, state: &AppState,
 
     let block = Block::default()
         .borders(Borders::TOP)
-        .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+        .border_style(Style::default().fg(theme.colors.border));
     let popup_inner = block.inner(popup_area);
     f.render_widget(block, popup_area);
     f.render_widget(List::new(list_items), popup_inner);
@@ -884,7 +457,7 @@ fn render_slash_popup_overlay(f: &mut Frame, input_area: Rect, state: &AppState,
         f.render_widget(
             Paragraph::new(Span::styled(
                 indicator,
-                Style::default().fg(theme.colors.muted.to_ratatui()),
+                Style::default().fg(theme.colors.muted),
             )),
             indicator_area,
         );
@@ -930,7 +503,7 @@ fn render_file_completion_popup(f: &mut Frame, input_area: Rect, state: &AppStat
         .collect();
 
     let styles = theme.to_styles();
-    let bg = theme.colors.background.to_ratatui();
+    let bg = theme.colors.background;
 
     let items: Vec<Line> = visible
         .iter()
@@ -962,334 +535,11 @@ fn render_file_completion_popup(f: &mut Frame, input_area: Rect, state: &AppStat
 // ── Overlay dispatch ────────────────────────────────────────────────────
 
 fn render_overlay(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
-    // ── Component-based overlay (takes priority) ──
+    // ── Component-based overlay ──
+    // All overlays have been migrated to `Box<dyn OverlayComponent>`.
     if let Some(ref mut overlay) = state.overlay_state {
         overlay.render(f, area, theme);
-        return;
     }
-    // ── Legacy AppOverlay enum ──
-    match &state.overlay {
-        Some(AppOverlay::Setup(step)) | Some(AppOverlay::ProviderConfig(step)) => {
-            let step = step.clone();
-            render_setup_step(f, area, state, theme, &step);
-        }
-        Some(AppOverlay::ModelSelect { .. }) => {
-            render_model_select(f, area, state, theme);
-        }
-        Some(AppOverlay::LogoutSelect { .. }) => {
-            render_logout_select(f, area, state, theme);
-        }
-        Some(AppOverlay::ResumeSelect { .. }) => {
-            render_resume_select(f, area, state, theme);
-        }
-        // RoutingStatus uses component-based overlay (overlay_state), handled above
-        Some(AppOverlay::RoutingStatus { .. }) | None => {}
-    }
-}
-
-// ── Setup wizard ────────────────────────────────────────────────────────
-
-#[allow(dead_code)]
-fn render_setup_step(
-    f: &mut Frame,
-    area: Rect,
-    _state: &mut AppState,
-    theme: &Theme,
-    step: &SetupStep,
-) {
-    let styles = theme.to_styles();
-    let bg = theme.colors.background.to_ratatui();
-    let fg = theme.colors.primary.to_ratatui();
-
-    match step {
-        SetupStep::SelectAuthType { selected, .. } => {
-            render_title(f, area, 2, " How would you like to authenticate?", fg, bg);
-            let items = vec![
-                " API Key    Enter an API key manually".to_string(),
-                // OAuth — not yet implemented. Uncomment when browser redirect → callback → token exchange is built.
-                // " OAuth      Sign in with your account".to_string(),
-            ];
-            let _ = render_selectable_list(f, area, 4, &items, *selected, &styles, theme, None);
-            render_hint(
-                f,
-                area,
-                " Up/Down select  |  Enter confirm  |  Esc cancel",
-                styles.muted,
-            );
-        }
-
-        SetupStep::SelectProvider {
-            providers,
-            selected,
-            ..
-        } => {
-            render_title(f, area, 2, " Select a provider to get started", fg, bg);
-            // Provider list starts below the title (y_offset 3: title at 2 + 1 gap)
-            let list_area = Rect {
-                x: area.x,
-                y: area.y + 3,
-                width: area.width,
-                height: area.height.saturating_sub(3),
-            };
-            let scroll = render_provider_list(f, list_area, providers, *selected, &styles, theme);
-            let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
-            let hint = format!(
-                " Up/Down select  |  Enter confirm  |  q quit  ({} providers){}",
-                providers.len(),
-                pos
-            );
-            render_hint(f, area, &hint, styles.muted);
-        }
-
-        SetupStep::EnterApiKey { provider, key, .. } => {
-            let title = format!(" Enter API key for {}", provider);
-            render_title(f, area, 3, &title, fg, bg);
-            render_input_field(f, area, 5, "API Key", key, theme, &styles);
-            render_hint(
-                f,
-                area,
-                " Type your key  |  Enter save  |  Esc back",
-                styles.muted,
-            );
-        }
-
-        SetupStep::SelectModel {
-            provider,
-            models,
-            selected,
-        } => {
-            let title = format!(" Select a model for {}", provider);
-            render_title(f, area, 2, &title, fg, bg);
-            let scroll =
-                render_selectable_list(f, area, 4, models, *selected, &styles, theme, None);
-            let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
-            let hint = format!(
-                " Up/Down select  |  Enter confirm  |  Esc back  ({} models){}",
-                models.len(),
-                pos
-            );
-            render_hint(f, area, &hint, styles.muted);
-        }
-
-        SetupStep::Done { provider, model } => {
-            let msg = format!(" {} is ready!", provider);
-            let msg_y = area.y + 4;
-            f.render_widget(
-                Paragraph::new(Span::styled(
-                    msg,
-                    Style::default()
-                        .fg(theme.colors.success.to_ratatui())
-                        .bg(bg)
-                        .bold(),
-                )),
-                Rect {
-                    x: area.x + 2,
-                    y: msg_y,
-                    width: area.width.saturating_sub(4),
-                    height: 1,
-                },
-            );
-            let model_line = format!(" Model: {}", model);
-            f.render_widget(
-                Paragraph::new(Span::styled(model_line, styles.normal)),
-                Rect {
-                    x: area.x + 2,
-                    y: msg_y + 1,
-                    width: area.width.saturating_sub(4),
-                    height: 1,
-                },
-            );
-            f.render_widget(
-                Paragraph::new(Span::styled(" Press Enter to start chatting", styles.muted)),
-                Rect {
-                    x: area.x + 2,
-                    y: msg_y + 3,
-                    width: area.width.saturating_sub(4),
-                    height: 1,
-                },
-            );
-        }
-    }
-}
-
-// ── Model select overlay ────────────────────────────────────────────────
-
-fn render_model_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
-    let styles = theme.to_styles();
-
-    let (_provider, models, filter, selected) = match &state.overlay {
-        Some(AppOverlay::ModelSelect {
-            provider,
-            models,
-            filter,
-            selected,
-        }) => (provider.clone(), models.clone(), filter.clone(), *selected),
-        _ => return,
-    };
-
-    // Compute filtered models
-    let filtered: Vec<String> = if filter.is_empty() {
-        models.clone()
-    } else {
-        let lower = filter.to_lowercase();
-        models
-            .iter()
-            .filter(|m| m.to_lowercase().contains(&lower))
-            .cloned()
-            .collect()
-    };
-
-    // Map selected index to filtered list
-    let selected_in_filtered = if filter.is_empty() {
-        selected
-    } else {
-        filtered
-            .iter()
-            .position(|m| m == &models[selected])
-            .unwrap_or(0)
-    };
-
-    let popup = centered_layout(area, 0.7, 0.7);
-    let inner = render_popup_frame(
-        f,
-        popup,
-        theme.colors.background.to_ratatui(),
-        theme.colors.border.to_ratatui(),
-    );
-
-    // Title + filter
-    let title_line = if filter.is_empty() {
-        " Select a model ".to_string()
-    } else {
-        format!(" Filter: {} ", filter)
-    };
-    render_title(
-        f,
-        inner,
-        0,
-        &title_line,
-        theme.colors.primary.to_ratatui(),
-        theme.colors.background.to_ratatui(),
-    );
-
-    // List
-    let scroll = render_selectable_list(
-        f,
-        inner,
-        2,
-        &filtered,
-        selected_in_filtered,
-        &styles,
-        theme,
-        None,
-    );
-
-    // Hint
-    let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
-    let hint = format!(
-        " {} models  |  Up/Down  |  type to filter  |  Enter select  |  Esc cancel{}",
-        filtered.len(),
-        pos
-    );
-    render_hint(f, inner, &hint, styles.muted);
-}
-
-// ── Logout select overlay ───────────────────────────────────────────────
-
-fn render_logout_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
-    let styles = theme.to_styles();
-
-    let (providers, selected) = match &state.overlay {
-        Some(AppOverlay::LogoutSelect {
-            providers,
-            selected,
-        }) => (providers.clone(), *selected),
-        _ => return,
-    };
-
-    let popup = centered_layout(area, 0.5, 0.5);
-    let inner = render_popup_frame(
-        f,
-        popup,
-        theme.colors.background.to_ratatui(),
-        theme.colors.border.to_ratatui(),
-    );
-
-    render_title(
-        f,
-        inner,
-        0,
-        " Select provider to logout",
-        theme.colors.error.to_ratatui(),
-        theme.colors.background.to_ratatui(),
-    );
-    let _ = render_selectable_list(
-        f,
-        inner,
-        2,
-        &providers,
-        selected,
-        &styles,
-        theme,
-        Some(theme.colors.error.to_ratatui()),
-    );
-    render_hint(
-        f,
-        inner,
-        " Up/Down select  |  Enter remove  |  Esc cancel",
-        styles.muted,
-    );
-}
-
-fn render_resume_select(f: &mut Frame, area: Rect, state: &mut AppState, theme: &Theme) {
-    let styles = theme.to_styles();
-
-    let sessions = match &state.overlay {
-        Some(AppOverlay::ResumeSelect { sessions, .. }) => sessions.clone(),
-        _ => return,
-    };
-
-    if sessions.is_empty() {
-        return;
-    }
-
-    let selected = match &state.overlay {
-        Some(AppOverlay::ResumeSelect { selected, .. }) => *selected,
-        _ => 0,
-    };
-
-    // Build session labels
-    let items: Vec<String> = sessions
-        .iter()
-        .map(|s| {
-            let name_or_id = s
-                .name
-                .clone()
-                .unwrap_or_else(|| s.id[..8.min(s.id.len())].to_string());
-            format!("{} — {} ({} messages)", name_or_id, s.cwd, s.message_count)
-        })
-        .collect();
-
-    let popup = centered_layout(area, 0.6, 0.6);
-    let inner = render_popup_frame(
-        f,
-        popup,
-        theme.colors.background.to_ratatui(),
-        theme.colors.border.to_ratatui(),
-    );
-
-    render_title(
-        f,
-        inner,
-        0,
-        " Resume session",
-        theme.colors.primary.to_ratatui(),
-        theme.colors.background.to_ratatui(),
-    );
-    let scroll = render_selectable_list(f, inner, 2, &items, selected, &styles, theme, None);
-    let pos = scroll.as_ref().map_or(String::new(), |s| s.hint());
-    let hint = format!(" Up/Down select  |  Enter resume  |  Esc cancel{}", pos);
-    render_hint(f, inner, &hint, styles.muted);
 }
 
 // ── Notifications (Toasts) ───────────────────────────────────────────────
@@ -1343,33 +593,33 @@ fn render_notifications(f: &mut Frame, area: Rect, state: &AppState, theme: &The
 
     let mut y_offset = 0u16;
     let base_y = area.y + area.height.saturating_sub(NOTIF_BOTTOM_OFFSET);
-    let text_style = Style::default().fg(theme.colors.foreground.to_ratatui());
+    let text_style = Style::default().fg(theme.colors.foreground);
 
     for notif in &visible {
         let (icon, fg_color, bg_color, border_color) = match notif.kind {
             NotificationKind::Success => (
                 "\u{2713}", // ✓
-                theme.colors.success.to_ratatui(),
-                theme.colors.tool_success_bg.to_ratatui(),
-                theme.colors.success.to_ratatui(),
+                theme.colors.success,
+                theme.colors.tool_success_bg,
+                theme.colors.success,
             ),
             NotificationKind::Warning => (
                 "\u{26A0}", // ⚠
-                theme.colors.warning.to_ratatui(),
-                theme.colors.tool_executing_bg.to_ratatui(),
-                theme.colors.warning.to_ratatui(),
+                theme.colors.warning,
+                theme.colors.tool_executing_bg,
+                theme.colors.warning,
             ),
             NotificationKind::Error => (
                 "\u{2717}", // ✗
-                theme.colors.error.to_ratatui(),
-                theme.colors.tool_error_bg.to_ratatui(),
-                theme.colors.error.to_ratatui(),
+                theme.colors.error,
+                theme.colors.tool_error_bg,
+                theme.colors.error,
             ),
             NotificationKind::Info => (
                 "\u{2139}", // ℹ
-                theme.colors.primary.to_ratatui(),
-                theme.colors.tool_pending_bg.to_ratatui(),
-                theme.colors.primary.to_ratatui(),
+                theme.colors.primary,
+                theme.colors.tool_pending_bg,
+                theme.colors.primary,
             ),
         };
 

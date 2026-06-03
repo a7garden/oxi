@@ -12,6 +12,8 @@ pub mod anchor;
 pub mod extensions;
 pub mod factories;
 pub mod fork_select;
+pub mod model_select_inline;
+pub mod provider_select;
 pub mod questionnaire;
 pub mod router_integration;
 pub mod router_setup;
@@ -61,6 +63,15 @@ pub enum OverlayAction {
     ForkFromEntry { entry_id: String },
     /// Navigate to the selected tree node entry ID.
     NavigateToEntry { entry_id: String },
+    /// A provider's API key was saved during initial setup.
+    /// Caller should open the model selector for this provider next.
+    ProviderKeySaved { provider_name: String },
+    /// A model was selected from the inline model-selector overlay.
+    /// The handler should apply it to the session and persist settings.
+    ModelSelected {
+        provider_name: String,
+        model_id: String,
+    },
 }
 
 // ---------------------------------------------------------------------------

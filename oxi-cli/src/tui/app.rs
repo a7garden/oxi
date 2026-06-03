@@ -237,83 +237,21 @@ pub(super) const SPINNER: &[&str] = &["|", "/", "-", "\\"];
 
 // ── App State ────────────────────────────────────────────────────────────
 
-/// Provider info for the selection UI.
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub(crate) struct ProviderInfo {
-    pub name: String,
-    pub display_name: String,
-    pub has_key: bool,
-    pub category: String,
-    pub description: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum SetupStep {
-    /// First step: OAuth or API Key
-    SelectAuthType {
-        auth_type: Option<String>, // "oauth" or "apikey"
-        selected: usize,
-    },
-    /// Select provider from list
-    SelectProvider {
-        providers: Vec<ProviderInfo>,
-        selected: usize,
-        #[allow(dead_code)]
-        filter: String,
-    },
-    /// Enter API key for selected provider
-    EnterApiKey {
-        provider: String,
-        key: String,
-        #[allow(dead_code)]
-        masked_cursor: usize,
-    },
-    /// Select a model from the provider's available models
-    SelectModel {
-        provider: String,
-        models: Vec<String>,
-        selected: usize,
-    },
-    /// Done — show success
-    #[allow(dead_code)]
-    Done { provider: String, model: String },
-}
+// NOTE: ProviderInfo and SetupStep have been removed.
+// Provider selection now uses `overlay::provider_select::ProviderSelectOverlay`
+// (a component-based overlay). Model selection uses
+// `overlay::model_select_inline::ModelSelectInlineOverlay`.
+// Both are `Box<dyn OverlayComponent>` stored in `overlay_state`.
 
 /// Overlay types for interactive TUI dialogs.
+///
+/// NOTE: All overlay variants have been migrated to component-based
+/// overlays (`Box<dyn OverlayComponent>` in `overlay_state`). This enum
+/// is kept only as a sentinel — the `overlay` field should always be `None`
+/// now. New overlays should implement [`super::overlay::OverlayComponent`]
+/// and be stored in `overlay_state`.
 #[derive(Debug, Clone)]
-pub(crate) enum AppOverlay {
-    /// Initial setup wizard
-    #[allow(dead_code)]
-    Setup(SetupStep),
-    /// Model selector overlay
-    ModelSelect {
-        /// Provider name for the models being shown.
-        /// Used to construct the full model ID (provider/model) when selecting.
-        provider: String,
-        models: Vec<String>,
-        filter: String,
-        selected: usize,
-    },
-    /// Provider config wizard (reuses SetupStep)
-    ProviderConfig(SetupStep),
-    /// Logout provider selector
-    LogoutSelect {
-        providers: Vec<String>,
-        selected: usize,
-    },
-    /// Session resume selector
-    ResumeSelect {
-        sessions: Vec<oxi_store::session::SessionInfo>,
-        selected: usize,
-    },
-    /// Routing status panel (toggle with Ctrl+R)
-    #[allow(dead_code)]
-    RoutingStatus {
-        data: oxi_tui::widgets::routing::RoutingStatusData,
-        visible: bool,
-    },
-}
+pub(crate) enum AppOverlay {}
 
 // ── Session Switch Action ──────────────────────────────────────────────
 
@@ -1323,42 +1261,17 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         let model_resolved = oxi_agent::model_id::resolve_model_from_id(&model_id).is_some();
         let has_model = !model_id.is_empty() && model_id.contains('/') && model_resolved;
         if !has_model {
-            let auth = oxi_store::auth_storage::shared_auth_storage();
-            let mut providers: Vec<ProviderInfo> =
-                oxi_ai::register_builtins::get_builtin_providers()
-                    .iter()
-                    .map(|builtin| ProviderInfo {
-                        name: builtin.name.to_string(),
-                        display_name: builtin.display_name.to_string(),
-                        has_key: auth.get_api_key(builtin.name).is_some(),
-                        category: builtin.category.to_string(),
-                        description: builtin.description.to_string(),
-                    })
-                    .collect();
-
-            // Sort by category order (must match render_provider_list's category_order)
-            // so that selected index aligns with the visual position.
-            let category_rank = |cat: &str| -> usize {
-                match cat {
-                    "primary" => 0,
-                    "chinese" => 1,
-                    "open" => 2,
-                    "cloud" => 3,
-                    "enterprise" => 4,
-                    "specialized" => 5,
-                    _ => 6,
-                }
-            };
-            providers.sort_by(|a, b| {
-                category_rank(&a.category)
-                    .cmp(&category_rank(&b.category))
-                    .then_with(|| a.display_name.cmp(&b.display_name))
-            });
-            state.overlay = Some(AppOverlay::Setup(SetupStep::SelectProvider {
-                providers,
-                selected: 0,
-                filter: String::new(),
-            }));
+            // Initial setup: open the provider-select overlay as a centered popup
+            // (not a full-screen wizard). The user picks a provider, enters an
+            // API key inline, and is then transitioned to the model selector
+            // — all without leaving the TUI.
+            let provider_entries = super::overlay::provider_select::build_provider_entries();
+            state.overlay_state = Some(Box::new(
+                super::overlay::provider_select::ProviderSelectOverlay::new(
+                    provider_entries,
+                    true, // is_initial_setup
+                ),
+            ));
         }
 
         // ── Inner TUI loop ──

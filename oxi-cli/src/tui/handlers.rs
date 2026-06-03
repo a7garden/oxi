@@ -1,6 +1,6 @@
 //! Event handlers for the TUI.
 
-use super::app::{AppOverlay, AppState, NotificationKind, ProviderInfo, SetupStep, UiEvent};
+use super::app::{AppState, NotificationKind, UiEvent};
 use super::overlay::router_integration;
 use super::slash;
 use crate::app::agent_session::{AgentSession, SessionEvent};
@@ -956,733 +956,116 @@ async fn handle_overlay_key(
                 state.next_action = Some(super::app::TuiNextAction::GotoEntry(entry_id));
                 return None;
             }
+            OverlayAction::ProviderKeySaved { provider_name } => {
+                // Initial setup: API key was just saved. Open the model
+                // selector for the chosen provider as a popup overlay.
+                state.overlay_state = None;
+
+                // Resolve models that match the selected provider, expanding
+                // to all providers sharing the same env_key (e.g. zai-coding-global
+                // and zai share the same env_key).
+                let model_providers =
+                    oxi_ai::register_builtins::get_builtin_provider(&provider_name)
+                        .map(|bp| {
+                            oxi_ai::register_builtins::get_builtin_providers()
+                                .iter()
+                                .filter(|p| p.env_key == bp.env_key)
+                                .map(|p| p.name)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_else(|| vec![provider_name.as_str()]);
+
+                let models: Vec<String> = oxi_ai::model_db::get_all_models()
+                    .filter(|e| model_providers.contains(&e.provider))
+                    .map(|e| e.id.to_string())
+                    .collect();
+
+                if models.is_empty() {
+                    // No models registered — fall back to "default" passthrough.
+                    let full_model = format!("{}/default", provider_name);
+                    if let Ok(mut settings) = oxi_store::settings::Settings::load() {
+                        settings.last_used_provider = Some(provider_name.clone());
+                        settings.last_used_model = Some("default".to_string());
+                        let _ = settings.save();
+                    }
+                    if let Err(e) = session.set_model(&full_model) {
+                        state.add_notification(
+                            format!("Error setting model: {}", e),
+                            NotificationKind::Error,
+                        );
+                    } else {
+                        state.footer_state.data.model_name = full_model.clone();
+                        state.footer_state.data.provider_name = provider_name.clone();
+                        state.add_notification(
+                            format!("Model: {}", full_model),
+                            NotificationKind::Success,
+                        );
+                    }
+                    return None;
+                }
+
+                // Open a pure-UI model selector. No shared pointers — the
+                // overlay emits `ModelSelected` and the handler applies it.
+                state.overlay_state = Some(Box::new(
+                    crate::tui::overlay::model_select_inline::ModelSelectInlineOverlay::new(
+                        provider_name,
+                        models,
+                    ),
+                ));
+                return None;
+            }
+            OverlayAction::ModelSelected {
+                provider_name,
+                model_id,
+            } => {
+                // Apply the model chosen in the inline model-selector.
+                state.overlay_state = None;
+                let full_model = format!("{}/{}", provider_name, model_id);
+
+                // Persist to settings.
+                if let Ok(mut settings) = oxi_store::settings::Settings::load() {
+                    settings.last_used_provider = Some(provider_name.clone());
+                    settings.last_used_model = Some(model_id.clone());
+                    let _ = settings.save();
+                }
+
+                // Apply to running session.
+                if let Err(e) = session.set_model(&full_model) {
+                    state.add_notification(
+                        format!("Error setting model: {}", e),
+                        NotificationKind::Error,
+                    );
+                } else {
+                    state.footer_state.data.model_name = full_model.clone();
+                    state.footer_state.data.provider_name = provider_name.clone();
+                    state.add_notification(
+                        format!("Model: {}", full_model),
+                        NotificationKind::Success,
+                    );
+                }
+                return None;
+            }
             _ => {}
         }
         return None;
     }
 
-    // Clone overlay variant to avoid borrow conflicts
-    let overlay = state.overlay.clone();
-    match &overlay {
-        // ── Setup wizard ──
-        Some(AppOverlay::Setup(_)) => handle_wizard_step_key(key, state, session).await,
-
-        // ── Provider config wizard (same steps as setup) ──
-        Some(AppOverlay::ProviderConfig(_)) => handle_wizard_step_key(key, state, session).await,
-
-        // ── Model selector ──
-        Some(AppOverlay::ModelSelect { .. }) => handle_model_select_key(key, state, session).await,
-
-        // ── Logout selector ──
-        Some(AppOverlay::LogoutSelect { .. }) => handle_logout_select_key(key, state).await,
-
-        // ── Resume selector ──
-        Some(AppOverlay::ResumeSelect { .. }) => {
-            handle_resume_select_key(key, state, session).await
-        }
-
-        // ── Routing status (handled by component overlay) ──
-        Some(AppOverlay::RoutingStatus { .. }) => None,
-
-        None => None,
-    }
-}
-
-// ── Setup/Provider wizard — unified handler ────────────────────────────────
-
-/// Extract the SetupStep from an overlay, if it's a setup-type overlay.
-fn extract_step(overlay: &Option<AppOverlay>) -> Option<&SetupStep> {
-    match overlay {
-        Some(AppOverlay::Setup(s)) | Some(AppOverlay::ProviderConfig(s)) => Some(s),
-        _ => None,
-    }
-}
-
-/// Wrap a SetupStep back into the same overlay variant.
-fn wrap_step(overlay: &Option<AppOverlay>, step: SetupStep) -> Option<AppOverlay> {
-    match overlay {
-        Some(AppOverlay::Setup(_)) => Some(AppOverlay::Setup(step)),
-        Some(AppOverlay::ProviderConfig(_)) => Some(AppOverlay::ProviderConfig(step)),
-        _ => None,
-    }
-}
-
-/// Check if the overlay is a provider-config (vs initial setup).
-fn is_provider_config(overlay: &Option<AppOverlay>) -> bool {
-    matches!(overlay, Some(AppOverlay::ProviderConfig(_)))
-}
-
-/// Build the provider list from builtins, sorted by category and enriched
-/// with display names, descriptions, and key status.
-fn build_provider_list(is_config: bool) -> Vec<ProviderInfo> {
-    let auth = oxi_store::auth_storage::shared_auth_storage();
-    let mut providers: Vec<ProviderInfo> = oxi_ai::register_builtins::get_builtin_providers()
-        .iter()
-        .map(|builtin| {
-            let has_key = if is_config {
-                auth.has_auth(builtin.name)
-            } else {
-                auth.get_api_key(builtin.name).is_some()
-            };
-            ProviderInfo {
-                name: builtin.name.to_string(),
-                display_name: builtin.display_name.to_string(),
-                has_key,
-                category: builtin.category.to_string(),
-                description: builtin.description.to_string(),
-            }
-        })
-        .collect();
-
-    // Sort by category order (matching render_provider_list) then by name.
-    // This ensures the selected index matches the rendered position.
-    let category_rank = |cat: &str| -> usize {
-        match cat {
-            "primary" => 0,
-            "chinese" => 1,
-            "open" => 2,
-            "cloud" => 3,
-            "enterprise" => 4,
-            "specialized" => 5,
-            _ => 6,
-        }
-    };
-    providers.sort_by(|a, b| {
-        category_rank(&a.category)
-            .cmp(&category_rank(&b.category))
-            .then_with(|| a.display_name.cmp(&b.display_name))
-    });
-
-    providers
-}
-
-/// Unified handler for Setup and ProviderConfig wizard steps.
-async fn handle_wizard_step_key(
-    key: crossterm::event::KeyEvent,
-    state: &mut AppState,
-    session: &AgentSession,
-) -> Option<Action> {
-    let step_kind = match extract_step(&state.overlay) {
-        Some(s) => match s {
-            SetupStep::SelectAuthType { .. } => 0,
-            SetupStep::SelectProvider { .. } => 1,
-            SetupStep::EnterApiKey { .. } => 2,
-            SetupStep::SelectModel { .. } => 3,
-            SetupStep::Done { .. } => 4,
-        },
-        _ => return None,
-    };
-    let is_config = is_provider_config(&state.overlay);
-
-    match step_kind {
-        0 => {
-            // SelectAuthType
-            match key.code {
-                KeyCode::Up | KeyCode::Down => {
-                    if let Some(SetupStep::SelectAuthType {
-                        auth_type,
-                        selected,
-                    }) = extract_step(&state.overlay)
-                    {
-                        let new_sel = if *selected == 0 { 1 } else { 0 };
-                        state.overlay = wrap_step(
-                            &state.overlay,
-                            SetupStep::SelectAuthType {
-                                auth_type: auth_type.clone(),
-                                selected: new_sel,
-                            },
-                        );
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(SetupStep::SelectAuthType { selected, .. }) =
-                        extract_step(&state.overlay)
-                    {
-                        if *selected == 0 {
-                            // API Key — proceed to provider select
-                            let providers = build_provider_list(is_config);
-                            state.overlay = wrap_step(
-                                &state.overlay,
-                                SetupStep::SelectProvider {
-                                    providers,
-                                    selected: 0,
-                                    filter: String::new(),
-                                },
-                            );
-                        }
-                        // OAuth — not yet implemented. Comment out the choice until
-                        // the full flow (browser redirect → callback → token exchange) is built.
-                        // if *selected == 1 {
-                        //     state.overlay = wrap_step(
-                        //         &state.overlay,
-                        //         SetupStep::SelectProvider {
-                        //             providers: build_provider_list(is_config),
-                        //             selected: 0,
-                        //             filter: String::new(),
-                        //         },
-                        //     );
-                        // }
-                    }
-                }
-                KeyCode::Char('q') | KeyCode::Esc => {
-                    state.overlay = None;
-                }
-                _ => {}
-            }
-        }
-
-        1 => {
-            // SelectProvider
-            match key.code {
-                KeyCode::Up => {
-                    if let Some(SetupStep::SelectProvider {
-                        providers,
-                        selected,
-                        ..
-                    }) = extract_step(&state.overlay)
-                    {
-                        let new_sel = if *selected == 0 {
-                            providers.len() - 1
-                        } else {
-                            *selected - 1
-                        };
-                        state.overlay = wrap_step(
-                            &state.overlay,
-                            SetupStep::SelectProvider {
-                                providers: providers.clone(),
-                                selected: new_sel,
-                                filter: String::new(),
-                            },
-                        );
-                    }
-                }
-                KeyCode::Down => {
-                    if let Some(SetupStep::SelectProvider {
-                        providers,
-                        selected,
-                        ..
-                    }) = extract_step(&state.overlay)
-                    {
-                        let new_sel = (*selected + 1) % providers.len();
-                        state.overlay = wrap_step(
-                            &state.overlay,
-                            SetupStep::SelectProvider {
-                                providers: providers.clone(),
-                                selected: new_sel,
-                                filter: String::new(),
-                            },
-                        );
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(SetupStep::SelectProvider {
-                        providers,
-                        selected,
-                        ..
-                    }) = extract_step(&state.overlay)
-                    {
-                        if let Some(pi) = providers.get(*selected).cloned() {
-                            state.overlay = wrap_step(
-                                &state.overlay,
-                                SetupStep::EnterApiKey {
-                                    provider: pi.name.clone(),
-                                    key: String::new(),
-                                    masked_cursor: 0,
-                                },
-                            );
-                        }
-                    }
-                }
-                KeyCode::Esc => {
-                    state.overlay = None;
-                }
-                _ => {}
-            }
-        }
-
-        2 => {
-            // EnterApiKey
-            let provider = match extract_step(&state.overlay) {
-                Some(SetupStep::EnterApiKey { provider, .. }) => provider.clone(),
-                _ => return None,
-            };
-            match key.code {
-                KeyCode::Char(c) => {
-                    if let Some(SetupStep::EnterApiKey { key, .. }) =
-                        extract_step_mut(&mut state.overlay)
-                    {
-                        key.push(c);
-                    }
-                }
-                KeyCode::Backspace => {
-                    if let Some(SetupStep::EnterApiKey { key, .. }) =
-                        extract_step_mut(&mut state.overlay)
-                    {
-                        key.pop();
-                    }
-                }
-                KeyCode::Enter => {
-                    let key_val = match extract_step(&state.overlay) {
-                        Some(SetupStep::EnterApiKey { key, .. }) => key.clone(),
-                        _ => String::new(),
-                    };
-
-                    if !key_val.is_empty() {
-                        let auth = oxi_store::auth_storage::shared_auth_storage();
-                        auth.set_api_key(&provider, key_val);
-
-                        // Resolve models for this provider.
-                        // The provider the user selected (e.g. "zai-coding-global") may differ
-                        // from the provider name in the model DB (e.g. "zai") if they share
-                        // the same env_key. Expand to all providers sharing the env_key.
-                        let model_providers =
-                            oxi_ai::register_builtins::get_builtin_provider(&provider)
-                                .map(|bp| {
-                                    oxi_ai::register_builtins::get_builtin_providers()
-                                        .iter()
-                                        .filter(|p| p.env_key == bp.env_key)
-                                        .map(|p| p.name)
-                                        .collect::<Vec<_>>()
-                                })
-                                .unwrap_or_else(|| vec![provider.as_str()]);
-
-                        let models: Vec<String> = oxi_ai::model_db::get_all_models()
-                            .filter(|e| model_providers.contains(&e.provider))
-                            .map(|e| format!("{}/{}", e.provider, e.id))
-                            .collect();
-
-                        if models.is_empty() {
-                            if !is_config {
-                                // No models found — use the provider name as a passthrough.
-                                // The model ID "default" will be sent as-is to the provider.
-                                let model_id = "default".to_string();
-                                let full_model = format!("{}/{}", provider, model_id);
-                                if let Ok(mut settings) = oxi_store::settings::Settings::load() {
-                                    settings.last_used_provider = Some(provider.clone());
-                                    settings.last_used_model = Some(model_id.clone());
-                                    let _ = settings.save();
-                                }
-                                state.footer_state.data.model_name = full_model.clone();
-                                state.footer_state.data.provider_name = provider.clone();
-                                state.overlay = wrap_step(
-                                    &state.overlay,
-                                    SetupStep::Done {
-                                        provider: provider.clone(),
-                                        model: full_model,
-                                    },
-                                );
-                            } else {
-                                state.add_notification(
-                                    format!("{} API key saved.", provider),
-                                    NotificationKind::Success,
-                                );
-                                state.overlay = None;
-                            }
-                        } else {
-                            state.overlay = wrap_step(
-                                &state.overlay,
-                                SetupStep::SelectModel {
-                                    provider,
-                                    models,
-                                    selected: 0,
-                                },
-                            );
-                        }
-                    }
-                }
-                KeyCode::Esc => {
-                    let providers = build_provider_list(is_config);
-                    state.overlay = wrap_step(
-                        &state.overlay,
-                        SetupStep::SelectProvider {
-                            providers,
-                            selected: 0,
-                            filter: String::new(),
-                        },
-                    );
-                }
-                _ => {}
-            }
-        }
-
-        3 => {
-            // SelectModel
-            match key.code {
-                KeyCode::Up => {
-                    if let Some(SetupStep::SelectModel {
-                        provider,
-                        models,
-                        selected,
-                    }) = extract_step(&state.overlay)
-                    {
-                        let new_sel = if *selected == 0 {
-                            models.len().saturating_sub(1)
-                        } else {
-                            *selected - 1
-                        };
-                        state.overlay = wrap_step(
-                            &state.overlay,
-                            SetupStep::SelectModel {
-                                provider: provider.clone(),
-                                models: models.clone(),
-                                selected: new_sel,
-                            },
-                        );
-                    }
-                }
-                KeyCode::Down => {
-                    if let Some(SetupStep::SelectModel {
-                        provider,
-                        models,
-                        selected,
-                    }) = extract_step(&state.overlay)
-                    {
-                        let new_sel = if models.is_empty() {
-                            0
-                        } else {
-                            (*selected + 1).min(models.len() - 1)
-                        };
-                        state.overlay = wrap_step(
-                            &state.overlay,
-                            SetupStep::SelectModel {
-                                provider: provider.clone(),
-                                models: models.clone(),
-                                selected: new_sel,
-                            },
-                        );
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(SetupStep::SelectModel {
-                        provider,
-                        models,
-                        selected,
-                    }) = extract_step(&state.overlay)
-                    {
-                        if let Some(model_id) = models.get(*selected) {
-                            let full_model = model_id.clone();
-                            if let Ok(mut settings) = oxi_store::settings::Settings::load() {
-                                settings.last_used_model = Some(model_id.to_string());
-                                let model_provider = model_id.split('/').next().unwrap_or(provider);
-                                settings.last_used_provider = Some(model_provider.to_string());
-                                let _ = settings.save();
-                            }
-                            state.footer_state.data.model_name = full_model.clone();
-                            state.footer_state.data.provider_name =
-                                full_model.split('/').next().unwrap_or("").to_string();
-                            if !is_config {
-                                state.overlay = wrap_step(
-                                    &state.overlay,
-                                    SetupStep::Done {
-                                        provider: provider.clone(),
-                                        model: full_model,
-                                    },
-                                );
-                            } else {
-                                // Actually switch the model in the running session
-                                if let Err(e) = session.set_model(&full_model) {
-                                    state.add_notification(
-                                        format!("Error switching model: {}", e),
-                                        NotificationKind::Error,
-                                    );
-                                } else {
-                                    state.add_notification(
-                                        format!("Model set to {}", full_model),
-                                        NotificationKind::Success,
-                                    );
-                                }
-                                state.overlay = None;
-                            }
-                        }
-                    }
-                }
-                KeyCode::Esc => {
-                    if let Some(SetupStep::SelectModel { provider, .. }) =
-                        extract_step(&state.overlay)
-                    {
-                        state.overlay = wrap_step(
-                            &state.overlay,
-                            SetupStep::EnterApiKey {
-                                provider: provider.clone(),
-                                key: String::new(),
-                                masked_cursor: 0,
-                            },
-                        );
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        4 => {
-            // Done — only respond to Enter to close the setup wizard
-            #[allow(clippy::collapsible_match)]
-            if key.code == KeyCode::Enter {
-                // Extract the model from the Done step and apply to session
-                if let Some(SetupStep::Done { model, .. }) = extract_step(&state.overlay) {
-                    if let Err(e) = session.set_model(model) {
-                        state.add_notification(
-                            format!("Error applying model: {}", e),
-                            NotificationKind::Warning,
-                        );
-                    }
-                }
-
-                state.overlay = None;
-                state.add_notification("Ready to chat".to_string(), NotificationKind::Info);
-            }
-        }
-
-        _ => {}
-    }
-
-    None
-}
-
-/// Extract a mutable reference to the SetupStep from an overlay.
-fn extract_step_mut(overlay: &mut Option<AppOverlay>) -> Option<&mut SetupStep> {
-    match overlay {
-        Some(AppOverlay::Setup(s)) | Some(AppOverlay::ProviderConfig(s)) => Some(s),
-        _ => None,
-    }
-}
-
-async fn handle_model_select_key(
-    key: crossterm::event::KeyEvent,
-    state: &mut AppState,
-    session: &AgentSession,
-) -> Option<Action> {
-    let (provider, models, filter, selected) = match &state.overlay {
-        Some(AppOverlay::ModelSelect {
-            provider,
-            models,
-            filter,
-            selected,
-        }) => (provider.clone(), models.clone(), filter.clone(), *selected),
-        _ => return None,
-    };
-
-    // Compute filtered view
-    let filtered: Vec<(usize, &String)> = if filter.is_empty() {
-        models.iter().enumerate().collect()
-    } else {
-        let lower = filter.to_lowercase();
-        models
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| m.to_lowercase().contains(&lower))
-            .collect()
-    };
-
-    match key.code {
-        KeyCode::Up => {
-            let new_sel = if selected == 0 {
-                filtered.len().saturating_sub(1)
-            } else {
-                selected.saturating_sub(1)
-            };
-            state.overlay = Some(AppOverlay::ModelSelect {
-                provider,
-                models,
-                filter,
-                selected: new_sel,
-            });
-        }
-        KeyCode::Down => {
-            let new_sel = if filtered.is_empty() {
-                0
-            } else {
-                (selected + 1).min(filtered.len() - 1)
-            };
-            state.overlay = Some(AppOverlay::ModelSelect {
-                provider,
-                models,
-                filter,
-                selected: new_sel,
-            });
-        }
-        KeyCode::Enter => {
-            if let Some((_idx, model_id)) = filtered.get(selected) {
-                let model_id = (*model_id).clone();
-                // Construct full model ID (provider/model) so set_model() can find it.
-                let full_model = format!("{}/{}", provider, model_id);
-                match session.set_model(&full_model) {
-                    Ok(()) => {
-                        state.add_notification(
-                            format!("Model: {}", full_model),
-                            NotificationKind::Success,
-                        );
-                        state.footer_state.data.model_name = full_model.clone();
-                        state.footer_state.data.provider_name = provider.clone();
-                        oxi_store::settings::Settings::save_last_used(&full_model);
-                    }
-                    Err(e) => {
-                        state.add_notification(format!("Error: {}", e), NotificationKind::Error);
-                    }
-                }
-            }
-            state.overlay = None;
-        }
-        KeyCode::Esc => {
-            state.overlay = None;
-        }
-        KeyCode::Backspace => {
-            let mut new_filter = filter;
-            new_filter.pop();
-            state.overlay = Some(AppOverlay::ModelSelect {
-                provider,
-                models,
-                filter: new_filter,
-                selected: 0,
-            });
-        }
-        KeyCode::Char(c) => {
-            let mut new_filter = filter;
-            new_filter.push(c);
-            state.overlay = Some(AppOverlay::ModelSelect {
-                provider,
-                models,
-                filter: new_filter,
-                selected: 0,
-            });
-        }
-        _ => {}
-    }
-
-    None
-}
-
-async fn handle_resume_select_key(
-    key: crossterm::event::KeyEvent,
-    state: &mut AppState,
-    _session: &crate::app::agent_session::AgentSession,
-) -> Option<Action> {
-    let (sessions, selected) = match &state.overlay {
-        Some(AppOverlay::ResumeSelect { sessions, selected }) => (sessions.clone(), *selected),
-        _ => return None,
-    };
-
-    match key.code {
-        KeyCode::Up => {
-            let new_sel = if selected == 0 {
-                sessions.len().saturating_sub(1)
-            } else {
-                selected - 1
-            };
-            state.overlay = Some(AppOverlay::ResumeSelect {
-                sessions,
-                selected: new_sel,
-            });
-        }
-        KeyCode::Down => {
-            let new_sel = if sessions.is_empty() {
-                0
-            } else {
-                (selected + 1).min(sessions.len() - 1)
-            };
-            state.overlay = Some(AppOverlay::ResumeSelect {
-                sessions,
-                selected: new_sel,
-            });
-        }
-        KeyCode::Enter => {
-            // Only select if input is empty — otherwise user is trying to send a message
-            if !state.input.text().is_empty() {
-                return None;
-            }
-            if let Some(session_info) = sessions.get(selected) {
-                state.next_action = Some(super::app::TuiNextAction::SwitchSession(
-                    session_info.path.clone(),
-                ));
-                state.add_notification(
-                    format!("Switching to session: {}", session_info.path),
-                    NotificationKind::Info,
-                );
-            }
-            state.overlay = None;
-        }
-        KeyCode::Esc => {
-            state.overlay = None;
-        }
-        _ => {}
-    }
-
-    None
-}
-
-async fn handle_logout_select_key(
-    key: crossterm::event::KeyEvent,
-    state: &mut AppState,
-) -> Option<Action> {
-    let (providers, selected) = match &state.overlay {
-        Some(AppOverlay::LogoutSelect {
-            providers,
-            selected,
-        }) => (providers.clone(), *selected),
-        _ => return None,
-    };
-
-    match key.code {
-        KeyCode::Up => {
-            let new_sel = if selected == 0 {
-                providers.len().saturating_sub(1)
-            } else {
-                selected - 1
-            };
-            state.overlay = Some(AppOverlay::LogoutSelect {
-                providers,
-                selected: new_sel,
-            });
-        }
-        KeyCode::Down => {
-            let new_sel = if providers.is_empty() {
-                0
-            } else {
-                (selected + 1).min(providers.len() - 1)
-            };
-            state.overlay = Some(AppOverlay::LogoutSelect {
-                providers,
-                selected: new_sel,
-            });
-        }
-        KeyCode::Enter => {
-            if let Some(provider) = providers.get(selected) {
-                let auth = oxi_store::auth_storage::shared_auth_storage();
-                auth.remove(provider);
-                state.add_notification(format!("Removed {}", provider), NotificationKind::Success);
-            }
-            state.overlay = None;
-        }
-        KeyCode::Esc => {
-            state.overlay = None;
-        }
-        _ => {}
-    }
-
+    // NOTE: All overlay variants (Setup, ProviderConfig, ModelSelect,
+    // LogoutSelect, ResumeSelect) have been migrated to component-based
+    // overlays. The AppOverlay enum is now empty. If we reach here,
+    // state.overlay should be None — nothing to handle.
     None
 }
 
 // ── Overlay paste handler ────────────────────────────────────────────────
 
-fn handle_overlay_paste(text: &str, state: &mut AppState) -> Option<Action> {
-    match &state.overlay {
-        // Setup/Login EnterApiKey step — paste into key field
-        Some(AppOverlay::Setup(SetupStep::EnterApiKey { .. }))
-        | Some(AppOverlay::ProviderConfig(SetupStep::EnterApiKey { .. })) => {
-            if let Some(SetupStep::EnterApiKey { key, .. }) = extract_step_mut(&mut state.overlay) {
-                key.push_str(text);
-            }
-        }
-        // ModelSelect — paste into filter
-        Some(AppOverlay::ModelSelect { .. }) => {
-            if let Some(AppOverlay::ModelSelect { filter, .. }) = &mut state.overlay {
-                filter.push_str(text);
-            }
-        }
-        _ => {}
-    }
+fn handle_overlay_paste(_text: &str, _state: &mut AppState) -> Option<Action> {
+    // NOTE: All paste handling now lives in component-based overlays.
+    // The ProviderSelectOverlay handles paste in its SubMode::EnteringKey.
     None
 }
+
+// ── Mouse click ────────────────────────────────────────────────────────────
 
 /// Handle a mouse click — check if it hit a thinking or tool block.
 fn handle_click(col: u16, row: u16, state: &mut AppState) {
