@@ -723,6 +723,357 @@ static BUILTIN_PROVIDERS: &[BuiltinProvider] = &[
         category: "enterprise",
         description: "Kilo Gateway",
     },
+    // ── Providers ported from openclaw (MIT) ────────────────────────────
+    BuiltinProvider {
+        name: "chutes",
+        display_name: "Chutes",
+        aliases: &["chutes"],
+        api: Api::OpenAiCompletions,
+        env_key: "CHUTES_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://llm.chutes.ai/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "open",
+        description: "Chutes LLM gateway — 47+ open models (DeepSeek, Qwen, GLM, Llama, etc.)",
+    },
+    BuiltinProvider {
+        name: "venice",
+        display_name: "Venice",
+        aliases: &["venice"],
+        api: Api::OpenAiCompletions,
+        env_key: "VENICE_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.venice.ai/api/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "open",
+        description: "Venice — privacy-focused uncensored inference",
+    },
+    BuiltinProvider {
+        name: "moonshot",
+        display_name: "Moonshot AI (Kimi International)",
+        aliases: &["moonshot"],
+        api: Api::OpenAiCompletions,
+        env_key: "MOONSHOT_API_KEY",
+        extra_env_keys: &["KIMI_API_KEY"],
+        base_url: "https://api.moonshot.ai/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "specialized",
+        description: "Kimi models from Moonshot AI (international endpoint)",
+    },
+    BuiltinProvider {
+        name: "byteplus",
+        display_name: "BytePlus (Volcengine Ark)",
+        aliases: &["byteplus"],
+        api: Api::OpenAiCompletions,
+        env_key: "BYTEPLUS_API_KEY",
+        extra_env_keys: &["ARK_API_KEY"],
+        base_url: "https://ark.ap-southeast.bytepluses.com/api/v3",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "chinese",
+        description: "BytePlus Ark (Volcengine) — Seed, GLM, Kimi",
+    },
+    BuiltinProvider {
+        name: "gmi",
+        display_name: "GMI Cloud",
+        aliases: &["gmi", "gmi-cloud", "gmicloud"],
+        api: Api::OpenAiCompletions,
+        env_key: "GMI_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.gmi-serving.com/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "cloud",
+        description: "GMI Cloud — multi-model inference (GLM, DeepSeek, Kimi, Claude, GPT)",
+    },
+    BuiltinProvider {
+        name: "novita",
+        display_name: "Novita",
+        aliases: &["novita", "novita-ai", "novitaai"],
+        api: Api::OpenAiCompletions,
+        env_key: "NOVITA_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.novita.ai/openai/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "open",
+        description: "Novita — open model inference marketplace",
+    },
+    BuiltinProvider {
+        name: "arcee",
+        display_name: "Arcee AI",
+        aliases: &["arcee"],
+        api: Api::OpenAiCompletions,
+        env_key: "ARCEE_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.arcee.ai/api/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "open",
+        description: "Arcee AI — domain-specialized models",
+    },
+    BuiltinProvider {
+        name: "qianfan",
+        display_name: "Baidu Qianfan",
+        aliases: &["qianfan"],
+        api: Api::OpenAiCompletions,
+        env_key: "QIANFAN_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://qianfan.baidubce.com/v2",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "chinese",
+        description: "Baidu Qianfan — ERNIE, DeepSeek",
+    },
+    BuiltinProvider {
+        name: "stepfun",
+        display_name: "StepFun",
+        aliases: &["stepfun", "stepfun-plan"],
+        api: Api::OpenAiCompletions,
+        env_key: "STEPFUN_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.stepfun.ai/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "chinese",
+        description: "StepFun — Step-3.5 models",
+    },
+    BuiltinProvider {
+        name: "qwen-portal",
+        display_name: "Qwen Portal (OAuth)",
+        aliases: &["qwen-portal", "qwen-oauth", "qwen-cli", "qwen", "qwencloud"],
+        api: Api::OpenAiCompletions,
+        env_key: "QWEN_API_KEY",
+        extra_env_keys: &["DASHSCOPE_API_KEY", "MODELSTUDIO_API_KEY"],
+        base_url: "https://portal.qwen.ai/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "chinese",
+        description: "Alibaba Qwen — Portal (OAuth), DashScope, Model Studio",
+    },
+    BuiltinProvider {
+        name: "alibaba",
+        display_name: "Alibaba Model Studio",
+        aliases: &["alibaba", "dashscope", "modelstudio"],
+        api: Api::OpenAiCompletions,
+        env_key: "DASHSCOPE_API_KEY",
+        extra_env_keys: &["MODELSTUDIO_API_KEY", "QWEN_API_KEY"],
+        base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "chinese",
+        description: "Alibaba DashScope / Model Studio — Qwen, Wan",
+    },
+    BuiltinProvider {
+        name: "anthropic-vertex",
+        display_name: "Anthropic on Vertex AI",
+        aliases: &["anthropic-vertex"],
+        api: Api::AnthropicMessages,
+        env_key: "GOOGLE_APPLICATION_CREDENTIALS",
+        extra_env_keys: &["GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION", "ANTHROPIC_VERTEX_PROJECT_ID"],
+        base_url: "",
+        default_enabled: true,
+        auth_method: AuthMethod::None,
+        extra_headers: &[("anthropic-version", "vertex-2023-10-16")],
+        category: "cloud",
+        description: "Claude models via Google Cloud Vertex AI (Anthropic on Vertex)",
+    },
+    BuiltinProvider {
+        name: "synthetic",
+        display_name: "Synthetic",
+        aliases: &["synthetic"],
+        api: Api::AnthropicMessages,
+        env_key: "SYNTHETIC_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.synthetic.new/anthropic",
+        default_enabled: true,
+        auth_method: AuthMethod::XApiKey,
+        extra_headers: &[],
+        category: "open",
+        description: "Synthetic — Anthropic-compatible multi-model gateway",
+    },
+    BuiltinProvider {
+        name: "ollama",
+        display_name: "Ollama (local)",
+        aliases: &["ollama"],
+        api: Api::OpenAiCompletions,
+        env_key: "OLLAMA_API_KEY",
+        extra_env_keys: &[],
+        base_url: "http://localhost:11434/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "local",
+        description: "Ollama — local model runtime (http://localhost:11434)",
+    },
+    BuiltinProvider {
+        name: "ollama-cloud",
+        display_name: "Ollama Cloud",
+        aliases: &["ollama-cloud"],
+        api: Api::OpenAiCompletions,
+        env_key: "OLLAMA_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://ollama.com/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "open",
+        description: "Ollama Cloud — managed inference for Ollama models",
+    },
+    BuiltinProvider {
+        name: "lmstudio",
+        display_name: "LM Studio (local)",
+        aliases: &["lmstudio"],
+        api: Api::OpenAiCompletions,
+        env_key: "LMSTUDIO_API_KEY",
+        extra_env_keys: &[],
+        base_url: "http://localhost:1234/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "local",
+        description: "LM Studio — local OpenAI-compatible server",
+    },
+    BuiltinProvider {
+        name: "vllm",
+        display_name: "vLLM (local)",
+        aliases: &["vllm"],
+        api: Api::OpenAiCompletions,
+        env_key: "VLLM_API_KEY",
+        extra_env_keys: &[],
+        base_url: "http://localhost:8000/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "local",
+        description: "vLLM — high-throughput local OpenAI-compatible server",
+    },
+    BuiltinProvider {
+        name: "sglang",
+        display_name: "SGLang (local)",
+        aliases: &["sglang"],
+        api: Api::OpenAiCompletions,
+        env_key: "SGLANG_API_KEY",
+        extra_env_keys: &[],
+        base_url: "http://localhost:30000/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "local",
+        description: "SGLang — fast self-hosted OpenAI-compatible server",
+    },
+    BuiltinProvider {
+        name: "litellm",
+        display_name: "LiteLLM",
+        aliases: &["litellm"],
+        api: Api::OpenAiCompletions,
+        env_key: "LITELLM_API_KEY",
+        extra_env_keys: &[],
+        base_url: "",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "enterprise",
+        description: "LiteLLM — unified gateway for 100+ LLM providers",
+    },
+    BuiltinProvider {
+        name: "microsoft-foundry",
+        display_name: "Microsoft Foundry",
+        aliases: &["microsoft-foundry"],
+        api: Api::AzureOpenAiResponses,
+        env_key: "AZURE_OPENAI_API_KEY",
+        extra_env_keys: &["AZURE_FOUNDRY_ENDPOINT"],
+        base_url: "",
+        default_enabled: true,
+        auth_method: AuthMethod::ApiKey,
+        extra_headers: &[],
+        category: "cloud",
+        description: "Microsoft Foundry (Azure AI Foundry) — Entra ID or API key",
+    },
+    BuiltinProvider {
+        name: "amazon-bedrock-mantle",
+        display_name: "Amazon Bedrock Mantle",
+        aliases: &["amazon-bedrock-mantle"],
+        api: Api::OpenAiCompletions,
+        env_key: "AWS_ACCESS_KEY_ID",
+        extra_env_keys: &["AWS_PROFILE", "AWS_REGION", "MANTLE_API_KEY"],
+        base_url: "",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "specialized",
+        description: "Amazon Bedrock Mantle — OpenAI-compatible routing layer",
+    },
+    BuiltinProvider {
+        name: "opencode",
+        display_name: "OpenCode Native",
+        aliases: &["opencode"],
+        api: Api::OpenAiCompletions,
+        env_key: "OPENCODE_API_KEY",
+        extra_env_keys: &["OPENCODE_ZEN_API_KEY"],
+        base_url: "https://opencode.ai/api/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "specialized",
+        description: "OpenCode native API (*.opencode.ai)",
+    },
+    BuiltinProvider {
+        name: "copilot-proxy",
+        display_name: "GitHub Copilot Proxy",
+        aliases: &["copilot-proxy"],
+        api: Api::OpenAiCompletions,
+        env_key: "COPILOT_PROXY_API_KEY",
+        extra_env_keys: &[],
+        base_url: "",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "specialized",
+        description: "GitHub Copilot Proxy — local proxy with custom base URL",
+    },
+    BuiltinProvider {
+        name: "xiaomi-token-plan",
+        display_name: "Xiaomi MiMo (Token Plan)",
+        aliases: &["xiaomi-token-plan"],
+        api: Api::OpenAiCompletions,
+        env_key: "XIAOMI_API_KEY",
+        extra_env_keys: &[],
+        base_url: "https://api.xiaomimimo.com/v1",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "chinese",
+        description: "Xiaomi MiMo token plan (international)",
+    },
+    BuiltinProvider {
+        name: "kilocode",
+        display_name: "Kilo (OpenRouter gateway)",
+        aliases: &["kilocode"],
+        api: Api::OpenAiCompletions,
+        env_key: "KILOCODE_API_KEY",
+        extra_env_keys: &["KILO_API_KEY"],
+        base_url: "https://api.kilo.ai/api/gateway/",
+        default_enabled: true,
+        auth_method: AuthMethod::Bearer,
+        extra_headers: &[],
+        category: "enterprise",
+        description: "Kilo — OpenRouter-compatible gateway",
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1184,6 +1535,147 @@ mod tests {
         assert!(names.contains(&"bedrock"));
         assert!(names.contains(&"togetherai"));
         assert!(names.len() >= 20);
+    }
+
+    // ── Tests for providers ported from openclaw (MIT) ─────────────────
+
+    #[test]
+    fn test_openclaw_ported_providers_present() {
+        // Verify all 28 new providers added in feat/openclaw-port
+        let names = get_all_provider_names();
+        for p in [
+            "chutes",
+            "venice",
+            "moonshot",
+            "byteplus",
+            "gmi",
+            "novita",
+            "arcee",
+            "qianfan",
+            "stepfun",
+            "qwen-portal",
+            "alibaba",
+            "anthropic-vertex",
+            "synthetic",
+            "ollama",
+            "ollama-cloud",
+            "lmstudio",
+            "vllm",
+            "sglang",
+            "litellm",
+            "microsoft-foundry",
+            "amazon-bedrock-mantle",
+            "opencode",
+            "copilot-proxy",
+            "xiaomi-token-plan",
+            "kilocode",
+        ] {
+            assert!(names.contains(&p), "Missing openclaw-ported provider: {p}");
+        }
+    }
+
+    #[test]
+    fn test_openclaw_provider_aliases() {
+        // gmi-cloud, gmicloud, qwen-portal, modelstudio → canonical resolution
+        assert_eq!(resolve_provider_name("gmi-cloud"), Some("gmi"));
+        assert_eq!(resolve_provider_name("gmicloud"), Some("gmi"));
+        // dashscope and modelstudio resolve to alibaba (primary entry)
+        assert_eq!(resolve_provider_name("dashscope"), Some("alibaba"));
+        assert_eq!(resolve_provider_name("modelstudio"), Some("alibaba"));
+        // qwen-oauth and qwen-cli resolve to qwen-portal
+        assert_eq!(resolve_provider_name("qwen-oauth"), Some("qwen-portal"));
+        assert_eq!(resolve_provider_name("qwen-cli"), Some("qwen-portal"));
+        assert_eq!(resolve_provider_name("novita-ai"), Some("novita"));
+        assert_eq!(resolve_provider_name("novitaai"), Some("novita"));
+        assert_eq!(resolve_provider_name("stepfun-plan"), Some("stepfun"));
+        assert_eq!(resolve_provider_name("kilocode"), Some("kilocode"));
+    }
+
+    #[test]
+    fn test_openclaw_provider_base_urls() {
+        assert_eq!(
+            get_provider_base_url("chutes"),
+            Some("https://llm.chutes.ai/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("venice"),
+            Some("https://api.venice.ai/api/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("ollama"),
+            Some("http://localhost:11434/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("lmstudio"),
+            Some("http://localhost:1234/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("vllm"),
+            Some("http://localhost:8000/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("synthetic"),
+            Some("https://api.synthetic.new/anthropic")
+        );
+    }
+
+    #[test]
+    fn test_openclaw_local_providers_use_bearer() {
+        // Local providers still use Bearer auth (some clients require a key)
+        for p in ["ollama", "ollama-cloud", "lmstudio", "vllm", "sglang"] {
+            let bp = get_builtin_provider(p).unwrap();
+            assert_eq!(
+                bp.auth_method,
+                AuthMethod::Bearer,
+                "{p} should use Bearer auth"
+            );
+        }
+    }
+
+    #[test]
+    fn test_openclaw_anthropic_compat_providers() {
+        // synthetic, anthropic-vertex, kimi are Anthropic-protocol
+        for p in ["synthetic", "anthropic-vertex"] {
+            let bp = get_builtin_provider(p).unwrap();
+            assert_eq!(
+                bp.api,
+                Api::AnthropicMessages,
+                "{p} should use AnthropicMessages API"
+            );
+        }
+    }
+
+    #[test]
+    fn test_create_openclaw_providers() {
+        // Smoke test that all new providers can be instantiated
+        for p in [
+            "chutes",
+            "venice",
+            "moonshot",
+            "byteplus",
+            "gmi",
+            "novita",
+            "arcee",
+            "qianfan",
+            "stepfun",
+            "qwen-portal",
+            "alibaba",
+            "anthropic-vertex",
+            "synthetic",
+            "ollama",
+            "lmstudio",
+            "vllm",
+            "sglang",
+            "litellm",
+            "microsoft-foundry",
+            "opencode",
+            "copilot-proxy",
+            "xiaomi-token-plan",
+            "kilocode",
+        ] {
+            let bp = create_builtin_provider(p);
+            assert!(bp.is_some(), "create_builtin_provider({p}) failed");
+        }
     }
 
     #[test]
