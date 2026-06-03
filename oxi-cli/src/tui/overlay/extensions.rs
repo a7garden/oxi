@@ -50,11 +50,11 @@ impl ExtensionEntry {
 
     fn status_color(&self, theme: &oxi_tui::Theme) -> ratatui::style::Color {
         if !self.toggleable {
-            theme.colors.muted.to_ratatui()
+            theme.colors.muted
         } else if self.enabled {
-            theme.colors.success.to_ratatui()
+            theme.colors.success
         } else {
-            theme.colors.error.to_ratatui()
+            theme.colors.error
         }
     }
 
@@ -453,7 +453,7 @@ impl OverlayComponent for ExtensionsOverlay {
         let border_block = Block::default()
             .title(title_line(&title_text))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
@@ -472,10 +472,7 @@ impl OverlayComponent for ExtensionsOverlay {
         let sep_x = inner.x + list_width + 1;
         for y in (inner.y + 1)..(inner.y + inner.height.saturating_sub(1)) {
             frame.render_widget(
-                Paragraph::new(Span::styled(
-                    "│",
-                    Style::default().fg(theme.colors.border.to_ratatui()),
-                )),
+                Paragraph::new(Span::styled("│", Style::default().fg(theme.colors.border))),
                 Rect {
                     x: sep_x,
                     y,
@@ -495,8 +492,8 @@ impl OverlayComponent for ExtensionsOverlay {
         // ── Build list items with section headers ──
         let list_items = self.build_list_items(theme, list_width);
         let highlight_style = Style::default()
-            .fg(theme.colors.background.to_ratatui())
-            .bg(theme.colors.primary.to_ratatui());
+            .fg(theme.colors.background)
+            .bg(theme.colors.primary);
 
         let list_widget = ratatui::widgets::List::new(list_items)
             .highlight_style(highlight_style)
@@ -522,7 +519,7 @@ impl OverlayComponent for ExtensionsOverlay {
             frame.render_widget(
                 Paragraph::new(Span::styled(
                     " Select an extension to view details",
-                    Style::default().fg(theme.colors.muted.to_ratatui()),
+                    Style::default().fg(theme.colors.muted),
                 )),
                 detail_area,
             );
@@ -559,7 +556,7 @@ impl ExtensionsOverlay {
             match row {
                 ListRow::Section { label } => {
                     let section_style = Style::default()
-                        .fg(theme.colors.primary.to_ratatui())
+                        .fg(theme.colors.primary)
                         .add_modifier(Modifier::BOLD);
                     items.push(ListItem::new(Line::from(vec![Span::styled(
                         format!(" {} ", label),
@@ -574,21 +571,21 @@ impl ExtensionsOverlay {
 
                     let name_style = if is_selected {
                         Style::default()
-                            .fg(theme.colors.background.to_ratatui())
-                            .bg(theme.colors.primary.to_ratatui())
+                            .fg(theme.colors.background)
+                            .bg(theme.colors.primary)
                             .add_modifier(Modifier::BOLD)
                     } else if entry.enabled {
-                        Style::default().fg(theme.colors.foreground.to_ratatui())
+                        Style::default().fg(theme.colors.foreground)
                     } else {
-                        Style::default().fg(theme.colors.muted.to_ratatui())
+                        Style::default().fg(theme.colors.muted)
                     };
 
                     let tag_style = if is_selected {
                         Style::default()
-                            .fg(theme.colors.background.to_ratatui())
-                            .bg(theme.colors.primary.to_ratatui())
+                            .fg(theme.colors.background)
+                            .bg(theme.colors.primary)
                     } else {
-                        Style::default().fg(theme.colors.muted.to_ratatui())
+                        Style::default().fg(theme.colors.muted)
                     };
 
                     let max_label_len = (list_width as usize).saturating_sub(16);
@@ -607,7 +604,7 @@ impl ExtensionsOverlay {
                     } else {
                         spans.push(Span::styled(
                             " fix",
-                            Style::default().fg(theme.colors.muted.to_ratatui()),
+                            Style::default().fg(theme.colors.muted),
                         ));
                     }
 
@@ -619,7 +616,7 @@ impl ExtensionsOverlay {
         if items.is_empty() {
             items.push(ListItem::new(Line::from(Span::styled(
                 " No matching extensions",
-                Style::default().fg(theme.colors.muted.to_ratatui()),
+                Style::default().fg(theme.colors.muted),
             ))));
         }
 
@@ -656,7 +653,7 @@ fn render_detail_panel(
     scroll: usize,
 ) {
     let title_style = Style::default()
-        .fg(theme.colors.primary.to_ratatui())
+        .fg(theme.colors.primary)
         .add_modifier(Modifier::BOLD);
 
     let status_text = if entry.enabled { "enabled" } else { "disabled" };
@@ -680,14 +677,14 @@ fn render_detail_panel(
 
     // Category badge
     let cat_color = match entry.category {
-        EntryCategory::Essential => theme.colors.muted.to_ratatui(),
-        EntryCategory::Optional => theme.colors.accent.to_ratatui(),
-        EntryCategory::Wasm => theme.colors.warning.to_ratatui(),
+        EntryCategory::Essential => theme.colors.muted,
+        EntryCategory::Optional => theme.colors.accent,
+        EntryCategory::Wasm => theme.colors.warning,
     };
     let badge_line = Line::from(vec![Span::styled(
         format!(" {} ", entry.category_label().to_uppercase()),
         Style::default()
-            .fg(theme.colors.background.to_ratatui())
+            .fg(theme.colors.background)
             .bg(cat_color)
             .add_modifier(Modifier::BOLD),
     )]);
@@ -705,7 +702,7 @@ fn render_detail_panel(
     frame.render_widget(
         Paragraph::new(Span::styled(
             "\u{2500}".repeat(area.width as usize),
-            Style::default().fg(theme.colors.border.to_ratatui()),
+            Style::default().fg(theme.colors.border),
         )),
         Rect {
             x: area.x,
@@ -720,10 +717,7 @@ fn render_detail_panel(
     if !entry.label.is_empty() {
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "Label:  ",
-                    Style::default().fg(theme.colors.muted.to_ratatui()),
-                ),
+                Span::styled("Label:  ", Style::default().fg(theme.colors.muted)),
                 Span::styled(&entry.label, styles.normal),
             ])),
             Rect {
@@ -761,7 +755,7 @@ fn render_detail_panel(
         let hint_y = area.y + area.height.saturating_sub(2);
         let action = if entry.enabled { "disable" } else { "enable" };
         let hint_style = Style::default()
-            .fg(theme.colors.accent.to_ratatui())
+            .fg(theme.colors.accent)
             .add_modifier(Modifier::ITALIC);
         frame.render_widget(
             Paragraph::new(Span::styled(

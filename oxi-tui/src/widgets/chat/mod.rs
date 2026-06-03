@@ -65,7 +65,7 @@ impl StatefulWidget for ChatView<'_> {
         state.tool_regions.clear();
 
         // Get layout computed with inner_width for correct height measurements
-        let layout = state.get_layout(inner_width);
+        let layout = state.get_layout(inner_width, &styles);
         let total_height: u16 = layout
             .last()
             .map(|e| {
@@ -140,12 +140,16 @@ impl StatefulWidget for ChatView<'_> {
                 let tmp_rect = Rect::new(0, 0, inner_width, entry.height);
                 let mut tmp = ratatui::buffer::Buffer::empty(tmp_rect);
                 EntryWidget::new(&entry.kind, &styles).render(tmp_rect, &mut tmp);
+                // Copy visible rows from the temp buffer to the frame buffer.
+                // Uses row-level clone instead of per-cell iteration for
+                // better performance on wide terminals.
+                let dst_y = area.y + rel_y;
                 for row in 0..h {
-                    for col in 0..inner_width {
-                        if let Some(dst) = buf.cell_mut((area.x + col, area.y + rel_y + row)) {
-                            *dst = tmp[(col, hidden + row)].clone();
-                        }
-                    }
+                    let src_base = (hidden + row) as usize * inner_width as usize;
+                    let dst_base = buf.index_of(area.x, dst_y + row);
+                    let dst_slice = &mut buf.content[dst_base..dst_base + inner_width as usize];
+                    let src_slice = &tmp.content[src_base..src_base + inner_width as usize];
+                    dst_slice.clone_from_slice(src_slice);
                 }
             }
         }
@@ -157,6 +161,7 @@ impl StatefulWidget for ChatView<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::theme::ThemeStyles;
     use layout::compute_layout;
     use markdown::{fix_bare_code_fences, md_lines, wrap_lines_styled};
     use ratatui::style::{Modifier, Style};
@@ -249,7 +254,7 @@ mod tests {
             }],
             timestamp: 0,
         });
-        let layout = compute_layout(&s, 80);
+        let layout = compute_layout(&s, 80, &ThemeStyles::default());
         assert!(!layout.is_empty());
         assert!(layout.iter().any(|e| matches!(&e.kind, LayoutKind::Rule)));
     }
@@ -299,12 +304,12 @@ mod tests {
             timestamp: 0,
         });
         // First call — cache miss, recompute
-        let layout1 = s.get_layout(80);
+        let layout1 = s.get_layout(80, &ThemeStyles::default());
         // Second call with same params — cache hit
-        let layout2 = s.get_layout(80);
+        let layout2 = s.get_layout(80, &ThemeStyles::default());
         assert_eq!(layout1.len(), layout2.len());
         // Different width — cache miss
-        let layout3 = s.get_layout(60);
+        let layout3 = s.get_layout(60, &ThemeStyles::default());
         assert_eq!(layout1.len(), layout3.len()); // same content, different heights
     }
 
@@ -335,7 +340,7 @@ mod tests {
         // CJK text without spaces between characters should wrap
         // at character boundaries, not overflow.
         let text = "oxi is a terminal-based AI coding assistant written in Rust with full multilingual support.";
-        let lines = md_lines(text, 30);
+        let lines = md_lines(text, 30, &ThemeStyles::default());
         // Should produce multiple lines, all fitting within width 30
         for line in &lines {
             let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
@@ -352,7 +357,7 @@ mod tests {
     #[test]
     fn wrap_lines_styled_ascii() {
         let text = "Hello world, this is a test of text wrapping.";
-        let lines = md_lines(text, 20);
+        let lines = md_lines(text, 20, &ThemeStyles::default());
         for line in &lines {
             let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
             assert!(
@@ -370,7 +375,7 @@ mod tests {
         // Mixed narrow and wide characters
         let text =
             "Multi-provider LLM support with streaming and extensible tool system architecture";
-        let lines = md_lines(text, 30);
+        let lines = md_lines(text, 30, &ThemeStyles::default());
         for line in &lines {
             let w = unicode_width::UnicodeWidthStr::width(line.to_string().as_str());
             assert!(
@@ -387,7 +392,7 @@ mod tests {
     fn wrap_lines_styled_short_text() {
         // Short text should not be split
         let text = "Hello";
-        let lines = md_lines(text, 80);
+        let lines = md_lines(text, 80, &ThemeStyles::default());
         assert_eq!(lines.len(), 1, "Short text should be a single line");
     }
 
@@ -410,6 +415,7 @@ mod tests {
 mod table_tests {
     use super::*;
     use crate::table_renderer::render_markdown_table;
+    use crate::theme::ThemeStyles;
     use markdown::md_lines;
 
     #[test]
@@ -431,14 +437,14 @@ mod table_tests {
 |---|---|---|
 | Alice | 30 |
 | Bob | 25 |";
-        let lines = md_lines(md, 80);
+        let lines = md_lines(md, 80, &ThemeStyles::default());
         assert!(!lines.is_empty());
     }
 
     #[test]
     fn md_lines_without_table() {
         let md = "Hello **world**";
-        let lines = md_lines(md, 80);
+        let lines = md_lines(md, 80, &ThemeStyles::default());
         assert!(!lines.is_empty());
     }
     #[test]

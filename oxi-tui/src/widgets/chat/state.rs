@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use parking_lot::RwLock;
 
+use crate::theme::ThemeStyles;
 use crate::widgets::chat::layout::{compute_layout, LayoutEntry};
 use crate::widgets::chat::markdown::extract_last_code_block;
 use crate::widgets::chat::types::{
@@ -553,7 +554,7 @@ impl ChatViewState {
     }
 
     /// Get cached layout entries, recomputing if needed.
-    pub(crate) fn get_layout(&self, width: u16) -> Vec<LayoutEntry> {
+    pub(crate) fn get_layout(&self, width: u16, styles: &ThemeStyles) -> Vec<LayoutEntry> {
         let msg_count = self.messages.len();
         let streaming_len = self
             .streaming
@@ -586,7 +587,7 @@ impl ChatViewState {
         }
 
         // Recompute outside the read lock
-        let entries = compute_layout(self, width);
+        let entries = compute_layout(self, width, styles);
         let total_height: u16 = entries
             .last()
             .map(|e| {

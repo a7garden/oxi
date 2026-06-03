@@ -100,13 +100,13 @@ impl OverlayComponent for ResumeSelectOverlay {
         let border_block = Block::default()
             .title(title_line())
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
         // Header
         let header_style = Style::default()
-            .fg(theme.colors.muted.to_ratatui())
+            .fg(theme.colors.muted)
             .add_modifier(Modifier::BOLD);
         let header = format!(
             "{:<20} {:>6} {:<35} {:>12} {:<20}",
@@ -143,8 +143,8 @@ impl OverlayComponent for ResumeSelectOverlay {
 
             let style = if is_sel {
                 Style::default()
-                    .fg(theme.colors.background.to_ratatui())
-                    .bg(theme.colors.primary.to_ratatui())
+                    .fg(theme.colors.background)
+                    .bg(theme.colors.primary)
                     .add_modifier(Modifier::BOLD)
             } else {
                 styles.normal

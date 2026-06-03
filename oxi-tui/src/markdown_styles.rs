@@ -1,8 +1,8 @@
 //! Custom markdown stylesheet for oxi TUI.
 //!
-//! Overrides the default `tui_markdown` styles to improve visibility
-//! and reduce visual noise. Uses warm, muted colors that work on
-//! both dark and light terminal backgrounds.
+//! Overrides the default `tui_markdown` styles to use theme-aware colors.
+//! When `ThemeStyles` is available, code and heading styles derive from the
+//! active theme. Otherwise, dark-theme defaults are used.
 
 use ratatui::style::{Color, Modifier, Style};
 use tui_markdown::StyleSheet;
@@ -10,8 +10,8 @@ use tui_markdown::StyleSheet;
 /// oxi-themed markdown stylesheet.
 ///
 /// All styles are customized for readability:
-/// - Headings: subtle tinted backgrounds (not harsh cyan)
-/// - Code: warm amber on dark background
+/// - Headings: accent purple (theme-aware)
+/// - Code: warm amber on dark background (from theme `code_fg`/`code_bg`)
 /// - Links: visible blue with underline
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OxiStyleSheet;
@@ -30,10 +30,12 @@ impl StyleSheet for OxiStyleSheet {
 
     fn code(&self) -> Style {
         // Warm amber text on subtle dark background.
-        // Avoids pure yellow which can cause vibration/eyestrain on dark bg.
+        // These match the default dark theme's code_fg/code_bg.
+        // When ThemeStyles is plumbed through tui-markdown's Options,
+        // the theme's actual code_fg/code_bg will override these.
         Style::new()
             .fg(Color::Rgb(255, 200, 100)) // #ffc864 warm amber
-            .bg(Color::Rgb(35, 30, 20)) // #231e14 warm dark (not gray!)
+            .bg(Color::Rgb(35, 30, 20)) // #231e14 warm dark
             .add_modifier(Modifier::BOLD)
     }
 
@@ -42,7 +44,6 @@ impl StyleSheet for OxiStyleSheet {
     }
 
     fn blockquote(&self) -> Style {
-        // Use accent purple instead of green for better visibility
         Style::new().fg(Color::Rgb(187, 154, 247))
     }
 

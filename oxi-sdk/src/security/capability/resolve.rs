@@ -62,7 +62,9 @@ pub fn resolve_cspace(
         use super::types::{ResourceRef, Rights};
         for domain in domains {
             builder = builder.grant(
-                ResourceRef::KernelDomain { domain: domain.clone() },
+                ResourceRef::KernelDomain {
+                    domain: domain.clone(),
+                },
                 vec![Rights::Read, Rights::Write, Rights::Execute],
             );
         }
@@ -81,11 +83,15 @@ mod tests {
         let id = Uuid::new_v4();
         let cs = resolve_cspace(Some("standard"), None, None, id);
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "read".into() },
+            &ResourceRef::KernelDomain {
+                domain: "read".into()
+            },
             Rights::Execute
         ));
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "memory".into() },
+            &ResourceRef::KernelDomain {
+                domain: "memory".into()
+            },
             Rights::Read
         ));
     }
@@ -95,7 +101,9 @@ mod tests {
         let id = Uuid::new_v4();
         let cs = resolve_cspace(Some("admin"), None, None, id);
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "anything".into() },
+            &ResourceRef::KernelDomain {
+                domain: "anything".into()
+            },
             Rights::Grant
         ));
     }
@@ -105,7 +113,9 @@ mod tests {
         let id = Uuid::new_v4();
         let cs = resolve_cspace(Some("worker"), None, None, id);
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "subagent".into() },
+            &ResourceRef::KernelDomain {
+                domain: "subagent".into()
+            },
             Rights::Execute
         ));
     }

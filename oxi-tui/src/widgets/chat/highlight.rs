@@ -1,9 +1,14 @@
-//! Code syntax highlighting — simple token-based highlighter.
+//! Code syntax highlighting — theme-aware token-based highlighter.
+//!
+//! Accepts a `&ThemeStyles` reference so colors adapt to the active theme
+//! (dark, light, or custom). Falls back gracefully when a style is `Style::default()`.
 
 use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
 };
+
+use crate::theme::ThemeStyles;
 
 /// Code token types for styling.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -18,10 +23,8 @@ enum TokenType {
     Punctuation,
 }
 
-/// Map token type to a ratatui Style using default theme colors.
-fn token_style(token: TokenType) -> Style {
-    let dark = crate::theme::ColorScheme::dark();
-    let styles = dark.to_styles();
+/// Map token type to a ratatui Style using the active theme's semantic colors.
+fn token_style(token: TokenType, styles: &ThemeStyles) -> Style {
     match token {
         TokenType::Normal => styles.normal,
         TokenType::Keyword => styles.accent.add_modifier(Modifier::BOLD),
@@ -151,7 +154,7 @@ fn preceded_by_dot(text_before: &str) -> bool {
 }
 
 /// Highlight a single code line into styled Spans.
-fn highlight_line(line: &str, lang: &str) -> Line<'static> {
+fn highlight_line(line: &str, lang: &str, styles: &ThemeStyles) -> Line<'static> {
     let keywords = lang_keywords(lang);
     let comment_prefix = line_comment_prefix(lang);
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -163,7 +166,7 @@ fn highlight_line(line: &str, lang: &str) -> Line<'static> {
         if let Some(prefix) = comment_prefix {
             if line[i..].starts_with(prefix) {
                 let rest: String = chars[i..].iter().collect();
-                spans.push(Span::styled(rest, token_style(TokenType::Comment)));
+                spans.push(Span::styled(rest, token_style(TokenType::Comment, styles)));
                 break;
             }
         }
@@ -182,7 +185,7 @@ fn highlight_line(line: &str, lang: &str) -> Line<'static> {
                 }
             }
             let s: String = chars[i..end].iter().collect();
-            spans.push(Span::styled(s, token_style(TokenType::String)));
+            spans.push(Span::styled(s, token_style(TokenType::String, styles)));
             i = end;
             continue;
         }
@@ -201,7 +204,7 @@ fn highlight_line(line: &str, lang: &str) -> Line<'static> {
                 }
             }
             let s: String = chars[i..end].iter().collect();
-            spans.push(Span::styled(s, token_style(TokenType::String)));
+            spans.push(Span::styled(s, token_style(TokenType::String, styles)));
             i = end;
             continue;
         }
@@ -228,7 +231,7 @@ fn highlight_line(line: &str, lang: &str) -> Line<'static> {
                 end += 1;
             }
             let s: String = chars[i..end].iter().collect();
-            spans.push(Span::styled(s, token_style(TokenType::Number)));
+            spans.push(Span::styled(s, token_style(TokenType::Number, styles)));
             i = end;
             continue;
         }
@@ -252,7 +255,7 @@ fn highlight_line(line: &str, lang: &str) -> Line<'static> {
                 TokenType::Normal
             };
 
-            spans.push(Span::styled(word, token_style(token_type)));
+            spans.push(Span::styled(word, token_style(token_type, styles)));
             i = end;
             continue;
         }
@@ -274,7 +277,7 @@ fn highlight_line(line: &str, lang: &str) -> Line<'static> {
         } else {
             TokenType::Normal
         };
-        spans.push(Span::styled(c.to_string(), token_style(tok)));
+        spans.push(Span::styled(c.to_string(), token_style(tok, styles)));
         i += 1;
     }
 
@@ -285,10 +288,17 @@ fn highlight_line(line: &str, lang: &str) -> Line<'static> {
 }
 
 /// Highlight a code block with language-aware syntax coloring.
-pub(crate) fn highlight_code(content: &str, lang: &str) -> Vec<Line<'static>> {
+///
+/// Now accepts `&ThemeStyles` so that syntax colors adapt to the active
+/// theme (dark, light, or custom) instead of always using dark defaults.
+pub(crate) fn highlight_code(
+    content: &str,
+    lang: &str,
+    styles: &ThemeStyles,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for line in content.lines() {
-        lines.push(highlight_line(line, lang));
+        lines.push(highlight_line(line, lang, styles));
     }
     lines
 }

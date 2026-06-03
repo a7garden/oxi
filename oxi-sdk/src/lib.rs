@@ -58,10 +58,10 @@ pub use middleware::{
 };
 pub use multi_provider::{MultiProviderBuilder, RoutingConfig};
 pub use observability::{
-    AuditAction, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPersistence,
-    AuditTrail, CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig, EventQuery,
-    EventStore, EventStoreConfig, GlobalCostSnapshot, HashDigest, Span, SpanContext, SpanGuard,
-    SpanId, SpanKind, SpanStatus, StoredEvent, TokenUsage, TraceId, TrailEntry, Tracer,
+    AuditAction, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPersistence, AuditTrail,
+    CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig, EventQuery, EventStore,
+    EventStoreConfig, GlobalCostSnapshot, HashDigest, Span, SpanContext, SpanGuard, SpanId,
+    SpanKind, SpanStatus, StoredEvent, TokenUsage, TraceId, Tracer, TrailEntry,
 };
 
 // Composition Layer — Security
@@ -70,7 +70,7 @@ pub use security::{
     ApprovalStatus, AuditEvent, AuditSink, Authorizer, Capability, CapabilitySet,
     CapabilitySubject, CheckRequest, DefaultPolicy, DenyLayer, ExecPolicy, PathMode,
     PendingApproval, PermAuditEntry, PermissionUpdate, RbacAuditEntry, RbacManager, RbacPolicy,
-    Role, SecurityMiddleware, StringPattern, Subject, TrailAuditSink, TracingAuditSink,
+    Role, SecurityMiddleware, StringPattern, Subject, TracingAuditSink, TrailAuditSink,
 };
 
 // Composition Layer — Coordination

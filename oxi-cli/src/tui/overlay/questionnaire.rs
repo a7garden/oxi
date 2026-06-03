@@ -296,13 +296,13 @@ impl OverlayComponent for QuestionnaireOverlay {
         frame.render_widget(Clear, popup);
 
         let title_style = Style::default()
-            .fg(theme.colors.primary.to_ratatui())
+            .fg(theme.colors.primary)
             .add_modifier(Modifier::BOLD);
 
         let border_block = Block::default()
             .title(Line::styled(" Questionnaire ", title_style))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
 
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
@@ -347,7 +347,7 @@ impl QuestionnaireOverlay {
     fn build_lines(&self, width: u16, theme: &Theme, styles: &ThemeStyles) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         let sep_line = "─".repeat(width as usize);
-        let fg = theme.colors.accent.to_ratatui();
+        let fg = theme.colors.accent;
 
         if self.input_mode {
             self.build_input_mode_lines(&mut lines, width, theme, styles, &sep_line);
@@ -375,7 +375,7 @@ impl QuestionnaireOverlay {
             Some(q) => q,
             None => return,
         };
-        let fg = theme.colors.accent.to_ratatui();
+        let fg = theme.colors.accent;
 
         lines.push(Line::from(Span::styled(
             sep_line.to_string(),
@@ -450,7 +450,7 @@ impl QuestionnaireOverlay {
         styles: &ThemeStyles,
         sep_line: &str,
     ) {
-        let fg = theme.colors.accent.to_ratatui();
+        let fg = theme.colors.accent;
 
         lines.push(Line::from(Span::styled(
             sep_line.to_string(),
@@ -530,7 +530,7 @@ impl QuestionnaireOverlay {
             Some(q) => q,
             None => return,
         };
-        let fg = theme.colors.accent.to_ratatui();
+        let fg = theme.colors.accent;
 
         lines.push(Line::from(Span::styled(
             sep_line.to_string(),
@@ -576,8 +576,8 @@ impl QuestionnaireOverlay {
             .take(max_input_w)
             .collect::<String>();
         let cursor_style = Style::default()
-            .fg(theme.colors.foreground.to_ratatui())
-            .bg(theme.colors.primary.to_ratatui());
+            .fg(theme.colors.foreground)
+            .bg(theme.colors.primary);
 
         if display.is_empty() {
             lines.push(Line::from(vec![

@@ -291,7 +291,7 @@ impl OverlayComponent for SettingsOverlay {
         let border_block = Block::default()
             .title(title_line(&filter_text))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
@@ -300,7 +300,7 @@ impl OverlayComponent for SettingsOverlay {
             Paragraph::new(Span::styled(
                 " KEY                   VALUE                    ",
                 Style::default()
-                    .fg(theme.colors.muted.to_ratatui())
+                    .fg(theme.colors.muted)
                     .add_modifier(Modifier::BOLD),
             )),
             Rect {
@@ -322,15 +322,15 @@ impl OverlayComponent for SettingsOverlay {
                 let style = if item.is_editable() {
                     styles.normal
                 } else {
-                    Style::default().fg(theme.colors.muted.to_ratatui())
+                    Style::default().fg(theme.colors.muted)
                 };
                 ListItem::new(Span::styled(format!("{} {}", label, value), style))
             })
             .collect();
 
         let highlight_style = Style::default()
-            .fg(theme.colors.background.to_ratatui())
-            .bg(theme.colors.primary.to_ratatui())
+            .fg(theme.colors.background)
+            .bg(theme.colors.primary)
             .add_modifier(Modifier::BOLD);
 
         let list = List::new(list_items)

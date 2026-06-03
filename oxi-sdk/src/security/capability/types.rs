@@ -25,21 +25,13 @@ pub enum Rights {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ResourceRef {
     /// Kernel-service domain (e.g., a tool name or subsystem).
-    KernelDomain {
-        domain: String,
-    },
+    KernelDomain { domain: String },
     /// Filesystem path pattern.
-    Path {
-        pattern: String,
-    },
+    Path { pattern: String },
     /// Network endpoint pattern.
-    Network {
-        pattern: String,
-    },
+    Network { pattern: String },
     /// Arbitrary named resource.
-    Named {
-        name: String,
-    },
+    Named { name: String },
 }
 
 /// A single capability entry: rights over a resource, optionally with metadata.
@@ -126,9 +118,9 @@ impl CSpace {
     /// Checks for an exact or more-permissive match. For `ResourceRef::Path`
     /// and `ResourceRef::Network`, a wildcard pattern (`*`) matches anything.
     pub fn can(&self, resource: &ResourceRef, right: Rights) -> bool {
-        self.entries.values().any(|entry| {
-            entry.has_right(right) && resource_matches(&entry.resource, resource)
-        })
+        self.entries
+            .values()
+            .any(|entry| entry.has_right(right) && resource_matches(&entry.resource, resource))
     }
 
     /// Iterate over all entries.
@@ -154,10 +146,9 @@ fn resource_matches(granted: &ResourceRef, required: &ResourceRef) -> bool {
         _ if granted == required => true,
 
         // KernelDomain: wildcard matches any domain
-        (
-            ResourceRef::KernelDomain { domain: g },
-            ResourceRef::KernelDomain { domain: _r },
-        ) => g == "*",
+        (ResourceRef::KernelDomain { domain: g }, ResourceRef::KernelDomain { domain: _r }) => {
+            g == "*"
+        }
 
         // Path: wildcard matches any path
         (ResourceRef::Path { pattern: g }, ResourceRef::Path { pattern: _r }) => {
@@ -219,11 +210,15 @@ impl CSpaceBuilder {
             vec![Rights::Read, Rights::Write, Rights::Execute, Rights::Grant],
         )
         .grant(
-            ResourceRef::Path { pattern: "/**".into() },
+            ResourceRef::Path {
+                pattern: "/**".into(),
+            },
             vec![Rights::Read, Rights::Write, Rights::Execute],
         )
         .grant(
-            ResourceRef::Network { pattern: "*".into() },
+            ResourceRef::Network {
+                pattern: "*".into(),
+            },
             vec![Rights::Read, Rights::Write, Rights::Execute],
         )
     }
@@ -232,39 +227,57 @@ impl CSpaceBuilder {
     pub fn standard(self) -> Self {
         // Essential tools
         self.grant(
-            ResourceRef::KernelDomain { domain: "read".into() },
+            ResourceRef::KernelDomain {
+                domain: "read".into(),
+            },
             vec![Rights::Read, Rights::Execute],
         )
         .grant(
-            ResourceRef::KernelDomain { domain: "write".into() },
+            ResourceRef::KernelDomain {
+                domain: "write".into(),
+            },
             vec![Rights::Read, Rights::Write, Rights::Execute],
         )
         .grant(
-            ResourceRef::KernelDomain { domain: "edit".into() },
+            ResourceRef::KernelDomain {
+                domain: "edit".into(),
+            },
             vec![Rights::Read, Rights::Write, Rights::Execute],
         )
         .grant(
-            ResourceRef::KernelDomain { domain: "bash".into() },
+            ResourceRef::KernelDomain {
+                domain: "bash".into(),
+            },
             vec![Rights::Read, Rights::Write, Rights::Execute],
         )
         .grant(
-            ResourceRef::KernelDomain { domain: "grep".into() },
+            ResourceRef::KernelDomain {
+                domain: "grep".into(),
+            },
             vec![Rights::Read, Rights::Execute],
         )
         .grant(
-            ResourceRef::KernelDomain { domain: "find".into() },
+            ResourceRef::KernelDomain {
+                domain: "find".into(),
+            },
             vec![Rights::Read, Rights::Execute],
         )
         .grant(
-            ResourceRef::KernelDomain { domain: "ls".into() },
+            ResourceRef::KernelDomain {
+                domain: "ls".into(),
+            },
             vec![Rights::Read, Rights::Execute],
         )
         .grant(
-            ResourceRef::KernelDomain { domain: "memory".into() },
+            ResourceRef::KernelDomain {
+                domain: "memory".into(),
+            },
             vec![Rights::Read, Rights::Write],
         )
         .grant(
-            ResourceRef::Path { pattern: "/workspace/**".into() },
+            ResourceRef::Path {
+                pattern: "/workspace/**".into(),
+            },
             vec![Rights::Read, Rights::Write, Rights::Execute],
         )
     }
@@ -273,11 +286,15 @@ impl CSpaceBuilder {
     pub fn worker(self) -> Self {
         self.standard()
             .grant(
-                ResourceRef::KernelDomain { domain: "subagent".into() },
+                ResourceRef::KernelDomain {
+                    domain: "subagent".into(),
+                },
                 vec![Rights::Execute],
             )
             .grant(
-                ResourceRef::Network { pattern: "*".into() },
+                ResourceRef::Network {
+                    pattern: "*".into(),
+                },
                 vec![Rights::Read, Rights::Write],
             )
     }
@@ -301,16 +318,22 @@ mod tests {
         let id = Uuid::new_v4();
         let mut cs = CSpace::new(id);
         cs.insert(CapabilityEntry::new(
-            ResourceRef::KernelDomain { domain: "read".into() },
+            ResourceRef::KernelDomain {
+                domain: "read".into(),
+            },
             vec![Rights::Read, Rights::Execute],
         ));
 
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "read".into() },
+            &ResourceRef::KernelDomain {
+                domain: "read".into()
+            },
             Rights::Execute
         ));
         assert!(!cs.can(
-            &ResourceRef::KernelDomain { domain: "write".into() },
+            &ResourceRef::KernelDomain {
+                domain: "write".into()
+            },
             Rights::Execute
         ));
     }
@@ -325,7 +348,9 @@ mod tests {
         ));
 
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "anything".into() },
+            &ResourceRef::KernelDomain {
+                domain: "anything".into()
+            },
             Rights::Execute
         ));
     }
@@ -335,16 +360,22 @@ mod tests {
         let id = Uuid::new_v4();
         let mut cs = CSpace::new(id);
         cs.insert(CapabilityEntry::new(
-            ResourceRef::Path { pattern: "/workspace/**".into() },
+            ResourceRef::Path {
+                pattern: "/workspace/**".into(),
+            },
             vec![Rights::Read, Rights::Write],
         ));
 
         assert!(cs.can(
-            &ResourceRef::Path { pattern: "/workspace/src/main.rs".into() },
+            &ResourceRef::Path {
+                pattern: "/workspace/src/main.rs".into()
+            },
             Rights::Read
         ));
         assert!(!cs.can(
-            &ResourceRef::Path { pattern: "/etc/passwd".into() },
+            &ResourceRef::Path {
+                pattern: "/etc/passwd".into()
+            },
             Rights::Read
         ));
     }
@@ -354,11 +385,15 @@ mod tests {
         let id = Uuid::new_v4();
         let cs = CSpaceBuilder::new(id).standard().build();
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "read".into() },
+            &ResourceRef::KernelDomain {
+                domain: "read".into()
+            },
             Rights::Execute
         ));
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "memory".into() },
+            &ResourceRef::KernelDomain {
+                domain: "memory".into()
+            },
             Rights::Read
         ));
     }
@@ -368,11 +403,15 @@ mod tests {
         let id = Uuid::new_v4();
         let cs = CSpaceBuilder::new(id).all_access().build();
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "anything".into() },
+            &ResourceRef::KernelDomain {
+                domain: "anything".into()
+            },
             Rights::Grant
         ));
         assert!(cs.can(
-            &ResourceRef::Path { pattern: "/any/path".into() },
+            &ResourceRef::Path {
+                pattern: "/any/path".into()
+            },
             Rights::Write
         ));
     }
@@ -382,11 +421,15 @@ mod tests {
         let id = Uuid::new_v4();
         let cs = CSpaceBuilder::new(id).worker().build();
         assert!(cs.can(
-            &ResourceRef::KernelDomain { domain: "subagent".into() },
+            &ResourceRef::KernelDomain {
+                domain: "subagent".into()
+            },
             Rights::Execute
         ));
         assert!(cs.can(
-            &ResourceRef::Network { pattern: "example.com".into() },
+            &ResourceRef::Network {
+                pattern: "example.com".into()
+            },
             Rights::Read
         ));
     }
@@ -396,12 +439,16 @@ mod tests {
         let id = Uuid::new_v4();
         let mut cs = CSpace::new(id);
         let idx = cs.insert(CapabilityEntry::new(
-            ResourceRef::KernelDomain { domain: "read".into() },
+            ResourceRef::KernelDomain {
+                domain: "read".into(),
+            },
             vec![Rights::Read],
         ));
         assert!(cs.remove(idx).is_some());
         assert!(!cs.can(
-            &ResourceRef::KernelDomain { domain: "read".into() },
+            &ResourceRef::KernelDomain {
+                domain: "read".into()
+            },
             Rights::Read
         ));
     }

@@ -198,7 +198,7 @@ impl<'a> CompletionPopup<'a> {
                 let desc = item.description.as_ref().map(|d| {
                     Span::styled(
                         format!(" {}", d),
-                        Style::default().fg(self.theme.colors.muted.to_ratatui()),
+                        Style::default().fg(self.theme.colors.muted),
                     )
                 });
                 let mut spans = vec![
@@ -214,13 +214,11 @@ impl<'a> CompletionPopup<'a> {
             .collect();
 
         let list = List::new(items)
-            .block(
-                Block::bordered().style(Style::default().fg(self.theme.colors.border.to_ratatui())),
-            )
+            .block(Block::bordered().style(Style::default().fg(self.theme.colors.border)))
             .highlight_style(
                 Style::default()
-                    .fg(self.theme.colors.background.to_ratatui())
-                    .bg(self.theme.colors.primary.to_ratatui()),
+                    .fg(self.theme.colors.background)
+                    .bg(self.theme.colors.primary),
             )
             .highlight_symbol("→ ");
 

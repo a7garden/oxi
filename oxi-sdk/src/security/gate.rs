@@ -15,11 +15,11 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use crate::security::audit_sink::{AuditEvent, AuditSink};
+use crate::security::capability::types::{ResourceRef, Rights};
 use crate::security::context::AgentContext;
 use crate::security::exec_policy::ExecPolicy;
 use crate::security::permissions::AgentPermissions;
 use crate::security::rbac::{Action, RbacManager, Role, Subject};
-use crate::security::capability::types::{ResourceRef, Rights};
 
 // ─── Path Mode ──────────────────────────────────────────────────────────────
 
@@ -102,11 +102,22 @@ impl std::fmt::Display for AccessDenied {
 #[derive(Debug)]
 pub enum CheckRequest<'a> {
     /// Tool usage.
-    Tool { context: &'a AgentContext, tool_name: &'a str },
+    Tool {
+        context: &'a AgentContext,
+        tool_name: &'a str,
+    },
     /// Path access.
-    Path { context: &'a AgentContext, path: &'a Path, mode: PathMode },
+    Path {
+        context: &'a AgentContext,
+        path: &'a Path,
+        mode: PathMode,
+    },
     /// Command execution.
-    Exec { context: &'a AgentContext, binary: &'a str, args: &'a [String] },
+    Exec {
+        context: &'a AgentContext,
+        binary: &'a str,
+        args: &'a [String],
+    },
     /// Network access.
     Network { context: &'a AgentContext },
     /// Agent fork.
@@ -172,7 +183,12 @@ impl AccessGate {
         exec_policy: Arc<ExecPolicy>,
         audit: Arc<dyn AuditSink>,
     ) -> Self {
-        Self { permissions, rbac, exec_policy, audit }
+        Self {
+            permissions,
+            rbac,
+            exec_policy,
+            audit,
+        }
     }
 
     /// Create a permissive gate (all checks pass). Useful for development.
@@ -200,8 +216,16 @@ impl AccessGate {
     pub fn check(&self, req: CheckRequest<'_>) -> Result<(), AccessDenied> {
         let result = match &req {
             CheckRequest::Tool { context, tool_name } => self.check_tool(context, tool_name),
-            CheckRequest::Path { context, path, mode } => self.check_path(context, path, *mode),
-            CheckRequest::Exec { context, binary, args } => self.check_exec(context, binary, args),
+            CheckRequest::Path {
+                context,
+                path,
+                mode,
+            } => self.check_path(context, path, *mode),
+            CheckRequest::Exec {
+                context,
+                binary,
+                args,
+            } => self.check_exec(context, binary, args),
             CheckRequest::Network { context } => self.check_network(context),
             CheckRequest::Fork { context } => self.check_fork(context),
         };
@@ -211,9 +235,13 @@ impl AccessGate {
 
     fn check_tool(&self, ctx: &AgentContext, tool: &str) -> Result<(), AccessDenied> {
         // Layer 0: CSpace
-        let resource = ResourceRef::KernelDomain { domain: tool.to_string() };
+        let resource = ResourceRef::KernelDomain {
+            domain: tool.to_string(),
+        };
         if !ctx.cspace.can(&resource, Rights::Execute) {
-            let always_on = ["read", "write", "edit", "grep", "find", "ls", "bash", "exec"];
+            let always_on = [
+                "read", "write", "edit", "grep", "find", "ls", "bash", "exec",
+            ];
             if !always_on.contains(&tool) {
                 return Err(AccessDenied {
                     agent: ctx.agent_name.clone(),
@@ -227,7 +255,11 @@ impl AccessGate {
 
         // Layer 1+2: RBAC + Permissions
         let subject = Subject::User(ctx.agent_name.clone());
-        if !self.rbac.lock().check_permission(&subject, &Action::UseTool(tool.to_string()), tool) {
+        if !self
+            .rbac
+            .lock()
+            .check_permission(&subject, &Action::UseTool(tool.to_string()), tool)
+        {
             return Err(AccessDenied {
                 agent: ctx.agent_name.clone(),
                 resource: tool.to_string(),
@@ -253,7 +285,12 @@ impl AccessGate {
         Ok(())
     }
 
-    fn check_path(&self, ctx: &AgentContext, path: &Path, _mode: PathMode) -> Result<(), AccessDenied> {
+    fn check_path(
+        &self,
+        ctx: &AgentContext,
+        path: &Path,
+        _mode: PathMode,
+    ) -> Result<(), AccessDenied> {
         let path_str = path.to_string_lossy();
 
         // Layer 2: Path permissions
@@ -273,7 +310,12 @@ impl AccessGate {
         Ok(())
     }
 
-    fn check_exec(&self, ctx: &AgentContext, binary: &str, args: &[String]) -> Result<(), AccessDenied> {
+    fn check_exec(
+        &self,
+        ctx: &AgentContext,
+        binary: &str,
+        args: &[String],
+    ) -> Result<(), AccessDenied> {
         // Layer 3: ExecPolicy
         if !self.exec_policy.is_binary_allowed(binary) {
             return Err(AccessDenied {
@@ -375,11 +417,12 @@ mod tests {
         let rbac = Arc::new(Mutex::new(RbacManager::new()));
         let ctx = AgentContext::from_template("test-agent", "standard");
 
-        perms.lock().insert("test-agent".into(), AgentPermissions::for_new_agent("test-agent"));
-        rbac.lock().assign_role(
-            Subject::User("test-agent".into()),
-            Role::Superuser,
+        perms.lock().insert(
+            "test-agent".into(),
+            AgentPermissions::for_new_agent("test-agent"),
         );
+        rbac.lock()
+            .assign_role(Subject::User("test-agent".into()), Role::Superuser);
 
         let gate = AccessGate::new(
             perms,
@@ -393,7 +436,12 @@ mod tests {
     #[test]
     fn test_tool_allowed() {
         let (gate, ctx) = make_gate();
-        assert!(gate.check(CheckRequest::Tool { context: &ctx, tool_name: "bash" }).is_ok());
+        assert!(gate
+            .check(CheckRequest::Tool {
+                context: &ctx,
+                tool_name: "bash"
+            })
+            .is_ok());
     }
 
     #[test]

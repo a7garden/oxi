@@ -196,7 +196,7 @@ impl StatefulWidget for Footer<'_> {
                 left_spans.push(Span::styled(
                     "  Compacting...",
                     Style::default()
-                        .fg(self.theme.colors.warning.to_ratatui())
+                        .fg(self.theme.colors.warning)
                         .add_modifier(Modifier::BOLD),
                 ));
             }
@@ -222,9 +222,9 @@ impl StatefulWidget for Footer<'_> {
                     .render(info_area, buf);
 
                 let sparkline_style = if pct > 0.8 {
-                    self.theme.colors.warning.to_ratatui()
+                    self.theme.colors.warning
                 } else {
-                    self.theme.colors.primary.to_ratatui()
+                    self.theme.colors.primary
                 };
 
                 Sparkline::default()
@@ -251,12 +251,12 @@ impl StatefulWidget for Footer<'_> {
                 if !branch.is_empty() {
                     left_spans.push(Span::styled(
                         format!(" ({})", branch),
-                        Style::default().fg(self.theme.colors.accent.to_ratatui()),
+                        Style::default().fg(self.theme.colors.accent),
                     ));
                     if d.git_dirty {
                         left_spans.push(Span::styled(
                             " *",
-                            Style::default().fg(self.theme.colors.warning.to_ratatui()),
+                            Style::default().fg(self.theme.colors.warning),
                         ));
                     }
                 }
@@ -269,14 +269,14 @@ impl StatefulWidget for Footer<'_> {
                 right_spans.push(Span::styled(
                     "[no model]".to_string(),
                     Style::default()
-                        .fg(self.theme.colors.primary.to_ratatui())
+                        .fg(self.theme.colors.primary)
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
                 let model_bold = Style::default()
-                    .fg(self.theme.colors.primary.to_ratatui())
+                    .fg(self.theme.colors.primary)
                     .add_modifier(Modifier::BOLD);
-                let thinking_style = Style::default().fg(self.theme.colors.muted.to_ratatui());
+                let thinking_style = Style::default().fg(self.theme.colors.muted);
 
                 let model_part = d.model_name.split('/').next_back().unwrap_or(&d.model_name);
                 let provider_part = d.model_name.split('/').next().unwrap_or("");

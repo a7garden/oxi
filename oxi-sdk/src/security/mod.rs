@@ -16,15 +16,14 @@ pub mod middleware;
 mod permissions;
 mod rbac;
 
+pub use audit_sink::{AuditEvent, AuditSink, TracingAuditSink, TrailAuditSink};
 pub use authorizer::{Authorizer, DefaultPolicy};
 pub use capability::{Capability, CapabilitySet, CapabilitySubject, StringPattern};
-pub use audit_sink::{AuditEvent, AuditSink, TrailAuditSink, TracingAuditSink};
 pub use context::AgentContext;
 pub use exec_policy::{AllowlistMode, ExecPolicy};
 pub use gate::{AccessDenied, AccessGate, CheckRequest, DenyLayer, PathMode};
+pub use middleware::SecurityMiddleware;
 pub use permissions::{AgentPermissions, PermAuditEntry, PermissionUpdate};
 pub use rbac::{
-    Action, ApprovalStatus, PendingApproval, RbacAuditEntry, RbacManager, RbacPolicy, Role,
-    Subject,
+    Action, ApprovalStatus, PendingApproval, RbacAuditEntry, RbacManager, RbacPolicy, Role, Subject,
 };
-pub use middleware::SecurityMiddleware;

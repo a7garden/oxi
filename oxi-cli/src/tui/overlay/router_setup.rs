@@ -195,8 +195,8 @@ impl RouterSetupOverlay {
 
         let value_style = if focused {
             Style::default()
-                .fg(theme.colors.background.to_ratatui())
-                .bg(theme.colors.primary.to_ratatui())
+                .fg(theme.colors.background)
+                .bg(theme.colors.primary)
         } else if value.is_empty() {
             styles.muted
         } else {
@@ -206,7 +206,7 @@ impl RouterSetupOverlay {
         let label_span = Span::styled(
             format!("{:width$}", label, width = Self::LABEL_W),
             Style::default()
-                .fg(theme.colors.muted.to_ratatui())
+                .fg(theme.colors.muted)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -233,7 +233,7 @@ impl RouterSetupOverlay {
         let label_span = Span::styled(
             format!("{:width$}", label, width = Self::LABEL_W),
             Style::default()
-                .fg(theme.colors.muted.to_ratatui())
+                .fg(theme.colors.muted)
                 .add_modifier(Modifier::BOLD),
         );
 
@@ -244,8 +244,8 @@ impl RouterSetupOverlay {
                     Span::styled(
                         format!("[{}] ", opt),
                         Style::default()
-                            .fg(theme.colors.background.to_ratatui())
-                            .bg(theme.colors.primary.to_ratatui()),
+                            .fg(theme.colors.background)
+                            .bg(theme.colors.primary),
                     )
                 } else {
                     Span::styled(format!("{} ", opt), styles.muted)
@@ -449,7 +449,7 @@ impl OverlayComponent for RouterSetupOverlay {
         let border_block = Block::default()
             .title(Self::title_line())
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
@@ -473,7 +473,7 @@ impl OverlayComponent for RouterSetupOverlay {
 
         let sep = Line::from(Span::styled(
             "\u{2500}".repeat((inner.width - 2) as usize),
-            Style::default().fg(theme.colors.border.to_ratatui()),
+            Style::default().fg(theme.colors.border),
         ));
         frame.render_widget(
             Paragraph::new(sep),
@@ -570,16 +570,16 @@ impl OverlayComponent for RouterSetupOverlay {
 
         let save_style = if save_sel {
             Style::default()
-                .fg(theme.colors.background.to_ratatui())
-                .bg(theme.colors.primary.to_ratatui())
+                .fg(theme.colors.background)
+                .bg(theme.colors.primary)
                 .add_modifier(Modifier::BOLD)
         } else {
             styles.primary
         };
         let cancel_style = if cancel_sel {
             Style::default()
-                .fg(theme.colors.background.to_ratatui())
-                .bg(theme.colors.muted.to_ratatui())
+                .fg(theme.colors.background)
+                .bg(theme.colors.muted)
                 .add_modifier(Modifier::BOLD)
         } else {
             styles.muted
@@ -622,7 +622,7 @@ impl OverlayComponent for RouterSetupOverlay {
             let picker_block = Block::default()
                 .title(Self::picker_title())
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.colors.accent.to_ratatui()));
+                .border_style(Style::default().fg(theme.colors.accent));
             let pi = picker_block.inner(picker_popup);
             frame.render_widget(picker_block, picker_popup);
 
@@ -647,8 +647,8 @@ impl OverlayComponent for RouterSetupOverlay {
                         let ptr = if is_sel { "-> " } else { "   " };
                         let style = if is_sel {
                             Style::default()
-                                .fg(theme.colors.background.to_ratatui())
-                                .bg(theme.colors.primary.to_ratatui())
+                                .fg(theme.colors.background)
+                                .bg(theme.colors.primary)
                                 .add_modifier(Modifier::BOLD)
                         } else {
                             styles.normal

@@ -7,6 +7,7 @@ use ratatui::{
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::table_renderer::render_markdown_table;
+use crate::theme::ThemeStyles;
 use crate::widgets::chat::highlight::highlight_code;
 
 // ── Code block extraction ────────────────────────────────────────────
@@ -76,7 +77,7 @@ pub(crate) fn fix_bare_code_fences(content: &str) -> String {
 /// Parse markdown, extract tables, and render to styled Lines.
 /// Tables are rendered using pulldown-cmark with width-aware column sizing.
 /// `width` limits table width to prevent overflow.
-pub(crate) fn md_lines(content: &str, width: u16) -> Vec<Line<'static>> {
+pub(crate) fn md_lines(content: &str, width: u16, styles: &ThemeStyles) -> Vec<Line<'static>> {
     // Try table rendering first (pulldown-cmark based)
     let table_lines = render_markdown_table(content, width);
     if !table_lines.is_empty() {
@@ -93,7 +94,7 @@ pub(crate) fn md_lines(content: &str, width: u16) -> Vec<Line<'static>> {
     // Paragraph::wrap would be used at render time, but it only
     // breaks at whitespace — CJK characters that lack spaces between
     // them would be treated as a single giant "word" and overflow.
-    let raw_lines = render_markdown(content);
+    let raw_lines = render_markdown(content, styles);
     wrap_lines_styled(&raw_lines, width)
 }
 
@@ -331,7 +332,7 @@ pub(crate) fn spans_width(spans: &[Span<'static>]) -> usize {
 
 /// Render regular markdown (non-table content).
 /// Detects fenced code blocks and applies syntax highlighting.
-fn render_markdown(content: &str) -> Vec<Line<'static>> {
+fn render_markdown(content: &str, styles: &ThemeStyles) -> Vec<Line<'static>> {
     let preprocessed = fix_bare_code_fences(content);
 
     // Split into segments: code blocks vs inline markdown
@@ -398,7 +399,7 @@ fn render_markdown(content: &str) -> Vec<Line<'static>> {
                 }
             }
             MarkdownSegment::Code { lang, content } => {
-                lines.extend(highlight_code(content, lang));
+                lines.extend(highlight_code(content, lang, styles));
             }
         }
     }

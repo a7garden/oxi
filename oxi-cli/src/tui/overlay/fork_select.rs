@@ -128,7 +128,7 @@ impl OverlayComponent for ForkSelectOverlay {
                 Style::default().bg(ratatui::style::Color::Rgb(0, 0, 0)),
             ))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
@@ -148,8 +148,8 @@ impl OverlayComponent for ForkSelectOverlay {
         let list = List::new(list_items)
             .highlight_style(
                 Style::default()
-                    .fg(theme.colors.background.to_ratatui())
-                    .bg(theme.colors.primary.to_ratatui())
+                    .fg(theme.colors.background)
+                    .bg(theme.colors.primary)
                     .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol("→ ");

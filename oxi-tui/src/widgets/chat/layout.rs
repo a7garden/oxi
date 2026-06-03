@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use ratatui::style::Style;
 use ratatui::text::Line;
 
+use crate::theme::ThemeStyles;
 use crate::widgets::chat::dashboard::{measure_dashboard, DashboardInfo};
 use crate::widgets::chat::markdown::{filter_tool_json, md_lines};
 use crate::widgets::chat::state::ChatViewState;
@@ -90,7 +91,11 @@ fn is_box_block(block: &ContentBlock) -> bool {
     )
 }
 
-pub(crate) fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEntry> {
+pub(crate) fn compute_layout(
+    state: &ChatViewState,
+    width: u16,
+    styles: &ThemeStyles,
+) -> Vec<LayoutEntry> {
     let mut entries = Vec::new();
     let mut y: u32 = 0;
 
@@ -160,7 +165,7 @@ pub(crate) fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEnt
             prev_was_box = is_box;
 
             let key = format!("{}:{}", msg_idx, blk_idx);
-            let mut kind = block_to_layout_kind(block, msg.role, width, &key);
+            let mut kind = block_to_layout_kind(block, msg.role, width, &key, styles);
             // Override collapsed/expanded state
             #[allow(clippy::collapsible_match)]
             match &mut kind {
@@ -188,7 +193,7 @@ pub(crate) fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEnt
                 }
                 _ => {}
             }
-            let h = measure_kind(&kind, width, &state.expanded_thinking);
+            let h = measure_kind(&kind, width, &state.expanded_thinking, styles);
             if y > u16::MAX as u32 {
                 break 'outer;
             }
@@ -241,7 +246,7 @@ pub(crate) fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEnt
             prev_was_box = is_box;
 
             let key = format!("s:{}", blk_idx);
-            let mut kind = block_to_layout_kind(block, MessageRole::Assistant, width, &key);
+            let mut kind = block_to_layout_kind(block, MessageRole::Assistant, width, &key, styles);
             #[allow(clippy::collapsible_match)]
             match &mut kind {
                 LayoutKind::Thinking {
@@ -268,7 +273,7 @@ pub(crate) fn compute_layout(state: &ChatViewState, width: u16) -> Vec<LayoutEnt
                 }
                 _ => {}
             }
-            let h = measure_kind(&kind, width, &state.expanded_thinking);
+            let h = measure_kind(&kind, width, &state.expanded_thinking, styles);
             if y <= u16::MAX as u32 {
                 entries.push(LayoutEntry {
                     y: y as u16,
@@ -289,6 +294,7 @@ fn block_to_layout_kind(
     role: MessageRole,
     width: u16,
     key: &str,
+    styles: &ThemeStyles,
 ) -> LayoutKind {
     match block {
         ContentBlock::Text { content } => {
@@ -299,7 +305,7 @@ fn block_to_layout_kind(
             } else {
                 width
             };
-            let lines = md_lines(content, wrap_w);
+            let lines = md_lines(content, wrap_w, styles);
             LayoutKind::Text {
                 lines,
                 is_user: role == MessageRole::User,
@@ -373,6 +379,7 @@ pub(crate) fn measure_kind(
     kind: &LayoutKind,
     width: u16,
     expanded_thinking: &HashSet<String>,
+    styles: &ThemeStyles,
 ) -> u16 {
     match kind {
         LayoutKind::Spacer
@@ -448,7 +455,7 @@ pub(crate) fn measure_kind(
             } else {
                 // Expanded: header + filtered content rendered as markdown
                 let filtered = filter_tool_json(content);
-                let md = md_lines(&filtered, width);
+                let md = md_lines(&filtered, width, styles);
                 1 + md.len() as u16
             }
         }

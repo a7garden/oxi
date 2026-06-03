@@ -194,8 +194,10 @@ impl<W: io::Write> Backend for DiffBackend<W> {
             .collect();
 
         if self.force_full_redraw || self.prev_rows.is_empty() {
-            // Full redraw — delegate to crossterm
-            // Re-iterate from collected cells
+            // Full redraw — delegate to crossterm.
+            // NOTE: `row_cells` is consumed here (into_iter). This is safe
+            // because we `return` immediately after — the diff branch below
+            // never executes in this case.
             let all_cells: Vec<(u16, u16, &'a Cell)> = row_cells.into_iter().flatten().collect();
             self.inner.draw(all_cells.into_iter())?;
             self.prev_rows = new_rows;
@@ -203,12 +205,14 @@ impl<W: io::Write> Backend for DiffBackend<W> {
             return Ok(());
         }
 
-        // --- Differential rendering ---
-        // Begin synchronized output (CSI 2026h)
-        let _ = crossterm::execute!(
-            self.inner,
-            crossterm::style::SetAttribute(CAttribute::Reset)
-        );
+        // --- Differential rendering with Synchronized Update (CSI 2026) ---
+        // Begin synchronized output to prevent mid-frame tearing.
+        // CSI 2026: Begin synchronized update
+        let _ = crossterm::queue!(self.inner, crossterm::style::Print("\x1b[?2026h"));
+        self.inner.flush()?;
+
+        // Reset any residual attributes
+        let _ = crossterm::execute!(self.inner, SetAttribute(CAttribute::Reset));
 
         // Find changed rows
         let max_rows = new_rows.len().max(self.prev_rows.len());
@@ -317,6 +321,10 @@ impl<W: io::Write> Backend for DiffBackend<W> {
                 (None, None) => unreachable!(),
             }
         }
+
+        // CSI 2026: End synchronized update — flush all changes atomically
+        let _ = crossterm::queue!(self.inner, crossterm::style::Print("\x1b[?2026l"));
+        ratatui::backend::Backend::flush(self)?;
 
         self.prev_rows = new_rows;
         Ok(())

@@ -91,19 +91,40 @@ impl AuditEvent {
             AuditEvent::ToolAccess { tool, allowed, .. } => AuditAction::Other {
                 detail: format!("tool_access:{tool}:allowed={allowed}"),
             },
-            AuditEvent::PathAccess { path, mode, allowed, .. } => AuditAction::Other {
+            AuditEvent::PathAccess {
+                path,
+                mode,
+                allowed,
+                ..
+            } => AuditAction::Other {
                 detail: format!("path_access:{path}:{mode}:allowed={allowed}"),
             },
-            AuditEvent::ExecAccess { binary, allowed, .. } => AuditAction::Other {
+            AuditEvent::ExecAccess {
+                binary, allowed, ..
+            } => AuditAction::Other {
                 detail: format!("exec_access:{binary}:allowed={allowed}"),
             },
-            AuditEvent::RbacDecision { subject, action, allowed, .. } => AuditAction::Other {
+            AuditEvent::RbacDecision {
+                subject,
+                action,
+                allowed,
+                ..
+            } => AuditAction::Other {
                 detail: format!("rbac:{subject}:{action}:allowed={allowed}"),
             },
-            AuditEvent::SandboxViolation { agent, path, workspace, .. } => AuditAction::Other {
+            AuditEvent::SandboxViolation {
+                agent,
+                path,
+                workspace,
+                ..
+            } => AuditAction::Other {
                 detail: format!("sandbox_violation:{agent}:{path}:ws={workspace}"),
             },
-            AuditEvent::Approval { approval_id, status, .. } => AuditAction::Other {
+            AuditEvent::Approval {
+                approval_id,
+                status,
+                ..
+            } => AuditAction::Other {
                 detail: format!("approval:{approval_id}:{status}"),
             },
         }

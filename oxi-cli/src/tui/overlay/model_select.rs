@@ -126,13 +126,13 @@ impl OverlayComponent for ModelSelectOverlay {
         let border_block = Block::default()
             .title(title_line(&self.filter))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
         let title_area = Rect { x: inner.x, y: inner.y, width: inner.width, height: 1 };
         let title_style = Style::default()
-            .fg(theme.colors.primary.to_ratatui())
+            .fg(theme.colors.primary)
             .add_modifier(Modifier::BOLD);
         frame.render_widget(
             Paragraph::new(Span::styled(title_text(&self.filter), title_style)),
@@ -157,8 +157,8 @@ impl OverlayComponent for ModelSelectOverlay {
                 let content = format!("{}{}", pointer, model);
                 let style = if is_sel {
                     Style::default()
-                        .fg(theme.colors.background.to_ratatui())
-                        .bg(theme.colors.primary.to_ratatui())
+                        .fg(theme.colors.background)
+                        .bg(theme.colors.primary)
                         .add_modifier(Modifier::BOLD)
                 } else {
                     styles.normal

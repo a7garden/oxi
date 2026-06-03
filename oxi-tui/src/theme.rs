@@ -139,44 +139,48 @@ impl ColorScheme {
         }
     }
 
-    /// Convert to ratatui Style with just foreground.
+    /// Convert to ratatui Style with foreground and background.
     pub fn to_style(&self) -> Style {
-        Style::default()
-            .fg(self.foreground.to_ratatui())
-            .bg(self.background.to_ratatui())
+        Style::default().fg(self.foreground).bg(self.background)
     }
 
     /// Convert to ratatui Style with all semantic colors.
     pub fn to_styles(&self) -> ThemeStyles {
         ThemeStyles {
-            normal: Style::default().fg(self.foreground.to_ratatui()),
-            primary: Style::default().fg(self.primary.to_ratatui()),
-            secondary: Style::default().fg(self.secondary.to_ratatui()),
-            error: Style::default().fg(self.error.to_ratatui()),
-            warning: Style::default().fg(self.warning.to_ratatui()),
-            success: Style::default().fg(self.success.to_ratatui()),
-            muted: Style::default().fg(self.muted.to_ratatui()),
-            accent: Style::default().fg(self.accent.to_ratatui()),
-            border: Style::default().fg(self.border.to_ratatui()),
-            cursor_fg: Style::default().fg(self.cursor_fg.to_ratatui()),
-            cursor_bg: Style::default().fg(self.cursor_bg.to_ratatui()),
-            selection_bg: Style::default().bg(self.selection_bg.to_ratatui()),
-            user_border: Style::default().fg(self.user_border.to_ratatui()),
-            user_bg: Style::default().bg(self.user_bg.to_ratatui()),
-            tool_pending_bg: Style::default().bg(self.tool_pending_bg.to_ratatui()),
-            tool_executing_bg: Style::default().bg(self.tool_executing_bg.to_ratatui()),
-            tool_success_bg: Style::default().bg(self.tool_success_bg.to_ratatui()),
-            tool_error_bg: Style::default().bg(self.tool_error_bg.to_ratatui()),
+            normal: Style::default().fg(self.foreground),
+            primary: Style::default().fg(self.primary),
+            secondary: Style::default().fg(self.secondary),
+            error: Style::default().fg(self.error),
+            warning: Style::default().fg(self.warning),
+            success: Style::default().fg(self.success),
+            muted: Style::default().fg(self.muted),
+            accent: Style::default().fg(self.accent),
+            border: Style::default().fg(self.border),
+            cursor_fg: Style::default().fg(self.cursor_fg),
+            cursor_bg: Style::default().fg(self.cursor_bg),
+            selection_bg: Style::default().bg(self.selection_bg),
+            user_border: Style::default().fg(self.user_border),
+            user_bg: Style::default().bg(self.user_bg),
+            tool_pending_bg: Style::default().bg(self.tool_pending_bg),
+            tool_executing_bg: Style::default().bg(self.tool_executing_bg),
+            tool_success_bg: Style::default().bg(self.tool_success_bg),
+            tool_error_bg: Style::default().bg(self.tool_error_bg),
+            code_fg: Style::default().fg(self.code_fg),
+            code_bg: Style::default().bg(self.code_bg),
         }
     }
 }
 
 /// Pre-computed ratatui styles for all semantic colors in a ColorScheme.
+///
+/// Every style field is a `Style` with only the relevant property set (fg or bg),
+/// so they compose correctly via `Style::patch()`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ThemeStyles {
+    // ── Text ──────────────────────────────────────────────────────
     /// Normal / default text style.
     pub normal: Style,
-    /// Primary color style.
+    /// Primary accent color style (UI elements, labels, user "You").
     pub primary: Style,
     /// Secondary color style.
     pub secondary: Style,
@@ -190,6 +194,8 @@ pub struct ThemeStyles {
     pub muted: Style,
     /// Accent / highlight style.
     pub accent: Style,
+
+    // ── Structural ────────────────────────────────────────────────
     /// Border / separator style.
     pub border: Style,
     /// Cursor foreground style.
@@ -198,10 +204,14 @@ pub struct ThemeStyles {
     pub cursor_bg: Style,
     /// Selection background style.
     pub selection_bg: Style,
+
+    // ── User messages ─────────────────────────────────────────────
     /// User message left-border accent (bright primary).
     pub user_border: Style,
     /// User message background (subtle tint).
     pub user_bg: Style,
+
+    // ── Tool call states ──────────────────────────────────────────
     /// Tool call pending background (waiting state).
     pub tool_pending_bg: Style,
     /// Tool call executing background (running state).
@@ -210,9 +220,13 @@ pub struct ThemeStyles {
     pub tool_success_bg: Style,
     /// Tool call error background (completed with error).
     pub tool_error_bg: Style,
-}
 
-// ThemeStyles derives Default
+    // ── Code ──────────────────────────────────────────────────────
+    /// Inline code foreground style.
+    pub code_fg: Style,
+    /// Inline code / code block background style.
+    pub code_bg: Style,
+}
 
 // ---------------------------------------------------------------------------
 // Spacing
@@ -484,7 +498,7 @@ fn parse_color(s: &str) -> Option<Color> {
         "bright-magenta" | "brightmagenta" => Some(Color::Indexed(13)),
         "bright-cyan" | "brightcyan" => Some(Color::Indexed(14)),
         "bright-white" | "brightwhite" => Some(Color::Indexed(15)),
-        "default" => Some(Color::Default),
+        "default" => Some(Color::Reset),
         _ => None,
     }
 }
@@ -696,7 +710,7 @@ mod tests {
     fn parse_named_colors() {
         assert_eq!(parse_color("red"), Some(Color::Red));
         assert_eq!(parse_color("bright-black"), Some(Color::Indexed(8)));
-        assert_eq!(parse_color("default"), Some(Color::Default));
+        assert_eq!(parse_color("default"), Some(Color::Reset));
     }
 
     #[test]

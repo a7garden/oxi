@@ -79,7 +79,7 @@ impl OverlayComponent for TextViewerOverlay {
     fn render(&mut self, frame: &mut Frame, area: Rect, theme: &oxi_tui::Theme) {
         let popup = centered_layout(area, 0.85, 0.85);
         let title_style = Style::default()
-            .fg(theme.colors.primary.to_ratatui())
+            .fg(theme.colors.primary)
             .add_modifier(Modifier::BOLD);
 
         // Clear background
@@ -89,7 +89,7 @@ impl OverlayComponent for TextViewerOverlay {
         let border_block = Block::default()
             .title(Span::styled(&self.title, title_style))
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.colors.border.to_ratatui()));
+            .border_style(Style::default().fg(theme.colors.border));
         let inner = border_block.inner(popup);
         frame.render_widget(border_block, popup);
 
@@ -132,7 +132,7 @@ impl OverlayComponent for TextViewerOverlay {
         frame.render_widget(
             Paragraph::new(Span::styled(
                 " ↑/↓ scroll  |  PgUp/PgDn  |  Esc/Enter/q close",
-                Style::default().fg(theme.colors.muted.to_ratatui()),
+                Style::default().fg(theme.colors.muted),
             )),
             Rect {
                 x: inner.x,

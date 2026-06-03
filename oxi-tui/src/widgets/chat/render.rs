@@ -362,7 +362,7 @@ impl Widget for EntryWidget<'_> {
                         Span::styled(count_str, self.styles.muted),
                     ]));
                     let thinking_style = self.styles.muted.add_modifier(Modifier::ITALIC);
-                    let md_rendered = md_lines(&filtered, rect.width);
+                    let md_rendered = md_lines(&filtered, rect.width, self.styles);
                     for md_line in md_rendered {
                         let spans: Vec<Span<'static>> = md_line
                             .spans

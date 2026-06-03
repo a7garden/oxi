@@ -61,10 +61,12 @@ impl ExecPolicy {
     }
 
     fn safe_defaults() -> HashSet<String> {
-        ["git", "grep", "find", "cat", "ls", "head", "tail", "wc", "sort", "uniq"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect()
+        [
+            "git", "grep", "find", "cat", "ls", "head", "tail", "wc", "sort", "uniq",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
     }
 }
 

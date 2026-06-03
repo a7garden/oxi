@@ -280,17 +280,17 @@ impl ratatui::widgets::StatefulWidget for Input<'_> {
 
         // Configure the textarea with oxi styling
         let textarea = state.textarea_mut();
-        textarea.set_style(Style::default().fg(self.theme.colors.foreground.to_ratatui()));
+        textarea.set_style(Style::default().fg(self.theme.colors.foreground));
         textarea.set_cursor_style(
             Style::default()
-                .fg(self.theme.colors.cursor_fg.to_ratatui())
-                .bg(self.theme.colors.cursor_bg.to_ratatui()),
+                .fg(self.theme.colors.cursor_fg)
+                .bg(self.theme.colors.cursor_bg),
         );
         textarea.set_cursor_line_style(Style::default());
         textarea.remove_line_number();
 
         // Placeholder style — text is managed by InputState::set_placeholder()
-        textarea.set_placeholder_style(Style::default().fg(self.theme.colors.muted.to_ratatui()));
+        textarea.set_placeholder_style(Style::default().fg(self.theme.colors.muted));
 
         // Render the textarea widget.
         // No prompt symbol is shown (the `> ` prefix was removed),
