@@ -5,9 +5,9 @@
 >
 > **How to use:** Open a new agent session, point it at the brief file, and let it run.
 
-**Generated:** 2026-05-31
+**Generated:** 2026-05-31 (last regenerated 2026-06-03)
 **Project:** oxi
-**Version:** 0.24.0 / 0.25.0
+**Version:** 0.26.2 (latest released: 0.25.7)
 
 ## Survey Summary
 

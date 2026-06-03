@@ -1,5 +1,10 @@
 # oxi cargo-audit configuration
 #
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  UPGRADE TRACKER — When extism ≥ 1.22 (wasmtime ≥ 43) ships,  ║
+# ║  remove ALL wasmtime RUSTSEC-2026-* ignores below.              ║
+# ╚══════════════════════════════════════════════════════════════════╝
+#
 # All ignored advisories below are wasmtime 41.x vulnerabilities pulled in
 # through extism 1.21 (WASM extension runtime). extism hard-pins wasmtime = "41"
 # and no newer extism release exists yet that uses wasmtime >= 43.
@@ -10,34 +15,49 @@
 #   - There is no untrusted plugin input path in oxi.
 #   - Removing extism would disable WASM extensions entirely, which is not acceptable.
 #
-# When extism releases a version with wasmtime >= 43, remove these ignores.
+# This file is the single source of truth for advisory ignores.
+# deny.toml [advisories].ignore MUST be kept in sync with this list.
 
 [advisories]
 ignore = [
-    # wasmtime 41.x — sandbox escape on aarch64 Cranelift (critical)
+    # ── wasmtime 41.x (via extism 1.21) ──────────────────────────────
+
+    # sandbox escape on aarch64 Cranelift (critical)
     "RUSTSEC-2026-0096",
-    # wasmtime 41.x — Winch sandbox-escaping memory access (critical)
+    # Winch sandbox-escaping memory access (critical)
     "RUSTSEC-2026-0095",
-    # wasmtime 41.x — host data leakage with 64-bit tables and Winch (low)
+    # host data leakage with 64-bit tables and Winch (low)
     "RUSTSEC-2026-0086",
-    # wasmtime 41.x — panic transcoding misaligned UTF-16 (medium)
+    # panic transcoding misaligned UTF-16 (medium)
     "RUSTSEC-2026-0092",
-    # wasmtime 41.x — heap OOB read UTF-16 transcoding (medium)
+    # heap OOB read UTF-16 transcoding (medium)
     "RUSTSEC-2026-0093",
-    # wasmtime 41.x — panic on oversized table allocation (medium)
+    # panic on oversized table allocation (medium)
     "RUSTSEC-2026-0114",
-    # wasmtime 41.x — segfault with f64x2.splat on Cranelift x86-64 (medium)
+    # segfault with f64x2.splat on Cranelift x86-64 (medium)
     "RUSTSEC-2026-0087",
-    # wasmtime 41.x — pooling allocator data leakage (low)
+    # pooling allocator data leakage (low)
     "RUSTSEC-2026-0088",
-    # wasmtime 41.x — panic on Winch table.fill (medium)
+    # panic on Winch table.fill (medium)
     "RUSTSEC-2026-0089",
-    # wasmtime 41.x — Winch table.grow return value masking (medium)
+    # Winch table.grow return value masking (medium)
     "RUSTSEC-2026-0094",
-    # wasmtime 41.x — panic lifting component model flags (medium)
+    # panic lifting component model flags (medium)
     "RUSTSEC-2026-0085",
-    # wasmtime 41.x — OOB write transcoding component model strings (medium)
+    # OOB write transcoding component model strings (medium)
     "RUSTSEC-2026-0091",
-    # rsa — Marvin Attack timing sidechannel (medium, no fix available)
+
+    # ── transitive dependencies (no fix available) ──────────────────
+
+    # rsa ~0.9.10 — Marvin Attack timing sidechannel (medium)
+    # Transitive via jsonschema → referencing. Server-side only.
     "RUSTSEC-2023-0071",
+
+    # fxhash — unmaintained, transitive via a3s-search → scraper → selectors.
+    # No known exploit. Re-evaluate when a3s-search updates deps.
+    "RUSTSEC-2025-0057",
+
+    # number_prefix — unmaintained, transitive via indicatif → self_update.
+    # No known exploit. self_update has no maintained alternative.
+    "RUSTSEC-2025-0119",
 ]

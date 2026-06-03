@@ -1,6 +1,15 @@
 [advisories]
 # Vulnerabilities that are currently accepted.
 # Each entry should have a brief note explaining why.
+#
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  SOURCE OF TRUTH: .cargo/audit.toml.                             ║
+# ║  When extism ≥ 1.22 (wasmtime ≥ 43) ships, remove all            ║
+# ║  RUSTSEC-2026-* entries below AND in audit.toml.                  ║
+# ║                                                                  ║
+# ║  If you update this list, mirror the change in audit.toml,       ║
+# ║  or run scripts/sync-audit-ignores.sh (TBD).                     ║
+# ╚══════════════════════════════════════════════════════════════════╝
 ignore = [
     # wasmtime 41.0.4 — pinned by extism 1.21.0 (no fixed version available).
     # All CVEs are sandbox-constrained; oxi does not execute untrusted Wasm.

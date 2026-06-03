@@ -1,7 +1,7 @@
 name: Test
 
 # Run tests on main merge and release, not on every PR.
-# CI workflow handles fast feedback (fmt/clippy) for PRs.
+# CI workflow handles fast feedback (fmt/clippy/smoke) for PRs.
 
 on:
   push:
@@ -12,6 +12,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: ""
+  # Fail doc-test builds on any rustdoc warning (broken links, etc.)
+  RUSTDOCFLAGS: "-D warnings"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,15 +21,19 @@ concurrency:
 
 jobs:
   test:
-    name: Test (nextest)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: Test (nextest, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "test"
+          shared-key: test-${{ matrix.os }}
       - uses: taiki-e/install-action@nextest
       - name: Run tests
         run: cargo nextest run --workspace --profile ci

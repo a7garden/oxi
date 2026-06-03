@@ -16,14 +16,44 @@ jobs:
       - name: Check PR size
         run: |
           LINES=$(git diff --numstat origin/main...HEAD | awk '{sum+=$1+$2} END {print sum+0}')
-          if [ "$LINES" -gt 2000 ]; then
+          if [ "$LINES" -gt 4000 ]; then
+            echo "::error::PR is too large ($LINES lines changed). Please split into smaller PRs (<2000 lines each is the soft target)."
+            exit 1
+          elif [ "$LINES" -gt 2000 ]; then
             echo "::warning::PR is large ($LINES lines changed). Consider splitting."
           else
             echo "PR size: $LINES lines changed. OK."
           fi
 
-      - name: Check conventional commits
+      - name: Enforce conventional commit title
         run: |
           TITLE="${{ github.event.pull_request.title }}"
-          echo "$TITLE" | grep -qE '^(feat|fix|docs|refactor|perf|test|chore|ci|build)(\(.+\))?: .+' || \
-            echo "::warning::PR title should follow conventional commits format: $TITLE"
+          # Allowed types: feat, fix, docs, refactor, perf, test, chore, ci, build, style, revert
+          if ! echo "$TITLE" | grep -qE '^(feat|fix|docs|refactor|perf|test|chore|ci|build|style|revert)(\([a-z0-9_-]+\))?!?: .+'; then
+            echo "::error::PR title does not follow Conventional Commits format."
+            echo "::error::Got: '$TITLE'"
+            echo "::error::Expected: <type>(<scope>)?: <subject>"
+            echo "::error::Allowed types: feat, fix, docs, refactor, perf, test, chore, ci, build, style, revert"
+            exit 1
+          fi
+          echo "PR title: $TITLE  (conforming)"
+
+      - name: Check for merge commit in feature branch
+        run: |
+          # Discourage merge commits inside feature branches; prefer rebase or squash.
+          MERGE_COUNT=$(git log --oneline --merges origin/main..HEAD | wc -l | tr -d ' ')
+          if [ "$MERGE_COUNT" -gt 0 ]; then
+            echo "::warning::Feature branch contains $MERGE_COUNT merge commit(s). Consider rebasing or squashing."
+          else
+            echo "No merge commits in feature branch. OK."
+          fi
+
+      - name: Check linked issue
+        # Encourage issue linkage for traceability
+        run: |
+          BODY="${{ github.event.pull_request.body }}"
+          if ! echo "$BODY" | grep -qE '(#[0-9]+|fixes #[0-9]+|closes #[0-9]+|resolves #[0-9]+)'; then
+            echo "::warning::PR body does not reference any issue (e.g. 'Fixes #123'). Consider linking one."
+          else
+            echo "PR body references an issue. OK."
+          fi

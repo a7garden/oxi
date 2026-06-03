@@ -1,0 +1,26 @@
+# CODEOWNERS — automatic PR review assignment
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo
+*       @a7garden
+
+# Workspace crates — each area has a responsible owner
+/oxi-ai/       @a7garden
+/oxi-agent/    @a7garden
+/oxi-store/    @a7garden
+/oxi-tui/      @a7garden
+/oxi-sdk/      @a7garden
+/oxi-cli/      @a7garden
+
+# CI/CD and infrastructure
+/.github/      @a7garden
+/scripts/      @a7garden
+
+# Documentation
+/docs/         @a7garden
+/AGENTS.md     @a7garden
+
+# Security-related files
+/deny.toml             @a7garden
+/.cargo/audit.toml     @a7garden
+/SECURITY.md           @a7garden

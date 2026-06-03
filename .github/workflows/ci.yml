@@ -41,13 +41,33 @@ jobs:
           shared-key: "clippy"
       - run: cargo clippy --workspace -- -D warnings
 
+  smoke-test:
+    name: Smoke Test (PR only)
+    # Lightweight subset of tests for PR feedback. Full matrix runs in
+    # `test.yml` on push to main. Skips tests tagged `slow` or `net`.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "smoke-test"
+      - uses: taiki-e/install-action@nextest
+      - name: Run smoke tests
+        # Exclude long-running / network-dependent tests; those run in test.yml
+        # against the full nextest CI profile (20-min timeout).
+        run: |
+          cargo nextest run --workspace \
+            -E 'not (test(slow) | test(/^net_/) | test(requires_network) | test(/^bench_/))'
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install cargo-audit && cargo audit
+      - uses: taiki-e/install-action@cargo-audit
+      - run: cargo audit
 
   deny:
     name: Dependency Lint
@@ -55,4 +75,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install cargo-deny && cargo deny check
+      - uses: taiki-e/install-action@cargo-deny
+      - run: cargo deny check

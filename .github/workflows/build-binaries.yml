@@ -25,13 +25,16 @@ jobs:
             artifact_name: oxi
             archive_ext: tar.gz
           # ── macOS ──
+          # macos-14 is the first ARM-only runner line; x86_64-apple-darwin
+          # is produced via Apple's cross-linker (--target x86_64-apple-darwin
+          # is handled by the dtolnay/rust-toolchain step below).
           - target: aarch64-apple-darwin
             os: macos-latest
             use_cross: false
             artifact_name: oxi
             archive_ext: tar.gz
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-14
             use_cross: false
             artifact_name: oxi
             archive_ext: tar.gz

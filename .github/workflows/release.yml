@@ -38,13 +38,16 @@ jobs:
             archive_ext: tar.gz
             use_cross: true
           # ── macOS ──
+          # macos-14 is the first ARM-only runner line; x86_64-apple-darwin
+          # is produced via Apple's cross-linker (--target x86_64-apple-darwin
+          # is handled by the dtolnay/rust-toolchain step above).
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact_name: oxi
             archive_ext: tar.gz
             use_cross: false
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-14
             artifact_name: oxi
             archive_ext: tar.gz
             use_cross: false
@@ -103,6 +106,8 @@ jobs:
 
   release:
     name: Publish Release
+    # Block release on test workflow — releases must come from a green main.
+    # Tag pushes from a branch that hasn't passed test.yml will be rejected.
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -112,6 +117,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Verify tag points at main HEAD
+        # Defensive: protect against force-pushed tags from stale branches.
+        # Checks that the tagged commit is an ancestor of (or equal to) origin/main.
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME (commit $GITHUB_SHA) is not reachable from origin/main."
+            echo "::error::Refusing to release a tag that does not point at a main commit."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME is on main. OK."
 
       - name: List artifacts
         run: ls -R artifacts

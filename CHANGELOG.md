@@ -5,6 +5,25 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed — infrastructure
+
+- **CI**: Added `smoke-test` job to `.github/workflows/ci.yml` so PRs run a lightweight test subset
+- **CI**: Replaced `cargo install` with `taiki-e/install-action` for `cargo-audit` and `cargo-deny` (saves ~3 min/job)
+- **CI**: Added macOS to `test.yml` matrix for cross-platform test coverage
+- **CI**: Added `RUSTDOCFLAGS=-D warnings` to `test.yml` so doc-tests fail on warnings
+- **Release**: Switched x86_64 macOS runner from `macos-13` (deprecated) to `macos-14` (cross-compiled)
+- **Release**: Added tag-on-main verification step to prevent releases from stale branches
+- **PR Gate**: Conventional commit title is now enforced (error, not warning); PR size hard cap at 4000 lines
+- **PR Gate**: Added merge-commit detection and issue-linkage encouragement
+- **Dependabot**: Added `github-actions` ecosystem alongside cargo
+- **Cargo**: Removed conflicting `[profile.release]` from `.cargo/config.toml` (workspace `Cargo.toml` is now the single source of truth)
+- **Cargo audit/deny**: Synced ignore lists across `.cargo/audit.toml` and `deny.toml`; added upgrade tracker comment for extism ≥ 1.22 (wasmtime ≥ 43)
+- **Docs**: Added `CODEOWNERS` for per-area review assignment
+
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.25.7...HEAD
+
 ## [0.24.0] - 2026-05-30
 
 ### Changed — workspace
@@ -14,10 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `.cargo/audit.toml` with documented vulnerability ignore rationale (wasmtime 41.x via extism)
 - Updated README version badge to 0.24.0
 - Updated AGENTS.md version to 0.24.0
-
-### Unreleased
-
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.25.7...HEAD
 
 ## [0.25.7] - 2026-05-31
 

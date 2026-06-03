@@ -1,20 +1,11 @@
 [build]
 # sccache for distributed compilation cache
-# Enable via RUSTC_WRAPPER=sccache (set in CI)
+# Enable via: RUSTC_WRAPPER=sccache cargo build
 
 [term]
 verbose = false
 
-# Optimization hints
-[profile.dev]
-opt-level = 0
-
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 16
-strip = false
-
-# Faster incremental builds in dev
+# Faster incremental builds in dev: build dependencies with mild optimization
+# to avoid recompiling them on every change.
 [profile.dev.package."*"]
 opt-level = 1
