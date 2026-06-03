@@ -71,7 +71,7 @@ mod tests {
             &ResourceRef::KernelDomain {
                 domain: "memory".into()
             },
-            Rights::READ
+            Rights::Read
         ));
     }
 

@@ -212,14 +212,14 @@ impl AccessGate {
     fn check_tool(&self, ctx: &AgentContext, tool: &str) -> Result<(), AccessDenied> {
         // Layer 0: CSpace
         let resource = ResourceRef::KernelDomain { domain: tool.to_string() };
-        if !ctx.cspace.can(&resource, Rights::EXECUTE) {
+        if !ctx.cspace.can(&resource, Rights::Execute) {
             let always_on = ["read", "write", "edit", "grep", "find", "ls", "bash", "exec"];
             if !always_on.contains(&tool) {
                 return Err(AccessDenied {
                     agent: ctx.agent_name.clone(),
                     resource: tool.to_string(),
                     layer: DenyLayer::Capability,
-                    reason: format!("No EXECUTE capability for '{tool}' in CSpace"),
+                    reason: format!("No Execute capability for '{tool}' in CSpace"),
                     suggestion: Some(format!("Add '{tool}' capability to the agent's template.")),
                 });
             }

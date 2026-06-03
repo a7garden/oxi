@@ -19,6 +19,7 @@ pub mod builder;
 pub mod closure_tool;
 pub mod coordination;
 pub mod error;
+pub mod event_bus;
 pub mod kernel_bridge;
 pub mod lifecycle;
 pub mod message_bus;
@@ -41,10 +42,13 @@ pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
 pub use message_bus::{InterAgentMessage, LagAwareReceiver, MessageBus, PublishResult};
 pub use metrics::{AgentMetrics, MetricsSnapshot};
 
+// Composition Layer — EventBus
+pub use event_bus::EventBus;
+
 // Foundation Layer
 pub use error::{SdkError, SdkResult};
 pub use lifecycle::{
-    AgentHandle, AgentLifecycleEvent, AgentSnapshot, AgentStatus, AgentSupervisor,
+    AgentHandle, AgentLifecycleEvent, AgentPool, AgentSnapshot, AgentStatus, AgentSupervisor,
     FileSnapshotStore, RestartBackoff, SnapshotStore, SupervisorPolicy, ToolManifest,
 };
 pub use middleware::Middleware;
@@ -54,15 +58,19 @@ pub use middleware::{
 };
 pub use multi_provider::{MultiProviderBuilder, RoutingConfig};
 pub use observability::{
-    AuditEntry, AuditFilter, AuditLog, CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig,
-    EventQuery, EventStore, EventStoreConfig, GlobalCostSnapshot, Span, SpanContext, SpanGuard,
-    SpanId, SpanKind, SpanStatus, StoredEvent, TokenUsage, TraceId, Tracer,
+    AuditAction, AuditEntry, AuditError, AuditFilter, AuditLog, AuditPersistence,
+    AuditTrail, CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig, EventQuery,
+    EventStore, EventStoreConfig, GlobalCostSnapshot, HashDigest, Span, SpanContext, SpanGuard,
+    SpanId, SpanKind, SpanStatus, StoredEvent, TokenUsage, TraceId, TrailEntry, Tracer,
 };
 
 // Composition Layer — Security
 pub use security::{
-    Authorizer, Capability, CapabilitySet, CapabilitySubject, DefaultPolicy, SecurityMiddleware,
-    StringPattern,
+    AccessDenied, AccessGate, Action, AgentContext, AgentPermissions, AllowlistMode,
+    ApprovalStatus, AuditEvent, AuditSink, Authorizer, Capability, CapabilitySet,
+    CapabilitySubject, CheckRequest, DefaultPolicy, DenyLayer, ExecPolicy, PathMode,
+    PendingApproval, PermAuditEntry, PermissionUpdate, RbacAuditEntry, RbacManager, RbacPolicy,
+    Role, SecurityMiddleware, StringPattern, Subject, TrailAuditSink, TracingAuditSink,
 };
 
 // Composition Layer — Coordination

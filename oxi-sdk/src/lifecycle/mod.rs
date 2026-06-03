@@ -11,10 +11,12 @@
 //! | `supervisor.rs`   | `AgentSupervisor`, `SupervisorPolicy`, `RestartBackoff`, `AgentHandle` |
 //! | `snapshot.rs`     | `AgentSnapshot`, `ToolManifest`, `SnapshotStore`, `FileSnapshotStore` |
 
+mod agent_pool;
 mod snapshot;
 mod supervisor;
 
 // ── Re-exports (thin facade) ─────────────────────────────────────────────
+pub use agent_pool::AgentPool;
 pub use snapshot::{AgentSnapshot, FileSnapshotStore, SnapshotStore, ToolManifest};
 pub use supervisor::{AgentHandle, AgentSupervisor, RestartBackoff, SupervisorPolicy};
 

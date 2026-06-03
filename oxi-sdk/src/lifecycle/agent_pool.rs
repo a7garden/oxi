@@ -47,22 +47,20 @@ impl AgentPool {
     /// serialization fails.
     pub fn export_state(&self, id: &str) -> Option<serde_json::Value> {
         let agents = self.agents.read();
-        let _agent = agents.get(id)?;
-        // Serialize what we can — agents don't have a standard state method,
-        // so we export metadata.
-        Some(serde_json::json!({
-            "agent_id": id,
-        }))
+        let agent = agents.get(id)?;
+        agent.export_state().ok()
     }
 
     /// Import agent state from JSON.
     ///
-    /// Returns `false` if the agent is not in the pool.
-    pub fn import_state(&self, _id: &str, _state: serde_json::Value) -> bool {
+    /// Returns `false` if the agent is not in the pool or import fails.
+    pub fn import_state(&self, id: &str, state: serde_json::Value) -> bool {
         let agents = self.agents.read();
-        // State restoration is application-specific;
-        // the pool just confirms the agent exists.
-        !agents.is_empty()
+        if let Some(agent) = agents.get(id) {
+            agent.import_state(state).is_ok()
+        } else {
+            false
+        }
     }
 
     /// Number of agents in the pool.

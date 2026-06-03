@@ -1,4 +1,10 @@
 //! Capability types — fine-grained permission definitions.
+//!
+//! Also provides the `types` sub-module (seL4-style CSpace, ResourceRef, Rights)
+//! and `resolve` sub-module (template-based CSpace resolution).
+
+pub mod resolve;
+pub mod types;
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

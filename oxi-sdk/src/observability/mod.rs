@@ -1,12 +1,16 @@
 //! Observability layer — tracing, audit, cost tracking, and event sourcing.
 
 mod audit;
+pub mod audit_trail;
 mod cost;
 mod event_store;
 mod trace;
 
 // Re-exports
 pub use audit::{AuditEntry, AuditFilter, AuditLog};
+pub use audit_trail::{
+    AuditAction, AuditError, AuditPersistence, AuditTrail, HashDigest, TrailEntry,
+};
 pub use cost::{
     CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig, GlobalCostSnapshot, TokenUsage,
 };
