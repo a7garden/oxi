@@ -22,9 +22,15 @@
 
 pub mod provider;
 pub mod model;
+pub mod override_;
+pub mod runtime;
 
 pub use provider::{AuthMethod, BuiltinProviderEntry, load_builtin_providers, builtin_providers_count};
 pub use model::{BuiltinModelEntry, load_builtin_models, builtin_model_count};
+pub use override_::{
+    OverrideFile, apply_provider_overrides, apply_model_overrides, find_override_files,
+    load_overrides,
+};
 
 use std::sync::OnceLock;
 

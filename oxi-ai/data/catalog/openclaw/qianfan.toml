@@ -1,0 +1,33 @@
+# qianfan models — ported from openclaw (MIT)
+# Source: openclaw MIT — github.com/openclaw/openclaw
+provider = "qianfan"
+
+[[model]]
+id = "deepseek-v3.2"
+name = "DEEPSEEK V3.2"
+api = "openai-completions"
+provider = "qianfan"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 98304
+max_tokens = 32768
+
+
+[[model]]
+id = "ernie-5.0-thinking-preview"
+name = "ERNIE-5.0-Thinking-Preview"
+api = "openai-completions"
+provider = "qianfan"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 119000
+max_tokens = 64000
+

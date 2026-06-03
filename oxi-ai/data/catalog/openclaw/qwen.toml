@@ -1,0 +1,138 @@
+# qwen-oauth models — ported from openclaw (MIT)
+# Source: openclaw MIT — github.com/openclaw/openclaw
+provider = "qwen-oauth"
+
+[[model]]
+id = "MiniMax-M2.5"
+name = "MiniMax-M2.5"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 65536
+
+
+[[model]]
+id = "glm-4.7"
+name = "glm-4.7"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 202752
+max_tokens = 65536
+
+
+[[model]]
+id = "glm-5"
+name = "glm-5"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 202752
+max_tokens = 65536
+
+
+[[model]]
+id = "kimi-k2.5"
+name = "kimi-k2.5"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 65536
+
+
+[[model]]
+id = "qwen3-coder-next"
+name = "qwen3-coder-next"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 65536
+
+
+[[model]]
+id = "qwen3-coder-plus"
+name = "qwen3-coder-plus"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 65536
+
+
+[[model]]
+id = "qwen3-max-2026-01-23"
+name = "qwen3-max-2026-01-23"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 65536
+
+
+[[model]]
+id = "qwen3.5-plus"
+name = "qwen3.5-plus"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 65536
+
+
+[[model]]
+id = "qwen3.6-plus"
+name = "qwen3.6-plus"
+api = "openai-completions"
+provider = "qwen-oauth"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 65536
+

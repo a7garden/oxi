@@ -378,3 +378,93 @@ cost_cache_read = 0.0
 cost_cache_write = 0.0
 context_window = 128000
 max_tokens = 64000
+
+[[model]]
+id = "claude-opus-4.8"
+name = "Claude Opus 4.8"
+api = "openai-completions"
+provider = "github-copilot"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+
+[[model]]
+id = "gemini-3-flash"
+name = "Gemini 3 Flash"
+api = "openai-completions"
+provider = "github-copilot"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+
+[[model]]
+id = "gemini-3.1-pro"
+name = "Gemini 3.1 Pro"
+api = "openai-completions"
+provider = "github-copilot"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+
+[[model]]
+id = "gpt-5.4-nano"
+name = "GPT-5.4 nano"
+api = "openai-completions"
+provider = "github-copilot"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+
+[[model]]
+id = "raptor-mini"
+name = "Raptor mini"
+api = "openai-completions"
+provider = "github-copilot"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+
+[[model]]
+id = "goldeneye"
+name = "Goldeneye"
+api = "openai-completions"
+provider = "github-copilot"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+

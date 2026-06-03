@@ -1,0 +1,48 @@
+# stepfun, stepfun-plan models — ported from openclaw (MIT)
+# Source: openclaw MIT — github.com/openclaw/openclaw
+provider = "stepfun"
+
+[[model]]
+id = "step-3.5-flash"
+name = "Step 3.5 Flash"
+api = "openai-completions"
+provider = "stepfun"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 65536
+
+
+[[model]]
+id = "step-3.5-flash"
+name = "Step 3.5 Flash"
+api = "openai-completions"
+provider = "stepfun-plan"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 65536
+
+
+[[model]]
+id = "step-3.5-flash-2603"
+name = "Step 3.5 Flash 2603"
+api = "openai-completions"
+provider = "stepfun-plan"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 65536
+

@@ -122,6 +122,19 @@ pub fn models_index() -> &'static [(&'static str, &'static str)] {
         ("xai", include_str!("../../data/catalog/models/xai.toml")),
         ("xiaomi", include_str!("../../data/catalog/models/xiaomi.toml")),
         ("zai", include_str!("../../data/catalog/models/zai.toml")),
+        ("byteplus", include_str!("../../data/catalog/openclaw/byteplus.toml")),
+        ("chutes", include_str!("../../data/catalog/openclaw/chutes.toml")),
+        ("deepinfra", include_str!("../../data/catalog/openclaw/deepinfra.toml")),
+        ("gmi", include_str!("../../data/catalog/openclaw/gmi.toml")),
+        ("kilocode", include_str!("../../data/catalog/openclaw/kilocode.toml")),
+        ("moonshot", include_str!("../../data/catalog/openclaw/moonshot.toml")),
+        ("novita", include_str!("../../data/catalog/openclaw/novita.toml")),
+        ("nvidia", include_str!("../../data/catalog/openclaw/nvidia.toml")),
+        ("ollama-cloud", include_str!("../../data/catalog/openclaw/ollama.toml")),
+        ("qianfan", include_str!("../../data/catalog/openclaw/qianfan.toml")),
+        ("qwen-oauth", include_str!("../../data/catalog/openclaw/qwen.toml")),
+        ("stepfun", include_str!("../../data/catalog/openclaw/stepfun.toml")),
+        ("venice", include_str!("../../data/catalog/openclaw/venice.toml")),
     ]
 }
 

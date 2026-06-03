@@ -1,0 +1,93 @@
+# nvidia models — ported from openclaw (MIT)
+# Source: openclaw MIT — github.com/openclaw/openclaw
+provider = "nvidia"
+
+[[model]]
+id = "minimaxai/minimax-m2.5"
+name = "MiniMax M2.5"
+api = "openai-completions"
+provider = "nvidia"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 196608
+max_tokens = 8192
+
+
+[[model]]
+id = "minimaxai/minimax-m2.7"
+name = "Minimax M2.7"
+api = "openai-completions"
+provider = "nvidia"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 196608
+max_tokens = 8192
+
+
+[[model]]
+id = "moonshotai/kimi-k2.5"
+name = "Kimi K2.5"
+api = "openai-completions"
+provider = "nvidia"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 8192
+
+
+[[model]]
+id = "nvidia/nemotron-3-super-120b-a12b"
+name = "NVIDIA Nemotron 3 Super 120B"
+api = "openai-completions"
+provider = "nvidia"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 8192
+
+
+[[model]]
+id = "z-ai/glm-5.1"
+name = "GLM 5.1"
+api = "openai-completions"
+provider = "nvidia"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 202752
+max_tokens = 8192
+
+
+[[model]]
+id = "z-ai/glm5"
+name = "GLM-5"
+api = "openai-completions"
+provider = "nvidia"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 202752
+max_tokens = 8192
+

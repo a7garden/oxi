@@ -322,3 +322,33 @@ cost_cache_read = 0.3
 cost_cache_write = 3.75
 context_window = 1000000
 max_tokens = 64000
+
+[[model]]
+id = "claude-opus-4-8"
+name = "Claude Opus 4.8 (Claude CLI)"
+api = "anthropic-messages"
+provider = "claude-cli"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 128000
+
+
+[[model]]
+id = "claude-opus-4-8"
+name = "Claude Opus 4.8"
+api = "anthropic-messages"
+provider = "anthropic"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1048576
+max_tokens = 128000
+

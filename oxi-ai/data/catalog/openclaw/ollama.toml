@@ -1,0 +1,48 @@
+# ollama-cloud models — ported from openclaw (MIT)
+# Source: openclaw MIT — github.com/openclaw/openclaw
+provider = "ollama-cloud"
+
+[[model]]
+id = "glm-5.1:cloud"
+name = "glm-5.1:cloud"
+api = "openai-completions"
+provider = "ollama-cloud"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+
+[[model]]
+id = "kimi-k2.5:cloud"
+name = "kimi-k2.5:cloud"
+api = "openai-completions"
+provider = "ollama-cloud"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+
+[[model]]
+id = "minimax-m2.7:cloud"
+name = "minimax-m2.7:cloud"
+api = "openai-completions"
+provider = "ollama-cloud"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+

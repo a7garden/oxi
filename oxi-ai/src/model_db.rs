@@ -148,8 +148,6 @@ impl ModelEntry {
     }
 }
 
-/// together models (10 entries)
-
 /// Lazy, catalog-backed `(provider, models)` table.
 ///
 /// Replaces the historical `static ALL_PROVIDER_MODELS` array. On first access,
@@ -163,19 +161,27 @@ static ALL_PROVIDER_MODELS: OnceLock<Vec<(&'static str, &'static [ModelEntry])>>
 fn all_provider_models() -> &'static [(&'static str, &'static [ModelEntry])] {
     ALL_PROVIDER_MODELS.get_or_init(|| {
         let catalog = crate::catalog::CatalogRoot::get();
-        let mut out: Vec<(&'static str, &'static [ModelEntry])> =
-            Vec::with_capacity(catalog.models.len());
-        for (provider_id, builtin_models) in catalog.models.iter() {
-            // Leak the provider id (sorted order, called once).
-            let pid: &'static str = Box::leak(provider_id.clone().into_boxed_str());
-            // Convert each BuiltinModelEntry → ModelEntry, then leak the Vec.
-            let entries: Vec<ModelEntry> =
-                builtin_models.iter().map(ModelEntry::from).collect();
-            let slice: &'static [ModelEntry] = Box::leak(entries.into_boxed_slice());
-            out.push((pid, slice));
+        // Group by the per-model `provider` field, not the file-level
+        // top-level provider. The openclaw-anthropic file contains models
+        // for both `anthropic` and `claude-cli` provider namespaces; they
+        // must be indexed separately. We first flatten all entries, then
+        // regroup by the per-entry provider field.
+        use std::collections::BTreeMap;
+        let mut by_pid: BTreeMap<String, Vec<ModelEntry>> = BTreeMap::new();
+        for (_file_pid, builtin_models) in catalog.models.iter() {
+            for bm in builtin_models.iter() {
+                let entry = ModelEntry::from(bm);
+                by_pid.entry(entry.provider.to_string()).or_default().push(entry);
+            }
         }
-        // Sort by provider id for deterministic order.
-        out.sort_by(|a, b| a.0.cmp(b.0));
+        let mut out: Vec<(&'static str, &'static [ModelEntry])> =
+            Vec::with_capacity(by_pid.len());
+        for (pid, mut entries) in by_pid {
+            let pid_static: &'static str = Box::leak(pid.into_boxed_str());
+            entries.sort_by(|a, b| a.id.cmp(b.id));
+            let slice: &'static [ModelEntry] = Box::leak(entries.into_boxed_slice());
+            out.push((pid_static, slice));
+        }
         out
     }).as_slice()
 }
@@ -369,6 +375,7 @@ mod tests {
     }
 
     #[test]
+
     fn test_cheapest_models() {
         let cheapest = get_cheapest_models(5);
         assert_eq!(cheapest.len(), 5.min(model_count()));
