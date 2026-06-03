@@ -5,8 +5,8 @@
 //! headers. The provider factory is data-driven from this metadata rather than
 //! using hardcoded match arms.
 
-use crate::Api;
 use crate::catalog::BuiltinProviderEntry;
+use crate::Api;
 
 // ---------------------------------------------------------------------------
 // Auth method
@@ -58,8 +58,6 @@ pub struct BuiltinProvider {
     /// Short human-readable description shown in the provider selection UI
     pub description: &'static str,
 }
-
-
 
 // ---------------------------------------------------------------------------
 // API enum parsing

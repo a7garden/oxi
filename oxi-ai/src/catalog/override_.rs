@@ -109,8 +109,12 @@ pub fn load_overrides() -> Option<OverrideFile> {
     for (path, content) in files {
         match toml::from_str::<OverrideFile>(&content) {
             Ok(file) => {
-                tracing::info!(?path, providers = file.provider.len(), models = file.model.len(),
-                    "Loaded catalog override");
+                tracing::info!(
+                    ?path,
+                    providers = file.provider.len(),
+                    models = file.model.len(),
+                    "Loaded catalog override"
+                );
                 merged.provider.extend(file.provider);
                 merged.model.extend(file.model);
             }

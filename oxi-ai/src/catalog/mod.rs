@@ -20,16 +20,18 @@
 //!
 //! See `register_builtins.rs` for the consumer side.
 
-pub mod provider;
 pub mod model;
 pub mod override_;
+pub mod provider;
 pub mod runtime;
 
-pub use provider::{AuthMethod, BuiltinProviderEntry, load_builtin_providers, builtin_providers_count};
-pub use model::{BuiltinModelEntry, load_builtin_models, builtin_model_count};
+pub use model::{builtin_model_count, load_builtin_models, BuiltinModelEntry};
 pub use override_::{
-    OverrideFile, apply_provider_overrides, apply_model_overrides, find_override_files,
-    load_overrides,
+    apply_model_overrides, apply_provider_overrides, find_override_files, load_overrides,
+    OverrideFile,
+};
+pub use provider::{
+    builtin_providers_count, load_builtin_providers, AuthMethod, BuiltinProviderEntry,
 };
 
 use std::sync::OnceLock;
@@ -63,10 +65,11 @@ impl CatalogRoot {
             // The models subdirectory is included via concat! trick — each file
             // is included as a &str, then parsed and merged at startup.
             let providers_toml = include_str!("../../data/catalog/providers.toml");
-            let mut root: CatalogRoot = toml::from_str(providers_toml)
-                .expect("BUG: built-in providers.toml failed to parse. \
+            let mut root: CatalogRoot = toml::from_str(providers_toml).expect(
+                "BUG: built-in providers.toml failed to parse. \
                          This is a build-time error — the file is validated at startup. \
-                         Run `cargo test -p oxi-ai catalog` to reproduce.");
+                         Run `cargo test -p oxi-ai catalog` to reproduce.",
+            );
             // Load all model files in data/catalog/models/
             let model_dir_models = load_all_model_files();
             for (provider_id, models) in model_dir_models {
@@ -90,7 +93,10 @@ impl CatalogRoot {
 
     /// Get all models for a provider.
     pub fn models_for(&self, provider_id: &str) -> &[BuiltinModelEntry] {
-        self.models.get(provider_id).map(|v| v.as_slice()).unwrap_or(&[])
+        self.models
+            .get(provider_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 }
 
@@ -108,9 +114,7 @@ fn load_all_model_files() -> std::collections::BTreeMap<String, Vec<BuiltinModel
     for (_provider_id, toml_str) in model::models_index() {
         match toml::from_str::<ModelFile>(toml_str) {
             Ok(file) => {
-                out.entry(file.provider)
-                    .or_default()
-                    .extend(file.model);
+                out.entry(file.provider).or_default().extend(file.model);
             }
             Err(e) => {
                 panic!(
@@ -140,7 +144,10 @@ mod tests {
     #[test]
     fn catalog_loads() {
         let root = CatalogRoot::get();
-        assert!(!root.provider.is_empty(), "providers.toml should not be empty");
+        assert!(
+            !root.provider.is_empty(),
+            "providers.toml should not be empty"
+        );
     }
 
     #[test]
@@ -170,7 +177,7 @@ mod tests {
         assert!(root.find_provider("anthropic").is_some());
         // Alias
         assert!(root.find_provider("kimi").is_some()); // alias for kimi-coding
-        // Not found
+                                                       // Not found
         assert!(root.find_provider("nonexistent").is_none());
     }
 }

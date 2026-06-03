@@ -111,13 +111,13 @@ pub async fn discover_models(
             name: m.id.clone(), // runtime providers don't provide display names
             api: api_type.to_string(),
             provider: provider_id.to_string(),
-            reasoning: false,    // unknown at runtime
+            reasoning: false,           // unknown at runtime
             input: vec!["text".into()], // most local servers default to text
-            cost_input: 0.0,     // local = free
+            cost_input: 0.0,            // local = free
             cost_output: 0.0,
             cost_cache_read: 0.0,
             cost_cache_write: 0.0,
-            context_window: 0,   // unknown
+            context_window: 0, // unknown
             max_tokens: 0,
         })
         .collect()
@@ -153,8 +153,11 @@ pub async fn discover_all_local() -> BTreeMap<String, Vec<BuiltinModelEntry>> {
             async move {
                 let models = discover_models(id, api, url).await;
                 if !models.is_empty() {
-                    tracing::info!(provider = id, count = models.len(),
-                        "Discovered local models");
+                    tracing::info!(
+                        provider = id,
+                        count = models.len(),
+                        "Discovered local models"
+                    );
                 }
                 (id.to_string(), models)
             }

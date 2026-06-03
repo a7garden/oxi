@@ -23,8 +23,8 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use crate::{Api, InputModality};
 use crate::catalog::BuiltinModelEntry;
+use crate::{Api, InputModality};
 
 // ---------------------------------------------------------------------------
 // TOML → ModelEntry bridge
@@ -159,31 +159,36 @@ impl ModelEntry {
 static ALL_PROVIDER_MODELS: OnceLock<Vec<(&'static str, &'static [ModelEntry])>> = OnceLock::new();
 
 fn all_provider_models() -> &'static [(&'static str, &'static [ModelEntry])] {
-    ALL_PROVIDER_MODELS.get_or_init(|| {
-        let catalog = crate::catalog::CatalogRoot::get();
-        // Group by the per-model `provider` field, not the file-level
-        // top-level provider. The openclaw-anthropic file contains models
-        // for both `anthropic` and `claude-cli` provider namespaces; they
-        // must be indexed separately. We first flatten all entries, then
-        // regroup by the per-entry provider field.
-        use std::collections::BTreeMap;
-        let mut by_pid: BTreeMap<String, Vec<ModelEntry>> = BTreeMap::new();
-        for (_file_pid, builtin_models) in catalog.models.iter() {
-            for bm in builtin_models.iter() {
-                let entry = ModelEntry::from(bm);
-                by_pid.entry(entry.provider.to_string()).or_default().push(entry);
+    ALL_PROVIDER_MODELS
+        .get_or_init(|| {
+            let catalog = crate::catalog::CatalogRoot::get();
+            // Group by the per-model `provider` field, not the file-level
+            // top-level provider. The openclaw-anthropic file contains models
+            // for both `anthropic` and `claude-cli` provider namespaces; they
+            // must be indexed separately. We first flatten all entries, then
+            // regroup by the per-entry provider field.
+            use std::collections::BTreeMap;
+            let mut by_pid: BTreeMap<String, Vec<ModelEntry>> = BTreeMap::new();
+            for (_file_pid, builtin_models) in catalog.models.iter() {
+                for bm in builtin_models.iter() {
+                    let entry = ModelEntry::from(bm);
+                    by_pid
+                        .entry(entry.provider.to_string())
+                        .or_default()
+                        .push(entry);
+                }
             }
-        }
-        let mut out: Vec<(&'static str, &'static [ModelEntry])> =
-            Vec::with_capacity(by_pid.len());
-        for (pid, mut entries) in by_pid {
-            let pid_static: &'static str = Box::leak(pid.into_boxed_str());
-            entries.sort_by(|a, b| a.id.cmp(b.id));
-            let slice: &'static [ModelEntry] = Box::leak(entries.into_boxed_slice());
-            out.push((pid_static, slice));
-        }
-        out
-    }).as_slice()
+            let mut out: Vec<(&'static str, &'static [ModelEntry])> =
+                Vec::with_capacity(by_pid.len());
+            for (pid, mut entries) in by_pid {
+                let pid_static: &'static str = Box::leak(pid.into_boxed_str());
+                entries.sort_by(|a, b| a.id.cmp(b.id));
+                let slice: &'static [ModelEntry] = Box::leak(entries.into_boxed_slice());
+                out.push((pid_static, slice));
+            }
+            out
+        })
+        .as_slice()
 }
 // ── Lazy-initialized indexes for O(1) lookups ──────────────────────────
 
@@ -273,7 +278,10 @@ pub fn model_count() -> usize {
 
 /// Get all known provider names.
 pub fn get_providers() -> Vec<&'static str> {
-    all_provider_models().iter().map(|(name, _)| *name).collect()
+    all_provider_models()
+        .iter()
+        .map(|(name, _)| *name)
+        .collect()
 }
 
 /// Search models by name or ID pattern (case-insensitive).
