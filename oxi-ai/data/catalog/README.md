@@ -140,27 +140,67 @@ warning log. Set `OXI_CATALOG_DEBUG=1` for verbose output.
 ## Layer 3: runtime discovery
 
 For providers that expose an OpenAI-compatible `/v1/models` endpoint, oxi
-can fetch them at startup. The default targets are:
+can fetch them at startup. Two sub-layers:
 
-| Provider | URL | Why |
-|----------|-----|-----|
-| ollama | `http://localhost:11434/v1` | Local model server |
-| lmstudio | `http://localhost:1234/v1` | Local model server |
-| vllm | `http://localhost:8000/v1` | Self-hosted LLM |
-| sglang | `http://localhost:30000/v1` | Self-hosted LLM |
+### 3a. Local servers (always probed)
 
-Each endpoint is queried in parallel with a 5-second timeout. Failures
-are silent — if Ollama isn't running, you just don't have its models.
+| Provider | URL |
+|----------|-----|
+| ollama | `http://localhost:11434/v1` |
+| lmstudio | `http://localhost:1234/v1` |
+| vllm | `http://localhost:8000/v1` |
+| sglang | `http://localhost:30000/v1` |
 
-Runtime-discovered models have:
-- `provider` = the local server's id (e.g. `ollama`)
-- `cost_input/output` = 0.0 (local = free)
+Queried in parallel. Failures are silent — if Ollama isn't running, you
+just don't have its models.
+
+### 3b. Authenticated cloud (probed only if API key is set)
+
+Inspired by openclaw's `provider-discovery.ts` pattern: cloud providers
+are only queried when the user has the corresponding env var set. This
+is what makes the openclaw-port data "live" for users who actually have
+an account.
+
+| Provider | Env var | Default URL |
+|----------|---------|-------------|
+| chutes | `CHUTES_API_KEY` | `https://api.chutes.ai/v1` |
+| deepinfra | `DEEPINFRA_API_KEY` | `https://api.deepinfra.com/v1/openai` |
+| gmi | `GMI_API_KEY` | `https://api.gmi-serving.com/v1` |
+| kilocode | `KILOCODE_API_KEY` | `https://api.kilocode.ai/v1` |
+| moonshot | `MOONSHOT_API_KEY` | `https://api.moonshot.ai/v1` |
+| novita | `NOVITA_API_KEY` | `https://api.novita.ai/v3/openai` |
+| nvidia | `NVIDIA_API_KEY` | `https://integrate.api.nvidia.com/v1` |
+| qwen-oauth | `QWEN_API_KEY` | `https://api.qwen.ai/v1` |
+| stepfun | `STEPFUN_API_KEY` | `https://api.stepfun.com/v1` |
+| byteplus | `BYTEPLUS_API_KEY` | `https://ark.ap-southeast.bytepluses.com/api/v3` |
+| venice | `VENICE_API_KEY` | `https://api.venice.ai/api/v1` |
+
+When the env var is set, the URL is used to fetch the **live** model
+list. The live list **replaces** the built-in catalog for that provider
+(Layer 3 supersedes Layer 1). This is the openclaw pattern: built-in
+data is a fallback for offline / no-key use, but the live data is
+authoritative when available.
+
+### Limitations of runtime-discovered models
+
+- `cost_input/output` = 0.0 (not fetched; check the provider's billing dashboard)
 - `context_window` = 0 (unknown)
 - `reasoning` = false (unknown)
 - `input` = `["text"]` (default)
 
-These limitations are why **Layer 1 is the source of truth** when possible.
-Layer 3 is for *discovery*, not *accuracy*.
+The user is responsible for verifying accuracy of Layer 3 data against
+the provider's official pricing page.
+
+### Programmatic access
+
+```rust
+use oxi_ai::catalog::discover_all;
+
+let live = discover_all().await;
+for (provider_id, models) in &live {
+    println!("{provider_id}: {} models (live)", models.len());
+}
+```
 
 ## TOML schema (full)
 
@@ -247,6 +287,35 @@ id = "deepseek-v3.2"
 provider = "gmi"
 cost_input = 0.5     # your verified rate
 cost_output = 2.0
+```
+
+### Sentinel value for unverified prices
+
+The runtime `ModelEntry` distinguishes "verified free" from
+"unverified" via a **sentinel value** in the cost fields:
+
+| `cost_input` | Meaning |
+|--------------|---------|
+| `< 0.0` (sentinel `-1.0`) | **Price unverified** — openclaw-sourced, not backfilled. UI should warn. |
+| `0.0` | **Verified free** — oxi-original data, locally free. |
+| `> 0.0` | **Verified price** in USD per million tokens. |
+
+The conversion happens in `model_db.rs::From<&BuiltinModelEntry>`:
+upstream `0.0` from openclaw-sourced providers becomes `-1.0` at
+runtime. UIs and CLI cost reports should call
+`ModelEntry::pricing_unverified()` and warn the user.
+
+Programmatic access:
+
+```rust
+use oxi_ai::model_db::{get_model_entry, builtin_model_count_sentinel};
+
+let count_unverified = builtin_model_count_sentinel();
+if let Some(m) = get_model_entry("gmi", "anthropic/claude-sonnet-4.6") {
+    if m.pricing_unverified() {
+        eprintln!("⚠️  {} pricing is unverified", m.id);
+    }
+}
 ```
 
 ## Testing

@@ -33,6 +33,7 @@ pub use override_::{
 pub use provider::{
     builtin_providers_count, load_builtin_providers, AuthMethod, BuiltinProviderEntry,
 };
+pub use runtime::{discover_all, discover_all_authenticated, discover_all_local, discover_models};
 
 use std::sync::OnceLock;
 
