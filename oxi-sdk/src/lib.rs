@@ -98,8 +98,20 @@ pub use oxi_ai::env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_key,
 
 // Model database — provider catalog, model metadata
 pub use oxi_ai::model_db::{
-    get_all_models, get_cheapest_models, get_model_entry, get_provider_models, get_providers,
-    get_reasoning_models, get_vision_models, model_count, search_models, ModelEntry,
+    builtin_model_count_sentinel, get_all_models, get_cheapest_models, get_model_entry,
+    get_provider_models, get_providers, get_reasoning_models, get_vision_models, model_count,
+    search_models, ModelEntry,
+};
+
+// 3-tier hybrid catalog (Layer 1 built-in TOML, Layer 2 user override,
+// Layer 3 runtime discovery). The catalog module exposes the full surface;
+// `model_db` (above) is the legacy compatibility shim that lazily
+// integrates all three layers and converts BuiltinModelEntry → ModelEntry.
+pub use oxi_ai::catalog::{
+    apply_model_overrides, apply_provider_overrides, builtin_model_count, builtin_providers_count,
+    discover_all, discover_all_authenticated, discover_all_local, discover_models,
+    find_override_files, load_builtin_models, load_builtin_providers, load_overrides, AuthMethod,
+    BuiltinModelEntry, BuiltinProviderEntry, OverrideFile,
 };
 pub use oxi_ai::oauth::{
     default_auth_path, load_auth_store, load_token, remove_token, save_auth_store, save_token,
@@ -142,6 +154,21 @@ pub use oxi_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool, OxiBrows
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn catalog_reachable_via_sdk() {
+        // Verify the 3-tier catalog surface is exposed to SDK consumers.
+        let providers = load_builtin_providers();
+        let models = load_builtin_models();
+        assert!(providers.len() >= 70, "expected >= 70 providers, got {}", providers.len());
+        assert!(!models.is_empty(), "models should be loaded");
+    }
+
+    #[test]
+    fn sentinel_count_via_sdk() {
+        let n = builtin_model_count_sentinel();
+        assert!(n >= 30, "expected >= 30 sentinel entries, got {n}");
+    }
 
     /// Helper to build a minimal Model for tests.
     fn test_model(id: &str, provider: &str) -> Model {

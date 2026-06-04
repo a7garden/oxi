@@ -28,6 +28,14 @@ pub use oxi_agent::tools::browse::{
 pub use oxi_ai::circuit_breaker::CircuitBreakerConfig;
 pub use oxi_ai::{CompactionStrategy, Model, Provider, UserMessage};
 
+// ── 3-tier catalog (built-in TOML + override + runtime discovery) ──────
+pub use oxi_ai::catalog::{
+    discover_all, discover_all_authenticated, discover_all_local, discover_models,
+    load_builtin_models, load_builtin_providers, load_overrides, AuthMethod, BuiltinModelEntry,
+    BuiltinProviderEntry, OverrideFile,
+};
+pub use oxi_ai::model_db::{builtin_model_count_sentinel, ModelEntry};
+
 // ── Concrete provider re-exports (single-dependency pattern) ──────────
 pub use oxi_ai::OpenAiProvider;
 pub use oxi_ai::OpenAiResponsesProvider;
