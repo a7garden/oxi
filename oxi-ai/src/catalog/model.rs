@@ -101,9 +101,9 @@ mod tests {
     #[test]
     fn models_index_loads_all_providers() {
         let idx = models_index();
-        // We expect at least the 29 oxi-original providers.
-        // (More may be added as openclaw/opencode imports land.)
-        assert!(idx.len() >= 40, "got {} entries", idx.len());
+        // 29 oxi-original + 13 openclaw = 42 files. The build script
+        // auto-enumerates them; this test catches miscounts.
+        assert_eq!(idx.len(), 42, "expected 42 files, got {}", idx.len());
         for (pid, body) in idx {
             assert!(!pid.is_empty(), "empty provider id");
             assert!(
@@ -117,9 +117,16 @@ mod tests {
     #[test]
     fn all_loaded_models_round_trip() {
         // Each TOML file should be parseable and yield >=1 model.
+        // The exact count must match the known catalog size (1099 as of
+        // 2026-Q2). If this fails, either a TOML file was deleted, a
+        // model was added/removed without updating the test, or a
+        // parsing error silently dropped models.
         let root = crate::catalog::CatalogRoot::get();
         let total: usize = root.models.values().map(|v| v.len()).sum();
-        assert!(total >= 900, "expected >= 900 models, got {total}");
+        assert_eq!(
+            total, 1099,
+            "model count mismatch (expected 1099, got {total})"
+        );
     }
 
     #[test]
@@ -145,7 +152,12 @@ mod tests {
             s, helper,
             "helper and direct count disagree: {s} vs {helper}"
         );
-        println!("verified={v} sentinel={s} zero={z}");
-        assert!(s >= 30, "expected at least 30 sentinel entries, got {s}");
+        assert_eq!(s, 34, "sentinel count drift (expected 34, got {s})");
+        // Sanity: v + s + z should equal total model count
+        assert_eq!(
+            v + s + z,
+            1099,
+            "category counts don't sum to total (v={v} s={s} z={z})"
+        );
     }
 }

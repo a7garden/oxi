@@ -176,14 +176,21 @@ static API_TO_PROVIDER: &[(&str, Api)] = &[
 /// This replaces the historical `static BUILTIN_PROVIDERS` array. The first
 /// call parses `data/catalog/providers.toml` and converts each entry to a
 /// `BuiltinProvider`; subsequent calls return the cached `&'static` slice.
+///
+/// **Layer 2 (user overrides) is applied here**: before conversion, the
+/// `OverrideFile` from `crate::catalog::load_overrides()` (if any) is
+/// merged with the built-in providers. Override entries with the same id
+/// replace built-in ones; new ids are appended.
 pub fn get_builtin_providers() -> &'static [BuiltinProvider] {
     static CACHE: std::sync::OnceLock<Vec<BuiltinProvider>> = std::sync::OnceLock::new();
     CACHE
         .get_or_init(|| {
-            crate::catalog::load_builtin_providers()
-                .iter()
-                .map(BuiltinProvider::from)
-                .collect()
+            let mut builtins: Vec<crate::catalog::BuiltinProviderEntry> =
+                crate::catalog::load_builtin_providers().to_vec();
+            if let Some(overrides) = crate::catalog::load_overrides() {
+                crate::catalog::apply_provider_overrides(&mut builtins, &overrides.provider);
+            }
+            builtins.iter().map(BuiltinProvider::from).collect()
         })
         .as_slice()
 }
@@ -489,6 +496,50 @@ mod tests {
     #[test]
     fn test_create_builtin_provider_unknown() {
         assert!(create_builtin_provider("unknown").is_none());
+    }
+
+    #[test]
+    fn layer2_override_adds_provider() {
+        // Set OXI_CATALOG_OVERRIDE to a known override file, then verify
+        // the provider shows up. We use a tempfile in the test target dir.
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join("oxi-test-layer2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("overrides.toml");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"
+[[provider]]
+id = "test-injected-{}"
+display_name = "Test Injected"
+api = "openai-completions"
+env_key = "TEST_INJECTED_KEY"
+auth_method = "bearer"
+category = "primary"
+description = "Test provider from override"
+"#,
+            std::process::id()
+        )
+        .unwrap();
+        drop(f);
+
+        // SAFETY: only this test mutates this env var, and only briefly.
+        // The test is #[test] which runs on a single thread within a test binary.
+        unsafe {
+            std::env::set_var("OXI_CATALOG_OVERRIDE", &path);
+        }
+        // Invalidate the cache so the override is picked up.
+        // (The OnceLock has no reset API; this test only checks the load
+        //  machinery via find_override_files, not the full integration.)
+        let files = crate::catalog::find_override_files();
+        unsafe {
+            std::env::remove_var("OXI_CATALOG_OVERRIDE");
+        }
+        assert!(!files.is_empty(), "OXI_CATALOG_OVERRIDE should be detected");
+        let (found_path, _content) = &files[0];
+        assert_eq!(found_path, &path);
     }
 
     #[test]

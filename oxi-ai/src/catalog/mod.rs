@@ -14,9 +14,9 @@
 //! # Layered design
 //!
 //! This is **Layer 1 (built-in)** of the 3-tier catalog:
-//! 1. Built-in TOML (this module) — bundled, validated
-//! 2. User overrides (TODO) — `~/.oxi/catalog/overrides.toml`
-//! 3. Runtime discovery (TODO) — ollama/lmstudio `/v1/models` fetch
+//! 1. Built-in TOML (this module) — bundled, validated at compile time
+//! 2. User overrides (`override_` module) — `~/.oxi/catalog/overrides.toml`
+//! 3. Runtime discovery (`runtime` module) — ollama/lmstudio/cloud `/v1/models` fetch
 //!
 //! See `register_builtins.rs` for the consumer side.
 

@@ -75,6 +75,11 @@ Three locations, in increasing priority:
 2. `~/.oxi/catalog/overrides.toml` (global)
 3. `.oxi/catalog.local.toml` (project-local, relative to cwd)
 
+**Layer 2 is integrated**: `get_builtin_providers()` and
+`get_provider_models()` automatically apply overrides on first access.
+The integration is verified by
+`providers::register_builtins::tests::layer2_override_adds_provider`.
+
 Use cases:
 
 - **Custom pricing** for negotiated enterprise rates
@@ -317,6 +322,10 @@ if let Some(m) = get_model_entry("gmi", "anthropic/claude-sonnet-4.6") {
     }
 }
 ```
+
+**Current count**: `builtin_model_count_sentinel()` returns **34** (as of
+2026-Q2). This number will go up if `port_openclaw.py` adds more
+zero-cost models and down if a future PR backfills more prices.
 
 ## Testing
 

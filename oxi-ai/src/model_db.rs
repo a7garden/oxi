@@ -120,20 +120,20 @@ impl From<&BuiltinModelEntry> for ModelEntry {
 /// - `cost_input > 0.0` — verified price in USD per million tokens.
 pub const UNVERIFIED_PRICE: f64 = -1.0;
 
-/// Returns true if a provider id came from the openclaw port.
+/// Returns true if a provider id came from the openclaw port AND has
+/// unverified pricing.
 ///
-/// These are the providers we don't have first-party pricing data for;
-/// their `0.0` cost values in the upstream are placeholder, not
-/// verified-free. Oxi-original providers and standard cloud APIs (anthropic,
-/// openai, google, ...) are NOT in this set — their `0.0` values are
-/// hand-curated as "truly free" (e.g. local ollama models we added).
+/// These are the providers whose `0.0` cost values in the openclaw
+/// upstream are placeholder, not verified-free. The runtime sentinel
+/// transformation (`0.0` → `-1.0`) applies to them.
+///
+/// Providers with **verified** prices (venice, novita) are NOT in this
+/// set — their values are backfilled and treated as known.
 ///
 /// See `data/catalog/README.md` for the data-quality breakdown.
 fn is_openclaw_sourced(provider: &str) -> bool {
     matches!(
         provider,
-        // The 11 openclaw providers for which we could not verify prices.
-        // venice and novita were backfilled by price_backfill.py.
         "gmi"
             | "kilocode"
             | "moonshot"
@@ -145,6 +145,11 @@ fn is_openclaw_sourced(provider: &str) -> bool {
             | "byteplus"
             | "chutes"
             | "deepinfra"
+            // Variants that share a TOML file with a verified provider.
+            // stepfun.toml has both "stepfun" and "stepfun-plan" models;
+            // the latter is a paid tier whose price is also unknown.
+            | "stepfun-plan"
+            | "byteplus-plan"
     )
 }
 
@@ -253,15 +258,32 @@ fn all_provider_models() -> &'static [(&'static str, &'static [ModelEntry])] {
             // must be indexed separately. We first flatten all entries, then
             // regroup by the per-entry provider field.
             use std::collections::BTreeMap;
-            let mut by_pid: BTreeMap<String, Vec<ModelEntry>> = BTreeMap::new();
+            // Snapshot into owned BuiltinModelEntry vec so we can mutate.
+            let mut all_builtins: Vec<crate::catalog::BuiltinModelEntry> = Vec::new();
             for (_file_pid, builtin_models) in catalog.models.iter() {
                 for bm in builtin_models.iter() {
-                    let entry = ModelEntry::from(bm);
-                    by_pid
-                        .entry(entry.provider.to_string())
-                        .or_default()
-                        .push(entry);
+                    all_builtins.push(bm.clone());
                 }
+            }
+            // Apply Layer 2 (user overrides): same (provider, id) replaces,
+            // new entries append.
+            if let Some(overrides) = crate::catalog::load_overrides() {
+                // Build mutable BTreeMap so apply_model_overrides can mutate.
+                let mut all_map: BTreeMap<String, Vec<crate::catalog::BuiltinModelEntry>> =
+                    BTreeMap::new();
+                for bm in all_builtins.into_iter() {
+                    all_map.entry(bm.provider.clone()).or_default().push(bm);
+                }
+                crate::catalog::apply_model_overrides(&mut all_map, &overrides.model);
+                all_builtins = all_map.into_values().flatten().collect();
+            }
+            let mut by_pid: BTreeMap<String, Vec<ModelEntry>> = BTreeMap::new();
+            for bm in all_builtins.iter() {
+                let entry = ModelEntry::from(bm);
+                by_pid
+                    .entry(entry.provider.to_string())
+                    .or_default()
+                    .push(entry);
             }
             let mut out: Vec<(&'static str, &'static [ModelEntry])> =
                 Vec::with_capacity(by_pid.len());
