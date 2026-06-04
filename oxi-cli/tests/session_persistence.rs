@@ -1,6 +1,6 @@
 //! Session persistence tests — verifies create → persist → reload cycle.
 
-use oxi_store::session::{AgentMessage, AssistantContentBlock, ContentValue, SessionManager};
+use oxi::store::session::{AgentMessage, AssistantContentBlock, ContentValue, SessionManager};
 use tempfile::TempDir;
 
 fn make_user_message(text: &str) -> AgentMessage {

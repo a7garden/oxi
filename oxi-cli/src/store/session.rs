@@ -626,7 +626,7 @@ impl SessionEntry {
 
     /// Create a simple message entry with a role string and content
     pub fn simple_message(role: &str, content: &str) -> Self {
-        use crate::session::ContentValue;
+        use crate::store::session::ContentValue;
         let message = match role {
             "user" => AgentMessage::User {
                 content: ContentValue::String(content.to_string()),

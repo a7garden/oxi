@@ -127,7 +127,7 @@ impl SettingsOverlay {
 
     /// Persist toggle/choice changes back to disk.
     fn persist_changes(&self) {
-        if let Ok(mut settings) = oxi_store::settings::Settings::load() {
+        if let Ok(mut settings) = crate::store::settings::Settings::load() {
             for item in &self.all_items {
                 match item {
                     SettingsItem::Toggle { label, value } => match label.as_str() {
@@ -140,12 +140,12 @@ impl SettingsOverlay {
                     SettingsItem::Choice { label, value } => match label.as_str() {
                         "thinking" => {
                             settings.thinking_level = match value.as_str() {
-                                "Off" => oxi_store::settings::ThinkingLevel::Off,
-                                "Minimal" => oxi_store::settings::ThinkingLevel::Minimal,
-                                "Low" => oxi_store::settings::ThinkingLevel::Low,
-                                "Medium" => oxi_store::settings::ThinkingLevel::Medium,
-                                "High" => oxi_store::settings::ThinkingLevel::High,
-                                "XHigh" => oxi_store::settings::ThinkingLevel::XHigh,
+                                "Off" => crate::store::settings::ThinkingLevel::Off,
+                                "Minimal" => crate::store::settings::ThinkingLevel::Minimal,
+                                "Low" => crate::store::settings::ThinkingLevel::Low,
+                                "Medium" => crate::store::settings::ThinkingLevel::Medium,
+                                "High" => crate::store::settings::ThinkingLevel::High,
+                                "XHigh" => crate::store::settings::ThinkingLevel::XHigh,
                                 _ => settings.thinking_level,
                             };
                         }
@@ -229,7 +229,7 @@ impl OverlayComponent for SettingsOverlay {
                                 }
                             }
                         } else if *id == "router_setup" {
-                            let auth = oxi_store::auth_storage::shared_auth_storage();
+                            let auth = crate::store::auth_storage::shared_auth_storage();
                             let models: Vec<String> = oxi_sdk::get_all_models()
                                 .filter(|entry| auth.get_api_key(entry.provider).is_some())
                                 .map(|entry| format!("{}/{}", entry.provider, entry.id))
@@ -387,15 +387,15 @@ fn title_line(filter: &str) -> ratatui::text::Line<'static> {
 }
 
 fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
-    let settings = oxi_store::settings::Settings::load().unwrap_or_default();
+    let settings = crate::store::settings::Settings::load().unwrap_or_default();
 
     let thinking_str = match settings.thinking_level {
-        oxi_store::settings::ThinkingLevel::Off => "Off",
-        oxi_store::settings::ThinkingLevel::Minimal => "Minimal",
-        oxi_store::settings::ThinkingLevel::Low => "Low",
-        oxi_store::settings::ThinkingLevel::Medium => "Medium",
-        oxi_store::settings::ThinkingLevel::High => "High",
-        oxi_store::settings::ThinkingLevel::XHigh => "XHigh",
+        crate::store::settings::ThinkingLevel::Off => "Off",
+        crate::store::settings::ThinkingLevel::Minimal => "Minimal",
+        crate::store::settings::ThinkingLevel::Low => "Low",
+        crate::store::settings::ThinkingLevel::Medium => "Medium",
+        crate::store::settings::ThinkingLevel::High => "High",
+        crate::store::settings::ThinkingLevel::XHigh => "XHigh",
     };
 
     let mut items = vec![SettingsItem::Choice {
@@ -426,7 +426,7 @@ fn build_settings_items(_session: &AgentSessionHandle) -> Vec<SettingsItem> {
     // ── Routing ─────────────────────────────────────────────────────────
     let gd = dirs::config_dir().unwrap_or_default().join("oxi");
     let pd = std::env::current_dir().unwrap_or_default();
-    let has_router = oxi_store::router_config::load_router_config(&gd, &pd).is_some();
+    let has_router = crate::store::router_config::load_router_config(&gd, &pd).is_some();
 
     items.push(SettingsItem::ReadOnly {
         label: "───────────────────".to_string(),

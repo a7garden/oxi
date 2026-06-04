@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 // ── Re-exports ─────────────────────────────────────────────────────
 // Use the canonical ThinkingLevel from settings (None/Minimal/Standard/Thorough).
-pub use oxi_store::settings::ThinkingLevel;
+pub use crate::store::settings::ThinkingLevel;
 
 // ── Main CLI arguments ─────────────────────────────────────────────
 

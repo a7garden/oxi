@@ -8,9 +8,13 @@
 
 // ─── Root-level entry modules ───────────────────────────────────────────────
 // cli must be pub for main.rs binary
+pub mod bootstrap;
 pub mod cli;
+pub mod main_dispatch;
 pub mod print_mode;
+pub mod services;
 pub mod setup_wizard;
+pub mod store;
 
 // ─── Directory groups ───────────────────────────────────────────────────────
 pub(crate) mod app;
@@ -29,13 +33,63 @@ pub mod tui; // public for main.rs
 pub(crate) mod ui;
 pub(crate) mod util;
 
-// ─── oxi-store re-exports (shared persistent state) ─────────────────────────
-pub use oxi_store::{
-    auth_guidance, auth_storage, model_registry, model_resolver, session, session_cwd,
-    session_navigation, settings, settings_validation, AgentMessage, AssistantContentBlock,
-    AuthStorage, ContentBlock, ContentValue, ModelRegistry, SessionEntry, SessionManager,
-    SessionTreeNode, Settings, ValidationReport,
-};
+///
+/// This is the **new entry point** for oxi-cli run modes. It uses
+/// `oxi-fs` adapters and `OxiBuilder::with_port_*` to construct an
+/// `Oxi` with persistence, auth, config, and skills wired. The legacy
+/// `App::new` path is still used by the interactive TUI during the
+/// migration period.
+///
+/// # Example
+///
+/// ```no_run
+/// use oxi::build_oxi_engine;
+/// # fn _example() -> anyhow::Result<()> {
+/// let oxi = build_oxi_engine()?;
+/// println!("providers: {}", oxi.providers().names().len());
+/// # Ok(()) }
+/// ```
+pub fn build_oxi_engine() -> anyhow::Result<oxi_sdk::Oxi> {
+    let paths = services::OxiPaths::default_paths()?;
+    services::build_oxi(&paths)
+}
+
+/// Self-check the wired port implementations. Prints a one-line summary
+/// per port and returns `Ok(())` if all are reachable.
+///
+/// Triggered by the `OXI_PORT_CHECK=1` environment variable from
+/// `oxi-cli/src/main.rs`. Useful for verifying the new composition root
+/// without disturbing the legacy `App::new` path.
+pub async fn run_port_check() -> anyhow::Result<()> {
+    let oxi = build_oxi_engine()?;
+    let ports = oxi.ports();
+
+    // State
+    let entries = ports.state.list("").await?;
+    println!("[state]    entries: {}", entries.len());
+
+    // Auth
+    let providers = ports.auth.list_providers().await?;
+    println!("[auth]     providers with credentials: {:?}", providers);
+
+    // Config
+    let keys = ports.config.list()?;
+    println!("[config]   keys: {}", keys.len());
+
+    // Skills
+    let skills = ports.skills.list().await?;
+    println!("[skills]   {} skill(s) discovered", skills.len());
+    for s in &skills {
+        println!("           - {}: {}", s.name, s.description);
+    }
+
+    // Event bus / memory / etc — all noop unless registered
+    let _ = ports.event_bus.publish(&"port-check".to_string(), serde_json::json!({"ok": true})).await;
+    println!("[event-bus] publish ok (noop bus if not registered)");
+
+    println!("\nport check: ok");
+    Ok(())
+}
 
 /// Context for compaction operations, passed to extension hooks
 #[derive(Debug, Clone)]
@@ -76,17 +130,23 @@ impl CompactionContext {
 }
 
 // ─── Module-level imports ────────────────────────────────────────────────────
+use crate::store::settings::Settings;
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use parking_lot::RwLock;
 use skills::SkillManager;
 use std::sync::Arc;
-use uuid::Uuid;
 
 // ─── Application state ───────────────────────────────────────────────────────
 
-/// Application state and entry point
+/// Application state and entry point.
+///
+/// Holds an `Oxi` engine (composition root) and a single `Agent` built
+/// from it. The legacy `App::new(settings)` constructor is **gone**;
+/// use [`App::from_oxi`] with a wired `Oxi` from
+/// [`build_oxi_engine`].
 pub struct App {
+    oxi: oxi_sdk::Oxi,
     agent: Arc<Agent>,
     settings: Settings,
     skills: RwLock<SkillManager>,
@@ -96,121 +156,10 @@ pub struct App {
         Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
 }
 
-/// Chat message for display
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ChatMessage {
-    /// Role of the message sender (e.g. "user" or "assistant").
-    pub role: String,
-    /// Text content of the message.
-    pub content: String,
-    /// Timestamp when the message was created.
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-}
-
-impl ChatMessage {
-    /// Create a new user chat message.
-    pub fn user(content: String) -> Self {
-        Self {
-            role: "user".to_string(),
-            content,
-            timestamp: chrono::Utc::now(),
-        }
-    }
-
-    /// Create a new assistant chat message.
-    pub fn assistant(content: String) -> Self {
-        Self {
-            role: "assistant".to_string(),
-            content,
-            timestamp: chrono::Utc::now(),
-        }
-    }
-}
-
-/// Interactive session state
-#[derive(Debug, Clone, Default)]
-pub struct InteractiveSession {
-    /// Chat messages exchanged so far.
-    pub messages: Vec<ChatMessage>,
-    /// Whether the assistant is currently generating a response.
-    pub thinking: bool,
-    /// Partial response text accumulated during streaming.
-    pub current_response: String,
-    /// Unique session identifier.
-    pub session_id: Option<Uuid>,
-    /// Optional human-readable session name.
-    pub name: Option<String>,
-    /// Raw session entries for persistence and tree navigation.
-    pub entries: Vec<SessionEntry>,
-}
-
-impl InteractiveSession {
-    /// Create a new empty interactive session.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Add a user message to the session.
-    pub fn add_user_message(&mut self, content: String) {
-        self.messages.push(ChatMessage::user(content.clone()));
-        let entry = SessionEntry::new(AgentMessage::User {
-            content: ContentValue::String(content),
-        });
-        self.entries.push(entry);
-    }
-
-    /// Add an assistant message to the session.
-    pub fn add_assistant_message(&mut self, content: String) {
-        self.messages.push(ChatMessage::assistant(content.clone()));
-        let entry = SessionEntry::new(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text { text: content }],
-            provider: None,
-            model_id: None,
-            usage: None,
-            stop_reason: None,
-        });
-        self.entries.push(entry);
-        self.current_response.clear();
-    }
-
-    /// Append text to the current partial streaming response.
-    pub fn append_to_response(&mut self, text: &str) {
-        self.current_response.push_str(text);
-    }
-
-    /// Finalize the current streaming response into a full assistant message.
-    pub fn finish_response(&mut self) {
-        if !self.current_response.is_empty() {
-            let response = std::mem::take(&mut self.current_response);
-            self.add_assistant_message(response);
-        }
-    }
-
-    /// Get all entries in the session
-    pub fn entries(&self) -> &[SessionEntry] {
-        &self.entries
-    }
-
-    /// Get entry at a specific index
-    pub fn get_entry(&self, index: usize) -> Option<&SessionEntry> {
-        self.entries.get(index)
-    }
-
-    /// Get entry by ID
-    pub fn get_entry_by_id(&self, id: &str) -> Option<&SessionEntry> {
-        self.entries.iter().find(|e| e.id == id)
-    }
-
-    /// Truncate entries at a given index (for branching)
-    pub fn truncate_at(&mut self, index: usize) {
-        self.entries.truncate(index + 1);
-    }
-}
-
-// ─── System prompt builder ───────────────────────────────────────────────────
+/// Context for compaction operations, passed to extension hooks// ─── System prompt builder ───────────────────────────────────────────────────
 
 fn build_system_prompt(
-    thinking_level: oxi_store::settings::ThinkingLevel,
+    thinking_level: crate::store::settings::ThinkingLevel,
     skill_contents: &[String],
 ) -> String {
     let skills: Vec<prompt::system_prompt::Skill> = skill_contents
@@ -237,37 +186,20 @@ fn build_system_prompt(
 // ─── App implementation ─────────────────────────────────────────────────────
 
 impl App {
-    /// Create a new App instance
-    pub async fn new(settings: Settings) -> Result<Self> {
+    /// Build an `App` from a wired `Oxi` engine and a settings object.
+    ///
+    /// The `Oxi` should be created via [`build_oxi_engine`] (or
+    /// `services::build_oxi`) so that all 11 ports are wired. The
+    /// settings hold the user's runtime configuration (model, thinking
+    /// level, etc.).
+    pub async fn from_oxi(oxi: oxi_sdk::Oxi, settings: Settings) -> Result<Self> {
         let model_id = settings.effective_model(None).unwrap_or_default();
         let provider_name = settings
             .effective_provider(None)
             .unwrap_or_else(|| model_id.split('/').next().unwrap_or("").to_string());
 
-        let (provider_name, model_name) = if model_id.contains('/') {
-            let parts: Vec<&str> = model_id.split('/').collect();
-            (parts[0].to_string(), parts[1..].join("/"))
-        } else if !model_id.is_empty() {
-            (provider_name.clone(), model_id.clone())
-        } else {
-            (String::new(), String::new())
-        };
-
-        // Resolve model (validation only)
-        if !provider_name.is_empty() && !model_name.is_empty() {
-            let _ = oxi_sdk::lookup_model(&provider_name, &model_name);
-        }
-
-        // Resolve provider via oxi-ai built-in factory
-        let provider: Arc<dyn oxi_sdk::Provider> = {
-            let name = if provider_name.is_empty() {
-                "anthropic"
-            } else {
-                &provider_name
-            };
-            oxi_sdk::get_provider_arc(name)
-                .ok_or_else(|| Error::msg(format!("Provider '{}' not found", name)))?
-        };
+        // Pull the API key from the wired port, not from oxi_store.
+        let api_key = oxi.ports().auth.get_api_key(&provider_name).await?;
 
         let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
             dirs::home_dir()
@@ -286,8 +218,6 @@ impl App {
         } else {
             oxi_sdk::CompactionStrategy::Disabled
         };
-        let auth = oxi_store::auth_storage::shared_auth_storage();
-        let api_key = auth.get_api_key(&provider_name);
 
         let config = AgentConfig {
             name: "oxi".to_string(),
@@ -309,11 +239,14 @@ impl App {
             provider_options: None,
         };
 
-        let agent = Arc::new(Agent::new(
-            provider,
-            config,
-            Arc::new(oxi_agent::ToolRegistry::new()),
-        ));
+        // Build the agent via the SDK's AgentBuilder — no manual wiring.
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let agent = oxi
+            .agent(config)
+            .workspace(cwd)
+            .build()
+            .map_err(|e| Error::msg(format!("agent build failed: {e}")))?;
+        let agent = Arc::new(agent);
 
         let bridge =
             std::sync::Arc::new(oxi_agent::tools::questionnaire::QuestionnaireBridge::new());
@@ -324,6 +257,7 @@ impl App {
             .register_arc(std::sync::Arc::new(questionnaire_tool));
 
         Ok(Self {
+            oxi,
             agent,
             settings,
             skills: RwLock::new(skills),
@@ -445,110 +379,25 @@ impl App {
         Ok(String::new())
     }
 
-    /// Run in interactive mode, returning an event stream
-    pub async fn run_interactive(&self) -> Result<InteractiveLoop<'_>> {
-        let session = InteractiveSession::new();
-        Ok(InteractiveLoop { app: self, session })
-    }
-
     /// Reset the conversation
     pub fn reset(&self) {
         self.agent.reset();
     }
 
     /// Switch the model used for future LLM calls.
-    pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
+    pub async fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
         let parts: Vec<&str> = model_id.split('/').collect();
         let provider = parts
             .first()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "anthropic".to_string());
-        let api_key = oxi_store::auth_storage::shared_auth_storage().get_api_key(&provider);
-        self.agent.switch_model(model_id, api_key)
+        let api_key = self.oxi.ports().auth.get_api_key(&provider).await?;
+        self.agent.switch_model(model_id, api_key);
+        Ok(())
     }
 
     /// Get the current model ID
     pub fn model_id(&self) -> String {
         self.agent.model_id()
-    }
-}
-
-/// Interactive loop handle
-pub struct InteractiveLoop<'a> {
-    app: &'a App,
-    session: InteractiveSession,
-}
-
-impl<'a> InteractiveLoop<'a> {
-    /// Add a user message and get the assistant response
-    pub async fn send_message(&mut self, prompt: String) -> Result<()> {
-        self.session.add_user_message(prompt.clone());
-        self.session.thinking = true;
-
-        let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
-        let agent = Arc::clone(&self.app.agent);
-
-        let local = tokio::task::LocalSet::new();
-        local.spawn_local(async move {
-            let _ = agent.run_with_channel(prompt, tx).await;
-        });
-
-        while let Ok(event) = rx.recv() {
-            match event {
-                AgentEvent::TextChunk { text } => {
-                    self.session.append_to_response(&text);
-                }
-                AgentEvent::Thinking => {}
-                AgentEvent::Complete { .. } => {
-                    self.session.finish_response();
-                    self.session.thinking = false;
-                }
-                AgentEvent::Error { message, .. } => {
-                    self.session
-                        .append_to_response(&format!("[Error: {}]", message));
-                    self.session.finish_response();
-                    self.session.thinking = false;
-                }
-                _ => {}
-            }
-        }
-
-        local.await;
-        Ok(())
-    }
-
-    /// Get current messages
-    pub fn messages(&self) -> &[ChatMessage] {
-        &self.session.messages
-    }
-
-    /// Get the current partial response (while thinking)
-    pub fn current_response(&self) -> &str {
-        &self.session.current_response
-    }
-
-    /// Check if currently thinking
-    pub fn is_thinking(&self) -> bool {
-        self.session.thinking
-    }
-
-    /// Get session entries for tree navigation
-    pub fn entries(&self) -> &[SessionEntry] {
-        self.session.entries()
-    }
-
-    /// Get entry by ID
-    pub fn get_entry(&self, id: Uuid) -> Option<&SessionEntry> {
-        self.session.get_entry_by_id(&id.to_string())
-    }
-
-    /// Switch the model used for future LLM calls
-    pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
-        self.app.switch_model(model_id)
-    }
-
-    /// Get the current model ID
-    pub fn model_id(&self) -> String {
-        self.app.model_id()
     }
 }

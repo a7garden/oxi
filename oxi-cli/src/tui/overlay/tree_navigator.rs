@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
-use oxi_store::session::{AgentMessage, SessionEntry};
+use crate::store::session::{AgentMessage, SessionEntry};
 use oxi_tui::Theme;
 use ratatui::{
     layout::Rect,

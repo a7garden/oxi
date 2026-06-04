@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::Write as FmtWrite;
 use uuid::Uuid;
 
-use oxi_store::session::{AgentMessage, SessionEntry, SessionMeta};
+use crate::store::session::{AgentMessage, SessionEntry, SessionMeta};
 
 // ── Public types ─────────────────────────────────────────────────────
 
@@ -951,11 +951,11 @@ fn render_entry(
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
             let content_str: String = match content {
-                oxi_store::session::ContentValue::String(s) => s.clone(),
-                oxi_store::session::ContentValue::Blocks(blocks) => {
+                crate::store::session::ContentValue::String(s) => s.clone(),
+                crate::store::session::ContentValue::Blocks(blocks) => {
                     let mut text = String::new();
                     for block in blocks {
-                        if let oxi_store::session::ContentBlock::Text { text: t } = block {
+                        if let crate::store::session::ContentBlock::Text { text: t } = block {
                             text.push_str(t);
                             text.push('\n');
                         }
@@ -976,7 +976,7 @@ fn render_entry(
             // Extract text content for markdown rendering
             let mut text_content = String::new();
             for block in content {
-                if let oxi_store::session::AssistantContentBlock::Text { text } = block {
+                if let crate::store::session::AssistantContentBlock::Text { text } = block {
                     text_content.push_str(text);
                     text_content.push('\n');
                 }
@@ -1002,11 +1002,11 @@ fn render_entry(
             html.push_str("</div>\n");
             html.push_str("<div class=\"msg-body\">");
             let content_str: String = match content {
-                oxi_store::session::ContentValue::String(s) => s.clone(),
-                oxi_store::session::ContentValue::Blocks(blocks) => {
+                crate::store::session::ContentValue::String(s) => s.clone(),
+                crate::store::session::ContentValue::Blocks(blocks) => {
                     let mut text = String::new();
                     for block in blocks {
-                        if let oxi_store::session::ContentBlock::Text { text: t } = block {
+                        if let crate::store::session::ContentBlock::Text { text: t } = block {
                             text.push_str(t);
                             text.push('\n');
                         }
@@ -1650,7 +1650,7 @@ document.addEventListener('DOMContentLoaded', () => {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxi_store::session::{AgentMessage, AssistantContentBlock};
+    use crate::store::session::{AgentMessage, AssistantContentBlock};
 
     fn make_entry(msg: AgentMessage) -> SessionEntry {
         SessionEntry {

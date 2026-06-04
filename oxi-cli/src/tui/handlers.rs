@@ -931,7 +931,7 @@ async fn handle_overlay_key(
             OverlayAction::ForkFromEntry { entry_id } => {
                 state.overlay_state = None;
                 if let Some(ref path) = state.session_file_path {
-                    let sm = oxi_store::session::SessionManager::open(path, None, None);
+                    let sm = crate::store::session::SessionManager::open(path, None, None);
                     match sm.branch_from_entry(&entry_id) {
                         Ok(new_path) => {
                             state.next_action =
@@ -982,7 +982,7 @@ async fn handle_overlay_key(
                 if models.is_empty() {
                     // No models registered — fall back to "default" passthrough.
                     let full_model = format!("{}/default", provider_name);
-                    if let Ok(mut settings) = oxi_store::settings::Settings::load() {
+                    if let Ok(mut settings) = crate::store::settings::Settings::load() {
                         settings.last_used_provider = Some(provider_name.clone());
                         settings.last_used_model = Some("default".to_string());
                         let _ = settings.save();
@@ -1022,7 +1022,7 @@ async fn handle_overlay_key(
                 let full_model = format!("{}/{}", provider_name, model_id);
 
                 // Persist to settings.
-                if let Ok(mut settings) = oxi_store::settings::Settings::load() {
+                if let Ok(mut settings) = crate::store::settings::Settings::load() {
                     settings.last_used_provider = Some(provider_name.clone());
                     settings.last_used_model = Some(model_id.clone());
                     let _ = settings.save();

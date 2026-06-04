@@ -11,6 +11,7 @@ use crate::agent_builder::AgentBuilder;
 use crate::lifecycle::{AgentSupervisor, FileSnapshotStore, SupervisorPolicy};
 use crate::multi_provider::{MultiProviderBuilder, RoutingConfig};
 use crate::observability::{AuditLog, CostTracker, Tracer};
+use crate::ports::PortRegistry;
 use crate::security::Authorizer;
 
 /// Oxi AI engine instance — holds isolated provider and model registries.
@@ -31,6 +32,8 @@ pub struct Oxi {
     api_keys: Arc<HashMap<String, String>>,
     /// Per-provider base URL overrides.
     base_urls: Arc<HashMap<String, String>>,
+    /// Port registry (state, config, auth, event bus, etc.). Default: noop.
+    ports: Arc<PortRegistry>,
 }
 
 impl Oxi {
@@ -52,6 +55,11 @@ impl Oxi {
     /// Get the shared tool registry.
     pub fn tools(&self) -> Arc<ToolRegistry> {
         Arc::clone(&self.tools)
+    }
+
+    /// Get the port registry (state, config, auth, event bus, ...).
+    pub fn ports(&self) -> &PortRegistry {
+        &self.ports
     }
 
     /// Resolve a model ID to a Model.
@@ -130,6 +138,8 @@ pub struct OxiBuilder {
     include_builtins: bool,
     api_keys: HashMap<String, String>,
     base_urls: HashMap<String, String>,
+    /// Port registry (None = use noop default).
+    ports: Option<PortRegistry>,
 }
 
 impl OxiBuilder {
@@ -142,6 +152,7 @@ impl OxiBuilder {
             include_builtins: false,
             api_keys: HashMap::new(),
             base_urls: HashMap::new(),
+            ports: None,
         }
     }
 
@@ -278,6 +289,113 @@ impl OxiBuilder {
         self
     }
 
+    // ─── Port registration ────────────────────────────────────────────────
+    //
+    // Products (oxi-cli, oxios-kernel, custom apps) register concrete
+    // implementations of the port traits defined in `crate::ports`.
+    // All ports are optional: unset ports use a noop default.
+
+    /// Register a complete [`PortRegistry`] at once.
+    ///
+    /// Use this when you have a fully-built registry (e.g. loaded from a
+    /// directory of file-based adapters). For piecemeal registration, use
+    /// the `with_port_*` methods below.
+    pub fn with_ports(mut self, ports: PortRegistry) -> Self {
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the state store.
+    pub fn with_state(mut self, store: Arc<dyn crate::ports::StateStore>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.state = store;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the config store.
+    pub fn with_config(mut self, store: Arc<dyn crate::ports::ConfigStore>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.config = store;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the auth provider.
+    pub fn with_auth(mut self, auth: Arc<dyn crate::ports::AuthProvider>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.auth = auth;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the event bus.
+    pub fn with_event_bus(mut self, bus: Arc<dyn crate::ports::EventBus>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.event_bus = bus;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the skill loader.
+    pub fn with_skills(mut self, loader: Arc<dyn crate::ports::SkillLoader>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.skills = loader;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the persona provider.
+    pub fn with_personas(mut self, provider: Arc<dyn crate::ports::PersonaProvider>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.personas = provider;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the access gate.
+    pub fn with_access(mut self, gate: Arc<dyn crate::ports::AccessGate>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.access = gate;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the capability resolver.
+    pub fn with_capabilities(
+        mut self,
+        resolver: Arc<dyn crate::ports::CapabilityResolver>,
+    ) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.capabilities = resolver;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the memory store.
+    pub fn with_memory(mut self, store: Arc<dyn crate::ports::MemoryStore>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.memory = store;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the cron scheduler.
+    pub fn with_cron(mut self, scheduler: Arc<dyn crate::ports::CronScheduler>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.cron = scheduler;
+        self.ports = Some(ports);
+        self
+    }
+
+    /// Register the resource monitor.
+    pub fn with_resources(mut self, monitor: Arc<dyn crate::ports::ResourceMonitor>) -> Self {
+        let mut ports = self.ports.unwrap_or_default();
+        ports.resources = monitor;
+        self.ports = Some(ports);
+        self
+    }
+
     /// Enable multi-provider routing with automatic complexity-based model selection.
     ///
     /// This registers a [`MultiProvider`](oxi_ai::multi_provider::MultiProvider) that routes requests based on task complexity,
@@ -368,6 +486,7 @@ impl OxiBuilder {
             include_builtins: self.include_builtins,
             api_keys: Arc::new(self.api_keys),
             base_urls: Arc::new(self.base_urls),
+            ports: Arc::new(self.ports.unwrap_or_default()),
         }
     }
 }

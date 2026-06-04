@@ -14,7 +14,7 @@ use oxi_tui::widgets::stateful_list::StatefulList;
 
 use super::{centered_layout, OverlayAction, OverlayComponent};
 use crate::app::agent_session::{AgentSession, AgentSessionHandle};
-use oxi_store::session::SessionInfo;
+use crate::store::session::SessionInfo;
 use ratatui::{layout::Rect, style::Style, Frame};
 
 type SharedAppState = Arc<Mutex<*mut crate::tui::app::AppState>>;
@@ -75,7 +75,7 @@ impl OverlayComponent for ModelSelectOverlay {
                         let gd = dirs::config_dir().unwrap_or_default().join("oxi");
                         let pd = std::env::current_dir().unwrap_or_default();
                         let has_config =
-                            oxi_store::router_config::load_router_config(&gd, &pd).is_some();
+                            crate::store::router_config::load_router_config(&gd, &pd).is_some();
                         if !has_config {
                             if let Ok(ptr) = self.app_state.lock() {
                                 // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
@@ -116,7 +116,7 @@ impl OverlayComponent for ModelSelectOverlay {
                                     }
                                 }
                             }
-                            oxi_store::settings::Settings::save_last_used(&model_id);
+                            crate::store::settings::Settings::save_last_used(&model_id);
                         }
                         Err(e) => {
                             if let Ok(ptr) = self.app_state.lock() {
@@ -281,7 +281,7 @@ impl OverlayComponent for LogoutSelectOverlay {
             }
             KeyCode::Enter => {
                 if let Some(provider) = self.list.selected().cloned() {
-                    oxi_store::auth_storage::shared_auth_storage().remove(&provider);
+                    crate::store::auth_storage::shared_auth_storage().remove(&provider);
                     if let Ok(ptr) = self.app_state.lock() {
                         // SAFETY: We hold the Mutex lock, guaranteeing exclusive access.
                         unsafe {
