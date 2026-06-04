@@ -51,16 +51,26 @@
 
 pub mod access;
 pub mod auth;
+pub mod capability;
 pub mod config;
+pub mod cron;
+pub mod event;
+pub mod memory;
 pub mod path;
 pub mod persona;
+pub mod resources;
 pub mod session;
 pub mod skill;
 
 pub use access::SimpleAccessGate;
 pub use auth::FileAuthProvider;
+pub use capability::TomlCapabilityResolver;
 pub use config::FileConfigStore;
+pub use cron::InMemoryCronScheduler;
+pub use event::InProcessEventBus;
+pub use memory::InMemoryMemoryStore;
 pub use persona::FilePersonaProvider;
+pub use resources::CountingResourceMonitor;
 pub use session::FileStateStore;
 pub use skill::FileSkillLoader;
 

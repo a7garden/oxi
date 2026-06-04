@@ -21,8 +21,9 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 
 use oxi_fs::{
-    FileAuthProvider, FileConfigStore, FilePersonaProvider, FileSkillLoader, FileStateStore,
-    SimpleAccessGate,
+    CountingResourceMonitor, FileAuthProvider, FileConfigStore, FilePersonaProvider,
+    FileSkillLoader, FileStateStore, InMemoryCronScheduler, InMemoryMemoryStore,
+    InProcessEventBus, SimpleAccessGate, TomlCapabilityResolver,
 };
 use oxi_sdk::Oxi;
 
@@ -82,6 +83,13 @@ pub fn build_oxi(paths: &OxiPaths) -> Result<Oxi> {
         .with_access(Arc::new(SimpleAccessGate::from_file(
             paths.home.join("access.toml"),
         )))
+        .with_capabilities(Arc::new(TomlCapabilityResolver::from_file(
+            paths.home.join("capabilities.toml"),
+        )))
+        .with_event_bus(InProcessEventBus::new(64))
+        .with_memory(Arc::new(InMemoryMemoryStore::new()))
+        .with_cron(Arc::new(InMemoryCronScheduler::new()))
+        .with_resources(Arc::new(CountingResourceMonitor::new()))
         .build();
 
     Ok(oxi)

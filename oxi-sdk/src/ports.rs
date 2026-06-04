@@ -310,6 +310,18 @@ impl std::fmt::Debug for SubscriptionHandle {
     }
 }
 
+impl SubscriptionHandle {
+    /// Construct a subscription from an mpsc receiver. Used by port impls
+    /// (e.g. `oxi_fs::InProcessEventBus`) — not part of the public SDK API
+    /// for end-users.
+    pub fn from_receiver(rx: tokio::sync::mpsc::Receiver<(EventTopic, EventPayload)>) -> Self {
+        Self {
+            _unsubscribe: None,
+            receiver: Some(rx),
+        }
+    }
+}
+
 /// In-memory bus for tests or small products.
 pub struct InMemoryEventBus {
     tx: tokio::sync::broadcast::Sender<(EventTopic, EventPayload)>,

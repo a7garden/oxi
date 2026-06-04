@@ -1485,16 +1485,8 @@ fn load_wasm_extensions(
 
 /// Run a single prompt and print the result
 async fn run_single_prompt(app: oxi::App, prompt: &str) -> Result<()> {
-    let mut session = app.run_interactive().await?;
-    session.send_message(prompt.to_string()).await?;
-
-    // Print response
-    for msg in session.messages() {
-        if msg.role == "assistant" {
-            println!("{}", msg.content);
-        }
-    }
-
+    let response = app.run_prompt_with_events(prompt.to_string(), |_event| {}).await?;
+    println!("{response}");
     Ok(())
 }
 

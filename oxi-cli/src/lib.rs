@@ -141,7 +141,6 @@ use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use parking_lot::RwLock;
 use skills::SkillManager;
 use std::sync::Arc;
-use uuid::Uuid;
 
 // ─── Application state ───────────────────────────────────────────────────────
 
@@ -156,118 +155,7 @@ pub struct App {
         Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
 }
 
-/// Chat message for display
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ChatMessage {
-    /// Role of the message sender (e.g. "user" or "assistant").
-    pub role: String,
-    /// Text content of the message.
-    pub content: String,
-    /// Timestamp when the message was created.
-    pub timestamp: chrono::DateTime<chrono::Utc>,
-}
-
-impl ChatMessage {
-    /// Create a new user chat message.
-    pub fn user(content: String) -> Self {
-        Self {
-            role: "user".to_string(),
-            content,
-            timestamp: chrono::Utc::now(),
-        }
-    }
-
-    /// Create a new assistant chat message.
-    pub fn assistant(content: String) -> Self {
-        Self {
-            role: "assistant".to_string(),
-            content,
-            timestamp: chrono::Utc::now(),
-        }
-    }
-}
-
-/// Interactive session state
-#[derive(Debug, Clone, Default)]
-pub struct InteractiveSession {
-    /// Chat messages exchanged so far.
-    pub messages: Vec<ChatMessage>,
-    /// Whether the assistant is currently generating a response.
-    pub thinking: bool,
-    /// Partial response text accumulated during streaming.
-    pub current_response: String,
-    /// Unique session identifier.
-    pub session_id: Option<Uuid>,
-    /// Optional human-readable session name.
-    pub name: Option<String>,
-    /// Raw session entries for persistence and tree navigation.
-    pub entries: Vec<SessionEntry>,
-}
-
-impl InteractiveSession {
-    /// Create a new empty interactive session.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Add a user message to the session.
-    pub fn add_user_message(&mut self, content: String) {
-        self.messages.push(ChatMessage::user(content.clone()));
-        let entry = SessionEntry::new(AgentMessage::User {
-            content: ContentValue::String(content),
-        });
-        self.entries.push(entry);
-    }
-
-    /// Add an assistant message to the session.
-    pub fn add_assistant_message(&mut self, content: String) {
-        self.messages.push(ChatMessage::assistant(content.clone()));
-        let entry = SessionEntry::new(AgentMessage::Assistant {
-            content: vec![AssistantContentBlock::Text { text: content }],
-            provider: None,
-            model_id: None,
-            usage: None,
-            stop_reason: None,
-        });
-        self.entries.push(entry);
-        self.current_response.clear();
-    }
-
-    /// Append text to the current partial streaming response.
-    pub fn append_to_response(&mut self, text: &str) {
-        self.current_response.push_str(text);
-    }
-
-    /// Finalize the current streaming response into a full assistant message.
-    pub fn finish_response(&mut self) {
-        if !self.current_response.is_empty() {
-            let response = std::mem::take(&mut self.current_response);
-            self.add_assistant_message(response);
-        }
-    }
-
-    /// Get all entries in the session
-    pub fn entries(&self) -> &[SessionEntry] {
-        &self.entries
-    }
-
-    /// Get entry at a specific index
-    pub fn get_entry(&self, index: usize) -> Option<&SessionEntry> {
-        self.entries.get(index)
-    }
-
-    /// Get entry by ID
-    pub fn get_entry_by_id(&self, id: &str) -> Option<&SessionEntry> {
-        self.entries.iter().find(|e| e.id == id)
-    }
-
-    /// Truncate entries at a given index (for branching)
-    pub fn truncate_at(&mut self, index: usize) {
-        self.entries.truncate(index + 1);
-    }
-}
-
-// ─── System prompt builder ───────────────────────────────────────────────────
+/// Context for compaction operations, passed to extension hooks// ─── System prompt builder ───────────────────────────────────────────────────
 
 fn build_system_prompt(
     thinking_level: oxi_store::settings::ThinkingLevel,
@@ -505,12 +393,6 @@ impl App {
         Ok(String::new())
     }
 
-    /// Run in interactive mode, returning an event stream
-    pub async fn run_interactive(&self) -> Result<InteractiveLoop<'_>> {
-        let session = InteractiveSession::new();
-        Ok(InteractiveLoop { app: self, session })
-    }
-
     /// Reset the conversation
     pub fn reset(&self) {
         self.agent.reset();
@@ -530,85 +412,5 @@ impl App {
     /// Get the current model ID
     pub fn model_id(&self) -> String {
         self.agent.model_id()
-    }
-}
-
-/// Interactive loop handle
-pub struct InteractiveLoop<'a> {
-    app: &'a App,
-    session: InteractiveSession,
-}
-
-impl<'a> InteractiveLoop<'a> {
-    /// Add a user message and get the assistant response
-    pub async fn send_message(&mut self, prompt: String) -> Result<()> {
-        self.session.add_user_message(prompt.clone());
-        self.session.thinking = true;
-
-        let (tx, rx) = std::sync::mpsc::channel::<AgentEvent>();
-        let agent = Arc::clone(&self.app.agent);
-
-        let local = tokio::task::LocalSet::new();
-        local.spawn_local(async move {
-            let _ = agent.run_with_channel(prompt, tx).await;
-        });
-
-        while let Ok(event) = rx.recv() {
-            match event {
-                AgentEvent::TextChunk { text } => {
-                    self.session.append_to_response(&text);
-                }
-                AgentEvent::Thinking => {}
-                AgentEvent::Complete { .. } => {
-                    self.session.finish_response();
-                    self.session.thinking = false;
-                }
-                AgentEvent::Error { message, .. } => {
-                    self.session
-                        .append_to_response(&format!("[Error: {}]", message));
-                    self.session.finish_response();
-                    self.session.thinking = false;
-                }
-                _ => {}
-            }
-        }
-
-        local.await;
-        Ok(())
-    }
-
-    /// Get current messages
-    pub fn messages(&self) -> &[ChatMessage] {
-        &self.session.messages
-    }
-
-    /// Get the current partial response (while thinking)
-    pub fn current_response(&self) -> &str {
-        &self.session.current_response
-    }
-
-    /// Check if currently thinking
-    pub fn is_thinking(&self) -> bool {
-        self.session.thinking
-    }
-
-    /// Get session entries for tree navigation
-    pub fn entries(&self) -> &[SessionEntry] {
-        self.session.entries()
-    }
-
-    /// Get entry by ID
-    pub fn get_entry(&self, id: Uuid) -> Option<&SessionEntry> {
-        self.session.get_entry_by_id(&id.to_string())
-    }
-
-    /// Switch the model used for future LLM calls
-    pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
-        self.app.switch_model(model_id)
-    }
-
-    /// Get the current model ID
-    pub fn model_id(&self) -> String {
-        self.app.model_id()
     }
 }
