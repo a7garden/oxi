@@ -1,0 +1,60 @@
+# DeepSeek models (2 entries)
+provider = "deepseek"
+
+[[model]]
+id = "deepseek-v4-flash"
+name = "DeepSeek V4 Flash"
+api = "openai-completions"
+provider = "deepseek"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0028
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 384000
+
+[[model]]
+id = "deepseek-v4-pro"
+name = "DeepSeek V4 Pro"
+api = "openai-completions"
+provider = "deepseek"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.003625
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 384000
+
+[[model]]
+id = "deepseek-chat"
+name = "DeepSeek Chat"
+api = "openai-completions"
+provider = "deepseek"
+reasoning = false
+input = ["text"]
+cost_input = 0.28
+cost_output = 0.42
+cost_cache_read = 0.028
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 8192
+
+
+[[model]]
+id = "deepseek-reasoner"
+name = "DeepSeek Reasoner"
+api = "openai-completions"
+provider = "deepseek"
+reasoning = true
+input = ["text"]
+cost_input = 0.28
+cost_output = 0.42
+cost_cache_read = 0.028
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 65536
+

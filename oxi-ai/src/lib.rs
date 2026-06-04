@@ -7,6 +7,7 @@
 //! This crate provides a unified interface for interacting with multiple LLM providers.
 //! It handles streaming, tool calling, context management, and cross-provider handoffs.
 
+pub mod catalog;
 pub mod circuit_breaker;
 mod compaction;
 mod complexity_router;

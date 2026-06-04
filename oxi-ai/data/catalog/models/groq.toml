@@ -1,0 +1,254 @@
+# Groq models (18 entries)
+provider = "groq"
+
+[[model]]
+id = "deepseek-r1-distill-llama-70b"
+name = "DeepSeek R1 Distill Llama 70B"
+api = "openai-completions"
+provider = "groq"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 8192
+
+[[model]]
+id = "gemma2-9b-it"
+name = "Gemma 2 9B"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 8192
+max_tokens = 8192
+
+[[model]]
+id = "groq/compound"
+name = "Compound"
+api = "openai-completions"
+provider = "groq"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 8192
+
+[[model]]
+id = "groq/compound-mini"
+name = "Compound Mini"
+api = "openai-completions"
+provider = "groq"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 8192
+
+[[model]]
+id = "llama-3.1-8b-instant"
+name = "Llama 3.1 8B Instant"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 131072
+
+[[model]]
+id = "llama-3.3-70b-versatile"
+name = "Llama 3.3 70B Versatile"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 32768
+
+[[model]]
+id = "llama3-70b-8192"
+name = "Llama 3 70B"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 8192
+max_tokens = 8192
+
+[[model]]
+id = "llama3-8b-8192"
+name = "Llama 3 8B"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 8192
+max_tokens = 8192
+
+[[model]]
+id = "meta-llama/llama-4-maverick-17b-128e-instruct"
+name = "Llama 4 Maverick 17B"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 8192
+
+[[model]]
+id = "meta-llama/llama-4-scout-17b-16e-instruct"
+name = "Llama 4 Scout 17B"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 8192
+
+[[model]]
+id = "mistral-saba-24b"
+name = "Mistral Saba 24B"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 32768
+max_tokens = 32768
+
+[[model]]
+id = "moonshotai/kimi-k2-instruct"
+name = "Kimi K2 Instruct"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 16384
+
+[[model]]
+id = "moonshotai/kimi-k2-instruct-0905"
+name = "Kimi K2 Instruct 0905"
+api = "openai-completions"
+provider = "groq"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 16384
+
+[[model]]
+id = "openai/gpt-oss-120b"
+name = "GPT OSS 120B"
+api = "openai-completions"
+provider = "groq"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 65536
+
+[[model]]
+id = "openai/gpt-oss-20b"
+name = "GPT OSS 20B"
+api = "openai-completions"
+provider = "groq"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 65536
+
+[[model]]
+id = "openai/gpt-oss-safeguard-20b"
+name = "Safety GPT OSS 20B"
+api = "openai-completions"
+provider = "groq"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.037
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 65536
+
+[[model]]
+id = "qwen-qwq-32b"
+name = "Qwen QwQ 32B"
+api = "openai-completions"
+provider = "groq"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 16384
+
+[[model]]
+id = "qwen/qwen3-32b"
+name = "Qwen3 32B"
+api = "openai-completions"
+provider = "groq"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 40960

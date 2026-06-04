@@ -1,0 +1,170 @@
+# Cloudflare Workers AI models (12 entries)
+provider = "cloudflare-workers-ai"
+
+[[model]]
+id = "@cf/google/gemma-4-26b-a4b-it"
+name = "Gemma 4 26B A4B IT"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 256000
+max_tokens = 16384
+
+[[model]]
+id = "@cf/meta/llama-4-scout-17b-16e-instruct"
+name = "Llama 4 Scout 17B 16E Instruct"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 16384
+
+[[model]]
+id = "@cf/moonshotai/kimi-k2.5"
+name = "Kimi K2.5"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.1
+cost_cache_write = 0.0
+context_window = 256000
+max_tokens = 256000
+
+[[model]]
+id = "@cf/moonshotai/kimi-k2.6"
+name = "Kimi K2.6"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.16
+cost_cache_write = 0.0
+context_window = 256000
+max_tokens = 256000
+
+[[model]]
+id = "@cf/nvidia/nemotron-3-120b-a12b"
+name = "Nemotron 3 Super 120B"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 256000
+max_tokens = 256000
+
+[[model]]
+id = "@cf/openai/gpt-oss-120b"
+name = "GPT OSS 120B"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 16384
+
+[[model]]
+id = "@cf/openai/gpt-oss-20b"
+name = "GPT OSS 20B"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 16384
+
+[[model]]
+id = "@cf/zai-org/glm-4.7-flash"
+name = "GLM-4.7-Flash"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 131072
+
+[[model]]
+id = "@cf/ibm-granite/granite-4.0-h-micro"
+name = "Granite 4.0 H Micro"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = false
+input = ["text"]
+cost_input = 0.017
+cost_output = 0.112
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131000
+max_tokens = 131000
+
+[[model]]
+id = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+name = "Llama 3.3 70B Instruct fp8 Fast"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = false
+input = ["text"]
+cost_input = 0.293
+cost_output = 2.253
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 24000
+max_tokens = 24000
+
+[[model]]
+id = "@cf/mistralai/mistral-small-3.1-24b-instruct"
+name = "Mistral Small 3.1 24B Instruct"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = false
+input = ["text"]
+cost_input = 0.351
+cost_output = 0.555
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 128000
+
+[[model]]
+id = "@cf/qwen/qwen3-30b-a3b-fp8"
+name = "Qwen3 30B A3b fp8"
+api = "openai-completions"
+provider = "cloudflare-workers-ai"
+reasoning = true
+input = ["text"]
+cost_input = 0.0509
+cost_output = 0.335
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 32768
+max_tokens = 32768

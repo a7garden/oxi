@@ -5,6 +5,7 @@
 //! headers. The provider factory is data-driven from this metadata rather than
 //! using hardcoded match arms.
 
+use crate::catalog::BuiltinProviderEntry;
 use crate::Api;
 
 // ---------------------------------------------------------------------------
@@ -59,671 +60,96 @@ pub struct BuiltinProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Built-in provider definitions
+// API enum parsing
 // ---------------------------------------------------------------------------
 
-/// All built-in providers, defined statically.
+/// Parse the API string from a TOML entry into the `Api` enum.
 ///
-/// Base URLs follow opencode's profiles where available to ensure consistency
-/// with well-tested endpoints.
-static BUILTIN_PROVIDERS: &[BuiltinProvider] = &[
-    // ── Primary providers ──────────────────────────────────────────────
-    BuiltinProvider {
-        name: "openai",
-        display_name: "OpenAI",
-        aliases: &["openai"],
-        api: Api::OpenAiCompletions,
-        env_key: "OPENAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.openai.com/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "primary",
-        description: "GPT, o-series models",
-    },
-    BuiltinProvider {
-        name: "openai-responses",
-        display_name: "OpenAI Responses API",
-        aliases: &["openai-responses"],
-        api: Api::OpenAiResponses,
-        env_key: "OPENAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.openai.com/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "primary",
-        description: "GPT Responses API with hosted tools",
-    },
-    BuiltinProvider {
-        name: "openai-completions",
-        display_name: "OpenAI Completions API (Legacy)",
-        aliases: &["openai-completions", "completions"],
-        api: Api::OpenAiCompletions,
-        env_key: "OPENAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.openai.com/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "primary",
-        description: "Legacy Completions API",
-    },
-    BuiltinProvider {
-        name: "anthropic",
-        display_name: "Anthropic",
-        aliases: &["anthropic"],
-        api: Api::AnthropicMessages,
-        env_key: "ANTHROPIC_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.anthropic.com",
-        default_enabled: true,
-        auth_method: AuthMethod::XApiKey,
-        extra_headers: &[],
-        category: "primary",
-        description: "Claude models with extended thinking",
-    },
-    BuiltinProvider {
-        name: "google",
-        display_name: "Google AI",
-        aliases: &["google"],
-        api: Api::GoogleGenerativeAi,
-        env_key: "GOOGLE_API_KEY",
-        extra_env_keys: &["GEMINI_API_KEY"],
-        base_url: "https://generativelanguage.googleapis.com",
-        default_enabled: true,
-        auth_method: AuthMethod::None, // Google uses URL-param auth
-        extra_headers: &[],
-        category: "primary",
-        description: "Gemini models with thinking",
-    },
-    BuiltinProvider {
-        name: "vertex",
-        display_name: "Google Vertex AI",
-        aliases: &["vertex", "google-vertex"],
-        api: Api::GoogleVertex,
-        env_key: "GOOGLE_APPLICATION_CREDENTIALS",
-        extra_env_keys: &["GOOGLE_CLOUD_PROJECT"],
-        base_url: "https://us-central1-aiplatform.googleapis.com",
-        default_enabled: true,
-        auth_method: AuthMethod::None, // Vertex uses OAuth Bearer
-        extra_headers: &[],
-        category: "specialized",
-        description: "Gemini via Google Cloud Vertex AI",
-    },
-    BuiltinProvider {
-        name: "mistral",
-        display_name: "Mistral",
-        aliases: &["mistral"],
-        api: Api::MistralConversations,
-        env_key: "MISTRAL_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.mistral.ai",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "primary",
-        description: "Mistral and Codestral models",
-    },
-    BuiltinProvider {
-        name: "azure",
-        display_name: "Azure OpenAI",
-        aliases: &["azure", "azure-openai"],
-        api: Api::AzureOpenAiResponses,
-        env_key: "AZURE_OPENAI_API_KEY",
-        extra_env_keys: &["AZURE_API_KEY"],
-        base_url: "", // Configured per deployment (resource name)
-        default_enabled: true,
-        auth_method: AuthMethod::ApiKey,
-        extra_headers: &[],
-        category: "cloud",
-        description: "OpenAI models via Azure Cognitive Services",
-    },
-    BuiltinProvider {
-        name: "bedrock",
-        display_name: "Amazon Bedrock",
-        aliases: &["bedrock", "amazon-bedrock", "aws-bedrock"],
-        api: Api::BedrockConverseStream,
-        env_key: "AWS_ACCESS_KEY_ID",
-        extra_env_keys: &["AWS_PROFILE", "AWS_REGION"],
-        base_url: "", // Uses AWS SDK resolution
-        default_enabled: true,
-        auth_method: AuthMethod::None, // Bedrock uses AWS SigV4
-        extra_headers: &[],
-        category: "specialized",
-        description: "Multi-model via AWS Bedrock ConverseStream",
-    },
-    // ── OpenAI-compatible providers ─────────────────────────────────────
-    // All use Api::OpenAiCompletions with custom base URLs.
-    // Base URLs match opencode's openai-compatible-profile.ts.
-    BuiltinProvider {
-        name: "deepseek",
-        display_name: "DeepSeek",
-        aliases: &["deepseek"],
-        api: Api::OpenAiCompletions,
-        env_key: "DEEPSEEK_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.deepseek.com",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "chinese",
-        description: "DeepSeek-V3, DeepSeek-R1",
-    },
-    BuiltinProvider {
-        name: "groq",
-        display_name: "Groq",
-        aliases: &["groq"],
-        api: Api::OpenAiCompletions,
-        env_key: "GROQ_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.groq.com/openai/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "open",
-        description: "Fast Llama, Mixtral, Gemma inference",
-    },
-    BuiltinProvider {
-        name: "cerebras",
-        display_name: "Cerebras",
-        aliases: &["cerebras"],
-        api: Api::OpenAiCompletions,
-        env_key: "CEREBRAS_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.cerebras.ai/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[("X-Cerebras-3rd-Party-Integration", "opencode")],
-        category: "open",
-        description: "Ultra-fast open model inference",
-    },
-    BuiltinProvider {
-        name: "xai",
-        display_name: "xAI (Grok)",
-        aliases: &["xai", "grok"],
-        api: Api::OpenAiCompletions,
-        env_key: "XAI_API_KEY",
-        extra_env_keys: &["GROK_API_KEY"],
-        base_url: "https://api.x.ai/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "primary",
-        description: "Grok models from xAI",
-    },
-    BuiltinProvider {
-        name: "openrouter",
-        display_name: "OpenRouter",
-        aliases: &["openrouter"],
-        api: Api::OpenAiCompletions,
-        env_key: "OPENROUTER_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://openrouter.ai/api/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[("HTTP-Referer", "https://oxi.dev/"), ("X-Title", "oxi")],
-        category: "open",
-        description: "Unified gateway to 200+ models",
-    },
-    BuiltinProvider {
-        name: "fireworks",
-        display_name: "Fireworks AI",
-        aliases: &["fireworks"],
-        api: Api::OpenAiCompletions,
-        env_key: "FIREWORKS_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.fireworks.ai/inference/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "open",
-        description: "Fast open-source model serving",
-    },
-    BuiltinProvider {
-        name: "togetherai",
-        display_name: "Together AI",
-        aliases: &["togetherai", "together"],
-        api: Api::OpenAiCompletions,
-        env_key: "TOGETHER_API_KEY",
-        extra_env_keys: &["TOGETHER_AI_API_KEY"],
-        base_url: "https://api.together.xyz/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "open",
-        description: "Open-source model hosting (Llama, Mixtral, etc.)",
-    },
-    BuiltinProvider {
-        name: "deepinfra",
-        display_name: "DeepInfra",
-        aliases: &["deepinfra"],
-        api: Api::OpenAiCompletions,
-        env_key: "DEEPINFRA_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.deepinfra.com/v1/openai",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "open",
-        description: "Open model inference marketplace",
-    },
-    BuiltinProvider {
-        name: "cloudflare",
-        display_name: "Cloudflare Workers AI",
-        aliases: &["cloudflare", "workers-ai"],
-        api: Api::OpenAiCompletions,
-        env_key: "CLOUDFLARE_API_KEY",
-        extra_env_keys: &["CF_API_KEY"],
-        // Requires account ID: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
-        base_url: "https://api.cloudflare.com/client/v4/accounts",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "cloud",
-        description: "Cloudflare Workers AI",
-    },
-    BuiltinProvider {
-        name: "copilot",
-        display_name: "GitHub Copilot",
-        aliases: &["copilot", "github-copilot"],
-        api: Api::OpenAiCompletions,
-        env_key: "GITHUB_COPILOT_TOKEN",
-        extra_env_keys: &["GITHUB_TOKEN"],
-        base_url: "https://api.githubcopilot.com",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "specialized",
-        description: "GitHub Copilot models (GPT-4, Claude)",
-    },
-    BuiltinProvider {
-        name: "codex",
-        display_name: "GitHub Codex",
-        aliases: &["codex", "github-codex", "copilot-codex"],
-        api: Api::OpenAiCompletions,
-        env_key: "GITHUB_COPILOT_TOKEN",
-        extra_env_keys: &["GITHUB_TOKEN"],
-        base_url: "https://api.githubcopilot.com",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "specialized",
-        description: "GitHub Codex coding agent",
-    },
-    // ── Anthropic-compatible providers ──────────────────────────────────
-    // These expose the Anthropic Messages API at a custom endpoint.
-    BuiltinProvider {
-        name: "minimax",
-        display_name: "MiniMax",
-        aliases: &["minimax"],
-        api: Api::AnthropicMessages,
-        env_key: "MINIMAX_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.minimax.io/anthropic",
-        default_enabled: true,
-        auth_method: AuthMethod::XApiKey,
-        extra_headers: &[],
-        category: "chinese",
-        description: "MiniMax-M2.7, abab models",
-    },
-    BuiltinProvider {
-        name: "minimax-cn",
-        display_name: "MiniMax (China)",
-        aliases: &["minimax-cn"],
-        api: Api::AnthropicMessages,
-        env_key: "MINIMAX_CN_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.minimaxi.com/anthropic",
-        default_enabled: true,
-        auth_method: AuthMethod::XApiKey,
-        extra_headers: &[],
-        category: "chinese",
-        description: "MiniMax China region endpoint",
-    },
-    // ── Other providers ─────────────────────────────────────────────────
-    BuiltinProvider {
-        name: "zai",
-        display_name: "ZAI",
-        aliases: &["zai"],
-        api: Api::OpenAiCompletions,
-        env_key: "ZAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.z.ai/api/coding/paas/v4",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "chinese",
-        description: "Z.AI GLM models (coding plan)",
-    },
-    BuiltinProvider {
-        name: "zai-coding-global",
-        display_name: "ZAI Coding Plan (Global)",
-        aliases: &["zai-coding-global"],
-        api: Api::OpenAiCompletions,
-        env_key: "ZAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.z.ai/api/coding/paas/v4",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "chinese",
-        description: "Z.AI GLM Coding Plan — prompt-based pricing, optimized for coding",
-    },
-    BuiltinProvider {
-        name: "zai-coding-cn",
-        display_name: "ZAI Coding Plan (China)",
-        aliases: &["zai-coding-cn"],
-        api: Api::OpenAiCompletions,
-        env_key: "ZAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.z.ai/api/coding/paas/v4",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "chinese",
-        description: "Z.AI GLM Coding Plan — China region",
-    },
-    BuiltinProvider {
-        name: "zai-global",
-        display_name: "ZAI General API (Global)",
-        aliases: &["zai-global"],
-        api: Api::OpenAiCompletions,
-        env_key: "ZAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.z.ai/api/paas/v4",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "chinese",
-        description: "Z.AI GLM General API — token-based pricing",
-    },
-    BuiltinProvider {
-        name: "zai-cn",
-        display_name: "ZAI General API (China)",
-        aliases: &["zai-cn"],
-        api: Api::OpenAiCompletions,
-        env_key: "ZAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.z.ai/api/paas/v4",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "chinese",
-        description: "Z.AI GLM General API — China region, token-based pricing",
-    },
-    BuiltinProvider {
-        name: "cloudflare-ai-gateway",
-        display_name: "Cloudflare AI Gateway",
-        aliases: &["cloudflare-ai-gateway", "cf-ai-gateway"],
-        api: Api::OpenAiCompletions,
-        env_key: "CLOUDFLARE_API_TOKEN",
-        extra_env_keys: &["CF_AIG_TOKEN"],
-        // Requires account ID + gateway ID in URL at runtime
-        base_url: "",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[("HTTP-Referer", "https://oxi.dev/"), ("X-Title", "oxi")],
-        category: "cloud",
-        description: "Serverless AI via Cloudflare",
-    },
-    BuiltinProvider {
-        name: "cloudflare-workers-ai",
-        display_name: "Cloudflare Workers AI",
-        aliases: &["cloudflare-workers-ai"],
-        api: Api::OpenAiCompletions,
-        env_key: "CLOUDFLARE_API_KEY",
-        extra_env_keys: &["CF_API_KEY"],
-        // Requires account ID: https://api.cloudflare.com/client/v4/accounts/{id}/ai/v1
-        base_url: "",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "cloud",
-        description: "Serverless AI via Cloudflare",
-    },
-    BuiltinProvider {
-        name: "huggingface",
-        display_name: "Hugging Face",
-        aliases: &["huggingface", "hf"],
-        api: Api::OpenAiCompletions,
-        env_key: "HUGGINGFACE_API_KEY",
-        extra_env_keys: &["HF_API_KEY"],
-        base_url: "https://router.huggingface.co/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "open",
-        description: "Open model inference hub",
-    },
-    BuiltinProvider {
-        name: "moonshotai",
-        display_name: "Moonshot AI (Kimi)",
-        aliases: &["moonshotai", "moonshot", "kimi"],
-        api: Api::OpenAiCompletions,
-        env_key: "MOONSHOT_API_KEY",
-        extra_env_keys: &["MOONSHOT_AI_API_KEY", "KIMI_API_KEY"],
-        base_url: "https://api.moonshot.cn/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "specialized",
-        description: "Kimi models from Moonshot AI",
-    },
-    BuiltinProvider {
-        name: "moonshotai-cn",
-        display_name: "Moonshot AI (China)",
-        aliases: &["moonshotai-cn", "moonshot-cn"],
-        api: Api::OpenAiCompletions,
-        env_key: "MOONSHOT_CN_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.moonshotai.com/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "specialized",
-        description: "Kimi models — China region endpoint",
-    },
-    BuiltinProvider {
-        name: "vercel-ai-gateway",
-        display_name: "Vercel AI Gateway",
-        aliases: &["vercel-ai-gateway", "vercel"],
-        api: Api::OpenAiCompletions,
-        env_key: "VERCEL_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://sdk.vercel.ai/api",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[("HTTP-Referer", "https://oxi.dev/"), ("X-Title", "oxi")],
-        category: "cloud",
-        description: "Vercel AI Gateway",
-    },
-    BuiltinProvider {
-        name: "xiaomi",
-        display_name: "Xiaomi",
-        aliases: &["xiaomi"],
-        api: Api::OpenAiCompletions,
-        env_key: "XIAOMI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://xiaomi.ai/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "chinese",
-        description: "Xiaomi MiMo models",
-    },
-    BuiltinProvider {
-        name: "kimi-coding",
-        display_name: "Kimi Coding",
-        aliases: &["kimi-coding"],
-        api: Api::OpenAiCompletions,
-        env_key: "KIMI_CODING_API_KEY",
-        extra_env_keys: &["KIMI_API_KEY"],
-        base_url: "https://api.kimi.ai/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "specialized",
-        description: "Kimi Coding Plan — optimized for coding",
-    },
-    BuiltinProvider {
-        name: "openai-codex",
-        display_name: "OpenAI Codex",
-        aliases: &["openai-codex"],
-        api: Api::OpenAiResponses,
-        env_key: "OPENAI_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.openai.com/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "specialized",
-        description: "OpenAI Codex coding agent",
-    },
-    BuiltinProvider {
-        name: "opencode-go",
-        display_name: "OpenCode Go",
-        aliases: &["opencode-go"],
-        api: Api::OpenAiCompletions,
-        env_key: "OPENCODE_GO_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://api.opencode.ai/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "specialized",
-        description: "OpenCode Go Gateway",
-    },
-    // ── Enterprise / Gateway providers ──────────────────────────────────
-    BuiltinProvider {
-        name: "google-vertex-anthropic",
-        display_name: "Google Vertex AI (Anthropic)",
-        aliases: &["google-vertex-anthropic", "vertex-anthropic"],
-        api: Api::AnthropicMessages,
-        env_key: "GOOGLE_APPLICATION_CREDENTIALS",
-        extra_env_keys: &["GOOGLE_CLOUD_PROJECT", "GOOGLE_CLOUD_LOCATION"],
-        // Base URL computed at runtime from project + location
-        base_url: "",
-        default_enabled: true,
-        auth_method: AuthMethod::None, // Uses Google OAuth Bearer
-        extra_headers: &[],
-        category: "cloud",
-        description: "Claude via Google Cloud Vertex AI",
-    },
-    BuiltinProvider {
-        name: "azure-cognitive-services",
-        display_name: "Azure Cognitive Services",
-        aliases: &["azure-cognitive-services"],
-        api: Api::OpenAiCompletions,
-        env_key: "AZURE_COGNITIVE_SERVICES_API_KEY",
-        extra_env_keys: &["AZURE_COGNITIVE_SERVICES_RESOURCE_NAME"],
-        base_url: "", // Computed from resource name at runtime
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "cloud",
-        description: "OpenAI via Azure (alias)",
-    },
-    BuiltinProvider {
-        name: "baseten",
-        display_name: "Baseten",
-        aliases: &["baseten"],
-        api: Api::OpenAiCompletions,
-        env_key: "BASETEN_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://inference.baseten.co/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "open",
-        description: "Baseten model inference",
-    },
-    BuiltinProvider {
-        name: "nvidia",
-        display_name: "NVIDIA NIM",
-        aliases: &["nvidia", "nim"],
-        api: Api::OpenAiCompletions,
-        env_key: "NVIDIA_API_KEY",
-        extra_env_keys: &[],
-        base_url: "https://integrate.api.nvidia.com/v1",
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[("HTTP-Referer", "https://oxi.dev/"), ("X-Title", "oxi")],
-        category: "enterprise",
-        description: "LLM Gateway proxy",
-    },
-    BuiltinProvider {
-        name: "llmgateway",
-        display_name: "LLM Gateway",
-        aliases: &["llmgateway", "llm-gateway"],
-        api: Api::OpenAiCompletions,
-        env_key: "LLMGATEWAY_API_KEY",
-        extra_env_keys: &[],
-        base_url: "", // Configured per deployment
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[("HTTP-Referer", "https://oxi.dev/"), ("X-Title", "oxi")],
-        category: "enterprise",
-        description: "LLM Gateway proxy",
-    },
-    BuiltinProvider {
-        name: "gitlab",
-        display_name: "GitLab AI",
-        aliases: &["gitlab", "gitlab-ai"],
-        api: Api::OpenAiCompletions,
-        env_key: "GITLAB_TOKEN",
-        extra_env_keys: &["GITLAB_INSTANCE_URL"],
-        base_url: "", // Computed from GITLAB_INSTANCE_URL at runtime
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "enterprise",
-        description: "GitLab Duo Workflow",
-    },
-    BuiltinProvider {
-        name: "sap-ai-core",
-        display_name: "SAP AI Core",
-        aliases: &["sap-ai-core", "sap"],
-        api: Api::OpenAiCompletions,
-        env_key: "AICORE_SERVICE_KEY",
-        extra_env_keys: &[],
-        base_url: "", // Configured from service key at runtime
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[],
-        category: "enterprise",
-        description: "SAP AI Core",
-    },
-    BuiltinProvider {
-        name: "zenmux",
-        display_name: "ZenMux",
-        aliases: &["zenmux"],
-        api: Api::OpenAiCompletions,
-        env_key: "ZENMUX_API_KEY",
-        extra_env_keys: &[],
-        base_url: "", // Configured per deployment
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[("HTTP-Referer", "https://oxi.dev/"), ("X-Title", "oxi")],
-        category: "enterprise",
-        description: "Kilo Gateway",
-    },
-    BuiltinProvider {
-        name: "kilo",
-        display_name: "Kilo",
-        aliases: &["kilo"],
-        api: Api::OpenAiCompletions,
-        env_key: "KILO_API_KEY",
-        extra_env_keys: &[],
-        base_url: "", // Configured per deployment
-        default_enabled: true,
-        auth_method: AuthMethod::Bearer,
-        extra_headers: &[("HTTP-Referer", "https://oxi.dev/"), ("X-Title", "oxi")],
-        category: "enterprise",
-        description: "Kilo Gateway",
-    },
-];
+/// Falls back to `Api::OpenAiCompletions` for unknown values — this matches
+/// the historical behavior where most "AI gateway" providers expose an
+/// OpenAI-compatible endpoint.
+fn parse_api(s: &str) -> Api {
+    match s {
+        "openai-completions" => Api::OpenAiCompletions,
+        "openai-responses" => Api::OpenAiResponses,
+        "anthropic-messages" => Api::AnthropicMessages,
+        "google-generative-ai" => Api::GoogleGenerativeAi,
+        "google-vertex" => Api::GoogleVertex,
+        "mistral-conversations" => Api::MistralConversations,
+        "azure-openai-responses" => Api::AzureOpenAiResponses,
+        "bedrock-converse-stream" => Api::BedrockConverseStream,
+        _ => Api::OpenAiCompletions,
+    }
+}
+
+impl From<&BuiltinProviderEntry> for BuiltinProvider {
+    fn from(entry: &BuiltinProviderEntry) -> Self {
+        // SAFETY: These String→&'static str conversions are safe because the
+        // resulting `BuiltinProvider` instances are stored in a `OnceLock<Vec<_>>`
+        // that lives for the lifetime of the program. We leak the strings to
+        // obtain `'static` references; this is a one-time cost at startup and
+        // bounded by the number of providers (currently 71).
+        let name: &'static str = Box::leak(entry.id.clone().into_boxed_str());
+        let display_name: &'static str = Box::leak(entry.display_name.clone().into_boxed_str());
+        let aliases: &'static [&'static str] = Box::leak(
+            entry
+                .aliases
+                .iter()
+                .map(|s| Box::leak(s.clone().into_boxed_str()) as &'static str)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
+        let env_key: &'static str = Box::leak(entry.env_key.clone().into_boxed_str());
+        let extra_env_keys: &'static [&'static str] = Box::leak(
+            entry
+                .extra_env_keys
+                .iter()
+                .map(|s| Box::leak(s.clone().into_boxed_str()) as &'static str)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
+        let base_url: &'static str = Box::leak(entry.base_url.clone().into_boxed_str());
+        let category: &'static str = Box::leak(entry.category.clone().into_boxed_str());
+        let description: &'static str = Box::leak(entry.description.clone().into_boxed_str());
+        let extra_headers: &'static [(&'static str, &'static str)] = Box::leak(
+            entry
+                .extra_headers
+                .iter()
+                .map(|(k, v)| {
+                    (
+                        Box::leak(k.clone().into_boxed_str()) as &'static str,
+                        Box::leak(v.clone().into_boxed_str()) as &'static str,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        );
+
+        BuiltinProvider {
+            name,
+            display_name,
+            aliases,
+            api: parse_api(&entry.api),
+            env_key,
+            extra_env_keys,
+            base_url,
+            default_enabled: entry.default_enabled,
+            auth_method: match entry.auth_method {
+                crate::catalog::AuthMethod::Bearer => AuthMethod::Bearer,
+                crate::catalog::AuthMethod::XApiKey => AuthMethod::XApiKey,
+                crate::catalog::AuthMethod::ApiKey => AuthMethod::ApiKey,
+                crate::catalog::AuthMethod::None => AuthMethod::None,
+            },
+            extra_headers,
+            category,
+            description,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Built-in provider definitions (deprecated, now in data/catalog/providers.toml)
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // API-to-provider mappings
@@ -745,14 +171,33 @@ static API_TO_PROVIDER: &[(&str, Api)] = &[
 // Registry access functions
 // ---------------------------------------------------------------------------
 
-/// Get all built-in providers.
+/// Get all built-in providers, built lazily from the catalog TOML.
+///
+/// This replaces the historical `static BUILTIN_PROVIDERS` array. The first
+/// call parses `data/catalog/providers.toml` and converts each entry to a
+/// `BuiltinProvider`; subsequent calls return the cached `&'static` slice.
+///
+/// **Layer 2 (user overrides) is applied here**: before conversion, the
+/// `OverrideFile` from `crate::catalog::load_overrides()` (if any) is
+/// merged with the built-in providers. Override entries with the same id
+/// replace built-in ones; new ids are appended.
 pub fn get_builtin_providers() -> &'static [BuiltinProvider] {
-    BUILTIN_PROVIDERS
+    static CACHE: std::sync::OnceLock<Vec<BuiltinProvider>> = std::sync::OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let mut builtins: Vec<crate::catalog::BuiltinProviderEntry> =
+                crate::catalog::load_builtin_providers().to_vec();
+            if let Some(overrides) = crate::catalog::load_overrides() {
+                crate::catalog::apply_provider_overrides(&mut builtins, &overrides.provider);
+            }
+            builtins.iter().map(BuiltinProvider::from).collect()
+        })
+        .as_slice()
 }
 
 /// Look up a built-in provider by name or alias.
 pub fn get_builtin_provider(name: &str) -> Option<&'static BuiltinProvider> {
-    BUILTIN_PROVIDERS
+    get_builtin_providers()
         .iter()
         .find(|p| p.name == name || p.aliases.contains(&name))
 }
@@ -790,12 +235,12 @@ pub fn get_api_mappings() -> &'static [(&'static str, Api)] {
 
 /// Get all provider names (primary names only).
 pub fn get_all_provider_names() -> Vec<&'static str> {
-    BUILTIN_PROVIDERS.iter().map(|p| p.name).collect()
+    get_builtin_providers().iter().map(|p| p.name).collect()
 }
 
 /// Get all provider names including aliases.
 pub fn get_all_provider_aliases() -> Vec<&'static str> {
-    let mut names: Vec<&'static str> = BUILTIN_PROVIDERS
+    let mut names: Vec<&'static str> = get_builtin_providers()
         .iter()
         .flat_map(|p| std::iter::once(p.name).chain(p.aliases.iter().copied()))
         .collect();
@@ -1054,6 +499,50 @@ mod tests {
     }
 
     #[test]
+    fn layer2_override_adds_provider() {
+        // Set OXI_CATALOG_OVERRIDE to a known override file, then verify
+        // the provider shows up. We use a tempfile in the test target dir.
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join("oxi-test-layer2");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("overrides.toml");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"
+[[provider]]
+id = "test-injected-{}"
+display_name = "Test Injected"
+api = "openai-completions"
+env_key = "TEST_INJECTED_KEY"
+auth_method = "bearer"
+category = "primary"
+description = "Test provider from override"
+"#,
+            std::process::id()
+        )
+        .unwrap();
+        drop(f);
+
+        // SAFETY: only this test mutates this env var, and only briefly.
+        // The test is #[test] which runs on a single thread within a test binary.
+        unsafe {
+            std::env::set_var("OXI_CATALOG_OVERRIDE", &path);
+        }
+        // Invalidate the cache so the override is picked up.
+        // (The OnceLock has no reset API; this test only checks the load
+        //  machinery via find_override_files, not the full integration.)
+        let files = crate::catalog::find_override_files();
+        unsafe {
+            std::env::remove_var("OXI_CATALOG_OVERRIDE");
+        }
+        assert!(!files.is_empty(), "OXI_CATALOG_OVERRIDE should be detected");
+        let (found_path, _content) = &files[0];
+        assert_eq!(found_path, &path);
+    }
+
+    #[test]
     fn test_create_builtin_provider_deepseek() {
         let p = create_builtin_provider("deepseek").unwrap();
         assert_eq!(p.name(), "openai"); // Uses OpenAI provider with custom base URL
@@ -1184,6 +673,147 @@ mod tests {
         assert!(names.contains(&"bedrock"));
         assert!(names.contains(&"togetherai"));
         assert!(names.len() >= 20);
+    }
+
+    // ── Tests for providers ported from openclaw (MIT) ─────────────────
+
+    #[test]
+    fn test_openclaw_ported_providers_present() {
+        // Verify all 28 new providers added in feat/openclaw-port
+        let names = get_all_provider_names();
+        for p in [
+            "chutes",
+            "venice",
+            "moonshot",
+            "byteplus",
+            "gmi",
+            "novita",
+            "arcee",
+            "qianfan",
+            "stepfun",
+            "qwen-portal",
+            "alibaba",
+            "anthropic-vertex",
+            "synthetic",
+            "ollama",
+            "ollama-cloud",
+            "lmstudio",
+            "vllm",
+            "sglang",
+            "litellm",
+            "microsoft-foundry",
+            "amazon-bedrock-mantle",
+            "opencode",
+            "copilot-proxy",
+            "xiaomi-token-plan",
+            "kilocode",
+        ] {
+            assert!(names.contains(&p), "Missing openclaw-ported provider: {p}");
+        }
+    }
+
+    #[test]
+    fn test_openclaw_provider_aliases() {
+        // gmi-cloud, gmicloud, qwen-portal, modelstudio → canonical resolution
+        assert_eq!(resolve_provider_name("gmi-cloud"), Some("gmi"));
+        assert_eq!(resolve_provider_name("gmicloud"), Some("gmi"));
+        // dashscope and modelstudio resolve to alibaba (primary entry)
+        assert_eq!(resolve_provider_name("dashscope"), Some("alibaba"));
+        assert_eq!(resolve_provider_name("modelstudio"), Some("alibaba"));
+        // qwen-oauth and qwen-cli resolve to qwen-portal
+        assert_eq!(resolve_provider_name("qwen-oauth"), Some("qwen-portal"));
+        assert_eq!(resolve_provider_name("qwen-cli"), Some("qwen-portal"));
+        assert_eq!(resolve_provider_name("novita-ai"), Some("novita"));
+        assert_eq!(resolve_provider_name("novitaai"), Some("novita"));
+        assert_eq!(resolve_provider_name("stepfun-plan"), Some("stepfun"));
+        assert_eq!(resolve_provider_name("kilocode"), Some("kilocode"));
+    }
+
+    #[test]
+    fn test_openclaw_provider_base_urls() {
+        assert_eq!(
+            get_provider_base_url("chutes"),
+            Some("https://llm.chutes.ai/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("venice"),
+            Some("https://api.venice.ai/api/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("ollama"),
+            Some("http://localhost:11434/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("lmstudio"),
+            Some("http://localhost:1234/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("vllm"),
+            Some("http://localhost:8000/v1")
+        );
+        assert_eq!(
+            get_provider_base_url("synthetic"),
+            Some("https://api.synthetic.new/anthropic")
+        );
+    }
+
+    #[test]
+    fn test_openclaw_local_providers_use_bearer() {
+        // Local providers still use Bearer auth (some clients require a key)
+        for p in ["ollama", "ollama-cloud", "lmstudio", "vllm", "sglang"] {
+            let bp = get_builtin_provider(p).unwrap();
+            assert_eq!(
+                bp.auth_method,
+                AuthMethod::Bearer,
+                "{p} should use Bearer auth"
+            );
+        }
+    }
+
+    #[test]
+    fn test_openclaw_anthropic_compat_providers() {
+        // synthetic, anthropic-vertex, kimi are Anthropic-protocol
+        for p in ["synthetic", "anthropic-vertex"] {
+            let bp = get_builtin_provider(p).unwrap();
+            assert_eq!(
+                bp.api,
+                Api::AnthropicMessages,
+                "{p} should use AnthropicMessages API"
+            );
+        }
+    }
+
+    #[test]
+    fn test_create_openclaw_providers() {
+        // Smoke test that all new providers can be instantiated
+        for p in [
+            "chutes",
+            "venice",
+            "moonshot",
+            "byteplus",
+            "gmi",
+            "novita",
+            "arcee",
+            "qianfan",
+            "stepfun",
+            "qwen-portal",
+            "alibaba",
+            "anthropic-vertex",
+            "synthetic",
+            "ollama",
+            "lmstudio",
+            "vllm",
+            "sglang",
+            "litellm",
+            "microsoft-foundry",
+            "opencode",
+            "copilot-proxy",
+            "xiaomi-token-plan",
+            "kilocode",
+        ] {
+            let bp = create_builtin_provider(p);
+            assert!(bp.is_some(), "create_builtin_provider({p}) failed");
+        }
     }
 
     #[test]

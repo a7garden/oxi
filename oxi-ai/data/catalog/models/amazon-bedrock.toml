@@ -1,0 +1,1332 @@
+# Amazon Bedrock models (95 entries)
+provider = "amazon-bedrock"
+
+[[model]]
+id = "amazon.nova-2-lite-v1:0"
+name = "Nova 2 Lite"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "amazon.nova-lite-v1:0"
+name = "Nova Lite"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.015
+cost_cache_write = 0.0
+context_window = 300000
+max_tokens = 8192
+
+[[model]]
+id = "amazon.nova-premier-v1:0"
+name = "Nova Premier"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 16384
+
+[[model]]
+id = "anthropic.claude-3-5-haiku-20241022-v1:0"
+name = "Claude Haiku 3.5"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.08
+cost_cache_write = 1.0
+context_window = 200000
+max_tokens = 8192
+
+[[model]]
+id = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+name = "Claude Sonnet 3.5 v2"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 8192
+
+[[model]]
+id = "anthropic.claude-3-haiku-20240307-v1:0"
+name = "Claude Haiku 3"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 200000
+max_tokens = 4096
+
+[[model]]
+id = "anthropic.claude-opus-4-1-20250805-v1:0"
+name = "Claude Opus 4.1"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 1.5
+cost_cache_write = 18.75
+context_window = 200000
+max_tokens = 32000
+
+[[model]]
+id = "anthropic.claude-opus-4-5-20251101-v1:0"
+name = "Claude Opus 4.5"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "anthropic.claude-opus-4-6-v1"
+name = "Claude Opus 4.6"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "anthropic.claude-sonnet-4-20250514-v1:0"
+name = "Claude Sonnet 4"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "anthropic.claude-sonnet-4-6"
+name = "Claude Sonnet 4.6"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 1000000
+max_tokens = 64000
+
+[[model]]
+id = "au.anthropic.claude-sonnet-4-6"
+name = "AU Anthropic Claude Sonnet 4.6"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.33
+cost_cache_write = 4.125
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "deepseek.v3-v1:0"
+name = "DeepSeek-V3.1"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 163840
+max_tokens = 81920
+
+[[model]]
+id = "eu.anthropic.claude-haiku-4-5-20251001-v1:0"
+name = "Claude Haiku 4.5 (EU)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.1
+cost_cache_write = 1.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "eu.anthropic.claude-opus-4-6-v1"
+name = "Claude Opus 4.6 (EU)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "eu.anthropic.claude-opus-4-7"
+name = "Claude Opus 4.7 (EU)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+name = "Claude Sonnet 4.5 (EU)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+name = "Claude Haiku 4.5 (Global)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.1
+cost_cache_write = 1.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "global.anthropic.claude-opus-4-6-v1"
+name = "Claude Opus 4.6 (Global)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "global.anthropic.claude-sonnet-4-20250514-v1:0"
+name = "Claude Sonnet 4 (Global)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "global.anthropic.claude-sonnet-4-6"
+name = "Claude Sonnet 4.6 (Global)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 1000000
+max_tokens = 64000
+
+[[model]]
+id = "google.gemma-3-4b-it"
+name = "Gemma 3 4B IT"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "meta.llama3-1-405b-instruct-v1:0"
+name = "Llama 3.1 405B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "meta.llama3-1-8b-instruct-v1:0"
+name = "Llama 3.1 8B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "meta.llama3-2-1b-instruct-v1:0"
+name = "Llama 3.2 1B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131000
+max_tokens = 4096
+
+[[model]]
+id = "meta.llama3-2-90b-instruct-v1:0"
+name = "Llama 3.2 90B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "meta.llama4-maverick-17b-instruct-v1:0"
+name = "Llama 4 Maverick 17B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 16384
+
+[[model]]
+id = "minimax.minimax-m2"
+name = "MiniMax M2"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 204608
+max_tokens = 128000
+
+[[model]]
+id = "minimax.minimax-m2.5"
+name = "MiniMax M2.5"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 196608
+max_tokens = 98304
+
+[[model]]
+id = "mistral.devstral-2-123b"
+name = "Devstral 2 123B"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 256000
+max_tokens = 8192
+
+[[model]]
+id = "mistral.ministral-3-14b-instruct"
+name = "Ministral 14B 3.0"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "mistral.ministral-3-8b-instruct"
+name = "Ministral 3 8B"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "mistral.pixtral-large-2502-v1:0"
+name = "Pixtral Large (25.02)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+[[model]]
+id = "mistral.voxtral-small-24b-2507"
+name = "Voxtral Small 24B 2507"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 32000
+max_tokens = 8192
+
+[[model]]
+id = "moonshotai.kimi-k2.5"
+name = "Kimi K2.5"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 256000
+max_tokens = 256000
+
+[[model]]
+id = "nvidia.nemotron-nano-3-30b"
+name = "NVIDIA Nemotron Nano 3 30B"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "nvidia.nemotron-nano-9b-v2"
+name = "NVIDIA Nemotron Nano 9B v2"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "openai.gpt-oss-120b-1:0"
+name = "gpt-oss-120b"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "openai.gpt-oss-safeguard-120b"
+name = "GPT OSS Safeguard 120B"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "qwen.qwen3-235b-a22b-2507-v1:0"
+name = "Qwen3 235B A22B 2507"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 131072
+
+[[model]]
+id = "qwen.qwen3-coder-30b-a3b-v1:0"
+name = "Qwen3 Coder 30B A3B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 131072
+
+[[model]]
+id = "qwen.qwen3-coder-next"
+name = "Qwen3 Coder Next"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 65536
+
+[[model]]
+id = "qwen.qwen3-vl-235b-a22b"
+name = "Qwen/Qwen3-VL-235B-A22B-Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262000
+max_tokens = 262000
+
+[[model]]
+id = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+name = "Claude Haiku 4.5 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.1
+cost_cache_write = 1.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "us.anthropic.claude-opus-4-20250514-v1:0"
+name = "Claude Opus 4 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 1.5
+cost_cache_write = 18.75
+context_window = 200000
+max_tokens = 32000
+
+[[model]]
+id = "us.anthropic.claude-opus-4-6-v1"
+name = "Claude Opus 4.6 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "us.anthropic.claude-sonnet-4-20250514-v1:0"
+name = "Claude Sonnet 4 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "us.anthropic.claude-sonnet-4-6"
+name = "Claude Sonnet 4.6 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 1000000
+max_tokens = 64000
+
+[[model]]
+id = "writer.palmyra-x5-v1:0"
+name = "Palmyra X5"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1040000
+max_tokens = 8192
+
+[[model]]
+id = "zai.glm-4.7-flash"
+name = "GLM-4.7-Flash"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.0
+cost_output = 0.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 200000
+max_tokens = 131072
+
+[[model]]
+id = "amazon.nova-micro-v1:0"
+name = "Nova Micro"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.035
+cost_output = 0.14
+cost_cache_read = 0.00875
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 8192
+
+[[model]]
+id = "amazon.nova-pro-v1:0"
+name = "Nova Pro"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.8
+cost_output = 3.2
+cost_cache_read = 0.2
+cost_cache_write = 0.0
+context_window = 300000
+max_tokens = 8192
+
+[[model]]
+id = "anthropic.claude-haiku-4-5-20251001-v1:0"
+name = "Claude Haiku 4.5"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 1.0
+cost_output = 5.0
+cost_cache_read = 0.1
+cost_cache_write = 1.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "anthropic.claude-opus-4-7"
+name = "Claude Opus 4.7"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 5.0
+cost_output = 25.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+name = "Claude Sonnet 4.5"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 3.0
+cost_output = 15.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "au.anthropic.claude-haiku-4-5-20251001-v1:0"
+name = "Claude Haiku 4.5 (AU)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 1.0
+cost_output = 5.0
+cost_cache_read = 0.1
+cost_cache_write = 1.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "au.anthropic.claude-opus-4-6-v1"
+name = "AU Anthropic Claude Opus 4.6"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 16.5
+cost_output = 82.5
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
+name = "Claude Sonnet 4.5 (AU)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 3.0
+cost_output = 15.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "deepseek.r1-v1:0"
+name = "DeepSeek-R1"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 1.35
+cost_output = 5.4
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 32768
+
+[[model]]
+id = "deepseek.v3.2"
+name = "DeepSeek-V3.2"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.62
+cost_output = 1.85
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 163840
+max_tokens = 81920
+
+[[model]]
+id = "eu.anthropic.claude-opus-4-5-20251101-v1:0"
+name = "Claude Opus 4.5 (EU)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 5.0
+cost_output = 25.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "eu.anthropic.claude-sonnet-4-6"
+name = "Claude Sonnet 4.6 (EU)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 3.0
+cost_output = 15.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 1000000
+max_tokens = 64000
+
+[[model]]
+id = "global.anthropic.claude-opus-4-5-20251101-v1:0"
+name = "Claude Opus 4.5 (Global)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 5.0
+cost_output = 25.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "global.anthropic.claude-opus-4-7"
+name = "Claude Opus 4.7 (Global)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 5.0
+cost_output = 25.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+name = "Claude Sonnet 4.5 (Global)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 3.0
+cost_output = 15.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "google.gemma-3-27b-it"
+name = "Google Gemma 3 27B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.12
+cost_output = 0.2
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 202752
+max_tokens = 8192
+
+[[model]]
+id = "jp.anthropic.claude-opus-4-7"
+name = "Claude Opus 4.7 (JP)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 5.0
+cost_output = 25.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "jp.anthropic.claude-sonnet-4-5-20250929-v1:0"
+name = "Claude Sonnet 4.5 (JP)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 3.0
+cost_output = 15.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "jp.anthropic.claude-sonnet-4-6"
+name = "Claude Sonnet 4.6 (JP)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 3.0
+cost_output = 15.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 1000000
+max_tokens = 64000
+
+[[model]]
+id = "meta.llama3-1-70b-instruct-v1:0"
+name = "Llama 3.1 70B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.72
+cost_output = 0.72
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "meta.llama3-3-70b-instruct-v1:0"
+name = "Llama 3.3 70B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.72
+cost_output = 0.72
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "meta.llama4-scout-17b-instruct-v1:0"
+name = "Llama 4 Scout 17B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.17
+cost_output = 0.66
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 3500000
+max_tokens = 16384
+
+[[model]]
+id = "minimax.minimax-m2.1"
+name = "MiniMax M2.1"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.3
+cost_output = 1.2
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 204800
+max_tokens = 131072
+
+[[model]]
+id = "mistral.magistral-small-2509"
+name = "Magistral Small 1.2"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 0.5
+cost_output = 1.5
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 40000
+
+[[model]]
+id = "mistral.ministral-3-3b-instruct"
+name = "Ministral 3 3B"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.1
+cost_output = 0.1
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 256000
+max_tokens = 8192
+
+[[model]]
+id = "mistral.mistral-large-3-675b-instruct"
+name = "Mistral Large 3"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.5
+cost_output = 1.5
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 256000
+max_tokens = 8192
+
+[[model]]
+id = "mistral.voxtral-mini-3b-2507"
+name = "Voxtral Mini 3B 2507"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.04
+cost_output = 0.04
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "moonshot.kimi-k2-thinking"
+name = "Kimi K2 Thinking"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.6
+cost_output = 2.5
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262143
+max_tokens = 16000
+
+[[model]]
+id = "nvidia.nemotron-nano-12b-v2"
+name = "NVIDIA Nemotron Nano 12B v2 VL BF16"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.2
+cost_output = 0.6
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 4096
+
+[[model]]
+id = "nvidia.nemotron-super-3-120b"
+name = "NVIDIA Nemotron 3 Super 120B A12B"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.15
+cost_output = 0.65
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262144
+max_tokens = 131072
+
+[[model]]
+id = "openai.gpt-oss-20b-1:0"
+name = "gpt-oss-20b"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.07
+cost_output = 0.3
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 16384
+
+[[model]]
+id = "openai.gpt-oss-safeguard-20b"
+name = "GPT OSS Safeguard 20B"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.07
+cost_output = 0.2
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 16384
+
+[[model]]
+id = "qwen.qwen3-32b-v1:0"
+name = "Qwen3 32B (dense)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.15
+cost_output = 0.6
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 16384
+max_tokens = 16384
+
+[[model]]
+id = "qwen.qwen3-coder-480b-a35b-v1:0"
+name = "Qwen3 Coder 480B A35B Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.22
+cost_output = 1.8
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 131072
+max_tokens = 65536
+
+[[model]]
+id = "qwen.qwen3-next-80b-a3b"
+name = "Qwen/Qwen3-Next-80B-A3B-Instruct"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text"]
+cost_input = 0.14
+cost_output = 1.4
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 262000
+max_tokens = 262000
+
+[[model]]
+id = "us.anthropic.claude-opus-4-1-20250805-v1:0"
+name = "Claude Opus 4.1 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 15.0
+cost_output = 75.0
+cost_cache_read = 1.5
+cost_cache_write = 18.75
+context_window = 200000
+max_tokens = 32000
+
+[[model]]
+id = "us.anthropic.claude-opus-4-5-20251101-v1:0"
+name = "Claude Opus 4.5 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 5.0
+cost_output = 25.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "us.anthropic.claude-opus-4-7"
+name = "Claude Opus 4.7 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 5.0
+cost_output = 25.0
+cost_cache_read = 0.5
+cost_cache_write = 6.25
+context_window = 1000000
+max_tokens = 128000
+
+[[model]]
+id = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+name = "Claude Sonnet 4.5 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text", "image"]
+cost_input = 3.0
+cost_output = 15.0
+cost_cache_read = 0.3
+cost_cache_write = 3.75
+context_window = 200000
+max_tokens = 64000
+
+[[model]]
+id = "us.deepseek.r1-v1:0"
+name = "DeepSeek-R1 (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 1.35
+cost_output = 5.4
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 128000
+max_tokens = 32768
+
+[[model]]
+id = "us.meta.llama4-maverick-17b-instruct-v1:0"
+name = "Llama 4 Maverick 17B Instruct (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.24
+cost_output = 0.97
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 1000000
+max_tokens = 16384
+
+[[model]]
+id = "us.meta.llama4-scout-17b-instruct-v1:0"
+name = "Llama 4 Scout 17B Instruct (US)"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = false
+input = ["text", "image"]
+cost_input = 0.17
+cost_output = 0.66
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 3500000
+max_tokens = 16384
+
+[[model]]
+id = "writer.palmyra-x4-v1:0"
+name = "Palmyra X4"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 2.5
+cost_output = 10.0
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 122880
+max_tokens = 8192
+
+[[model]]
+id = "zai.glm-4.7"
+name = "GLM-4.7"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 0.6
+cost_output = 2.2
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 204800
+max_tokens = 131072
+
+[[model]]
+id = "zai.glm-5"
+name = "GLM-5"
+api = "bedrock-converse-stream"
+provider = "amazon-bedrock"
+reasoning = true
+input = ["text"]
+cost_input = 1.0
+cost_output = 3.2
+cost_cache_read = 0.0
+cost_cache_write = 0.0
+context_window = 202752
+max_tokens = 101376
