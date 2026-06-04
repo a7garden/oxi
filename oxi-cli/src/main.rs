@@ -87,8 +87,9 @@ async fn main() -> Result<()> {
     // Build initial prompt if provided
     let prompt = args.prompt.join(" ");
 
-    // Create app
-    let mut app = oxi::App::new(settings).await?;
+    // Create app via the new composition root
+    let oxi = oxi::build_oxi_engine()?;
+    let mut app = oxi::App::from_oxi(oxi, settings).await?;
 
     // Register builtin tools, respecting --tools filter
     let tools = app.agent_tools();

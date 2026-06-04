@@ -144,8 +144,14 @@ use std::sync::Arc;
 
 // ─── Application state ───────────────────────────────────────────────────────
 
-/// Application state and entry point
+/// Application state and entry point.
+///
+/// Holds an `Oxi` engine (composition root) and a single `Agent` built
+/// from it. The legacy `App::new(settings)` constructor is **gone**;
+/// use [`App::from_oxi`] with a wired `Oxi` from
+/// [`build_oxi_engine`].
 pub struct App {
+    oxi: oxi_sdk::Oxi,
     agent: Arc<Agent>,
     settings: Settings,
     skills: RwLock<SkillManager>,
@@ -185,37 +191,20 @@ fn build_system_prompt(
 // ─── App implementation ─────────────────────────────────────────────────────
 
 impl App {
-    /// Create a new App instance
-    pub async fn new(settings: Settings) -> Result<Self> {
+    /// Build an `App` from a wired `Oxi` engine and a settings object.
+    ///
+    /// The `Oxi` should be created via [`build_oxi_engine`] (or
+    /// `services::build_oxi`) so that all 11 ports are wired. The
+    /// settings hold the user's runtime configuration (model, thinking
+    /// level, etc.).
+    pub async fn from_oxi(oxi: oxi_sdk::Oxi, settings: Settings) -> Result<Self> {
         let model_id = settings.effective_model(None).unwrap_or_default();
         let provider_name = settings
             .effective_provider(None)
             .unwrap_or_else(|| model_id.split('/').next().unwrap_or("").to_string());
 
-        let (provider_name, model_name) = if model_id.contains('/') {
-            let parts: Vec<&str> = model_id.split('/').collect();
-            (parts[0].to_string(), parts[1..].join("/"))
-        } else if !model_id.is_empty() {
-            (provider_name.clone(), model_id.clone())
-        } else {
-            (String::new(), String::new())
-        };
-
-        // Resolve model (validation only)
-        if !provider_name.is_empty() && !model_name.is_empty() {
-            let _ = oxi_sdk::lookup_model(&provider_name, &model_name);
-        }
-
-        // Resolve provider via oxi-ai built-in factory
-        let provider: Arc<dyn oxi_sdk::Provider> = {
-            let name = if provider_name.is_empty() {
-                "anthropic"
-            } else {
-                &provider_name
-            };
-            oxi_sdk::get_provider_arc(name)
-                .ok_or_else(|| Error::msg(format!("Provider '{}' not found", name)))?
-        };
+        // Pull the API key from the wired port, not from oxi_store.
+        let api_key = oxi.ports().auth.get_api_key(&provider_name).await?;
 
         let skills_dir = SkillManager::skills_dir().unwrap_or_else(|_| {
             dirs::home_dir()
@@ -234,8 +223,6 @@ impl App {
         } else {
             oxi_sdk::CompactionStrategy::Disabled
         };
-        let auth = oxi_store::auth_storage::shared_auth_storage();
-        let api_key = auth.get_api_key(&provider_name);
 
         let config = AgentConfig {
             name: "oxi".to_string(),
@@ -257,11 +244,14 @@ impl App {
             provider_options: None,
         };
 
-        let agent = Arc::new(Agent::new(
-            provider,
-            config,
-            Arc::new(oxi_agent::ToolRegistry::new()),
-        ));
+        // Build the agent via the SDK's AgentBuilder — no manual wiring.
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let agent = oxi
+            .agent(config)
+            .workspace(cwd)
+            .build()
+            .map_err(|e| Error::msg(format!("agent build failed: {e}")))?;
+        let agent = Arc::new(agent);
 
         let bridge =
             std::sync::Arc::new(oxi_agent::tools::questionnaire::QuestionnaireBridge::new());
@@ -272,6 +262,7 @@ impl App {
             .register_arc(std::sync::Arc::new(questionnaire_tool));
 
         Ok(Self {
+            oxi,
             agent,
             settings,
             skills: RwLock::new(skills),
@@ -399,14 +390,15 @@ impl App {
     }
 
     /// Switch the model used for future LLM calls.
-    pub fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
+    pub async fn switch_model(&self, model_id: &str) -> anyhow::Result<()> {
         let parts: Vec<&str> = model_id.split('/').collect();
         let provider = parts
             .first()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "anthropic".to_string());
-        let api_key = oxi_store::auth_storage::shared_auth_storage().get_api_key(&provider);
-        self.agent.switch_model(model_id, api_key)
+        let api_key = self.oxi.ports().auth.get_api_key(&provider).await?;
+        self.agent.switch_model(model_id, api_key);
+        Ok(())
     }
 
     /// Get the current model ID
