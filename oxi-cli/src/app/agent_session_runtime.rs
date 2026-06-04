@@ -34,7 +34,7 @@ use crate::app::agent_session::{AgentSession, AgentSessionHandle, ScopedModel};
 use crate::storage::resource_loader::ResourceLoader;
 use anyhow::Result;
 use crate::store::auth_storage::AuthStorage;
-use crate::store::model_registry::ModelRegistry;
+use oxi_sdk::ModelRegistry;
 use crate::store::session::SessionManager;
 use crate::store::session_cwd::{assert_session_cwd_exists, SessionCwdSource};
 use crate::store::settings::{Settings, ThinkingLevel};
@@ -168,14 +168,11 @@ pub fn create_agent_session_services(
         Arc::new(s)
     });
 
-    // Model registry — creates its own AuthStorage internally
-    // (reads from the same default path)
-    let model_registry = options.model_registry.unwrap_or_else(|| {
-        Arc::new(ModelRegistry::create(
-            AuthStorage::new(),
-            Some(agent_dir.join("models.json")),
-        ))
-    });
+    // Model registry — uses the SDK's static catalog. oxi-cli does not
+    // maintain its own model DB; the SDK has all built-in providers.
+    let model_registry = options
+        .model_registry
+        .unwrap_or_else(|| Arc::new(oxi_sdk::ModelRegistry::from_static()));
 
     // Resource loader
     let resource_loader = options

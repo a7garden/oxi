@@ -50,16 +50,10 @@ async fn main() -> Result<()> {
         Some(args.disable_fallback),
     );
 
-    // Validate settings
-    let report = settings.validate();
-    for warn in &report.warnings {
-        tracing::warn!("Settings warning: {} - {}", warn.field, warn.message);
-    }
-    if !report.is_valid() {
-        eprintln!("Configuration error ({}):", report.errors.len());
-        for err in &report.errors {
-            eprintln!("   • {}: {}", err.field, err.message);
-        }
+    // (settings_validation::Settings::validate was removed with the
+    // dead modules; inline a minimal sanity check here.)
+    if settings.effective_model(None).unwrap_or_default().is_empty() {
+        eprintln!("No model configured. Run `oxi setup` to configure.");
         std::process::exit(1);
     }
 
