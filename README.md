@@ -8,7 +8,11 @@ A Rust port of [pi](https://github.com/earendil-works/pi) by Mario Zechner.
 Multi-provider · Streaming-first · Extensible · Session persistence
 
 [![CI](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/ci.yml?style=flat-square&label=CI)](https://github.com/a7garden/oxi/actions)
+[![Crates.io](https://img.shields.io/crates/v/oxi-cli?style=flat-square&label=crates.io)](https://crates.io/crates/oxi-cli)
+[![docs.rs](https://img.shields.io/docsrs/oxi-cli?style=flat-square&label=docs.rs)](https://docs.rs/oxi-cli)
+[![GitHub release](https://img.shields.io/github/v/release/a7garden/oxi?style=flat-square&include_prereleases&label=release)](https://github.com/a7garden/oxi/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE.md)
+[![GitHub stars](https://img.shields.io/github/stars/a7garden/oxi?style=flat-square)](https://github.com/a7garden/oxi/stargazers)
 [![Rust](https://img.shields.io/badge/Rust-1.82%2B-orange.svg?style=flat-square)](https://www.rust-lang.org/)
 
 [Getting Started](#getting-started) · [Architecture](#architecture) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
