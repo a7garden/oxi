@@ -23,7 +23,7 @@
 //!  oxi_agent::Agent
 //!        │
 //!        ▼
-//!  oxi_ai::Provider  (streaming LLM calls)
+//!  oxi_sdk::Provider  (streaming LLM calls)
 //! ```
 
 use crate::context::auto_compaction::{CompactionConfig, CompactionReason};
@@ -33,7 +33,7 @@ use crate::extensions::{
 };
 use anyhow::{Context, Result};
 use oxi_agent::{Agent, AgentEvent, AgentState};
-use oxi_ai::Message;
+use oxi_sdk::Message;
 use oxi_store::session::{AgentMessage, SessionManager};
 use oxi_store::settings::{Settings, ThinkingLevel};
 use parking_lot::RwLock;
@@ -293,7 +293,7 @@ impl AgentSession {
                     assistant_messages += 1;
                     // Count tool-use content blocks
                     for block in &a.content {
-                        if matches!(block, oxi_ai::ContentBlock::ToolCall(_)) {
+                        if matches!(block, oxi_sdk::ContentBlock::ToolCall(_)) {
                             tool_calls += 1;
                         }
                     }
@@ -653,8 +653,8 @@ impl AgentSession {
             match msg {
                 Message::User(u) => {
                     let content = match &u.content {
-                        oxi_ai::MessageContent::Text(t) => t.clone(),
-                        oxi_ai::MessageContent::Blocks(blocks) => blocks
+                        oxi_sdk::MessageContent::Text(t) => t.clone(),
+                        oxi_sdk::MessageContent::Blocks(blocks) => blocks
                             .iter()
                             .filter_map(|b| b.as_text())
                             .collect::<Vec<_>>()
@@ -670,30 +670,30 @@ impl AgentSession {
                         .content
                         .iter()
                         .map(|b| match b {
-                            oxi_ai::ContentBlock::Text(t) => {
+                            oxi_sdk::ContentBlock::Text(t) => {
                                 oxi_store::session::AssistantContentBlock::Text {
                                     text: t.text.clone(),
                                 }
                             }
-                            oxi_ai::ContentBlock::Thinking(t) => {
+                            oxi_sdk::ContentBlock::Thinking(t) => {
                                 oxi_store::session::AssistantContentBlock::Thinking {
                                     thinking: t.thinking.clone(),
                                 }
                             }
-                            oxi_ai::ContentBlock::ToolCall(tc) => {
+                            oxi_sdk::ContentBlock::ToolCall(tc) => {
                                 oxi_store::session::AssistantContentBlock::ToolCall {
                                     id: tc.id.clone(),
                                     name: tc.name.clone(),
                                     arguments: tc.arguments.clone(),
                                 }
                             }
-                            oxi_ai::ContentBlock::Image(img) => {
+                            oxi_sdk::ContentBlock::Image(img) => {
                                 oxi_store::session::AssistantContentBlock::ImageResult {
                                     data: img.data.clone(),
                                     media_type: img.mime_type.clone(),
                                 }
                             }
-                            oxi_ai::ContentBlock::Unknown(v) => {
+                            oxi_sdk::ContentBlock::Unknown(v) => {
                                 // Best-effort: try to extract text from unknown JSON
                                 oxi_store::session::AssistantContentBlock::Text {
                                     text: v.to_string(),
@@ -775,13 +775,13 @@ impl AgentSession {
     /// This avoids the race condition where `persist_session()` reads
     /// `agent.state()` which may be stale during a running agent loop
     /// (the agent loop operates on a separate `fresh_state`).
-    pub fn persist_event_message(&self, message: &oxi_ai::Message) {
+    pub fn persist_event_message(&self, message: &oxi_sdk::Message) {
         let mut sm = self.session_manager.write();
         match message {
             Message::User(u) => {
                 let content = match &u.content {
-                    oxi_ai::MessageContent::Text(t) => t.clone(),
-                    oxi_ai::MessageContent::Blocks(blocks) => blocks
+                    oxi_sdk::MessageContent::Text(t) => t.clone(),
+                    oxi_sdk::MessageContent::Blocks(blocks) => blocks
                         .iter()
                         .filter_map(|b| b.as_text())
                         .collect::<Vec<_>>()
@@ -796,30 +796,30 @@ impl AgentSession {
                     .content
                     .iter()
                     .map(|b| match b {
-                        oxi_ai::ContentBlock::Text(t) => {
+                        oxi_sdk::ContentBlock::Text(t) => {
                             oxi_store::session::AssistantContentBlock::Text {
                                 text: t.text.clone(),
                             }
                         }
-                        oxi_ai::ContentBlock::Thinking(t) => {
+                        oxi_sdk::ContentBlock::Thinking(t) => {
                             oxi_store::session::AssistantContentBlock::Thinking {
                                 thinking: t.thinking.clone(),
                             }
                         }
-                        oxi_ai::ContentBlock::ToolCall(tc) => {
+                        oxi_sdk::ContentBlock::ToolCall(tc) => {
                             oxi_store::session::AssistantContentBlock::ToolCall {
                                 id: tc.id.clone(),
                                 name: tc.name.clone(),
                                 arguments: tc.arguments.clone(),
                             }
                         }
-                        oxi_ai::ContentBlock::Image(img) => {
+                        oxi_sdk::ContentBlock::Image(img) => {
                             oxi_store::session::AssistantContentBlock::ImageResult {
                                 data: img.data.clone(),
                                 media_type: img.mime_type.clone(),
                             }
                         }
-                        oxi_ai::ContentBlock::Unknown(v) => {
+                        oxi_sdk::ContentBlock::Unknown(v) => {
                             oxi_store::session::AssistantContentBlock::Text {
                                 text: v.to_string(),
                             }
@@ -1145,7 +1145,7 @@ mod tests {
     use async_trait::async_trait;
     use futures::Stream;
     use oxi_agent::AgentConfig;
-    use oxi_ai::{Model, Provider, ProviderError, ProviderEvent};
+    use oxi_sdk::{Model, Provider, ProviderError, ProviderEvent};
     use std::pin::Pin;
 
     use std::task::{Context as TaskContext, Poll};
@@ -1169,8 +1169,8 @@ mod tests {
         async fn stream(
             &self,
             _model: &Model,
-            _context: &oxi_ai::Context,
-            _options: Option<oxi_ai::StreamOptions>,
+            _context: &oxi_sdk::Context,
+            _options: Option<oxi_sdk::StreamOptions>,
         ) -> Result<Pin<Box<dyn Stream<Item = ProviderEvent> + Send>>, ProviderError> {
             Ok(Box::pin(EmptyStream))
         }

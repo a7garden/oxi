@@ -88,9 +88,9 @@ pub use oxi_ai::circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker};
 pub use oxi_ai::multi_provider::MultiProviderConfig;
 pub use oxi_ai::provider_pool::{ProviderPool, RateLimitPolicy};
 pub use oxi_ai::{
-    Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, Model,
-    ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderOptions, ProviderRegistry,
-    StreamOptions, UserMessage,
+    Api, CompactionStrategy, ContentBlock, Context, Cost, InputModality, Message, MessageContent,
+    Model, ModelRegistry, Provider, ProviderError, ProviderEvent, ProviderOptions,
+    ProviderRegistry, StreamOptions, UserMessage,
 };
 
 // Credential management (oauth + env key resolution)
@@ -117,6 +117,33 @@ pub use oxi_ai::oauth::{
     default_auth_path, load_auth_store, load_token, remove_token, save_auth_store, save_token,
     AuthStore, OAuthError, TokenBundle,
 };
+
+// Provider registry — built-in providers (Layer 1 of the catalog) and
+// the runtime functions that surface them to consumers.
+pub use oxi_ai::register_builtins::{
+    get_all_provider_aliases, get_all_provider_names, get_api_mappings, get_builtin_provider,
+    get_builtin_providers, get_provider_api, get_provider_base_url, get_provider_env_key,
+    get_provider_env_keys, is_builtin_provider, resolve_provider_name, BuiltinProvider,
+};
+
+// Provider instance registry (custom + built-in at runtime)
+pub use oxi_ai::{
+    create_builtin_provider, create_builtin_provider_with_options, custom_provider_names,
+    dynamic_models, fetch_models_async, fetch_models_blocking, get_model, get_models, get_provider,
+    get_provider_arc, lookup_model, register_model, register_provider, unregister_provider,
+};
+
+// Complexity-based routing and the router module
+pub use oxi_ai::router;
+
+// Tool-related types (oxi-cli's main.rs uses ToolCall, ToolResult, ToolCallType)
+pub use oxi_ai::{
+    validate_args, ProgressCallback, Tool, ToolCall, ToolCallType, ToolResult, ToolValidationError,
+};
+
+// Thinking level (re-exported from oxi_ai::types, since oxi-ai's top-level
+// re-exports it via `pub use types::*` but not as a named item).
+pub use oxi_ai::types::ThinkingLevel;
 
 // Re-export from oxi-agent
 pub use oxi_agent::{
@@ -160,7 +187,11 @@ mod tests {
         // Verify the 3-tier catalog surface is exposed to SDK consumers.
         let providers = load_builtin_providers();
         let models = load_builtin_models();
-        assert!(providers.len() >= 70, "expected >= 70 providers, got {}", providers.len());
+        assert!(
+            providers.len() >= 70,
+            "expected >= 70 providers, got {}",
+            providers.len()
+        );
         assert!(!models.is_empty(), "models should be loaded");
     }
 

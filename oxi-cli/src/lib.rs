@@ -255,17 +255,17 @@ impl App {
 
         // Resolve model (validation only)
         if !provider_name.is_empty() && !model_name.is_empty() {
-            let _ = oxi_ai::lookup_model(&provider_name, &model_name);
+            let _ = oxi_sdk::lookup_model(&provider_name, &model_name);
         }
 
         // Resolve provider via oxi-ai built-in factory
-        let provider: Arc<dyn oxi_ai::Provider> = {
+        let provider: Arc<dyn oxi_sdk::Provider> = {
             let name = if provider_name.is_empty() {
                 "anthropic"
             } else {
                 &provider_name
             };
-            oxi_ai::get_provider_arc(name)
+            oxi_sdk::get_provider_arc(name)
                 .ok_or_else(|| Error::msg(format!("Provider '{}' not found", name)))?
         };
 
@@ -282,9 +282,9 @@ impl App {
 
         let system_prompt = build_system_prompt(settings.thinking_level, &[]);
         let compaction_strategy = if settings.auto_compaction {
-            oxi_ai::CompactionStrategy::Threshold(0.8)
+            oxi_sdk::CompactionStrategy::Threshold(0.8)
         } else {
-            oxi_ai::CompactionStrategy::Disabled
+            oxi_sdk::CompactionStrategy::Disabled
         };
         let auth = oxi_store::auth_storage::shared_auth_storage();
         let api_key = auth.get_api_key(&provider_name);
@@ -438,7 +438,7 @@ impl App {
         self.agent.run_streaming(prompt, on_event).await?;
         let state = self.agent_state();
         for msg in state.messages.iter().rev() {
-            if let oxi_ai::Message::Assistant(a) = msg {
+            if let oxi_sdk::Message::Assistant(a) = msg {
                 return Ok(a.text_content());
             }
         }

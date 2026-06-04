@@ -68,9 +68,9 @@ pub(crate) fn handle_slash_command(
                 // This handles the case where a user sets a key for "zai-coding-global"
                 // but model DB entries have provider "zai" (both share ZAI_API_KEY).
                 let mut providers_with_key = std::collections::HashSet::new();
-                for p in oxi_ai::register_builtins::get_builtin_providers() {
+                for p in oxi_sdk::get_builtin_providers() {
                     if auth.get_api_key(p.name).is_some() {
-                        for p2 in oxi_ai::register_builtins::get_builtin_providers() {
+                        for p2 in oxi_sdk::get_builtin_providers() {
                             if p2.env_key == p.env_key {
                                 providers_with_key.insert(p2.name.to_string());
                             }
@@ -79,13 +79,13 @@ pub(crate) fn handle_slash_command(
                 }
 
                 // Static models filtered by API key
-                let mut all_models: Vec<String> = oxi_ai::model_db::get_all_models()
+                let mut all_models: Vec<String> = oxi_sdk::get_all_models()
                     .filter(|entry| providers_with_key.contains(entry.provider))
                     .map(|entry| format!("{}/{}", entry.provider, entry.id))
                     .collect();
 
                 // Dynamic models (custom providers + router/auto)
-                for dyn_model in oxi_ai::dynamic_models() {
+                for dyn_model in oxi_sdk::dynamic_models() {
                     let entry = format!("{}/{}", dyn_model.provider, dyn_model.id);
                     if !all_models.contains(&entry) {
                         all_models.push(entry);
@@ -647,11 +647,11 @@ pub(crate) fn handle_slash_command(
                 let cmd = parts.next().unwrap_or("");
                 match cmd {
                     "status" => {
-                        if let Some(snap) = oxi_ai::router::RouterProvider::get_snapshot() {
+                        if let Some(snap) = oxi_sdk::router::RouterProvider::get_snapshot() {
                             let content = format!(
                                 "Router Status:\n\nProfile: {}\nTier: {:?}\nScore: {:.2}\nModel: {}\nProvider: {}\nCost: ${:.4}\nTurns: {}",
                                 snap.profile.as_deref().unwrap_or("-"),
-                                snap.last_tier.unwrap_or(oxi_ai::router::RouterTier::Medium),
+                                snap.last_tier.unwrap_or(oxi_sdk::router::RouterTier::Medium),
                                 snap.last_score,
                                 snap.last_model.as_deref().unwrap_or("-"),
                                 snap.last_provider.as_deref().unwrap_or("-"),
@@ -677,8 +677,8 @@ pub(crate) fn handle_slash_command(
                         if let Some(tier_arg) = parts.next() {
                             match tier_arg.to_lowercase().as_str() {
                                 "low" => {
-                                    oxi_ai::router::set_router_pin(Some(
-                                        oxi_ai::router::RouterTier::Low,
+                                    oxi_sdk::router::set_router_pin(Some(
+                                        oxi_sdk::router::RouterTier::Low,
                                     ));
                                     state.add_notification(
                                         "Router pinned to LOW tier".to_string(),
@@ -686,8 +686,8 @@ pub(crate) fn handle_slash_command(
                                     );
                                 }
                                 "medium" => {
-                                    oxi_ai::router::set_router_pin(Some(
-                                        oxi_ai::router::RouterTier::Medium,
+                                    oxi_sdk::router::set_router_pin(Some(
+                                        oxi_sdk::router::RouterTier::Medium,
                                     ));
                                     state.add_notification(
                                         "Router pinned to MEDIUM tier".to_string(),
@@ -695,8 +695,8 @@ pub(crate) fn handle_slash_command(
                                     );
                                 }
                                 "high" => {
-                                    oxi_ai::router::set_router_pin(Some(
-                                        oxi_ai::router::RouterTier::High,
+                                    oxi_sdk::router::set_router_pin(Some(
+                                        oxi_sdk::router::RouterTier::High,
                                     ));
                                     state.add_notification(
                                         "Router pinned to HIGH tier".to_string(),
@@ -704,7 +704,7 @@ pub(crate) fn handle_slash_command(
                                     );
                                 }
                                 "off" | "none" | "clear" => {
-                                    oxi_ai::router::set_router_pin(None);
+                                    oxi_sdk::router::set_router_pin(None);
                                     state.add_notification(
                                         "Router pin cleared (auto-routing resumed)".to_string(),
                                         NotificationKind::Success,
@@ -718,7 +718,7 @@ pub(crate) fn handle_slash_command(
                                 }
                             }
                         } else {
-                            let current = oxi_ai::router::get_router_pin();
+                            let current = oxi_sdk::router::get_router_pin();
                             let msg = match current {
                                 Some(t) => format!("Router pin: {:?}", t),
                                 None => "Router pin: none (auto)".to_string(),
@@ -794,11 +794,11 @@ pub(crate) fn handle_slash_command(
                         .is_some();
 
                 if has_config {
-                    if let Some(snap) = oxi_ai::router::RouterProvider::get_snapshot() {
+                    if let Some(snap) = oxi_sdk::router::RouterProvider::get_snapshot() {
                         let content = format!(
                             "Router Status:\n\nProfile: {}\nTier: {:?}\nScore: {:.2}\nModel: {}\nCost: ${:.4}\nTurns: {}",
                             snap.profile.as_deref().unwrap_or("-"),
-                            snap.last_tier.unwrap_or(oxi_ai::router::RouterTier::Medium),
+                            snap.last_tier.unwrap_or(oxi_sdk::router::RouterTier::Medium),
                             snap.last_score,
                             snap.last_model.as_deref().unwrap_or("-"),
                             snap.accumulated_cost,
@@ -823,7 +823,7 @@ pub(crate) fn handle_slash_command(
                         NotificationKind::Info,
                     );
                     let auth = oxi_store::auth_storage::shared_auth_storage();
-                    let setup_models: Vec<String> = oxi_ai::model_db::get_all_models()
+                    let setup_models: Vec<String> = oxi_sdk::get_all_models()
                         .filter(|entry| auth.get_api_key(entry.provider).is_some())
                         .map(|entry| format!("{}/{}", entry.provider, entry.id))
                         .collect();
@@ -838,7 +838,7 @@ pub(crate) fn handle_slash_command(
                         move |data: &super::overlay::RouterSetupData| {
                             let store_cfg = router_integration::save_router_config(data)?;
                             let ai_cfg = router_integration::store_config_to_ai_config(&store_cfg);
-                            oxi_ai::router::register_router(&ai_cfg);
+                            oxi_sdk::router::register_router(&ai_cfg);
                             Ok(())
                         },
                         || {},

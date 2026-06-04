@@ -1,14 +1,14 @@
 //! Provider ID to display name mappings.
 //!
 //! Human-readable display names for supported LLM providers.
-//! Uses the built-in provider registry from `oxi_ai::register_builtins`.
+//! Uses the built-in provider registry from `oxi_sdk::register_builtins`.
 
 /// Look up a display name for a provider ID.
 ///
 /// Falls back to returning the raw `provider_id` if no mapping exists.
 #[allow(dead_code)]
 pub fn provider_display_name(provider_id: &str) -> &str {
-    oxi_ai::register_builtins::get_builtin_provider(provider_id)
+    oxi_sdk::get_builtin_provider(provider_id)
         .map(|p| p.display_name)
         .unwrap_or(provider_id)
 }

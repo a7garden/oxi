@@ -1073,7 +1073,7 @@ fn handle_config_reset(all: bool) -> Result<()> {
 
 /// Handle `oxi models [--provider <name>]`
 fn handle_models_command(provider: &Option<String>) -> Result<()> {
-    use oxi_ai::{get_all_models, get_provider_models, model_count};
+    use oxi_sdk::{get_all_models, get_provider_models, model_count};
 
     // If a custom provider is specified, also try to fetch models dynamically
     if let Some(ref provider_name) = *provider {
@@ -1086,28 +1086,28 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
             let auth = oxi_store::auth_storage::shared_auth_storage();
             let api_key = auth.get_api_key(&cp.name);
             if let Some(ref key) = api_key {
-                match oxi_ai::fetch_models_blocking(&cp.base_url, key) {
+                match oxi_sdk::fetch_models_blocking(&cp.base_url, key) {
                     Ok(model_ids) => {
                         let api_type = match cp.api.to_lowercase().as_str() {
-                            "openai-responses" | "responses" => oxi_ai::Api::OpenAiResponses,
-                            _ => oxi_ai::Api::OpenAiCompletions,
+                            "openai-responses" | "responses" => oxi_sdk::Api::OpenAiResponses,
+                            _ => oxi_sdk::Api::OpenAiCompletions,
                         };
                         for model_id in &model_ids {
-                            let model = oxi_ai::Model {
+                            let model = oxi_sdk::Model {
                                 id: model_id.clone(),
                                 name: model_id.clone(),
                                 api: api_type,
                                 provider: cp.name.clone(),
                                 base_url: cp.base_url.clone(),
                                 reasoning: false,
-                                input: vec![oxi_ai::InputModality::Text],
-                                cost: oxi_ai::Cost::default(),
+                                input: vec![oxi_sdk::InputModality::Text],
+                                cost: oxi_sdk::Cost::default(),
                                 context_window: 128_000,
                                 max_tokens: 8_192,
                                 headers: Default::default(),
                                 compat: None,
                             };
-                            oxi_ai::register_model(model);
+                            oxi_sdk::register_model(model);
                         }
                         if model_ids.is_empty() {
                             println!("No models found for provider '{}'.", provider_name);
@@ -1333,8 +1333,8 @@ fn register_custom_providers(settings: &Settings) {
         match api.as_str() {
             "openai-completions" | "openai" => {
                 let provider =
-                    oxi_ai::OpenAiProvider::with_base_url_and_key(&cp.base_url, api_key.clone());
-                oxi_ai::register_provider(&cp.name, provider);
+                    oxi_sdk::OpenAiProvider::with_base_url_and_key(&cp.base_url, api_key.clone());
+                oxi_sdk::register_provider(&cp.name, provider);
                 tracing::info!(
                     "Registered custom provider '{}' (openai-completions) -> {}",
                     cp.name,
@@ -1342,11 +1342,11 @@ fn register_custom_providers(settings: &Settings) {
                 );
             }
             "openai-responses" | "responses" => {
-                let provider = oxi_ai::OpenAiResponsesProvider::with_base_url_and_key(
+                let provider = oxi_sdk::OpenAiResponsesProvider::with_base_url_and_key(
                     &cp.base_url,
                     api_key.clone(),
                 );
-                oxi_ai::register_provider(&cp.name, provider);
+                oxi_sdk::register_provider(&cp.name, provider);
                 tracing::info!(
                     "Registered custom provider '{}' (openai-responses) -> {}",
                     cp.name,
@@ -1372,29 +1372,29 @@ fn fetch_and_register_models(
     api_key: &Option<String>,
 ) {
     if let Some(ref key) = api_key {
-        match oxi_ai::fetch_models_blocking(&cp.base_url, key.as_str()) {
+        match oxi_sdk::fetch_models_blocking(&cp.base_url, key.as_str()) {
             Ok(model_ids) => {
                 let count = model_ids.len();
                 for model_id in &model_ids {
                     let api_type = match api {
-                        "openai-responses" | "responses" => oxi_ai::Api::OpenAiResponses,
-                        _ => oxi_ai::Api::OpenAiCompletions,
+                        "openai-responses" | "responses" => oxi_sdk::Api::OpenAiResponses,
+                        _ => oxi_sdk::Api::OpenAiCompletions,
                     };
-                    let model = oxi_ai::Model {
+                    let model = oxi_sdk::Model {
                         id: model_id.clone(),
                         name: model_id.clone(),
                         api: api_type,
                         provider: cp.name.clone(),
                         base_url: cp.base_url.clone(),
                         reasoning: false,
-                        input: vec![oxi_ai::InputModality::Text],
-                        cost: oxi_ai::Cost::default(),
+                        input: vec![oxi_sdk::InputModality::Text],
+                        cost: oxi_sdk::Cost::default(),
                         context_window: 128_000,
                         max_tokens: 8_192,
                         headers: Default::default(),
                         compat: None,
                     };
-                    oxi_ai::register_model(model);
+                    oxi_sdk::register_model(model);
                 }
                 tracing::info!(
                     "[oxi] auto-fetched {} models from '{}' ({})",
@@ -1504,10 +1504,10 @@ fn register_router_provider(settings: &Settings) {
     };
 
     // Register router models only when configured.
-    oxi_ai::register_model(oxi_ai::Model::new(
+    oxi_sdk::register_model(oxi_sdk::Model::new(
         "auto",
         "Router (auto)".to_string(),
-        oxi_ai::Api::AnthropicMessages,
+        oxi_sdk::Api::AnthropicMessages,
         "router",
         "router://local",
     ));
@@ -1515,31 +1515,31 @@ fn register_router_provider(settings: &Settings) {
     // Convert store config to AI config.
     let mut ai_profiles = std::collections::HashMap::new();
     for (name, sp) in store_cfg.profiles() {
-        fn parse_thinking(s: &Option<String>) -> Option<oxi_ai::ThinkingLevel> {
+        fn parse_thinking(s: &Option<String>) -> Option<oxi_sdk::ThinkingLevel> {
             s.as_ref().and_then(|s| match s.as_str() {
-                "off" => Some(oxi_ai::ThinkingLevel::Off),
-                "minimal" => Some(oxi_ai::ThinkingLevel::Minimal),
-                "low" => Some(oxi_ai::ThinkingLevel::Low),
-                "medium" => Some(oxi_ai::ThinkingLevel::Medium),
-                "high" => Some(oxi_ai::ThinkingLevel::High),
-                "xhigh" => Some(oxi_ai::ThinkingLevel::XHigh),
+                "off" => Some(oxi_sdk::ThinkingLevel::Off),
+                "minimal" => Some(oxi_sdk::ThinkingLevel::Minimal),
+                "low" => Some(oxi_sdk::ThinkingLevel::Low),
+                "medium" => Some(oxi_sdk::ThinkingLevel::Medium),
+                "high" => Some(oxi_sdk::ThinkingLevel::High),
+                "xhigh" => Some(oxi_sdk::ThinkingLevel::XHigh),
                 _ => None,
             })
         }
         ai_profiles.insert(
             name.clone(),
-            oxi_ai::router::RouterProfile {
-                high: oxi_ai::router::RoutedTierConfig {
+            oxi_sdk::router::RouterProfile {
+                high: oxi_sdk::router::RoutedTierConfig {
                     model: sp.high.model.clone(),
                     thinking: parse_thinking(&sp.high.thinking),
                     fallbacks: sp.high.fallbacks.clone(),
                 },
-                medium: oxi_ai::router::RoutedTierConfig {
+                medium: oxi_sdk::router::RoutedTierConfig {
                     model: sp.medium.model.clone(),
                     thinking: parse_thinking(&sp.medium.thinking),
                     fallbacks: sp.medium.fallbacks.clone(),
                 },
-                low: oxi_ai::router::RoutedTierConfig {
+                low: oxi_sdk::router::RoutedTierConfig {
                     model: sp.low.model.clone(),
                     thinking: parse_thinking(&sp.low.thinking),
                     fallbacks: sp.low.fallbacks.clone(),
@@ -1547,13 +1547,13 @@ fn register_router_provider(settings: &Settings) {
             },
         );
     }
-    let ai_cfg = oxi_ai::router::RouterConfig::with_pinning(
+    let ai_cfg = oxi_sdk::router::RouterConfig::with_pinning(
         store_cfg.default_profile().to_string(),
         store_cfg.classifier_model().map(String::from),
         store_cfg.context_upgrade_threshold(),
         store_cfg.max_session_budget(),
         ai_profiles,
-        oxi_ai::router::ScoringWeights {
+        oxi_sdk::router::ScoringWeights {
             structural: store_cfg.weights().structural,
             behavioral: store_cfg.weights().behavioral,
             context_budget: store_cfg.weights().context_budget,
@@ -1561,15 +1561,15 @@ fn register_router_provider(settings: &Settings) {
             message: store_cfg.weights().message,
         },
         store_cfg.pin_tier().and_then(|s| match s {
-            "high" => Some(oxi_ai::router::RouterTier::High),
-            "medium" => Some(oxi_ai::router::RouterTier::Medium),
-            "low" => Some(oxi_ai::router::RouterTier::Low),
+            "high" => Some(oxi_sdk::router::RouterTier::High),
+            "medium" => Some(oxi_sdk::router::RouterTier::Medium),
+            "low" => Some(oxi_sdk::router::RouterTier::Low),
             _ => None,
         }),
         store_cfg.phase_bias(),
     );
 
-    oxi_ai::router::register_router(&ai_cfg);
+    oxi_sdk::router::register_router(&ai_cfg);
 
     if let Some(profile) = settings.router_profile() {
         tracing::info!("Router active with profile: {profile}");

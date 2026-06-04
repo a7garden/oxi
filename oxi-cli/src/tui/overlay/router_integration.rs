@@ -4,42 +4,42 @@ use std::collections::HashMap;
 
 use super::router_setup::RouterSetupData;
 
-fn parse_ai_thinking(level: &str) -> Option<oxi_ai::ThinkingLevel> {
+fn parse_ai_thinking(level: &str) -> Option<oxi_sdk::ThinkingLevel> {
     match level {
-        "off" => Some(oxi_ai::ThinkingLevel::Off),
-        "minimal" => Some(oxi_ai::ThinkingLevel::Minimal),
-        "low" => Some(oxi_ai::ThinkingLevel::Low),
-        "medium" => Some(oxi_ai::ThinkingLevel::Medium),
-        "high" => Some(oxi_ai::ThinkingLevel::High),
-        "xhigh" => Some(oxi_ai::ThinkingLevel::XHigh),
+        "off" => Some(oxi_sdk::ThinkingLevel::Off),
+        "minimal" => Some(oxi_sdk::ThinkingLevel::Minimal),
+        "low" => Some(oxi_sdk::ThinkingLevel::Low),
+        "medium" => Some(oxi_sdk::ThinkingLevel::Medium),
+        "high" => Some(oxi_sdk::ThinkingLevel::High),
+        "xhigh" => Some(oxi_sdk::ThinkingLevel::XHigh),
         _ => None,
     }
 }
 
-fn thinking_to_ai(opt: &Option<String>) -> Option<oxi_ai::ThinkingLevel> {
+fn thinking_to_ai(opt: &Option<String>) -> Option<oxi_sdk::ThinkingLevel> {
     opt.as_ref().and_then(|s| parse_ai_thinking(s))
 }
 
 /// Convert a store [`RouterConfig`] to an AI [`RouterConfig`].
 pub fn store_config_to_ai_config(
     c: &oxi_store::router_config::RouterConfig,
-) -> oxi_ai::router::RouterConfig {
-    let mut ai_profiles: HashMap<String, oxi_ai::router::RouterProfile> = HashMap::new();
+) -> oxi_sdk::router::RouterConfig {
+    let mut ai_profiles: HashMap<String, oxi_sdk::router::RouterProfile> = HashMap::new();
     for (name, sp) in c.profiles() {
         ai_profiles.insert(
             name.clone(),
-            oxi_ai::router::RouterProfile {
-                high: oxi_ai::router::RoutedTierConfig {
+            oxi_sdk::router::RouterProfile {
+                high: oxi_sdk::router::RoutedTierConfig {
                     model: sp.high.model.clone(),
                     thinking: thinking_to_ai(&sp.high.thinking),
                     fallbacks: sp.high.fallbacks.clone(),
                 },
-                medium: oxi_ai::router::RoutedTierConfig {
+                medium: oxi_sdk::router::RoutedTierConfig {
                     model: sp.medium.model.clone(),
                     thinking: thinking_to_ai(&sp.medium.thinking),
                     fallbacks: sp.medium.fallbacks.clone(),
                 },
-                low: oxi_ai::router::RoutedTierConfig {
+                low: oxi_sdk::router::RoutedTierConfig {
                     model: sp.low.model.clone(),
                     thinking: thinking_to_ai(&sp.low.thinking),
                     fallbacks: sp.low.fallbacks.clone(),
@@ -47,13 +47,13 @@ pub fn store_config_to_ai_config(
             },
         );
     }
-    oxi_ai::router::RouterConfig::with_pinning(
+    oxi_sdk::router::RouterConfig::with_pinning(
         c.default_profile().to_string(),
         c.classifier_model().map(String::from),
         c.context_upgrade_threshold(),
         c.max_session_budget(),
         ai_profiles,
-        oxi_ai::router::ScoringWeights {
+        oxi_sdk::router::ScoringWeights {
             structural: c.weights().structural,
             behavioral: c.weights().behavioral,
             context_budget: c.weights().context_budget,
@@ -61,9 +61,9 @@ pub fn store_config_to_ai_config(
             message: c.weights().message,
         },
         c.pin_tier().and_then(|s| match s {
-            "high" => Some(oxi_ai::router::RouterTier::High),
-            "medium" => Some(oxi_ai::router::RouterTier::Medium),
-            "low" => Some(oxi_ai::router::RouterTier::Low),
+            "high" => Some(oxi_sdk::router::RouterTier::High),
+            "medium" => Some(oxi_sdk::router::RouterTier::Medium),
+            "low" => Some(oxi_sdk::router::RouterTier::Low),
             _ => None,
         }),
         c.phase_bias(),

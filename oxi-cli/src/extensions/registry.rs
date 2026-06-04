@@ -605,7 +605,7 @@ impl ExtensionRunner {
     }
 
     /// Emit context event (message modification).
-    pub fn emit_context_event(&self, messages: Vec<oxi_ai::Message>) -> ContextEmitResult {
+    pub fn emit_context_event(&self, messages: Vec<oxi_sdk::Message>) -> ContextEmitResult {
         let mut current_messages = messages;
         let mut errors = Vec::new();
         let mut modified = false;

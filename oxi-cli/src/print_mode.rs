@@ -212,14 +212,14 @@ async fn run_single_prompt(
                                 last_text.push_str(text);
                             }
                             // AgentLoop MessageUpdate — extract text from snapshot
-                            AgentEvent::MessageUpdate { message: oxi_ai::Message::Assistant(asst), .. } => {
+                            AgentEvent::MessageUpdate { message: oxi_sdk::Message::Assistant(asst), .. } => {
                                 // Only extract Text blocks (matching pi's print-mode.ts behavior).
                                 // GLM fallback: if no Text blocks exist but Thinking
                                 // blocks do, use Thinking content since GLM puts all
                                 // output in reasoning_content.
                                 let text_only: String = asst.content.iter()
                                     .filter_map(|b| match b {
-                                        oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                        oxi_sdk::ContentBlock::Text(t) => Some(t.text.as_str()),
                                         _ => None,
                                     })
                                     .collect();
@@ -229,7 +229,7 @@ async fn run_single_prompt(
                                     // GLM fallback: use Thinking blocks when no Text
                                     let thinking_text: String = asst.content.iter()
                                         .filter_map(|b| match b {
-                                            oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
+                                            oxi_sdk::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
                                             _ => None,
                                         })
                                         .collect();
@@ -238,11 +238,11 @@ async fn run_single_prompt(
                                     }
                                 }
                             }
-                            AgentEvent::MessageEnd { message: oxi_ai::Message::Assistant(asst) } => {
+                            AgentEvent::MessageEnd { message: oxi_sdk::Message::Assistant(asst) } => {
                                 // Finalize last_text from the completed message snapshot
                                 let text_only: String = asst.content.iter()
                                     .filter_map(|b| match b {
-                                        oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                                        oxi_sdk::ContentBlock::Text(t) => Some(t.text.as_str()),
                                         _ => None,
                                     })
                                     .collect();
@@ -252,7 +252,7 @@ async fn run_single_prompt(
                                     // GLM fallback
                                     let thinking_text: String = asst.content.iter()
                                         .filter_map(|b| match b {
-                                            oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
+                                            oxi_sdk::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
                                             _ => None,
                                         })
                                         .collect();
@@ -307,17 +307,17 @@ async fn run_single_prompt(
     Ok(())
 }
 
-/// Extract text content from an oxi_ai::Message.
+/// Extract text content from an oxi_sdk::Message.
 /// Prefers Text blocks; falls back to Thinking blocks if no Text
 /// content exists (GLM models send all output as reasoning_content).
-fn extract_text_from_message(msg: &oxi_ai::Message) -> String {
+fn extract_text_from_message(msg: &oxi_sdk::Message) -> String {
     match msg {
-        oxi_ai::Message::Assistant(asst) => {
+        oxi_sdk::Message::Assistant(asst) => {
             let text_only: String = asst
                 .content
                 .iter()
                 .filter_map(|b| match b {
-                    oxi_ai::ContentBlock::Text(t) => Some(t.text.as_str()),
+                    oxi_sdk::ContentBlock::Text(t) => Some(t.text.as_str()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -329,7 +329,7 @@ fn extract_text_from_message(msg: &oxi_ai::Message) -> String {
             asst.content
                 .iter()
                 .filter_map(|b| match b {
-                    oxi_ai::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
+                    oxi_sdk::ContentBlock::Thinking(t) => Some(t.thinking.as_str()),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -522,8 +522,8 @@ mod tests {
     #[test]
     fn test_event_to_json_tool_call() {
         let event = AgentEvent::ToolCall {
-            tool_call: oxi_ai::ToolCall {
-                content_type: oxi_ai::ToolCallType::ToolCall,
+            tool_call: oxi_sdk::ToolCall {
+                content_type: oxi_sdk::ToolCallType::ToolCall,
                 id: "tc-1".to_string(),
                 name: "read_file".to_string(),
                 arguments: serde_json::json!({"path": "/tmp/test.rs"}),
@@ -560,7 +560,7 @@ mod tests {
     #[test]
     fn test_event_to_json_tool_complete() {
         let event = AgentEvent::ToolComplete {
-            result: oxi_ai::ToolResult {
+            result: oxi_sdk::ToolResult {
                 tool_call_id: "tc-1".to_string(),
                 content: "file contents here".to_string(),
                 status: "success".to_string(),

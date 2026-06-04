@@ -348,7 +348,7 @@ async fn dispatch_action(
         }
         KAction::ToggleRouting => {
             state.overlay_state = None;
-            let snap = oxi_ai::router::RouterProvider::get_snapshot();
+            let snap = oxi_sdk::router::RouterProvider::get_snapshot();
             let data = if let Some(ref s) = snap {
                 use oxi_tui::widgets::routing::{ProviderHealth, ProviderInfo, RoutingStatusData};
                 let chain = vec![ProviderInfo {
@@ -921,7 +921,7 @@ async fn handle_overlay_key(
                     move |data: &super::overlay::RouterSetupData| {
                         let store_cfg = router_integration::save_router_config(data)?;
                         let ai_cfg = router_integration::store_config_to_ai_config(&store_cfg);
-                        oxi_ai::router::register_router(&ai_cfg);
+                        oxi_sdk::router::register_router(&ai_cfg);
                         Ok(())
                     },
                     || {},
@@ -964,18 +964,17 @@ async fn handle_overlay_key(
                 // Resolve models that match the selected provider, expanding
                 // to all providers sharing the same env_key (e.g. zai-coding-global
                 // and zai share the same env_key).
-                let model_providers =
-                    oxi_ai::register_builtins::get_builtin_provider(&provider_name)
-                        .map(|bp| {
-                            oxi_ai::register_builtins::get_builtin_providers()
-                                .iter()
-                                .filter(|p| p.env_key == bp.env_key)
-                                .map(|p| p.name)
-                                .collect::<Vec<_>>()
-                        })
-                        .unwrap_or_else(|| vec![provider_name.as_str()]);
+                let model_providers = oxi_sdk::get_builtin_provider(&provider_name)
+                    .map(|bp| {
+                        oxi_sdk::get_builtin_providers()
+                            .iter()
+                            .filter(|p| p.env_key == bp.env_key)
+                            .map(|p| p.name)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_else(|| vec![provider_name.as_str()]);
 
-                let models: Vec<String> = oxi_ai::model_db::get_all_models()
+                let models: Vec<String> = oxi_sdk::get_all_models()
                     .filter(|e| model_providers.contains(&e.provider))
                     .map(|e| e.id.to_string())
                     .collect();

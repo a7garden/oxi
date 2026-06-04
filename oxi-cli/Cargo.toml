@@ -22,6 +22,7 @@ path = "src/lib.rs"
 [dependencies]
 oxi-ai = { version = "0.26.2", path = "../oxi-ai" }
 oxi-agent = { version = "0.26.2", path = "../oxi-agent" }
+oxi-sdk = { version = "0.26.2", path = "../oxi-sdk" }
 oxi-store = { version = "0.26.2", path = "../oxi-store" }
 oxi-tui = { version = "0.26.2", path = "../oxi-tui" }
 

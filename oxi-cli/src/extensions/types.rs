@@ -2,7 +2,7 @@
 //!
 //! This module contains all the data types used across the extension system.
 
-use oxi_ai::Message;
+use oxi_sdk::Message;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

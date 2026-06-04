@@ -637,7 +637,7 @@ impl ProviderSelectOverlay {
             let styles = theme.to_styles();
 
             // Storage hint + env var alternative
-            if let Some(env_key) = oxi_ai::register_builtins::get_provider_env_key(provider_name) {
+            if let Some(env_key) = oxi_sdk::get_provider_env_key(provider_name) {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![Span::styled(
                         " Saved to ~/.oxi/auth.json",
@@ -783,7 +783,7 @@ fn truncate_str(text: &str, max_width: usize) -> String {
 pub fn build_provider_entries() -> Vec<ProviderEntry> {
     let auth = oxi_store::auth_storage::shared_auth_storage();
 
-    let mut providers: Vec<ProviderEntry> = oxi_ai::register_builtins::get_builtin_providers()
+    let mut providers: Vec<ProviderEntry> = oxi_sdk::get_builtin_providers()
         .iter()
         .map(|builtin| {
             let has_key = auth.get_api_key(builtin.name).is_some();

@@ -230,7 +230,7 @@ impl OverlayComponent for SettingsOverlay {
                             }
                         } else if *id == "router_setup" {
                             let auth = oxi_store::auth_storage::shared_auth_storage();
-                            let models: Vec<String> = oxi_ai::model_db::get_all_models()
+                            let models: Vec<String> = oxi_sdk::get_all_models()
                                 .filter(|entry| auth.get_api_key(entry.provider).is_some())
                                 .map(|entry| format!("{}/{}", entry.provider, entry.id))
                                 .collect();

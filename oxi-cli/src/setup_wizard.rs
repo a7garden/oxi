@@ -119,7 +119,7 @@ fn mask_key(key: &str) -> String {
 fn load_providers(auth_store: &oxi_store::auth_storage::AuthStorage) -> Vec<ProviderEntry> {
     let mut entries = Vec::new();
 
-    for builtin in oxi_ai::register_builtins::get_builtin_providers() {
+    for builtin in oxi_sdk::get_builtin_providers() {
         let key = auth_store.get_api_key(builtin.name);
 
         let (has_key, key_masked) = match &key {
@@ -144,7 +144,7 @@ fn load_providers(auth_store: &oxi_store::auth_storage::AuthStorage) -> Vec<Prov
     // Add custom providers from settings that aren't already in builtins
     if let Ok(settings) = oxi_store::settings::Settings::load() {
         for cp in &settings.custom_providers {
-            if oxi_ai::register_builtins::is_builtin_provider(&cp.name) {
+            if oxi_sdk::is_builtin_provider(&cp.name) {
                 continue;
             }
             let actual_key = auth_store.get_api_key(&cp.name);
@@ -181,7 +181,7 @@ fn load_models() -> Vec<ModelEntry> {
                 let key = format!("{}/{}", provider, id);
                 if seen.insert(key.clone()) {
                     // Try to get context_window from model_db, default 128_000
-                    let ctx = oxi_ai::model_db::get_model_entry(provider, id)
+                    let ctx = oxi_sdk::get_model_entry(provider, id)
                         .map(|e| e.context_window)
                         .unwrap_or(128_000);
                     models.push(ModelEntry {
@@ -195,7 +195,7 @@ fn load_models() -> Vec<ModelEntry> {
     }
 
     // 2. Static models from model_db
-    for entry in oxi_ai::model_db::get_all_models() {
+    for entry in oxi_sdk::get_all_models() {
         let key = format!("{}/{}", entry.provider, entry.id);
         if seen.insert(key) {
             models.push(ModelEntry {
@@ -222,9 +222,7 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
         .iter()
         .find(|p| p.name == provider_name)
         .and_then(|p| p.base_url.clone())
-        .or_else(|| {
-            oxi_ai::register_builtins::get_provider_base_url(provider_name).map(|s| s.to_string())
-        });
+        .or_else(|| oxi_sdk::get_provider_base_url(provider_name).map(|s| s.to_string()));
 
     let base_url = match base_url {
         Some(url) if !url.is_empty() => url,
@@ -251,11 +249,11 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
     };
 
     // Only fetch for OpenAI-compatible providers (api = openai-completions or openai-responses)
-    let api_type = oxi_ai::register_builtins::get_provider_api(provider_name);
+    let api_type = oxi_sdk::get_provider_api(provider_name);
     let is_openai_compatible = api_type.is_none_or(|api| {
         matches!(
             api,
-            oxi_ai::Api::OpenAiCompletions | oxi_ai::Api::OpenAiResponses
+            oxi_sdk::Api::OpenAiCompletions | oxi_sdk::Api::OpenAiResponses
         )
     });
 
@@ -273,7 +271,7 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
         provider_name
     );
 
-    match oxi_ai::fetch_models_blocking(&base_url, &api_key) {
+    match oxi_sdk::fetch_models_blocking(&base_url, &api_key) {
         Ok(model_ids) => {
             tracing::info!(
                 "Fetched {} models from provider '{}'",

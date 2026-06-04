@@ -155,17 +155,17 @@ pub(crate) enum UiEvent {
     // ── Message lifecycle (pi-mono: message_start / update / end) ──
     /// A new message is being streamed. pi-mono: message_start.
     MessageStart {
-        message: oxi_ai::Message,
+        message: oxi_sdk::Message,
     },
     /// Full message snapshot with current content blocks. pi-mono: message_update.
     /// Content blocks are already separated (text vs toolCall) by the provider.
     MessageUpdate {
-        message: oxi_ai::Message,
+        message: oxi_sdk::Message,
         delta: Option<String>,
     },
     /// Message streaming is complete. pi-mono: message_end.
     MessageEnd {
-        message: oxi_ai::Message,
+        message: oxi_sdk::Message,
     },
 
     // ── Tool execution ─────────────────────────────────────────────
@@ -177,7 +177,7 @@ pub(crate) enum UiEvent {
     ToolExecutionEnd {
         tool_call_id: String,
         tool_name: String,
-        result: oxi_ai::ToolResult,
+        result: oxi_sdk::ToolResult,
         is_error: bool,
     },
 
@@ -591,12 +591,12 @@ impl AppState {
     /// from ToolCall blocks in the snapshot. If the provider sent tool call
     /// JSON as TextDelta, the snapshot's Text block won't contain it (it'll
     /// be in a ToolCall block instead). This prevents JSON appearing in chat.
-    pub fn update_streaming_message(&mut self, msg: &oxi_ai::Message, delta: Option<&str>) {
-        if let oxi_ai::Message::Assistant(assistant) = msg {
+    pub fn update_streaming_message(&mut self, msg: &oxi_sdk::Message, delta: Option<&str>) {
+        if let oxi_sdk::Message::Assistant(assistant) = msg {
             let mut thinking_block_idx: usize = 0;
             for block in &assistant.content {
                 match block {
-                    oxi_ai::ContentBlock::Text(t) => {
+                    oxi_sdk::ContentBlock::Text(t) => {
                         // Only render new text beyond what we've already rendered.
                         // This is the pi-mono snapshot-based approach: use the
                         // provider's Text block (which is properly separated
@@ -637,7 +637,7 @@ impl AppState {
                             }
                         }
                     }
-                    oxi_ai::ContentBlock::ToolCall(tc) => {
+                    oxi_sdk::ContentBlock::ToolCall(tc) => {
                         // stream_tool_call is idempotent — it checks tool_tracker
                         let args_str = serde_json::to_string(&tc.arguments)
                             .unwrap_or_else(|_| tc.arguments.to_string());
@@ -648,7 +648,7 @@ impl AppState {
                             oxi_tui::widgets::chat::ToolCallStatus::Requested,
                         );
                     }
-                    oxi_ai::ContentBlock::Thinking(t) => {
+                    oxi_sdk::ContentBlock::Thinking(t) => {
                         // Thinking blocks — only append new content beyond
                         // what we've already rendered for this specific block.
                         // Per-block tracking prevents content loss if a future
@@ -672,19 +672,19 @@ impl AppState {
                         }
                         thinking_block_idx += 1;
                     }
-                    oxi_ai::ContentBlock::Image(img) => {
+                    oxi_sdk::ContentBlock::Image(img) => {
                         self.chat
                             .stream_image(img.mime_type.clone(), img.data.clone());
                     }
-                    oxi_ai::ContentBlock::Unknown(_) => {}
+                    oxi_sdk::ContentBlock::Unknown(_) => {}
                 }
             }
         }
     }
 
     /// Finalize the streaming message from a MessageEnd snapshot.
-    pub fn finalize_streaming_message(&mut self, msg: &oxi_ai::Message) {
-        if let oxi_ai::Message::Assistant(assistant) = msg {
+    pub fn finalize_streaming_message(&mut self, msg: &oxi_sdk::Message) {
+        if let oxi_sdk::Message::Assistant(assistant) = msg {
             // Update token usage from the completed message
             let usage = &assistant.usage;
             tracing::info!(
@@ -974,7 +974,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                         } => UiEvent::ToolExecutionEnd {
                                             tool_call_id,
                                             tool_name: String::new(),
-                                            result: oxi_ai::ToolResult {
+                                            result: oxi_sdk::ToolResult {
                                                 tool_call_id: String::new(),
                                                 content: error,
                                                 status: "error".to_string(),
@@ -1586,10 +1586,10 @@ fn rebuild_chat(state: &mut AppState, session: &crate::app::agent_session::Agent
 
     for msg in messages {
         match msg {
-            oxi_ai::Message::User(u) => {
+            oxi_sdk::Message::User(u) => {
                 let content = match &u.content {
-                    oxi_ai::MessageContent::Text(t) => t.clone(),
-                    oxi_ai::MessageContent::Blocks(blocks) => blocks
+                    oxi_sdk::MessageContent::Text(t) => t.clone(),
+                    oxi_sdk::MessageContent::Blocks(blocks) => blocks
                         .iter()
                         .filter_map(|b| b.as_text())
                         .collect::<Vec<_>>()
@@ -1602,19 +1602,19 @@ fn rebuild_chat(state: &mut AppState, session: &crate::app::agent_session::Agent
                 });
                 state.message_count += 1;
             }
-            oxi_ai::Message::Assistant(a) => {
+            oxi_sdk::Message::Assistant(a) => {
                 let mut blocks = Vec::new();
                 for cb in &a.content {
                     match cb {
-                        oxi_ai::ContentBlock::Text(t) => {
+                        oxi_sdk::ContentBlock::Text(t) => {
                             blocks.push(ContentBlock::Text {
                                 content: t.text.clone(),
                             });
                         }
-                        oxi_ai::ContentBlock::Thinking(_t) => {
+                        oxi_sdk::ContentBlock::Thinking(_t) => {
                             // Skip thinking blocks in rebuilt chat
                         }
-                        oxi_ai::ContentBlock::ToolCall(tc) => {
+                        oxi_sdk::ContentBlock::ToolCall(tc) => {
                             blocks.push(ContentBlock::ToolCall {
                                 id: tc.id.clone(),
                                 name: tc.name.clone(),
@@ -1633,7 +1633,7 @@ fn rebuild_chat(state: &mut AppState, session: &crate::app::agent_session::Agent
                     timestamp: now_millis(),
                 });
             }
-            oxi_ai::Message::ToolResult(t) => {
+            oxi_sdk::Message::ToolResult(t) => {
                 let content = t
                     .content
                     .iter()

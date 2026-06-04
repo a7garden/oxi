@@ -27,7 +27,7 @@
 //!   oxi_agent::Agent
 //!            │
 //!            ▼
-//!   oxi_ai::Provider
+//!   oxi_sdk::Provider
 //! ```
 
 use crate::app::agent_session::{AgentSession, AgentSessionHandle, ScopedModel};
@@ -269,9 +269,9 @@ pub fn create_agent_session_from_services(
             temperature: settings.effective_temperature(),
             max_tokens: settings.effective_max_tokens(),
             compaction_strategy: if settings.auto_compaction {
-                oxi_ai::CompactionStrategy::Threshold(0.8)
+                oxi_sdk::CompactionStrategy::Threshold(0.8)
             } else {
-                oxi_ai::CompactionStrategy::Disabled
+                oxi_sdk::CompactionStrategy::Disabled
             },
             compaction_instruction: None,
             context_window: 128_000,
@@ -281,7 +281,7 @@ pub fn create_agent_session_from_services(
             provider_options: None,
         };
         // Use anthropic as a placeholder provider so the session can be created
-        let provider = oxi_ai::get_provider("anthropic")
+        let provider = oxi_sdk::get_provider("anthropic")
             .ok_or_else(|| anyhow::anyhow!("No provider available"))?;
         let agent = Arc::new(oxi_agent::Agent::new(
             Arc::from(provider),
@@ -297,15 +297,15 @@ pub fn create_agent_session_from_services(
 
     let (provider_name, _model_name) = parse_model_id(&model_id);
 
-    let provider = oxi_ai::get_provider(&provider_name)
+    let provider = oxi_sdk::get_provider(&provider_name)
         .ok_or_else(|| anyhow::anyhow!("Provider '{}' not found", provider_name))?;
 
     // Build agent config
     let system_prompt = build_system_prompt(thinking_level);
     let compaction_strategy = if settings.auto_compaction {
-        oxi_ai::CompactionStrategy::Threshold(0.8)
+        oxi_sdk::CompactionStrategy::Threshold(0.8)
     } else {
-        oxi_ai::CompactionStrategy::Disabled
+        oxi_sdk::CompactionStrategy::Disabled
     };
 
     // Resolve API key from auth storage for the provider
