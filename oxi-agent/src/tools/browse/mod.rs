@@ -16,8 +16,6 @@ pub mod tab_guard;
 #[cfg(feature = "native-browser")]
 pub mod browse_script_tool;
 #[cfg(feature = "native-browser")]
-pub mod browse_session_tool;
-#[cfg(feature = "native-browser")]
 pub mod oxibrowser_backend;
 
 // Re-exports for convenience
@@ -30,7 +28,5 @@ pub use tab_guard::TabGuard;
 
 #[cfg(feature = "native-browser")]
 pub use browse_script_tool::BrowseScriptTool;
-#[cfg(feature = "native-browser")]
-pub use browse_session_tool::BrowseSessionTool;
 #[cfg(feature = "native-browser")]
 pub use oxibrowser_backend::OxiBrowserEngine;

@@ -147,6 +147,15 @@ mod tests {
             self.closed.store(true, Ordering::SeqCst);
             Ok(())
         }
+        async fn back(&self) -> Result<PageContent, BrowserError> {
+            Ok(PageContent::empty())
+        }
+        async fn forward(&self) -> Result<PageContent, BrowserError> {
+            Ok(PageContent::empty())
+        }
+        async fn reload(&self) -> Result<PageContent, BrowserError> {
+            Ok(PageContent::empty())
+        }
         async fn select_option(&self, _selector: &str, _value: &str) -> Result<(), BrowserError> {
             Ok(())
         }

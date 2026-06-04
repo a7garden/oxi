@@ -199,6 +199,15 @@ pub use oxi_agent::tools::browse::{
 #[cfg(feature = "native-browser")]
 pub use oxi_agent::tools::browse::{BrowseScriptTool, BrowseSessionTool, OxiBrowserEngine};
 
+/// Re-export the browser event type from oxibrowser-core. Surfaced through
+/// `Browser::subscribe_events()` for agents/UIs that want to render fine-
+/// grained progress ("Opening X…", "Loaded Y…") to the user.
+///
+/// Gated by the `native-browser` feature because it depends on
+/// `oxibrowser-core` types.
+#[cfg(feature = "native-browser")]
+pub use oxibrowser_core::BrowserEvent;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -85,6 +85,15 @@ impl AgentTool for BrowseTool {
         })
     }
 
+    fn on_progress(&self, callback: crate::tools::ProgressCallback) {
+        // The agent loop calls this *before* `execute`. The engine's
+        // background task (spawned by `OxiBrowserEngine::with_config`) will
+        // invoke `callback` with each browser event's `short_label()` for
+        // the duration of this tool call. The next tool call's `on_progress`
+        // will replace this one — there is no fan-out.
+        self.engine.progress_forwarder().set(callback);
+    }
+
     async fn execute(
         &self,
         _tool_call_id: &str,

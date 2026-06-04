@@ -10,9 +10,11 @@
 //! `#[cfg(feature = "native-browser")]` in `oxibrowser_backend.rs`.
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Errors that can occur during browser operations.
 #[derive(Debug, thiserror::Error)]
@@ -131,6 +133,15 @@ pub trait BrowserTab: Send + Sync {
 
     /// Close this tab.
     async fn close(&self) -> Result<(), BrowserError>;
+
+    /// Navigate back in history. Returns the rendered page content.
+    async fn back(&self) -> Result<PageContent, BrowserError>;
+
+    /// Navigate forward in history. Returns the rendered page content.
+    async fn forward(&self) -> Result<PageContent, BrowserError>;
+
+    /// Reload the current page. Returns the rendered page content.
+    async fn reload(&self) -> Result<PageContent, BrowserError>;
 
     /// Select an option in a `<select>` element.
     async fn select_option(&self, selector: &str, value: &str) -> Result<(), BrowserError>;
@@ -255,11 +266,148 @@ pub trait BrowserEngine: Send + Sync {
 
     /// Returns `true` if the browser is still alive.
     async fn is_alive(&self) -> bool;
+
+    /// Access the engine's progress forwarder.
+    ///
+    /// Tools (e.g. `BrowseTool`) call `engine.progress_forwarder().set(cb)`
+    /// from their `on_progress` implementation. Backends that stream
+    /// lifecycle events (oxibrowser-core) spawn a background task in their
+    /// constructor that drains the browser's event channel and invokes
+    /// the currently-installed callback. Backends without event streaming
+    /// return an empty forwarder — `set` becomes a no-op, no events fire.
+    ///
+    /// Default implementation returns a fresh empty forwarder.
+    fn progress_forwarder(&self) -> Arc<ProgressForwarder> {
+        Arc::new(ProgressForwarder::new())
+    }
 }
+
+// ── ProgressForwarder ─────────────────────────────────────────────────────
+
+/// Shared slot for a single progress callback.
+///
+/// Holds at most one `ProgressCallback` at a time. Tools set the callback
+/// before `execute`; a backend's background task reads it and invokes it
+/// with each event's `short_label()`. Replacing the callback (the next
+/// tool call) drops the old one — there is no fan-out.
+///
+/// The default forwarder (returned by the trait's default `progress_forwarder`)
+/// is a no-op: `invoke` silently drops messages. This is the right
+/// behaviour for backends that don't stream events.
+pub struct ProgressForwarder {
+    callback: Mutex<Option<crate::tools::ProgressCallback>>,
+}
+
+impl Default for ProgressForwarder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ProgressForwarder {
+    /// Create an empty forwarder.
+    pub fn new() -> Self {
+        Self {
+            callback: Mutex::new(None),
+        }
+    }
+
+    /// Install (or replace) the callback. Called from `AgentTool::on_progress`.
+    pub fn set(&self, cb: crate::tools::ProgressCallback) {
+        *self.callback.lock() = Some(cb);
+    }
+
+    /// Remove the callback. Subsequent `invoke` calls become no-ops until
+    /// the next `set`.
+    pub fn clear(&self) {
+        *self.callback.lock() = None;
+    }
+
+    /// Invoke the currently-installed callback, if any. Never panics; never
+    /// blocks. If the callback itself panics, the panic propagates (we do
+    /// not silently swallow — that would hide bugs in user code).
+    pub fn invoke(&self, msg: String) {
+        if let Some(cb) = self.callback.lock().as_ref() {
+            cb(msg);
+        }
+    }
+
+    /// Whether a callback is currently installed. Useful for tests.
+    pub fn is_set(&self) -> bool {
+        self.callback.lock().is_some()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn progress_forwarder_default_is_empty() {
+        let pf = ProgressForwarder::new();
+        assert!(!pf.is_set());
+        // invoke on empty forwarder is a silent no-op
+        pf.invoke("should be dropped".into());
+    }
+
+    #[test]
+    fn progress_forwarder_set_and_invoke() {
+        let pf = ProgressForwarder::new();
+        let count = Arc::new(AtomicUsize::new(0));
+        let count_clone = Arc::clone(&count);
+        pf.set(oxi_ai::progress_callback(move |msg: String| {
+            assert_eq!(msg, "hello");
+            count_clone.fetch_add(1, Ordering::SeqCst);
+        }));
+        assert!(pf.is_set());
+
+        pf.invoke("hello".into());
+        pf.invoke("hello".into());
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn progress_forwarder_set_replaces_previous() {
+        let pf = ProgressForwarder::new();
+        let count_a = Arc::new(AtomicUsize::new(0));
+        let count_b = Arc::new(AtomicUsize::new(0));
+
+        let ca = Arc::clone(&count_a);
+        pf.set(oxi_ai::progress_callback(move |_| {
+            ca.fetch_add(1, Ordering::SeqCst);
+        }));
+        pf.invoke("first".into());
+        assert_eq!(count_a.load(Ordering::SeqCst), 1);
+        assert_eq!(count_b.load(Ordering::SeqCst), 0);
+
+        // Replace with a new callback — the old one is dropped.
+        let cb_clone = Arc::clone(&count_b);
+        pf.set(oxi_ai::progress_callback(move |_| {
+            cb_clone.fetch_add(1, Ordering::SeqCst);
+        }));
+        pf.invoke("second".into());
+        assert_eq!(count_a.load(Ordering::SeqCst), 1, "old callback should not fire");
+        assert_eq!(count_b.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn progress_forwarder_clear() {
+        let pf = ProgressForwarder::new();
+        let count = Arc::new(AtomicUsize::new(0));
+        let c = Arc::clone(&count);
+        pf.set(oxi_ai::progress_callback(move |_| {
+            c.fetch_add(1, Ordering::SeqCst);
+        }));
+        pf.invoke("x".into());
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        pf.clear();
+        assert!(!pf.is_set());
+        pf.invoke("y".into());
+        assert_eq!(count.load(Ordering::SeqCst), 1, "invoke after clear is no-op");
+    }
 
     #[test]
     fn page_content_empty() {

@@ -3788,7 +3788,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "oxi-agent"
-version = "0.26.2"
+version = "0.27.0"
 dependencies = [
  "a3s-search",
  "anyhow",
@@ -3818,7 +3818,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-ai"
-version = "0.26.2"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3857,7 +3857,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-cli"
-version = "0.26.2"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3908,7 +3908,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-sdk"
-version = "0.26.2"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3920,6 +3920,7 @@ dependencies = [
  "glob",
  "oxi-agent",
  "oxi-ai",
+ "oxibrowser-core",
  "parking_lot",
  "serde",
  "serde_json",
@@ -3935,7 +3936,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-tui"
-version = "0.26.2"
+version = "0.27.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -3957,9 +3958,9 @@ dependencies = [
 
 [[package]]
 name = "oxibrowser-core"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87aedf82afa7a5b3c4c7fb56a23fe4385279ecc42c571aae569d2e071d5ee81b"
+checksum = "7111a75f5ae87fe55110c557b3151fb94eb9bcc2caf1d2d972b18caa5a0fd716"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3993,9 +3994,9 @@ dependencies = [
 
 [[package]]
 name = "oxibrowser-webapi"
-version = "0.11.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62bb773f19223e8ffdb845e5d58250bc17ccd49361c6e197aea394962bcdf6e6"
+checksum = "2e072e1c0f571c562747565ece117700fda2bf9f85ec4ea59599e87c0c3ccce3"
 dependencies = [
  "html5ever",
  "markup5ever",
