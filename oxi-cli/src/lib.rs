@@ -10,6 +10,7 @@
 // cli must be pub for main.rs binary
 pub mod cli;
 pub mod print_mode;
+pub mod services;
 pub mod setup_wizard;
 
 // ─── Directory groups ───────────────────────────────────────────────────────

@@ -3878,6 +3878,7 @@ dependencies = [
  "once_cell",
  "oxi-agent",
  "oxi-ai",
+ "oxi-fs",
  "oxi-sdk",
  "oxi-store",
  "oxi-tui",
@@ -3905,6 +3906,28 @@ dependencies = [
  "urlencoding",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "oxi-fs"
+version = "0.26.2"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "chrono",
+ "dirs",
+ "oxi-sdk",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]

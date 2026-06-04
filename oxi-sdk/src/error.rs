@@ -84,6 +84,10 @@ pub enum SdkError {
     #[error("run cancelled")]
     Cancelled,
 
+    // ── Ports ───────────────────────────────────────────────────────────────
+    #[error("port not configured: {port} (use OxiBuilder::with_port_*(...))")]
+    PortNotConfigured { port: &'static str },
+
     // ── General ─────────────────────────────────────────────────────────────
     #[error("{0}")]
     Internal(#[from] anyhow::Error),

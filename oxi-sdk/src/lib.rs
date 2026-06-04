@@ -27,6 +27,7 @@ pub mod metrics;
 pub mod middleware;
 pub mod multi_provider;
 pub mod observability;
+pub mod ports;
 pub mod prelude;
 pub mod routing;
 pub mod security;
@@ -37,6 +38,23 @@ pub mod workflow_dsl;
 pub use agent_builder::AgentBuilder;
 pub use agent_group::{AgentGroup, AgentGroupOutput, GroupResult, GroupStrategy};
 pub use builder::{Oxi, OxiBuilder};
+
+// Re-export port types — products implement these traits.
+// Note: Some names conflict with existing modules (e.g. `EventBus` is also a
+// module, `MemoryEntry` is also in `coordination`). We rename on import to
+// avoid ambiguity; users can still access the trait via the explicit path
+// `oxi_sdk::ports::EventBus` if they need to disambiguate.
+pub use ports::{
+    AccessDecision, AuthProvider, CapabilityResolver, ConfigStore, CronJob, CronScheduler,
+    EventPayload, EventTopic, InMemoryEventBus, MemoryStore, NoopAuthProvider, NoopConfigStore,
+    NoopCronScheduler, NoopEventBus, NoopMemoryStore, NoopPersonaProvider, NoopResourceMonitor,
+    NoopSkillLoader, NoopStateStore, OAuthToken, Persona, PersonaProvider, PortId, PortRegistry,
+    PortValue, ResourceMonitor, ResourceUsage, Skill, SkillLoader, SkillMeta, StateStore,
+    SubscriptionHandle, ToolCallRequest,
+};
+pub use ports::AccessGate as AccessGatePort;
+pub use ports::EventBus as EventBusPort;
+pub use ports::MemoryEntry as MemoryEntryPort;
 pub use closure_tool::ClosureTool;
 pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
 pub use message_bus::{InterAgentMessage, LagAwareReceiver, MessageBus, PublishResult};
