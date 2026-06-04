@@ -1,16 +1,21 @@
 # oxi
 
-Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI coding assistant. Multi-crate workspace providing multi-provider LLM access, an agent tool-calling loop, a terminal UI, a persistent session store, and an SDK for building multi-agent systems.
+Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI coding assistant. Multi-crate workspace providing multi-provider LLM access, an agent tool-calling loop, a terminal UI, a port-based adapter system, and an SDK for building multi-agent systems.
 
 ## Quick Facts
 
 | Item | Value |
 |------|-------|
 | Language | Rust 2021 edition |
-| Workspace crates | `oxi-ai`, `oxi-agent`, `oxi-store`, `oxi-tui`, `oxi-sdk`, `oxi-cli` |
+| Workspace crates | `oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli` (5 crates) |
 | Version | 0.26.2 (latest release: 0.25.7) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
+
+> The legacy `oxi-store` crate (settings, sessions, auth) was absorbed
+> into `oxi-cli/src/store/` as a self-contained sub-module. The legacy
+> `oxi-fs` crate (file-based port adapters) was absorbed into
+> `oxi-sdk/src/ports/fs/`. See the refactor history in CHANGELOG.md.
 
 ## Workspace Layout
 
@@ -18,23 +23,47 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 oxi/
 ├── oxi-ai/       Unified LLM API — streaming, multi-provider abstraction
 ├── oxi-agent/    Agent runtime — tool-calling loop, MCP client, built-in tools
-├── oxi-store/    Persistent state — sessions, settings, auth, model registry
 ├── oxi-tui/      Terminal UI widgets — chat, themes, markdown rendering (ratatui)
-├── oxi-sdk/      Multi-agent SDK — agent groups, message bus, builder pattern
-└── oxi-cli/      CLI binary — ties everything together (TUI + RPC modes)
+├── oxi-sdk/      Multi-agent SDK + port contract: 11 port traits + reference impls
+└── oxi-cli/      CLI binary — composition root (TUI + RPC + print modes)
 ```
 
 ### Dependency Flow
 
 ```
 oxi-ai  ←  oxi-agent  ←  oxi-sdk  ←  oxi-cli
-oxi-ai  ←  oxi-store             ←  oxi-cli
-oxi-tui  (independent)           ←  oxi-cli
+oxi-tui  (independent, no oxi-* deps)  ←  oxi-cli
 ```
 
 `oxi-ai` is the foundation layer with zero internal dependencies.
 `oxi-cli` is the integration layer that depends on all other crates.
 Never create circular dependencies between crates.
+
+## Port System (oxi-sdk)
+
+`oxi-sdk` defines **11 port traits** as the contract between the SDK
+and product-specific infrastructure. Each port has a noop default;
+products register their own implementations via `OxiBuilder::with_port_*`
+or `with_ports(PortRegistry)`.
+
+| Port | Purpose | oxi-cli uses | oxios (sister repo) uses |
+|---|---|:-:|:-:|
+| `StateStore` | Durable key-value / append-only | ✅ `FileStateStore` | 🔜 TBD |
+| `ConfigStore` | Layered configuration | ✅ `FileConfigStore` | 🔜 TBD |
+| `AuthProvider` | API keys + OAuth | ✅ `FileAuthProvider` | 🔜 TBD |
+| `EventBus` | pub/sub kernel events | ✅ `InProcessEventBus` | 🔜 TBD |
+| `SkillLoader` | SKILL.md discovery | ✅ `FileSkillLoader` | 🔜 TBD |
+| `PersonaProvider` | System-prompt fragments | ✅ `FilePersonaProvider` | 🔜 TBD |
+| `AccessGate` | Pre-execution policy | ✅ `SimpleAccessGate` | 🔜 TBD |
+| `CapabilityResolver` | Subject → tool visibility | ✅ `TomlCapabilityResolver` | 🔜 TBD |
+| `MemoryStore` | Episodic / semantic | ✅ `InMemoryMemoryStore` | 🔜 TBD |
+| `CronScheduler` | Time-based triggers | ✅ `InMemoryCronScheduler` | 🔜 TBD |
+| `ResourceMonitor` | Usage limits | ✅ `CountingResourceMonitor` | 🔜 TBD |
+
+Reference implementations live in `oxi-sdk/src/ports/fs/` (file-based)
+and `oxi-sdk/src/ports/inmem/` (in-memory). See `docs/PORT_GUIDE.md`
+for the full contract, the noop-fallback semantics, and patterns for
+writing new impls.
 
 ## Architecture Overview
 
@@ -92,40 +121,81 @@ pub trait AgentTool: Send + Sync {
 
 Key types: `Agent`, `AgentEvent`, `AgentState`, `AgentConfig`, `ToolRegistry`.
 
-### oxi-store — Persistent State
-
-Append-only JSONL session storage with tree branching (fork).
-Layered settings: defaults → global (`~/.oxi/settings.toml`) → project (`.oxi/settings.toml`) → env vars → CLI args.
-`auth_storage.rs` stores API keys and OAuth tokens.
-`model_registry.rs`/`model_resolver.rs` handle model metadata and ID resolution.
-
-Key types: `SessionEntry`, `AgentMessage`, `Settings`, `SessionManager`.
-
 ### oxi-tui — Terminal UI
 
-Built on `ratatui` + `crossterm`. Theme system with hot-reload from TOML/JSON files.
-Markdown rendering via `pulldown-cmark`. Fuzzy search for file/command completion.
-`widgets/chat/` is the main conversation widget (3166 lines across 8 files).
+Built on `ratatui` + `crossterm`. **No oxi-* dependencies** — pure widget library.
+
+- Theme system with hot-reload from TOML/JSON files.
+- Markdown rendering via `pulldown-cmark`. Fuzzy search for file/command completion.
+- `widgets/chat/` is the main conversation widget.
+- The widget layer defines its own domain types (`ChatMessage`,
+  `MessageRole`, `ContentBlock`) so it can be reused by any product
+  that wants the chat UX. Products implement the conversion
+  (one `From` impl per direction) in their own composition root.
 
 Key types: `Theme`, `ThemeManager`, `ChatWidget`, `ToolRenderer`.
 
-### oxi-sdk — Multi-Agent SDK
+### oxi-sdk — Multi-Agent SDK + Port Contract
 
-Builder pattern for constructing agents. `AgentGroup` supports parallel, sequential, and fan-out strategies.
+`OxiBuilder` is the entry point:
+
+```rust
+let oxi = OxiBuilder::new()
+    .with_builtins()
+    .with_state(Arc::new(my_state_store))
+    .with_auth(Arc::new(my_auth))
+    .build();
+let agent = oxi.agent(AgentConfig { /* ... */ }).build()?;
+```
+
+`AgentGroup` supports parallel, sequential, and fan-out strategies.
 `MessageBus` provides pub/sub inter-agent communication.
 `KernelToolProvider` bridges SDK agents to the host tool registry.
 
-Key types: `AgentBuilder`, `AgentGroup`, `MessageBus`, `ClosureTool`, `KernelBridge`.
+The SDK is **re-exported through the oxi-sdk crate** — products do
+not depend on `oxi-ai` or `oxi-agent` directly. See `docs/PORT_GUIDE.md`
+for the full port contract and "single dependency" pattern
+(`oxios → oxi-sdk`, no `oxi-ai` direct dep).
+
+Key types: `Oxi`, `OxiBuilder`, `AgentBuilder`, `AgentGroup`, `MessageBus`, `PortRegistry`.
 
 ### oxi-cli — CLI Binary
 
-Entry point: `oxi-cli/src/main.rs` (uses `clap`).
-Runs in two modes: **TUI mode** (interactive terminal) and **RPC mode** (JSON-over-stdin/stdout for IDE integration).
-`extensions/` supports native shared libraries (`.dylib`/`.so`/`.dll`) and WASM via Extism.
-`skills/` loads markdown skill files from `~/.oxi/skills/<name>/SKILL.md`.
-`storage/packages.rs` is the built-in package manager.
+Single binary with three run modes: **TUI** (interactive), **print**
+(plain or JSON), **RPC** (JSON-over-stdin/stdout for IDE integration).
+
+Composition root: `oxi-cli/src/main.rs` is a 12-line dispatcher that
+calls `oxi::bootstrap::run_with_args(args)`. All wiring (settings
+merge, custom-provider registration, router registration, built-in
+tool registration, WASM extension loading) lives in
+`oxi-cli/src/bootstrap.rs`. The run-mode dispatcher
+(`dispatch_run_mode`) routes to TUI / print / RPC based on flags.
+
+The `App` struct is built via `App::from_oxi(oxi, settings)` from
+the wired `Oxi` engine — no manual `Agent::new(provider, config, ...)`
+calls anymore. Subcommand handlers (config, session, export, share,
+setup, models) stay in `main.rs` because they are dispatch targets,
+not bootstrap.
+
+Self-contained submodules in `oxi-cli/src/`:
+
+- `store/` — domain types and file-based adapters (was `oxi-store`):
+  `session.rs` (JSONL session persistence), `settings.rs` (layered
+  config), `auth_storage.rs` (API keys + OAuth), `router_config.rs`
+  (auto-routing rules), `session_cwd.rs` (cwd binding).
+- `bootstrap.rs` — composition root.
+- `tui/` — interactive mode entry points and app glue
+  (`tui/app.rs`, `tui/handlers.rs`, `tui/slash.rs`,
+  `tui/overlay/*`).
+- `app/agent_session*.rs` — single-shot session wrapper around
+  `Agent`.
+- `setup_wizard.rs` — interactive `oxi setup`.
+- `rpc_mode/` — JSON-RPC mode.
+- `extensions/` — WASM / native extension loading.
+- `storage/packages.rs` — built-in package manager (ClawHub-style).
 
 Extension system (`src/extensions/types.rs`):
+
 - `ExtensionManifest`: metadata with permissions (FileRead, FileWrite, Bash, Network)
 - `ExtensionState`: Pending, Active, Disabled, Failed, Unloaded
 - `InputEventResult`: Continue, Transform { text }, Handled
@@ -138,12 +208,15 @@ Extension system (`src/extensions/types.rs`):
 - `cargo clippy --workspace -- -D warnings` must pass clean.
 - Module structure: `mod.rs` re-exports public API, implementation in sibling files.
 - Prefer `anyhow::Result` for application code, custom error enums (`thiserror`) for library crates.
-  - **Library crates** (oxi-ai, oxi-agent, oxi-store, oxi-sdk): define typed error enums with `thiserror::Error` for public API functions. Internal helpers may use `anyhow`.
+  - **Library crates** (oxi-ai, oxi-agent, oxi-sdk): define typed error enums with `thiserror::Error` for public API functions. Internal helpers may use `anyhow`.
   - **Application crate** (oxi-cli): use `anyhow::Result` everywhere.
   - **Leaf crate** (oxi-tui): `anyhow` is acceptable — no public error types needed.
   - Never create a shared workspace error crate. Each library owns its own error type.
-- Use `parking_lot::RwLock` instead of `std::sync::RwLock`.
-- Atomic file writes: use `atomic_write()` helper (write to temp, then rename).
+- Use `parking_lot::RwLock` instead of `std::sync::RwLock`. (But
+  `parking_lot::MutexGuard` is `!Send` — drop the guard before any
+  `.await` or use `tokio::sync::Mutex` instead.)
+- Atomic file writes: use the `temp + rename` pattern
+  (e.g. `oxi-sdk/src/ports/fs/session.rs::FileStateStore`).
 - Async: `tokio` runtime with `#[tokio::main]`. Use `async_trait` for trait objects.
 
 ### Testing
@@ -169,6 +242,14 @@ Extension system (`src/extensions/types.rs`):
 3. Add module declaration in `oxi-agent/src/tools.rs`.
 4. Register in `ToolRegistry::with_builtins_cwd()`.
 5. Mark `essential()` as `true` if it cannot be disabled.
+
+### Adding a New Port Implementation
+
+1. Implement the port trait from `oxi_sdk::ports::*`.
+2. The SDK does not include concrete adapters (beyond `fs/` and
+   `inmem/`) — products write their own.
+3. Register via `OxiBuilder::with_port_*(Arc::new(my_impl))` in your
+   composition root.
 
 ### Adding a New Extension Type
 
@@ -217,6 +298,9 @@ cargo test --workspace --doc         # Doc tests
 4. **Progressive enhancement** — core works with zero config. Settings, extensions, skills, MCP are all opt-in layers.
 5. **Sandboxed extensions** — WASM extensions get zero host access by default. Permissions must be explicitly requested.
 6. **Atomic I/O** — file writes go through temp+rename to prevent corruption on crash.
+7. **Port-based adapters** — infrastructure (state, auth, events, memory, skills, …) is **opt-in**. Products register only the ports they care about; the SDK provides noop fallbacks for the rest.
+8. **SDK is the contract, not the implementation** — `oxi-sdk` defines port traits and ships small reference impls. Products (oxi-cli, oxios) write their own domain-specific impls.
+9. **Composition root in one place** — each binary has a single module that wires its `Oxi` engine. Wiring code does not leak into business logic.
 
 ## Pitfalls
 
@@ -227,3 +311,6 @@ cargo test --workspace --doc         # Doc tests
 - `model_db.rs` is large (934 models). Manual edits may be overwritten by regeneration scripts.
 - SSE parsing handles partial UTF-8 lines. Do not assume line boundaries are clean.
 - `Agent::is_running` field prevents concurrent agent runs — check this before spawning parallel tasks.
+- Port trait methods are **async**. `MutexGuard`s held across `.await` will not compile (`!Send`). Use `tokio::sync::Mutex` or scope the lock.
+- The legacy `oxi-store` crate no longer exists. If a new file needs session/settings/auth, put it in `oxi-cli/src/store/` (or in a sibling product's store).
+- The `oxi-cli` crate is a **monorepo monolith** by design (~17K lines). Do not split it into more crates — the 4 separation conditions (independent reuse, independent versioning, build isolation, team boundary) do not hold.

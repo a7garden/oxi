@@ -79,20 +79,17 @@ oxi is a multi-crate Rust workspace designed for modularity:
 graph LR
     A[oxi-cli] --> B[oxi-sdk]
     A --> C[oxi-tui]
-    A --> D[oxi-store]
     B --> E[oxi-agent]
     E --> F[oxi-ai]
-    D --> F
 ```
 
 | Crate | Purpose |
 |-------|---------|
 | [**oxi-ai**](oxi-ai/) | Unified LLM API — 10 providers, streaming, tool calling, compaction |
 | [**oxi-agent**](oxi-agent/) | Agent runtime — tool-calling loop, event system, MCP client |
-| [**oxi-store**](oxi-store/) | Persistent state — sessions, settings, auth, model registry |
 | [**oxi-tui**](oxi-tui/) | Terminal UI — differential rendering, themes, markdown, chat widgets |
-| [**oxi-sdk**](oxi-sdk/) | Multi-agent SDK — agent groups, message bus, builder pattern |
-| [**oxi-cli**](oxi-cli/) | CLI binary — ties everything together (TUI + RPC modes) |
+| [**oxi-sdk**](oxi-sdk/) | Multi-agent SDK — agent groups, message bus, port-based adapters, builder pattern |
+| [**oxi-cli**](oxi-cli/) | CLI binary — ties everything together (TUI + RPC + port composition root) |
 
 ## Configuration
 
@@ -169,7 +166,7 @@ Commands:
 ```bash
 cargo build                          # Debug build
 cargo build --release                # Release binary
-cargo test --workspace               # Run all tests (1,600+)
+cargo test --workspace               # Run all tests (2,000+)
 cargo clippy --workspace -- -D warnings   # Lint
 cargo fmt --all -- --check           # Format check
 ```
@@ -187,7 +184,7 @@ OpenAI, Anthropic, Google, DeepSeek, Mistral, Groq, Cerebras, xAI, OpenRouter, a
 <details>
 <summary><strong>Can I use oxi as a library?</strong></summary>
 
-Yes. Each crate is published independently: `oxi-ai` (LLM API), `oxi-agent` (agent runtime), `oxi-tui` (terminal UI), `oxi-store` (persistence), `oxi-sdk` (multi-agent SDK). See individual crate READMEs for details.
+Yes. Each crate is published independently: `oxi-ai` (LLM API), `oxi-agent` (agent runtime), `oxi-tui` (terminal UI), `oxi-sdk` (multi-agent SDK). See individual crate READMEs for details.
 </details>
 
 <details>
