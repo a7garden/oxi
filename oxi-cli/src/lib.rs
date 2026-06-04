@@ -8,7 +8,9 @@
 
 // ─── Root-level entry modules ───────────────────────────────────────────────
 // cli must be pub for main.rs binary
+pub mod bootstrap;
 pub mod cli;
+pub mod main_dispatch;
 pub mod print_mode;
 pub mod services;
 pub mod setup_wizard;
