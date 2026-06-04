@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use oxi_sdk::ports::{ResourceMonitor, ResourceUsage};
-use oxi_sdk::SdkError;
+use crate::ports::{ResourceMonitor, ResourceUsage};
+use crate::SdkError;
 
 /// Resource monitor that tracks counters set by the application.
 ///

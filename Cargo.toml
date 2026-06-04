@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["oxi-ai", "oxi-agent", "oxi-store", "oxi-tui", "oxi-cli", "oxi-sdk", "oxi-fs"]
+members = ["oxi-ai", "oxi-agent", "oxi-store", "oxi-tui", "oxi-cli", "oxi-sdk"]
 exclude = ["scripts"]
 
 [workspace.dependencies]

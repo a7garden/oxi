@@ -17,8 +17,8 @@
 use async_trait::async_trait;
 use std::path::PathBuf;
 
-use oxi_sdk::ports::{Persona, PersonaProvider};
-use oxi_sdk::SdkError;
+use crate::ports::{Persona, PersonaProvider};
+use crate::SdkError;
 
 /// Discovers `<root>/<name>.md` persona files and parses them.
 pub struct FilePersonaProvider {

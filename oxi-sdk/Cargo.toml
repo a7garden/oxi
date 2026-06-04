@@ -30,6 +30,10 @@ blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
 glob = "0.3"
 
+# File-based port impls (fs/ sub-module). Always available in default build.
+toml = "0.8"
+walkdir = "2"
+
 [dev-dependencies]
 tempfile = "3"
 futures = "0.3"

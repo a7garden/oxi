@@ -6,8 +6,8 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 
-use oxi_sdk::ports::{EventBus, EventPayload, EventTopic, SubscriptionHandle};
-use oxi_sdk::SdkError;
+use crate::ports::{EventBus, EventPayload, EventTopic, SubscriptionHandle};
+use crate::SdkError;
 
 /// In-process event bus using `tokio::sync::broadcast`.
 ///

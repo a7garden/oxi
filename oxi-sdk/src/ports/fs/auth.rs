@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use oxi_sdk::ports::{AuthProvider, OAuthToken};
-use oxi_sdk::SdkError;
+use crate::ports::{AuthProvider, OAuthToken};
+use crate::SdkError;
 
 /// On-disk schema for `auth.json`.
 ///

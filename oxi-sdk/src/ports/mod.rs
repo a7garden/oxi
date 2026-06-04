@@ -816,3 +816,16 @@ mod tests {
         assert_eq!(t.token_type.as_deref(), Some("Bearer"));
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Reference implementations
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `fs`     — file-based adapters (JSON, TOML, SKILL.md, …)
+// `inmem`  — in-process adapters (RAM-only, useful for tests and headless)
+//
+// All impls are part of the SDK. Products can import them directly or
+// write their own — the port traits in this module are the contract.
+
+pub mod fs;
+pub mod inmem;

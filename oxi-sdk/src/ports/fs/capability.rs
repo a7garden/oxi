@@ -5,8 +5,8 @@ use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use oxi_sdk::ports::CapabilityResolver;
-use oxi_sdk::SdkError;
+use crate::ports::CapabilityResolver;
+use crate::SdkError;
 
 /// Resolves visible tools per subject from a TOML file:
 ///

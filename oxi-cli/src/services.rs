@@ -20,10 +20,12 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use oxi_fs::{
-    CountingResourceMonitor, FileAuthProvider, FileConfigStore, FilePersonaProvider,
-    FileSkillLoader, FileStateStore, InMemoryCronScheduler, InMemoryMemoryStore,
-    InProcessEventBus, SimpleAccessGate, TomlCapabilityResolver,
+use oxi_sdk::fs::{
+    FileAuthProvider, FileConfigStore, FilePersonaProvider, FileSkillLoader, FileStateStore,
+    SimpleAccessGate, TomlCapabilityResolver,
+};
+use oxi_sdk::inmem::{
+    CountingResourceMonitor, InMemoryCronScheduler, InMemoryMemoryStore, InProcessEventBus,
 };
 use oxi_sdk::Oxi;
 
@@ -57,7 +59,7 @@ impl OxiPaths {
 
     /// Default — uses `$OXI_HOME` or `$HOME/.oxi`.
     pub fn default_paths() -> Result<Self> {
-        oxi_fs::home_dir()
+        oxi_sdk::fs::home_dir()
             .map(Self::from_home)
             .context("could not resolve oxi home directory")
     }

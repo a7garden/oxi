@@ -28,6 +28,10 @@ pub mod middleware;
 pub mod multi_provider;
 pub mod observability;
 pub mod ports;
+
+// Reference implementations bundled with the SDK.
+pub use ports::{fs, inmem};
+/// Convenience re-exports: `oxi_sdk::fs::*`, `oxi_sdk::inmem::*`.
 pub mod prelude;
 pub mod routing;
 pub mod security;

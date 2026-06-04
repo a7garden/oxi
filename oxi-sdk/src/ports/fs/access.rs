@@ -24,8 +24,8 @@ use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use oxi_sdk::ports::{AccessDecision, AccessGate, ToolCallRequest};
-use oxi_sdk::SdkError;
+use crate::ports::{AccessDecision, AccessGate, ToolCallRequest};
+use crate::SdkError;
 
 /// Rule-based gate. Pure sync, no I/O at request time.
 pub struct SimpleAccessGate {

@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
-use oxi_sdk::ports::{Skill, SkillLoader, SkillMeta};
-use oxi_sdk::SdkError;
+use crate::ports::{Skill, SkillLoader, SkillMeta};
+use crate::SdkError;
 
 /// Discovers `SKILL.md` files under one or more root directories.
 ///
