@@ -9,7 +9,6 @@ Multi-provider · Streaming-first · Extensible · Session persistence
 
 [![CI](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/ci.yml?style=flat-square&label=CI)](https://github.com/a7garden/oxi/actions)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE.md)
-[![Version](https://img.shields.io/badge/Version-0.24.0-blue.svg?style=flat-square)](https://github.com/a7garden/oxi/releases)
 [![Rust](https://img.shields.io/badge/Rust-1.82%2B-orange.svg?style=flat-square)](https://www.rust-lang.org/)
 
 [Getting Started](#getting-started) · [Architecture](#architecture) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
