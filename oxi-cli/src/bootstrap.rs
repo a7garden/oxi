@@ -6,12 +6,10 @@
 //! The helper functions below are moved verbatim from main.rs and
 //! retain their original signatures.
 
-use anyhow::Result;
-use clap::Parser;
 use crate::cli::CliArgs;
 use crate::store::settings::Settings;
+use anyhow::Result;
 use std::path::PathBuf;
-use std::sync::Arc;
 use tracing;
 
 /// Build a wired `App` from CLI args. All the wiring that used to be
@@ -34,7 +32,11 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
         Some(args.disable_fallback),
     );
 
-    if settings.effective_model(None).unwrap_or_default().is_empty() {
+    if settings
+        .effective_model(None)
+        .unwrap_or_default()
+        .is_empty()
+    {
         eprintln!("No model configured. Run `oxi setup` to configure.");
         std::process::exit(1);
     }
@@ -64,7 +66,7 @@ pub async fn build_app(args: &CliArgs) -> Result<crate::App> {
     // Register built-in tools on the agent's tool registry.
     let tools = app.agent_tools();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    register_builtin_tools(&tools, &cwd, &args, &app.settings().disabled_tools);
+    register_builtin_tools(&tools, &cwd, args, &app.settings().disabled_tools);
 
     // Discover and load WASM extensions.
     let wasm_ext = load_wasm_extensions(&app, &cwd, &tools);
@@ -126,6 +128,11 @@ pub async fn run_with_args(args: CliArgs) -> Result<i32> {
 }
 
 // ─── Helpers (moved verbatim from main.rs) ─────────────────────────────
+
+/// Initialize file-based logging to `~/.cache/oxi/oxi.log`.
+///
+/// Reads `RUST_LOG` for filter (default: `debug`). Builds a
+/// `tracing_subscriber::EnvFilter` and writes to a `Mutex<File>` writer.
 pub fn init_logging() {
     let log_dir = dirs::cache_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
@@ -303,19 +310,13 @@ fn load_wasm_extensions(
     Some(mgr)
 }
 
-/// Run a single prompt and print the result
-async fn run_single_prompt(app: crate::App, prompt: &str) -> Result<()> {
-    let response = app.run_prompt_with_events(prompt.to_string(), |_event| {}).await?;
-    println!("{response}");
-    Ok(())
-}
-
 /// Register the model auto-router if configured in settings.
 fn register_router_provider(settings: &Settings) {
     let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
     let project_dir = std::env::current_dir().unwrap_or_default();
 
-    let store_cfg = match crate::store::router_config::load_router_config(&global_dir, &project_dir) {
+    let store_cfg = match crate::store::router_config::load_router_config(&global_dir, &project_dir)
+    {
         Some(cfg) => cfg,
         None => {
             tracing::debug!("No router config found — router/auto will not appear in model list");

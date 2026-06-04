@@ -31,11 +31,11 @@ use crate::extensions::{
     ExtensionContext, ExtensionContextBuilder, ExtensionRunner, SessionShutdownEvent,
     SessionShutdownReason,
 };
+use crate::store::session::{AgentMessage, SessionManager};
+use crate::store::settings::{Settings, ThinkingLevel};
 use anyhow::{Context, Result};
 use oxi_agent::{Agent, AgentEvent, AgentState};
 use oxi_sdk::Message;
-use crate::store::session::{AgentMessage, SessionManager};
-use crate::store::settings::{Settings, ThinkingLevel};
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::path::PathBuf;

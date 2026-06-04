@@ -22,7 +22,6 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use crate::ports::{AccessDecision, AccessGate, ToolCallRequest};
 use crate::SdkError;
@@ -35,7 +34,9 @@ pub struct SimpleAccessGate {
 
 impl std::fmt::Debug for SimpleAccessGate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SimpleAccessGate").field("path", &self.path).finish()
+        f.debug_struct("SimpleAccessGate")
+            .field("path", &self.path)
+            .finish()
     }
 }
 

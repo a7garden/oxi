@@ -341,7 +341,6 @@ impl ProgressForwarder {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,7 +390,11 @@ mod tests {
             cb_clone.fetch_add(1, Ordering::SeqCst);
         }));
         pf.invoke("second".into());
-        assert_eq!(count_a.load(Ordering::SeqCst), 1, "old callback should not fire");
+        assert_eq!(
+            count_a.load(Ordering::SeqCst),
+            1,
+            "old callback should not fire"
+        );
         assert_eq!(count_b.load(Ordering::SeqCst), 1);
     }
 
@@ -409,7 +412,11 @@ mod tests {
         pf.clear();
         assert!(!pf.is_set());
         pf.invoke("y".into());
-        assert_eq!(count.load(Ordering::SeqCst), 1, "invoke after clear is no-op");
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "invoke after clear is no-op"
+        );
     }
 
     #[test]

@@ -5,13 +5,10 @@
 use anyhow::Result;
 use clap::Parser;
 use oxi::cli::{CliArgs, Commands, ConfigCommands, PkgCommands};
-use oxi::extensions::ExtensionRegistry;
 use oxi::storage::packages::{PackageManager, ResourceKind};
 use oxi::store::session::{AgentMessage, SessionManager};
 use oxi::store::settings::Settings;
-use std::path::PathBuf;
 use uuid::Uuid;
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,7 +24,6 @@ async fn main() -> Result<()> {
     let exit_code = oxi::bootstrap::run_with_args(args).await?;
     std::process::exit(exit_code);
 }
-
 
 /// Handle session-related commands
 async fn handle_subcommand(command: &Commands) -> Result<()> {
@@ -1184,7 +1180,6 @@ fn truncate(s: &str, max_len: usize) -> String {
     format!("{}...", &s[..boundary])
 }
 
-
 // ── Export / Import / Share ──────────────────────────────────────────────────
 
 /// Handle `oxi export [SESSION_ID] [--output PATH]`
@@ -1295,7 +1290,8 @@ fn handle_import_command(path: &std::path::Path) -> Result<()> {
     }
 
     // Copy the session file into the sessions directory
-    let sessions_dir: std::path::PathBuf = oxi::store::session::get_default_session_dir(&cwd).into();
+    let sessions_dir: std::path::PathBuf =
+        oxi::store::session::get_default_session_dir(&cwd).into();
     std::fs::create_dir_all(&sessions_dir)?;
 
     let filename = path
@@ -1364,8 +1360,11 @@ async fn handle_share_command(session_id: Option<&str>) -> Result<()> {
         anyhow::bail!("Session file not found: {}", session_path.display());
     }
 
-    let sm =
-        oxi::store::session::SessionManager::open(&session_path.to_string_lossy(), None, Some(&cwd));
+    let sm = oxi::store::session::SessionManager::open(
+        &session_path.to_string_lossy(),
+        None,
+        Some(&cwd),
+    );
     let branch = sm.get_branch(None);
     let entries: Vec<oxi::store::session::SessionEntry> = branch.into_iter().collect();
 

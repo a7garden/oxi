@@ -27,7 +27,9 @@ pub struct FilePersonaProvider {
 
 impl std::fmt::Debug for FilePersonaProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FilePersonaProvider").field("root", &self.root).finish()
+        f.debug_struct("FilePersonaProvider")
+            .field("root", &self.root)
+            .finish()
     }
 }
 

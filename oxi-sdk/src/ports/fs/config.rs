@@ -18,7 +18,9 @@ pub struct FileConfigStore {
 
 impl std::fmt::Debug for FileConfigStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FileConfigStore").field("path", &self.path).finish()
+        f.debug_struct("FileConfigStore")
+            .field("path", &self.path)
+            .finish()
     }
 }
 
@@ -50,9 +52,8 @@ impl FileConfigStore {
         }
         let snapshot = self.state.read().clone();
         let nested = flat_map_to_nested(&snapshot);
-        let text = toml::to_string_pretty(&nested).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-        })?;
+        let text = toml::to_string_pretty(&nested)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
         let tmp = self.path.with_extension("toml.tmp");
         std::fs::write(&tmp, text)?;
         std::fs::rename(&tmp, &self.path)?;
@@ -131,9 +132,7 @@ fn json_to_toml(v: JsonValue) -> toml::Value {
             }
         }
         JsonValue::String(s) => toml::Value::String(s),
-        JsonValue::Array(a) => toml::Value::Array(
-            a.into_iter().map(json_to_toml).collect(),
-        ),
+        JsonValue::Array(a) => toml::Value::Array(a.into_iter().map(json_to_toml).collect()),
         JsonValue::Object(o) => {
             let mut t = toml::value::Table::new();
             for (k, v) in o {
@@ -159,7 +158,12 @@ impl ConfigStore for FileConfigStore {
     }
 
     fn list(&self) -> Result<Vec<(String, PortValue)>, SdkError> {
-        Ok(self.state.read().iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        Ok(self
+            .state
+            .read()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect())
     }
 }
 
@@ -175,14 +179,12 @@ mod tests {
         let p = tmp.path().join("settings.toml");
         let c = FileConfigStore::new(&p);
         c.set("model.provider", json!("anthropic")).unwrap();
-        c.set("model.name", json!("claude-sonnet-4-20250514")).unwrap();
+        c.set("model.name", json!("claude-sonnet-4-20250514"))
+            .unwrap();
         c.set("ui.theme", json!("dark")).unwrap();
         // Reload from disk.
         let c2 = FileConfigStore::new(&p);
-        assert_eq!(
-            c2.get("model.provider").unwrap(),
-            Some(json!("anthropic"))
-        );
+        assert_eq!(c2.get("model.provider").unwrap(), Some(json!("anthropic")));
         assert_eq!(c2.get("ui.theme").unwrap(), Some(json!("dark")));
     }
 

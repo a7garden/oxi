@@ -17,8 +17,8 @@ use crate::extensions::types::{
 
 use crate::extensions::context::ExtensionContext;
 use crate::extensions::Extension;
-use crate::CompactionContext;
 use crate::store::settings::Settings;
+use crate::CompactionContext;
 
 use parking_lot::RwLock;
 use serde_json::Value;

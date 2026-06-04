@@ -9,8 +9,6 @@
 //! Uses crossterm + ratatui for terminal control with proper raw-mode
 //! restoration on panic or early exit.
 
-
-use std::sync::Arc;
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},

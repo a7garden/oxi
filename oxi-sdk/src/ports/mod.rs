@@ -137,9 +137,7 @@ pub struct NoopStateStore;
 #[async_trait]
 impl StateStore for NoopStateStore {
     async fn append(&self, _entry: PortValue) -> Result<PortId, SdkError> {
-        Err(SdkError::PortNotConfigured {
-            port: "StateStore",
-        })
+        Err(SdkError::PortNotConfigured { port: "StateStore" })
     }
     async fn load(&self, _id: &PortId) -> Result<Option<PortValue>, SdkError> {
         Ok(None)
@@ -239,7 +237,9 @@ impl AuthProvider for NoopAuthProvider {
         Ok(None)
     }
     async fn set_api_key(&self, _provider: &str, _key: &str) -> Result<(), SdkError> {
-        Err(SdkError::PortNotConfigured { port: "AuthProvider" })
+        Err(SdkError::PortNotConfigured {
+            port: "AuthProvider",
+        })
     }
     async fn delete_api_key(&self, _provider: &str) -> Result<(), SdkError> {
         Ok(())
@@ -248,7 +248,9 @@ impl AuthProvider for NoopAuthProvider {
         Ok(None)
     }
     async fn set_oauth(&self, _provider: &str, _token: OAuthToken) -> Result<(), SdkError> {
-        Err(SdkError::PortNotConfigured { port: "AuthProvider" })
+        Err(SdkError::PortNotConfigured {
+            port: "AuthProvider",
+        })
     }
     async fn list_providers(&self) -> Result<Vec<String>, SdkError> {
         Ok(Vec::new())
@@ -345,13 +347,13 @@ impl EventBus for InMemoryEventBus {
     async fn subscribe(&self, _topic: &EventTopic) -> Result<SubscriptionHandle, SdkError> {
         let mut rx = self.tx.subscribe();
         let (tx, rx2) = tokio::sync::mpsc::channel(64);
-        let _ = tokio::spawn(async move {
+        drop(tokio::spawn(async move {
             while let Ok(event) = rx.recv().await {
                 if tx.send(event).await.is_err() {
                     break;
                 }
             }
-        });
+        }));
         Ok(SubscriptionHandle {
             _unsubscribe: None,
             receiver: Some(rx2),
@@ -569,7 +571,9 @@ pub struct NoopMemoryStore;
 #[async_trait]
 impl MemoryStore for NoopMemoryStore {
     async fn put(&self, _entry: MemoryEntry) -> Result<(), SdkError> {
-        Err(SdkError::PortNotConfigured { port: "MemoryStore" })
+        Err(SdkError::PortNotConfigured {
+            port: "MemoryStore",
+        })
     }
     async fn list(&self, _subject: &str) -> Result<Vec<MemoryEntry>, SdkError> {
         Ok(Vec::new())
@@ -606,7 +610,9 @@ pub struct NoopCronScheduler;
 #[async_trait]
 impl CronScheduler for NoopCronScheduler {
     async fn register(&self, _job: CronJob) -> Result<(), SdkError> {
-        Err(SdkError::PortNotConfigured { port: "CronScheduler" })
+        Err(SdkError::PortNotConfigured {
+            port: "CronScheduler",
+        })
     }
     async fn unregister(&self, _id: &str) -> Result<(), SdkError> {
         Ok(())
@@ -763,7 +769,10 @@ mod tests {
     async fn noop_state_store_append_errors() {
         let s = NoopStateStore;
         let err = s.append(json!({})).await.unwrap_err();
-        assert!(matches!(err, SdkError::PortNotConfigured { port: "StateStore" }));
+        assert!(matches!(
+            err,
+            SdkError::PortNotConfigured { port: "StateStore" }
+        ));
     }
 
     #[test]
@@ -788,7 +797,9 @@ mod tests {
             .unwrap();
         let mut sub = bus.subscribe(&"test".to_string()).await.unwrap();
         // Re-publish to ensure subscriber is registered.
-        bus.publish(&"test".to_string(), json!({"k": 1})).await.unwrap();
+        bus.publish(&"test".to_string(), json!({"k": 1}))
+            .await
+            .unwrap();
         let (topic, payload) = sub.recv().await.unwrap();
         assert_eq!(topic, "test");
         assert_eq!(payload, json!({"k": 1}));

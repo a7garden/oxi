@@ -2,8 +2,8 @@
 //!
 //! Originally inspired by pi-mono's system prompt construction.
 
-use chrono::Local;
 use crate::store::settings::ThinkingLevel;
+use chrono::Local;
 
 /// A skill that can be included in the system prompt.
 #[derive(Debug, Clone)]

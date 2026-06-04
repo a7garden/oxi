@@ -914,6 +914,7 @@ impl AuthStorage {
     }
 
     /// Persist to disk
+    #[allow(unexpected_cfgs)]
     fn persist(&self) -> Result<(), String> {
         if let Some(ref storage) = self.file_storage {
             let creds = self.credentials.read();

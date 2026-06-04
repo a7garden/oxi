@@ -5,9 +5,7 @@
 //! `#[cfg(feature = "native-browser")]`.
 
 use super::config::BrowseConfig;
-use super::engine::{
-    BrowserError, BrowserTab as BrowserTabTrait, PageContent, ProgressForwarder,
-};
+use super::engine::{BrowserError, BrowserTab as BrowserTabTrait, PageContent, ProgressForwarder};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -451,10 +449,7 @@ mod tests {
         }));
 
         let tab = engine.new_tab().await.unwrap();
-        let _ = tab
-            .goto("data:text/html,<title>A</title>")
-            .await
-            .unwrap();
+        let _ = tab.goto("data:text/html,<title>A</title>").await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let a_after_first = count_a.load(Ordering::SeqCst);
         assert!(a_after_first > 0, "callback A should have fired");
@@ -465,10 +460,7 @@ mod tests {
             cb_clone.fetch_add(1, Ordering::SeqCst);
         }));
 
-        let _ = tab
-            .goto("data:text/html,<title>B</title>")
-            .await
-            .unwrap();
+        let _ = tab.goto("data:text/html,<title>B</title>").await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let a_final = count_a.load(Ordering::SeqCst);

@@ -48,6 +48,13 @@ pub use builder::{Oxi, OxiBuilder};
 // module, `MemoryEntry` is also in `coordination`). We rename on import to
 // avoid ambiguity; users can still access the trait via the explicit path
 // `oxi_sdk::ports::EventBus` if they need to disambiguate.
+pub use closure_tool::ClosureTool;
+pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
+pub use message_bus::{InterAgentMessage, LagAwareReceiver, MessageBus, PublishResult};
+pub use metrics::{AgentMetrics, MetricsSnapshot};
+pub use ports::AccessGate as AccessGatePort;
+pub use ports::EventBus as EventBusPort;
+pub use ports::MemoryEntry as MemoryEntryPort;
 pub use ports::{
     AccessDecision, AuthProvider, CapabilityResolver, ConfigStore, CronJob, CronScheduler,
     EventPayload, EventTopic, InMemoryEventBus, MemoryStore, NoopAuthProvider, NoopConfigStore,
@@ -56,13 +63,6 @@ pub use ports::{
     PortValue, ResourceMonitor, ResourceUsage, Skill, SkillLoader, SkillMeta, StateStore,
     SubscriptionHandle, ToolCallRequest,
 };
-pub use ports::AccessGate as AccessGatePort;
-pub use ports::EventBus as EventBusPort;
-pub use ports::MemoryEntry as MemoryEntryPort;
-pub use closure_tool::ClosureTool;
-pub use kernel_bridge::{KernelToolContext, KernelToolProvider};
-pub use message_bus::{InterAgentMessage, LagAwareReceiver, MessageBus, PublishResult};
-pub use metrics::{AgentMetrics, MetricsSnapshot};
 
 // Composition Layer — EventBus
 pub use event_bus::EventBus;

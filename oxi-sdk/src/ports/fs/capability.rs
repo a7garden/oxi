@@ -23,7 +23,9 @@ pub struct TomlCapabilityResolver {
 
 impl std::fmt::Debug for TomlCapabilityResolver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TomlCapabilityResolver").field("path", &self.path).finish()
+        f.debug_struct("TomlCapabilityResolver")
+            .field("path", &self.path)
+            .finish()
     }
 }
 
@@ -85,10 +87,10 @@ impl CapabilityResolver for TomlCapabilityResolver {
         let mut best: Option<&Vec<String>> = None;
         for (key, list) in g.iter() {
             if let Some(prefix) = key.strip_suffix('*') {
-                if subject.starts_with(prefix) {
-                    if best.is_none() || prefix.len() > key.trim_end_matches('*').len() {
-                        best = Some(list);
-                    }
+                if subject.starts_with(prefix)
+                    && (best.is_none() || prefix.len() > key.trim_end_matches('*').len())
+                {
+                    best = Some(list);
                 }
             }
         }

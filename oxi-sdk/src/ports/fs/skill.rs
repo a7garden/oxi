@@ -23,7 +23,9 @@ pub struct FileSkillLoader {
 
 impl std::fmt::Debug for FileSkillLoader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FileSkillLoader").field("roots", &self.roots).finish()
+        f.debug_struct("FileSkillLoader")
+            .field("roots", &self.roots)
+            .finish()
     }
 }
 

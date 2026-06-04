@@ -84,7 +84,10 @@ pub async fn run_port_check() -> anyhow::Result<()> {
     }
 
     // Event bus / memory / etc — all noop unless registered
-    let _ = ports.event_bus.publish(&"port-check".to_string(), serde_json::json!({"ok": true})).await;
+    let _ = ports
+        .event_bus
+        .publish(&"port-check".to_string(), serde_json::json!({"ok": true}))
+        .await;
     println!("[event-bus] publish ok (noop bus if not registered)");
 
     println!("\nport check: ok");
@@ -156,8 +159,8 @@ pub struct App {
         Option<std::sync::Arc<oxi_agent::tools::questionnaire::QuestionnaireBridge>>,
 }
 
-/// Context for compaction operations, passed to extension hooks// ─── System prompt builder ───────────────────────────────────────────────────
-
+/// Context for compaction operations, passed to extension hooks
+// ─── System prompt builder ───────────────────────────────────────────────────
 fn build_system_prompt(
     thinking_level: crate::store::settings::ThinkingLevel,
     skill_contents: &[String],
@@ -392,7 +395,7 @@ impl App {
             .map(|s| s.to_string())
             .unwrap_or_else(|| "anthropic".to_string());
         let api_key = self.oxi.ports().auth.get_api_key(&provider).await?;
-        self.agent.switch_model(model_id, api_key);
+        let _ = self.agent.switch_model(model_id, api_key);
         Ok(())
     }
 

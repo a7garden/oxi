@@ -110,9 +110,15 @@ mod tests {
     #[tokio::test]
     async fn cosine_search_returns_top_k() {
         let s = InMemoryMemoryStore::new();
-        s.put(entry("a", "x", Some(vec![1.0, 0.0, 0.0]))).await.unwrap();
-        s.put(entry("b", "x", Some(vec![0.0, 1.0, 0.0]))).await.unwrap();
-        s.put(entry("c", "x", Some(vec![0.9, 0.1, 0.0]))).await.unwrap();
+        s.put(entry("a", "x", Some(vec![1.0, 0.0, 0.0])))
+            .await
+            .unwrap();
+        s.put(entry("b", "x", Some(vec![0.0, 1.0, 0.0])))
+            .await
+            .unwrap();
+        s.put(entry("c", "x", Some(vec![0.9, 0.1, 0.0])))
+            .await
+            .unwrap();
         let top = s.search(&[1.0, 0.0, 0.0], 2).await.unwrap();
         assert_eq!(top.len(), 2);
         assert_eq!(top[0].id, "a");

@@ -10,10 +10,10 @@ use crate::app::agent_session_runtime::{
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
 };
 use crate::context::auto_compaction::CompactionReason;
+use crate::store::session::SessionManager;
 use crate::util::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
-use crate::store::session::SessionManager;
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{
     chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},

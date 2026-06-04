@@ -32,12 +32,12 @@
 
 use crate::app::agent_session::{AgentSession, AgentSessionHandle, ScopedModel};
 use crate::storage::resource_loader::ResourceLoader;
-use anyhow::Result;
 use crate::store::auth_storage::AuthStorage;
-use oxi_sdk::ModelRegistry;
 use crate::store::session::SessionManager;
 use crate::store::session_cwd::{assert_session_cwd_exists, SessionCwdSource};
 use crate::store::settings::{Settings, ThinkingLevel};
+use anyhow::Result;
+use oxi_sdk::ModelRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

@@ -1,8 +1,8 @@
 //! Extension context and builder.
 
 use crate::extensions::types::ExtensionErrorRecord;
-use anyhow::{bail, Context, Result};
 use crate::store::settings::Settings;
+use anyhow::{bail, Context, Result};
 use parking_lot::RwLock;
 use serde_json::Value;
 use std::path::{Path, PathBuf};

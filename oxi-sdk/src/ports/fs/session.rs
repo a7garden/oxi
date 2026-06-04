@@ -21,7 +21,9 @@ pub struct FileStateStore {
 
 impl std::fmt::Debug for FileStateStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FileStateStore").field("dir", &self.dir).finish()
+        f.debug_struct("FileStateStore")
+            .field("dir", &self.dir)
+            .finish()
     }
 }
 
@@ -182,6 +184,10 @@ mod tests {
     async fn load_missing_returns_none() {
         let tmp = TempDir::new().unwrap();
         let store = FileStateStore::new(tmp.path());
-        assert!(store.load(&"nonexistent".to_string()).await.unwrap().is_none());
+        assert!(store
+            .load(&"nonexistent".to_string())
+            .await
+            .unwrap()
+            .is_none());
     }
 }

@@ -77,7 +77,9 @@ pub struct FileAuthProvider {
 
 impl std::fmt::Debug for FileAuthProvider {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FileAuthProvider").field("path", &self.path).finish()
+        f.debug_struct("FileAuthProvider")
+            .field("path", &self.path)
+            .finish()
     }
 }
 
@@ -97,7 +99,13 @@ impl FileAuthProvider {
     /// 2. The `OXI_API_KEY_<UPPER>` env var
     /// 3. The provider's standard env var (e.g. `ANTHROPIC_API_KEY`)
     pub fn resolve_api_key(&self, provider: &str) -> Option<String> {
-        if let Some(k) = self.state.lock().providers.get(provider).and_then(|e| e.api_key.clone()) {
+        if let Some(k) = self
+            .state
+            .lock()
+            .providers
+            .get(provider)
+            .and_then(|e| e.api_key.clone())
+        {
             return Some(k);
         }
         let upper = provider.to_uppercase();
@@ -126,10 +134,7 @@ impl AuthProvider for FileAuthProvider {
 
     async fn set_api_key(&self, provider: &str, key: &str) -> Result<(), SdkError> {
         let mut s = self.state.lock();
-        s.providers
-            .entry(provider.to_string())
-            .or_default()
-            .api_key = Some(key.to_string());
+        s.providers.entry(provider.to_string()).or_default().api_key = Some(key.to_string());
         s.save(&self.path).map_err(|e| SdkError::Internal(e.into()))
     }
 
@@ -151,10 +156,7 @@ impl AuthProvider for FileAuthProvider {
 
     async fn set_oauth(&self, provider: &str, token: OAuthToken) -> Result<(), SdkError> {
         let mut s = self.state.lock();
-        s.providers
-            .entry(provider.to_string())
-            .or_default()
-            .oauth = Some(token);
+        s.providers.entry(provider.to_string()).or_default().oauth = Some(token);
         s.save(&self.path).map_err(|e| SdkError::Internal(e.into()))
     }
 
