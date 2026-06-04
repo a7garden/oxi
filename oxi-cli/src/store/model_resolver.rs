@@ -8,7 +8,7 @@
 //! - oxi_ai::model_registry for runtime model lookup
 //! - auth_storage for auth validation
 
-use crate::settings::Settings;
+use crate::store::settings::Settings;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -409,7 +409,7 @@ pub fn clamp_thinking_level(model_id: &str, requested_level: &str) -> String {
 /// Use `oxi setup` to configure credentials persistently.
 pub fn has_configured_auth(provider: &str, _model: &Model) -> bool {
     // Check auth storage (auth.json)
-    let auth = crate::auth_storage::shared_auth_storage();
+    let auth = crate::store::auth_storage::shared_auth_storage();
     auth.has_auth(provider)
 }
 

@@ -7,8 +7,8 @@ use clap::Parser;
 use oxi::cli::{CliArgs, Commands, ConfigCommands, PkgCommands};
 use oxi::extensions::ExtensionRegistry;
 use oxi::storage::packages::{PackageManager, ResourceKind};
-use oxi_store::session::{AgentMessage, SessionManager};
-use oxi_store::settings::Settings;
+use oxi::store::session::{AgentMessage, SessionManager};
+use oxi::store::settings::Settings;
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -71,7 +71,7 @@ async fn main() -> Result<()> {
 
     // Apply thinking level if specified
     if let Some(ref level_str) = args.thinking {
-        if let Some(level) = oxi_store::settings::parse_thinking_level(level_str) {
+        if let Some(level) = oxi::store::settings::parse_thinking_level(level_str) {
             settings.thinking_level = level;
         } else {
             anyhow::bail!(
@@ -159,7 +159,7 @@ async fn handle_subcommand(command: &Commands) -> Result<()> {
                 .unwrap_or_else(|_| std::path::PathBuf::from("."))
                 .to_string_lossy()
                 .to_string();
-            let sessions = oxi_store::session::SessionManager::list(&cwd, None).await?;
+            let sessions = oxi::store::session::SessionManager::list(&cwd, None).await?;
             if sessions.is_empty() {
                 println!("No sessions found.");
             } else {
@@ -595,7 +595,7 @@ fn config_set(key: &str, value: &str) -> Result<()> {
             settings.last_used_provider = Some(value.to_string());
         }
         "thinking_level" | "thinking" => {
-            let level = oxi_store::settings::parse_thinking_level(value).ok_or_else(|| {
+            let level = oxi::store::settings::parse_thinking_level(value).ok_or_else(|| {
                 anyhow::anyhow!(
                     "Invalid thinking level: '{}'. Valid: off, minimal, low, medium, high, xhigh",
                     value
@@ -714,7 +714,7 @@ fn config_get(key: &str) -> Result<()> {
 
 /// Handle `oxi config add-provider`
 fn config_add_provider(name: &str, base_url: &str, api_key_env: &str, api: &str) -> Result<()> {
-    use oxi_store::settings::CustomProvider;
+    use oxi::store::settings::CustomProvider;
 
     let mut settings = Settings::load()?;
 
@@ -1066,7 +1066,7 @@ fn handle_config_reset(all: bool) -> Result<()> {
 
     if all {
         // Also reset settings
-        if let Ok(settings_path) = oxi_store::settings::Settings::settings_path() {
+        if let Ok(settings_path) = oxi::store::settings::Settings::settings_path() {
             if settings_path.exists() {
                 std::fs::remove_file(&settings_path)?;
                 println!("Removed settings: {}", settings_path.display());
@@ -1092,7 +1092,7 @@ fn handle_models_command(provider: &Option<String>) -> Result<()> {
             .iter()
             .find(|cp| cp.name == *provider_name)
         {
-            let auth = oxi_store::auth_storage::shared_auth_storage();
+            let auth = oxi::store::auth_storage::shared_auth_storage();
             let api_key = auth.get_api_key(&cp.name);
             if let Some(ref key) = api_key {
                 match oxi_sdk::fetch_models_blocking(&cp.base_url, key) {
@@ -1334,7 +1334,7 @@ fn init_logging() {
 
 /// Register custom OpenAI-compatible providers from settings and auto-fetch their models.
 fn register_custom_providers(settings: &Settings) {
-    let auth_storage = oxi_store::auth_storage::shared_auth_storage();
+    let auth_storage = oxi::store::auth_storage::shared_auth_storage();
     for cp in &settings.custom_providers {
         let api_key = auth_storage.get_api_key(&cp.name);
         let api = cp.api.to_lowercase();
@@ -1376,7 +1376,7 @@ fn register_custom_providers(settings: &Settings) {
 
 /// Fetch models from a custom provider's /v1/models endpoint and register them.
 fn fetch_and_register_models(
-    cp: &oxi_store::settings::CustomProvider,
+    cp: &oxi::store::settings::CustomProvider,
     api: &str,
     api_key: &Option<String>,
 ) {
@@ -1496,7 +1496,7 @@ fn register_router_provider(settings: &Settings) {
     let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
     let project_dir = std::env::current_dir().unwrap_or_default();
 
-    let store_cfg = match oxi_store::router_config::load_router_config(&global_dir, &project_dir) {
+    let store_cfg = match oxi::store::router_config::load_router_config(&global_dir, &project_dir) {
         Some(cfg) => cfg,
         None => {
             tracing::debug!("No router config found — router/auto will not appear in model list");
@@ -1584,7 +1584,7 @@ fn handle_export_command(
     session_id: Option<&str>,
     output_path: Option<&std::path::Path>,
 ) -> Result<()> {
-    use oxi_store::session::SessionManager;
+    use oxi::store::session::SessionManager;
 
     let cwd = std::env::current_dir()
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
@@ -1618,7 +1618,7 @@ fn handle_export_command(
             .ok_or_else(|| anyhow::anyhow!("No sessions found for this project"))?;
         // Reconstruct the path from session_dir + id
         let session_dir: std::path::PathBuf =
-            oxi_store::session::get_default_session_dir(&cwd).into();
+            oxi::store::session::get_default_session_dir(&cwd).into();
         session_dir.join(format!("{}.jsonl", most_recent.id))
     };
 
@@ -1639,7 +1639,7 @@ fn handle_export_command(
         total_assistant_tokens: None,
     };
 
-    let entries: Vec<oxi_store::session::SessionEntry> = branch.into_iter().collect();
+    let entries: Vec<oxi::store::session::SessionEntry> = branch.into_iter().collect();
     let html = oxi::storage::export::export_to_html(
         &entries,
         &meta,
@@ -1679,7 +1679,7 @@ fn handle_import_command(path: &std::path::Path) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    let resolved = oxi_store::session::resolve_session_path(&path.to_string_lossy(), &cwd)
+    let resolved = oxi::store::session::resolve_session_path(&path.to_string_lossy(), &cwd)
         .map_err(|e| anyhow::anyhow!("Error resolving path: {}", e))?;
 
     if !std::path::Path::new(&resolved).exists() {
@@ -1687,7 +1687,7 @@ fn handle_import_command(path: &std::path::Path) -> Result<()> {
     }
 
     // Copy the session file into the sessions directory
-    let sessions_dir: std::path::PathBuf = oxi_store::session::get_default_session_dir(&cwd).into();
+    let sessions_dir: std::path::PathBuf = oxi::store::session::get_default_session_dir(&cwd).into();
     std::fs::create_dir_all(&sessions_dir)?;
 
     let filename = path
@@ -1743,12 +1743,12 @@ async fn handle_share_command(session_id: Option<&str>) -> Result<()> {
             anyhow::bail!("Session not found: {}", sid);
         }
     } else {
-        let sessions = oxi_store::session::SessionManager::list(&cwd, None).await?;
+        let sessions = oxi::store::session::SessionManager::list(&cwd, None).await?;
         let most_recent = sessions
             .first()
             .ok_or_else(|| anyhow::anyhow!("No sessions found for this project"))?;
         let session_dir: std::path::PathBuf =
-            oxi_store::session::get_default_session_dir(&cwd).into();
+            oxi::store::session::get_default_session_dir(&cwd).into();
         session_dir.join(format!("{}.jsonl", most_recent.id))
     };
 
@@ -1757,9 +1757,9 @@ async fn handle_share_command(session_id: Option<&str>) -> Result<()> {
     }
 
     let sm =
-        oxi_store::session::SessionManager::open(&session_path.to_string_lossy(), None, Some(&cwd));
+        oxi::store::session::SessionManager::open(&session_path.to_string_lossy(), None, Some(&cwd));
     let branch = sm.get_branch(None);
-    let entries: Vec<oxi_store::session::SessionEntry> = branch.into_iter().collect();
+    let entries: Vec<oxi::store::session::SessionEntry> = branch.into_iter().collect();
 
     let meta = oxi::storage::export::ExportMeta {
         model: None,

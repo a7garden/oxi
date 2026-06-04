@@ -9,7 +9,7 @@
 //! - Supports dynamic provider registration (extensions)
 //! - Provides model filtering by provider, capability, and modality
 
-use crate::auth_storage::{AuthStatus, AuthStorage};
+use crate::store::auth_storage::{AuthStatus, AuthStorage};
 use oxi_ai::model_db;
 use oxi_ai::register_builtins::get_builtin_provider;
 use oxi_ai::{Api, CompatSettings, Cost, InputModality, Model};

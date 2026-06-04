@@ -33,11 +33,11 @@
 use crate::app::agent_session::{AgentSession, AgentSessionHandle, ScopedModel};
 use crate::storage::resource_loader::ResourceLoader;
 use anyhow::Result;
-use oxi_store::auth_storage::AuthStorage;
-use oxi_store::model_registry::ModelRegistry;
-use oxi_store::session::SessionManager;
-use oxi_store::session_cwd::{assert_session_cwd_exists, SessionCwdSource};
-use oxi_store::settings::{Settings, ThinkingLevel};
+use crate::store::auth_storage::AuthStorage;
+use crate::store::model_registry::ModelRegistry;
+use crate::store::session::SessionManager;
+use crate::store::session_cwd::{assert_session_cwd_exists, SessionCwdSource};
+use crate::store::settings::{Settings, ThinkingLevel};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -160,7 +160,7 @@ pub fn create_agent_session_services(
     // instances (they both read from the same underlying file).
     let auth_storage = options
         .auth_storage
-        .unwrap_or_else(oxi_store::auth_storage::shared_auth_storage);
+        .unwrap_or_else(crate::store::auth_storage::shared_auth_storage);
 
     // Settings — load from cwd + agent_dir
     let settings = options.settings.unwrap_or_else(|| {

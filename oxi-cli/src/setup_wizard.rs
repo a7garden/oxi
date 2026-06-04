@@ -9,6 +9,8 @@
 //! Uses crossterm + ratatui for terminal control with proper raw-mode
 //! restoration on panic or early exit.
 
+
+use std::sync::Arc;
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
@@ -116,7 +118,7 @@ fn mask_key(key: &str) -> String {
 // ── Load provider state ─────────────────────────────────────────────────────
 
 /// Build the initial provider list from builtins + stored keys + custom providers.
-fn load_providers(auth_store: &oxi_store::auth_storage::AuthStorage) -> Vec<ProviderEntry> {
+fn load_providers(auth_store: &crate::store::auth_storage::AuthStorage) -> Vec<ProviderEntry> {
     let mut entries = Vec::new();
 
     for builtin in oxi_sdk::get_builtin_providers() {
@@ -142,7 +144,7 @@ fn load_providers(auth_store: &oxi_store::auth_storage::AuthStorage) -> Vec<Prov
     }
 
     // Add custom providers from settings that aren't already in builtins
-    if let Ok(settings) = oxi_store::settings::Settings::load() {
+    if let Ok(settings) = crate::store::settings::Settings::load() {
         for cp in &settings.custom_providers {
             if oxi_sdk::is_builtin_provider(&cp.name) {
                 continue;
@@ -175,7 +177,7 @@ fn load_models() -> Vec<ModelEntry> {
     let mut seen = std::collections::HashSet::new();
 
     // 1. Dynamic models from settings cache (fetched from /models endpoints)
-    if let Ok(settings) = oxi_store::settings::Settings::load() {
+    if let Ok(settings) = crate::store::settings::Settings::load() {
         for (provider, model_ids) in &settings.dynamic_models {
             for id in model_ids {
                 let key = format!("{}/{}", provider, id);
@@ -236,7 +238,7 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
     };
 
     // Get the API key from auth storage
-    let auth_store = oxi_store::auth_storage::shared_auth_storage();
+    let auth_store = crate::store::auth_storage::shared_auth_storage();
     let api_key = match auth_store.get_api_key(provider_name) {
         Some(key) => key,
         None => {
@@ -280,7 +282,7 @@ fn fetch_and_cache_models(provider_name: &str, providers: &[ProviderEntry]) {
             );
 
             // Update settings cache
-            if let Ok(mut settings) = oxi_store::settings::Settings::load() {
+            if let Ok(mut settings) = crate::store::settings::Settings::load() {
                 settings
                     .dynamic_models
                     .insert(provider_name.to_string(), model_ids);
@@ -324,7 +326,7 @@ fn save_settings(
     theme_name: &str,
     custom_base_urls: &[(String, String)],
 ) -> Result<()> {
-    let mut settings = oxi_store::settings::Settings::load().unwrap_or_default();
+    let mut settings = crate::store::settings::Settings::load().unwrap_or_default();
 
     // Split "provider/model" and store as last_used
     if let Some((provider, model_name)) = model_id.split_once('/') {
@@ -341,7 +343,7 @@ fn save_settings(
         if !already_exists {
             settings
                 .custom_providers
-                .push(oxi_store::settings::CustomProvider {
+                .push(crate::store::settings::CustomProvider {
                     name: name.clone(),
                     base_url: base_url.clone(),
                     api_key_env: format!("{}_API_KEY", name.to_uppercase().replace('-', "_")),
@@ -741,7 +743,7 @@ fn build_step_indicator(current_step: usize) -> Line<'static> {
 fn handle_event(
     state: &mut WizardState,
     event: Event,
-    auth_store: &oxi_store::auth_storage::AuthStorage,
+    auth_store: &crate::store::auth_storage::AuthStorage,
 ) -> Result<bool> {
     match state.step {
         0 => handle_provider_event(state, event, auth_store),
@@ -755,7 +757,7 @@ fn handle_event(
 fn handle_provider_event(
     state: &mut WizardState,
     event: Event,
-    auth_store: &oxi_store::auth_storage::AuthStorage,
+    auth_store: &crate::store::auth_storage::AuthStorage,
 ) -> Result<bool> {
     match &mut state.input_mode {
         InputMode::Normal => {
@@ -1062,18 +1064,18 @@ pub fn run() -> Result<()> {
     }));
 
     // Load data
-    let auth_store = oxi_store::auth_storage::shared_auth_storage();
+    let auth_store = crate::store::auth_storage::shared_auth_storage();
     let providers = load_providers(&auth_store);
     let models = load_models();
     let themes = load_themes();
 
-    let auth_path = oxi_store::auth_storage::AuthStorage::default_path().unwrap_or_else(|| {
+    let auth_path = crate::store::auth_storage::AuthStorage::default_path().unwrap_or_else(|| {
         dirs::home_dir()
             .unwrap_or_default()
             .join(".oxi")
             .join("auth.json")
     });
-    let settings_path = oxi_store::settings::Settings::settings_path().unwrap_or_else(|_| {
+    let settings_path = crate::store::settings::Settings::settings_path().unwrap_or_else(|_| {
         dirs::home_dir()
             .unwrap_or_default()
             .join(".oxi")
@@ -1081,7 +1083,7 @@ pub fn run() -> Result<()> {
     });
 
     // Find the index of the current default model
-    let current_model = oxi_store::settings::Settings::load()
+    let current_model = crate::store::settings::Settings::load()
         .ok()
         .and_then(|s| s.last_used_model.clone())
         .unwrap_or_default();
@@ -1095,7 +1097,7 @@ pub fn run() -> Result<()> {
         .unwrap_or(0);
 
     // Find the index of the current theme
-    let current_theme = oxi_store::settings::Settings::load()
+    let current_theme = crate::store::settings::Settings::load()
         .ok()
         .map(|s| s.theme.clone())
         .unwrap_or_else(|| "oxi_dark".to_string());

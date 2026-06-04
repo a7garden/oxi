@@ -334,7 +334,7 @@ impl OverlayComponent for ProviderSelectOverlay {
         }
 
         if do_save {
-            let auth = oxi_store::auth_storage::shared_auth_storage();
+            let auth = crate::store::auth_storage::shared_auth_storage();
             auth.set_api_key(&pname, key_text.clone());
 
             if let Some(entry) = self.providers.iter_mut().find(|p| p.name == pname) {
@@ -781,7 +781,7 @@ fn truncate_str(text: &str, max_width: usize) -> String {
 
 /// Build the provider list from builtins, sorted by category order.
 pub fn build_provider_entries() -> Vec<ProviderEntry> {
-    let auth = oxi_store::auth_storage::shared_auth_storage();
+    let auth = crate::store::auth_storage::shared_auth_storage();
 
     let mut providers: Vec<ProviderEntry> = oxi_sdk::get_builtin_providers()
         .iter()

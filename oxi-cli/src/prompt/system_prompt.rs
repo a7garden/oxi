@@ -3,7 +3,7 @@
 //! Originally inspired by pi-mono's system prompt construction.
 
 use chrono::Local;
-use oxi_store::settings::ThinkingLevel;
+use crate::store::settings::ThinkingLevel;
 
 /// A skill that can be included in the system prompt.
 #[derive(Debug, Clone)]

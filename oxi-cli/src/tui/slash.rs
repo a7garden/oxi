@@ -54,14 +54,14 @@ pub(crate) fn handle_slash_command(
                         if let Some((provider, _model)) = model_id.split_once('/') {
                             state.footer_state.data.provider_name = provider.to_string();
                         }
-                        oxi_store::settings::Settings::save_last_used(model_id);
+                        crate::store::settings::Settings::save_last_used(model_id);
                     }
                     Err(e) => {
                         state.add_notification(format!("Error: {}", e), NotificationKind::Error);
                     }
                 }
             } else {
-                let auth = oxi_store::auth_storage::shared_auth_storage();
+                let auth = crate::store::auth_storage::shared_auth_storage();
 
                 // Build a set of provider names that have a configured key,
                 // including all providers sharing the same env_key.
@@ -269,7 +269,7 @@ pub(crate) fn handle_slash_command(
                 total_user_tokens: None,
                 total_assistant_tokens: None,
             };
-            let entries: Vec<oxi_store::session::SessionEntry> = state
+            let entries: Vec<crate::store::session::SessionEntry> = state
                 .messages()
                 .iter()
                 .map(|msg| {
@@ -287,7 +287,7 @@ pub(crate) fn handle_slash_command(
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    oxi_store::session::SessionEntry::simple_message(role, &content)
+                    crate::store::session::SessionEntry::simple_message(role, &content)
                 })
                 .collect();
             match export::export_to_html(&entries, &meta, &HtmlExportOptions::default()) {
@@ -342,7 +342,7 @@ pub(crate) fn handle_slash_command(
                         total_user_tokens: None,
                         total_assistant_tokens: None,
                     };
-                    let entries: Vec<oxi_store::session::SessionEntry> = state
+                    let entries: Vec<crate::store::session::SessionEntry> = state
                         .messages()
                         .iter()
                         .map(|msg| {
@@ -360,7 +360,7 @@ pub(crate) fn handle_slash_command(
                                 })
                                 .collect::<Vec<_>>()
                                 .join("\n");
-                            oxi_store::session::SessionEntry::simple_message(role, &content)
+                            crate::store::session::SessionEntry::simple_message(role, &content)
                         })
                         .collect();
                     match export::export_to_html(&entries, &meta, &HtmlExportOptions::default()) {
@@ -445,7 +445,7 @@ pub(crate) fn handle_slash_command(
                 let cwd = std::env::current_dir()
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| ".".to_string());
-                match oxi_store::session::resolve_session_path(path, &cwd) {
+                match crate::store::session::resolve_session_path(path, &cwd) {
                     Ok(resolved) => {
                         if !std::path::Path::new(&resolved).exists() {
                             state.add_notification(
@@ -478,7 +478,7 @@ pub(crate) fn handle_slash_command(
         }
         "/fork" => {
             if let Some(ref path) = state.session_file_path {
-                let sm = oxi_store::session::SessionManager::open(path, None, None);
+                let sm = crate::store::session::SessionManager::open(path, None, None);
                 let branch = sm.get_branch(None);
                 let user_entries: Vec<_> = branch.iter().filter(|e| e.message.is_user()).collect();
 
@@ -550,7 +550,7 @@ pub(crate) fn handle_slash_command(
                 let cwd: String = std::env::current_dir()
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| ".".to_string());
-                match oxi_store::session::SessionManager::fork_from(path, &cwd, None) {
+                match crate::store::session::SessionManager::fork_from(path, &cwd, None) {
                     Ok(new_sm) => {
                         if let Some(new_path) = new_sm.get_session_file() {
                             state.add_notification(
@@ -578,7 +578,7 @@ pub(crate) fn handle_slash_command(
         }
         "/tree" => {
             if let Some(ref path) = state.session_file_path {
-                let sm = oxi_store::session::SessionManager::open(path, None, None);
+                let sm = crate::store::session::SessionManager::open(path, None, None);
                 match sm.get_tree(uuid::Uuid::nil()) {
                     Ok(roots) => {
                         if roots.is_empty() {
@@ -728,7 +728,7 @@ pub(crate) fn handle_slash_command(
                     }
                     "disable" => {
                         // Switch away from router to the default model
-                        let settings = oxi_store::settings::Settings::load().unwrap_or_default();
+                        let settings = crate::store::settings::Settings::load().unwrap_or_default();
                         if let Some(default_model) = settings.effective_model(None) {
                             let full_id = if default_model.contains('/') {
                                 default_model.clone()
@@ -790,7 +790,7 @@ pub(crate) fn handle_slash_command(
                 let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
                 let project_dir = std::env::current_dir().unwrap_or_default();
                 let has_config =
-                    oxi_store::router_config::load_router_config(&global_dir, &project_dir)
+                    crate::store::router_config::load_router_config(&global_dir, &project_dir)
                         .is_some();
 
                 if has_config {
@@ -822,7 +822,7 @@ pub(crate) fn handle_slash_command(
                         "Opening router setup...".to_string(),
                         NotificationKind::Info,
                     );
-                    let auth = oxi_store::auth_storage::shared_auth_storage();
+                    let auth = crate::store::auth_storage::shared_auth_storage();
                     let setup_models: Vec<String> = oxi_sdk::get_all_models()
                         .filter(|entry| auth.get_api_key(entry.provider).is_some())
                         .map(|entry| format!("{}/{}", entry.provider, entry.id))
@@ -849,10 +849,10 @@ pub(crate) fn handle_slash_command(
         }
         "/logout" => {
             if let Some(provider) = arg {
-                oxi_store::auth_storage::shared_auth_storage().remove(provider);
+                crate::store::auth_storage::shared_auth_storage().remove(provider);
                 state.add_notification(format!("Removed {}", provider), NotificationKind::Success);
             } else {
-                let auth = oxi_store::auth_storage::shared_auth_storage();
+                let auth = crate::store::auth_storage::shared_auth_storage();
                 let providers = auth.configured_providers();
                 if providers.is_empty() {
                     state.add_notification(
@@ -868,7 +868,7 @@ pub(crate) fn handle_slash_command(
         }
         "/new" => {
             // Reload settings so the next session uses latest config
-            let fresh = oxi_store::settings::Settings::load().unwrap_or_default();
+            let fresh = crate::store::settings::Settings::load().unwrap_or_default();
             session.set_thinking_level(fresh.thinking_level);
             if let Some(m) = fresh.effective_model(None) {
                 if !m.is_empty() {
@@ -910,7 +910,7 @@ pub(crate) fn handle_slash_command(
                         .enable_all()
                         .build()
                         .expect("failed to build temp runtime");
-                    rt.block_on(oxi_store::session::SessionManager::list(&cwd, None))
+                    rt.block_on(crate::store::session::SessionManager::list(&cwd, None))
                 })
                 .join()
                 .unwrap_or_else(|e| {
@@ -944,7 +944,7 @@ pub(crate) fn handle_slash_command(
             true
         }
         "/reload" => {
-            let reloaded = oxi_store::settings::Settings::load().unwrap_or_default();
+            let reloaded = crate::store::settings::Settings::load().unwrap_or_default();
             let _theme_name = reloaded.theme.clone();
             session.set_thinking_level(reloaded.thinking_level);
             // Apply model change to the active agent session
@@ -1225,7 +1225,7 @@ pub(crate) fn handle_slash_command(
 /// - A full UUID
 ///
 /// Returns `None` if nothing matches.
-fn resolve_entry_id(sel: &str, entries: &[&oxi_store::session::SessionEntry]) -> Option<String> {
+fn resolve_entry_id(sel: &str, entries: &[&crate::store::session::SessionEntry]) -> Option<String> {
     // Try numeric index first (1-based)
     if let Ok(idx) = sel.parse::<usize>() {
         if idx >= 1 && idx <= entries.len() {
@@ -1341,7 +1341,7 @@ fn try_provider_with_key(provider: &str, key: &str, state: &mut AppState) -> boo
     if key.is_empty() {
         return false;
     }
-    let auth = oxi_store::auth_storage::shared_auth_storage();
+    let auth = crate::store::auth_storage::shared_auth_storage();
     auth.set_api_key(provider, key.to_string());
     state.add_notification(
         format!("API key for {} saved.", provider),
@@ -1433,12 +1433,12 @@ fn handle_tool_command(
 /// Collect all entries from a tree of SessionTreeNodes into a flat Vec<SessionEntry>.
 /// Preserves tree order (depth-first traversal).
 fn collect_tree_entries(
-    roots: &[oxi_store::session::SessionTreeNode],
-) -> Vec<oxi_store::session::SessionEntry> {
+    roots: &[crate::store::session::SessionTreeNode],
+) -> Vec<crate::store::session::SessionEntry> {
     let mut entries = Vec::new();
     fn visit(
-        node: &oxi_store::session::SessionTreeNode,
-        entries: &mut Vec<oxi_store::session::SessionEntry>,
+        node: &crate::store::session::SessionTreeNode,
+        entries: &mut Vec<crate::store::session::SessionEntry>,
     ) {
         entries.push(node.entry.clone());
         for child in &node.children {

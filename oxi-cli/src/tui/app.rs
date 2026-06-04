@@ -13,7 +13,7 @@ use crate::context::auto_compaction::CompactionReason;
 use crate::util::slash_commands::BUILTIN_SLASH_COMMANDS;
 use anyhow::Result;
 use oxi_agent::AgentEvent;
-use oxi_store::session::SessionManager;
+use crate::store::session::SessionManager;
 use oxi_tui::theme::Theme;
 use oxi_tui::widgets::{
     chat::{ChatMessage, ChatViewState, ContentBlock, MessageRole},
@@ -451,7 +451,7 @@ impl AppState {
         };
 
         // Load user keybindings from settings
-        if let Ok(settings) = oxi_store::settings::Settings::load() {
+        if let Ok(settings) = crate::store::settings::Settings::load() {
             if !settings.keybindings.is_empty() {
                 state.keybindings.set_user_bindings(&settings.keybindings);
             }
@@ -809,7 +809,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
 
     // ── Determine initial session ──
     let mut session_target: Option<String> = if resume_last {
-        oxi_store::session::find_recent_session_path(&cwd)
+        crate::store::session::find_recent_session_path(&cwd)
     } else {
         None
     };
@@ -1159,18 +1159,18 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         // Restore previous messages if resuming
         if is_resuming {
             if let Some(ref path) = session_target {
-                let sm = oxi_store::session::SessionManager::open(path, None, Some(&cwd));
+                let sm = crate::store::session::SessionManager::open(path, None, Some(&cwd));
                 let branch = sm.get_branch(None);
                 for entry in &branch {
                     match &entry.message {
-                        oxi_store::session::AgentMessage::User { content } => {
+                        crate::store::session::AgentMessage::User { content } => {
                             state.add_user_message(content.as_str().to_string());
                         }
-                        oxi_store::session::AgentMessage::Assistant { content, .. } => {
+                        crate::store::session::AgentMessage::Assistant { content, .. } => {
                             let text: String = content
                                 .iter()
                                 .filter_map(|b| match b {
-                                    oxi_store::session::AssistantContentBlock::Text { text } => {
+                                    crate::store::session::AssistantContentBlock::Text { text } => {
                                         Some(text.as_str())
                                     }
                                     _ => None,
@@ -1501,7 +1501,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             Some(TuiNextAction::NewSession) => {
                 tracing::info!("Starting new session");
                 // Reload settings so the new session picks up any config changes
-                if let Ok(fresh) = oxi_store::settings::Settings::load() {
+                if let Ok(fresh) = crate::store::settings::Settings::load() {
                     if let Some(m) = fresh.effective_model(None) {
                         if !m.is_empty() {
                             // effective_model may already include provider
@@ -1523,7 +1523,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                     tracing::warn!("GotoEntry: no session file path");
                     continue;
                 };
-                let sm = oxi_store::session::SessionManager::open(path, None, Some(&cwd));
+                let sm = crate::store::session::SessionManager::open(path, None, Some(&cwd));
                 sm.set_leaf_from_entry(&entry_id)
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
                 // Reload messages from the new leaf position
@@ -1531,14 +1531,14 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 let branch = sm.get_branch(Some(&entry_id));
                 for entry in &branch {
                     match &entry.message {
-                        oxi_store::session::AgentMessage::User { content } => {
+                        crate::store::session::AgentMessage::User { content } => {
                             state.add_user_message(content.as_str().to_string());
                         }
-                        oxi_store::session::AgentMessage::Assistant { content, .. } => {
+                        crate::store::session::AgentMessage::Assistant { content, .. } => {
                             let text: String = content
                                 .iter()
                                 .filter_map(|b| match b {
-                                    oxi_store::session::AssistantContentBlock::Text { text } => {
+                                    crate::store::session::AssistantContentBlock::Text { text } => {
                                         Some(text.as_str())
                                     }
                                     _ => None,

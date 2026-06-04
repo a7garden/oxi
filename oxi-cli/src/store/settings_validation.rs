@@ -3,7 +3,7 @@
 //! Validates all setting values at application startup
 //! to prevent runtime panics in advance.
 
-use crate::settings::Settings;
+use crate::store::settings::Settings;
 
 /// Validation result
 #[derive(Debug)]
@@ -131,7 +131,7 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::ThinkingLevel;
+    use crate::store::settings::ThinkingLevel;
 
     /// Default settings should have no errors or warnings.
     #[test]

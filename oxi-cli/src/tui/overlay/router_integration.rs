@@ -22,7 +22,7 @@ fn thinking_to_ai(opt: &Option<String>) -> Option<oxi_sdk::ThinkingLevel> {
 
 /// Convert a store [`RouterConfig`] to an AI [`RouterConfig`].
 pub fn store_config_to_ai_config(
-    c: &oxi_store::router_config::RouterConfig,
+    c: &crate::store::router_config::RouterConfig,
 ) -> oxi_sdk::router::RouterConfig {
     let mut ai_profiles: HashMap<String, oxi_sdk::router::RouterProfile> = HashMap::new();
     for (name, sp) in c.profiles() {
@@ -73,7 +73,7 @@ pub fn store_config_to_ai_config(
 /// Convert [`RouterSetupData`] to a store [`RouterConfig`] and write it to settings.toml.
 pub fn save_router_config(
     data: &RouterSetupData,
-) -> Result<oxi_store::router_config::RouterConfig, String> {
+) -> Result<crate::store::router_config::RouterConfig, String> {
     let profile_name = if data.profile_name.is_empty() {
         "auto"
     } else {
@@ -125,7 +125,7 @@ low.model = "{low}"
             std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
             let gd = dirs::config_dir().unwrap_or_default().join("oxi");
             let pd = std::env::current_dir().unwrap_or_default();
-            return oxi_store::router_config::load_router_config(&gd, &pd)
+            return crate::store::router_config::load_router_config(&gd, &pd)
                 .ok_or_else(|| "Failed to reload router config after save".to_string());
         };
 
@@ -149,6 +149,6 @@ low.model = "{low}"
 
     let global_dir = dirs::config_dir().unwrap_or_default().join("oxi");
     let project_dir = std::env::current_dir().unwrap_or_default();
-    oxi_store::router_config::load_router_config(&global_dir, &project_dir)
+    crate::store::router_config::load_router_config(&global_dir, &project_dir)
         .ok_or_else(|| "Failed to reload router config after save".to_string())
 }

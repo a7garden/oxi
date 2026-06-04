@@ -100,7 +100,7 @@ pub trait Extension: Send + Sync {
     /// `_session_id` uniquely identifies the session that ended.
     fn on_session_end(&self, _session_id: &str) {}
     /// Called whenever the user saves or updates settings.
-    fn on_settings_changed(&self, _settings: &oxi_store::settings::Settings) {}
+    fn on_settings_changed(&self, _settings: &crate::store::settings::Settings) {}
     /// Catch-all hook for any agent event not covered by a specific method.
     fn on_event(&self, _event: &oxi_agent::AgentEvent) {}
     /// Called before a tool is executed. Return `Err` to block the tool call.
@@ -280,7 +280,7 @@ impl Extension for RecordingExtension {
     fn on_session_end(&self, session_id: &str) {
         self.push(&format!("on_session_end({})", session_id));
     }
-    fn on_settings_changed(&self, _settings: &oxi_store::settings::Settings) {
+    fn on_settings_changed(&self, _settings: &crate::store::settings::Settings) {
         self.push("on_settings_changed");
     }
     fn on_event(&self, _event: &oxi_agent::AgentEvent) {
@@ -292,7 +292,7 @@ impl Extension for RecordingExtension {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxi_store::settings::Settings;
+    use crate::store::settings::Settings;
     use std::sync::Arc;
 
     #[test]

@@ -12,6 +12,7 @@ pub mod cli;
 pub mod print_mode;
 pub mod services;
 pub mod setup_wizard;
+pub mod store;
 
 // ─── Directory groups ───────────────────────────────────────────────────────
 pub(crate) mod app;
@@ -30,15 +31,6 @@ pub mod tui; // public for main.rs
 pub(crate) mod ui;
 pub(crate) mod util;
 
-// ─── oxi-store re-exports (shared persistent state) ─────────────────────────
-pub use oxi_store::{
-    auth_guidance, auth_storage, model_registry, model_resolver, session, session_cwd,
-    session_navigation, settings, settings_validation, AgentMessage, AssistantContentBlock,
-    AuthStorage, ContentBlock, ContentValue, ModelRegistry, SessionEntry, SessionManager,
-    SessionTreeNode, Settings, ValidationReport,
-};
-
-/// Build an `Oxi` engine wired with file-based port implementations.
 ///
 /// This is the **new entry point** for oxi-cli run modes. It uses
 /// `oxi-fs` adapters and `OxiBuilder::with_port_*` to construct an
@@ -136,6 +128,7 @@ impl CompactionContext {
 }
 
 // ─── Module-level imports ────────────────────────────────────────────────────
+use crate::store::settings::Settings;
 use anyhow::{Error, Result};
 use oxi_agent::{Agent, AgentConfig, AgentEvent};
 use parking_lot::RwLock;
@@ -164,7 +157,7 @@ pub struct App {
 /// Context for compaction operations, passed to extension hooks// ─── System prompt builder ───────────────────────────────────────────────────
 
 fn build_system_prompt(
-    thinking_level: oxi_store::settings::ThinkingLevel,
+    thinking_level: crate::store::settings::ThinkingLevel,
     skill_contents: &[String],
 ) -> String {
     let skills: Vec<prompt::system_prompt::Skill> = skill_contents

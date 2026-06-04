@@ -12,7 +12,7 @@ use ratatui::{
 use super::{centered_layout, OverlayAction, OverlayComponent};
 use oxi_tui::Theme;
 
-use oxi_store::session::SessionInfo;
+use crate::store::session::SessionInfo;
 
 // ---------------------------------------------------------------------------
 // State
