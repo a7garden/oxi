@@ -23,6 +23,8 @@ use tokio::task::JoinHandle;
 /// event stream and invokes whatever callback is currently installed in
 /// `progress_forwarder()`. The task exits gracefully when the browser
 /// is dropped (the broadcast sender is dropped → `RecvError::Closed`).
+///
+/// Single-tenant — see `BrowseTool::execution_mode`.
 pub struct OxiBrowserEngine {
     browser: oxibrowser_core::Browser,
     config: BrowseConfig,

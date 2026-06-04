@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — oxi-agent
+
+- `BrowseTool::execution_mode` now returns `SequentialOnly` to prevent the OxiBrowserEngine progress forwarder race. (Future work: per-tool_call_id forwarder.)
+
 ### Changed — infrastructure
 
 - **CI**: Added `smoke-test` job to `.github/workflows/ci.yml` so PRs run a lightweight test subset

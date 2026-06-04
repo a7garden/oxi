@@ -3788,7 +3788,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "oxi-agent"
-version = "0.27.0"
+version = "0.27.1"
 dependencies = [
  "a3s-search",
  "anyhow",

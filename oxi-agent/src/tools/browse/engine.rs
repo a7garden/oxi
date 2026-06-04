@@ -286,6 +286,9 @@ pub trait BrowserEngine: Send + Sync {
 
 /// Shared slot for a single progress callback.
 ///
+/// The engine is single-tenant: only one tool call may be in flight at a
+/// time. `BrowseTool` enforces this via `ToolExecutionMode::SequentialOnly`.
+///
 /// Holds at most one `ProgressCallback` at a time. Tools set the callback
 /// before `execute`; a backend's background task reads it and invokes it
 /// with each event's `short_label()`. Replacing the callback (the next

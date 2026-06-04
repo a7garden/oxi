@@ -7,7 +7,7 @@ use super::config::BrowseConfig;
 use super::engine::BrowserEngine;
 use super::helpers;
 use super::tab_guard::TabGuard;
-use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
+use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError, ToolExecutionMode};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -92,6 +92,24 @@ impl AgentTool for BrowseTool {
         // the duration of this tool call. The next tool call's `on_progress`
         // will replace this one — there is no fan-out.
         self.engine.progress_forwarder().set(callback);
+    }
+
+    /// Run sequentially — never in parallel with other tool calls.
+    ///
+    /// The `OxiBrowserEngine`'s `ProgressForwarder` is single-tenant: a
+    /// single `Mutex<Option<ProgressCallback>>` shared by all callers. If
+    /// two `BrowseTool::execute` calls overlapped, the second's
+    /// `on_progress` would overwrite the first's callback in the forwarder,
+    /// and progress events would be delivered to the wrong `tool_call_id`
+    /// (events for tool A would surface on tool B's UI). Sequential mode
+    /// is the simplest, safest fix: the agent loop serializes BrowseTool
+    /// calls so only one is in flight at a time.
+    ///
+    /// Future work: a per-`tool_call_id` forwarder (or per-tab routing via
+    /// a `tab_id` field on `oxibrowser_core::BrowserEvent`) is the proper
+    /// long-term fix and would let BrowseTool run in parallel again.
+    fn execution_mode(&self) -> ToolExecutionMode {
+        ToolExecutionMode::SequentialOnly
     }
 
     async fn execute(
@@ -210,5 +228,45 @@ impl AgentTool for BrowseTool {
         }
 
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::browse::engine::{BrowserError, BrowserTab};
+    use async_trait::async_trait;
+
+    /// Minimal `BrowserEngine` stub. We never call `new_tab` in the test,
+    /// so the trait methods are allowed to return `Err` — the goal is just
+    /// to be able to construct a `BrowseTool` and read `execution_mode()`.
+    struct MockEngine;
+
+    #[async_trait]
+    impl BrowserEngine for MockEngine {
+        async fn new_tab(&self) -> Result<Box<dyn BrowserTab>, BrowserError> {
+            Err(BrowserError::Backend("MockEngine: no real browser".into()))
+        }
+
+        async fn close(&self) -> Result<(), BrowserError> {
+            Ok(())
+        }
+
+        async fn is_alive(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn browse_tool_is_sequential_only() {
+        // The BrowseTool must run sequentially because the OxiBrowserEngine's
+        // progress forwarder is single-tenant. If two BrowseTool executions
+        // ran in parallel, the second's on_progress would overwrite the first's
+        // callback and progress events would be routed to the wrong tool_call_id.
+        let tool = BrowseTool::new(std::sync::Arc::new(MockEngine));
+        assert!(matches!(
+            tool.execution_mode(),
+            crate::tools::ToolExecutionMode::SequentialOnly
+        ));
     }
 }
