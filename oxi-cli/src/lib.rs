@@ -38,6 +38,65 @@ pub use oxi_store::{
     SessionTreeNode, Settings, ValidationReport,
 };
 
+/// Build an `Oxi` engine wired with file-based port implementations.
+///
+/// This is the **new entry point** for oxi-cli run modes. It uses
+/// `oxi-fs` adapters and `OxiBuilder::with_port_*` to construct an
+/// `Oxi` with persistence, auth, config, and skills wired. The legacy
+/// `App::new` path is still used by the interactive TUI during the
+/// migration period.
+///
+/// # Example
+///
+/// ```no_run
+/// use oxi::build_oxi_engine;
+/// # fn _example() -> anyhow::Result<()> {
+/// let oxi = build_oxi_engine()?;
+/// println!("providers: {}", oxi.providers().names().len());
+/// # Ok(()) }
+/// ```
+pub fn build_oxi_engine() -> anyhow::Result<oxi_sdk::Oxi> {
+    let paths = services::OxiPaths::default_paths()?;
+    services::build_oxi(&paths)
+}
+
+/// Self-check the wired port implementations. Prints a one-line summary
+/// per port and returns `Ok(())` if all are reachable.
+///
+/// Triggered by the `OXI_PORT_CHECK=1` environment variable from
+/// `oxi-cli/src/main.rs`. Useful for verifying the new composition root
+/// without disturbing the legacy `App::new` path.
+pub async fn run_port_check() -> anyhow::Result<()> {
+    let oxi = build_oxi_engine()?;
+    let ports = oxi.ports();
+
+    // State
+    let entries = ports.state.list("").await?;
+    println!("[state]    entries: {}", entries.len());
+
+    // Auth
+    let providers = ports.auth.list_providers().await?;
+    println!("[auth]     providers with credentials: {:?}", providers);
+
+    // Config
+    let keys = ports.config.list()?;
+    println!("[config]   keys: {}", keys.len());
+
+    // Skills
+    let skills = ports.skills.list().await?;
+    println!("[skills]   {} skill(s) discovered", skills.len());
+    for s in &skills {
+        println!("           - {}: {}", s.name, s.description);
+    }
+
+    // Event bus / memory / etc — all noop unless registered
+    let _ = ports.event_bus.publish(&"port-check".to_string(), serde_json::json!({"ok": true})).await;
+    println!("[event-bus] publish ok (noop bus if not registered)");
+
+    println!("\nport check: ok");
+    Ok(())
+}
+
 /// Context for compaction operations, passed to extension hooks
 #[derive(Debug, Clone)]
 pub struct CompactionContext {

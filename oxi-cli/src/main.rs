@@ -14,6 +14,14 @@ use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Port-check fast path: when OXI_PORT_CHECK is set, exercise the new
+    // composition root (services::build_oxi + OxiBuilder::with_port_*) and
+    // return before any legacy wiring runs. Useful for verifying the
+    // migration path without disturbing the existing App::new flow.
+    if std::env::var("OXI_PORT_CHECK").is_ok() {
+        return oxi::run_port_check().await;
+    }
+
     // Initialize file-based logging
     init_logging();
 
