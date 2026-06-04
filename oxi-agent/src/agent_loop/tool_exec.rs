@@ -442,6 +442,11 @@ async fn execute_prepared_tool_call(
                 tool_call_id: tool_call_id_clone.clone(),
                 tool_name: tool_name.clone(),
                 partial_result: msg,
+                // Per-tab routing is a follow-up; the engine currently
+                // hands a String to the callback (no structured event),
+                // so we don't know the tab_id here. oxios-kernel treats
+                // None as "no tab badge".
+                tab_id: None,
             });
         });
 
