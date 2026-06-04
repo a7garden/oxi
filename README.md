@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="logo-readme.png" alt="oxi logo" width="120">
+
 # oxi
 
 **A terminal-based AI coding assistant built in Rust.**
