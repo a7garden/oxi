@@ -20,7 +20,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use oxi_fs::{FileAuthProvider, FileConfigStore, FileSkillLoader, FileStateStore};
+use oxi_fs::{
+    FileAuthProvider, FileConfigStore, FilePersonaProvider, FileSkillLoader, FileStateStore,
+    SimpleAccessGate,
+};
 use oxi_sdk::Oxi;
 
 /// Resolved paths under the oxi home directory.
@@ -75,6 +78,10 @@ pub fn build_oxi(paths: &OxiPaths) -> Result<Oxi> {
         .with_auth(Arc::new(FileAuthProvider::new(&paths.auth)))
         .with_config(Arc::new(FileConfigStore::new(&paths.config)))
         .with_skills(Arc::new(FileSkillLoader::single(&paths.skills)))
+        .with_personas(Arc::new(FilePersonaProvider::new(paths.home.join("personas"))))
+        .with_access(Arc::new(SimpleAccessGate::from_file(
+            paths.home.join("access.toml"),
+        )))
         .build();
 
     Ok(oxi)

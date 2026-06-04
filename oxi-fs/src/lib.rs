@@ -49,14 +49,18 @@
 #![warn(missing_docs)]
 #![warn(clippy::unwrap_used)]
 
+pub mod access;
 pub mod auth;
 pub mod config;
 pub mod path;
+pub mod persona;
 pub mod session;
 pub mod skill;
 
+pub use access::SimpleAccessGate;
 pub use auth::FileAuthProvider;
 pub use config::FileConfigStore;
+pub use persona::FilePersonaProvider;
 pub use session::FileStateStore;
 pub use skill::FileSkillLoader;
 
