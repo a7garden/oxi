@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — oxi-agent
+
+- `AgentEvent::ToolExecutionUpdate` gains an optional `tab_id: Option<Uuid>` field (`#[serde(default)]`, backwards-compatible). The current implementation always sets `tab_id: None` because the per-tab routing refactor is a follow-up; oxios-kernel/oxios-web are ready to consume the field once it's populated.
+
 ### Fixed — workspace
 
 - Resolved CI gate violations (12 errors total under `cargo clippy --workspace -- -D warnings` and `RUSTFLAGS="-D warnings" cargo build --workspace`):

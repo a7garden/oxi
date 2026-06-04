@@ -87,6 +87,11 @@ pub enum AgentEvent {
         tool_name: String,
         /// Partial result text so far.
         partial_result: String,
+        /// Browser tab id that produced this progress (if the tool is
+        /// tab-aware). `None` for tools that don't have a tab concept,
+        /// or for older tool implementations that don't propagate tab ids.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tab_id: Option<uuid::Uuid>,
     },
 
     /// A tool execution has finished.
