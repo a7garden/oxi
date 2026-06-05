@@ -3788,7 +3788,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "oxi-agent"
-version = "0.27.1"
+version = "0.28.0"
 dependencies = [
  "a3s-search",
  "anyhow",
@@ -3799,7 +3799,7 @@ dependencies = [
  "futures",
  "glob",
  "libc",
- "oxi-ai",
+ "oxi-ai 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxibrowser-core",
  "parking_lot",
  "regex",
@@ -3817,8 +3817,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxi-agent"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbf911733a5749fa359d3eff1ffcbd89ee5dac343c5779a43c77da9513ae30bf"
+dependencies = [
+ "a3s-search",
+ "anyhow",
+ "async-trait",
+ "base64",
+ "dirs",
+ "futures",
+ "glob",
+ "libc",
+ "oxi-ai 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxibrowser-core",
+ "parking_lot",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
 name = "oxi-ai"
-version = "0.27.1"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3856,8 +3885,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxi-ai"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a0d4c411511145043f4233f6d18058de899ec2c8da2364ea1a84dbbf2aa98de0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bytes",
+ "chrono",
+ "digest",
+ "dirs",
+ "fs2",
+ "futures",
+ "hmac",
+ "jsonschema",
+ "once_cell",
+ "parking_lot",
+ "pkcs8",
+ "raii_flock",
+ "rand 0.8.6",
+ "reqwest",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2",
+ "signature",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "oxi-cli"
-version = "0.27.1"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -3876,10 +3942,10 @@ dependencies = [
  "libloading",
  "notify",
  "once_cell",
- "oxi-agent",
- "oxi-ai",
- "oxi-sdk",
- "oxi-tui",
+ "oxi-agent 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-ai 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-sdk 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-tui 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "parking_lot",
  "predicates",
  "rand 0.8.6",
@@ -3908,7 +3974,7 @@ dependencies = [
 
 [[package]]
 name = "oxi-sdk"
-version = "0.27.1"
+version = "0.28.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3918,8 +3984,8 @@ dependencies = [
  "fastrand",
  "futures",
  "glob",
- "oxi-agent",
- "oxi-ai",
+ "oxi-agent 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-ai 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "oxibrowser-core",
  "parking_lot",
  "serde",
@@ -3935,8 +4001,59 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxi-sdk"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0448b0b9e69c6b86678ea83f4547ce4c813d1885dea8f90406725cd1ade24dc1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "blake3",
+ "chrono",
+ "dirs",
+ "fastrand",
+ "glob",
+ "oxi-agent 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "oxi-ai 0.28.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "oxi-tui"
-version = "0.27.1"
+version = "0.28.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "crossterm",
+ "dirs",
+ "parking_lot",
+ "pulldown-cmark",
+ "ratatui",
+ "ratatui-textarea",
+ "serde",
+ "serde_json",
+ "strum 0.26.3",
+ "toml 0.8.23",
+ "tracing",
+ "tui-markdown",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
+name = "oxi-tui"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6296001d324572c35c2687983fb38c0defe532e0e7ca802b796cbc8216cec8be"
 dependencies = [
  "anyhow",
  "base64",
@@ -3958,9 +4075,9 @@ dependencies = [
 
 [[package]]
 name = "oxibrowser-core"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7111a75f5ae87fe55110c557b3151fb94eb9bcc2caf1d2d972b18caa5a0fd716"
+checksum = "bf06fd8d3bfbf60735c2452503658a16d783cdb01acad1d93bf284139aca920e"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3994,9 +4111,9 @@ dependencies = [
 
 [[package]]
 name = "oxibrowser-webapi"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e072e1c0f571c562747565ece117700fda2bf9f85ec4ea59599e87c0c3ccce3"
+checksum = "cdafb78e15d051b32a7478454a0f87f65ba76b72727aafb79b3b986ee1563637"
 dependencies = [
  "html5ever",
  "markup5ever",

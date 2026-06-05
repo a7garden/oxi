@@ -304,6 +304,20 @@ pub trait AgentTool: Send + Sync {
         ToolExecutionMode::ParallelSafe
     }
 
+    /// Return the current active tab ID, if this tool manages browser tabs.
+    /// Defaults to `None`. Browser tools override this to return the tab ID
+    /// of the currently-open tab during execution, so the agent loop can
+    /// populate `ToolExecutionUpdate.tab_id`.
+    fn current_tab_id(&self) -> Option<uuid::Uuid> {
+        None
+    }
+
+    /// Receive a shared slot where the tool can write the current tab ID.
+    /// The agent loop creates the slot and passes it before `on_progress`;
+    /// the tool writes `Some(tab_id)` when it opens a tab and `None` when
+    /// it closes it. Defaults to a no-op — only tab-aware tools override.
+    fn set_tab_id_slot(&self, _slot: Arc<parking_lot::Mutex<Option<uuid::Uuid>>>) {}
+
     /// Convert to ToolDefinition
     fn to_definition(&self) -> ToolDefinition {
         ToolDefinition {

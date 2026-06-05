@@ -437,16 +437,23 @@ async fn execute_prepared_tool_call(
         let tool_call_id_clone = tool_call_id.clone();
         let emit_clone = emit.clone();
 
+        // Shared slot for the active tab ID. Tools that manage browser tabs
+        // (BrowseTool) populate this when they open a tab; the progress
+        // callback reads it to include `tab_id` in `ToolExecutionUpdate`.
+        let tab_id_slot: Arc<parking_lot::Mutex<Option<uuid::Uuid>>> =
+            Arc::new(parking_lot::Mutex::new(None));
+
+        // Pass the slot to the tool so it can write the tab_id.
+        tool.set_tab_id_slot(Arc::clone(&tab_id_slot));
+
+        let tab_id_slot_cb = Arc::clone(&tab_id_slot);
         let progress_cb: Arc<dyn Fn(String) + Send + Sync> = Arc::new(move |msg: String| {
+            let tab_id = *tab_id_slot_cb.lock();
             emit_clone(AgentEvent::ToolExecutionUpdate {
                 tool_call_id: tool_call_id_clone.clone(),
                 tool_name: tool_name.clone(),
                 partial_result: msg,
-                // Per-tab routing is a follow-up; the engine currently
-                // hands a String to the callback (no structured event),
-                // so we don't know the tab_id here. oxios-kernel treats
-                // None as "no tab badge".
-                tab_id: None,
+                tab_id,
             });
         });
 

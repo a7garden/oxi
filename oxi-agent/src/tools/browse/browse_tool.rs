@@ -9,6 +9,7 @@ use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError, ToolExecutionMode};
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -19,6 +20,13 @@ use tokio::sync::oneshot;
 pub struct BrowseTool {
     engine: Arc<dyn BrowserEngine>,
     config: BrowseConfig,
+    /// Callback stored by `on_progress`, consumed in `execute` when the tab
+    /// is opened.
+    pending_callback: Mutex<Option<crate::tools::ProgressCallback>>,
+    /// Shared slot for the current tab's ID. The agent loop creates the slot
+    /// and passes it via `set_tab_id_slot`; BrowseTool writes `Some(tab_id)`
+    /// when it opens a tab and `None` on close.
+    tab_id_slot: Mutex<Arc<parking_lot::Mutex<Option<uuid::Uuid>>>>,
 }
 
 impl BrowseTool {
@@ -27,12 +35,19 @@ impl BrowseTool {
         Self {
             engine,
             config: BrowseConfig::default(),
+            pending_callback: Mutex::new(None),
+            tab_id_slot: Mutex::new(Arc::new(parking_lot::Mutex::new(None))),
         }
     }
 
     /// Create with custom configuration.
     pub fn with_config(engine: Arc<dyn BrowserEngine>, config: BrowseConfig) -> Self {
-        Self { engine, config }
+        Self {
+            engine,
+            config,
+            pending_callback: Mutex::new(None),
+            tab_id_slot: Mutex::new(Arc::new(parking_lot::Mutex::new(None))),
+        }
     }
 }
 
@@ -86,30 +101,29 @@ impl AgentTool for BrowseTool {
     }
 
     fn on_progress(&self, callback: crate::tools::ProgressCallback) {
-        // The agent loop calls this *before* `execute`. The engine's
-        // background task (spawned by `OxiBrowserEngine::with_config`) will
-        // invoke `callback` with each browser event's `short_label()` for
-        // the duration of this tool call. The next tool call's `on_progress`
-        // will replace this one — there is no fan-out.
-        self.engine.progress_forwarder().set(callback);
+        // The agent loop calls this *before* `execute`. We store the
+        // callback and register it on the actual tab once it's opened
+        // inside `execute`. This bridges the gap: `tab_id` is not known
+        // until the tab is created.
+        *self.pending_callback.lock() = Some(callback);
     }
 
-    /// Run sequentially — never in parallel with other tool calls.
+    /// Sequential execution preserved for stability.
     ///
-    /// The `OxiBrowserEngine`'s `ProgressForwarder` is single-tenant: a
-    /// single `Mutex<Option<ProgressCallback>>` shared by all callers. If
-    /// two `BrowseTool::execute` calls overlapped, the second's
-    /// `on_progress` would overwrite the first's callback in the forwarder,
-    /// and progress events would be delivered to the wrong `tool_call_id`
-    /// (events for tool A would surface on tool B's UI). Sequential mode
-    /// is the simplest, safest fix: the agent loop serializes BrowseTool
-    /// calls so only one is in flight at a time.
-    ///
-    /// Future work: a per-`tool_call_id` forwarder (or per-tab routing via
-    /// a `tab_id` field on `oxibrowser_core::BrowserEvent`) is the proper
-    /// long-term fix and would let BrowseTool run in parallel again.
+    /// Per-tab routing via `TabCallbackRegistry` now correctly routes
+    /// progress events by `tab_id`, making parallel execution safe.
+    /// However, `SequentialOnly` is kept for now unless a concrete
+    /// multi-tab use case requires parallel browse calls.
     fn execution_mode(&self) -> ToolExecutionMode {
         ToolExecutionMode::SequentialOnly
+    }
+
+    fn current_tab_id(&self) -> Option<uuid::Uuid> {
+        *self.tab_id_slot.lock().lock()
+    }
+
+    fn set_tab_id_slot(&self, slot: Arc<parking_lot::Mutex<Option<uuid::Uuid>>>) {
+        *self.tab_id_slot.lock() = slot;
     }
 
     async fn execute(
@@ -136,6 +150,27 @@ impl AgentTool for BrowseTool {
             .new_tab()
             .await
             .map_err(|e| format!("Failed to open browser tab: {}", e))?;
+
+        // Store the tab_id so the agent loop's progress callback can
+        // include it in `ToolExecutionUpdate` events.
+        let tab_id = raw_tab.tab_id();
+        *self.tab_id_slot.lock().lock() = Some(tab_id);
+
+        // Register the pending progress callback on this tab (keyed by tab_id).
+        if let Some(cb) = self.pending_callback.lock().take() {
+            #[cfg(feature = "native-browser")]
+            {
+                use super::oxibrowser_backend::OxiTab;
+                if let Some(oxi_tab) = raw_tab.as_any().downcast_ref::<OxiTab>() {
+                    oxi_tab.set_progress_callback(cb);
+                }
+            }
+            #[cfg(not(feature = "native-browser"))]
+            {
+                let _ = cb; // no-op without native browser
+            }
+        }
+
         let guard = TabGuard::new(raw_tab);
         let tab = guard.tab();
 
@@ -214,8 +249,9 @@ impl AgentTool for BrowseTool {
             None
         };
 
-        // Explicitly close the tab
+        // Explicitly close the tab and clear the tab_id slot
         guard.close().await;
+        *self.tab_id_slot.lock().lock() = None;
 
         let mut result = AgentToolResult::success(output).with_metadata(json!({
             "url": final_url,
@@ -259,14 +295,54 @@ mod tests {
 
     #[test]
     fn browse_tool_is_sequential_only() {
-        // The BrowseTool must run sequentially because the OxiBrowserEngine's
-        // progress forwarder is single-tenant. If two BrowseTool executions
-        // ran in parallel, the second's on_progress would overwrite the first's
-        // callback and progress events would be routed to the wrong tool_call_id.
         let tool = BrowseTool::new(std::sync::Arc::new(MockEngine));
         assert!(matches!(
             tool.execution_mode(),
             crate::tools::ToolExecutionMode::SequentialOnly
         ));
+    }
+
+    #[test]
+    fn browse_tool_tab_id_slot_receives_id_from_agent_loop() {
+        // Simulate the agent loop's flow: set_tab_id_slot → write tab_id →
+        // read current_tab_id → clear.
+        let tool = BrowseTool::new(std::sync::Arc::new(MockEngine));
+
+        // Initially no tab_id
+        assert!(tool.current_tab_id().is_none());
+
+        // Agent loop creates a slot and passes it
+        let slot: Arc<parking_lot::Mutex<Option<uuid::Uuid>>> =
+            Arc::new(parking_lot::Mutex::new(None));
+        tool.set_tab_id_slot(Arc::clone(&slot));
+
+        // Simulate BrowseTool::execute opening a tab
+        let tab_id = uuid::Uuid::new_v4();
+        *slot.lock() = Some(tab_id);
+
+        // Agent loop's progress callback reads the slot
+        assert_eq!(tool.current_tab_id(), Some(tab_id));
+
+        // BrowseTool::execute closes the tab
+        *slot.lock() = None;
+        assert!(tool.current_tab_id().is_none());
+    }
+
+    #[test]
+    fn browse_tool_on_progress_stores_pending_callback() {
+        let tool = BrowseTool::new(std::sync::Arc::new(MockEngine));
+
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let called_clone = Arc::clone(&called);
+        tool.on_progress(oxi_ai::progress_callback(move |_: String| {
+            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        // The pending callback should be stored (not yet registered on any tab)
+        let pending = tool.pending_callback.lock();
+        assert!(
+            pending.is_some(),
+            "pending_callback should be set after on_progress"
+        );
     }
 }

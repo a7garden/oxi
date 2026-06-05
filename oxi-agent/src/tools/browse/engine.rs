@@ -240,6 +240,22 @@ pub trait BrowserTab: Send + Sync {
     fn is_closed(&self) -> bool {
         false
     }
+
+    /// Return this tab's unique ID, if the backend supports it.
+    /// Defaults to `Uuid::nil()` for backends that don't track tab identity.
+    fn tab_id(&self) -> uuid::Uuid {
+        uuid::Uuid::nil()
+    }
+
+    /// Support downcasting for backend-specific access.
+    fn as_any(&self) -> &dyn std::any::Any {
+        // Default: no concrete type info.
+        &std::marker::PhantomData::<()>
+    }
+
+    /// Clear any registered progress callback for this tab.
+    /// Defaults to no-op — only backends with callback registries override.
+    fn clear_progress_callback(&self) {}
 }
 
 // ── BrowserEngine trait ───────────────────────────────────────────────────────
@@ -267,77 +283,82 @@ pub trait BrowserEngine: Send + Sync {
     /// Returns `true` if the browser is still alive.
     async fn is_alive(&self) -> bool;
 
-    /// Access the engine's progress forwarder.
+    /// Access the engine's per-tab callback registry.
     ///
-    /// Tools (e.g. `BrowseTool`) call `engine.progress_forwarder().set(cb)`
-    /// from their `on_progress` implementation. Backends that stream
-    /// lifecycle events (oxibrowser-core) spawn a background task in their
-    /// constructor that drains the browser's event channel and invokes
-    /// the currently-installed callback. Backends without event streaming
-    /// return an empty forwarder — `set` becomes a no-op, no events fire.
+    /// Tools (e.g. `BrowseTool`) register per-tab callbacks keyed by
+    /// `tab_id`. The backend's background event-drain task extracts
+    /// `tab_id` from each `BrowserEvent` and routes it to the correct
+    /// callback. Backends without event streaming return an empty
+    /// registry — `set`/`invoke` become no-ops.
     ///
-    /// Default implementation returns a fresh empty forwarder.
-    fn progress_forwarder(&self) -> Arc<ProgressForwarder> {
-        Arc::new(ProgressForwarder::new())
+    /// Default implementation returns a fresh empty registry.
+    fn callback_registry(&self) -> Arc<TabCallbackRegistry> {
+        Arc::new(TabCallbackRegistry::new())
     }
 }
 
-// ── ProgressForwarder ─────────────────────────────────────────────────────
+// ── TabCallbackRegistry ──────────────────────────────────────────────────
 
-/// Shared slot for a single progress callback.
+/// Per-`tab_id` callback registry for browser event routing.
 ///
-/// The engine is single-tenant: only one tool call may be in flight at a
-/// time. `BrowseTool` enforces this via `ToolExecutionMode::SequentialOnly`.
+/// Each `BrowseTool` invocation opens its own tab and registers a callback
+/// keyed by the tab's `tab_id`. The engine's background event-drain task
+/// extracts `tab_id` from each `BrowserEvent` and routes it to the correct
+/// callback. Multiple tabs can be active concurrently — each receives only
+/// its own events.
 ///
-/// Holds at most one `ProgressCallback` at a time. Tools set the callback
-/// before `execute`; a backend's background task reads it and invokes it
-/// with each event's `short_label()`. Replacing the callback (the next
-/// tool call) drops the old one — there is no fan-out.
-///
-/// The default forwarder (returned by the trait's default `progress_forwarder`)
-/// is a no-op: `invoke` silently drops messages. This is the right
-/// behaviour for backends that don't stream events.
-pub struct ProgressForwarder {
-    callback: Mutex<Option<crate::tools::ProgressCallback>>,
+/// Tabs that have no registered callback (e.g. opened outside of a tool
+/// call) are silently ignored — `invoke` is a no-op for unknown tab IDs.
+pub struct TabCallbackRegistry {
+    callbacks: Mutex<HashMap<uuid::Uuid, crate::tools::ProgressCallback>>,
 }
 
-impl Default for ProgressForwarder {
+impl Default for TabCallbackRegistry {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ProgressForwarder {
-    /// Create an empty forwarder.
+impl TabCallbackRegistry {
+    /// Create an empty registry.
     pub fn new() -> Self {
         Self {
-            callback: Mutex::new(None),
+            callbacks: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Install (or replace) the callback. Called from `AgentTool::on_progress`.
-    pub fn set(&self, cb: crate::tools::ProgressCallback) {
-        *self.callback.lock() = Some(cb);
+    /// Register a callback for the given `tab_id`.
+    pub fn set(&self, tab_id: uuid::Uuid, cb: crate::tools::ProgressCallback) {
+        self.callbacks.lock().insert(tab_id, cb);
     }
 
-    /// Remove the callback. Subsequent `invoke` calls become no-ops until
-    /// the next `set`.
-    pub fn clear(&self) {
-        *self.callback.lock() = None;
+    /// Remove the callback for `tab_id`. Called when the tab is closed.
+    pub fn clear(&self, tab_id: &uuid::Uuid) {
+        self.callbacks.lock().remove(tab_id);
     }
 
-    /// Invoke the currently-installed callback, if any. Never panics; never
-    /// blocks. If the callback itself panics, the panic propagates (we do
-    /// not silently swallow — that would hide bugs in user code).
-    pub fn invoke(&self, msg: String) {
-        if let Some(cb) = self.callback.lock().as_ref() {
+    /// Invoke the callback for `tab_id`, if one is registered.
+    /// Never panics; never blocks. If the callback itself panics, the
+    /// panic propagates.
+    pub fn invoke(&self, tab_id: &uuid::Uuid, msg: String) {
+        if let Some(cb) = self.callbacks.lock().get(tab_id).cloned() {
             cb(msg);
         }
     }
 
-    /// Whether a callback is currently installed. Useful for tests.
-    pub fn is_set(&self) -> bool {
-        self.callback.lock().is_some()
+    /// Whether a callback is registered for the given `tab_id`.
+    pub fn is_set(&self, tab_id: &uuid::Uuid) -> bool {
+        self.callbacks.lock().contains_key(tab_id)
+    }
+
+    /// Number of currently registered callbacks.
+    pub fn len(&self) -> usize {
+        self.callbacks.lock().len()
+    }
+
+    /// Returns `true` if no callbacks are registered.
+    pub fn is_empty(&self) -> bool {
+        self.callbacks.lock().is_empty()
     }
 }
 
@@ -347,71 +368,89 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
-    fn progress_forwarder_default_is_empty() {
-        let pf = ProgressForwarder::new();
-        assert!(!pf.is_set());
-        // invoke on empty forwarder is a silent no-op
-        pf.invoke("should be dropped".into());
+    fn tab_callback_registry_default_is_empty() {
+        let reg = TabCallbackRegistry::new();
+        assert!(reg.is_empty());
+        assert_eq!(reg.len(), 0);
+        // invoke on empty registry is a silent no-op
+        let nil = uuid::Uuid::nil();
+        reg.invoke(&nil, "should be dropped".into());
     }
 
     #[test]
-    fn progress_forwarder_set_and_invoke() {
-        let pf = ProgressForwarder::new();
+    fn tab_callback_registry_set_and_invoke() {
+        let reg = TabCallbackRegistry::new();
+        let tab_a = uuid::Uuid::new_v4();
+        let tab_b = uuid::Uuid::new_v4();
         let count = Arc::new(AtomicUsize::new(0));
         let count_clone = Arc::clone(&count);
-        pf.set(oxi_ai::progress_callback(move |msg: String| {
-            assert_eq!(msg, "hello");
-            count_clone.fetch_add(1, Ordering::SeqCst);
-        }));
-        assert!(pf.is_set());
+        reg.set(
+            tab_a,
+            oxi_ai::progress_callback(move |msg: String| {
+                assert_eq!(msg, "hello");
+                count_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        assert!(reg.is_set(&tab_a));
+        assert!(!reg.is_set(&tab_b));
 
-        pf.invoke("hello".into());
-        pf.invoke("hello".into());
+        reg.invoke(&tab_a, "hello".into());
+        reg.invoke(&tab_a, "hello".into());
+        // invoke for unregistered tab_b is a no-op
+        reg.invoke(&tab_b, "hello".into());
         assert_eq!(count.load(Ordering::SeqCst), 2);
     }
 
     #[test]
-    fn progress_forwarder_set_replaces_previous() {
-        let pf = ProgressForwarder::new();
+    fn tab_callback_registry_set_per_tab_isolation() {
+        let reg = TabCallbackRegistry::new();
+        let tab_a = uuid::Uuid::new_v4();
+        let tab_b = uuid::Uuid::new_v4();
         let count_a = Arc::new(AtomicUsize::new(0));
         let count_b = Arc::new(AtomicUsize::new(0));
 
         let ca = Arc::clone(&count_a);
-        pf.set(oxi_ai::progress_callback(move |_| {
-            ca.fetch_add(1, Ordering::SeqCst);
-        }));
-        pf.invoke("first".into());
+        reg.set(
+            tab_a,
+            oxi_ai::progress_callback(move |_| {
+                ca.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        let cb_clone = Arc::clone(&count_b);
+        reg.set(
+            tab_b,
+            oxi_ai::progress_callback(move |_| {
+                cb_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
+        reg.invoke(&tab_a, "event".into());
         assert_eq!(count_a.load(Ordering::SeqCst), 1);
         assert_eq!(count_b.load(Ordering::SeqCst), 0);
 
-        // Replace with a new callback — the old one is dropped.
-        let cb_clone = Arc::clone(&count_b);
-        pf.set(oxi_ai::progress_callback(move |_| {
-            cb_clone.fetch_add(1, Ordering::SeqCst);
-        }));
-        pf.invoke("second".into());
-        assert_eq!(
-            count_a.load(Ordering::SeqCst),
-            1,
-            "old callback should not fire"
-        );
+        reg.invoke(&tab_b, "event".into());
+        assert_eq!(count_a.load(Ordering::SeqCst), 1);
         assert_eq!(count_b.load(Ordering::SeqCst), 1);
     }
 
     #[test]
-    fn progress_forwarder_clear() {
-        let pf = ProgressForwarder::new();
+    fn tab_callback_registry_clear() {
+        let reg = TabCallbackRegistry::new();
+        let tab_a = uuid::Uuid::new_v4();
         let count = Arc::new(AtomicUsize::new(0));
         let c = Arc::clone(&count);
-        pf.set(oxi_ai::progress_callback(move |_| {
-            c.fetch_add(1, Ordering::SeqCst);
-        }));
-        pf.invoke("x".into());
+        reg.set(
+            tab_a,
+            oxi_ai::progress_callback(move |_| {
+                c.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+        reg.invoke(&tab_a, "x".into());
         assert_eq!(count.load(Ordering::SeqCst), 1);
 
-        pf.clear();
-        assert!(!pf.is_set());
-        pf.invoke("y".into());
+        reg.clear(&tab_a);
+        assert!(!reg.is_set(&tab_a));
+        reg.invoke(&tab_a, "y".into());
         assert_eq!(
             count.load(Ordering::SeqCst),
             1,

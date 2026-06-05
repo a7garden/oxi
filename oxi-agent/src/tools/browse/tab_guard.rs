@@ -57,6 +57,7 @@ impl TabGuard {
     pub async fn close(mut self) {
         self.explicitly_consumed = true;
         if let Some(tab) = self.tab.take() {
+            tab.clear_progress_callback();
             if let Err(e) = tab.close().await {
                 tracing::warn!("TabGuard: tab close failed: {}", e);
             }

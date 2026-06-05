@@ -10,6 +10,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added — oxi-agent
 
 - `AgentEvent::ToolExecutionUpdate` gains an optional `tab_id: Option<Uuid>` field (`#[serde(default)]`, backwards-compatible). The current implementation always sets `tab_id: None` because the per-tab routing refactor is a follow-up; oxios-kernel/oxios-web are ready to consume the field once it's populated.
+- Per-`tab_id` `TabCallbackRegistry` replaces the single-slot `ProgressForwarder`.
+  Concurrent `BrowseTool` calls (each with their own tab) are now routed correctly.
+  Each `BrowseTool::execute` registers its callback on the specific tab; the
+  engine's background event-drain task routes events by `tab_id`.
+- `AgentTool::set_tab_id_slot` and `AgentTool::current_tab_id` default methods
+  on the tool trait, enabling the agent loop to read the active tab ID.
+- `BrowserTab::tab_id`, `BrowserTab::as_any`, `BrowserTab::clear_progress_callback`
+  default methods on the browser tab trait.
+- `BrowseTool::pending_callback` pattern: `on_progress` stores the callback;
+  `execute` registers it on the actual tab (tab_id not known until tab creation).
+- Integration test `engine_routes_events_by_tab_id_concurrent`: opens two tabs,
+  registers per-tab callbacks, and verifies event isolation.
+
+### Changed — oxi-agent
+
+- `oxibrowser-core` dependency bumped from 0.12 to **0.13**.
+- `BrowseTool::execution_mode` remains `SequentialOnly` (per-tab routing makes
+  parallel safe, but no concrete multi-tab use case yet).
+
+### Fixed — oxi-agent
+
+- `AgentEvent::ToolExecutionUpdate.tab_id` is now populated (no longer always `None`).
+  The agent loop passes a shared `tab_id_slot` to the tool; `BrowseTool` writes
+  the tab ID when it opens a tab, and the progress callback reads it.
+- `TabGuard::close` now calls `clear_progress_callback()` to unregister the
+  per-tab callback, preventing stale callbacks from accumulating in the registry.
 
 ### Fixed — workspace
 

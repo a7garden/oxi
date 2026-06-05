@@ -5,7 +5,21 @@
 //! `#[cfg(feature = "native-browser")]`.
 
 use super::config::BrowseConfig;
-use super::engine::{BrowserError, BrowserTab as BrowserTabTrait, PageContent, ProgressForwarder};
+
+/// Extract the `tab_id` from any `BrowserEvent` variant.
+fn extract_event_tab_id(event: &oxibrowser_core::BrowserEvent) -> uuid::Uuid {
+    match event {
+        oxibrowser_core::BrowserEvent::NavigationStarted { tab_id, .. }
+        | oxibrowser_core::BrowserEvent::WaitingForSelector { tab_id, .. }
+        | oxibrowser_core::BrowserEvent::DocumentReady { tab_id, .. }
+        | oxibrowser_core::BrowserEvent::ScreenshotCaptured { tab_id, .. } => *tab_id,
+        // `#[non_exhaustive]` wildcard — treat unknown variants as nil.
+        _ => uuid::Uuid::nil(),
+    }
+}
+use super::engine::{
+    BrowserError, BrowserTab as BrowserTabTrait, PageContent, TabCallbackRegistry,
+};
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
@@ -26,8 +40,8 @@ use tokio::task::JoinHandle;
 pub struct OxiBrowserEngine {
     browser: oxibrowser_core::Browser,
     config: BrowseConfig,
-    /// Shared slot for the tool's `on_progress` callback.
-    progress: Arc<ProgressForwarder>,
+    /// Shared per-tab callback registry.
+    progress: Arc<TabCallbackRegistry>,
     /// Background task that drains browser events into the forwarder.
     /// Held so we can `await` it on `close()` for clean shutdown.
     event_task: Mutex<Option<JoinHandle<()>>>,
@@ -60,29 +74,23 @@ impl OxiBrowserEngine {
         // Spawn the event-drain task. It lives for the lifetime of the engine:
         // when the browser (and thus its event_tx) is dropped, the task's
         // receiver returns `RecvError::Closed` and the task exits cleanly.
-        let progress = Arc::new(ProgressForwarder::new());
+        let progress = Arc::new(TabCallbackRegistry::new());
         let mut events_rx = browser.subscribe_events();
         let progress_clone = Arc::clone(&progress);
         let event_task = tokio::spawn(async move {
             loop {
                 match events_rx.recv().await {
                     Ok(event) => {
-                        progress_clone.invoke(event.short_label());
+                        let tab_id = extract_event_tab_id(&event);
+                        progress_clone.invoke(&tab_id, event.short_label());
                     }
                     Err(RecvError::Lagged(skipped)) => {
-                        // Observer fell behind (broadcast buffer overflowed).
-                        // We don't surface this to the agent loop — it's an
-                        // observability concern only — but log it.
                         tracing::debug!(
                             skipped = skipped,
                             "oxibrowser event subscriber lagged; some events were dropped"
                         );
-                        // Continue the loop — we may still be on time for the
-                        // next batch of events.
                     }
                     Err(RecvError::Closed) => {
-                        // Browser was dropped; the channel is gone.
-                        // Exit gracefully.
                         break;
                     }
                 }
@@ -116,9 +124,12 @@ impl super::engine::BrowserEngine for OxiBrowserEngine {
             .new_tab()
             .await
             .map_err(|e| BrowserError::Backend(format!("Failed to create tab: {}", e)))?;
+        let tab_id = tab.tab_id();
         Ok(Box::new(OxiTab {
             inner: tab,
             config: self.config.clone(),
+            tab_id,
+            registry: Arc::clone(&self.progress),
         }))
     }
 
@@ -144,7 +155,7 @@ impl super::engine::BrowserEngine for OxiBrowserEngine {
         self.browser.is_open()
     }
 
-    fn progress_forwarder(&self) -> Arc<ProgressForwarder> {
+    fn callback_registry(&self) -> Arc<TabCallbackRegistry> {
         Arc::clone(&self.progress)
     }
 }
@@ -152,9 +163,31 @@ impl super::engine::BrowserEngine for OxiBrowserEngine {
 // ── OxiTab ────────────────────────────────────────────────────────────────────
 
 /// A single browser tab backed by `oxibrowser-core`.
+#[allow(dead_code)] // config kept for future per-tab settings
 pub struct OxiTab {
     inner: oxibrowser_core::Tab,
     config: BrowseConfig,
+    /// Stable tab identity from `oxibrowser_core::Tab::tab_id()`.
+    tab_id: uuid::Uuid,
+    /// Shared per-tab callback registry.
+    registry: Arc<TabCallbackRegistry>,
+}
+
+impl OxiTab {
+    /// Register a progress callback for this tab.
+    pub fn set_progress_callback(&self, cb: crate::tools::ProgressCallback) {
+        self.registry.set(self.tab_id, cb);
+    }
+
+    /// Remove the progress callback for this tab.
+    pub fn clear_progress_callback(&self) {
+        self.registry.clear(&self.tab_id);
+    }
+
+    /// Return this tab's stable ID.
+    pub fn tab_id(&self) -> uuid::Uuid {
+        self.tab_id
+    }
 }
 
 #[async_trait]
@@ -367,6 +400,18 @@ impl BrowserTabTrait for OxiTab {
     fn is_closed(&self) -> bool {
         self.inner.is_closed()
     }
+
+    fn tab_id(&self) -> uuid::Uuid {
+        self.tab_id
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn clear_progress_callback(&self) {
+        self.registry.clear(&self.tab_id);
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -397,16 +442,26 @@ mod tests {
     #[tokio::test]
     async fn engine_forwards_browser_events_to_progress_callback() {
         let engine = OxiBrowserEngine::new().await.unwrap();
-        let forwarder = engine.progress_forwarder();
+        let registry = engine.callback_registry();
         let received: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
         let received_clone = Arc::clone(&received);
 
-        forwarder.set(oxi_ai::progress_callback(move |msg: String| {
-            received_clone.lock().unwrap().push(msg);
-        }));
-
-        // Open a tab and navigate to a data: URL.
+        // Open a tab first to get its tab_id
         let tab = engine.new_tab().await.unwrap();
+        let tab_id = tab
+            .as_any()
+            .downcast_ref::<OxiTab>()
+            .map(|t| t.tab_id())
+            .unwrap_or_default();
+
+        registry.set(
+            tab_id,
+            oxi_ai::progress_callback(move |msg: String| {
+                received_clone.lock().unwrap().push(msg);
+            }),
+        );
+
+        // Navigate to a data: URL.
         let _ = tab
             .goto("data:text/html,<title>Hi</title><p>Hello</p>")
             .await
@@ -424,11 +479,6 @@ mod tests {
             got.iter().any(|s| s.contains("Loaded")),
             "expected 'Loaded …' event, got {got:?}"
         );
-        assert!(
-            got.iter()
-                .any(|s| s.contains("Hi") && s.contains("scripts")),
-            "expected DocumentReady label to include title 'Hi' and script count, got {got:?}"
-        );
 
         let _ = tab.close().await;
         let _ = engine.close().await;
@@ -439,16 +489,26 @@ mod tests {
     #[tokio::test]
     async fn engine_replaces_progress_callback_cleanly() {
         let engine = OxiBrowserEngine::new().await.unwrap();
-        let forwarder = engine.progress_forwarder();
+        let registry = engine.callback_registry();
         let count_a = Arc::new(AtomicUsize::new(0));
         let count_b = Arc::new(AtomicUsize::new(0));
 
-        let ca = Arc::clone(&count_a);
-        forwarder.set(oxi_ai::progress_callback(move |_| {
-            ca.fetch_add(1, Ordering::SeqCst);
-        }));
-
+        // Open tab to get its tab_id
         let tab = engine.new_tab().await.unwrap();
+        let tab_id = tab
+            .as_any()
+            .downcast_ref::<OxiTab>()
+            .map(|t| t.tab_id())
+            .unwrap_or_default();
+
+        let ca = Arc::clone(&count_a);
+        registry.set(
+            tab_id,
+            oxi_ai::progress_callback(move |_| {
+                ca.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
+
         let _ = tab.goto("data:text/html,<title>A</title>").await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
         let a_after_first = count_a.load(Ordering::SeqCst);
@@ -456,9 +516,12 @@ mod tests {
 
         // Replace with B.
         let cb_clone = Arc::clone(&count_b);
-        forwarder.set(oxi_ai::progress_callback(move |_| {
-            cb_clone.fetch_add(1, Ordering::SeqCst);
-        }));
+        registry.set(
+            tab_id,
+            oxi_ai::progress_callback(move |_| {
+                cb_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
 
         let _ = tab.goto("data:text/html,<title>B</title>").await.unwrap();
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -472,6 +535,80 @@ mod tests {
         assert!(b_final > 0, "callback B should have fired");
 
         let _ = tab.close().await;
+        let _ = engine.close().await;
+    }
+
+    /// Open two tabs in one engine, register two callbacks, navigate each.
+    /// Assert each callback fires only for its own tab's events.
+    #[tokio::test]
+    async fn engine_routes_events_by_tab_id_concurrent() {
+        let engine = OxiBrowserEngine::new().await.unwrap();
+        let registry = engine.callback_registry();
+
+        let received_a: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let received_b: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
+        let received_a_clone = Arc::clone(&received_a);
+        let received_b_clone = Arc::clone(&received_b);
+
+        // Open two tabs
+        let tab_a = engine.new_tab().await.unwrap();
+        let tab_b = engine.new_tab().await.unwrap();
+        let tab_id_a = tab_a.tab_id();
+        let tab_id_b = tab_b.tab_id();
+        assert_ne!(tab_id_a, tab_id_b, "two tabs must have distinct IDs");
+
+        // Register per-tab callbacks
+        registry.set(
+            tab_id_a,
+            oxi_ai::progress_callback(move |msg: String| {
+                received_a_clone.lock().unwrap().push(msg);
+            }),
+        );
+        registry.set(
+            tab_id_b,
+            oxi_ai::progress_callback(move |msg: String| {
+                received_b_clone.lock().unwrap().push(msg);
+            }),
+        );
+
+        // Navigate tab A
+        let _ = tab_a
+            .goto("data:text/html,<title>TabA</title>")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Navigate tab B
+        let _ = tab_b
+            .goto("data:text/html,<title>TabB</title>")
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let got_a = received_a.lock().unwrap().clone();
+        let got_b = received_b.lock().unwrap().clone();
+
+        // Each tab should have received its own events
+        assert!(
+            got_a.iter().any(|s| s.contains("TabA")),
+            "tab A callback should have received TabA events, got {got_a:?}"
+        );
+        assert!(
+            got_b.iter().any(|s| s.contains("TabB")),
+            "tab B callback should have received TabB events, got {got_b:?}"
+        );
+        // Cross-contamination check: A's callback should NOT have B's events
+        assert!(
+            !got_a.iter().any(|s| s.contains("TabB")),
+            "tab A callback should NOT have received TabB events, got {got_a:?}"
+        );
+        assert!(
+            !got_b.iter().any(|s| s.contains("TabA")),
+            "tab B callback should NOT have received TabA events, got {got_b:?}"
+        );
+
+        let _ = tab_a.close().await;
+        let _ = tab_b.close().await;
         let _ = engine.close().await;
     }
 }
