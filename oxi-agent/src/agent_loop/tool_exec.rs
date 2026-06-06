@@ -749,11 +749,11 @@ mod tests {
     fn infer_context_web_search_with_engine() {
         let ctx = infer_context(
             "web_search",
-            &json!({ "query": "rust", "engines": "brave" }),
+            &json!({ "query": "rust", "engines": "bing" }),
         );
         assert!(matches!(
             ctx,
-            Some(ToolCallContext::WebSearch { engine: Some(e), .. }) if e == "brave"
+            Some(ToolCallContext::WebSearch { engine: Some(e), .. }) if e == "bing"
         ));
     }
 

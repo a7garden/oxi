@@ -5,6 +5,23 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] - 2026-06-06
+
+### Changed — oxi-agent
+
+- **Replace `a3s-search` with `oxibrowser` search module**: Web search (`web_search` tool) now uses `oxibrowser::search::dispatch()` instead of the `a3s-search` crate. This consolidates search functionality into the oxibrowser ecosystem and removes the `a3s-search` dependency.
+- **Remove Brave engine**: The `brave` engine option is no longer available. Supported engines: `ddg`, `wiki`, `bing`.
+- **`SearchResult` type migration**: `search_cache::SearchResult` replaced by `oxibrowser::SearchResult` (fields `engines`/`score` → `source`/`extra`).
+
+### Removed
+
+- `a3s-search` dependency from `oxi-agent`.
+- `RUSTSEC-2025-0057` (fxhash) advisory exception — no longer a transitive dependency.
+
+### Changed — oxi-sdk
+
+- `oxibrowser-core` dependency updated to `0.14.1`.
+
 ## [0.29.1] - 2026-06-06
 
 ### Added — oxi-agent

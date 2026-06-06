@@ -63,7 +63,7 @@ oxi는 이미 **20개 내장 툴**(AgentTool 트레이트 구현체)로 pi의 7�
 | 내장 툴 수 | 7 | 20+ | 우위 유지 |
 | MCP Client | ❌ | ✅ (tools + resources) | 정교화 |
 | Subagent | ❌ | ✅ (single/parallel/chain) | 정교화 |
-| Web Search | ❌ | ✅ (a3s-search + DDG 폴백) | 유지 |
+| Web Search | ❌ | ✅ (oxibrowser search: ddg/wiki/bing) | 유지 |
 | GitHub | ❌ | ✅ (gh CLI + REST API) | 유지 |
 | Browse | ❌ | ✅ (4개 툴 + 세션 관리) | 안정화 |
 | Context7 | ❌ | ✅ (resolve + query) | 유지 |

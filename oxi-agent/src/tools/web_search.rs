@@ -1,11 +1,12 @@
 use super::search_cache::{SearchCache, SearchResult};
-/// Web search tool — searches via a3s-search library (DuckDuckGo, Wikipedia, Bing, Brave).
+/// Web search tool — searches via oxibrowser's integrated search module.
 ///
-/// Uses a3s-search as a Rust library (not CLI), so no external binary is needed.
-/// Results are structured types — no text parsing required.
+/// Uses `oxibrowser::search::dispatch()` which provides multi-engine web
+/// search (DuckDuckGo, Wikipedia, Bing) and GitHub search, all powered by
+/// lightweight HTTP requests — no external binary or API keys needed.
 ///
 /// Features:
-/// - Multiple search engines (ddg, wiki, bing, brave)
+/// - Multiple search engines (ddg, wiki, bing)
 /// - Result caching with search IDs for later retrieval via `get_search_results`
 /// - Configurable engine selection and result count
 /// - Zero-config: no API keys, no external binary needed
@@ -24,25 +25,12 @@ const MAX_RESULTS: usize = 30;
 /// Default search engines.
 const DEFAULT_ENGINES: &str = "ddg,wiki";
 
-// ── Engine shortcut → a3s engine mapping ──────────────────────────
-
-/// Build a3s-search engine instances from shortcuts and add to Search.
-fn add_engines(search: &mut a3s_search::Search, shortcuts: &str) {
-    for shortcut in shortcuts.split(',') {
-        match shortcut.trim() {
-            "ddg" => search.add_engine(a3s_search::engines::DuckDuckGo::new()),
-            "wiki" => search.add_engine(a3s_search::engines::Wikipedia::new()),
-            "bing" => search.add_engine(a3s_search::engines::Bing::new()),
-            "brave" => search.add_engine(a3s_search::engines::Brave::new()),
-            s if !s.is_empty() => tracing::warn!("Unknown search engine: {}", s),
-            _ => {}
-        }
-    }
-}
+/// Search timeout in seconds.
+const SEARCH_TIMEOUT_SECS: u64 = 15;
 
 // ── WebSearchTool ─────────────────────────────────────────────────
 
-/// Multi-engine web search tool using a3s-search library.
+/// Multi-engine web search tool using oxibrowser's search module.
 pub struct WebSearchTool {
     cache: Arc<SearchCache>,
 }
@@ -53,49 +41,26 @@ impl WebSearchTool {
         Self { cache }
     }
 
-    /// Execute search using a3s-search library.
+    /// Execute search using oxibrowser's dispatch.
     async fn do_search(
         &self,
         query: &str,
         engines: &str,
         limit: usize,
     ) -> Result<Vec<SearchResult>, ToolError> {
-        let mut search = a3s_search::Search::new();
-        add_engines(&mut search, engines);
+        let output = oxibrowser::search::dispatch(
+            query,
+            "web",       // source: web search
+            engines,     // "ddg,wiki,bing"
+            None,        // repo (not used for web)
+            None,        // token (not used for web)
+            limit,
+            SEARCH_TIMEOUT_SECS,
+        )
+        .await
+        .map_err(|e| format!("Search failed: {}", e))?;
 
-        if search.engine_count() == 0 {
-            return Err(
-                "No valid engines specified. Available: ddg, wiki, bing, brave".to_string(),
-            );
-        }
-
-        search.set_timeout(std::time::Duration::from_secs(15));
-
-        let a3s_query = a3s_search::SearchQuery::new(query);
-        let results = search
-            .search(a3s_query)
-            .await
-            .map_err(|e| format!("Search failed: {}", e))?;
-
-        let formatted: Vec<SearchResult> = results
-            .items()
-            .iter()
-            .take(limit)
-            .map(|r| SearchResult {
-                title: r.title.clone(),
-                url: r.url.clone(),
-                snippet: r.content.clone(),
-                engines: r.engines.iter().cloned().collect(),
-                score: r.score,
-            })
-            .collect();
-
-        // Log engine errors if any
-        for (engine, error) in results.errors() {
-            tracing::warn!("Search engine {} error: {}", engine, error);
-        }
-
-        Ok(formatted)
+        Ok(output.results)
     }
 }
 
@@ -116,7 +81,13 @@ fn format_results(results: &[SearchResult]) -> String {
             } else {
                 r.snippet.clone()
             };
-            format!("{}. **{}**\n   {}\n   {}", i + 1, r.title, r.url, snippet)
+            format!(
+                "{}. **{}**\n   {}\n   {}",
+                i + 1,
+                r.title,
+                r.url,
+                snippet
+            )
         })
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -135,7 +106,7 @@ impl AgentTool for WebSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search the web using multiple engines (DuckDuckGo, Wikipedia, Bing, Brave). No server or API key needed. Returns results with titles, URLs, and snippets."
+        "Search the web using multiple engines (DuckDuckGo, Wikipedia, Bing). No server or API key needed. Returns results with titles, URLs, and snippets."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -148,7 +119,7 @@ impl AgentTool for WebSearchTool {
                 },
                 "engines": {
                     "type": "string",
-                    "description": "Comma-separated engines (ddg,wiki,bing,brave). Default: ddg,wiki",
+                    "description": "Comma-separated engines (ddg,wiki,bing). Default: ddg,wiki",
                     "default": "ddg,wiki"
                 },
                 "limit": {
@@ -200,8 +171,7 @@ impl AgentTool for WebSearchTool {
                     "title": r.title,
                     "url": r.url,
                     "snippet": r.snippet,
-                    "engines": r.engines,
-                    "score": r.score
+                    "source": r.source,
                 })
             })
             .collect();
@@ -222,34 +192,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_add_engines_ddg() {
-        let mut search = a3s_search::Search::new();
-        add_engines(&mut search, "ddg");
-        assert_eq!(search.engine_count(), 1);
-    }
-
-    #[test]
-    fn test_add_engines_multiple() {
-        let mut search = a3s_search::Search::new();
-        add_engines(&mut search, "ddg,wiki,brave");
-        assert_eq!(search.engine_count(), 3);
-    }
-
-    #[test]
-    fn test_add_engines_unknown() {
-        let mut search = a3s_search::Search::new();
-        add_engines(&mut search, "ddg,unknown,wiki");
-        assert_eq!(search.engine_count(), 2);
-    }
-
-    #[test]
-    fn test_add_engines_empty() {
-        let mut search = a3s_search::Search::new();
-        add_engines(&mut search, "");
-        assert_eq!(search.engine_count(), 0);
-    }
-
-    #[test]
     fn test_format_results_empty() {
         assert_eq!(format_results(&[]), "No results found.");
     }
@@ -260,8 +202,8 @@ mod tests {
             title: "Test".to_string(),
             url: "https://example.com".to_string(),
             snippet: "A snippet".to_string(),
-            engines: vec!["DuckDuckGo".to_string()],
-            score: 1.0,
+            source: "DuckDuckGo".to_string(),
+            extra: None,
         }];
         let formatted = format_results(&results);
         assert!(formatted.contains("**Test**"));

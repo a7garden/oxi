@@ -88,8 +88,8 @@ impl From<&GitHubSearchResult> for SearchResult {
             title: r.full_name.clone(),
             url: r.url.clone(),
             snippet: r.description.clone(),
-            engines: vec!["GitHub".to_string()],
-            score: r.stars as f64,
+            source: "GitHub".to_string(),
+            extra: None,
         }
     }
 }

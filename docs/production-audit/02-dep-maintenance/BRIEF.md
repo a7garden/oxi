@@ -14,7 +14,6 @@ Current state:
 
 | Crate | Version | Advisory ID | Dependency Path | Impact |
 |-------|---------|-------------|-----------------|--------|
-| `fxhash` | 0.2.1 | RUSTSEC-2025-0057 | `selectors 0.26.0` ← `scraper 0.22.0` ← `a3s-search 1.2.3` ← `oxi-agent` | Hash function used by CSS selector engine; no security vuln, just unmaintained |
 | `number_prefix` | 0.4.0 | RUSTSEC-2025-0119 | `indicatif 0.17.11` ← `self_update 0.41.0` ← `oxi-cli` | Number formatting; unmaintained since 2025-11 |
 | `paste` | 1.0.15 | RUSTSEC-2024-0436 | `rav1e 0.8.1` / `boa_string 0.20.0` ← `oxibrowser-core` ← `oxi-agent` / `oxi-cli` | Procedural macro crate; unmaintained since 2024-10 |
 
@@ -27,12 +26,12 @@ None of these are direct security vulnerabilities. They are **informational warn
 Resolve or acknowledge all 3 unmaintained crate warnings from `cargo audit`.
 
 This does NOT mean:
-- ❌ Removing dependencies that are needed (a3s-search, self_update, oxibrowser-core)
+- ❌ Removing dependencies that are needed (self_update, oxibrowser-core)
 - ❌ Forking and maintaining these crates ourselves
 - ❌ Pinning to older versions that may have actual vulnerabilities
 
 It DOES mean:
-- ✅ `cargo audit 2>&1 | grep "Warning:" | wc -l` is reduced (ideally to 0)
+- ✅ `cargo audit 2>&1 | grep "Warning:" | wc -l` is reduced from 3 to 2 (fxhash resolved by replacing a3s-search with oxibrowser search)
 - ✅ For warnings that cannot be resolved, document the reasoning
 
 ---
@@ -43,7 +42,7 @@ It DOES mean:
 
 For each unmaintained crate:
 
-1. **`fxhash`**: Check if `selectors` or `scraper` has been updated to replace it. Check if `a3s-search` can be updated.
+1. ~~**`fxhash`**~~: **Resolved.** Replaced `a3s-search` with `oxibrowser` search module (v0.14.1+). `fxhash` is no longer a transitive dependency.
 2. **`number_prefix`**: Check if `indicatif` or `self_update` has a newer version that drops this dependency.
 3. **`paste`**: Check if `rav1e` or `boa_*` crates have newer versions that replaced `paste`.
 
@@ -76,9 +75,8 @@ Option A: Add to `[advisories]` in `.cargo/audit.toml` (or create it) with a com
 ```toml
 [advisories]
 ignore = [
-    # RUSTSEC-2025-0057: fxhash unmaintained; transitive via a3s-search → scraper → selectors.
-    # No known vulnerability, only maintenance warning. Re-evaluate quarterly.
-    "RUSTSEC-2025-0057",
+    # RUSTSEC-2025-0057: RESOLVED — a3s-search removed, fxhash no longer in tree.
+    # Keeping entry as documentation; cargo audit will not flag it.
 ]
 ```
 

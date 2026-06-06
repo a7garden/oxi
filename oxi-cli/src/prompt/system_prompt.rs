@@ -99,7 +99,7 @@ pub fn default_tool_snippets() -> std::collections::HashMap<String, String> {
     m.insert("ls".into(), "List directory contents".into());
     m.insert(
         "web_search".into(),
-        "Search the web (DuckDuckGo, Wikipedia, Bing, Brave)".into(),
+        "Search the web (DuckDuckGo, Wikipedia, Bing)".into(),
     );
     m
 }

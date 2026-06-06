@@ -816,8 +816,8 @@ impl AgentTool for GitHubTool {
                             title: format!("GitHub {} search: {}", kind, query),
                             url: String::new(),
                             snippet: result.output.chars().take(200).collect(),
-                            engines: vec!["GitHub".to_string()],
-                            score: 0.0,
+                            source: "GitHub".to_string(),
+                            extra: None,
                         }],
                     );
                     return Ok(result.with_metadata(json!({

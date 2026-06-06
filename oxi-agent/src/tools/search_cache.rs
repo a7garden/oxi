@@ -2,6 +2,9 @@
 ///
 /// Stores search results in memory keyed by generated IDs, enabling the
 /// `get_search_results` tool to retrieve previous results without re-querying.
+///
+/// Uses `oxibrowser::SearchResult` as the canonical result type, shared across
+/// web_search, github, and get_search_results tools.
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -10,24 +13,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-// ── Shared search result type ─────────────────────────────────────
-
-/// A single search result, shared across all search tools.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SearchResult {
-    /// Result title.
-    pub title: String,
-    /// Result URL.
-    pub url: String,
-    /// Short snippet / description.
-    pub snippet: String,
-    /// Which engines returned this result.
-    #[serde(default)]
-    pub engines: Vec<String>,
-    /// Relevance score.
-    #[serde(default)]
-    pub score: f64,
-}
+// Re-export oxibrowser's SearchResult for all search tools.
+pub use oxibrowser::SearchResult;
 
 // ── Search cache ──────────────────────────────────────────────────
 
@@ -182,8 +169,7 @@ impl AgentTool for GetSearchResultsTool {
                     "title": r.title,
                     "url": r.url,
                     "snippet": r.snippet,
-                    "engines": r.engines,
-                    "score": r.score
+                    "source": r.source,
                 })
             })
             .collect();
@@ -239,16 +225,20 @@ mod rand {
 mod tests {
     use super::*;
 
+    fn make_result(title: &str, url: &str, snippet: &str) -> SearchResult {
+        SearchResult {
+            title: title.to_string(),
+            url: url.to_string(),
+            snippet: snippet.to_string(),
+            source: "test".to_string(),
+            extra: None,
+        }
+    }
+
     #[test]
     fn test_cache_insert_and_get() {
         let cache = SearchCache::new();
-        let results = vec![SearchResult {
-            title: "Test".to_string(),
-            url: "https://example.com".to_string(),
-            snippet: "Test snippet".to_string(),
-            engines: vec!["ddg".to_string()],
-            score: 1.0,
-        }];
+        let results = vec![make_result("Test", "https://example.com", "Test snippet")];
 
         let id = cache.insert("test query", results.clone());
         let (query, retrieved) = cache.get(&id).unwrap();
@@ -291,13 +281,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_search_results_tool() {
         let cache = Arc::new(SearchCache::new());
-        let results = vec![SearchResult {
-            title: "Rust".to_string(),
-            url: "https://rust-lang.org".to_string(),
-            snippet: "A language".to_string(),
-            engines: vec!["ddg".to_string()],
-            score: 1.5,
-        }];
+        let results = vec![make_result("Rust", "https://rust-lang.org", "A language")];
         let id = cache.insert("rust lang", results);
 
         let tool = GetSearchResultsTool::new(cache);

@@ -321,7 +321,7 @@ pub mod subagent;
 pub mod tool_definition_wrapper;
 /// Output truncation helpers.
 pub mod truncate;
-/// Multi-engine web search tool (a3s-search library + DuckDuckGo fallback).
+/// Multi-engine web search tool (oxibrowser search module).
 pub mod web_search;
 /// File writing tool.
 pub mod write;

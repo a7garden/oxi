@@ -1,8 +1,8 @@
 # RFC-007: BrowseProgress Enrichment 확장 — 전체 이벤트 타입 ToolCallContext 반영
 
-**상태**: 제안  
-**우선순위**: P1 — oxios Web UI 브라우징 투명성 리치 렌더링의 전제 조건  
-**영역**: oxi-agent (`agent_loop/tool_exec.rs`, `events.rs`)  
+**상태**: 구현 완료 (oxi-agent 0.29.1)
+**우선순위**: P1 — oxios Web UI 브라우징 투명성 리치 렌더링의 전제 조건
+**영역**: oxi-agent (`agent_loop/tool_exec.rs`, `events.rs`)
 **의존**: RFC-015 (oxios chat transparency)  
 
 ---

@@ -30,9 +30,6 @@ ignore = [
     # No safe upgrade; rsa is only used server-side in schema validation.
     # Network timing attack requires attacker on the same network path.
     "RUSTSEC-2023-0071",
-    # fxhash - unmaintained, transitive via a3s-search → scraper → selectors.
-    # No known exploit. Re-evaluate when a3s-search updates its dependencies.
-    "RUSTSEC-2025-0057",
     # number_prefix - unmaintained, transitive via indicatif → self_update → oxi-cli.
     # No known exploit. self_update has no maintained alternative; re-evaluate periodically.
     "RUSTSEC-2025-0119",
