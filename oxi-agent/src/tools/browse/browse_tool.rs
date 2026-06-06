@@ -103,10 +103,7 @@ impl AgentTool for BrowseTool {
         self.callbacks.store_progress(callback);
     }
 
-    fn on_browse_progress(
-        &self,
-        callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>,
-    ) {
+    fn on_browse_progress(&self, callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>) {
         self.callbacks.store_browse(callback);
     }
 
@@ -317,5 +314,4 @@ mod tests {
         *slot.lock() = None;
         assert!(tool.current_tab_id().is_none());
     }
-
 }

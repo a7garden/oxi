@@ -9,8 +9,8 @@
 //!
 //! `BrowseCallbacks` eliminates the per-tool boilerplate.
 
-use crate::tools::ProgressCallback;
 use super::engine::{BrowseProgressCallback, TabCallbackRegistry};
+use crate::tools::ProgressCallback;
 use parking_lot::Mutex;
 
 /// Shared callback state for browser tools.

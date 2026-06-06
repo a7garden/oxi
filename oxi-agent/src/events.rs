@@ -46,6 +46,13 @@ pub enum ToolCallContext {
         /// Wall-clock page load duration in milliseconds.
         #[serde(skip_serializing_if = "Option::is_none")]
         page_duration_ms: Option<u64>,
+        // ── Error / enrichment fields ──
+        /// Navigation error message (from BrowseProgress::NavigationFailed).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        navigation_error: Option<String>,
+        /// Screenshot metadata (from BrowseProgress::ScreenshotCaptured).
+        #[serde(skip_serializing_if = "Option::is_none")]
+        screenshot: Option<ScreenshotMeta>,
     },
 
     /// Extracting data from a web page.
@@ -85,6 +92,17 @@ pub enum ToolCallContext {
         /// Human-readable step description.
         step: String,
     },
+}
+
+/// Screenshot metadata attached to PageVisit context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScreenshotMeta {
+    /// PNG payload size in bytes.
+    pub bytes: usize,
+    /// Viewport width.
+    pub width: u32,
+    /// Capture duration in milliseconds.
+    pub duration_ms: u64,
 }
 
 /// Reason for visiting a page.

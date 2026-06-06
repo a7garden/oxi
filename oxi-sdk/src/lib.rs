@@ -170,11 +170,11 @@ pub use oxi_ai::types::ThinkingLevel;
 // Re-export from oxi-agent
 pub use oxi_agent::{
     Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
-    AgentTool, AgentToolResult, CompactedContext, CompactionEvent, CompactionHook, EditTool,
-    FindTool, GetSearchResultsTool, GrepTool, LsTool, OutputMode, ProviderResolver, ReadTool,
-    SearchCache, SharedState, StructuredOutput, StructuredOutputError, ToolCallContext,
-    ToolContext, ToolError, ToolExecutionMode, ToolRegistry, VisitReason, WebSearchTool,
-    WriteTool, BrowseProgress, BrowseProgressCallback,
+    AgentTool, AgentToolResult, BrowseProgress, BrowseProgressCallback, CompactedContext,
+    CompactionEvent, CompactionHook, EditTool, FindTool, GetSearchResultsTool, GrepTool, LsTool,
+    OutputMode, ProviderResolver, ReadTool, SearchCache, SharedState, StructuredOutput,
+    StructuredOutputError, ToolCallContext, ToolContext, ToolError, ToolExecutionMode,
+    ToolRegistry, VisitReason, WebSearchTool, WriteTool,
 };
 
 // ── Concrete provider re-exports ─────────────────────────────────────────

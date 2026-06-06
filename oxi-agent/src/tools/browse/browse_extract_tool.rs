@@ -9,8 +9,8 @@ use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
 use parking_lot::Mutex;
+use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -69,10 +69,7 @@ impl AgentTool for BrowseExtractTool {
         self.callbacks.store_progress(callback);
     }
 
-    fn on_browse_progress(
-        &self,
-        callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>,
-    ) {
+    fn on_browse_progress(&self, callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>) {
         self.callbacks.store_browse(callback);
     }
 
@@ -173,10 +170,8 @@ impl BrowseExtractTool {
         *self.tab_id_slot.lock().lock() = Some(tab_id);
 
         // Register progress callbacks on the tab via the engine's registry.
-        self.callbacks.register_on_registry(
-            tab_id,
-            self.engine.callback_registry().as_ref(),
-        );
+        self.callbacks
+            .register_on_registry(tab_id, self.engine.callback_registry().as_ref());
 
         let guard = TabGuard::new(raw_tab);
 

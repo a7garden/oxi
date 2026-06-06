@@ -232,11 +232,7 @@ pub trait AgentTool: Send + Sync {
     /// Default implementation is no-op. Only browse tools override this to
     /// register a callback that enriches `ToolCallContext` with structured
     /// data from `BrowseProgress` events.
-    fn on_browse_progress(
-        &self,
-        _callback: crate::tools::browse::BrowseProgressCallback,
-    ) {
-    }
+    fn on_browse_progress(&self, _callback: crate::tools::browse::BrowseProgressCallback) {}
 
     /// Custom rendering for tool call (TUI visualization).
     /// Return None to use the default tool_renderer.rs formatter.

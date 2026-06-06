@@ -74,7 +74,7 @@ pub enum SessionEvent {
     /// Session display name changed.
     SessionInfoChanged,
     /// Passthrough agent event.
-    Agent(AgentEvent),
+    Agent(Box<AgentEvent>),
     /// Thinking level changed.
     ThinkingLevelChanged {
         /// New thinking level.
@@ -985,7 +985,7 @@ impl AgentSession {
     /// [`SessionEvent::Agent`] to regular session listeners.
     pub fn forward_event_to_extensions(&self, event: &AgentEvent) {
         // Always emit to session listeners
-        self.emit(SessionEvent::Agent(event.clone()));
+        self.emit(SessionEvent::Agent(Box::new(event.clone())));
 
         // Forward to extension runner if installed
         let guard = self.extension_runner.read();

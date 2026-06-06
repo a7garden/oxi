@@ -32,13 +32,12 @@ fn infer_context(tool_name: &str, args: &serde_json::Value) -> Option<ToolCallCo
             page_status: None,
             page_bytes: None,
             page_duration_ms: None,
+            navigation_error: None,
+            screenshot: None,
         }),
 
         "browse_extract" => Some(ToolCallContext::DataExtraction {
-            target: args["selector"]
-                .as_str()
-                .unwrap_or("data")
-                .to_string(),
+            target: args["selector"].as_str().unwrap_or("data").to_string(),
             url: args["url"].as_str().map(String::from),
             result_count: None,
             page_status: None,
@@ -56,6 +55,8 @@ fn infer_context(tool_name: &str, args: &serde_json::Value) -> Option<ToolCallCo
                     page_status: None,
                     page_bytes: None,
                     page_duration_ms: None,
+                    navigation_error: None,
+                    screenshot: None,
                 })
             } else {
                 Some(ToolCallContext::SessionAction {
@@ -90,7 +91,9 @@ fn infer_context(tool_name: &str, args: &serde_json::Value) -> Option<ToolCallCo
                         })
                 }
                 #[cfg(not(feature = "native-browser"))]
-                { None }
+                {
+                    None
+                }
             }
         }
 
@@ -121,6 +124,8 @@ fn enrich_context_from_metadata(
 /// - `DocumentReady` + `PageVisit` → fills `page_title`, `page_status`,
 ///   `page_bytes`, `page_duration_ms`; updates `url` if redirected.
 /// - `DocumentReady` + `DataExtraction` → fills `page_status`, `page_duration_ms`.
+/// - `NavigationFailed` + `PageVisit` → fills `navigation_error`.
+/// - `ScreenshotCaptured` + `PageVisit` → fills `screenshot`.
 /// - All other combinations → no-op.
 fn make_browse_enrichment_cb(
     context_cell: Arc<parking_lot::Mutex<Option<ToolCallContext>>>,
@@ -169,6 +174,33 @@ fn make_browse_enrichment_cb(
                 *page_status = Some(*status);
                 *page_duration_ms = Some(*duration_ms);
             }
+
+            // ── NavigationFailed → PageVisit.navigation_error ──
+            (
+                Some(ToolCallContext::PageVisit {
+                    navigation_error, ..
+                }),
+                crate::tools::browse::BrowseProgress::NavigationFailed { error, .. },
+            ) => {
+                *navigation_error = Some(error.clone());
+            }
+
+            // ── ScreenshotCaptured → PageVisit.screenshot ──
+            (
+                Some(ToolCallContext::PageVisit { screenshot, .. }),
+                crate::tools::browse::BrowseProgress::ScreenshotCaptured {
+                    bytes,
+                    width,
+                    duration_ms,
+                },
+            ) => {
+                *screenshot = Some(crate::events::ScreenshotMeta {
+                    bytes: *bytes,
+                    width: *width,
+                    duration_ms: *duration_ms,
+                });
+            }
+
             _ => {}
         }
     })
@@ -682,7 +714,10 @@ async fn execute_prepared_tool_call(
         // Wire up browse progress callback.
         tool.on_browse_progress(make_browse_enrichment_cb(Arc::clone(&context_cell)));
 
-        match tool.execute(&tool_call_id, prepared.args.clone(), None, ctx).await {
+        match tool
+            .execute(&tool_call_id, prepared.args.clone(), None, ctx)
+            .await
+        {
             Ok(r) => result = r,
             Err(e) => {
                 result = AgentToolResult::error(e);
@@ -789,7 +824,11 @@ mod tests {
             &json!({ "steps": [{"goto": "https://example.com"}, {"click": "#btn"}] }),
         );
         match ctx {
-            Some(ToolCallContext::ScriptStep { current, total, step }) => {
+            Some(ToolCallContext::ScriptStep {
+                current,
+                total,
+                step,
+            }) => {
                 assert_eq!(current, 0);
                 assert_eq!(total, 2);
                 assert_eq!(step, "starting");
@@ -838,6 +877,8 @@ mod tests {
                 page_status: None,
                 page_bytes: None,
                 page_duration_ms: None,
+                navigation_error: None,
+                screenshot: None,
             },
             ToolCallContext::PageVisit {
                 url: "https://example.com".into(),
@@ -846,6 +887,8 @@ mod tests {
                 page_status: None,
                 page_bytes: None,
                 page_duration_ms: None,
+                navigation_error: None,
+                screenshot: None,
             },
             ToolCallContext::PageVisit {
                 url: "https://example.com".into(),
@@ -854,6 +897,8 @@ mod tests {
                 page_status: Some(200),
                 page_bytes: Some(12400),
                 page_duration_ms: Some(245),
+                navigation_error: None,
+                screenshot: None,
             },
             ToolCallContext::DataExtraction {
                 target: ".title".into(),
@@ -898,8 +943,7 @@ mod tests {
             "partial_result": "Loading...",
             "tab_id": null
         });
-        let event: crate::events::AgentEvent =
-            serde_json::from_value(old_json).unwrap();
+        let event: crate::events::AgentEvent = serde_json::from_value(old_json).unwrap();
         match event {
             crate::events::AgentEvent::ToolExecutionUpdate { context, .. } => {
                 assert!(context.is_none());
@@ -917,8 +961,7 @@ mod tests {
             "tool_name": "browse",
             "args": { "url": "https://example.com" }
         });
-        let event: crate::events::AgentEvent =
-            serde_json::from_value(old_json).unwrap();
+        let event: crate::events::AgentEvent = serde_json::from_value(old_json).unwrap();
         match event {
             crate::events::AgentEvent::ToolExecutionStart { context, .. } => {
                 assert!(context.is_none());
@@ -940,6 +983,8 @@ mod tests {
                 page_status: None,
                 page_bytes: None,
                 page_duration_ms: None,
+                navigation_error: None,
+                screenshot: None,
             })));
         let cb = make_browse_enrichment_cb(Arc::clone(&cell));
         cb(BrowseProgress::DocumentReady {
@@ -974,14 +1019,15 @@ mod tests {
         use crate::tools::browse::BrowseProgress;
         use std::sync::Arc;
 
-        let cell: Arc<parking_lot::Mutex<Option<ToolCallContext>>> =
-            Arc::new(parking_lot::Mutex::new(Some(ToolCallContext::DataExtraction {
+        let cell: Arc<parking_lot::Mutex<Option<ToolCallContext>>> = Arc::new(
+            parking_lot::Mutex::new(Some(ToolCallContext::DataExtraction {
                 target: ".item".into(),
                 url: Some("https://shop.example.com".into()),
                 result_count: None,
                 page_status: None,
                 page_duration_ms: None,
-            })));
+            })),
+        );
         let cb = make_browse_enrichment_cb(Arc::clone(&cell));
         cb(BrowseProgress::DocumentReady {
             url: "https://shop.example.com".into(),
@@ -1025,6 +1071,101 @@ mod tests {
             duration_ms: 0,
         });
         // ScriptStep should be untouched
-        assert!(matches!(cell.lock().as_ref(), Some(ToolCallContext::ScriptStep { .. })));
+        assert!(matches!(
+            cell.lock().as_ref(),
+            Some(ToolCallContext::ScriptStep { .. })
+        ));
+    }
+
+    #[test]
+    fn browse_enrichment_callback_fills_navigation_error() {
+        use crate::tools::browse::BrowseProgress;
+        use std::sync::Arc;
+
+        let cell: Arc<parking_lot::Mutex<Option<ToolCallContext>>> =
+            Arc::new(parking_lot::Mutex::new(Some(ToolCallContext::PageVisit {
+                url: "https://example.com".into(),
+                reason: Some(VisitReason::DirectNavigation),
+                page_title: None,
+                page_status: None,
+                page_bytes: None,
+                page_duration_ms: None,
+                navigation_error: None,
+                screenshot: None,
+            })));
+        let cb = make_browse_enrichment_cb(Arc::clone(&cell));
+        cb(BrowseProgress::NavigationFailed {
+            url: "https://example.com".into(),
+            error: "connection refused".into(),
+        });
+        let snapshot = cell.lock().clone();
+        match snapshot {
+            Some(ToolCallContext::PageVisit {
+                navigation_error, ..
+            }) => {
+                assert_eq!(navigation_error.as_deref(), Some("connection refused"));
+            }
+            other => panic!("expected PageVisit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn browse_enrichment_callback_fills_screenshot() {
+        use crate::tools::browse::BrowseProgress;
+        use std::sync::Arc;
+
+        let cell: Arc<parking_lot::Mutex<Option<ToolCallContext>>> =
+            Arc::new(parking_lot::Mutex::new(Some(ToolCallContext::PageVisit {
+                url: "https://example.com".into(),
+                reason: Some(VisitReason::DirectNavigation),
+                page_title: None,
+                page_status: None,
+                page_bytes: None,
+                page_duration_ms: None,
+                navigation_error: None,
+                screenshot: None,
+            })));
+        let cb = make_browse_enrichment_cb(Arc::clone(&cell));
+        cb(BrowseProgress::ScreenshotCaptured {
+            bytes: 2048,
+            width: 800,
+            duration_ms: 120,
+        });
+        let snapshot = cell.lock().clone();
+        match snapshot {
+            Some(ToolCallContext::PageVisit { screenshot, .. }) => {
+                let meta = screenshot.expect("screenshot should be set");
+                assert_eq!(meta.bytes, 2048);
+                assert_eq!(meta.width, 800);
+                assert_eq!(meta.duration_ms, 120);
+            }
+            other => panic!("expected PageVisit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn browse_enrichment_callback_navigation_failed_ignores_non_page_visit() {
+        use crate::tools::browse::BrowseProgress;
+        use std::sync::Arc;
+
+        // NavigationFailed + DataExtraction → no-op
+        let cell: Arc<parking_lot::Mutex<Option<ToolCallContext>>> = Arc::new(
+            parking_lot::Mutex::new(Some(ToolCallContext::DataExtraction {
+                target: ".title".into(),
+                url: None,
+                result_count: None,
+                page_status: None,
+                page_duration_ms: None,
+            })),
+        );
+        let cb = make_browse_enrichment_cb(Arc::clone(&cell));
+        cb(BrowseProgress::NavigationFailed {
+            url: "https://example.com".into(),
+            error: "timeout".into(),
+        });
+        assert!(matches!(
+            cell.lock().as_ref(),
+            Some(ToolCallContext::DataExtraction { .. })
+        ));
     }
 }

@@ -11,8 +11,8 @@ use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
-use serde::Deserialize;
 use parking_lot::Mutex;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::Arc;
@@ -159,10 +159,7 @@ fn parse_steps(yaml: &str) -> Result<Vec<Step>, ToolError> {
 /// - A string → shorthand for `{ <only_field>: <string> }`.
 /// - A mapping → used as-is.
 /// - A null → unit variant (no fields).
-fn step_from_yaml_payload(
-    variant: &str,
-    payload: &serde_yaml::Value,
-) -> Result<Step, String> {
+fn step_from_yaml_payload(variant: &str, payload: &serde_yaml::Value) -> Result<Step, String> {
     use serde_yaml::Value as Y;
 
     /// Build a JSON object `{ <variant>: <fields> }` and let serde
@@ -473,10 +470,7 @@ impl AgentTool for BrowseScriptTool {
         self.callbacks.store_progress(callback);
     }
 
-    fn on_browse_progress(
-        &self,
-        callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>,
-    ) {
+    fn on_browse_progress(&self, callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>) {
         self.callbacks.store_browse(callback);
     }
 
@@ -555,16 +549,19 @@ impl AgentTool for BrowseScriptTool {
             registry.set(tab_id, cb.clone());
         }
         // Register browse callback (still pending, not taken by take_progress).
-        self.callbacks.register_browse_on_registry(
-            tab_id,
-            self.engine.callback_registry().as_ref(),
-        );
+        self.callbacks
+            .register_browse_on_registry(tab_id, self.engine.callback_registry().as_ref());
 
         let guard = TabGuard::new(raw_tab);
 
-        let script_result =
-            execute_steps(guard.tab(), &steps, &self.config, deadline, progress_cb.as_ref())
-                .await?;
+        let script_result = execute_steps(
+            guard.tab(),
+            &steps,
+            &self.config,
+            deadline,
+            progress_cb.as_ref(),
+        )
+        .await?;
 
         // Build output
         let mut output_parts = Vec::new();

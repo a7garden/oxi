@@ -10,10 +10,10 @@ use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
+use parking_lot::Mutex as SyncMutex;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Instant;
-use parking_lot::Mutex as SyncMutex;
 use tokio::sync::{oneshot, Mutex};
 
 /// Interactive browser session with a persistent tab across calls.
@@ -124,26 +124,19 @@ impl AgentTool for BrowseSessionTool {
         let tab_id = self.current_tab_id();
         if let Some(tid) = tab_id {
             self.callbacks.store_progress(callback);
-            self.callbacks.register_progress_on_registry(
-                tid,
-                self.engine.callback_registry().as_ref(),
-            );
+            self.callbacks
+                .register_progress_on_registry(tid, self.engine.callback_registry().as_ref());
         } else {
             self.callbacks.store_progress(callback);
         }
     }
 
-    fn on_browse_progress(
-        &self,
-        callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>,
-    ) {
+    fn on_browse_progress(&self, callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>) {
         let tab_id = self.current_tab_id();
         if let Some(tid) = tab_id {
             self.callbacks.store_browse(callback);
-            self.callbacks.register_browse_on_registry(
-                tid,
-                self.engine.callback_registry().as_ref(),
-            );
+            self.callbacks
+                .register_browse_on_registry(tid, self.engine.callback_registry().as_ref());
         } else {
             self.callbacks.store_browse(callback);
         }
@@ -309,10 +302,8 @@ impl AgentTool for BrowseSessionTool {
                 // Register progress callbacks on the new tab via the
                 // engine's registry. BrowserEvents for this tab will
                 // flow through to ToolExecutionUpdate.
-                self.callbacks.register_on_registry(
-                    tab_id,
-                    self.engine.callback_registry().as_ref(),
-                );
+                self.callbacks
+                    .register_on_registry(tab_id, self.engine.callback_registry().as_ref());
 
                 let guard = TabGuard::new(raw_tab);
                 *slot = Some(guard);

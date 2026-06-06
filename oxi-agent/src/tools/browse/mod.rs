@@ -25,8 +25,8 @@ pub use browse_session_tool::BrowseSessionTool;
 pub use browse_tool::BrowseTool;
 pub use config::BrowseConfig;
 pub use engine::{
-    BrowseProgress, BrowseProgressCallback, BrowserEngine, BrowserError, BrowserTab,
-    ElementInfo, LinkInfo, PageContent,
+    BrowseProgress, BrowseProgressCallback, BrowserEngine, BrowserError, BrowserTab, ElementInfo,
+    LinkInfo, PageContent,
 };
 pub use tab_guard::TabGuard;
 

@@ -796,7 +796,7 @@ pub async fn handle_session_event(event: SessionEvent, ui_tx: &mpsc::UnboundedSe
             });
         }
         SessionEvent::SessionInfoChanged => {}
-        SessionEvent::Agent(agent_event) => match &agent_event {
+        SessionEvent::Agent(agent_event) => match &*agent_event {
             AgentEvent::Fallback { to_model, .. } => {
                 let _ = ui_tx.send(UiEvent::ModelChanged {
                     model_id: to_model.clone(),

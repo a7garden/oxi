@@ -412,20 +412,12 @@ impl TabCallbackRegistry {
 
     /// Register a string progress callback for the given `tab_id`.
     pub fn set(&self, tab_id: uuid::Uuid, cb: crate::tools::ProgressCallback) {
-        self.entries
-            .lock()
-            .entry(tab_id)
-            .or_default()
-            .progress = Some(cb);
+        self.entries.lock().entry(tab_id).or_default().progress = Some(cb);
     }
 
     /// Register a structured browse progress callback for the given tab.
     pub fn set_browse(&self, tab_id: uuid::Uuid, cb: BrowseProgressCallback) {
-        self.entries
-            .lock()
-            .entry(tab_id)
-            .or_default()
-            .browse = Some(cb);
+        self.entries.lock().entry(tab_id).or_default().browse = Some(cb);
     }
 
     /// Remove **all** callbacks for `tab_id`. Called when the tab is closed.
@@ -633,7 +625,10 @@ mod tests {
 
         let events = received.lock().unwrap();
         assert_eq!(events.len(), 1);
-        assert!(matches!(&events[0], BrowseProgress::DocumentReady { status: 200, .. }));
+        assert!(matches!(
+            &events[0],
+            BrowseProgress::DocumentReady { status: 200, .. }
+        ));
     }
 
     #[test]
@@ -642,14 +637,8 @@ mod tests {
         let tab = uuid::Uuid::new_v4();
 
         // Register both types
-        reg.set(
-            tab,
-            oxi_ai::progress_callback(move |_| {}),
-        );
-        reg.set_browse(
-            tab,
-            Arc::new(move |_: BrowseProgress| {}),
-        );
+        reg.set(tab, oxi_ai::progress_callback(move |_| {}));
+        reg.set_browse(tab, Arc::new(move |_: BrowseProgress| {}));
         assert!(reg.is_set(&tab));
 
         // clear removes both
@@ -668,13 +657,19 @@ mod tests {
         let count_b = Arc::new(AtomicUsize::new(0));
 
         let ca = Arc::clone(&count_a);
-        reg.set_browse(tab_a, Arc::new(move |_: BrowseProgress| {
-            ca.fetch_add(1, Ordering::SeqCst);
-        }));
+        reg.set_browse(
+            tab_a,
+            Arc::new(move |_: BrowseProgress| {
+                ca.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
         let cb2 = Arc::clone(&count_b);
-        reg.set_browse(tab_b, Arc::new(move |_: BrowseProgress| {
-            cb2.fetch_add(1, Ordering::SeqCst);
-        }));
+        reg.set_browse(
+            tab_b,
+            Arc::new(move |_: BrowseProgress| {
+                cb2.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
 
         let doc_ready = BrowseProgress::DocumentReady {
             url: "https://example.com".into(),

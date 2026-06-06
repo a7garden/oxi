@@ -26,9 +26,9 @@ fn extract_event_tab_id(event: &oxibrowser_core::BrowserEvent) -> uuid::Uuid {
 fn browse_progress_from_event(event: &oxibrowser_core::BrowserEvent) -> Option<BrowseProgress> {
     use oxibrowser_core::BrowserEvent::*;
     match event {
-        NavigationStarted { url, .. } => Some(BrowseProgress::NavigationStarted {
-            url: url.clone(),
-        }),
+        NavigationStarted { url, .. } => {
+            Some(BrowseProgress::NavigationStarted { url: url.clone() })
+        }
         WaitingForSelector {
             selector,
             timeout_ms,
@@ -67,8 +67,7 @@ fn browse_progress_from_event(event: &oxibrowser_core::BrowserEvent) -> Option<B
     }
 }
 use super::engine::{
-    BrowserError, BrowseProgress, BrowserTab as BrowserTabTrait, PageContent,
-    TabCallbackRegistry,
+    BrowseProgress, BrowserError, BrowserTab as BrowserTabTrait, PageContent, TabCallbackRegistry,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -612,8 +611,7 @@ mod tests {
 
         let engine = OxiBrowserEngine::new().await.unwrap();
         let registry = engine.callback_registry();
-        let received: Arc<StdMutex<Vec<BrowseProgress>>> =
-            Arc::new(StdMutex::new(Vec::new()));
+        let received: Arc<StdMutex<Vec<BrowseProgress>>> = Arc::new(StdMutex::new(Vec::new()));
         let received_clone = Arc::clone(&received);
 
         let tab = engine.new_tab().await.unwrap();
@@ -653,8 +651,14 @@ mod tests {
         });
         let (title, bytes, duration_ms) = doc_ready.expect("DocumentReady present");
         assert_eq!(title, "Hi");
-        assert!(bytes > 0, "bytes should be > 0 for non-empty page, got {bytes}");
-        assert!(duration_ms < 30_000, "duration_ms should be reasonable, got {duration_ms}");
+        assert!(
+            bytes > 0,
+            "bytes should be > 0 for non-empty page, got {bytes}"
+        );
+        assert!(
+            duration_ms < 30_000,
+            "duration_ms should be reasonable, got {duration_ms}"
+        );
 
         let _ = tab.close().await;
         let _ = engine.close().await;
@@ -669,10 +673,8 @@ mod tests {
         let engine = OxiBrowserEngine::new().await.unwrap();
         let registry = engine.callback_registry();
 
-        let received_a: Arc<StdMutex<Vec<BrowseProgress>>> =
-            Arc::new(StdMutex::new(Vec::new()));
-        let received_b: Arc<StdMutex<Vec<BrowseProgress>>> =
-            Arc::new(StdMutex::new(Vec::new()));
+        let received_a: Arc<StdMutex<Vec<BrowseProgress>>> = Arc::new(StdMutex::new(Vec::new()));
+        let received_b: Arc<StdMutex<Vec<BrowseProgress>>> = Arc::new(StdMutex::new(Vec::new()));
         let ra = Arc::clone(&received_a);
         let rb = Arc::clone(&received_b);
 
@@ -681,12 +683,18 @@ mod tests {
         let tid_a = tab_a.tab_id();
         let tid_b = tab_b.tab_id();
 
-        registry.set_browse(tid_a, Arc::new(move |bp: BrowseProgress| {
-            ra.lock().unwrap().push(bp);
-        }));
-        registry.set_browse(tid_b, Arc::new(move |bp: BrowseProgress| {
-            rb.lock().unwrap().push(bp);
-        }));
+        registry.set_browse(
+            tid_a,
+            Arc::new(move |bp: BrowseProgress| {
+                ra.lock().unwrap().push(bp);
+            }),
+        );
+        registry.set_browse(
+            tid_b,
+            Arc::new(move |bp: BrowseProgress| {
+                rb.lock().unwrap().push(bp);
+            }),
+        );
 
         let _ = tab_a
             .goto("data:text/html,<title>OnlyA</title>")
@@ -717,9 +725,15 @@ mod tests {
             })
             .collect();
 
-        assert!(a_titles.contains(&"OnlyA"), "A should have OnlyA, got {a_titles:?}");
+        assert!(
+            a_titles.contains(&"OnlyA"),
+            "A should have OnlyA, got {a_titles:?}"
+        );
         assert!(!a_titles.contains(&"OnlyB"), "A should NOT have OnlyB");
-        assert!(b_titles.contains(&"OnlyB"), "B should have OnlyB, got {b_titles:?}");
+        assert!(
+            b_titles.contains(&"OnlyB"),
+            "B should have OnlyB, got {b_titles:?}"
+        );
         assert!(!b_titles.contains(&"OnlyA"), "B should NOT have OnlyA");
 
         let _ = tab_a.close().await;
