@@ -20,9 +20,8 @@ use tokio::sync::oneshot;
 pub struct BrowseTool {
     engine: Arc<dyn BrowserEngine>,
     config: BrowseConfig,
-    /// Callback stored by `on_progress`, consumed in `execute` when the tab
-    /// is opened.
-    pending_callback: Mutex<Option<crate::tools::ProgressCallback>>,
+    /// Shared callback management (progress + browse progress).
+    callbacks: super::callback_mixin::BrowseCallbacks,
     /// Shared slot for the current tab's ID. The agent loop creates the slot
     /// and passes it via `set_tab_id_slot`; BrowseTool writes `Some(tab_id)`
     /// when it opens a tab and `None` on close.
@@ -35,7 +34,7 @@ impl BrowseTool {
         Self {
             engine,
             config: BrowseConfig::default(),
-            pending_callback: Mutex::new(None),
+            callbacks: super::callback_mixin::BrowseCallbacks::new(),
             tab_id_slot: Mutex::new(Arc::new(parking_lot::Mutex::new(None))),
         }
     }
@@ -45,7 +44,7 @@ impl BrowseTool {
         Self {
             engine,
             config,
-            pending_callback: Mutex::new(None),
+            callbacks: super::callback_mixin::BrowseCallbacks::new(),
             tab_id_slot: Mutex::new(Arc::new(parking_lot::Mutex::new(None))),
         }
     }
@@ -101,11 +100,14 @@ impl AgentTool for BrowseTool {
     }
 
     fn on_progress(&self, callback: crate::tools::ProgressCallback) {
-        // The agent loop calls this *before* `execute`. We store the
-        // callback and register it on the actual tab once it's opened
-        // inside `execute`. This bridges the gap: `tab_id` is not known
-        // until the tab is created.
-        *self.pending_callback.lock() = Some(callback);
+        self.callbacks.store_progress(callback);
+    }
+
+    fn on_browse_progress(
+        &self,
+        callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>,
+    ) {
+        self.callbacks.store_browse(callback);
     }
 
     /// Sequential execution preserved for stability.
@@ -156,20 +158,8 @@ impl AgentTool for BrowseTool {
         let tab_id = raw_tab.tab_id();
         *self.tab_id_slot.lock().lock() = Some(tab_id);
 
-        // Register the pending progress callback on this tab (keyed by tab_id).
-        if let Some(cb) = self.pending_callback.lock().take() {
-            #[cfg(feature = "native-browser")]
-            {
-                use super::oxibrowser_backend::OxiTab;
-                if let Some(oxi_tab) = raw_tab.as_any().downcast_ref::<OxiTab>() {
-                    oxi_tab.set_progress_callback(cb);
-                }
-            }
-            #[cfg(not(feature = "native-browser"))]
-            {
-                let _ = cb; // no-op without native browser
-            }
-        }
+        // Register the pending callbacks on this tab.
+        self.callbacks.register_on_tab(raw_tab.as_ref());
 
         let guard = TabGuard::new(raw_tab);
         let tab = guard.tab();
@@ -328,21 +318,4 @@ mod tests {
         assert!(tool.current_tab_id().is_none());
     }
 
-    #[test]
-    fn browse_tool_on_progress_stores_pending_callback() {
-        let tool = BrowseTool::new(std::sync::Arc::new(MockEngine));
-
-        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let called_clone = Arc::clone(&called);
-        tool.on_progress(oxi_ai::progress_callback(move |_: String| {
-            called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-        }));
-
-        // The pending callback should be stored (not yet registered on any tab)
-        let pending = tool.pending_callback.lock();
-        assert!(
-            pending.is_some(),
-            "pending_callback should be set after on_progress"
-        );
-    }
 }

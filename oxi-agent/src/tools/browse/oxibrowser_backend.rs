@@ -13,12 +13,62 @@ fn extract_event_tab_id(event: &oxibrowser_core::BrowserEvent) -> uuid::Uuid {
         | oxibrowser_core::BrowserEvent::WaitingForSelector { tab_id, .. }
         | oxibrowser_core::BrowserEvent::DocumentReady { tab_id, .. }
         | oxibrowser_core::BrowserEvent::ScreenshotCaptured { tab_id, .. } => *tab_id,
-        // `#[non_exhaustive]` wildcard — treat unknown variants as nil.
+        // `NavigationFailed` is only present in oxibrowser-core ≥ 0.14.
+        // crates.io 0.13 lacks this variant; unknown variants fall through.
         _ => uuid::Uuid::nil(),
     }
 }
+
+/// Convert an `oxibrowser_core::BrowserEvent` into a `BrowseProgress`.
+///
+/// Returns `None` for unknown variants (forward-compatible with
+/// future `BrowserEvent` additions).
+fn browse_progress_from_event(event: &oxibrowser_core::BrowserEvent) -> Option<BrowseProgress> {
+    use oxibrowser_core::BrowserEvent::*;
+    match event {
+        NavigationStarted { url, .. } => Some(BrowseProgress::NavigationStarted {
+            url: url.clone(),
+        }),
+        WaitingForSelector {
+            selector,
+            timeout_ms,
+            ..
+        } => Some(BrowseProgress::WaitingForSelector {
+            selector: selector.clone(),
+            timeout_ms: *timeout_ms,
+        }),
+        DocumentReady {
+            final_url,
+            title,
+            status,
+            total_bytes,
+            total_duration,
+            ..
+        } => Some(BrowseProgress::DocumentReady {
+            url: final_url.clone(),
+            title: title.clone(),
+            status: *status,
+            bytes: *total_bytes,
+            duration_ms: total_duration.as_millis() as u64,
+        }),
+        ScreenshotCaptured {
+            bytes,
+            viewport_width,
+            duration,
+            ..
+        } => Some(BrowseProgress::ScreenshotCaptured {
+            bytes: *bytes,
+            width: *viewport_width,
+            duration_ms: duration.as_millis() as u64,
+        }),
+        // `NavigationFailed` is only present in oxibrowser-core ≥ 0.14.
+        // crates.io 0.13 lacks this variant; we degrade gracefully.
+        _ => None,
+    }
+}
 use super::engine::{
-    BrowserError, BrowserTab as BrowserTabTrait, PageContent, TabCallbackRegistry,
+    BrowserError, BrowseProgress, BrowserTab as BrowserTabTrait, PageContent,
+    TabCallbackRegistry,
 };
 use async_trait::async_trait;
 use serde_json::Value;
@@ -82,6 +132,11 @@ impl OxiBrowserEngine {
                 match events_rx.recv().await {
                     Ok(event) => {
                         let tab_id = extract_event_tab_id(&event);
+                        // Enrich context FIRST so the String callback
+                        // below reads the enriched context_cell.
+                        if let Some(bp) = browse_progress_from_event(&event) {
+                            progress_clone.invoke_browse(&tab_id, bp);
+                        }
                         progress_clone.invoke(&tab_id, event.short_label());
                     }
                     Err(RecvError::Lagged(skipped)) => {
@@ -182,6 +237,11 @@ impl OxiTab {
     /// Remove the progress callback for this tab.
     pub fn clear_progress_callback(&self) {
         self.registry.clear(&self.tab_id);
+    }
+
+    /// Register a structured browse progress callback for this tab.
+    pub fn set_browse_progress_callback_impl(&self, cb: super::engine::BrowseProgressCallback) {
+        self.registry.set_browse(self.tab_id, cb);
     }
 
     /// Return this tab's stable ID.
@@ -412,6 +472,10 @@ impl BrowserTabTrait for OxiTab {
     fn clear_progress_callback(&self) {
         self.registry.clear(&self.tab_id);
     }
+
+    fn set_browse_progress_callback(&self, cb: super::engine::BrowseProgressCallback) {
+        self.set_browse_progress_callback_impl(cb);
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -535,6 +599,131 @@ mod tests {
         assert!(b_final > 0, "callback B should have fired");
 
         let _ = tab.close().await;
+        let _ = engine.close().await;
+    }
+
+    /// End-to-end: `invoke_browse` should fire the structured
+    /// `BrowseProgressCallback` with `DocumentReady` carrying the page title
+    /// and HTTP status. This is the key T2 integration test for
+    /// `BrowseProgress` propagation.
+    #[tokio::test]
+    async fn engine_forwards_browse_progress_to_callback() {
+        use crate::tools::browse::BrowseProgress;
+
+        let engine = OxiBrowserEngine::new().await.unwrap();
+        let registry = engine.callback_registry();
+        let received: Arc<StdMutex<Vec<BrowseProgress>>> =
+            Arc::new(StdMutex::new(Vec::new()));
+        let received_clone = Arc::clone(&received);
+
+        let tab = engine.new_tab().await.unwrap();
+        let tab_id = tab.tab_id();
+
+        registry.set_browse(
+            tab_id,
+            Arc::new(move |bp: BrowseProgress| {
+                received_clone.lock().unwrap().push(bp);
+            }),
+        );
+
+        // Navigate to a data: URL — must produce DocumentReady.
+        let _ = tab
+            .goto("data:text/html,<title>Hi</title><p>Hello</p>")
+            .await
+            .unwrap();
+
+        // Allow drain task to process events.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let events = received.lock().unwrap().clone();
+        assert!(
+            events
+                .iter()
+                .any(|bp| matches!(bp, BrowseProgress::DocumentReady { status: 200, .. })),
+            "expected DocumentReady with status 200, got {events:?}"
+        );
+        let doc_ready = events.iter().find_map(|bp| match bp {
+            BrowseProgress::DocumentReady {
+                title,
+                bytes,
+                duration_ms,
+                ..
+            } => Some((title.clone(), *bytes, *duration_ms)),
+            _ => None,
+        });
+        let (title, bytes, duration_ms) = doc_ready.expect("DocumentReady present");
+        assert_eq!(title, "Hi");
+        assert!(bytes > 0, "bytes should be > 0 for non-empty page, got {bytes}");
+        assert!(duration_ms < 30_000, "duration_ms should be reasonable, got {duration_ms}");
+
+        let _ = tab.close().await;
+        let _ = engine.close().await;
+    }
+
+    /// Open two tabs, register per-tab browse callbacks, and verify each
+    /// callback receives only its own tab's `BrowseProgress` events.
+    #[tokio::test]
+    async fn engine_routes_browse_progress_by_tab_id() {
+        use crate::tools::browse::BrowseProgress;
+
+        let engine = OxiBrowserEngine::new().await.unwrap();
+        let registry = engine.callback_registry();
+
+        let received_a: Arc<StdMutex<Vec<BrowseProgress>>> =
+            Arc::new(StdMutex::new(Vec::new()));
+        let received_b: Arc<StdMutex<Vec<BrowseProgress>>> =
+            Arc::new(StdMutex::new(Vec::new()));
+        let ra = Arc::clone(&received_a);
+        let rb = Arc::clone(&received_b);
+
+        let tab_a = engine.new_tab().await.unwrap();
+        let tab_b = engine.new_tab().await.unwrap();
+        let tid_a = tab_a.tab_id();
+        let tid_b = tab_b.tab_id();
+
+        registry.set_browse(tid_a, Arc::new(move |bp: BrowseProgress| {
+            ra.lock().unwrap().push(bp);
+        }));
+        registry.set_browse(tid_b, Arc::new(move |bp: BrowseProgress| {
+            rb.lock().unwrap().push(bp);
+        }));
+
+        let _ = tab_a
+            .goto("data:text/html,<title>OnlyA</title>")
+            .await
+            .unwrap();
+        let _ = tab_b
+            .goto("data:text/html,<title>OnlyB</title>")
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let got_a = received_a.lock().unwrap().clone();
+        let got_b = received_b.lock().unwrap().clone();
+
+        let a_titles: Vec<&str> = got_a
+            .iter()
+            .filter_map(|bp| match bp {
+                BrowseProgress::DocumentReady { title, .. } => Some(title.as_str()),
+                _ => None,
+            })
+            .collect();
+        let b_titles: Vec<&str> = got_b
+            .iter()
+            .filter_map(|bp| match bp {
+                BrowseProgress::DocumentReady { title, .. } => Some(title.as_str()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(a_titles.contains(&"OnlyA"), "A should have OnlyA, got {a_titles:?}");
+        assert!(!a_titles.contains(&"OnlyB"), "A should NOT have OnlyB");
+        assert!(b_titles.contains(&"OnlyB"), "B should have OnlyB, got {b_titles:?}");
+        assert!(!b_titles.contains(&"OnlyA"), "B should NOT have OnlyA");
+
+        let _ = tab_a.close().await;
+        let _ = tab_b.close().await;
         let _ = engine.close().await;
     }
 

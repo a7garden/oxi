@@ -6,6 +6,13 @@ exclude = ["scripts"]
 [workspace.dependencies]
 thiserror = "2"
 
+[patch.crates-io]
+oxi-ai = { path = "oxi-ai" }
+oxi-agent = { path = "oxi-agent" }
+oxi-sdk = { path = "oxi-sdk" }
+oxi-tui = { path = "oxi-tui" }
+oxi-cli = { path = "oxi-cli" }
+
 [profile.release]
 opt-level = 3
 lto = true

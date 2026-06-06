@@ -172,8 +172,9 @@ pub use oxi_agent::{
     Agent, AgentConfig, AgentError, AgentEvent, AgentHooks, AgentLoop, AgentLoopConfig, AgentState,
     AgentTool, AgentToolResult, CompactedContext, CompactionEvent, CompactionHook, EditTool,
     FindTool, GetSearchResultsTool, GrepTool, LsTool, OutputMode, ProviderResolver, ReadTool,
-    SearchCache, SharedState, StructuredOutput, StructuredOutputError, ToolContext, ToolError,
-    ToolExecutionMode, ToolRegistry, WebSearchTool, WriteTool,
+    SearchCache, SharedState, StructuredOutput, StructuredOutputError, ToolCallContext,
+    ToolContext, ToolError, ToolExecutionMode, ToolRegistry, VisitReason, WebSearchTool,
+    WriteTool, BrowseProgress, BrowseProgressCallback,
 };
 
 // ── Concrete provider re-exports ─────────────────────────────────────────

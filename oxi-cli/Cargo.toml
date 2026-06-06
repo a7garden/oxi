@@ -1,6 +1,6 @@
 [package]
 name = "oxi-cli"
-version = "0.28.0"
+version = "0.29.0"
 edition = "2021"
 description = "Terminal-based AI coding assistant — multi-provider, streaming-first, extensible"
 readme = "README.md"
@@ -20,10 +20,10 @@ name = "oxi"
 path = "src/lib.rs"
 
 [dependencies]
-oxi-ai = { version = "0.28.0" }
-oxi-agent = { version = "0.28.0" }
-oxi-sdk = { version = "0.28.0" }
-oxi-tui = { version = "0.28.0" }
+oxi-ai = { version = "0.29.0" }
+oxi-agent = { version = "0.29.0" }
+oxi-sdk = { version = "0.29.0" }
+oxi-tui = { version = "0.29.0" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

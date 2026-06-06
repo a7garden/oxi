@@ -13,6 +13,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Instant;
+use parking_lot::Mutex as SyncMutex;
 use tokio::sync::{oneshot, Mutex};
 
 /// Interactive browser session with a persistent tab across calls.
@@ -25,6 +26,12 @@ pub struct BrowseSessionTool {
     tab: Arc<Mutex<Option<TabGuard>>>,
     config: BrowseConfig,
     last_action: Arc<Mutex<Option<Instant>>>,
+    /// Shared callback management (progress + browse progress).
+    callbacks: super::callback_mixin::BrowseCallbacks,
+    /// Shared slot for the current tab's ID. The agent loop creates the
+    /// slot and passes it via `set_tab_id_slot`; the tool writes
+    /// `Some(tab_id)` on open and `None` on close.
+    tab_id_slot: SyncMutex<Arc<parking_lot::Mutex<Option<uuid::Uuid>>>>,
 }
 
 impl BrowseSessionTool {
@@ -35,6 +42,8 @@ impl BrowseSessionTool {
             tab: Arc::new(Mutex::new(None)),
             config: BrowseConfig::default(),
             last_action: Arc::new(Mutex::new(None)),
+            callbacks: super::callback_mixin::BrowseCallbacks::new(),
+            tab_id_slot: SyncMutex::new(Arc::new(parking_lot::Mutex::new(None))),
         }
     }
 
@@ -45,6 +54,8 @@ impl BrowseSessionTool {
             tab: Arc::new(Mutex::new(None)),
             config,
             last_action: Arc::new(Mutex::new(None)),
+            callbacks: super::callback_mixin::BrowseCallbacks::new(),
+            tab_id_slot: SyncMutex::new(Arc::new(parking_lot::Mutex::new(None))),
         }
     }
 
@@ -76,6 +87,8 @@ impl BrowseSessionTool {
                     "browse_session: auto-closing stale session"
                 );
                 guard.close().await;
+                // Clear the tab_id slot since the tab is gone
+                *self.tab_id_slot.lock().lock() = None;
             }
             return Err(format!(
                 "Session timed out after {}s of inactivity",
@@ -102,6 +115,46 @@ impl AgentTool for BrowseSessionTool {
          The tab retains cookies, localStorage, and DOM state between actions. \
          Use for multi-step interactions like form filling, login flows, and \
          SPA exploration where reasoning is needed between steps."
+    }
+
+    fn on_progress(&self, callback: crate::tools::ProgressCallback) {
+        // If a tab is already open, register directly on the engine's
+        // callback registry so browser events from the next action
+        // route to this callback (which carries the current tool_call_id).
+        let tab_id = self.current_tab_id();
+        if let Some(tid) = tab_id {
+            self.callbacks.store_progress(callback);
+            self.callbacks.register_progress_on_registry(
+                tid,
+                self.engine.callback_registry().as_ref(),
+            );
+        } else {
+            self.callbacks.store_progress(callback);
+        }
+    }
+
+    fn on_browse_progress(
+        &self,
+        callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>,
+    ) {
+        let tab_id = self.current_tab_id();
+        if let Some(tid) = tab_id {
+            self.callbacks.store_browse(callback);
+            self.callbacks.register_browse_on_registry(
+                tid,
+                self.engine.callback_registry().as_ref(),
+            );
+        } else {
+            self.callbacks.store_browse(callback);
+        }
+    }
+
+    fn set_tab_id_slot(&self, slot: Arc<parking_lot::Mutex<Option<uuid::Uuid>>>) {
+        *self.tab_id_slot.lock() = slot;
+    }
+
+    fn current_tab_id(&self) -> Option<uuid::Uuid> {
+        *self.tab_id_slot.lock().lock()
     }
 
     fn parameters_schema(&self) -> Value {
@@ -247,6 +300,20 @@ impl AgentTool for BrowseSessionTool {
                     .new_tab()
                     .await
                     .map_err(|e| format!("Failed to open browser tab: {}", e))?;
+
+                // Store tab_id so the agent loop can include it in
+                // ToolExecutionUpdate events.
+                let tab_id = raw_tab.tab_id();
+                *self.tab_id_slot.lock().lock() = Some(tab_id);
+
+                // Register progress callbacks on the new tab via the
+                // engine's registry. BrowserEvents for this tab will
+                // flow through to ToolExecutionUpdate.
+                self.callbacks.register_on_registry(
+                    tab_id,
+                    self.engine.callback_registry().as_ref(),
+                );
+
                 let guard = TabGuard::new(raw_tab);
                 *slot = Some(guard);
                 Ok(json_ok())
@@ -257,6 +324,8 @@ impl AgentTool for BrowseSessionTool {
                 match slot.take() {
                     Some(guard) => {
                         guard.close().await;
+                        // Clear the tab_id slot
+                        *self.tab_id_slot.lock().lock() = None;
                         Ok(json_ok())
                     }
                     None => Ok(json_error("no active session to close")),

@@ -3,13 +3,16 @@
 //! Parses a YAML sequence of steps and executes them in a single tab.
 //! Requires the `native-browser` feature (serde_yaml + oxibrowser-core).
 
+#![allow(clippy::useless_conversion, missing_docs)]
+
 use super::config::BrowseConfig;
-use super::engine::{BrowserEngine, BrowserError};
+use super::engine::BrowserEngine;
 use super::helpers;
 use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use serde::Deserialize;
+use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::Arc;
@@ -18,6 +21,7 @@ use tokio::sync::oneshot;
 // ── Step definitions ──────────────────────────────────────────────────────────
 
 /// A single step in a browse script.
+#[allow(missing_docs)] // Each variant is self-documenting via its label.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Step {
@@ -80,22 +84,170 @@ pub struct ScriptResult {
 
 fn parse_steps(yaml: &str) -> Result<Vec<Step>, ToolError> {
     // Accept both simple format (list of maps) and explicit format
-    let docs: Vec<serde_yaml::Value> =
+    // with a "steps:" key. The simple format is a bare sequence, the
+    // explicit format is `{ steps: [...] }`.
+    let doc: serde_yaml::Value =
         serde_yaml::from_str(yaml).map_err(|e| format!("Invalid YAML: {}", e))?;
 
-    let steps_val = if docs.len() == 1 {
-        &docs[0]
-    } else {
-        return Err("Expected a single YAML document with a 'steps' list".into());
+    let raw_seq = match &doc {
+        serde_yaml::Value::Sequence(_) => doc.clone(),
+        serde_yaml::Value::Mapping(map) => {
+            // Look up "steps" key (serde_yaml 0.9 doesn't implement
+            // Index<&str> on Mapping, so iterate).
+            let mut found: Option<&serde_yaml::Value> = None;
+            for (k, v) in map.iter() {
+                if let serde_yaml::Value::String(s) = k {
+                    if s == "steps" {
+                        found = Some(v);
+                        break;
+                    }
+                }
+            }
+            match found {
+                Some(v) => v.clone(),
+                None => {
+                    return Err("Missing 'steps' key in YAML document".into());
+                }
+            }
+        }
+        _ => return Err("YAML document must be a sequence or a map with a 'steps' key".into()),
     };
 
-    // Look for "steps:" key or treat as a direct list
-    let steps_node = steps_val.get("steps").unwrap_or(steps_val);
+    // raw_seq is a sequence of mappings, each containing a single
+    // key-value pair that names the variant. E.g.:
+    //   - goto: "url"        → Step::Goto { url }
+    //   - fill: { ... }      → Step::Fill { selector, value }
+    //   - screenshot: {}     → Step::Screenshot
+    //
+    // The single value can be either a string (shorthand for a
+    // one-field struct variant), a mapping (multi-field struct variant),
+    // or null (unit variant).
+    let yaml_seq = raw_seq
+        .as_sequence()
+        .ok_or_else(|| "steps must be a YAML sequence".to_string())?;
 
-    let steps: Vec<Step> = serde_yaml::from_value(steps_node.clone())
-        .map_err(|e| format!("Failed to parse steps: {}", e))?;
+    let mut steps = Vec::with_capacity(yaml_seq.len());
+    for (i, item) in yaml_seq.iter().enumerate() {
+        let mapping = item
+            .as_mapping()
+            .ok_or_else(|| format!("step {} is not a YAML mapping", i))?;
+        if mapping.len() != 1 {
+            return Err(format!(
+                "step {} must have exactly one key (the variant name), got {}",
+                i,
+                mapping.len()
+            ));
+        }
+        let (variant_key, payload) = mapping
+            .iter()
+            .next()
+            .expect("mapping.len() == 1 checked above");
+        let variant = variant_key
+            .as_str()
+            .ok_or_else(|| format!("step {} variant name is not a string", i))?;
+        let step = step_from_yaml_payload(variant, payload)
+            .map_err(|e| format!("step {} ({}): {}", i, variant, e))?;
+        steps.push(step);
+    }
 
     Ok(steps)
+}
+
+/// Build a `Step` from a YAML variant name + payload value.
+///
+/// `payload` may be:
+/// - A string → shorthand for `{ <only_field>: <string> }`.
+/// - A mapping → used as-is.
+/// - A null → unit variant (no fields).
+fn step_from_yaml_payload(
+    variant: &str,
+    payload: &serde_yaml::Value,
+) -> Result<Step, String> {
+    use serde_yaml::Value as Y;
+
+    /// Build a JSON object `{ <variant>: <fields> }` and let serde
+    /// do the variant dispatch. For single-field struct variants
+    /// with a YAML string payload, the field name is inferred by
+    /// inspecting the variant's expected field.
+    let wrapper = match payload {
+        Y::Null => serde_json::json!({ variant: {} }),
+        Y::Mapping(m) if m.is_empty() => {
+            // `screenshot: {}` — unit variant with no fields.
+            serde_json::json!({ variant: null })
+        }
+        Y::String(s) => {
+            // Try common single-field variants first; if none match,
+            // let serde report the error.
+            let single_field = single_field_struct_variant(variant)
+                .ok_or_else(|| format!("variant '{}' has no single-field shorthand", variant))?;
+            serde_json::json!({ variant: { single_field: s } })
+        }
+        _ => {
+            let payload_json = yaml_to_json_recursive(payload)?;
+            serde_json::json!({ variant: payload_json })
+        }
+    };
+    serde_json::from_value(wrapper).map_err(|e| e.to_string())
+}
+
+/// Return the field name for variants that have exactly one String field,
+/// enabling YAML shorthand `- goto: "url"` for `- goto: { url: "url" }`.
+fn single_field_struct_variant(variant: &str) -> Option<&'static str> {
+    match variant {
+        "goto" => Some("url"),
+        "click" => Some("selector"),
+        "fill" | "fill_" => Some("selector"), // not actually used; fill has 2 fields
+        "type" | "type_" => Some("selector"),
+        "clear" => Some("selector"),
+        "check" | "uncheck" => Some("selector"),
+        "select" => Some("selector"),
+        "press" => Some("combo"),
+        "wait" => Some("selector"),
+        "evaluate" => Some("expr"),
+        "extract" => Some("selector"),
+        "set" => Some("key"),
+        "echo" => Some("message"),
+        _ => None,
+    }
+}
+
+fn yaml_to_json_recursive(v: &serde_yaml::Value) -> Result<serde_json::Value, ToolError> {
+    use serde_yaml::Value as Y;
+    match v {
+        Y::Null => Ok(serde_json::Value::Null),
+        Y::Bool(b) => Ok(serde_json::Value::Bool(*b)),
+        Y::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Ok(serde_json::Value::Number(i.into()))
+            } else if let Some(u) = n.as_u64() {
+                Ok(serde_json::Value::Number(u.into()))
+            } else if let Some(f) = n.as_f64() {
+                serde_json::Number::from_f64(f)
+                    .map(serde_json::Value::Number)
+                    .ok_or_else(|| "non-finite number".to_string())
+            } else {
+                Err("unsupported number type".to_string())
+            }
+        }
+        Y::String(s) => Ok(serde_json::Value::String(s.clone())),
+        Y::Sequence(items) => {
+            let arr: Result<Vec<serde_json::Value>, ToolError> =
+                items.iter().map(yaml_to_json_recursive).collect();
+            Ok(serde_json::Value::Array(arr?))
+        }
+        Y::Mapping(map) => {
+            let mut obj = serde_json::Map::new();
+            for (k, v) in map.iter() {
+                let key = k
+                    .as_str()
+                    .ok_or_else(|| "non-string mapping key".to_string())?
+                    .to_string();
+                obj.insert(key, yaml_to_json_recursive(v)?);
+            }
+            Ok(serde_json::Value::Object(obj))
+        }
+        Y::Tagged(t) => yaml_to_json_recursive(&t.value),
+    }
 }
 
 // ── Execution ─────────────────────────────────────────────────────────────────
@@ -105,6 +257,7 @@ async fn execute_steps(
     steps: &[Step],
     config: &BrowseConfig,
     deadline: tokio::time::Instant,
+    progress_cb: Option<&crate::tools::ProgressCallback>,
 ) -> Result<ScriptResult, ToolError> {
     let mut result = ScriptResult {
         outputs: Vec::new(),
@@ -125,10 +278,42 @@ async fn execute_steps(
             .into());
         }
 
+        // Emit step-level progress so the UI can show "3/10 Clicking element…"
+        if let Some(cb) = progress_cb {
+            cb(format!("[{}/{}] {}", i + 1, steps.len(), step_label(step)));
+        }
+
         execute_single_step(tab, step, &mut result, config).await?;
     }
 
     Ok(result)
+}
+
+/// Human-readable label for a script step (for progress reporting).
+fn step_label(step: &Step) -> &'static str {
+    match step {
+        Step::Goto { .. } => "Navigating",
+        Step::Click { .. } => "Clicking element",
+        Step::Fill { .. } => "Filling input",
+        Step::Type { .. } => "Typing text",
+        Step::Clear { .. } => "Clearing input",
+        Step::Check { .. } => "Checking checkbox",
+        Step::Uncheck { .. } => "Unchecking checkbox",
+        Step::Select { .. } => "Selecting option",
+        Step::Press { .. } => "Pressing key",
+        Step::Scroll { .. } => "Scrolling",
+        Step::Wait { .. } => "Waiting for element",
+        Step::Evaluate { .. } => "Evaluating JavaScript",
+        Step::Extract { .. } => "Extracting data",
+        Step::Content => "Reading page content",
+        Step::Screenshot => "Taking screenshot",
+        Step::Set { .. } => "Setting variable",
+        Step::Echo { .. } => "Echo",
+        Step::Sleep { .. } => "Sleeping",
+        Step::Back => "Going back",
+        Step::Forward => "Going forward",
+        Step::Reload => "Reloading page",
+    }
 }
 
 async fn execute_single_step(
@@ -240,6 +425,10 @@ async fn execute_single_step(
 pub struct BrowseScriptTool {
     engine: Arc<dyn BrowserEngine>,
     config: BrowseConfig,
+    /// Shared callback management (progress + browse progress).
+    callbacks: super::callback_mixin::BrowseCallbacks,
+    /// Shared slot for the current tab's ID.
+    tab_id_slot: Mutex<Arc<parking_lot::Mutex<Option<uuid::Uuid>>>>,
 }
 
 impl BrowseScriptTool {
@@ -248,12 +437,19 @@ impl BrowseScriptTool {
         Self {
             engine,
             config: BrowseConfig::default(),
+            callbacks: super::callback_mixin::BrowseCallbacks::new(),
+            tab_id_slot: Mutex::new(Arc::new(parking_lot::Mutex::new(None))),
         }
     }
 
     /// Create with custom configuration.
     pub fn with_config(engine: Arc<dyn BrowserEngine>, config: BrowseConfig) -> Self {
-        Self { engine, config }
+        Self {
+            engine,
+            config,
+            callbacks: super::callback_mixin::BrowseCallbacks::new(),
+            tab_id_slot: Mutex::new(Arc::new(parking_lot::Mutex::new(None))),
+        }
     }
 }
 
@@ -271,6 +467,25 @@ impl AgentTool for BrowseScriptTool {
         "Run a multi-step browser automation script in YAML format. \
          Supports: goto, click, fill, type, press, wait, extract, evaluate, \
          check, uncheck, select, scroll, screenshot, content, sleep."
+    }
+
+    fn on_progress(&self, callback: crate::tools::ProgressCallback) {
+        self.callbacks.store_progress(callback);
+    }
+
+    fn on_browse_progress(
+        &self,
+        callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>,
+    ) {
+        self.callbacks.store_browse(callback);
+    }
+
+    fn set_tab_id_slot(&self, slot: Arc<parking_lot::Mutex<Option<uuid::Uuid>>>) {
+        *self.tab_id_slot.lock() = slot;
+    }
+
+    fn current_tab_id(&self) -> Option<uuid::Uuid> {
+        *self.tab_id_slot.lock().lock()
     }
 
     fn parameters_schema(&self) -> Value {
@@ -320,15 +535,36 @@ impl AgentTool for BrowseScriptTool {
 
         tracing::info!(steps = steps.len(), "executing browse script");
 
+        // Take the pending progress callback for step-level emission.
+        // The browse callback is registered on the registry separately.
+        let progress_cb = self.callbacks.take_progress();
+
         // Open one tab for the entire script
         let raw_tab = self
             .engine
             .new_tab()
             .await
             .map_err(|e| format!("Failed to open browser tab: {}", e))?;
+
+        let tab_id = raw_tab.tab_id();
+        *self.tab_id_slot.lock().lock() = Some(tab_id);
+
+        // Register progress callback on the registry for BrowserEvent routing.
+        if let Some(ref cb) = progress_cb {
+            let registry = self.engine.callback_registry();
+            registry.set(tab_id, cb.clone());
+        }
+        // Register browse callback (still pending, not taken by take_progress).
+        self.callbacks.register_browse_on_registry(
+            tab_id,
+            self.engine.callback_registry().as_ref(),
+        );
+
         let guard = TabGuard::new(raw_tab);
 
-        let script_result = execute_steps(guard.tab(), &steps, &self.config, deadline).await?;
+        let script_result =
+            execute_steps(guard.tab(), &steps, &self.config, deadline, progress_cb.as_ref())
+                .await?;
 
         // Build output
         let mut output_parts = Vec::new();
@@ -336,7 +572,7 @@ impl AgentTool for BrowseScriptTool {
             output_parts.push(script_result.outputs.join("\n"));
         }
 
-        let mut metadata = json!({
+        let metadata = json!({
             "steps_executed": steps.len(),
             "variables": script_result.variables,
         });
@@ -351,6 +587,7 @@ impl AgentTool for BrowseScriptTool {
         }
 
         guard.close().await;
+        *self.tab_id_slot.lock().lock() = None;
         Ok(result)
     }
 }

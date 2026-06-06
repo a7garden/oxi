@@ -137,56 +137,6 @@ impl fmt::Display for AgentToolResult {
 /// Callback type for progress updates
 pub type ProgressCallback = Arc<dyn Fn(String) + Send + Sync>;
 
-/// Structured progress event for tool execution streaming.
-#[derive(Debug, Clone)]
-pub enum ToolProgress {
-    /// Status message (progress in progress)
-    Status {
-        /// The status text.
-        message: String,
-    },
-    /// Partial output (e.g., bash stdout streaming)
-    PartialOutput {
-        /// The partial output text.
-        output: String,
-        /// Whether this came from stderr.
-        is_error: bool,
-    },
-    /// Progress percentage (0.0 - 1.0)
-    Percentage {
-        /// Current progress value.
-        current: f64,
-        /// Optional total value.
-        total: Option<f64>,
-        /// Optional human-readable message.
-        message: Option<String>,
-    },
-    /// File operation progress
-    FileOperation {
-        /// Type of file operation.
-        operation: FileOp,
-        /// File path being operated on.
-        path: std::path::PathBuf,
-        /// Bytes processed so far.
-        bytes_processed: Option<u64>,
-        /// Total bytes to process.
-        total_bytes: Option<u64>,
-    },
-}
-
-/// File operation types for progress reporting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileOp {
-    /// Reading a file.
-    Reading,
-    /// Writing a file.
-    Writing,
-    /// Searching file contents.
-    Searching,
-    /// Editing a file.
-    Editing,
-}
-
 /// Tool execution mode for parallel safety.
 #[derive(Debug, Clone)]
 pub enum ToolExecutionMode {
@@ -210,9 +160,6 @@ pub struct RenderOutput {
     /// Optional summary text for TUI footer
     pub summary: Option<String>,
 }
-
-/// Structured progress callback (alongside existing String callback)
-pub type StructuredProgressCallback = Arc<dyn Fn(ToolProgress) + Send + Sync>;
 
 /// Core trait for all agent tools
 #[async_trait]
@@ -281,10 +228,15 @@ pub trait AgentTool: Send + Sync {
         // Default no-op
     }
 
-    /// Structured progress callback for streaming tool execution updates.
-    /// Default implementation is no-op. Override in tools that support
-    /// structured progress (e.g., BashTool for partial output streaming).
-    fn on_structured_progress(&self, _callback: StructuredProgressCallback) {}
+    /// Structured browse progress callback for browser tool context enrichment.
+    /// Default implementation is no-op. Only browse tools override this to
+    /// register a callback that enriches `ToolCallContext` with structured
+    /// data from `BrowseProgress` events.
+    fn on_browse_progress(
+        &self,
+        _callback: crate::tools::browse::BrowseProgressCallback,
+    ) {
+    }
 
     /// Custom rendering for tool call (TUI visualization).
     /// Return None to use the default tool_renderer.rs formatter.

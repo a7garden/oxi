@@ -256,6 +256,10 @@ pub trait BrowserTab: Send + Sync {
     /// Clear any registered progress callback for this tab.
     /// Defaults to no-op — only backends with callback registries override.
     fn clear_progress_callback(&self) {}
+
+    /// Register a structured browse progress callback for this tab.
+    /// Defaults to no-op — only backends with browse callback support override.
+    fn set_browse_progress_callback(&self, _cb: BrowseProgressCallback) {}
 }
 
 // ── BrowserEngine trait ───────────────────────────────────────────────────────
@@ -297,7 +301,86 @@ pub trait BrowserEngine: Send + Sync {
     }
 }
 
+// ── BrowseProgress ──────────────────────────────────────────────────────
+
+/// Structured progress event for browser tool execution.
+///
+/// Converted from `oxibrowser_core::BrowserEvent` in the backend's drain
+/// task. Carries structured data that would be lost if flattened to a string
+/// via `short_label()`. The agent loop's browse callback receives these and
+/// enriches `ToolCallContext` with the result fields.
+///
+/// Defined here (not in `oxibrowser_backend.rs`) so the type is always
+/// available — no feature gate needed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum BrowseProgress {
+    /// A navigation has begun.
+    NavigationStarted {
+        /// URL being navigated to (pre-redirect).
+        url: String,
+    },
+
+    /// Waiting for a CSS selector to appear.
+    WaitingForSelector {
+        /// CSS selector being awaited.
+        selector: String,
+        /// Maximum wait time in milliseconds.
+        timeout_ms: u64,
+    },
+
+    /// Page has finished loading and JS has executed.
+    /// This is the key event — carries rich structured data.
+    DocumentReady {
+        /// Final URL after redirects.
+        url: String,
+        /// Page `<title>`.
+        title: String,
+        /// HTTP status code.
+        status: u16,
+        /// Size of the HTML body in bytes.
+        bytes: u64,
+        /// Wall-clock duration of the page load, in milliseconds.
+        duration_ms: u64,
+    },
+
+    /// A screenshot has been captured.
+    ScreenshotCaptured {
+        /// Size of the PNG payload in bytes.
+        bytes: usize,
+        /// Viewport width the screenshot was rendered at.
+        width: u32,
+        /// Render duration in milliseconds.
+        duration_ms: u64,
+    },
+
+    /// Navigation failed.
+    NavigationFailed {
+        /// URL that failed.
+        url: String,
+        /// Error description.
+        error: String,
+    },
+}
+
+// ── BrowseProgressCallback ──────────────────────────────────────────────
+
+/// Callback type for structured browse progress events.
+pub type BrowseProgressCallback = Arc<dyn Fn(BrowseProgress) + Send + Sync>;
+
 // ── TabCallbackRegistry ──────────────────────────────────────────────────
+
+/// Per-`tab_id` callback entry. Groups the string progress callback
+/// and the structured browse callback for a single tab. Both share
+/// the same lifecycle — `clear` removes both at once.
+#[derive(Default)]
+struct TabCallbacks {
+    /// String progress callback (`partial_result` text).
+    progress: Option<crate::tools::ProgressCallback>,
+    /// Structured browse progress callback (context enrichment).
+    browse: Option<BrowseProgressCallback>,
+}
 
 /// Per-`tab_id` callback registry for browser event routing.
 ///
@@ -310,7 +393,7 @@ pub trait BrowserEngine: Send + Sync {
 /// Tabs that have no registered callback (e.g. opened outside of a tool
 /// call) are silently ignored — `invoke` is a no-op for unknown tab IDs.
 pub struct TabCallbackRegistry {
-    callbacks: Mutex<HashMap<uuid::Uuid, crate::tools::ProgressCallback>>,
+    entries: Mutex<HashMap<uuid::Uuid, TabCallbacks>>,
 }
 
 impl Default for TabCallbackRegistry {
@@ -323,42 +406,64 @@ impl TabCallbackRegistry {
     /// Create an empty registry.
     pub fn new() -> Self {
         Self {
-            callbacks: Mutex::new(HashMap::new()),
+            entries: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Register a callback for the given `tab_id`.
+    /// Register a string progress callback for the given `tab_id`.
     pub fn set(&self, tab_id: uuid::Uuid, cb: crate::tools::ProgressCallback) {
-        self.callbacks.lock().insert(tab_id, cb);
+        self.entries
+            .lock()
+            .entry(tab_id)
+            .or_default()
+            .progress = Some(cb);
     }
 
-    /// Remove the callback for `tab_id`. Called when the tab is closed.
+    /// Register a structured browse progress callback for the given tab.
+    pub fn set_browse(&self, tab_id: uuid::Uuid, cb: BrowseProgressCallback) {
+        self.entries
+            .lock()
+            .entry(tab_id)
+            .or_default()
+            .browse = Some(cb);
+    }
+
+    /// Remove **all** callbacks for `tab_id`. Called when the tab is closed.
     pub fn clear(&self, tab_id: &uuid::Uuid) {
-        self.callbacks.lock().remove(tab_id);
+        self.entries.lock().remove(tab_id);
     }
 
-    /// Invoke the callback for `tab_id`, if one is registered.
-    /// Never panics; never blocks. If the callback itself panics, the
-    /// panic propagates.
+    /// Invoke the string progress callback for `tab_id`, if registered.
     pub fn invoke(&self, tab_id: &uuid::Uuid, msg: String) {
-        if let Some(cb) = self.callbacks.lock().get(tab_id).cloned() {
-            cb(msg);
+        if let Some(entry) = self.entries.lock().get(tab_id) {
+            if let Some(ref cb) = entry.progress {
+                cb(msg);
+            }
         }
     }
 
-    /// Whether a callback is registered for the given `tab_id`.
+    /// Invoke the browse progress callback for `tab_id`, if registered.
+    pub fn invoke_browse(&self, tab_id: &uuid::Uuid, progress: BrowseProgress) {
+        if let Some(entry) = self.entries.lock().get(tab_id) {
+            if let Some(ref cb) = entry.browse {
+                cb(progress);
+            }
+        }
+    }
+
+    /// Whether a string callback is registered for the given `tab_id`.
     pub fn is_set(&self, tab_id: &uuid::Uuid) -> bool {
-        self.callbacks.lock().contains_key(tab_id)
+        self.entries.lock().contains_key(tab_id)
     }
 
-    /// Number of currently registered callbacks.
+    /// Number of currently registered tabs.
     pub fn len(&self) -> usize {
-        self.callbacks.lock().len()
+        self.entries.lock().len()
     }
 
-    /// Returns `true` if no callbacks are registered.
+    /// Returns `true` if no tabs have registered callbacks.
     pub fn is_empty(&self) -> bool {
-        self.callbacks.lock().is_empty()
+        self.entries.lock().is_empty()
     }
 }
 
@@ -499,5 +604,127 @@ mod tests {
     fn browser_error_no_active_session() {
         let e = BrowserError::NoActiveSession;
         assert!(e.to_string().contains("no active session"));
+    }
+
+    // ── Browse progress callback tests ──────────────────────────
+
+    #[test]
+    fn tab_callback_registry_browse_set_and_invoke() {
+        let reg = TabCallbackRegistry::new();
+        let tab = uuid::Uuid::new_v4();
+        let received: Arc<std::sync::Mutex<Vec<BrowseProgress>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let r = Arc::clone(&received);
+        reg.set_browse(
+            tab,
+            Arc::new(move |bp: BrowseProgress| {
+                r.lock().unwrap().push(bp);
+            }),
+        );
+
+        let progress = BrowseProgress::DocumentReady {
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            status: 200,
+            bytes: 1024,
+            duration_ms: 500,
+        };
+        reg.invoke_browse(&tab, progress.clone());
+
+        let events = received.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], BrowseProgress::DocumentReady { status: 200, .. }));
+    }
+
+    #[test]
+    fn tab_callback_registry_browse_clear_removes_both() {
+        let reg = TabCallbackRegistry::new();
+        let tab = uuid::Uuid::new_v4();
+
+        // Register both types
+        reg.set(
+            tab,
+            oxi_ai::progress_callback(move |_| {}),
+        );
+        reg.set_browse(
+            tab,
+            Arc::new(move |_: BrowseProgress| {}),
+        );
+        assert!(reg.is_set(&tab));
+
+        // clear removes both
+        reg.clear(&tab);
+        assert!(!reg.is_set(&tab));
+        assert!(reg.is_empty());
+    }
+
+    #[test]
+    fn tab_callback_registry_browse_isolation_per_tab() {
+        let reg = TabCallbackRegistry::new();
+        let tab_a = uuid::Uuid::new_v4();
+        let tab_b = uuid::Uuid::new_v4();
+
+        let count_a = Arc::new(AtomicUsize::new(0));
+        let count_b = Arc::new(AtomicUsize::new(0));
+
+        let ca = Arc::clone(&count_a);
+        reg.set_browse(tab_a, Arc::new(move |_: BrowseProgress| {
+            ca.fetch_add(1, Ordering::SeqCst);
+        }));
+        let cb2 = Arc::clone(&count_b);
+        reg.set_browse(tab_b, Arc::new(move |_: BrowseProgress| {
+            cb2.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let doc_ready = BrowseProgress::DocumentReady {
+            url: "https://example.com".into(),
+            title: "Example".into(),
+            status: 200,
+            bytes: 1024,
+            duration_ms: 100,
+        };
+        reg.invoke_browse(&tab_a, doc_ready.clone());
+        assert_eq!(count_a.load(Ordering::SeqCst), 1);
+        assert_eq!(count_b.load(Ordering::SeqCst), 0);
+
+        reg.invoke_browse(&tab_b, doc_ready);
+        assert_eq!(count_a.load(Ordering::SeqCst), 1);
+        assert_eq!(count_b.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn browse_progress_serde_roundtrip() {
+        let variants = vec![
+            BrowseProgress::NavigationStarted {
+                url: "https://example.com".into(),
+            },
+            BrowseProgress::WaitingForSelector {
+                selector: ".content".into(),
+                timeout_ms: 5000,
+            },
+            BrowseProgress::DocumentReady {
+                url: "https://example.com/page".into(),
+                title: "Test Page".into(),
+                status: 200,
+                bytes: 4096,
+                duration_ms: 1234,
+            },
+            BrowseProgress::ScreenshotCaptured {
+                bytes: 8192,
+                width: 1280,
+                duration_ms: 200,
+            },
+            BrowseProgress::NavigationFailed {
+                url: "https://fail.example.com".into(),
+                error: "connection refused".into(),
+            },
+        ];
+
+        for bp in &variants {
+            let json = serde_json::to_string(bp).unwrap();
+            let restored: BrowseProgress = serde_json::from_str(&json).unwrap();
+            let json2 = serde_json::to_string(&restored).unwrap();
+            assert_eq!(json, json2, "roundtrip failed for {:?}", bp);
+        }
     }
 }

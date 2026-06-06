@@ -932,6 +932,7 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                                             tool_call_id,
                                             tool_name,
                                             args,
+                                            ..
                                         } => UiEvent::ToolExecutionStart {
                                             tool_call_id,
                                             tool_name,

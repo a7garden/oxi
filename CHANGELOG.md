@@ -5,11 +5,54 @@ All notable changes to the oxi project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.29.0] - 2026-06-06
 
 ### Added — oxi-agent
 
-- `AgentEvent::ToolExecutionUpdate` gains an optional `tab_id: Option<Uuid>` field (`#[serde(default)]`, backwards-compatible). The current implementation always sets `tab_id: None` because the per-tab routing refactor is a follow-up; oxios-kernel/oxios-web are ready to consume the field once it's populated.
+- **`ToolCallContext` enum**: Semantic context for tool calls (`WebSearch`, `PageVisit`, `DataExtraction`, `SessionAction`, `ScriptStep`). The agent loop infers context from tool name + args via `infer_context()`; tools remain unaware of semantics.
+- **`BrowseProgress` enum**: Structured progress events from browser tab lifecycle (`NavigationStarted`, `WaitingForSelector`, `DocumentReady`, `ScreenshotCaptured`, `NavigationFailed`). Converted from `oxibrowser_core::BrowserEvent` in the backend drain task.
+- **`VisitReason` enum**: `DirectNavigation`, `SearchResult { position }`, `LinkFollow` — distinguishes *why* a page was visited.
+- **`BrowseCallbacks` mixin** (`callback_mixin.rs`): Eliminates duplicated pending-callback boilerplate across 4 browse tools. Provides `store_progress()`, `store_browse()`, `register_on_registry()`, `register_on_tab()`.
+- **`TabCallbacks` composite** in `TabCallbackRegistry`: Single `HashMap<Uuid, TabCallbacks>` replaces the dual-map pattern. One `clear()` removes both string and browse callbacks atomically — no key-set divergence possible.
+- **`make_browse_enrichment_cb()`**: Shared closure factory that enriches `ToolCallContext::PageVisit` and `DataExtraction` with `DocumentReady` data (title, status, bytes, duration).
+- **`enrich_context_from_metadata()`**: Post-execute enrichment that fills `DataExtraction.result_count` from `AgentToolResult.metadata`.
+- **Parallel tool execution parity**: `execute_prepared_tool_call_static` (parallel path) now has full context_cell, tab_id_slot, progress callback, and browse callback wiring — identical observability to the sequential path.
+- **`browse_session "goto" → PageVisit`**: Semantic upgrade — `goto` action now produces `PageVisit { reason: DirectNavigation }` instead of generic `SessionAction`.
+- **`browse_script → ScriptStep`**: `infer_context` parses step count from YAML or JSON args, producing `ScriptStep { current: 0, total: N, step: "starting" }`.
+- **`browse_extract result_count`**: Extraction results include `result_count` in metadata; context enrichment populates `DataExtraction.result_count` after execute.
+- **Integration tests**: `engine_forwards_browse_progress_to_callback`, `engine_routes_browse_progress_by_tab_id` — end-to-end browse progress verification with real browser.
+- **Unit tests**: `browse_progress_serde_roundtrip`, `browse_enrichment_callback_*`, `infer_context_browse_script_*` — 18 new tests total.
+- **`AgentTool::on_browse_progress`**: Default trait method for structured browse progress callbacks.
+- **`BrowserTab::set_browse_progress_callback`**: Default trait method; only backends with browse callback support override.
+
+### Changed — oxi-agent
+
+- **`TabCallbackRegistry` restructured**: Dual `callbacks` + `browse_callbacks` maps → single `entries: HashMap<Uuid, TabCallbacks>` with composite `TabCallbacks { progress, browse }`. `clear()` is now atomic for both callback types.
+- **`BrowserTab::clear_browse_progress_callback` removed**: `TabCallbacks` clearing handles both; no separate method needed.
+- **4 browse tools refactored**: `pending_callback` + `pending_browse_callback` fields replaced with single `callbacks: BrowseCallbacks` field. ~80 lines of duplicated boilerplate eliminated.
+- **`BrowseScriptTool` YAML parser rewritten**: `parse_steps` now handles the `{ steps: [...] }` map format correctly, with per-step variant dispatch and shorthand support (`- goto: "url"` for single-field struct variants, `screenshot: {}` for unit variants). Fixes 10 previously-failing tests.
+- **`browse_progress_from_event`**: `NavigationFailed` match arm gated behind `oxibrowser-core ≥ 0.14` (crates.io 0.13 compatibility).
+
+### Removed — oxi-agent (Breaking Changes)
+
+- **`ToolProgress` enum**: Unused structured progress type (replaced by `BrowseProgress`).
+- **`FileOp` enum**: Unused file operation types (part of `ToolProgress`).
+- **`StructuredProgressCallback` type**: Unused callback type (replaced by `BrowseProgressCallback`).
+- **`AgentTool::on_structured_progress`**: Unused trait method (replaced by `on_browse_progress`).
+
+### Changed — oxi-sdk
+
+- Re-exports `BrowseProgress`, `BrowseProgressCallback`, `ToolCallContext`, `VisitReason`.
+
+### Changed — oxi-cli
+
+- `ToolExecutionStart` and `ToolExecutionUpdate` pattern matches updated with `..` for backward compatibility.
+
+### Changed — workspace
+
+- Bumped all crate versions to 0.29.0.
+- Inter-crate dependency versions aligned to 0.29.0.
+
 - Per-`tab_id` `TabCallbackRegistry` replaces the single-slot `ProgressForwarder`.
   Concurrent `BrowseTool` calls (each with their own tab) are now routed correctly.
   Each `BrowseTool::execute` registers its callback on the specific tab; the
@@ -67,7 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cargo audit/deny**: Synced ignore lists across `.cargo/audit.toml` and `deny.toml`; added upgrade tracker comment for extism ≥ 1.22 (wasmtime ≥ 43)
 - **Docs**: Added `CODEOWNERS` for per-area review assignment
 
-[Unreleased]: https://github.com/a7garden/oxi/compare/v0.25.7...HEAD
+[0.29.0]: https://github.com/a7garden/oxi/compare/v0.28.0...v0.29.0
+[Unreleased]: https://github.com/a7garden/oxi/compare/v0.29.0...HEAD
 
 ## [0.24.0] - 2026-05-30
 

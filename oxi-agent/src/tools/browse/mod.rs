@@ -7,6 +7,7 @@
 pub mod browse_extract_tool;
 pub mod browse_session_tool;
 pub mod browse_tool;
+pub mod callback_mixin;
 pub mod config;
 pub mod engine;
 pub mod helpers;
@@ -23,7 +24,10 @@ pub use browse_extract_tool::BrowseExtractTool;
 pub use browse_session_tool::BrowseSessionTool;
 pub use browse_tool::BrowseTool;
 pub use config::BrowseConfig;
-pub use engine::{BrowserEngine, BrowserError, BrowserTab, ElementInfo, LinkInfo, PageContent};
+pub use engine::{
+    BrowseProgress, BrowseProgressCallback, BrowserEngine, BrowserError, BrowserTab,
+    ElementInfo, LinkInfo, PageContent,
+};
 pub use tab_guard::TabGuard;
 
 #[cfg(feature = "native-browser")]

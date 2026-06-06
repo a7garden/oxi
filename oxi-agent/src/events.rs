@@ -4,6 +4,107 @@
 use crate::compaction::CompactionEvent;
 use serde::{Deserialize, Serialize};
 
+// ── Tool context types ────────────────────────────────────────────────────
+
+/// Semantic context for a tool execution event.
+///
+/// Carries structured information about *what* a tool call means,
+/// derived from the tool name and arguments by the agent loop.
+/// UI consumers that understand a context variant can render it
+/// richly; older consumers simply ignore the field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ToolCallContext {
+    // ── Web exploration ──────────────────────────────────────
+    /// A search engine query.
+    WebSearch {
+        /// The search query string.
+        query: String,
+        /// Search engine used (e.g. "duckduckgo").
+        #[serde(skip_serializing_if = "Option::is_none")]
+        engine: Option<String>,
+    },
+
+    /// Visiting a web page.
+    PageVisit {
+        /// URL being visited.
+        url: String,
+        /// Why this page is being visited.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<VisitReason>,
+        // ── Result fields (enriched by BrowseProgress::DocumentReady) ──
+        /// Page `<title>` after load.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_title: Option<String>,
+        /// HTTP status code.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_status: Option<u16>,
+        /// HTML body size in bytes.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_bytes: Option<u64>,
+        /// Wall-clock page load duration in milliseconds.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_duration_ms: Option<u64>,
+    },
+
+    /// Extracting data from a web page.
+    DataExtraction {
+        /// Description of what is being extracted (e.g. CSS selector).
+        target: String,
+        /// URL of the page being extracted from.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+        // ── Result fields (enriched by BrowseProgress::DocumentReady) ──
+        /// Number of items extracted.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        result_count: Option<usize>,
+        /// HTTP status code of the page.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_status: Option<u16>,
+        /// Page load duration in milliseconds.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        page_duration_ms: Option<u64>,
+    },
+
+    /// An action within a persistent browser session.
+    SessionAction {
+        /// The session action being performed (e.g. "goto", "click").
+        action: String,
+        /// URL if the action involves navigation.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+    },
+
+    /// A step within a browse script.
+    ScriptStep {
+        /// Current step index (1-based).
+        current: usize,
+        /// Total number of steps.
+        total: usize,
+        /// Human-readable step description.
+        step: String,
+    },
+}
+
+/// Reason for visiting a page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VisitReason {
+    /// The agent specified the URL directly.
+    DirectNavigation,
+    /// Clicked a search result at the given position.
+    SearchResult {
+        /// 1-based position in search results.
+        position: usize,
+    },
+    /// Followed a link from another page.
+    LinkFollowed {
+        /// The URL the link was on.
+        from_url: String,
+    },
+}
+
 /// Events emitted during agent execution.
 ///
 /// Events are tagged with `type` and serialized as camelCase for JSON consumers.
@@ -77,6 +178,10 @@ pub enum AgentEvent {
         tool_name: String,
         /// JSON arguments passed to the tool.
         args: serde_json::Value,
+        /// Semantic context inferred from tool name and arguments.
+        /// `None` for tools without a known context mapping.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<ToolCallContext>,
     },
 
     /// Partial progress from a running tool execution.
@@ -92,6 +197,10 @@ pub enum AgentEvent {
         /// or for older tool implementations that don't propagate tab ids.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tab_id: Option<uuid::Uuid>,
+        /// Semantic context inferred from tool name and arguments.
+        /// Carries structured information about what this update means.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<ToolCallContext>,
     },
 
     /// A tool execution has finished.

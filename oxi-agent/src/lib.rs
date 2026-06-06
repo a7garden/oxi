@@ -46,7 +46,8 @@ pub use config::{
     BeforeToolCallResult, ShouldStopAfterTurnContext, ToolExecutionMode,
 };
 pub use error::AgentError;
-pub use events::AgentEvent;
+pub use events::{AgentEvent, ToolCallContext, VisitReason};
+pub use tools::browse::{BrowseProgress, BrowseProgressCallback};
 
 pub use agent_loop::config::CompactionHook;
 pub use compaction::{CompactedContext, CompactionEvent};

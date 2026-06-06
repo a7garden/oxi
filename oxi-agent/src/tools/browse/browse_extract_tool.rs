@@ -10,6 +10,7 @@ use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use parking_lot::Mutex;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -20,6 +21,10 @@ use tokio::sync::oneshot;
 pub struct BrowseExtractTool {
     engine: Arc<dyn BrowserEngine>,
     config: BrowseConfig,
+    /// Shared callback management (progress + browse progress).
+    callbacks: super::callback_mixin::BrowseCallbacks,
+    /// Shared slot for the current tab's ID.
+    tab_id_slot: Mutex<Arc<parking_lot::Mutex<Option<uuid::Uuid>>>>,
 }
 
 impl BrowseExtractTool {
@@ -28,12 +33,19 @@ impl BrowseExtractTool {
         Self {
             engine,
             config: BrowseConfig::default(),
+            callbacks: super::callback_mixin::BrowseCallbacks::new(),
+            tab_id_slot: Mutex::new(Arc::new(parking_lot::Mutex::new(None))),
         }
     }
 
     /// Create with custom configuration.
     pub fn with_config(engine: Arc<dyn BrowserEngine>, config: BrowseConfig) -> Self {
-        Self { engine, config }
+        Self {
+            engine,
+            config,
+            callbacks: super::callback_mixin::BrowseCallbacks::new(),
+            tab_id_slot: Mutex::new(Arc::new(parking_lot::Mutex::new(None))),
+        }
     }
 }
 
@@ -51,6 +63,25 @@ impl AgentTool for BrowseExtractTool {
         "Extract structured data from a web page: links, text content, or elements matching \
          a CSS selector. Use when you need specific data from a page rather than the full content. \
          Supports extracting all matching elements or just the first match."
+    }
+
+    fn on_progress(&self, callback: crate::tools::ProgressCallback) {
+        self.callbacks.store_progress(callback);
+    }
+
+    fn on_browse_progress(
+        &self,
+        callback: Arc<dyn Fn(super::BrowseProgress) + Send + Sync>,
+    ) {
+        self.callbacks.store_browse(callback);
+    }
+
+    fn set_tab_id_slot(&self, slot: Arc<parking_lot::Mutex<Option<uuid::Uuid>>>) {
+        *self.tab_id_slot.lock() = slot;
+    }
+
+    fn current_tab_id(&self) -> Option<uuid::Uuid> {
+        *self.tab_id_slot.lock().lock()
     }
 
     fn parameters_schema(&self) -> Value {
@@ -135,6 +166,18 @@ impl BrowseExtractTool {
             .new_tab()
             .await
             .map_err(|e| format!("Failed to open browser tab: {}", e))?;
+
+        // Store tab_id so the agent loop can include it in
+        // ToolExecutionUpdate events.
+        let tab_id = raw_tab.tab_id();
+        *self.tab_id_slot.lock().lock() = Some(tab_id);
+
+        // Register progress callbacks on the tab via the engine's registry.
+        self.callbacks.register_on_registry(
+            tab_id,
+            self.engine.callback_registry().as_ref(),
+        );
+
         let guard = TabGuard::new(raw_tab);
 
         let page = guard
@@ -149,19 +192,38 @@ impl BrowseExtractTool {
 
         let metadata_url = page.url.clone();
         let metadata_title = page.title.clone();
+        let result_count = count_extracted_items(&output, extract);
 
         guard.close().await;
+        *self.tab_id_slot.lock().lock() = None;
 
         Ok(AgentToolResult::success(output).with_metadata(json!({
             "url": metadata_url,
             "title": metadata_title,
             "selector": selector,
             "extract": extract,
+            "result_count": result_count,
         })))
     }
 }
 
 // ── Extraction logic ──────────────────────────────────────────────────────────
+
+/// Count items in extraction output for metadata.
+fn count_extracted_items(output: &str, extract: &str) -> usize {
+    match extract {
+        "links" | "elements" => {
+            // JSON array output — count top-level array elements.
+            serde_json::from_str::<Vec<serde_json::Value>>(output)
+                .map(|v| v.len())
+                .unwrap_or(0)
+        }
+        _ => {
+            // Text/markdown — count non-empty lines.
+            output.lines().filter(|l| !l.trim().is_empty()).count()
+        }
+    }
+}
 
 async fn extract_from_tab(
     tab: &dyn BrowserTab,
