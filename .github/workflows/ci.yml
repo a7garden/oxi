@@ -114,37 +114,6 @@ jobs:
             exit 1
           fi
 
-  # ── Code coverage (informational — does not block merge) ────────
-  coverage:
-    name: Coverage (informational)
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    # Only run on main, not on every PR — coverage is for trend tracking.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "coverage"
-      - name: Install llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate coverage
-        run: |
-          cargo llvm-cov nextest --workspace \
-            --lcov --output-path lcov.info \
-            --exclude-files 'target/*' \
-            --exclude-files 'tests/*' \
-            --exclude-files '**/tests/*'
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v5
-        with:
-          files: lcov.info
-          # Public repos don't need a token; private repos must set
-          # CODECOV_TOKEN as a repository secret.
-          fail_ci_if_error: false
-          verbose: false
-
   # ── Documentation build (blocks doc-rot before it lands) ───────
   doc:
     name: cargo doc

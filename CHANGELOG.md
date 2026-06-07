@@ -7,22 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Scope decisions (2026-06-07)
+
+- **Distribution channel:** crates.io only. No Homebrew tap, no Scoop
+  bucket, no apt/yum repos.
+- **Build target:** `aarch64-apple-darwin` (macOS Apple Silicon) only.
+  The maintainer does not have access to Linux or Windows build
+  environments, so cross-OS verification is not part of this pipeline.
+- **Supply chain:** SHA256SUMS generated on every release (unsigned).
+  No GPG signing, no Codecov coverage reporting.
+
 ### Added — CI/CD & Supply Chain
 
 - **`release.yml` enhancements**:
   - New `tag-check` job rejects tags not reachable from `origin/main`
     (defense against force-pushed stale tags).
   - Release job now generates `SHA256SUMS` next to binaries.
-  - GPG detached signature (`SHA256SUMS.asc`) when `GPG_PRIVATE_KEY`,
-    `GPG_PASSPHRASE`, and `GPG_FINGERPRINT` secrets are configured.
   - CycloneDX 1.5 SBOM (`oxi.cdx.json`) attached to the GitHub release.
+  - Matrix simplified to a single target (`aarch64-apple-darwin`).
 - **`publish.yml`** (new) — publishes all 5 workspace crates to
   `crates.io` in topological order on `release: published`, with a
   dry-run `cargo package --no-verify` pre-flight. Requires `CARGO_TOKEN`
   secret. Run `workflow_dispatch` for a manual dry run.
-  **Scope decision (2026-06-07):** crates.io is the only distribution
-  channel. Homebrew/Scoop tap automation is intentionally not
-  implemented.
 - **`sbom.yml`** (new) — generates a CycloneDX SBOM on every push to
   `main`, submits it to GitHub's dependency-graph API (so Dependabot
   sees transitive crates), and uploads the JSON as a workflow artifact.
@@ -35,19 +41,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`.pre-commit-config.yaml`** (new) — local pre-commit hooks that
   mirror the ci.yml gate: trailing whitespace, EOF, YAML/TOML lint,
   merge-conflict, large files, private keys, no-commit-to-main,
-  `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`.
+  `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`.
 - **`ci.yml` enhancements**:
-  - `clippy` now runs with `--all-targets` (catches test/bench lints).
   - `smoke-test` now has a 15-min timeout.
   - New `msrv` job verifies the workspace builds on Rust 1.82.
-  - New `coverage` job (informational, main-only) generates
-    `lcov.info` via `cargo-llvm-cov` and uploads to Codecov.
   - New `doc` job builds `cargo doc --no-deps` with
     `RUSTDOCFLAGS="-D warnings"`.
 - **`test.yml` enhancements**:
   - Triggered on `pull_request` (was: main-only). Every PR now runs
     the full nextest matrix.
-  - Matrix now includes `windows-latest` (was: ubuntu + macos only).
+  - Matrix simplified to `macos-latest` only.
+- **`build-binaries.yml`** matrix simplified to `aarch64-apple-darwin`
+  only.
 
 ### Changed — Repository Hygiene
 

@@ -11,7 +11,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 | Version | 0.30.0 (latest release: 0.30.0) |
 | License | MIT |
 | CI | `cargo fmt`, `cargo clippy -D warnings`, `cargo nextest run`, `cargo audit`, `cargo deny check` |
-| Workflows | `ci.yml` (5+2 jobs: fmt/clippy/smoke-test/audit/deny + msrv/coverage/doc), `test.yml` (3-OS matrix + doc), `pr-gate.yml`, `release.yml` (7-target + SHA256SUMS + GPG + SBOM), `build-binaries.yml`, `publish.yml` (crates.io), `sbom.yml`, `labels.yml` |
+| Workflows | `ci.yml` (7 jobs: fmt/clippy/smoke-test/audit/deny/msrv/doc), `test.yml` (macOS-only matrix + doc), `pr-gate.yml`, `release.yml` (aarch64-apple-darwin + SHA256SUMS + SBOM), `build-binaries.yml`, `publish.yml` (crates.io), `sbom.yml`, `labels.yml` |
 
 > The legacy `oxi-store` crate (settings, sessions, auth) was absorbed
 > into `oxi-cli/src/store/` as a self-contained sub-module. The legacy
@@ -310,10 +310,10 @@ oxi ships a multi-stage pipeline. The full source is under
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| `ci.yml` | PR + push to main/develop | Fast feedback: `fmt`, `clippy`, `smoke-test`, `audit`, `deny`, `msrv`, `coverage`, `doc`. ~2-3 min for the fast jobs. |
-| `test.yml` | PR + push to main + release | Full nextest matrix on **ubuntu + macos + windows**, plus doc tests. Replaces the older "smoke on PR, full on main" split. |
+| `ci.yml` | PR + push to main/develop | Fast feedback: `fmt`, `clippy`, `smoke-test`, `audit`, `deny`, `msrv`, `doc`. ~2-3 min for the fast jobs. |
+| `test.yml` | PR + push to main + release | Full nextest matrix on **macos-latest** (Apple Silicon), plus doc tests. Replaces the older "smoke on PR, full on main" split. |
 | `pr-gate.yml` | PR opened/synchronized/reopened | Conventional-Commit title, PR size ≤ 4000 lines, no merge commits, issue linkage. |
-| `release.yml` | `v*` tag push | 7-target build matrix, `tag-check` (rejects stale tags), `SHA256SUMS` + GPG signature (conditional on secrets) + CycloneDX SBOM, GitHub Release. |
+| `release.yml` | `v*` tag push | Build `aarch64-apple-darwin`, `tag-check` (rejects stale tags), `SHA256SUMS` + CycloneDX SBOM, GitHub Release. |
 | `build-binaries.yml` | weekly cron + manual | Continuous binary build (no release artifact) for sanity. |
 | `publish.yml` | `release: published` + manual | `cargo publish` to crates.io in topological order with a dry-run pre-flight. Requires `CARGO_TOKEN`. |
 | `sbom.yml` | push to main + release | Generates CycloneDX 1.5 SBOM and submits it to GitHub's dependency-graph API. |
@@ -324,15 +324,22 @@ oxi ships a multi-stage pipeline. The full source is under
 | Secret | Used by | Required? | How to create |
 |--------|---------|:---:|---------------|
 | `CARGO_TOKEN` | `publish.yml` | ✅ **Yes** (to publish) | <https://crates.io/settings/tokens>, scope: publish |
-| `GPG_PRIVATE_KEY` | `release.yml` | ⚠️ Optional | `gpg --armor --export-secret-keys <KEYID>`. Skip → SHA256SUMS generated unsigned. |
-| `GPG_PASSPHRASE` | `release.yml` | ⚠️ Optional | Passphrase for the above key (or empty). |
-| `GPG_FINGERPRINT` | `release.yml` | ⚠️ Optional | `gpg --fingerprint` |
-| `CODECOV_TOKEN` | `ci.yml` (coverage) | ❌ Optional | <https://codecov.io> — only required for private repos. |
 
-Without **any** secret, the pipeline still runs `ci.yml`, `test.yml`,
-`pr-gate.yml`, `release.yml` (with unsigned SHA256SUMS + SBOM),
-`build-binaries.yml`, `sbom.yml`, and `labels.yml`. Only
-`publish.yml` (crates.io) and binary signing require secrets.
+**Scope decisions (2026-06-07):**
+
+- **Distribution channel:** crates.io only. No Homebrew tap, no Scoop bucket.
+- **Build target:** `aarch64-apple-darwin` (macOS Apple Silicon) only.
+  The maintainer does not have access to Linux or Windows build
+  environments, so cross-OS verification is not part of this pipeline.
+  To re-enable other targets, add an entry to the `matrix` in
+  `release.yml`/`build-binaries.yml` and a matching runner in
+  `test.yml`.
+- **Supply chain:** SHA256SUMS generated on every release (unsigned).
+  No GPG signing, no Codecov coverage reporting.
+
+With **only** `CARGO_TOKEN` configured, the full pipeline runs:
+CI gates (`ci.yml`) + tests (`test.yml`) + PR gate + release build
+(`release.yml`) + crates.io publish (`publish.yml`) + SBOM + label sync.
 
 ## Design Principles
 

@@ -13,37 +13,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ── Linux ──
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            use_cross: true
-            artifact_name: oxi
-            archive_ext: tar.gz
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
-            use_cross: true
-            artifact_name: oxi
-            archive_ext: tar.gz
-          # ── macOS ──
-          # macos-14 is the first ARM-only runner line; x86_64-apple-darwin
-          # is produced via Apple's cross-linker (--target x86_64-apple-darwin
-          # is handled by the dtolnay/rust-toolchain step below).
+          # ── macOS Apple Silicon (only supported target) ──
           - target: aarch64-apple-darwin
             os: macos-latest
-            use_cross: false
             artifact_name: oxi
             archive_ext: tar.gz
-          - target: x86_64-apple-darwin
-            os: macos-14
-            use_cross: false
-            artifact_name: oxi
-            archive_ext: tar.gz
-          # ── Windows ──
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            use_cross: false
-            artifact_name: oxi.exe
-            archive_ext: zip
 
     steps:
       - uses: actions/checkout@v5
@@ -51,37 +25,24 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross
-        if: matrix.use_cross
-        run: cargo install cross --locked
-
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
       - name: Build
         run: |
-          ${{ matrix.use_cross && 'cross' || 'cargo' }} build \
+          cargo build \
             --release \
             --target ${{ matrix.target }} \
             -p oxi-cli
 
       - name: Strip binary
-        if: runner.os != 'Windows'
         run: strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
 
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
+      - name: Package
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../oxi-${{ matrix.target }}.tar.gz ${{ matrix.artifact_name }}
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cd target/${{ matrix.target }}/release
-          7z a ../../../oxi-${{ matrix.target }}.zip ${{ matrix.artifact_name }}
-        shell: pwsh
 
       - uses: actions/upload-artifact@v4
         with:

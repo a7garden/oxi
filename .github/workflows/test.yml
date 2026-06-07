@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
@@ -39,10 +39,6 @@ jobs:
           shared-key: test-${{ matrix.os }}
       - uses: taiki-e/install-action@nextest
       - name: Run tests
-        # Windows MSVC runners need an explicit linker setup for some
-        # crates that pull in native deps; the default works for the
-        # current workspace. If a new crate adds a native dep, document
-        # the extra `shell: pwsh` step in its README.
         run: cargo nextest run --workspace --profile ci
 
   test-doc:

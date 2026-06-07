@@ -11,7 +11,6 @@ Multi-provider · Streaming-first · Extensible · Session persistence
 
 [![CI](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/ci.yml?style=flat-square&label=CI)](https://github.com/a7garden/oxi/actions)
 [![Test](https://img.shields.io/github/actions/workflow/status/a7garden/oxi/test.yml?style=flat-square&label=tests)](https://github.com/a7garden/oxi/actions)
-[![codecov](https://img.shields.io/codecov/c/github/a7garden/oxi?style=flat-square&label=coverage)](https://codecov.io/gh/a7garden/oxi)
 [![Crates.io](https://img.shields.io/crates/v/oxi-cli?style=flat-square&label=crates.io)](https://crates.io/crates/oxi-cli)
 [![docs.rs](https://img.shields.io/docsrs/oxi-cli?style=flat-square&label=docs.rs)](https://docs.rs/oxi-cli)
 [![GitHub release](https://img.shields.io/github/v/release/a7garden/oxi?style=flat-square&include_prereleases&label=release)](https://github.com/a7garden/oxi/releases)
@@ -59,15 +58,14 @@ cargo install cargo-binstall
 cargo binstall oxi-cli
 ```
 
-**Pre-built binaries** (Linux, macOS, Windows — 7 targets):
+**Pre-built binary** (macOS Apple Silicon):
 ```bash
-# Linux x86_64
-curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/x86_64-unknown-linux-gnu.tar.gz \
+# aarch64-apple-darwin
+curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/aarch64-apple-darwin.tar.gz \
   | tar xz -C /usr/local/bin
 ```
 Or download from the [Releases page](https://github.com/a7garden/oxi/releases).
-Each release ships with `SHA256SUMS` and (once the GPG key is configured)
-`SHA256SUMS.asc` for verification.
+Each release ships with `SHA256SUMS` for integrity verification.
 
 **Build from source** (last resort):
 ```bash
@@ -79,11 +77,8 @@ cp target/release/oxi /usr/local/bin/
 ### Verify a downloaded binary
 
 ```bash
-# Once a release is published with GPG signature:
 curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/SHA256SUMS -o SHA256SUMS
-curl -fsSL https://github.com/a7garden/oxi/releases/latest/download/SHA256SUMS.asc -o SHA256SUMS.asc
-gpg --verify SHA256SUMS.asc SHA256SUMS
-sha256sum -c SHA256SUMS 2>/dev/null | grep x86_64-unknown-linux-gnu
+sha256sum -c SHA256SUMS 2>/dev/null | grep aarch64-apple-darwin
 ```
 
 ### Configure
