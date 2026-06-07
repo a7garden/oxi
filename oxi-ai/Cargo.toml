@@ -1,7 +1,8 @@
 [package]
 name = "oxi-ai"
 version = "0.30.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 description = "Unified LLM API — multi-provider streaming interface for AI coding assistants"
 readme = "README.md"
 license = "MIT"

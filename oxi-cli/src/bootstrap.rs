@@ -191,7 +191,8 @@ fn register_custom_providers(settings: &Settings) {
             _ => {
                 tracing::warn!(
                     "Unknown API type '{}' for custom provider '{}'. Supported: openai-completions, openai-responses",
-                    cp.api, cp.name
+                    cp.api,
+                    cp.name
                 );
             }
         }
@@ -206,7 +207,7 @@ fn fetch_and_register_models(
     api: &str,
     api_key: &Option<String>,
 ) {
-    if let Some(ref key) = api_key {
+    if let Some(key) = api_key {
         match oxi_sdk::fetch_models_blocking(&cp.base_url, key.as_str()) {
             Ok(model_ids) => {
                 let count = model_ids.len();

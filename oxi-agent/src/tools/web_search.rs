@@ -12,7 +12,7 @@ use super::search_cache::{SearchCache, SearchResult};
 /// - Zero-config: no API keys, no external binary needed
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -213,9 +213,11 @@ mod tests {
         assert!(schema["properties"]["query"].is_object());
         assert!(schema["properties"]["engines"].is_object());
         assert!(schema["properties"]["limit"].is_object());
-        assert!(schema["required"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("query")));
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("query"))
+        );
     }
 }

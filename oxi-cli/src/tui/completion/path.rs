@@ -90,13 +90,13 @@ fn make_relative(path: &Path, base: &Path) -> PathBuf {
 
 /// Expand `~` to the user's home directory.
 fn expand_tilde(path: &str) -> PathBuf {
-    if path.starts_with("~/") || path == "~" {
-        if let Some(home) = dirs::home_dir() {
-            if path == "~" {
-                return home;
-            }
-            return home.join(&path[2..]);
+    if (path.starts_with("~/") || path == "~")
+        && let Some(home) = dirs::home_dir()
+    {
+        if path == "~" {
+            return home;
         }
+        return home.join(&path[2..]);
     }
     PathBuf::from(path)
 }

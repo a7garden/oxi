@@ -427,10 +427,10 @@ impl Settings {
         let mut settings = Settings::default();
 
         // 2. Layer global config
-        if let Ok(global_path) = Self::settings_path() {
-            if global_path.exists() {
-                settings = Self::layer_file(&settings, &global_path)?;
-            }
+        if let Ok(global_path) = Self::settings_path()
+            && global_path.exists()
+        {
+            settings = Self::layer_file(&settings, &global_path)?;
         }
 
         // 3. Layer project config
@@ -562,11 +562,11 @@ impl Settings {
 
     /// Save settings to a specific path, using the format determined by the file extension.
     pub fn save_to(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.exists()
+        {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
         }
 
         let format = Self::detect_format(path);
@@ -679,10 +679,10 @@ impl Settings {
         if let Some(p) = prefer_cost_efficient {
             self.prefer_cost_efficient = p;
         }
-        if let Some(fc) = fallback_chain {
-            if !fc.is_empty() {
-                self.fallback_chain = fc;
-            }
+        if let Some(fc) = fallback_chain
+            && !fc.is_empty()
+        {
+            self.fallback_chain = fc;
         }
         if let Some(df) = disable_fallback {
             self.disable_fallback = df;
@@ -958,7 +958,8 @@ mod tests {
                 .iter()
                 .map(|&name| {
                     let old = env::var(name).ok();
-                    env::remove_var(name);
+                    // SAFETY: test-only; the ENV_LOCK mutex serializes access.
+                    unsafe { env::remove_var(name) };
                     (name.to_string(), old)
                 })
                 .collect();
@@ -970,8 +971,9 @@ mod tests {
         fn drop(&mut self) {
             for (name, old) in self.saved.drain(..) {
                 match old {
-                    Some(val) => env::set_var(&name, val),
-                    None => env::remove_var(&name),
+                    // SAFETY: test-only; the ENV_LOCK mutex serializes access.
+                    Some(val) => unsafe { env::set_var(&name, val) },
+                    None => unsafe { env::remove_var(&name) },
                 }
             }
         }
@@ -1141,8 +1143,8 @@ theme = "dracula"
         // NOTE: Environment variable overrides are disabled.
         // apply_env() is a no-op.
         let _guard = EnvGuard::new(&["OXI_STREAM", "OXI_EXTENSIONS_ENABLED"]);
-        env::set_var("OXI_STREAM", "false");
-        env::set_var("OXI_EXTENSIONS_ENABLED", "0");
+        unsafe { env::set_var("OXI_STREAM", "false") };
+        unsafe { env::set_var("OXI_EXTENSIONS_ENABLED", "0") };
 
         let mut settings = Settings::default();
         settings.apply_env();
@@ -1155,7 +1157,7 @@ theme = "dracula"
     fn test_apply_env_temperature() {
         // NOTE: Environment variable overrides are disabled.
         let _guard = EnvGuard::new(&["OXI_TEMPERATURE"]);
-        env::set_var("OXI_TEMPERATURE", "0.7");
+        unsafe { env::set_var("OXI_TEMPERATURE", "0.7") };
 
         let mut settings = Settings::default();
         settings.apply_env();
@@ -1305,7 +1307,7 @@ theme = "dracula"
         // NOTE: Environment variable overrides are disabled.
         // OXI_SESSION_DIR is ignored; effective_session_dir() returns the field value (or default).
         let _guard = EnvGuard::new(&["OXI_SESSION_DIR"]);
-        env::set_var("OXI_SESSION_DIR", "/tmp/env-sessions");
+        unsafe { env::set_var("OXI_SESSION_DIR", "/tmp/env-sessions") };
         let settings = Settings::default();
         // Env is ignored, so it should use the default path, not /tmp/env-sessions
         let dir = settings.effective_session_dir().unwrap();

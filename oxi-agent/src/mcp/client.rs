@@ -458,17 +458,17 @@ impl McpClient {
             loop {
                 let msg = self.read_message().await?;
                 // Check if this is our response
-                if let Some(response_id) = msg.id {
-                    if response_id == id {
-                        if let Some(error) = msg.error {
-                            return Err(anyhow::anyhow!(
-                                "JSON-RPC error {}: {}",
-                                error.code,
-                                error.message
-                            ));
-                        }
-                        return Ok(msg.result.unwrap_or(serde_json::Value::Null));
+                if let Some(response_id) = msg.id
+                    && response_id == id
+                {
+                    if let Some(error) = msg.error {
+                        return Err(anyhow::anyhow!(
+                            "JSON-RPC error {}: {}",
+                            error.code,
+                            error.message
+                        ));
                     }
+                    return Ok(msg.result.unwrap_or(serde_json::Value::Null));
                 }
                 // Notification or unmatched response — skip
             }

@@ -6,8 +6,8 @@
 
 use std::sync::Arc;
 
-use oxi_sdk::prelude::*;
 use oxi_sdk::StringPattern;
+use oxi_sdk::prelude::*;
 
 fn main() {
     let audit = Arc::new(AuditLog::new(64));

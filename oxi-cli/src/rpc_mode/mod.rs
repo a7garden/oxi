@@ -33,13 +33,13 @@ pub use handlers::run_rpc_mode;
 
 // Protocol types
 pub use protocol::{
-    jsonrpc_to_command, parse_json_line, rpc_response_to_jsonrpc, serialize_json_line,
-    serialize_json_line_obj, CommandInfo, CompactionResult, ImageData, JsonRpcError,
+    CommandInfo, CompactionResult, ImageData, JSONRPC_INTERNAL_ERROR, JSONRPC_INVALID_PARAMS,
+    JSONRPC_INVALID_REQUEST, JSONRPC_METHOD_NOT_FOUND, JSONRPC_PARSE_ERROR, JsonRpcError,
     JsonRpcErrorResponse, JsonRpcRequest, JsonRpcSuccessResponse, JsonlLineReader, ModelInfo,
     PendingExtensionRequest, RpcCommand, RpcEvent, RpcExtensionUiRequest, RpcExtensionUiResponse,
     RpcImageSource, RpcOutput, RpcResponse, SessionHandoff, SessionState, SessionStats, SourceInfo,
-    JSONRPC_INTERNAL_ERROR, JSONRPC_INVALID_PARAMS, JSONRPC_INVALID_REQUEST,
-    JSONRPC_METHOD_NOT_FOUND, JSONRPC_PARSE_ERROR,
+    jsonrpc_to_command, parse_json_line, rpc_response_to_jsonrpc, serialize_json_line,
+    serialize_json_line_obj,
 };
 
 // State types

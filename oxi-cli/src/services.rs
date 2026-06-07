@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
+use oxi_sdk::Oxi;
 use oxi_sdk::fs::{
     FileAuthProvider, FileConfigStore, FilePersonaProvider, FileSkillLoader, FileStateStore,
     SimpleAccessGate, TomlCapabilityResolver,
@@ -27,7 +28,6 @@ use oxi_sdk::fs::{
 use oxi_sdk::inmem::{
     CountingResourceMonitor, InMemoryCronScheduler, InMemoryMemoryStore, InProcessEventBus,
 };
-use oxi_sdk::Oxi;
 
 /// Resolved paths under the oxi home directory.
 #[derive(Debug, Clone)]

@@ -12,7 +12,7 @@ use super::search_cache::{SearchCache, SearchResult};
 /// Disable via `disabled_tools = ["github"]` or `OXI_DISABLED_TOOLS=github`.
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
@@ -87,11 +87,18 @@ async fn gh_search(params: &Value) -> Result<AgentToolResult, ToolError> {
         .min(30) as usize;
 
     let json_fields = match kind {
-        "repos" => "--json=name,fullName,url,description,language,stargazersCount,forksCount,issues,updatedAt,repositoryTopics,licenseInfo",
+        "repos" => {
+            "--json=name,fullName,url,description,language,stargazersCount,forksCount,issues,updatedAt,repositoryTopics,licenseInfo"
+        }
         "issues" => "--json=title,url,state,body,author,labels,createdAt,updatedAt,comments,number",
         "code" => "--json=path,repository,textMatches",
         "commits" => "--json=sha,url,message,author,date",
-        _ => return Err(format!("Unknown search kind '{}'. Use: repos, issues, code, commits", kind)),
+        _ => {
+            return Err(format!(
+                "Unknown search kind '{}'. Use: repos, issues, code, commits",
+                kind
+            ));
+        }
     };
 
     let output = gh_exec(&[

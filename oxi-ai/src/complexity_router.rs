@@ -51,11 +51,7 @@ impl DefaultRouter {
         context.messages.iter().rev().find_map(|msg| {
             if let Message::User(user_msg) = msg {
                 let text = self.extract_content_text(&user_msg.content);
-                if !text.is_empty() {
-                    Some(text)
-                } else {
-                    None
-                }
+                if !text.is_empty() { Some(text) } else { None }
             } else {
                 None
             }

@@ -7,15 +7,15 @@
 /// - Unified diff output for previews
 /// - File mutation queue for concurrent write safety
 use super::edit_diff::{
-    self, detect_line_ending, has_bom, normalize_to_lf, restore_line_endings, strip_bom, Edit,
-    EditDiffError,
+    self, Edit, EditDiffError, detect_line_ending, has_bom, normalize_to_lf, restore_line_endings,
+    strip_bom,
 };
 use super::file_mutation_queue::global_mutation_queue;
 use super::path_security::PathGuard;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
@@ -66,8 +66,8 @@ impl EditTool {
         }
 
         // Legacy mode: old_text + new_text
-        if edits.is_empty() {
-            if let (Some(old), Some(new)) = (
+        if edits.is_empty()
+            && let (Some(old), Some(new)) = (
                 params
                     .get("old_text")
                     .or(params.get("oldText"))
@@ -76,12 +76,12 @@ impl EditTool {
                     .get("new_text")
                     .or(params.get("newText"))
                     .and_then(|v| v.as_str()),
-            ) {
-                edits.push(EditEntry {
-                    old_text: old.to_string(),
-                    new_text: new.to_string(),
-                });
-            }
+            )
+        {
+            edits.push(EditEntry {
+                old_text: old.to_string(),
+                new_text: new.to_string(),
+            });
         }
 
         let dry_run = params

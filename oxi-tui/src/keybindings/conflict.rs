@@ -85,13 +85,14 @@ pub fn validate_user_bindings(
     for (user_action, user_keys) in user_bindings {
         for user_key in user_keys {
             // Check if this key was bound to an essential action
-            if let Some(default_action) = default_keys.get(user_key) {
-                if essential_actions.contains(default_action) && *user_action != *default_action {
-                    warnings.push(format!(
-                        "Warning: Binding '{}' to '{}' shadows essential binding '{}' (key: {})",
-                        user_key, user_action, default_action, user_key,
-                    ));
-                }
+            if let Some(default_action) = default_keys.get(user_key)
+                && essential_actions.contains(default_action)
+                && *user_action != *default_action
+            {
+                warnings.push(format!(
+                    "Warning: Binding '{}' to '{}' shadows essential binding '{}' (key: {})",
+                    user_key, user_action, default_action, user_key,
+                ));
             }
         }
     }
@@ -136,9 +137,11 @@ mod tests {
         // Only report as conflict if the same key maps to 2+ actions
         // In this case, Ctrl+c should only map to Quit since Cancel
         // was not overridden. Let's verify no unexpected conflicts.
-        assert!(conflicts
-            .iter()
-            .all(|c| !c.actions.contains(&Action::Quit) || c.actions.len() <= 1));
+        assert!(
+            conflicts
+                .iter()
+                .all(|c| !c.actions.contains(&Action::Quit) || c.actions.len() <= 1)
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@ use ratatui::style::Style;
 use ratatui::text::Line;
 
 use crate::theme::ThemeStyles;
-use crate::widgets::chat::dashboard::{measure_dashboard, DashboardInfo};
+use crate::widgets::chat::dashboard::{DashboardInfo, measure_dashboard};
 use crate::widgets::chat::markdown::{filter_tool_json, md_lines};
 use crate::widgets::chat::state::ChatViewState;
 use crate::widgets::chat::types::{ContentBlock, MessageRole, ToolCallStatus};
@@ -169,22 +169,13 @@ pub(crate) fn compute_layout(
             // Override collapsed/expanded state
             #[allow(clippy::collapsible_match)]
             match &mut kind {
-                LayoutKind::Thinking {
-                    ref mut collapsed,
-                    ref key,
-                    ..
-                } =>
-                {
+                LayoutKind::Thinking { collapsed, key, .. } => {
                     #[allow(clippy::collapsible_match)]
                     if state.expanded_thinking.contains(key) {
                         *collapsed = false;
                     }
                 }
-                LayoutKind::ToolBox {
-                    ref mut expanded,
-                    ref key,
-                    ..
-                } =>
+                LayoutKind::ToolBox { expanded, key, .. } =>
                 {
                     #[allow(clippy::collapsible_match)]
                     if state.expanded_tools.contains(key) {
@@ -249,22 +240,13 @@ pub(crate) fn compute_layout(
             let mut kind = block_to_layout_kind(block, MessageRole::Assistant, width, &key, styles);
             #[allow(clippy::collapsible_match)]
             match &mut kind {
-                LayoutKind::Thinking {
-                    ref mut collapsed,
-                    ref key,
-                    ..
-                } =>
-                {
+                LayoutKind::Thinking { collapsed, key, .. } => {
                     #[allow(clippy::collapsible_match)]
                     if state.expanded_thinking.contains(key) {
                         *collapsed = false;
                     }
                 }
-                LayoutKind::ToolBox {
-                    ref mut expanded,
-                    ref key,
-                    ..
-                } =>
+                LayoutKind::ToolBox { expanded, key, .. } =>
                 {
                     #[allow(clippy::collapsible_match)]
                     if state.expanded_tools.contains(key) {

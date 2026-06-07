@@ -37,14 +37,14 @@ impl DynamicTool {
         description: impl Into<String>,
         parameters: Value,
         execute_fn: impl Fn(
-                &str,
-                Value,
-                Option<oneshot::Receiver<()>>,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-            > + Send
-            + Sync
-            + 'static,
+            &str,
+            Value,
+            Option<oneshot::Receiver<()>>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
+        > + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self {
             name: name.into(),
@@ -59,14 +59,14 @@ impl DynamicTool {
     pub fn from_definition(
         def: ToolDefinition,
         execute_fn: impl Fn(
-                &str,
-                Value,
-                Option<oneshot::Receiver<()>>,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-            > + Send
-            + Sync
-            + 'static,
+            &str,
+            Value,
+            Option<oneshot::Receiver<()>>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
+        > + Send
+        + Sync
+        + 'static,
     ) -> Self {
         let name_for_label = def.name.clone();
         let schema =

@@ -92,10 +92,11 @@ async fn handle_key(
     }
 
     // When queue panel is visible and has items, intercept navigation keys
-    if state.queue_panel_visible && !state.steering_messages_snapshot.is_empty() {
-        if let Some(action) = handle_queue_panel_key(key, state, session) {
-            return action;
-        }
+    if state.queue_panel_visible
+        && !state.steering_messages_snapshot.is_empty()
+        && let Some(action) = handle_queue_panel_key(key, state, session)
+    {
+        return action;
     }
 
     use oxi_tui::keybindings::keys::KeyId;
@@ -107,12 +108,14 @@ async fn handle_key(
     }
 
     // Fallback: printable character (no binding match)
-    if !key_id.ctrl && !key_id.alt && !key_id.super_ {
-        if let oxi_tui::keybindings::keys::BaseKey::Char(c) = key_id.base {
-            state.input.insert_char(c);
-            state.update_slash_completions();
-            update_file_completions(state);
-        }
+    if !key_id.ctrl
+        && !key_id.alt
+        && !key_id.super_
+        && let oxi_tui::keybindings::keys::BaseKey::Char(c) = key_id.base
+    {
+        state.input.insert_char(c);
+        state.update_slash_completions();
+        update_file_completions(state);
     }
     None
 }
@@ -297,15 +300,15 @@ async fn dispatch_action(
 
         // ── Cycle thinking ────────────────────────────────────
         KAction::CycleThinking => {
-            if !state.slash_completion_active {
-                if let Some(next_level) = session.cycle_thinking_level() {
-                    state.footer_state.data.thinking_level =
-                        Some(format!("{:?}", next_level).to_lowercase());
-                    state.add_notification(
-                        format!("Thinking: {:?}", next_level),
-                        NotificationKind::Info,
-                    );
-                }
+            if !state.slash_completion_active
+                && let Some(next_level) = session.cycle_thinking_level()
+            {
+                state.footer_state.data.thinking_level =
+                    Some(format!("{:?}", next_level).to_lowercase());
+                state.add_notification(
+                    format!("Thinking: {:?}", next_level),
+                    NotificationKind::Info,
+                );
             }
             None
         }

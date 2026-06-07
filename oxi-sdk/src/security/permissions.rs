@@ -103,10 +103,10 @@ impl AgentPermissions {
     /// Check if a path matches any denied pattern.
     pub fn is_path_denied(&self, path: &str) -> bool {
         for pattern in &self.denied_paths {
-            if let Ok(p) = Pattern::new(pattern) {
-                if p.matches(path) {
-                    return true;
-                }
+            if let Ok(p) = Pattern::new(pattern)
+                && p.matches(path)
+            {
+                return true;
             }
         }
         false
@@ -115,10 +115,10 @@ impl AgentPermissions {
     /// Check if a path matches any allowed pattern.
     pub fn is_path_allowed(&self, path: &str) -> bool {
         for pattern in &self.allowed_paths {
-            if let Ok(p) = Pattern::new(pattern) {
-                if p.matches(path) {
-                    return true;
-                }
+            if let Ok(p) = Pattern::new(pattern)
+                && p.matches(path)
+            {
+                return true;
             }
         }
         false

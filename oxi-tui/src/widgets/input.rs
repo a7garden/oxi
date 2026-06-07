@@ -417,7 +417,7 @@ mod tests {
         let mut state = InputState::default();
         state.insert_str("short\n");
         state.insert_str(&"a".repeat(200)); // Long line that wraps
-                                            // 1 short line + wrapped long line
+        // 1 short line + wrapped long line
         let height = state.required_height(80, 8);
         assert!(
             height >= 2,

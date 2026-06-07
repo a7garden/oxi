@@ -128,9 +128,16 @@ pub(crate) fn handle_slash_command(
             let stats = session.session_stats();
             let content = format!(
                 "Session: {}\n\nMessages: {} ({} user, {} assistant)\nTools: {} calls, {} results\n\nModel: {}\nThinking: {:?}\n\nAuto-compact: {}\nAuto-retry: {}",
-                stats.session_id, stats.total_messages, stats.user_messages, stats.assistant_messages,
-                stats.tool_calls, stats.tool_results, session.model_id(),
-                session.thinking_level(), session.auto_compaction_enabled(), session.auto_retry_enabled(),
+                stats.session_id,
+                stats.total_messages,
+                stats.user_messages,
+                stats.assistant_messages,
+                stats.tool_calls,
+                stats.tool_results,
+                session.model_id(),
+                session.thinking_level(),
+                session.auto_compaction_enabled(),
+                session.auto_retry_enabled(),
             );
             state.overlay = None;
             state.overlay_state = Some(Box::new(
@@ -651,7 +658,8 @@ pub(crate) fn handle_slash_command(
                             let content = format!(
                                 "Router Status:\n\nProfile: {}\nTier: {:?}\nScore: {:.2}\nModel: {}\nProvider: {}\nCost: ${:.4}\nTurns: {}",
                                 snap.profile.as_deref().unwrap_or("-"),
-                                snap.last_tier.unwrap_or(oxi_sdk::router::RouterTier::Medium),
+                                snap.last_tier
+                                    .unwrap_or(oxi_sdk::router::RouterTier::Medium),
                                 snap.last_score,
                                 snap.last_model.as_deref().unwrap_or("-"),
                                 snap.last_provider.as_deref().unwrap_or("-"),
@@ -798,7 +806,8 @@ pub(crate) fn handle_slash_command(
                         let content = format!(
                             "Router Status:\n\nProfile: {}\nTier: {:?}\nScore: {:.2}\nModel: {}\nCost: ${:.4}\nTurns: {}",
                             snap.profile.as_deref().unwrap_or("-"),
-                            snap.last_tier.unwrap_or(oxi_sdk::router::RouterTier::Medium),
+                            snap.last_tier
+                                .unwrap_or(oxi_sdk::router::RouterTier::Medium),
                             snap.last_score,
                             snap.last_model.as_deref().unwrap_or("-"),
                             snap.accumulated_cost,
@@ -870,22 +879,22 @@ pub(crate) fn handle_slash_command(
             // Reload settings so the next session uses latest config
             let fresh = crate::store::settings::Settings::load().unwrap_or_default();
             session.set_thinking_level(fresh.thinking_level);
-            if let Some(m) = fresh.effective_model(None) {
-                if !m.is_empty() {
-                    // effective_model may already include the provider ("provider/model")
-                    // or be just a model id. Only prepend provider when needed.
-                    let full_id = if m.contains('/') {
-                        m.clone()
-                    } else {
-                        let p = fresh.effective_provider(None).unwrap_or_default();
-                        format!("{}/{}", p, m)
-                    };
-                    if let Ok(()) = session.set_model(&full_id) {
-                        let parts: Vec<&str> = full_id.splitn(2, '/').collect();
-                        state.footer_state.data.model_name = full_id.clone();
-                        if parts.len() == 2 {
-                            state.footer_state.data.provider_name = parts[0].to_string();
-                        }
+            if let Some(m) = fresh.effective_model(None)
+                && !m.is_empty()
+            {
+                // effective_model may already include the provider ("provider/model")
+                // or be just a model id. Only prepend provider when needed.
+                let full_id = if m.contains('/') {
+                    m.clone()
+                } else {
+                    let p = fresh.effective_provider(None).unwrap_or_default();
+                    format!("{}/{}", p, m)
+                };
+                if let Ok(()) = session.set_model(&full_id) {
+                    let parts: Vec<&str> = full_id.splitn(2, '/').collect();
+                    state.footer_state.data.model_name = full_id.clone();
+                    if parts.len() == 2 {
+                        state.footer_state.data.provider_name = parts[0].to_string();
                     }
                 }
             }
@@ -948,28 +957,28 @@ pub(crate) fn handle_slash_command(
             let _theme_name = reloaded.theme.clone();
             session.set_thinking_level(reloaded.thinking_level);
             // Apply model change to the active agent session
-            if let Some(m) = reloaded.effective_model(None) {
-                if !m.is_empty() {
-                    let full_id = if m.contains('/') {
-                        m
-                    } else {
-                        let p = reloaded.effective_provider(None).unwrap_or_default();
-                        format!("{}/{}", p, m)
-                    };
-                    match session.set_model(&full_id) {
-                        Ok(()) => {
-                            let parts: Vec<&str> = full_id.splitn(2, '/').collect();
-                            state.footer_state.data.model_name = full_id.clone();
-                            if parts.len() == 2 {
-                                state.footer_state.data.provider_name = parts[0].to_string();
-                            }
+            if let Some(m) = reloaded.effective_model(None)
+                && !m.is_empty()
+            {
+                let full_id = if m.contains('/') {
+                    m
+                } else {
+                    let p = reloaded.effective_provider(None).unwrap_or_default();
+                    format!("{}/{}", p, m)
+                };
+                match session.set_model(&full_id) {
+                    Ok(()) => {
+                        let parts: Vec<&str> = full_id.splitn(2, '/').collect();
+                        state.footer_state.data.model_name = full_id.clone();
+                        if parts.len() == 2 {
+                            state.footer_state.data.provider_name = parts[0].to_string();
                         }
-                        Err(e) => {
-                            state.add_notification(
-                                format!("Warning: Could not apply model: {}", e),
-                                NotificationKind::Warning,
-                            );
-                        }
+                    }
+                    Err(e) => {
+                        state.add_notification(
+                            format!("Warning: Could not apply model: {}", e),
+                            NotificationKind::Warning,
+                        );
                     }
                 }
             }
@@ -1227,10 +1236,11 @@ pub(crate) fn handle_slash_command(
 /// Returns `None` if nothing matches.
 fn resolve_entry_id(sel: &str, entries: &[&crate::store::session::SessionEntry]) -> Option<String> {
     // Try numeric index first (1-based)
-    if let Ok(idx) = sel.parse::<usize>() {
-        if idx >= 1 && idx <= entries.len() {
-            return Some(entries[idx - 1].id.clone());
-        }
+    if let Ok(idx) = sel.parse::<usize>()
+        && idx >= 1
+        && idx <= entries.len()
+    {
+        return Some(entries[idx - 1].id.clone());
     }
 
     // Try prefix match or full match on entry IDs
@@ -1397,14 +1407,14 @@ fn handle_tool_command(
     }
 
     if registry.get(&tool_name).is_some() {
-        if let Some(tool) = registry.get(&tool_name) {
-            if tool.essential() {
-                state.add_notification(
-                    format!("Cannot disable essential tool: {}", tool_name),
-                    NotificationKind::Warning,
-                );
-                return;
-            }
+        if let Some(tool) = registry.get(&tool_name)
+            && tool.essential()
+        {
+            state.add_notification(
+                format!("Cannot disable essential tool: {}", tool_name),
+                NotificationKind::Warning,
+            );
+            return;
         }
         registry.unregister(&tool_name);
         if tool_name == "web_search" {

@@ -158,8 +158,8 @@ async fn run_single_prompt(
     shutdown_rx: &mut mpsc::Receiver<()>,
 ) -> Result<(), PromptError> {
     let _ = quiet; // used by callers when handling PromptError
-                   // Agent expects std::sync::mpsc, but we need async for tokio::select
-                   // Use a sync mpsc channel inside spawn_blocking, bridge to tokio mpsc
+    // Agent expects std::sync::mpsc, but we need async for tokio::select
+    // Use a sync mpsc channel inside spawn_blocking, bridge to tokio mpsc
     let (event_tx, event_rx) = std::sync::mpsc::channel::<AgentEvent>();
     let (async_tx, mut async_rx) = mpsc::channel::<AgentEvent>(256);
 
@@ -272,13 +272,12 @@ async fn run_single_prompt(
                             _ => {}
                         }
 
-                        if mode == PrintMode::Json {
-                            if let Ok(json) = serde_json::to_string(&event_to_json(&ev)) {
+                        if mode == PrintMode::Json
+                            && let Ok(json) = serde_json::to_string(&event_to_json(&ev)) {
                                 println!("{}", json);
                                 use std::io::Write;
                                 std::io::stdout().flush().ok();
                             }
-                        }
                     }
                     None => break,
                 }

@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
-use crate::ports::{Skill, SkillLoader, SkillMeta};
 use crate::SdkError;
+use crate::ports::{Skill, SkillLoader, SkillMeta};
 
 /// Discovers `SKILL.md` files under one or more root directories.
 ///
@@ -92,16 +92,16 @@ fn parse_meta(name: &str, path: &Path) -> Result<SkillMeta, SdkError> {
     let text = std::fs::read_to_string(path).map_err(read_err)?;
     let mut description = String::new();
     let mut version = None;
-    if let Some(body) = text.strip_prefix("---\n") {
-        if let Some(end) = body.find("\n---") {
-            let fm = &body[..end];
-            for line in fm.lines() {
-                let line = line.trim();
-                if let Some(rest) = line.strip_prefix("description:") {
-                    description = rest.trim().trim_matches('"').to_string();
-                } else if let Some(rest) = line.strip_prefix("version:") {
-                    version = Some(rest.trim().trim_matches('"').to_string());
-                }
+    if let Some(body) = text.strip_prefix("---\n")
+        && let Some(end) = body.find("\n---")
+    {
+        let fm = &body[..end];
+        for line in fm.lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("description:") {
+                description = rest.trim().trim_matches('"').to_string();
+            } else if let Some(rest) = line.strip_prefix("version:") {
+                version = Some(rest.trim().trim_matches('"').to_string());
             }
         }
     }
@@ -114,11 +114,11 @@ fn parse_meta(name: &str, path: &Path) -> Result<SkillMeta, SdkError> {
 }
 
 fn strip_frontmatter(text: &str) -> String {
-    if let Some(body) = text.strip_prefix("---\n") {
-        if let Some(idx) = body.find("\n---") {
-            let after = &body[idx + 4..];
-            return after.trim_start_matches('\n').to_string();
-        }
+    if let Some(body) = text.strip_prefix("---\n")
+        && let Some(idx) = body.find("\n---")
+    {
+        let after = &body[idx + 4..];
+        return after.trim_start_matches('\n').to_string();
     }
     text.to_string()
 }

@@ -381,19 +381,19 @@ impl ProviderAuthRegistry {
         }
 
         // 2. Check registered provider (stored API key or OAuth)
-        if let Some(auth) = self.providers.get(provider) {
-            if let Some(key) = auth.get_api_key() {
-                return Some(key);
-            }
+        if let Some(auth) = self.providers.get(provider)
+            && let Some(key) = auth.get_api_key()
+        {
+            return Some(key);
         }
 
         // 3. Fallback resolver (custom provider config from models.json)
         {
             let resolver = self.fallback_resolver.read();
-            if let Some(ref fallback) = *resolver {
-                if let Some(key) = fallback(provider) {
-                    return Some(key);
-                }
+            if let Some(ref fallback) = *resolver
+                && let Some(key) = fallback(provider)
+            {
+                return Some(key);
             }
         }
 
@@ -413,10 +413,10 @@ impl ProviderAuthRegistry {
         }
 
         // Check registered provider
-        if let Some(auth) = self.providers.get(provider) {
-            if auth.is_configured() {
-                return true;
-            }
+        if let Some(auth) = self.providers.get(provider)
+            && auth.is_configured()
+        {
+            return true;
         }
 
         // Environment variables do NOT count as configured auth.
@@ -483,14 +483,14 @@ impl ProviderAuthRegistry {
             };
         }
 
-        if let Some(auth) = self.providers.get(provider) {
-            if auth.is_configured() {
-                return AuthStatus {
-                    configured: true,
-                    source: AuthSource::Stored,
-                    label: None,
-                };
-            }
+        if let Some(auth) = self.providers.get(provider)
+            && auth.is_configured()
+        {
+            return AuthStatus {
+                configured: true,
+                source: AuthSource::Stored,
+                label: None,
+            };
         }
 
         // Check environment variables
@@ -697,7 +697,7 @@ mod tests {
 
     #[test]
     fn test_registry_env_key_fallback() {
-        std::env::set_var("OPENAI_API_KEY", "sk-env-key");
+        unsafe { std::env::set_var("OPENAI_API_KEY", "sk-env-key") };
 
         let registry = ProviderAuthRegistry::new();
         // No explicit provider registered
@@ -708,7 +708,7 @@ mod tests {
             Some("sk-env-key".to_string())
         );
 
-        std::env::remove_var("OPENAI_API_KEY");
+        unsafe { std::env::remove_var("OPENAI_API_KEY") };
     }
 
     #[test]
@@ -732,7 +732,7 @@ mod tests {
 
     #[test]
     fn test_registry_priority() {
-        std::env::set_var("ANTHROPIC_API_KEY", "sk-env");
+        unsafe { std::env::set_var("ANTHROPIC_API_KEY", "sk-env") };
 
         let mut registry = ProviderAuthRegistry::new();
 
@@ -755,7 +755,7 @@ mod tests {
             Some("sk-stored".to_string())
         );
 
-        std::env::remove_var("ANTHROPIC_API_KEY");
+        unsafe { std::env::remove_var("ANTHROPIC_API_KEY") };
     }
 
     #[test]
@@ -789,7 +789,7 @@ mod tests {
 
     #[test]
     fn test_registry_env_source_status() {
-        std::env::set_var("DEEPSEEK_API_KEY", "sk-test");
+        unsafe { std::env::set_var("DEEPSEEK_API_KEY", "sk-test") };
 
         let registry = ProviderAuthRegistry::new();
 
@@ -797,7 +797,7 @@ mod tests {
         assert!(!status.configured); // Env vars don't count as "configured"
         assert_eq!(status.source, AuthSource::Environment);
 
-        std::env::remove_var("DEEPSEEK_API_KEY");
+        unsafe { std::env::remove_var("DEEPSEEK_API_KEY") };
     }
 
     #[test]

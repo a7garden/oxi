@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::ports::{AuthProvider, OAuthToken};
 use crate::SdkError;
+use crate::ports::{AuthProvider, OAuthToken};
 
 /// On-disk schema for `auth.json`.
 ///
@@ -109,10 +109,10 @@ impl FileAuthProvider {
             return Some(k);
         }
         let upper = provider.to_uppercase();
-        if let Ok(k) = std::env::var(format!("OXI_API_KEY_{upper}")) {
-            if !k.is_empty() {
-                return Some(k);
-            }
+        if let Ok(k) = std::env::var(format!("OXI_API_KEY_{upper}"))
+            && !k.is_empty()
+        {
+            return Some(k);
         }
         // Standard provider env vars (best-effort, optional).
         let conventional = match provider {

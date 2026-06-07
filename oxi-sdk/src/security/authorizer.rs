@@ -143,10 +143,11 @@ impl Authorizer {
     fn evaluate(&self, subject: &CapabilitySubject, required: &Capability) -> bool {
         // 1. Direct grants
         let grants = self.grants.read();
-        if let Some(set) = grants.get(subject) {
-            if !set.is_expired() && set.satisfies(required) {
-                return true;
-            }
+        if let Some(set) = grants.get(subject)
+            && !set.is_expired()
+            && set.satisfies(required)
+        {
+            return true;
         }
         drop(grants);
 
@@ -156,10 +157,11 @@ impl Authorizer {
             if let Some(roles) = bindings.get(id) {
                 let role_defs = self.roles.read();
                 for role_name in roles {
-                    if let Some(role_caps) = role_defs.get(role_name) {
-                        if !role_caps.is_expired() && role_caps.satisfies(required) {
-                            return true;
-                        }
+                    if let Some(role_caps) = role_defs.get(role_name)
+                        && !role_caps.is_expired()
+                        && role_caps.satisfies(required)
+                    {
+                        return true;
                     }
                 }
             }
@@ -325,14 +327,15 @@ mod tests {
             CapabilitySubject::Agent("a1".into()),
             CapabilitySet::read_only("/ws"),
         );
-        assert!(auth
-            .require(
+        assert!(
+            auth.require(
                 &CapabilitySubject::Agent("a1".into()),
                 &Capability::FileRead {
                     path_pattern: "/ws/file".into()
                 },
             )
-            .is_ok());
+            .is_ok()
+        );
     }
 
     #[test]

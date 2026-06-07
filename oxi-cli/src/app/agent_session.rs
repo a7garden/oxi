@@ -39,8 +39,8 @@ use oxi_sdk::Message;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -616,10 +616,10 @@ impl AgentSession {
     pub fn abort_compaction_sync(&self) {
         // Best-effort: try to abort without async. The compaction
         // checks compaction_abort periodically.
-        if let Ok(mut guard) = self.compaction_abort.try_lock() {
-            if let Some(handle) = guard.take() {
-                handle.abort();
-            }
+        if let Ok(mut guard) = self.compaction_abort.try_lock()
+            && let Some(handle) = guard.take()
+        {
+            handle.abort();
         }
     }
 
@@ -1521,7 +1521,7 @@ mod tests {
         let session = make_session();
         // Directly set persisted count to verify the accessor works
         {
-            let mut sm = session.session_manager.write();
+            let sm = session.session_manager.write();
             sm.set_persisted_count(5);
         }
         let sm = session.session_manager.read();
@@ -1533,7 +1533,7 @@ mod tests {
         let session = make_session();
         // Set persisted_count to 3, then persist_session (0 messages) is a no-op
         {
-            let mut sm = session.session_manager.write();
+            let sm = session.session_manager.write();
             sm.set_persisted_count(3);
         }
         session.persist_session();

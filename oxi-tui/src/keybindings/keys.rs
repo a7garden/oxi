@@ -243,12 +243,11 @@ fn parse_base_key(s: &str) -> Option<BaseKey> {
         "space" => Some(BaseKey::Char(' ')),
         _ => {
             // Function keys F1-F12
-            if let Some(n_str) = lower.strip_prefix('f') {
-                if let Ok(n) = n_str.parse::<u8>() {
-                    if (1..=12).contains(&n) {
-                        return Some(BaseKey::F(n));
-                    }
-                }
+            if let Some(n_str) = lower.strip_prefix('f')
+                && let Ok(n) = n_str.parse::<u8>()
+                && (1..=12).contains(&n)
+            {
+                return Some(BaseKey::F(n));
             }
             // Single character
             let chars: Vec<char> = s.chars().collect();

@@ -940,9 +940,11 @@ mod tests {
     fn test_search_models() {
         let results = ModelRegistry::search("gpt");
         assert!(!results.is_empty());
-        assert!(results
-            .iter()
-            .all(|m| m.name.to_lowercase().contains("gpt")));
+        assert!(
+            results
+                .iter()
+                .all(|m| m.name.to_lowercase().contains("gpt"))
+        );
     }
 
     #[test]

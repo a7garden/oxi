@@ -160,10 +160,10 @@ pub fn parse_streaming_json<T: serde::de::DeserializeOwned + Default>(json: &str
 
     // Strategy 4: Repair then parse partial
     let repaired = repair_json(trimmed);
-    if repaired != trimmed {
-        if let Some(result) = parse_partial_json(&repaired) {
-            return result;
-        }
+    if repaired != trimmed
+        && let Some(result) = parse_partial_json(&repaired)
+    {
+        return result;
     }
 
     T::default()

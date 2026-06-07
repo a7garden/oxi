@@ -178,7 +178,7 @@ impl Widget for EntryWidget<'_> {
                             ));
                         }
                         // Append duration to header line
-                        if let Some(ref dur) = duration {
+                        if let Some(dur) = duration {
                             new_spans.push(Span::styled(format!("  {}", dur), self.styles.muted));
                         }
                         content_lines.push(Line::from(new_spans));

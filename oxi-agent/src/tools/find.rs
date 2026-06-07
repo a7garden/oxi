@@ -3,7 +3,7 @@ use super::path_security::PathGuard;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use glob::Pattern;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;
@@ -88,10 +88,10 @@ impl FindTool {
                     return true;
                 }
                 // Also check just the filename
-                if let Some(file_name) = path.file_name() {
-                    if glob.matches(&file_name.to_string_lossy()) {
-                        return true;
-                    }
+                if let Some(file_name) = path.file_name()
+                    && glob.matches(&file_name.to_string_lossy())
+                {
+                    return true;
                 }
                 // Check with directory prefix pattern (e.g., "node_modules")
                 if path_str.contains(pattern) {
@@ -164,10 +164,10 @@ impl FindTool {
         }
 
         // Check depth limit
-        if let Some(max) = max_depth {
-            if current_depth > max {
-                return Ok(());
-            }
+        if let Some(max) = max_depth
+            && current_depth > max
+        {
+            return Ok(());
         }
 
         let mut entries = fs::read_dir(current)

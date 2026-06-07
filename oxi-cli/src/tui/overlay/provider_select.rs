@@ -8,14 +8,14 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use oxi_tui::Theme;
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 
 // ── Category definitions ─────────────────────────────────────────────────
 
@@ -465,14 +465,14 @@ impl ProviderSelectOverlay {
                 self.selected = self.providers.len() - 1;
             }
             KeyCode::Enter => {
-                if let Some(idx) = self.selected_provider_index() {
-                    if let Some(entry) = self.providers.get(idx).cloned() {
-                        self.sub_mode = SubMode::EnteringKey {
-                            provider_name: entry.name,
-                            display_name: entry.display_name,
-                            key_text: String::new(),
-                        };
-                    }
+                if let Some(idx) = self.selected_provider_index()
+                    && let Some(entry) = self.providers.get(idx).cloned()
+                {
+                    self.sub_mode = SubMode::EnteringKey {
+                        provider_name: entry.name,
+                        display_name: entry.display_name,
+                        key_text: String::new(),
+                    };
                 }
             }
             KeyCode::Esc => {

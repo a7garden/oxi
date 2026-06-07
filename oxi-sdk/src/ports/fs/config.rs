@@ -6,8 +6,8 @@ use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::ports::{ConfigStore, PortValue};
 use crate::SdkError;
+use crate::ports::{ConfigStore, PortValue};
 
 /// File-based config. Reads from `path` on construction and writes back on
 /// every `set`.

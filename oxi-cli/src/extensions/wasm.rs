@@ -7,7 +7,7 @@
 //! default — HTTP access is granted via the `oxi_http_request` host function.
 
 use anyhow::{Context, Result};
-use extism::{CurrentPlugin, Function, UserData, Val, PTR};
+use extism::{CurrentPlugin, Function, PTR, UserData, Val};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -294,11 +294,11 @@ fn host_oxi_write_file(
 
         validate_path_allowed(&req.path)?;
 
-        if req.create_dirs {
-            if let Some(parent) = std::path::Path::new(&req.path).parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| anyhow::anyhow!("Failed to create directories: {}", e))?;
-            }
+        if req.create_dirs
+            && let Some(parent) = std::path::Path::new(&req.path).parent()
+        {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| anyhow::anyhow!("Failed to create directories: {}", e))?;
         }
 
         let bytes = req.content.len();

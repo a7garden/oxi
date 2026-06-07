@@ -270,16 +270,16 @@ impl AccessGate {
         }
 
         let perms = self.permissions.lock();
-        if let Some(p) = perms.get(&ctx.agent_name) {
-            if !p.allowed_tools.contains(tool) {
-                return Err(AccessDenied {
-                    agent: ctx.agent_name.clone(),
-                    resource: tool.to_string(),
-                    layer: DenyLayer::Permission,
-                    reason: format!("'{tool}' not in allowed_tools for '{}'", ctx.agent_name),
-                    suggestion: None,
-                });
-            }
+        if let Some(p) = perms.get(&ctx.agent_name)
+            && !p.allowed_tools.contains(tool)
+        {
+            return Err(AccessDenied {
+                agent: ctx.agent_name.clone(),
+                resource: tool.to_string(),
+                layer: DenyLayer::Permission,
+                reason: format!("'{tool}' not in allowed_tools for '{}'", ctx.agent_name),
+                suggestion: None,
+            });
         }
 
         Ok(())
@@ -295,16 +295,16 @@ impl AccessGate {
 
         // Layer 2: Path permissions
         let perms = self.permissions.lock();
-        if let Some(p) = perms.get(&ctx.agent_name) {
-            if p.is_path_denied(&path_str) {
-                return Err(AccessDenied {
-                    agent: ctx.agent_name.clone(),
-                    resource: path_str.to_string(),
-                    layer: DenyLayer::Permission,
-                    reason: format!("Path '{path_str}' is in denied_paths"),
-                    suggestion: None,
-                });
-            }
+        if let Some(p) = perms.get(&ctx.agent_name)
+            && p.is_path_denied(&path_str)
+        {
+            return Err(AccessDenied {
+                agent: ctx.agent_name.clone(),
+                resource: path_str.to_string(),
+                layer: DenyLayer::Permission,
+                reason: format!("Path '{path_str}' is in denied_paths"),
+                suggestion: None,
+            });
         }
 
         Ok(())
@@ -342,32 +342,32 @@ impl AccessGate {
 
     fn check_network(&self, ctx: &AgentContext) -> Result<(), AccessDenied> {
         let perms = self.permissions.lock();
-        if let Some(p) = perms.get(&ctx.agent_name) {
-            if !p.network_access {
-                return Err(AccessDenied {
-                    agent: ctx.agent_name.clone(),
-                    resource: "<network>".into(),
-                    layer: DenyLayer::Permission,
-                    reason: "Network access disabled".into(),
-                    suggestion: Some("Set network_access to true.".into()),
-                });
-            }
+        if let Some(p) = perms.get(&ctx.agent_name)
+            && !p.network_access
+        {
+            return Err(AccessDenied {
+                agent: ctx.agent_name.clone(),
+                resource: "<network>".into(),
+                layer: DenyLayer::Permission,
+                reason: "Network access disabled".into(),
+                suggestion: Some("Set network_access to true.".into()),
+            });
         }
         Ok(())
     }
 
     fn check_fork(&self, ctx: &AgentContext) -> Result<(), AccessDenied> {
         let perms = self.permissions.lock();
-        if let Some(p) = perms.get(&ctx.agent_name) {
-            if !p.can_fork {
-                return Err(AccessDenied {
-                    agent: ctx.agent_name.clone(),
-                    resource: "fork".into(),
-                    layer: DenyLayer::Permission,
-                    reason: "Fork not allowed".into(),
-                    suggestion: Some("Set can_fork to true.".into()),
-                });
-            }
+        if let Some(p) = perms.get(&ctx.agent_name)
+            && !p.can_fork
+        {
+            return Err(AccessDenied {
+                agent: ctx.agent_name.clone(),
+                resource: "fork".into(),
+                layer: DenyLayer::Permission,
+                reason: "Fork not allowed".into(),
+                suggestion: Some("Set can_fork to true.".into()),
+            });
         }
         Ok(())
     }
@@ -436,12 +436,13 @@ mod tests {
     #[test]
     fn test_tool_allowed() {
         let (gate, ctx) = make_gate();
-        assert!(gate
-            .check(CheckRequest::Tool {
+        assert!(
+            gate.check(CheckRequest::Tool {
                 context: &ctx,
                 tool_name: "bash"
             })
-            .is_ok());
+            .is_ok()
+        );
     }
 
     #[test]

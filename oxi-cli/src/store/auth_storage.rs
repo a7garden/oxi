@@ -391,18 +391,18 @@ impl FallbackResolver for EnvVarFallbackResolver {
         let key = builtin.env_key;
 
         // Try primary key
-        if let Ok(val) = std::env::var(key) {
-            if !val.is_empty() {
-                return Some(val);
-            }
+        if let Ok(val) = std::env::var(key)
+            && !val.is_empty()
+        {
+            return Some(val);
         }
 
         // Try extra keys
         for extra in builtin.extra_env_keys {
-            if let Ok(val) = std::env::var(extra) {
-                if !val.is_empty() {
-                    return Some(val);
-                }
+            if let Ok(val) = std::env::var(extra)
+                && !val.is_empty()
+            {
+                return Some(val);
             }
         }
 
@@ -545,10 +545,10 @@ impl AuthStorage {
         if self.credentials.read().contains_key(provider) {
             return true;
         }
-        if let Some(ref resolver) = *self.fallback_resolver.read() {
-            if resolver.resolve(provider).is_some() {
-                return true;
-            }
+        if let Some(ref resolver) = *self.fallback_resolver.read()
+            && resolver.resolve(provider).is_some()
+        {
+            return true;
         }
         false
     }
@@ -571,14 +571,14 @@ impl AuthStorage {
             };
         }
 
-        if let Some(ref resolver) = *self.fallback_resolver.read() {
-            if resolver.resolve(provider).is_some() {
-                return AuthStatus {
-                    configured: false,
-                    source: Some("fallback".to_string()),
-                    label: Some("custom provider config".to_string()),
-                };
-            }
+        if let Some(ref resolver) = *self.fallback_resolver.read()
+            && resolver.resolve(provider).is_some()
+        {
+            return AuthStatus {
+                configured: false,
+                source: Some("fallback".to_string()),
+                label: Some("custom provider config".to_string()),
+            };
         }
 
         AuthStatus {
@@ -650,41 +650,39 @@ impl AuthStorage {
                 if other.name == provider {
                     continue; // already checked above
                 }
-                if other.env_key == env_key {
-                    if let Some(cred) = credentials.get(other.name) {
-                        return match cred {
-                            AuthCredential::ApiKey { key } => Some(key.clone()),
-                            AuthCredential::OAuth {
-                                access_token,
-                                expires_at,
-                                ..
-                            } => {
-                                if *expires_at > now_secs() {
-                                    Some(access_token.clone())
-                                } else {
-                                    None
-                                }
+                if other.env_key == env_key
+                    && let Some(cred) = credentials.get(other.name)
+                {
+                    return match cred {
+                        AuthCredential::ApiKey { key } => Some(key.clone()),
+                        AuthCredential::OAuth {
+                            access_token,
+                            expires_at,
+                            ..
+                        } => {
+                            if *expires_at > now_secs() {
+                                Some(access_token.clone())
+                            } else {
+                                None
                             }
-                            AuthCredential::Session {
-                                token, expires_at, ..
-                            } => {
-                                if *expires_at == 0 || *expires_at > now_secs() {
-                                    Some(token.clone())
-                                } else {
-                                    None
-                                }
+                        }
+                        AuthCredential::Session {
+                            token, expires_at, ..
+                        } => {
+                            if *expires_at == 0 || *expires_at > now_secs() {
+                                Some(token.clone())
+                            } else {
+                                None
                             }
-                        };
-                    }
+                        }
+                    };
                 }
             }
         }
 
         // 6. Fallback resolver
-        if include_fallback {
-            if let Some(ref resolver) = *self.fallback_resolver.read() {
-                return resolver.resolve(provider);
-            }
+        if include_fallback && let Some(ref resolver) = *self.fallback_resolver.read() {
+            return resolver.resolve(provider);
         }
 
         None

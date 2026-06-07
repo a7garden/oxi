@@ -93,17 +93,12 @@ impl WasmHookManager {
             let Ok(s) = serde_json::to_string(&event) else {
                 continue;
             };
-            if let Ok(output) = plugin.call::<&str, &str>("on_tool_call", &s) {
-                if let Ok(result) = serde_json::from_str::<ToolCallHookResult>(output) {
-                    if result.block {
-                        tracing::info!(
-                            "Extension '{}' blocked tool_call '{}'",
-                            ext_name,
-                            tool_name
-                        );
-                        return Some(result);
-                    }
-                }
+            if let Ok(output) = plugin.call::<&str, &str>("on_tool_call", &s)
+                && let Ok(result) = serde_json::from_str::<ToolCallHookResult>(output)
+                && result.block
+            {
+                tracing::info!("Extension '{}' blocked tool_call '{}'", ext_name, tool_name);
+                return Some(result);
             }
         }
         None
@@ -126,12 +121,11 @@ impl WasmHookManager {
             let Ok(s) = serde_json::to_string(&event) else {
                 continue;
             };
-            if let Ok(output) = plugin.call::<&str, &str>("on_tool_result", &s) {
-                if let Ok(result) = serde_json::from_str::<ToolResultHookResult>(output) {
-                    if result.content.is_some() || result.is_error.is_some() {
-                        return Some(result);
-                    }
-                }
+            if let Ok(output) = plugin.call::<&str, &str>("on_tool_result", &s)
+                && let Ok(result) = serde_json::from_str::<ToolResultHookResult>(output)
+                && (result.content.is_some() || result.is_error.is_some())
+            {
+                return Some(result);
             }
         }
         None

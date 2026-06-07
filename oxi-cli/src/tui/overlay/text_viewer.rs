@@ -1,15 +1,15 @@
 //! Text viewer overlay — displays scrollable text content.
 //! Used for help, hotkeys, changelog, tools list, etc.
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 // use oxi_tui::Theme; // unused — kept for future use
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation},
-    Frame,
 };
 
 pub struct TextViewerOverlay {

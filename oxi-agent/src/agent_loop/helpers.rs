@@ -1,7 +1,7 @@
 /// Helper functions for agent loop
 use oxi_ai::{ContentBlock, TextContent, ToolCall, ToolResultMessage};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Extract tool calls from an assistant message.
 pub fn extract_tool_calls(message: &oxi_ai::AssistantMessage) -> Vec<ToolCall> {

@@ -4,8 +4,8 @@
 //! from the previous session become stale. The guard uses an atomic
 //! generation counter to detect this efficiently.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Shared generation counter for invalidation.
 /// Create one per session. When the session changes,

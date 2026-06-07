@@ -56,25 +56,24 @@ fn api_key() -> &'static Option<String> {
         // 1. File
         if let Some(dir) = dirs::config_dir() {
             let path = dir.join("oxi").join("keys").join(KEY_FILE_NAME);
-            if path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&path) {
-                    if let Some(line) = content.lines().next() {
-                        let key = line.trim().to_string();
-                        if !key.is_empty() {
-                            tracing::debug!("Context7: loaded API key from {}", path.display());
-                            return Some(key);
-                        }
-                    }
+            if path.exists()
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Some(line) = content.lines().next()
+            {
+                let key = line.trim().to_string();
+                if !key.is_empty() {
+                    tracing::debug!("Context7: loaded API key from {}", path.display());
+                    return Some(key);
                 }
             }
         }
 
         // 2. Env var fallback
-        if let Ok(key) = std::env::var("CONTEXT7_API_KEY") {
-            if !key.is_empty() {
-                tracing::debug!("Context7: loaded API key from CONTEXT7_API_KEY env var");
-                return Some(key);
-            }
+        if let Ok(key) = std::env::var("CONTEXT7_API_KEY")
+            && !key.is_empty()
+        {
+            tracing::debug!("Context7: loaded API key from CONTEXT7_API_KEY env var");
+            return Some(key);
         }
 
         tracing::debug!("Context7: no API key found (anonymous access)");
@@ -395,10 +394,10 @@ fn format_search_results(results: &[LibraryResult]) -> String {
             };
             text.push_str(&format!("  Source Reputation: {}\n", label));
         }
-        if let Some(ref versions) = lib.versions {
-            if !versions.is_empty() {
-                text.push_str(&format!("  Versions: {}\n", versions.join(", ")));
-            }
+        if let Some(ref versions) = lib.versions
+            && !versions.is_empty()
+        {
+            text.push_str(&format!("  Versions: {}\n", versions.join(", ")));
         }
         text.push_str(&format!("  {}\n\n", lib.description));
     }

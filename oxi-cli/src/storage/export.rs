@@ -123,13 +123,7 @@ fn color_256_to_hex(index: u8) -> String {
         let r = cube / 36;
         let g = (cube % 36) / 6;
         let b = cube % 6;
-        let component = |n: usize| -> u8 {
-            if n == 0 {
-                0
-            } else {
-                (55 + n * 40) as u8
-            }
-        };
+        let component = |n: usize| -> u8 { if n == 0 { 0 } else { (55 + n * 40) as u8 } };
         return format!(
             "#{:02x}{:02x}{:02x}",
             component(r),
@@ -628,11 +622,7 @@ fn render_tool_blocks(content: &str, include_tool_calls: bool) -> Option<String>
         }
     }
 
-    if found {
-        Some(html)
-    } else {
-        None
-    }
+    if found { Some(html) } else { None }
 }
 
 /// Extract a file path from a tool operation header line.
@@ -1270,21 +1260,21 @@ fn render_inline(input: &str) -> String {
             '[' => {
                 // Markdown link [text](url)
                 let rest = &input[i..];
-                if let Some(link_end) = rest.find(')') {
-                    if let Some(mid) = rest.find("](") {
-                        let text = &rest[1..mid];
-                        let url = &rest[mid + 2..link_end];
-                        out.push_str("<a href=\"");
-                        out.push_str(&html_escape(url));
-                        out.push_str("\">");
-                        out.push_str(&html_escape(text));
-                        out.push_str("</a>");
-                        // skip entire link
-                        for _ in rest[..=link_end].chars() {
-                            chars.next();
-                        }
-                        continue;
+                if let Some(link_end) = rest.find(')')
+                    && let Some(mid) = rest.find("](")
+                {
+                    let text = &rest[1..mid];
+                    let url = &rest[mid + 2..link_end];
+                    out.push_str("<a href=\"");
+                    out.push_str(&html_escape(url));
+                    out.push_str("\">");
+                    out.push_str(&html_escape(text));
+                    out.push_str("</a>");
+                    // skip entire link
+                    for _ in rest[..=link_end].chars() {
+                        chars.next();
                     }
+                    continue;
                 }
                 out.push('[');
             }

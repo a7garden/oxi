@@ -32,24 +32,36 @@ fn http_error_display() {
 
 #[test]
 fn http_error_common_status_codes() {
-    assert!(ProviderError::HttpError(400, "bad request".into())
-        .to_string()
-        .contains("400"));
-    assert!(ProviderError::HttpError(401, "unauthorized".into())
-        .to_string()
-        .contains("401"));
-    assert!(ProviderError::HttpError(403, "forbidden".into())
-        .to_string()
-        .contains("403"));
-    assert!(ProviderError::HttpError(500, "internal".into())
-        .to_string()
-        .contains("500"));
-    assert!(ProviderError::HttpError(502, "bad gateway".into())
-        .to_string()
-        .contains("502"));
-    assert!(ProviderError::HttpError(503, "unavailable".into())
-        .to_string()
-        .contains("503"));
+    assert!(
+        ProviderError::HttpError(400, "bad request".into())
+            .to_string()
+            .contains("400")
+    );
+    assert!(
+        ProviderError::HttpError(401, "unauthorized".into())
+            .to_string()
+            .contains("401")
+    );
+    assert!(
+        ProviderError::HttpError(403, "forbidden".into())
+            .to_string()
+            .contains("403")
+    );
+    assert!(
+        ProviderError::HttpError(500, "internal".into())
+            .to_string()
+            .contains("500")
+    );
+    assert!(
+        ProviderError::HttpError(502, "bad gateway".into())
+            .to_string()
+            .contains("502")
+    );
+    assert!(
+        ProviderError::HttpError(503, "unavailable".into())
+            .to_string()
+            .contains("503")
+    );
 }
 
 #[test]

@@ -11,10 +11,10 @@ use super::tab_guard::TabGuard;
 use crate::tools::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
 use parking_lot::Mutex as SyncMutex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 
 /// Interactive browser session with a persistent tab across calls.
 ///
@@ -915,10 +915,12 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("no active session"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("no active session")
+        );
     }
 
     #[tokio::test]
@@ -1203,39 +1205,44 @@ mod tests {
             .unwrap();
 
         // goto without url
-        assert!(tool
-            .execute("c2", json!({"action": "goto"}), None, &ctx)
-            .await
-            .is_err());
+        assert!(
+            tool.execute("c2", json!({"action": "goto"}), None, &ctx)
+                .await
+                .is_err()
+        );
 
         // click without selector
-        assert!(tool
-            .execute("c3", json!({"action": "click"}), None, &ctx)
-            .await
-            .is_err());
+        assert!(
+            tool.execute("c3", json!({"action": "click"}), None, &ctx)
+                .await
+                .is_err()
+        );
 
         // fill without value
-        assert!(tool
-            .execute(
+        assert!(
+            tool.execute(
                 "c4",
                 json!({"action": "fill", "selector": "#x"}),
                 None,
                 &ctx
             )
             .await
-            .is_err());
+            .is_err()
+        );
 
         // press without combo
-        assert!(tool
-            .execute("c5", json!({"action": "press"}), None, &ctx)
-            .await
-            .is_err());
+        assert!(
+            tool.execute("c5", json!({"action": "press"}), None, &ctx)
+                .await
+                .is_err()
+        );
 
         // evaluate without javascript
-        assert!(tool
-            .execute("c6", json!({"action": "evaluate"}), None, &ctx)
-            .await
-            .is_err());
+        assert!(
+            tool.execute("c6", json!({"action": "evaluate"}), None, &ctx)
+                .await
+                .is_err()
+        );
 
         tool.execute("c7", json!({"action": "close"}), None, &ctx)
             .await

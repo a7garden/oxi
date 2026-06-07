@@ -528,13 +528,13 @@ pub fn transform_messages_for_model(messages: &[Message], model: &Model) -> Vec<
             Message::User(_) => msg.clone(),
 
             Message::ToolResult(t) => {
-                if let Some(normalized) = tool_call_id_map.get(&t.tool_call_id) {
-                    if normalized != &t.tool_call_id {
-                        return Message::ToolResult(ToolResultMessage {
-                            tool_call_id: normalized.clone(),
-                            ..t.clone()
-                        });
-                    }
+                if let Some(normalized) = tool_call_id_map.get(&t.tool_call_id)
+                    && normalized != &t.tool_call_id
+                {
+                    return Message::ToolResult(ToolResultMessage {
+                        tool_call_id: normalized.clone(),
+                        ..t.clone()
+                    });
                 }
                 msg.clone()
             }
@@ -811,10 +811,11 @@ mod tests {
                 assert!(text.contains("Let me think..."));
                 assert!(text.contains("Here's the answer."));
                 // No native thinking blocks left
-                assert!(!a
-                    .content
-                    .iter()
-                    .any(|b| matches!(b, ContentBlock::Thinking(_))));
+                assert!(
+                    !a.content
+                        .iter()
+                        .any(|b| matches!(b, ContentBlock::Thinking(_)))
+                );
             }
             _ => panic!("Expected Assistant"),
         }

@@ -192,10 +192,10 @@ impl SnapshotStore for FileSnapshotStore {
         let mut entries = Vec::new();
         let mut dir = tokio::fs::read_dir(&self.base_dir).await?;
         while let Some(entry) = dir.next_entry().await? {
-            if entry.path().extension().is_some_and(|e| e == "json") {
-                if let Some(name) = entry.path().file_stem() {
-                    entries.push(name.to_string_lossy().to_string());
-                }
+            if entry.path().extension().is_some_and(|e| e == "json")
+                && let Some(name) = entry.path().file_stem()
+            {
+                entries.push(name.to_string_lossy().to_string());
             }
         }
         Ok(entries)

@@ -90,8 +90,8 @@ impl Default for AgentLoopConfig {
 // Re-export ToolExecutionMode from crate::config to avoid duplicate definitions.
 pub use crate::config::ToolExecutionMode;
 
-use crate::compaction::CompactedContext;
 use crate::AgentToolResult;
+use crate::compaction::CompactedContext;
 use anyhow::{Error, Result};
 use serde_json::Value;
 use std::future::Future;

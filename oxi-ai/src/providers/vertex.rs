@@ -4,8 +4,8 @@
 //! to access Vertex AI models via the Gemini API.
 
 use async_trait::async_trait;
-use futures::stream::StreamExt;
 use futures::Stream;
+use futures::stream::StreamExt;
 use reqwest::Client;
 use std::pin::Pin;
 
@@ -36,18 +36,18 @@ impl VertexProvider {
     }
 
     async fn get_access_token(&self) -> Result<String, ProviderError> {
-        if let Ok(token) = std::env::var("GOOGLE_ACCESS_TOKEN") {
-            if !token.is_empty() {
-                return Ok(token);
-            }
+        if let Ok(token) = std::env::var("GOOGLE_ACCESS_TOKEN")
+            && !token.is_empty()
+        {
+            return Ok(token);
         }
         if let Ok(token) = Self::get_gcloud_token().await {
             return Ok(token);
         }
-        if let Ok(creds) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS") {
-            if !creds.is_empty() {
-                return Self::get_token_from_service_account(&creds).await;
-            }
+        if let Ok(creds) = std::env::var("GOOGLE_APPLICATION_CREDENTIALS")
+            && !creds.is_empty()
+        {
+            return Self::get_token_from_service_account(&creds).await;
         }
         Err(ProviderError::MissingApiKey)
     }
@@ -76,7 +76,7 @@ impl VertexProvider {
         credentials_path: &str,
     ) -> Result<String, ProviderError> {
         use std::fs;
-        use tokio::time::{sleep, Duration};
+        use tokio::time::{Duration, sleep};
         let creds_json = fs::read_to_string(credentials_path).map_err(ProviderError::IoError)?;
         let creds: ServiceAccountCreds =
             serde_json::from_str(&creds_json).map_err(|_| ProviderError::InvalidApiKey)?;
@@ -228,8 +228,8 @@ fn sign_rs256(
 ) -> Result<String, ProviderError> {
     use base64::Engine as _;
     use pkcs8::DecodePrivateKey;
-    use rsa::pkcs1v15::SigningKey;
     use rsa::RsaPrivateKey;
+    use rsa::pkcs1v15::SigningKey;
     use sha2::Sha256;
     use signature::{SignatureEncoding, Signer};
     let message = format!("{}.{}", header_b64, claims_b64);
@@ -318,7 +318,8 @@ mod tests {
 
     #[test]
     fn test_get_region_default() {
-        std::env::remove_var("GOOGLE_CLOUD_REGION");
+        // SAFETY: test-only, single-threaded test binary.
+        unsafe { std::env::remove_var("GOOGLE_CLOUD_REGION") };
         assert_eq!(VertexProvider::get_region(), "us-central1");
     }
 

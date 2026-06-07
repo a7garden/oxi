@@ -82,8 +82,8 @@ impl PluginLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::middleware::{MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewareResult};
     use crate::Middleware;
+    use crate::middleware::{MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewareResult};
     use std::future::Future;
     use std::pin::Pin;
 

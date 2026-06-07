@@ -39,9 +39,9 @@ impl ClosureTool {
         description: impl Into<String>,
         schema: Value,
         handler: impl Fn(Value, &ToolContext) -> Result<AgentToolResult, ToolError>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         #[allow(clippy::type_complexity)]
         let handler_arc: Arc<
@@ -66,13 +66,13 @@ impl ClosureTool {
         description: impl Into<String>,
         schema: Value,
         handler: impl Fn(
-                Value,
-                &ToolContext,
-            ) -> std::pin::Pin<
-                Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
-            > + Send
-            + Sync
-            + 'static,
+            Value,
+            &ToolContext,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<AgentToolResult, ToolError>> + Send>,
+        > + Send
+        + Sync
+        + 'static,
     ) -> Self {
         Self {
             name: name.into(),

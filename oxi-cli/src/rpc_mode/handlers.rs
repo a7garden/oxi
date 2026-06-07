@@ -92,24 +92,24 @@ async fn process_line(line: &str, server: &Arc<RpcServer>, app: &App, output: &R
     };
 
     // Check if this is a JSON-RPC 2.0 request
-    if let Some(obj) = value.as_object() {
-        if obj.contains_key("jsonrpc") {
-            handle_jsonrpc_request(obj, server, app, output);
-            return;
-        }
+    if let Some(obj) = value.as_object()
+        && obj.contains_key("jsonrpc")
+    {
+        handle_jsonrpc_request(obj, server, app, output);
+        return;
     }
 
     // Handle extension UI responses
-    if let Some(obj) = value.as_object() {
-        if obj.get("type").and_then(|v| v.as_str()) == Some("extension_ui_response") {
-            if let Ok(response) = serde_json::from_value::<RpcExtensionUiResponse>(value.clone()) {
-                let id = match &response {
-                    RpcExtensionUiResponse::ExtensionUiResponse { id, .. } => id.clone(),
-                };
-                server.resolve_extension_request(&id, response).await;
-            }
-            return;
+    if let Some(obj) = value.as_object()
+        && obj.get("type").and_then(|v| v.as_str()) == Some("extension_ui_response")
+    {
+        if let Ok(response) = serde_json::from_value::<RpcExtensionUiResponse>(value.clone()) {
+            let id = match &response {
+                RpcExtensionUiResponse::ExtensionUiResponse { id, .. } => id.clone(),
+            };
+            server.resolve_extension_request(&id, response).await;
         }
+        return;
     }
 
     // Handle as native RPC command

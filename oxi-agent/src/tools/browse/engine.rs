@@ -427,19 +427,19 @@ impl TabCallbackRegistry {
 
     /// Invoke the string progress callback for `tab_id`, if registered.
     pub fn invoke(&self, tab_id: &uuid::Uuid, msg: String) {
-        if let Some(entry) = self.entries.lock().get(tab_id) {
-            if let Some(ref cb) = entry.progress {
-                cb(msg);
-            }
+        if let Some(entry) = self.entries.lock().get(tab_id)
+            && let Some(ref cb) = entry.progress
+        {
+            cb(msg);
         }
     }
 
     /// Invoke the browse progress callback for `tab_id`, if registered.
     pub fn invoke_browse(&self, tab_id: &uuid::Uuid, progress: BrowseProgress) {
-        if let Some(entry) = self.entries.lock().get(tab_id) {
-            if let Some(ref cb) = entry.browse {
-                cb(progress);
-            }
+        if let Some(entry) = self.entries.lock().get(tab_id)
+            && let Some(ref cb) = entry.browse
+        {
+            cb(progress);
         }
     }
 

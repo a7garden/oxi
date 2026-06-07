@@ -42,9 +42,9 @@ pub mod types;
 pub use client::{McpClient, McpLogLevel, McpPrompt, McpPromptArgument, McpSamplingRequest};
 pub use tool::McpTool;
 pub use types::{
-    effective_prefix_mode, format_schema, format_tool_name, get_server_prefix, McpCallResult,
-    McpConfig, McpContent, McpSettings, McpToolDef, ServerEntry, ServerInfo, ServerStatus,
-    ToolMetadata, ToolPrefix,
+    McpCallResult, McpConfig, McpContent, McpSettings, McpToolDef, ServerEntry, ServerInfo,
+    ServerStatus, ToolMetadata, ToolPrefix, effective_prefix_mode, format_schema, format_tool_name,
+    get_server_prefix,
 };
 
 use anyhow::{Context, Result};
@@ -243,10 +243,10 @@ impl McpManager {
                 return true;
             }
             // Check backoff
-            if let Some(failed_at) = inner.failure_tracker.get(server_name) {
-                if failed_at.elapsed().as_secs() < self.failure_backoff_secs() {
-                    return false;
-                }
+            if let Some(failed_at) = inner.failure_tracker.get(server_name)
+                && failed_at.elapsed().as_secs() < self.failure_backoff_secs()
+            {
+                return false;
             }
         }
 
@@ -339,10 +339,10 @@ impl McpManager {
         let mut matches = Vec::new();
 
         for (server_name, metadata) in &inner.tool_metadata {
-            if let Some(filter) = server_filter {
-                if server_name != filter {
-                    continue;
-                }
+            if let Some(filter) = server_filter
+                && server_name != filter
+            {
+                continue;
             }
             for tool in metadata {
                 if pattern.is_match(&tool.name) || pattern.is_match(&tool.description) {
@@ -499,10 +499,10 @@ impl McpManager {
             self.lazy_connect(server_name).await;
 
             let inner = self.inner.lock().await;
-            if let Some(metadata) = inner.tool_metadata.get(server_name) {
-                if let Some(tool) = metadata.iter().find(|t| t.name == tool_name) {
-                    return Ok((server_name.clone(), tool.clone()));
-                }
+            if let Some(metadata) = inner.tool_metadata.get(server_name)
+                && let Some(tool) = metadata.iter().find(|t| t.name == tool_name)
+            {
+                return Ok((server_name.clone(), tool.clone()));
             }
         }
 

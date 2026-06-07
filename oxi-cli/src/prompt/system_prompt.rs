@@ -245,7 +245,9 @@ pub fn build_system_prompt(options: &BuildSystemPromptOptions) -> String {
     if has_bash && !has_grep && !has_find && !has_ls {
         add_guideline("Use bash for file operations like ls, rg, find");
     } else if has_bash && (has_grep || has_find || has_ls) {
-        add_guideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
+        add_guideline(
+            "Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)",
+        );
     }
 
     // User-provided guidelines

@@ -6,8 +6,8 @@ use super::slash;
 use super::welcome;
 use crate::app::agent_session::SessionEvent;
 use crate::app::agent_session_runtime::{
-    create_agent_session_from_services, create_agent_session_services,
     CreateAgentSessionFromServicesOptions, CreateAgentSessionServicesOptions,
+    create_agent_session_from_services, create_agent_session_services,
 };
 use crate::context::auto_compaction::CompactionReason;
 use crate::store::session::SessionManager;
@@ -22,7 +22,7 @@ use oxi_tui::widgets::{
 };
 use std::io::{self, Write};
 use std::panic;
-use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc};
+use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 use tokio::sync::mpsc;
 
 use crossterm::{
@@ -32,10 +32,10 @@ use crossterm::{
         PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use oxi_tui::render::DiffBackend;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
 // ── Terminal Lifecycle ───────────────────────────────────────────────────
 
@@ -451,10 +451,10 @@ impl AppState {
         };
 
         // Load user keybindings from settings
-        if let Ok(settings) = crate::store::settings::Settings::load() {
-            if !settings.keybindings.is_empty() {
-                state.keybindings.set_user_bindings(&settings.keybindings);
-            }
+        if let Ok(settings) = crate::store::settings::Settings::load()
+            && !settings.keybindings.is_empty()
+        {
+            state.keybindings.set_user_bindings(&settings.keybindings);
         }
 
         state
@@ -628,12 +628,12 @@ impl AppState {
                             // the partial snapshot — use the raw delta instead.
                             // This guards against providers that emit TextDelta
                             // without updating partial_message.content.
-                            if let Some(delta_str) = delta {
-                                if !delta_str.is_empty() {
-                                    self.chat.stream_text_delta(delta_str);
-                                    // Keep snapshot_text_rendered at 0 so future
-                                    // updates also use the delta fallback.
-                                }
+                            if let Some(delta_str) = delta
+                                && !delta_str.is_empty()
+                            {
+                                self.chat.stream_text_delta(delta_str);
+                                // Keep snapshot_text_rendered at 0 so future
+                                // updates also use the delta fallback.
                             }
                         }
                     }
@@ -1158,32 +1158,30 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
         state.session_file_path = session_target.clone();
 
         // Restore previous messages if resuming
-        if is_resuming {
-            if let Some(ref path) = session_target {
-                let sm = crate::store::session::SessionManager::open(path, None, Some(&cwd));
-                let branch = sm.get_branch(None);
-                for entry in &branch {
-                    match &entry.message {
-                        crate::store::session::AgentMessage::User { content } => {
-                            state.add_user_message(content.as_str().to_string());
-                        }
-                        crate::store::session::AgentMessage::Assistant { content, .. } => {
-                            let text: String = content
-                                .iter()
-                                .filter_map(|b| match b {
-                                    crate::store::session::AssistantContentBlock::Text { text } => {
-                                        Some(text.as_str())
-                                    }
-                                    _ => None,
-                                })
-                                .collect::<Vec<_>>()
-                                .join("");
-                            if !text.is_empty() {
-                                state.add_system_message(text);
-                            }
-                        }
-                        _ => {}
+        if is_resuming && let Some(ref path) = session_target {
+            let sm = crate::store::session::SessionManager::open(path, None, Some(&cwd));
+            let branch = sm.get_branch(None);
+            for entry in &branch {
+                match &entry.message {
+                    crate::store::session::AgentMessage::User { content } => {
+                        state.add_user_message(content.as_str().to_string());
                     }
+                    crate::store::session::AgentMessage::Assistant { content, .. } => {
+                        let text: String = content
+                            .iter()
+                            .filter_map(|b| match b {
+                                crate::store::session::AssistantContentBlock::Text { text } => {
+                                    Some(text.as_str())
+                                }
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("");
+                        if !text.is_empty() {
+                            state.add_system_message(text);
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1304,34 +1302,33 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
                 if let Some(protocol) = caps.image_protocol {
                     use base64::Engine;
                     use oxi_tui::render::image::{
-                        detect_dimensions, encode_iterm2, encode_kitty, ImageOptions,
+                        ImageOptions, detect_dimensions, encode_iterm2, encode_kitty,
                     };
 
                     // Display only the latest image to avoid flooding the terminal
-                    if let Some((b64_data, _mime_type)) = state.chat.pending_images.last() {
-                        if let Ok(bytes) =
+                    if let Some((b64_data, _mime_type)) = state.chat.pending_images.last()
+                        && let Ok(bytes) =
                             base64::engine::general_purpose::STANDARD.decode(b64_data)
-                        {
-                            let dims = detect_dimensions(&bytes);
-                            let opts = ImageOptions {
-                                width_cells: dims.map(|d| (d.width / 10).min(40) as u16),
-                                height_cells: dims.map(|d| (d.height / 20).min(15) as u16),
-                                ..Default::default()
-                            };
+                    {
+                        let dims = detect_dimensions(&bytes);
+                        let opts = ImageOptions {
+                            width_cells: dims.map(|d| (d.width / 10).min(40) as u16),
+                            height_cells: dims.map(|d| (d.height / 20).min(15) as u16),
+                            ..Default::default()
+                        };
 
-                            let encoded = match protocol {
-                                oxi_tui::render::terminal::ImageProtocol::Kitty => {
-                                    encode_kitty(b64_data, &opts)
-                                }
-                                oxi_tui::render::terminal::ImageProtocol::ITerm2 => {
-                                    encode_iterm2(b64_data, &opts)
-                                }
-                            };
+                        let encoded = match protocol {
+                            oxi_tui::render::terminal::ImageProtocol::Kitty => {
+                                encode_kitty(b64_data, &opts)
+                            }
+                            oxi_tui::render::terminal::ImageProtocol::ITerm2 => {
+                                encode_iterm2(b64_data, &opts)
+                            }
+                        };
 
-                            // Write directly to stdout — this bypasses ratatui's buffer
-                            let _ = std::io::stdout().write_all(encoded.as_bytes());
-                            let _ = std::io::stdout().flush();
-                        }
+                        // Write directly to stdout — this bypasses ratatui's buffer
+                        let _ = std::io::stdout().write_all(encoded.as_bytes());
+                        let _ = std::io::stdout().flush();
                     }
                 }
             }
@@ -1388,17 +1385,17 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             }
 
             // Check for pending questionnaire from bridge (agent thread → TUI thread)
-            if state.overlay.is_none() && state.overlay_state.is_none() {
-                if let Some(bridge) = &state.questionnaire_bridge {
-                    if let Some(pending) = bridge.try_take() {
-                        use super::overlay::questionnaire::QuestionnaireOverlay;
-                        state.overlay_state = Some(Box::new(QuestionnaireOverlay::new(
-                            pending.questions,
-                            pending.responder,
-                        )));
-                        tracing::info!("[TUI] Questionnaire overlay opened");
-                    }
-                }
+            if state.overlay.is_none()
+                && state.overlay_state.is_none()
+                && let Some(bridge) = &state.questionnaire_bridge
+                && let Some(pending) = bridge.try_take()
+            {
+                use super::overlay::questionnaire::QuestionnaireOverlay;
+                state.overlay_state = Some(Box::new(QuestionnaireOverlay::new(
+                    pending.questions,
+                    pending.responder,
+                )));
+                tracing::info!("[TUI] Questionnaire overlay opened");
             }
 
             if state.next_action.is_some() {
@@ -1502,18 +1499,17 @@ async fn run_tui_interactive_impl(app: crate::App, resume_last: bool) -> Result<
             Some(TuiNextAction::NewSession) => {
                 tracing::info!("Starting new session");
                 // Reload settings so the new session picks up any config changes
-                if let Ok(fresh) = crate::store::settings::Settings::load() {
-                    if let Some(m) = fresh.effective_model(None) {
-                        if !m.is_empty() {
-                            // effective_model may already include provider
-                            model_id = if m.contains('/') {
-                                m
-                            } else {
-                                let p = fresh.effective_provider(None).unwrap_or_default();
-                                format!("{}/{}", p, m)
-                            };
-                        }
-                    }
+                if let Ok(fresh) = crate::store::settings::Settings::load()
+                    && let Some(m) = fresh.effective_model(None)
+                    && !m.is_empty()
+                {
+                    // effective_model may already include provider
+                    model_id = if m.contains('/') {
+                        m
+                    } else {
+                        let p = fresh.effective_provider(None).unwrap_or_default();
+                        format!("{}/{}", p, m)
+                    };
                 }
                 session_target = None;
                 continue;

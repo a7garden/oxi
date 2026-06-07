@@ -79,10 +79,10 @@ pub async fn discover_models(
         .unwrap_or_else(|_| reqwest::Client::new());
 
     let mut request = client.get(&url);
-    if let Some(env_var) = env_key {
-        if let Ok(api_key) = std::env::var(env_var) {
-            request = request.bearer_auth(api_key);
-        }
+    if let Some(env_var) = env_key
+        && let Ok(api_key) = std::env::var(env_var)
+    {
+        request = request.bearer_auth(api_key);
     }
 
     let result = request.send().await;

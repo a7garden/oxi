@@ -10,7 +10,7 @@
 use super::truncate::{self, TruncationOptions, TruncationResult};
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -238,10 +238,10 @@ impl BashTool {
         }
 
         // Append exit code for non-zero
-        if let Some(code) = exit_code {
-            if code != 0 {
-                output.push_str(&format!("\n\nCommand exited with code {}", code));
-            }
+        if let Some(code) = exit_code
+            && code != 0
+        {
+            output.push_str(&format!("\n\nCommand exited with code {}", code));
         }
 
         // Append timing
@@ -291,7 +291,7 @@ impl BashTool {
             .stderr(std::process::Stdio::piped())
             .process_group(0);
 
-        if let Some(ref dir) = work_dir {
+        if let Some(dir) = work_dir {
             cmd.current_dir(dir);
         }
 
@@ -436,10 +436,10 @@ impl BashTool {
         match result {
             Ok(status) => {
                 let exit_code = status.code();
-                if let Some(code) = exit_code {
-                    if let Some(cb) = progress_cb {
-                        cb(format!("Process exited with code {}", code));
-                    }
+                if let Some(code) = exit_code
+                    && let Some(cb) = progress_cb
+                {
+                    cb(format!("Process exited with code {}", code));
                 }
                 let combined = if stderr_str.is_empty() {
                     stdout_str.clone()
@@ -644,9 +644,11 @@ mod tests {
             .execute("test-4", json!({}), None, &ToolContext::default())
             .await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Missing required parameter: command"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Missing required parameter: command")
+        );
     }
 
     #[tokio::test]

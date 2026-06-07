@@ -3,8 +3,8 @@
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::broadcast;
 
 /// Unique work item ID type.
@@ -157,10 +157,10 @@ impl WorkQueue {
             if item.status != WorkStatus::Pending {
                 continue;
             }
-            if let Some(filter) = work_type_filter {
-                if !filter.contains(&item.work_type) {
-                    continue;
-                }
+            if let Some(filter) = work_type_filter
+                && !filter.contains(&item.work_type)
+            {
+                continue;
             }
             match &best {
                 Some((_, best_pri)) if item.priority <= *best_pri => {}

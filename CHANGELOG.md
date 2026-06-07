@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Edition upgrade (2024 edition)
+
+- **Rust edition**: upgraded from 2021 to **2024** across all workspace
+  crates (`oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli`,
+  `scripts`).
+- **MSRV**: bumped from **1.82** to **1.96** (2024 edition requires
+  Rust ≥ 1.85; 1.96 is the MSRV floor going forward).
+- `rust-toolchain.toml` now pins to channel `1.96` (was `stable`).
+- All workspace crates inherit `edition` and `rust-version` from
+  `[workspace.package]` in the root `Cargo.toml`.
+- **Match ergonomics (2024)**: removed redundant `ref`/`ref mut`
+  bindings in patterns matching on references — the compiler now
+  implicitly borrows in these positions.
+- **`set_var`/`remove_var` → unsafe**: wrapped all calls to
+  `std::env::set_var` and `std::env::remove_var` in `unsafe {}`
+  blocks (these functions became `unsafe fn` in the 2024 edition).
+  Affected files: `oxi-cli/src/store/settings.rs`,
+  `oxi-ai/src/providers/vertex.rs`,
+  `oxi-ai/src/providers/register_builtins.rs`,
+  `oxi-ai/src/env_api_keys.rs`, `oxi-ai/src/provider_registry.rs`.
+- **Clippy 1.96**: auto-fixed `collapsible_if` and `let_and_return`
+  lints (new in Rust 1.96 clippy) across the workspace.
+- **CI**: `RUST_VERSION_MSRV` in `.github/workflows/ci.yml` updated
+  to `1.96`.
+- **README**: Rust badge and install instructions updated to reflect
+  the new MSRV (≥ 1.96).
+
 ### Scope decisions (2026-06-07)
 
 - **Distribution channel:** crates.io only. No Homebrew tap, no Scoop

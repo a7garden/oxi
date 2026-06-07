@@ -3,7 +3,7 @@
 use base64::Engine;
 use serde::Serialize;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 use super::protocol::*;
 

@@ -1,2 +1,6 @@
+# Pinned to 1.96.x to match the workspace `rust-version` floor
+# (see [workspace.package] in the root Cargo.toml). 1.96 is the first
+# stable that ships with the 2024 edition and the temporary-scope
+# fixes we rely on. Bump in lockstep with [workspace.package].
 [toolchain]
-channel = "stable"
+channel = "1.96"

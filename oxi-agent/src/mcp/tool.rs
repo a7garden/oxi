@@ -10,8 +10,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 
-use super::content;
 use super::McpManager;
+use super::content;
 
 /// The unified MCP gateway tool.
 ///

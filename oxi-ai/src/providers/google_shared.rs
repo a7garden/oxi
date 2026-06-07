@@ -148,10 +148,10 @@ pub fn convert_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderErr
                         .unwrap_or(false);
 
                 if last_is_user_with_fn_response {
-                    if let Some(last) = contents.last_mut() {
-                        if let Some(parts) = last.get_mut("parts").and_then(|p| p.as_array_mut()) {
-                            parts.push(function_response_part);
-                        }
+                    if let Some(last) = contents.last_mut()
+                        && let Some(parts) = last.get_mut("parts").and_then(|p| p.as_array_mut())
+                    {
+                        parts.push(function_response_part);
                     }
                 } else {
                     contents.push(serde_json::json!({
@@ -230,11 +230,11 @@ pub fn convert_tools(tools: &[Tool], use_parameters: bool) -> Option<JsonValue> 
                 "name": tool.name,
                 "description": tool.description,
             });
-            if let JsonValue::Object(ref mut map) = obj {
-                if let JsonValue::Object(param_map) = params {
-                    for (k, v) in param_map {
-                        map.insert(k, v);
-                    }
+            if let JsonValue::Object(ref mut map) = obj
+                && let JsonValue::Object(param_map) = params
+            {
+                for (k, v) in param_map {
+                    map.insert(k, v);
                 }
             }
             obj
@@ -317,10 +317,10 @@ pub fn build_request_body(
     if let Some(max) = max_tokens {
         generation_config["maxOutputTokens"] = serde_json::json!(max);
     }
-    if let serde_json::Value::Object(ref obj) = generation_config {
-        if !obj.is_empty() {
-            body["generationConfig"] = generation_config;
-        }
+    if let serde_json::Value::Object(ref obj) = generation_config
+        && !obj.is_empty()
+    {
+        body["generationConfig"] = generation_config;
     }
 
     // System instruction
@@ -360,100 +360,99 @@ pub fn parse_google_events(
             continue;
         }
 
-        if let Some(data) = line.strip_prefix("data: ") {
-            if let Ok(response) = serde_json::from_str::<GoogleResponse>(data) {
-                // Process candidates
-                for candidate in &response.candidates {
-                    // Process content
-                    if let Some(content) = &candidate.content {
-                        for (index, part) in content.parts.iter().enumerate() {
-                            if let Some(text) = &part.text {
-                                // Check if this is a thinking part
-                                if is_thinking_part(part) {
-                                    // Accumulate into partial_message
-                                    let last_think_idx = partial_message
-                                        .content
-                                        .iter()
-                                        .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
-                                    if let Some(idx) = last_think_idx {
-                                        if let ContentBlock::Thinking(t) =
-                                            &mut partial_message.content[idx]
-                                        {
-                                            t.thinking.push_str(text);
-                                        }
-                                    } else {
-                                        partial_message.content.push(ContentBlock::Thinking(
-                                            ThinkingContent::new(text.clone()),
-                                        ));
+        if let Some(data) = line.strip_prefix("data: ")
+            && let Ok(response) = serde_json::from_str::<GoogleResponse>(data)
+        {
+            // Process candidates
+            for candidate in &response.candidates {
+                // Process content
+                if let Some(content) = &candidate.content {
+                    for (index, part) in content.parts.iter().enumerate() {
+                        if let Some(text) = &part.text {
+                            // Check if this is a thinking part
+                            if is_thinking_part(part) {
+                                // Accumulate into partial_message
+                                let last_think_idx = partial_message
+                                    .content
+                                    .iter()
+                                    .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
+                                if let Some(idx) = last_think_idx {
+                                    if let ContentBlock::Thinking(t) =
+                                        &mut partial_message.content[idx]
+                                    {
+                                        t.thinking.push_str(text);
                                     }
-                                    events.push(ProviderEvent::ThinkingDelta {
-                                        content_index: index,
-                                        delta: text.clone(),
-                                        partial: Arc::new(partial_message.clone()),
-                                    });
                                 } else {
-                                    // Accumulate into partial_message
-                                    let last_text_idx = partial_message
-                                        .content
-                                        .iter()
-                                        .rposition(|b| matches!(b, ContentBlock::Text(_)));
-                                    if let Some(idx) = last_text_idx {
-                                        if let ContentBlock::Text(t) =
-                                            &mut partial_message.content[idx]
-                                        {
-                                            t.text.push_str(text);
-                                        }
-                                    } else {
-                                        partial_message.content.push(ContentBlock::Text(
-                                            TextContent::new(text.clone()),
-                                        ));
-                                    }
-                                    events.push(ProviderEvent::TextDelta {
-                                        content_index: index,
-                                        delta: text.clone(),
-                                        partial: Arc::new(partial_message.clone()),
-                                    });
+                                    partial_message.content.push(ContentBlock::Thinking(
+                                        ThinkingContent::new(text.clone()),
+                                    ));
                                 }
-                            }
-
-                            if let Some(function_call) = &part.function_call {
-                                events.push(ProviderEvent::ToolCallDelta {
+                                events.push(ProviderEvent::ThinkingDelta {
                                     content_index: index,
-                                    delta: serde_json::to_string(&function_call.args)
-                                        .unwrap_or_default(),
+                                    delta: text.clone(),
+                                    partial: Arc::new(partial_message.clone()),
+                                });
+                            } else {
+                                // Accumulate into partial_message
+                                let last_text_idx = partial_message
+                                    .content
+                                    .iter()
+                                    .rposition(|b| matches!(b, ContentBlock::Text(_)));
+                                if let Some(idx) = last_text_idx {
+                                    if let ContentBlock::Text(t) = &mut partial_message.content[idx]
+                                    {
+                                        t.text.push_str(text);
+                                    }
+                                } else {
+                                    partial_message
+                                        .content
+                                        .push(ContentBlock::Text(TextContent::new(text.clone())));
+                                }
+                                events.push(ProviderEvent::TextDelta {
+                                    content_index: index,
+                                    delta: text.clone(),
                                     partial: Arc::new(partial_message.clone()),
                                 });
                             }
                         }
+
+                        if let Some(function_call) = &part.function_call {
+                            events.push(ProviderEvent::ToolCallDelta {
+                                content_index: index,
+                                delta: serde_json::to_string(&function_call.args)
+                                    .unwrap_or_default(),
+                                partial: Arc::new(partial_message.clone()),
+                            });
+                        }
                     }
                 }
+            }
 
-                // Update usage if present
-                if let Some(usage) = &response.usage_metadata {
-                    partial_message.usage = Usage {
-                        input: usage.prompt_token_count.unwrap_or(0),
-                        output: usage.candidates_token_count.unwrap_or(0),
-                        cache_read: 0,
-                        cache_write: 0,
-                        total_tokens: usage.total_token_count.unwrap_or(0),
-                        cost: Default::default(),
-                    };
-                }
+            // Update usage if present
+            if let Some(usage) = &response.usage_metadata {
+                partial_message.usage = Usage {
+                    input: usage.prompt_token_count.unwrap_or(0),
+                    output: usage.candidates_token_count.unwrap_or(0),
+                    cache_read: 0,
+                    cache_write: 0,
+                    total_tokens: usage.total_token_count.unwrap_or(0),
+                    cost: Default::default(),
+                };
+            }
 
-                // Check if done
-                if let Some(ref finish_reason) = response
-                    .candidates
-                    .first()
-                    .and_then(|c| c.finish_reason.clone())
-                {
-                    let reason = map_stop_reason(finish_reason);
+            // Check if done
+            if let Some(ref finish_reason) = response
+                .candidates
+                .first()
+                .and_then(|c| c.finish_reason.clone())
+            {
+                let reason = map_stop_reason(finish_reason);
 
-                    // Always emit Done event — even on error, stream has ended
-                    events.push(ProviderEvent::Done {
-                        reason,
-                        message: partial_message.clone(),
-                    });
-                }
+                // Always emit Done event — even on error, stream has ended
+                events.push(ProviderEvent::Done {
+                    reason,
+                    message: partial_message.clone(),
+                });
             }
         }
     }

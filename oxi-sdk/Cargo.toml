@@ -1,7 +1,8 @@
 [package]
 name = "oxi-sdk"
 version = "0.30.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 description = "oxi AI agent SDK — build isolated, multi-agent AI systems"
 readme = "README.md"
 license = "MIT"

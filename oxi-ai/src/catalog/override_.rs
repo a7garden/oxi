@@ -56,10 +56,10 @@ pub fn find_override_files() -> Vec<(PathBuf, String)> {
     let mut out = Vec::new();
 
     // 1. Explicit env var
-    if let Ok(path) = std::env::var("OXI_CATALOG_OVERRIDE") {
-        if let Some(pair) = read_override(&PathBuf::from(path)) {
-            out.push(pair);
-        }
+    if let Ok(path) = std::env::var("OXI_CATALOG_OVERRIDE")
+        && let Some(pair) = read_override(&PathBuf::from(path))
+    {
+        out.push(pair);
     }
 
     // 2. Global: ~/.oxi/catalog/overrides.toml

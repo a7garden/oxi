@@ -5,7 +5,7 @@
 
 #[allow(unused_imports)]
 pub use oxi_tui::overlay_anchor::{
-    resolve_overlay_layout, OverlayAnchor, OverlayLayout, SizeValue,
+    OverlayAnchor, OverlayLayout, SizeValue, resolve_overlay_layout,
 };
 
 /// Composite an overlay line onto a base line at a given column.

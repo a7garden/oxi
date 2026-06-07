@@ -19,7 +19,7 @@ use crate::messages::Message;
 use crate::providers::ProviderRegistry;
 use crate::providers::StreamOptions;
 use crate::types::Model;
-use crate::{register_model, register_provider, Api, Provider, ProviderEvent, ThinkingLevel};
+use crate::{Api, Provider, ProviderEvent, ThinkingLevel, register_model, register_provider};
 
 /// Global router state snapshot — updated after each routing decision.
 static ROUTER_SNAPSHOT: parking_lot::RwLock<Option<RouterSnapshot>> =
@@ -45,7 +45,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use fallback::FallbackChain;
-pub use profiles::{parse_tier_model, ProviderModel, RouterProfiles};
+pub use profiles::{ProviderModel, RouterProfiles, parse_tier_model};
 pub use scoring::{compute_score, lerp};
 pub use signals::{
     BehavioralSignal, ContextBudgetSignal, MessageContentSignal, StructuralSignal, VisionSignal,
@@ -365,12 +365,11 @@ impl RouterProvider {
         profile_name: &str,
     ) -> RoutedTierConfig {
         // 1. Current model already supports vision?
-        if let Some(pm) = parse_tier_model(&tier_config) {
-            if let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id) {
-                if model.supports_vision() {
-                    return tier_config;
-                }
-            }
+        if let Some(pm) = parse_tier_model(&tier_config)
+            && let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id)
+            && model.supports_vision()
+        {
+            return tier_config;
         }
 
         let original_model = tier_config.model.clone();
@@ -379,21 +378,20 @@ impl RouterProvider {
 
         // 2. Fallback list contains a vision model?
         for fb in &fallbacks {
-            if let Some(pm) = ProviderModel::parse(fb) {
-                if let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id) {
-                    if model.supports_vision() {
-                        tracing::info!(
-                            "Vision override: {} → {} (vision-capable fallback)",
-                            original_model,
-                            fb
-                        );
-                        return RoutedTierConfig {
-                            model: fb.clone(),
-                            thinking,
-                            fallbacks,
-                        };
-                    }
-                }
+            if let Some(pm) = ProviderModel::parse(fb)
+                && let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id)
+                && model.supports_vision()
+            {
+                tracing::info!(
+                    "Vision override: {} → {} (vision-capable fallback)",
+                    original_model,
+                    fb
+                );
+                return RoutedTierConfig {
+                    model: fb.clone(),
+                    thinking,
+                    fallbacks,
+                };
             }
         }
 
@@ -403,19 +401,18 @@ impl RouterProvider {
             for higher_tier in [RouterTier::High, RouterTier::Medium] {
                 if higher_tier.rank() > tier.rank() {
                     let tc = profile.tier_config(higher_tier);
-                    if let Some(pm) = parse_tier_model(tc) {
-                        if let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id) {
-                            if model.supports_vision() {
-                                tracing::info!(
-                                    "Vision upgrade: tier {:?} → {:?}, model {} → {}",
-                                    tier,
-                                    higher_tier,
-                                    original_model,
-                                    tc.model
-                                );
-                                return tc.clone();
-                            }
-                        }
+                    if let Some(pm) = parse_tier_model(tc)
+                        && let Some(model) = crate::lookup_model(&pm.provider, &pm.model_id)
+                        && model.supports_vision()
+                    {
+                        tracing::info!(
+                            "Vision upgrade: tier {:?} → {:?}, model {} → {}",
+                            tier,
+                            higher_tier,
+                            original_model,
+                            tc.model
+                        );
+                        return tc.clone();
                     }
                 }
             }

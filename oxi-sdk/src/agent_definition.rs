@@ -98,10 +98,10 @@ impl AgentDefinition {
         }
 
         // If description is still empty, use the first line of the body
-        if def.description.is_empty() {
-            if let Some(first_line) = def.system_prompt.as_ref().and_then(|s| s.lines().next()) {
-                def.description = first_line.trim_start_matches('#').trim().to_string();
-            }
+        if def.description.is_empty()
+            && let Some(first_line) = def.system_prompt.as_ref().and_then(|s| s.lines().next())
+        {
+            def.description = first_line.trim_start_matches('#').trim().to_string();
         }
 
         def.validate()?;

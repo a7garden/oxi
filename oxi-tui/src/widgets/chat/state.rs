@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use parking_lot::RwLock;
 
 use crate::theme::ThemeStyles;
-use crate::widgets::chat::layout::{compute_layout, LayoutEntry};
+use crate::widgets::chat::layout::{LayoutEntry, compute_layout};
 use crate::widgets::chat::markdown::extract_last_code_block;
 use crate::widgets::chat::types::{
     ChatMessage, ContentBlock, MessageRole, StreamingState, ToolCallStatus,
@@ -237,21 +237,31 @@ impl ChatViewState {
             // from providers around tool calls", but the proper fix is to
             // handle that at the provider layer, not at the TUI layer.
 
-            if let Some(ContentBlock::Text { ref mut content }) =
-                s.message.content_blocks.first_mut()
-            {
-                // Clamp total text size to prevent unbounded growth
-                if content.chars().count() > MAX_TEXT_CHARS {
-                    return;
-                }
-                let new_chars = text.chars().count();
-                if content.chars().count() + new_chars > MAX_TEXT_CHARS {
-                    // Truncate delta if it would exceed the limit
-                    let remaining = MAX_TEXT_CHARS.saturating_sub(content.chars().count());
-                    let taken: String = text.chars().take(remaining).collect();
-                    content.push_str(&taken);
-                } else {
-                    content.push_str(text);
+            // Find the LAST Text block to append to (not first_mut!).
+            // When Thinking blocks are present, first_mut() returns the
+            // Thinking block and the Text pattern doesn't match, causing
+            // every delta to create a new Text block — each rendered on
+            // its own line.
+            let text_idx = s
+                .message
+                .content_blocks
+                .iter()
+                .rposition(|b| matches!(b, ContentBlock::Text { .. }));
+            if let Some(idx) = text_idx {
+                if let ContentBlock::Text { ref mut content } = s.message.content_blocks[idx] {
+                    // Clamp total text size to prevent unbounded growth
+                    if content.chars().count() > MAX_TEXT_CHARS {
+                        return;
+                    }
+                    let new_chars = text.chars().count();
+                    if content.chars().count() + new_chars > MAX_TEXT_CHARS {
+                        // Truncate delta if it would exceed the limit
+                        let remaining = MAX_TEXT_CHARS.saturating_sub(content.chars().count());
+                        let taken: String = text.chars().take(remaining).collect();
+                        content.push_str(&taken);
+                    } else {
+                        content.push_str(text);
+                    }
                 }
             } else {
                 let truncated = if text.chars().count() > MAX_TEXT_CHARS {
@@ -275,37 +285,33 @@ impl ChatViewState {
     }
 
     fn update_last_code_block(&mut self) {
-        if let Some(ref s) = self.streaming {
-            if let Some(ContentBlock::Text { ref content, .. }) = s.message.content_blocks.first() {
-                if let Some(code) = extract_last_code_block(content) {
-                    self.last_code_block = Some(code);
-                }
-            }
+        if let Some(ref s) = self.streaming
+            && let Some(ContentBlock::Text { content, .. }) = s.message.content_blocks.first()
+            && let Some(code) = extract_last_code_block(content)
+        {
+            self.last_code_block = Some(code);
         }
     }
 
     pub fn refresh_last_code_block(&mut self) {
-        if let Some(ref s) = self.streaming {
-            if let Some(ContentBlock::Text { ref content, .. }) = s.message.content_blocks.first() {
-                if let Some(code) = extract_last_code_block(content) {
-                    self.last_code_block = Some(code);
-                }
-            }
+        if let Some(ref s) = self.streaming
+            && let Some(ContentBlock::Text { content, .. }) = s.message.content_blocks.first()
+            && let Some(code) = extract_last_code_block(content)
+        {
+            self.last_code_block = Some(code);
         }
     }
 
     pub fn set_tool_status(&mut self, id: &str, status: ToolCallStatus) {
-        if let Some(ref mut s) = self.streaming {
-            if let Some(idx) = self.tool_tracker.get(id) {
-                if let Some(ContentBlock::ToolCall {
-                    status: ref mut curr,
-                    ..
-                }) = s.message.content_blocks.get_mut(idx)
-                {
-                    *curr = status;
-                }
-                self.layout_cache.write().entries = None;
+        if let Some(ref mut s) = self.streaming
+            && let Some(idx) = self.tool_tracker.get(id)
+        {
+            if let Some(ContentBlock::ToolCall { status: curr, .. }) =
+                s.message.content_blocks.get_mut(idx)
+            {
+                *curr = status;
             }
+            self.layout_cache.write().entries = None;
         }
     }
 
@@ -326,9 +332,8 @@ impl ChatViewState {
             // Check if this tool call was already registered (e.g., from
             // a prior MessageUpdate that included ToolCall blocks).
             if let Some(existing_idx) = self.tool_tracker.get(&id) {
-                if let Some(ContentBlock::ToolCall {
-                    status: ref mut s, ..
-                }) = s.message.content_blocks.get_mut(existing_idx)
+                if let Some(ContentBlock::ToolCall { status: s, .. }) =
+                    s.message.content_blocks.get_mut(existing_idx)
                 {
                     *s = status;
                 }
@@ -362,29 +367,21 @@ impl ChatViewState {
             self.start_streaming();
         }
         if let Some(ref mut s) = self.streaming {
-            if let Some(ref id) = tool_call_id {
-                if let Some(idx) = self.tool_tracker.find_and_remove(id) {
-                    if let Some(ContentBlock::ToolCall {
-                        ref mut result,
-                        ref mut status,
-                        ..
-                    }) = s.message.content_blocks.get_mut(idx)
-                    {
-                        *result = Some((
-                            clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
-                            is_error,
-                        ));
-                        *status = ToolCallStatus::Done;
-                        self.layout_cache.write().entries = None;
-                        return;
-                    }
-                }
+            if let Some(ref id) = tool_call_id
+                && let Some(idx) = self.tool_tracker.find_and_remove(id)
+                && let Some(ContentBlock::ToolCall { result, status, .. }) =
+                    s.message.content_blocks.get_mut(idx)
+            {
+                *result = Some((
+                    clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
+                    is_error,
+                ));
+                *status = ToolCallStatus::Done;
+                self.layout_cache.write().entries = None;
+                return;
             }
-            if let Some(ContentBlock::ToolCall {
-                ref mut result,
-                ref mut status,
-                ..
-            }) = s.message.content_blocks.last_mut()
+            if let Some(ContentBlock::ToolCall { result, status, .. }) =
+                s.message.content_blocks.last_mut()
             {
                 *result = Some((
                     clamp_str(content, MAX_TOOL_RESULT_CHARS, MAX_TOOL_RESULT_LINES),
@@ -502,16 +499,13 @@ impl ChatViewState {
         if let Some(ref mut s) = self.streaming {
             for block in &mut s.message.content_blocks {
                 if let ContentBlock::ToolCall {
-                    id: ref bid,
-                    ref mut duration,
-                    ..
+                    id: bid, duration, ..
                 } = block
+                    && bid == id
                 {
-                    if bid == id {
-                        *duration = Some(dur_str);
-                        self.layout_cache.write().entries = None;
-                        return;
-                    }
+                    *duration = Some(dur_str);
+                    self.layout_cache.write().entries = None;
+                    return;
                 }
             }
         }
@@ -579,10 +573,9 @@ impl ChatViewState {
                 && cache.streaming_text_len == streaming_text_len
                 && cache.spinner_frame == spinner
                 && cache.width == width
+                && let Some(ref entries) = cache.entries
             {
-                if let Some(ref entries) = cache.entries {
-                    return entries.clone();
-                }
+                return entries.clone();
             }
         }
 

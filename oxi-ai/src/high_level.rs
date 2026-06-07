@@ -55,10 +55,10 @@ pub async fn complete(
             } => {
                 if current_text_index != Some(content_index) {
                     // New text block started — flush previous buffer first
-                    if let Some(idx) = current_text_index {
-                        if !text_buffer.is_empty() {
-                            push_text_block(&mut final_message, idx, &text_buffer);
-                        }
+                    if let Some(idx) = current_text_index
+                        && !text_buffer.is_empty()
+                    {
+                        push_text_block(&mut final_message, idx, &text_buffer);
                     }
                     current_text_index = Some(content_index);
                     text_buffer.clear();
@@ -166,10 +166,10 @@ pub async fn complete(
             }
             ProviderEvent::Done { message, .. } => {
                 // Finalize any remaining text
-                if let Some(idx) = current_text_index {
-                    if !text_buffer.is_empty() {
-                        push_text_block(&mut final_message, idx, &text_buffer);
-                    }
+                if let Some(idx) = current_text_index
+                    && !text_buffer.is_empty()
+                {
+                    push_text_block(&mut final_message, idx, &text_buffer);
                 }
 
                 // Add any pending tool calls
@@ -201,7 +201,7 @@ pub async fn complete(
 
 /// Push a text block to the message content
 fn push_text_block(msg: &mut Option<AssistantMessage>, index: usize, text: &str) {
-    if let Some(ref mut m) = msg {
+    if let Some(m) = msg {
         let content = ContentBlock::Text(TextContent {
             content_type: crate::TextContentType::Text,
             text: text.to_string(),
@@ -232,7 +232,7 @@ fn push_text_block(msg: &mut Option<AssistantMessage>, index: usize, text: &str)
 
 /// Push a tool call block to the message content
 fn push_tool_call(msg: &mut Option<AssistantMessage>, index: usize, tool_call: ToolCall) {
-    if let Some(ref mut m) = msg {
+    if let Some(m) = msg {
         while m.content.len() <= index {
             m.content.push(ContentBlock::Text(TextContent::new("")));
         }

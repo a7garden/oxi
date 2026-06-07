@@ -2,12 +2,12 @@
 
 #![allow(missing_docs)]
 
+use crate::ProviderEvent;
 use crate::context::Context;
 use crate::error::ProviderError;
 use crate::providers::ProviderRegistry;
 use crate::providers::StreamOptions;
 use crate::types::Model;
-use crate::ProviderEvent;
 use futures::Stream;
 use std::pin::Pin;
 use std::sync::Arc;

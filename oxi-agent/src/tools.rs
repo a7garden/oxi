@@ -544,10 +544,10 @@ impl ToolRegistry {
         let registry = Self::new();
         let set: std::collections::HashSet<&str> = names.iter().copied().collect();
         for name in full.names() {
-            if set.contains(name.as_str()) {
-                if let Some(tool) = full.get(&name) {
-                    registry.register_arc(tool);
-                }
+            if set.contains(name.as_str())
+                && let Some(tool) = full.get(&name)
+            {
+                registry.register_arc(tool);
             }
         }
         registry

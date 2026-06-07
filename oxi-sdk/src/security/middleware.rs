@@ -118,13 +118,13 @@ impl Middleware for SecurityMiddleware {
         Box::pin(async move {
             if let MiddlewareData::BeforeTool { tool_name, params } = &ctx.data {
                 let subject = CapabilitySubject::Agent(ctx.agent_id.clone());
-                if let Some(required) = Self::required_capability(tool_name, params) {
-                    if !self.authorizer.check(&subject, &required) {
-                        return MiddlewareResult::block(format!(
-                            "Permission denied for agent {}: {:?}",
-                            ctx.agent_id, required
-                        ));
-                    }
+                if let Some(required) = Self::required_capability(tool_name, params)
+                    && !self.authorizer.check(&subject, &required)
+                {
+                    return MiddlewareResult::block(format!(
+                        "Permission denied for agent {}: {:?}",
+                        ctx.agent_id, required
+                    ));
                 }
             }
             MiddlewareResult::pass()

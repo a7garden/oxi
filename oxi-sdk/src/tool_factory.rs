@@ -4,9 +4,9 @@ use std::path::Path;
 use std::sync::Arc;
 
 use oxi_agent::{
+    ToolRegistry,
     tools::browse::{BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine},
     tools::{EditTool, LsTool, ReadTool, WriteTool},
-    ToolRegistry,
 };
 
 /// Create the standard coding tools: read, write, edit, ls

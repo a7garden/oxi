@@ -1,8 +1,8 @@
 //! Google Generative AI provider (Gemini API)
 
 use async_trait::async_trait;
-use futures::stream::StreamExt;
 use futures::Stream;
+use futures::stream::StreamExt;
 use reqwest::Client;
 use std::pin::Pin;
 

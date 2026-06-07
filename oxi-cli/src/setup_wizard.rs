@@ -13,15 +13,15 @@ use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
-    Terminal,
 };
 
 use std::io;
@@ -1123,17 +1123,17 @@ pub fn run() -> Result<()> {
     loop {
         draw_wizard(&mut terminal, &mut state)?;
 
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                // Ctrl+C always quits
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                    break;
-                }
+        if event::poll(std::time::Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+        {
+            // Ctrl+C always quits
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                break;
+            }
 
-                let should_quit = handle_event(&mut state, Event::Key(key), &auth_store)?;
-                if should_quit {
-                    break;
-                }
+            let should_quit = handle_event(&mut state, Event::Key(key), &auth_store)?;
+            if should_quit {
+                break;
             }
         }
     }

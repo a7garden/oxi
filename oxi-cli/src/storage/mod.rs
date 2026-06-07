@@ -4,5 +4,5 @@ pub mod packages;
 pub(crate) mod resource_loader;
 
 // Re-exports for convenience
-pub use export::{export_to_html, ExportMeta, HtmlExportOptions};
+pub use export::{ExportMeta, HtmlExportOptions, export_to_html};
 pub use resource_loader::{Prompt, ResourceLoader, Skill, Theme};

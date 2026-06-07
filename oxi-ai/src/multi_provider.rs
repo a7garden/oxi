@@ -60,6 +60,7 @@ use futures::Stream;
 use std::pin::Pin;
 
 use crate::{
+    Model,
     circuit_breaker::{CircuitBreakerConfig, ProviderCircuitBreaker},
     complexity_router::{ComplexityRouter, DefaultRouter},
     context::Context,
@@ -67,7 +68,6 @@ use crate::{
     fallback_chain::FallbackChain,
     model_db::ModelEntry,
     providers::{FallbackReason, Provider, ProviderEvent, StreamOptions},
-    Model,
 };
 
 // ============================================================================
@@ -852,15 +852,14 @@ impl MultiProvider {
                 // Try to get the model from registry
                 if let Some(registered_model) =
                     crate::model_registry::get_model(entry.provider, entry.id)
+                    && self.providers.contains_key(entry.provider)
                 {
-                    if self.providers.contains_key(entry.provider) {
-                        add_candidate(
-                            &mut candidates,
-                            &mut seen_ids,
-                            entry.provider.to_string(),
-                            registered_model.clone(),
-                        );
-                    }
+                    add_candidate(
+                        &mut candidates,
+                        &mut seen_ids,
+                        entry.provider.to_string(),
+                        registered_model.clone(),
+                    );
                 }
 
                 // Also construct from entry if not found in registry
@@ -1070,8 +1069,8 @@ impl MultiProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::context::Context;
     use crate::Message;
+    use crate::context::Context;
 
     fn create_test_context() -> Context {
         let mut ctx = Context::new();

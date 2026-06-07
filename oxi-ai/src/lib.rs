@@ -42,7 +42,7 @@ pub mod prelude {
     pub use crate::error::{Error, Result};
     pub use crate::messages::*;
     pub use crate::providers::{Provider, ProviderEvent, StreamOptions};
-    pub use crate::tools::{validate_args, Tool};
+    pub use crate::tools::{Tool, validate_args};
     pub use crate::types::*;
 }
 
@@ -65,8 +65,8 @@ pub use providers::CacheRetention;
 
 /// Provider trait, streaming options, and provider registry.
 pub use providers::{
-    custom_provider_names, get_provider, get_provider_arc, register_provider, unregister_provider,
     Provider, ProviderEvent, ProviderOptions, ProviderRegistry, StreamOptions,
+    custom_provider_names, get_provider, get_provider_arc, register_provider, unregister_provider,
 };
 
 /// Built-in provider helpers (re-exported from providers).
@@ -103,7 +103,7 @@ pub use providers::VertexProvider;
 pub use providers::normalize_messages;
 
 /// Tool definition and argument validation.
-pub use tools::{progress_callback, validate_args, ProgressCallback, Tool, ToolValidationError};
+pub use tools::{ProgressCallback, Tool, ToolValidationError, progress_callback, validate_args};
 
 pub use compaction::generate_branch_summary;
 /// Core type definitions (tokens, cost, etc.).
@@ -133,8 +133,8 @@ pub use complexity_router::{ComplexityRouter, DefaultRouter};
 
 /// Message transformation between provider formats.
 pub use transform::{
-    anthropic_to_google, anthropic_to_openai, google_to_openai, normalize_tool_call_id,
-    openai_to_anthropic, transform_messages, transform_messages_for_model, TransformOptions,
+    TransformOptions, anthropic_to_google, anthropic_to_openai, google_to_openai,
+    normalize_tool_call_id, openai_to_anthropic, transform_messages, transform_messages_for_model,
 };
 
 // Multi-provider routing
@@ -152,8 +152,8 @@ mod model_registry;
 ///
 /// Unlike the static `model_db`, this supports adding/removing models at runtime.
 pub use model_registry::{
-    dynamic_models, get_model, get_models, get_providers, lookup_model, register_model,
-    unregister_model, ModelRegistry,
+    ModelRegistry, dynamic_models, get_model, get_models, get_providers, lookup_model,
+    register_model, unregister_model,
 };
 
 // Static model database (comprehensive)
@@ -163,8 +163,8 @@ pub mod model_db;
 ///
 /// Provides comprehensive model listings, filtering, and search capabilities.
 pub use model_db::{
-    get_all_models, get_cheapest_models, get_model_entry, get_provider_models,
-    get_reasoning_models, get_vision_models, model_count, search_models, ModelEntry,
+    ModelEntry, get_all_models, get_cheapest_models, get_model_entry, get_provider_models,
+    get_reasoning_models, get_vision_models, model_count, search_models,
 };
 
 // Fallback chain for ordered model failover

@@ -10,8 +10,8 @@ use std::pin::Pin;
 
 use futures::Stream;
 use oxi_ai::{
-    get_model, Context, Message, Model, OpenAiProvider, Provider, ProviderError, ProviderEvent,
-    StreamOptions, UserMessage,
+    Context, Message, Model, OpenAiProvider, Provider, ProviderError, ProviderEvent, StreamOptions,
+    UserMessage, get_model,
 };
 
 /// Helper to create a minimal context for testing

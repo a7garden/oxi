@@ -247,18 +247,18 @@ impl StatefulWidget for Footer<'_> {
                 left_spans.push(Span::styled(format!(" {}", display), styles.muted));
             }
 
-            if let Some(ref branch) = d.git_branch {
-                if !branch.is_empty() {
+            if let Some(ref branch) = d.git_branch
+                && !branch.is_empty()
+            {
+                left_spans.push(Span::styled(
+                    format!(" ({})", branch),
+                    Style::default().fg(self.theme.colors.accent),
+                ));
+                if d.git_dirty {
                     left_spans.push(Span::styled(
-                        format!(" ({})", branch),
-                        Style::default().fg(self.theme.colors.accent),
+                        " *",
+                        Style::default().fg(self.theme.colors.warning),
                     ));
-                    if d.git_dirty {
-                        left_spans.push(Span::styled(
-                            " *",
-                            Style::default().fg(self.theme.colors.warning),
-                        ));
-                    }
                 }
             }
 

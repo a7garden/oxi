@@ -5,8 +5,8 @@
 //! headers. The provider factory is data-driven from this metadata rather than
 //! using hardcoded match arms.
 
-use crate::catalog::BuiltinProviderEntry;
 use crate::Api;
+use crate::catalog::BuiltinProviderEntry;
 
 // ---------------------------------------------------------------------------
 // Auth method

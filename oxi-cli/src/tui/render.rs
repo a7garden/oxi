@@ -5,11 +5,11 @@ use oxi_tui::theme::Theme;
 use oxi_tui::truncate_to_width;
 use oxi_tui::widgets::{chat::ChatView, footer::Footer, input::Input};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-    Frame,
 };
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 

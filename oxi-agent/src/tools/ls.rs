@@ -1,9 +1,9 @@
 use super::path_security::PathGuard;
 /// Ls tool - list directory contents
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
-use crate::tools::truncate::{format_bytes, truncate_head, TruncationOptions};
+use crate::tools::truncate::{TruncationOptions, format_bytes, truncate_head};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::oneshot;

@@ -907,10 +907,10 @@ impl ResourceLoader {
 
         while current != root && iterations < max_iterations {
             // Check if we've reached or passed the git root
-            if let Some(ref git_r) = git_root {
-                if current == *git_r || !current.starts_with(git_r) {
-                    break;
-                }
+            if let Some(ref git_r) = git_root
+                && (current == *git_r || !current.starts_with(git_r))
+            {
+                break;
             }
 
             for file_type in &file_types {
@@ -1122,12 +1122,11 @@ impl ResourceLoader {
         }
 
         for (path, last_time) in mtimes.iter() {
-            if let Ok(metadata) = fs::metadata(path) {
-                if let Ok(modified) = metadata.modified() {
-                    if modified > *last_time {
-                        return true;
-                    }
-                }
+            if let Ok(metadata) = fs::metadata(path)
+                && let Ok(modified) = metadata.modified()
+                && modified > *last_time
+            {
+                return true;
             }
         }
 
@@ -1168,10 +1167,10 @@ impl ResourceLoader {
         };
 
         for path in paths {
-            if let Ok(metadata) = fs::metadata(&path) {
-                if let Ok(modified) = metadata.modified() {
-                    mtimes.insert(path, modified);
-                }
+            if let Ok(metadata) = fs::metadata(&path)
+                && let Ok(modified) = metadata.modified()
+            {
+                mtimes.insert(path, modified);
             }
         }
     }
@@ -1626,11 +1625,11 @@ pub fn load_prompt(path: &std::path::Path) -> Result<Prompt, String> {
 /// Resolve a path with ~ expansion
 pub fn resolve_path(path: &std::path::Path) -> std::path::PathBuf {
     let path_str = path.to_string_lossy();
-    if path_str.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            // SAFE: strip_prefix guaranteed to return Some because we checked starts_with("~/") above
-            return home.join(path_str.strip_prefix("~/").expect("starts_with checked"));
-        }
+    if path_str.starts_with("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        // SAFE: strip_prefix guaranteed to return Some because we checked starts_with("~/") above
+        return home.join(path_str.strip_prefix("~/").expect("starts_with checked"));
     }
     path.to_path_buf()
 }

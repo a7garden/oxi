@@ -9,7 +9,7 @@ use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError
 use async_trait::async_trait;
 use base64::Engine;
 use oxi_ai::{ContentBlock, ImageContent, TextContent};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::fs;

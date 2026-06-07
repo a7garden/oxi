@@ -34,7 +34,7 @@ use crate::app::agent_session::{AgentSession, AgentSessionHandle, ScopedModel};
 use crate::storage::resource_loader::ResourceLoader;
 use crate::store::auth_storage::AuthStorage;
 use crate::store::session::SessionManager;
-use crate::store::session_cwd::{assert_session_cwd_exists, SessionCwdSource};
+use crate::store::session_cwd::{SessionCwdSource, assert_session_cwd_exists};
 use crate::store::settings::{Settings, ThinkingLevel};
 use anyhow::Result;
 use oxi_sdk::ModelRegistry;
@@ -676,11 +676,7 @@ struct SessionManagerCwdAdapter<'a>(&'a SessionManager);
 impl SessionCwdSource for SessionManagerCwdAdapter<'_> {
     fn get_cwd(&self) -> Option<String> {
         let cwd = self.0.get_cwd();
-        if cwd.is_empty() {
-            None
-        } else {
-            Some(cwd)
-        }
+        if cwd.is_empty() { None } else { Some(cwd) }
     }
 
     fn get_session_file(&self) -> Option<String> {

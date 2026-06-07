@@ -7,11 +7,11 @@ use crate::tools::{AgentTool, ToolRegistry};
 use crate::types::{Response, StopReason};
 use anyhow::{Error, Result};
 use oxi_ai::{
-    transform_for_provider, CompactionManager, CompactionStrategy, LlmCompactor, Model, Provider,
+    CompactionManager, CompactionStrategy, LlmCompactor, Model, Provider, transform_for_provider,
 };
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // ── ProviderResolver trait ────────────────────────────────────────
 
@@ -622,9 +622,7 @@ impl Agent {
                             ),
                         },
                         tool_results: match &event {
-                            AgentEvent::TurnEnd {
-                                ref tool_results, ..
-                            } => tool_results.clone(),
+                            AgentEvent::TurnEnd { tool_results, .. } => tool_results.clone(),
                             _ => Vec::new(),
                         },
                         iteration: 0,
@@ -909,9 +907,7 @@ impl Agent {
                                 ),
                             },
                             tool_results: match &event {
-                                AgentEvent::TurnEnd {
-                                    ref tool_results, ..
-                                } => tool_results.clone(),
+                                AgentEvent::TurnEnd { tool_results, .. } => tool_results.clone(),
                                 _ => Vec::new(),
                             },
                             iteration: 0,

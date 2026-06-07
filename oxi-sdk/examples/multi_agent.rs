@@ -4,9 +4,9 @@
 
 use std::sync::Arc;
 
-use oxi_sdk::prelude::*;
 use oxi_sdk::AgentGroup;
 use oxi_sdk::GroupStrategy;
+use oxi_sdk::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

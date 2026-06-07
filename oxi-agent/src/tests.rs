@@ -4,8 +4,8 @@ use crate::{Agent, AgentConfig, AgentEvent, AgentState, ToolRegistry};
 use async_trait::async_trait;
 use futures::Stream;
 use oxi_ai::{
-    transform_for_provider, Api, ContentBlock, Context, Provider, ProviderEvent, StopReason,
-    TextContent, ThinkingContent,
+    Api, ContentBlock, Context, Provider, ProviderEvent, StopReason, TextContent, ThinkingContent,
+    transform_for_provider,
 };
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -181,12 +181,16 @@ async fn test_agent_with_mock_provider() {
 
     assert_eq!(response.content, "Hello! How can I help you?");
     assert_eq!(*provider.call_count.lock().unwrap(), 1);
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::AgentStart { .. })));
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentStart { .. }))
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd { .. }))
+    );
 }
 
 #[tokio::test]
@@ -200,13 +204,17 @@ async fn test_agent_events_sequence() {
 
     let (_, events) = agent.run("Test prompt".to_string()).await.unwrap();
 
-    assert!(events
-        .first()
-        .map(|e| matches!(e, AgentEvent::AgentStart { .. }))
-        .unwrap_or(false));
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+    assert!(
+        events
+            .first()
+            .map(|e| matches!(e, AgentEvent::AgentStart { .. }))
+            .unwrap_or(false)
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd { .. }))
+    );
 }
 
 #[test]
@@ -831,9 +839,11 @@ async fn test_multi_turn_tool_use_loop() {
     }
 
     // Should complete with an AgentEnd event
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::AgentEnd { .. }))
+    );
 }
 
 // ── Test 2: Compaction flow integration ───────────────────────────────
@@ -1429,9 +1439,11 @@ async fn test_follow_up_processed_in_tool_use_loop() {
     assert_eq!(turn_count, 3);
 
     // Tool should have been called
-    assert!(events
-        .iter()
-        .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. }))
+    );
 }
 
 #[tokio::test]
@@ -1510,9 +1522,11 @@ async fn test_follow_up_via_continue_loop() {
         .filter(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
         .count();
     assert_eq!(steering_count, 1);
-    assert!(events2
-        .iter()
-        .any(|e| matches!(e, AgentEvent::TurnStart { .. })));
+    assert!(
+        events2
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnStart { .. }))
+    );
 }
 
 #[tokio::test]

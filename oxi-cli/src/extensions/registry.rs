@@ -15,10 +15,10 @@ use crate::extensions::types::{
     SessionTreeEvent, ThinkingLevelSelectEvent, ToolCallEmitResult, ToolResultEmitResult,
 };
 
-use crate::extensions::context::ExtensionContext;
-use crate::extensions::Extension;
-use crate::store::settings::Settings;
 use crate::CompactionContext;
+use crate::extensions::Extension;
+use crate::extensions::context::ExtensionContext;
+use crate::store::settings::Settings;
 
 use parking_lot::RwLock;
 use serde_json::Value;
@@ -671,13 +671,13 @@ impl ExtensionRunner {
             if self.state(name) != ExtensionState::Active {
                 continue;
             }
-            if let Some(ext) = self.registry.get(name) {
-                if let Err(e) = ext.session_before_switch(event) {
-                    result.cancelled = true;
-                    result.cancelled_by = Some(name.clone());
-                    result.errors.push((name.clone(), e.to_string()));
-                    return result;
-                }
+            if let Some(ext) = self.registry.get(name)
+                && let Err(e) = ext.session_before_switch(event)
+            {
+                result.cancelled = true;
+                result.cancelled_by = Some(name.clone());
+                result.errors.push((name.clone(), e.to_string()));
+                return result;
             }
         }
         result
@@ -693,13 +693,13 @@ impl ExtensionRunner {
             if self.state(name) != ExtensionState::Active {
                 continue;
             }
-            if let Some(ext) = self.registry.get(name) {
-                if let Err(e) = ext.session_before_fork(event) {
-                    result.cancelled = true;
-                    result.cancelled_by = Some(name.clone());
-                    result.errors.push((name.clone(), e.to_string()));
-                    return result;
-                }
+            if let Some(ext) = self.registry.get(name)
+                && let Err(e) = ext.session_before_fork(event)
+            {
+                result.cancelled = true;
+                result.cancelled_by = Some(name.clone());
+                result.errors.push((name.clone(), e.to_string()));
+                return result;
             }
         }
         result
@@ -715,13 +715,13 @@ impl ExtensionRunner {
             if self.state(name) != ExtensionState::Active {
                 continue;
             }
-            if let Some(ext) = self.registry.get(name) {
-                if let Err(e) = ext.session_before_compact(event) {
-                    result.cancelled = true;
-                    result.cancelled_by = Some(name.clone());
-                    result.errors.push((name.clone(), e.to_string()));
-                    return result;
-                }
+            if let Some(ext) = self.registry.get(name)
+                && let Err(e) = ext.session_before_compact(event)
+            {
+                result.cancelled = true;
+                result.cancelled_by = Some(name.clone());
+                result.errors.push((name.clone(), e.to_string()));
+                return result;
             }
         }
         result
@@ -737,13 +737,13 @@ impl ExtensionRunner {
             if self.state(name) != ExtensionState::Active {
                 continue;
             }
-            if let Some(ext) = self.registry.get(name) {
-                if let Err(e) = ext.session_before_tree(event) {
-                    result.cancelled = true;
-                    result.cancelled_by = Some(name.clone());
-                    result.errors.push((name.clone(), e.to_string()));
-                    return result;
-                }
+            if let Some(ext) = self.registry.get(name)
+                && let Err(e) = ext.session_before_tree(event)
+            {
+                result.cancelled = true;
+                result.cancelled_by = Some(name.clone());
+                result.errors.push((name.clone(), e.to_string()));
+                return result;
             }
         }
         result

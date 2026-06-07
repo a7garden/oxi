@@ -527,12 +527,14 @@ fn fallback_chain_default() {
     let chain = FallbackChain::default();
     assert!(!chain.is_empty());
     // Default chain starts with google/gemini-2.0-flash (cheapest first)
-    assert!(chain
-        .names()
-        .first()
-        .map(|s| s.as_str())
-        .unwrap_or("")
-        .contains("gemini-2.0-flash"));
+    assert!(
+        chain
+            .names()
+            .first()
+            .map(|s| s.as_str())
+            .unwrap_or("")
+            .contains("gemini-2.0-flash")
+    );
 }
 
 #[test]

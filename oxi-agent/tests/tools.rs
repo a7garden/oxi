@@ -1127,7 +1127,7 @@ fn test_registry_get_tool() {
 fn test_registry_custom_tool() {
     use async_trait::async_trait;
     use oxi_agent::AgentTool;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
     use tokio::sync::oneshot;
 
     struct CustomTool;

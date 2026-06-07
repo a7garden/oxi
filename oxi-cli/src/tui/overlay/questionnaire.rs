@@ -3,16 +3,16 @@
 //! Implements `OverlayComponent` to display one or more questions
 //! with options, tabs, and inline text input (allowOther).
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use oxi_agent::tools::questionnaire::{Answer, Question, QuestionnaireResponse};
 use oxi_tui::theme::{Theme, ThemeStyles};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-    Frame,
 };
 use std::collections::{HashMap, HashSet};
 

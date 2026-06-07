@@ -16,16 +16,15 @@ pub mod openai_responses_shared;
 mod options;
 pub mod register_builtins;
 #[allow(unused_imports)]
-pub use register_builtins::create_builtin_provider_with_options;
-#[allow(unused_imports)]
 pub use register_builtins::AuthMethod;
+#[allow(unused_imports)]
+pub use register_builtins::create_builtin_provider_with_options;
 mod trait_def;
 mod vertex;
 
 use futures::Stream;
 use std::pin::Pin;
 
-use crate::error::ProviderError;
 #[allow(unused_imports)]
 pub use crate::Api;
 pub use crate::CacheRetention;
@@ -33,6 +32,7 @@ pub use crate::Context;
 pub use crate::Model;
 #[allow(unused_imports)]
 pub use crate::ThinkingLevel;
+use crate::error::ProviderError;
 #[allow(unused_imports)]
 pub use anthropic::AnthropicProvider;
 #[allow(unused_imports)]
@@ -45,9 +45,9 @@ pub use event::ProviderEvent;
 pub use google::GoogleProvider;
 #[allow(unused_imports)]
 pub use mistral::MistralProvider;
-pub use openai::normalize_messages;
 #[allow(unused_imports)]
 pub use openai::OpenAiProvider;
+pub use openai::normalize_messages;
 #[allow(unused_imports)]
 pub use openai_responses::OpenAiResponsesProvider;
 #[allow(unused_imports)]

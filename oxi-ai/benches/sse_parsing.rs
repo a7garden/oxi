@@ -2,7 +2,7 @@
 //!
 //! Measures throughput for both OpenAI and Anthropic event stream formats.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 // We access the internal parsing functions directly via crate-level re-exports.
 // Since the parse functions are private, we replicate the parsing logic here
@@ -19,6 +19,7 @@ use std::sync::Arc;
 mod openai_parser {
     use oxi_ai::{Api, AssistantMessage, ProviderEvent, StopReason, Usage};
     use serde::Deserialize;
+    use std::sync::Arc;
 
     #[derive(Debug, Deserialize)]
     struct SSEChunk {
@@ -148,6 +149,7 @@ mod openai_parser {
 mod anthropic_parser {
     use oxi_ai::{Api, AssistantMessage, ProviderEvent, StopReason, Usage};
     use serde::Deserialize;
+    use std::sync::Arc;
 
     #[derive(Debug, Deserialize)]
     struct AnthropicEvent {
@@ -238,6 +240,7 @@ mod anthropic_parser {
                                 events.push(ProviderEvent::ToolCallStart {
                                     content_index: block.index.unwrap_or(0),
                                     tool_call_id: None,
+                                    tool_name: None,
                                     partial: Arc::new(partial_message.clone()),
                                 });
                             }

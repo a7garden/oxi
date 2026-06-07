@@ -17,8 +17,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
-    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    ProviderEvent, StopReason, StreamOptions, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
+    StreamOptions, Usage, error::ProviderError,
 };
 
 use super::shared_client;
@@ -158,13 +158,13 @@ impl Provider for OpenAiResponsesProvider {
             }
         } else if let Some(ref thinking_level) = options.thinking_level {
             // Fallback: thinking_level only
-            if thinking_level != &crate::ThinkingLevel::Off {
-                if let Some(effort) = thinking_level.as_str() {
-                    body["reasoning"] = serde_json::json!({
-                        "effort": effort,
-                        "summary": "auto",
-                    });
-                }
+            if thinking_level != &crate::ThinkingLevel::Off
+                && let Some(effort) = thinking_level.as_str()
+            {
+                body["reasoning"] = serde_json::json!({
+                    "effort": effort,
+                    "summary": "auto",
+                });
             }
 
             // Include encrypted reasoning content for session continuity
@@ -287,10 +287,10 @@ fn build_input(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
 
 /// Convert content blocks to JSON
 fn blocks_to_json(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError> {
-    if blocks.len() == 1 {
-        if let Some(text) = blocks[0].as_text() {
-            return Ok(JsonValue::String(text.to_string()));
-        }
+    if blocks.len() == 1
+        && let Some(text) = blocks[0].as_text()
+    {
+        return Ok(JsonValue::String(text.to_string()));
     }
 
     let items: Result<Vec<_>, _> = blocks
@@ -947,9 +947,11 @@ mod tests {
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
         // Should contain a ToolCallStart event
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::ToolCallStart { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::ToolCallStart { .. }))
+        );
     }
 
     #[test]
@@ -958,9 +960,11 @@ mod tests {
         let sse_data = r#"data: {"output_text":{"content_index":0,"slice":"Hello"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::TextDelta { .. }))
+        );
     }
 
     #[test]
@@ -969,9 +973,11 @@ mod tests {
         let sse_data = r#"data: {"function_call":{"content_index":0,"arguments":"{\"location"}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::ToolCallDelta { .. }))
+        );
     }
 
     #[test]
@@ -995,9 +1001,11 @@ mod tests {
         let sse_data = r#"data: {"reasoning":{"content_index":0,"summary":[{"type":"summary_text","text":"Thinking process..."}]}}"#;
 
         let events = parse_sse_events(sse_data, "openai-responses", "gpt-4o");
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::ThinkingEnd { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::ThinkingEnd { .. }))
+        );
     }
 
     #[test]

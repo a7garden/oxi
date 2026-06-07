@@ -21,8 +21,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use oxi_ai::{
-    circuit_breaker::CircuitBreakerConfig, fallback_chain::FallbackChain,
-    multi_provider::MultiProviderConfig, ComplexityRouter, MultiProvider, Provider,
+    ComplexityRouter, MultiProvider, Provider, circuit_breaker::CircuitBreakerConfig,
+    fallback_chain::FallbackChain, multi_provider::MultiProviderConfig,
 };
 
 // ============================================================================

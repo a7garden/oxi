@@ -30,11 +30,11 @@ pub use oxi_ai::{CompactionStrategy, Model, Provider, UserMessage};
 
 // ── 3-tier catalog (built-in TOML + override + runtime discovery) ──────
 pub use oxi_ai::catalog::{
-    discover_all, discover_all_authenticated, discover_all_local, discover_models,
-    load_builtin_models, load_builtin_providers, load_overrides, AuthMethod, BuiltinModelEntry,
-    BuiltinProviderEntry, OverrideFile,
+    AuthMethod, BuiltinModelEntry, BuiltinProviderEntry, OverrideFile, discover_all,
+    discover_all_authenticated, discover_all_local, discover_models, load_builtin_models,
+    load_builtin_providers, load_overrides,
 };
-pub use oxi_ai::model_db::{builtin_model_count_sentinel, ModelEntry};
+pub use oxi_ai::model_db::{ModelEntry, builtin_model_count_sentinel};
 
 // ── Concrete provider re-exports (single-dependency pattern) ──────────
 pub use oxi_ai::OpenAiProvider;
@@ -48,8 +48,8 @@ pub use crate::lifecycle::{
 };
 pub use crate::middleware::Middleware;
 pub use crate::middleware::{
-    build_hooks, MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewarePipeline,
-    MiddlewareResult,
+    MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewarePipeline, MiddlewareResult,
+    build_hooks,
 };
 pub use crate::observability::{
     AuditEntry, AuditFilter, AuditLog, CostBreakdown, CostSnapshot, CostTracker, CostTrackerConfig,

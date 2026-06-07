@@ -123,10 +123,10 @@ impl WorkflowDefinition {
                 if task.is_empty() {
                     anyhow::bail!("Step {}: task must not be empty", index);
                 }
-                if let Some(c) = concurrency {
-                    if *c == 0 {
-                        anyhow::bail!("Step {}: concurrency must be > 0", index);
-                    }
+                if let Some(c) = concurrency
+                    && *c == 0
+                {
+                    anyhow::bail!("Step {}: concurrency must be > 0", index);
                 }
             }
             WorkflowStepDef::Chain { steps } => {

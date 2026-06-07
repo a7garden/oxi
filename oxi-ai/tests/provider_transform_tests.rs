@@ -5,8 +5,8 @@
 #[cfg(test)]
 mod tests {
     use oxi_ai::{
-        transform_messages_for_model, Api, AssistantMessage, ContentBlock, Message, Model,
-        StopReason, TextContent, ToolCall, ToolResultMessage, UserMessage,
+        Api, AssistantMessage, ContentBlock, Message, Model, StopReason, TextContent, ToolCall,
+        ToolResultMessage, UserMessage, transform_messages_for_model,
     };
 
     fn model_for(api: Api) -> Model {

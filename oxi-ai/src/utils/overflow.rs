@@ -59,29 +59,29 @@ const NON_OVERFLOW_PATTERNS: &[&str] = &[
 /// `true` if the message indicates a context overflow
 pub fn is_context_overflow(message: &AssistantMessage, context_window: Option<usize>) -> bool {
     // Case 1: Check error message patterns
-    if message.stop_reason == crate::types::StopReason::Error {
-        if let Some(ref error_msg) = message.error_message {
-            // Skip messages matching known non-overflow patterns
-            let is_non_overflow = NON_OVERFLOW_PATTERNS
+    if message.stop_reason == crate::types::StopReason::Error
+        && let Some(ref error_msg) = message.error_message
+    {
+        // Skip messages matching known non-overflow patterns
+        let is_non_overflow = NON_OVERFLOW_PATTERNS
+            .iter()
+            .any(|p: &&str| error_msg.contains(p));
+
+        if !is_non_overflow {
+            let is_overflow = OVERFLOW_PATTERNS
                 .iter()
                 .any(|p: &&str| error_msg.contains(p));
 
-            if !is_non_overflow {
-                let is_overflow = OVERFLOW_PATTERNS
-                    .iter()
-                    .any(|p: &&str| error_msg.contains(p));
-
-                if is_overflow {
-                    return true;
-                }
-            }
-
-            // Special case: Cerebras returns "400 status code (no body)" or "413 status code (no body)"
-            if (error_msg.contains("400") || error_msg.contains("413"))
-                && (error_msg.contains("no body") || error_msg.trim().len() < 50)
-            {
+            if is_overflow {
                 return true;
             }
+        }
+
+        // Special case: Cerebras returns "400 status code (no body)" or "413 status code (no body)"
+        if (error_msg.contains("400") || error_msg.contains("413"))
+            && (error_msg.contains("no body") || error_msg.trim().len() < 50)
+        {
+            return true;
         }
     }
 
@@ -174,7 +174,9 @@ mod tests {
 
     #[test]
     fn test_google_overflow() {
-        let msg = make_error_message("The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)");
+        let msg = make_error_message(
+            "The input token count (1196265) exceeds the maximum number of tokens allowed (1048575)",
+        );
         assert!(is_context_overflow(&msg, None));
     }
 

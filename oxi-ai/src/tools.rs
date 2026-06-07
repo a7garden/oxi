@@ -2,8 +2,8 @@
 
 use jsonschema::Validator;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use serde_json::Value as JsonValue;
+use serde_json::json;
 use std::sync::Arc;
 use thiserror::Error;
 

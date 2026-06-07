@@ -12,10 +12,10 @@ use oxi_tui::widgets::routing::{
 };
 use oxi_tui::widgets::stateful_list::StatefulList;
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::app::agent_session::{AgentSession, AgentSessionHandle};
 use crate::store::session::SessionInfo;
-use ratatui::{layout::Rect, style::Style, Frame};
+use ratatui::{Frame, layout::Rect, style::Style};
 
 type SharedAppState = Arc<Mutex<*mut crate::tui::app::AppState>>;
 

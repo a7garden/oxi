@@ -1,7 +1,8 @@
 [package]
 name = "oxi-tui"
 version = "0.30.0"
-edition = "2021"
+edition.workspace = true
+rust-version.workspace = true
 description = "Terminal UI widgets and theme system for oxi, built on ratatui"
 readme = "README.md"
 license = "MIT"

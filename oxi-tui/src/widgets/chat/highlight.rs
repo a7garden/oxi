@@ -163,12 +163,12 @@ fn highlight_line(line: &str, lang: &str, styles: &ThemeStyles) -> Line<'static>
 
     while i < chars.len() {
         // ── Line comment ──
-        if let Some(prefix) = comment_prefix {
-            if line[i..].starts_with(prefix) {
-                let rest: String = chars[i..].iter().collect();
-                spans.push(Span::styled(rest, token_style(TokenType::Comment, styles)));
-                break;
-            }
+        if let Some(prefix) = comment_prefix
+            && line[i..].starts_with(prefix)
+        {
+            let rest: String = chars[i..].iter().collect();
+            spans.push(Span::styled(rest, token_style(TokenType::Comment, styles)));
+            break;
         }
 
         // ── String literal (double-quoted) ──

@@ -7,14 +7,14 @@ use std::sync::{Arc, Mutex};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, ListItem, ListState, Paragraph},
-    Frame,
 };
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::tui::app::NotificationKind;
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -197,10 +197,10 @@ impl ExtensionsOverlay {
         if entry.enabled {
             // Disable
             if registry.get(&entry_name).is_some() {
-                if let Some(tool) = registry.get(&entry_name) {
-                    if tool.essential() {
-                        return;
-                    }
+                if let Some(tool) = registry.get(&entry_name)
+                    && tool.essential()
+                {
+                    return;
                 }
                 registry.unregister(&entry_name);
                 // Handle paired tools

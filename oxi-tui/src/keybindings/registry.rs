@@ -3,7 +3,7 @@
 //! Provides a declarative keybinding system with default bindings,
 //! user overrides, and lookup by key or action.
 
-use super::keys::{parse_key_id, KeyId};
+use super::keys::{KeyId, parse_key_id};
 use std::collections::HashMap;
 use std::fmt;
 

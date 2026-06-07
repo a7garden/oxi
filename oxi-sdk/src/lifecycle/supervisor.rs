@@ -10,8 +10,8 @@ use crate::routing::RoutingControl;
 use oxi_agent::{AgentConfig, AgentTool, ProviderResolver, ToolRegistry};
 use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use tokio::sync::broadcast;
 
 // ── Internal status encoding (fits in AtomicU8) ──────────────────────────
@@ -685,7 +685,7 @@ impl AgentSupervisor {
                 return Err(SdkError::SnapshotNotFound {
                     agent_id: agent_id.to_string(),
                 }
-                .into())
+                .into());
             }
         };
 
@@ -957,10 +957,12 @@ mod tests {
         let supervisor = make_supervisor();
         let handle = supervisor.spawn(test_config()).unwrap();
         handle.exclude_route_model("openai/gpt-4o");
-        assert!(handle
-            .routing()
-            .excluded_models()
-            .contains(&"openai/gpt-4o".to_string()));
+        assert!(
+            handle
+                .routing()
+                .excluded_models()
+                .contains(&"openai/gpt-4o".to_string())
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@ Rust port of [pi](https://github.com/earendil-works/pi) — terminal-based AI co
 
 | Item | Value |
 |------|-------|
-| Language | Rust 2021 edition |
+| Language | Rust 2024 edition |
 | Workspace crates | `oxi-ai`, `oxi-agent`, `oxi-tui`, `oxi-sdk`, `oxi-cli` (5 crates) |
 | Version | 0.30.0 (latest release: 0.30.0) |
 | License | MIT |

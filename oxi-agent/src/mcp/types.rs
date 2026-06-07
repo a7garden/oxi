@@ -259,32 +259,32 @@ pub fn format_schema(schema: &serde_json::Value, indent: &str) -> String {
         })
         .unwrap_or_default();
 
-    if schema_type == "object" {
-        if let Some(props) = properties {
-            if props.is_empty() {
-                return format!("{indent}(no parameters)");
-            }
-            let mut lines = Vec::new();
-            for (name, prop_schema) in props {
-                let is_required = required.iter().any(|r| r == name);
-                let type_str = prop_schema
-                    .get("type")
-                    .and_then(|t| t.as_str())
-                    .unwrap_or("any");
-                let desc = prop_schema
-                    .get("description")
-                    .and_then(|d| d.as_str())
-                    .unwrap_or("");
-                let req_mark = if is_required { " *required*" } else { "" };
-                let desc_part = if desc.is_empty() {
-                    String::new()
-                } else {
-                    format!(" - {desc}")
-                };
-                lines.push(format!("{indent}{name} ({type_str}){req_mark}{desc_part}"));
-            }
-            return lines.join("\n");
+    if schema_type == "object"
+        && let Some(props) = properties
+    {
+        if props.is_empty() {
+            return format!("{indent}(no parameters)");
         }
+        let mut lines = Vec::new();
+        for (name, prop_schema) in props {
+            let is_required = required.iter().any(|r| r == name);
+            let type_str = prop_schema
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("any");
+            let desc = prop_schema
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("");
+            let req_mark = if is_required { " *required*" } else { "" };
+            let desc_part = if desc.is_empty() {
+                String::new()
+            } else {
+                format!(" - {desc}")
+            };
+            lines.push(format!("{indent}{name} ({type_str}){req_mark}{desc_part}"));
+        }
+        return lines.join("\n");
     }
 
     format!("{indent}({schema_type})")

@@ -165,10 +165,10 @@ pub fn has_env_key(provider: &str) -> bool {
 /// Get first available environment variable value for a provider
 fn first_of(keys: &[&str]) -> Option<String> {
     for key in keys {
-        if let Some(value) = get_env(key) {
-            if !value.is_empty() {
-                return Some(value);
-            }
+        if let Some(value) = get_env(key)
+            && !value.is_empty()
+        {
+            return Some(value);
         }
     }
     None
@@ -366,48 +366,48 @@ mod tests {
 
     #[test]
     fn test_first_of_returns_first() {
-        env::set_var("TEST_FIRST_OF_1", "value1");
-        env::set_var("TEST_FIRST_OF_2", "value2");
+        unsafe { env::set_var("TEST_FIRST_OF_1", "value1") };
+        unsafe { env::set_var("TEST_FIRST_OF_2", "value2") };
 
         let result = first_of(&["TEST_FIRST_OF_1", "TEST_FIRST_OF_2"]);
         assert_eq!(result, Some("value1".to_string()));
 
-        env::remove_var("TEST_FIRST_OF_1");
-        env::remove_var("TEST_FIRST_OF_2");
+        unsafe { env::remove_var("TEST_FIRST_OF_1") };
+        unsafe { env::remove_var("TEST_FIRST_OF_2") };
     }
 
     #[test]
     fn test_first_of_skips_empty() {
-        env::set_var("TEST_FIRST_OF_SKIP", "");
-        env::set_var("TEST_FIRST_OF_SECOND", "second");
+        unsafe { env::set_var("TEST_FIRST_OF_SKIP", "") };
+        unsafe { env::set_var("TEST_FIRST_OF_SECOND", "second") };
 
         let result = first_of(&["TEST_FIRST_OF_SKIP", "TEST_FIRST_OF_SECOND"]);
         assert_eq!(result, Some("second".to_string()));
 
-        env::remove_var("TEST_FIRST_OF_SKIP");
-        env::remove_var("TEST_FIRST_OF_SECOND");
+        unsafe { env::remove_var("TEST_FIRST_OF_SKIP") };
+        unsafe { env::remove_var("TEST_FIRST_OF_SECOND") };
     }
 
     #[test]
     fn test_get_env_api_key() {
-        env::set_var("ANTHROPIC_API_KEY", "sk-test-key-123");
+        unsafe { env::set_var("ANTHROPIC_API_KEY", "sk-test-key-123") };
 
         // Provider with known keys
         let result = get_env_api_key("anthropic");
         assert_eq!(result, Some("sk-test-key-123".to_string()));
 
-        env::remove_var("ANTHROPIC_API_KEY");
+        unsafe { env::remove_var("ANTHROPIC_API_KEY") };
     }
 
     #[test]
     fn test_has_env_key() {
-        env::set_var("DEEPSEEK_API_KEY", "test-value");
+        unsafe { env::set_var("DEEPSEEK_API_KEY", "test-value") };
 
         // Check that deepseek has an env key
         let result = has_env_key("deepseek"); // DEEPSEEK_API_KEY
         assert!(result);
 
-        env::remove_var("DEEPSEEK_API_KEY");
+        unsafe { env::remove_var("DEEPSEEK_API_KEY") };
     }
 
     #[test]
@@ -422,7 +422,7 @@ mod tests {
     fn test_get_all_env_keys() {
         // Use a unique key to avoid race conditions in parallel test runs
         let key = "OXI_TEST_GET_ALL_ENV_KEYS";
-        env::set_var(key, "test-value");
+        unsafe { env::set_var(key, "test-value") };
 
         // Verify the function runs without panic and returns a map
         let all = get_all_env_keys();
@@ -430,12 +430,12 @@ mod tests {
         // environment, but it should always be a valid HashMap
         assert!(all.len() <= 17); // max number of providers in the mapping
 
-        env::remove_var(key);
+        unsafe { env::remove_var(key) };
     }
 
     #[test]
     fn test_oauth_env_token() {
-        env::set_var("ANTHROPIC_OAUTH_TOKEN", "oauth-token-123");
+        unsafe { env::set_var("ANTHROPIC_OAUTH_TOKEN", "oauth-token-123") };
 
         let result = get_oauth_env_token("anthropic");
         assert_eq!(result, Some("oauth-token-123".to_string()));
@@ -443,7 +443,7 @@ mod tests {
         let not_oauth = get_oauth_env_token("openai");
         assert!(not_oauth.is_none());
 
-        env::remove_var("ANTHROPIC_OAUTH_TOKEN");
+        unsafe { env::remove_var("ANTHROPIC_OAUTH_TOKEN") };
     }
 
     #[test]

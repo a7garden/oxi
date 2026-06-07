@@ -17,8 +17,8 @@
 use async_trait::async_trait;
 use std::path::PathBuf;
 
-use crate::ports::{Persona, PersonaProvider};
 use crate::SdkError;
+use crate::ports::{Persona, PersonaProvider};
 
 /// Discovers `<root>/<name>.md` persona files and parses them.
 pub struct FilePersonaProvider {
@@ -56,10 +56,10 @@ impl PersonaProvider for FilePersonaProvider {
             if path.extension().and_then(|e| e.to_str()) != Some("md") {
                 continue;
             }
-            if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
-                if let Ok(p) = parse_persona(name, &path) {
-                    out.push(p);
-                }
+            if let Some(name) = path.file_stem().and_then(|n| n.to_str())
+                && let Ok(p) = parse_persona(name, &path)
+            {
+                out.push(p);
             }
         }
         Ok(out)
@@ -77,12 +77,12 @@ impl PersonaProvider for FilePersonaProvider {
 
 /// Parse a persona file. Returns (front_matter, body).
 fn split_frontmatter(text: &str) -> (Option<String>, String) {
-    if let Some(body) = text.strip_prefix("---\n") {
-        if let Some(idx) = body.find("\n---") {
-            let fm = body[..idx].to_string();
-            let after = &body[idx + 4..];
-            return (Some(fm), after.trim_start_matches('\n').to_string());
-        }
+    if let Some(body) = text.strip_prefix("---\n")
+        && let Some(idx) = body.find("\n---")
+    {
+        let fm = body[..idx].to_string();
+        let after = &body[idx + 4..];
+        return (Some(fm), after.trim_start_matches('\n').to_string());
     }
     (None, text.to_string())
 }

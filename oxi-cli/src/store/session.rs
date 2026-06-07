@@ -1182,20 +1182,20 @@ impl SessionManager {
         }
         if let Some(ref file) = self.session_file {
             let path = Path::new(file);
-            if path.exists() {
-                if let Ok(metadata) = fs::metadata(path) {
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        let perm = metadata.permissions().mode();
-                        // 0o200 = write bit for owner removed
-                        return perm & 0o200 == 0;
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        let _ = metadata;
-                        return false;
-                    }
+            if path.exists()
+                && let Ok(metadata) = fs::metadata(path)
+            {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let perm = metadata.permissions().mode();
+                    // 0o200 = write bit for owner removed
+                    return perm & 0o200 == 0;
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = metadata;
+                    return false;
                 }
             }
         }
@@ -1467,10 +1467,9 @@ impl SessionManager {
                 content,
                 ..
             } = &entry.message
+                && custom_type == "session_info"
             {
-                if custom_type == "session_info" {
-                    return Some(content.as_str().trim().to_string()).filter(|s| !s.is_empty());
-                }
+                return Some(content.as_str().trim().to_string()).filter(|s| !s.is_empty());
             }
         }
         None
@@ -1766,10 +1765,10 @@ impl SessionManager {
         _details: Option<serde_json::Value>,
         _from_hook: Option<bool>,
     ) -> String {
-        if let Some(id) = branch_from_id {
-            if !self.by_id.read().contains_key(id) {
-                return String::new();
-            }
+        if let Some(id) = branch_from_id
+            && !self.by_id.read().contains_key(id)
+        {
+            return String::new();
         }
 
         *self.leaf_id.write() = branch_from_id.map(|s| s.to_string());
@@ -1889,10 +1888,10 @@ impl SessionManager {
         for entry in entries {
             let entry = entry?;
             let path = entry.path();
-            if path.is_dir() {
-                if let Ok(sessions) = list_sessions_from_dir(&path.to_string_lossy()).await {
-                    all_sessions.extend(sessions);
-                }
+            if path.is_dir()
+                && let Ok(sessions) = list_sessions_from_dir(&path.to_string_lossy()).await
+            {
+                all_sessions.extend(sessions);
             }
         }
 
@@ -2038,25 +2037,25 @@ impl SessionManager {
                     .to_string_lossy()
                     .to_string();
                 // Try to extract uuid from filename
-                if let Some(uuid_part) = file_name.split('_').next_back() {
-                    if let Ok(uuid) = Uuid::parse_str(uuid_part) {
-                        let mtime = entry.metadata().ok().and_then(|m| m.modified().ok());
-                        let now_ts = Utc::now().timestamp_millis();
-                        metas.push(SessionMeta {
-                            id: uuid,
-                            parent_id: None,
-                            root_id: None,
-                            branch_point: None,
-                            created_at: now_ts,
-                            updated_at: mtime
-                                .map(|t| {
-                                    let dt: DateTime<Utc> = DateTime::from(t);
-                                    dt.timestamp_millis()
-                                })
-                                .unwrap_or(now_ts),
-                            name: None,
-                        });
-                    }
+                if let Some(uuid_part) = file_name.split('_').next_back()
+                    && let Ok(uuid) = Uuid::parse_str(uuid_part)
+                {
+                    let mtime = entry.metadata().ok().and_then(|m| m.modified().ok());
+                    let now_ts = Utc::now().timestamp_millis();
+                    metas.push(SessionMeta {
+                        id: uuid,
+                        parent_id: None,
+                        root_id: None,
+                        branch_point: None,
+                        created_at: now_ts,
+                        updated_at: mtime
+                            .map(|t| {
+                                let dt: DateTime<Utc> = DateTime::from(t);
+                                dt.timestamp_millis()
+                            })
+                            .unwrap_or(now_ts),
+                        name: None,
+                    });
                 }
             }
         }
@@ -2376,14 +2375,12 @@ fn is_valid_session_file(file_path: &str) -> bool {
     if let Ok(mut file) = File::open(file_path) {
         use std::io::Read;
         let mut buffer = vec![0u8; 512];
-        if let Ok(bytes_read) = file.read(&mut buffer) {
-            if let Ok(content) = String::from_utf8(buffer[..bytes_read].to_vec()) {
-                if let Some(first_line) = content.split('\n').next() {
-                    if let Ok(header) = serde_json::from_str::<SessionHeader>(first_line) {
-                        return header.entry_type == "session" && !header.id.is_empty();
-                    }
-                }
-            }
+        if let Ok(bytes_read) = file.read(&mut buffer)
+            && let Ok(content) = String::from_utf8(buffer[..bytes_read].to_vec())
+            && let Some(first_line) = content.split('\n').next()
+            && let Ok(header) = serde_json::from_str::<SessionHeader>(first_line)
+        {
+            return header.entry_type == "session" && !header.id.is_empty();
         }
     }
     false
@@ -2405,16 +2402,13 @@ fn find_most_recent_session(session_dir: &str) -> Option<String> {
     if let Ok(entries) = fs::read_dir(session_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map(|e| e == "jsonl").unwrap_or(false) {
-                if let Some(path_str) = path.to_str() {
-                    if is_valid_session_file(path_str) {
-                        if let Ok(metadata) = entry.metadata() {
-                            if let Ok(mtime) = metadata.modified() {
-                                files.push((path_str.to_string(), mtime));
-                            }
-                        }
-                    }
-                }
+            if path.extension().map(|e| e == "jsonl").unwrap_or(false)
+                && let Some(path_str) = path.to_str()
+                && is_valid_session_file(path_str)
+                && let Ok(metadata) = entry.metadata()
+                && let Ok(mtime) = metadata.modified()
+            {
+                files.push((path_str.to_string(), mtime));
             }
         }
     }
@@ -2506,10 +2500,9 @@ fn build_session_context_internal(
             content,
             ..
         } = &entry.message
+            && custom_type == "thinking_level_change"
         {
-            if custom_type == "thinking_level_change" {
-                thinking_level = content.as_str().to_string();
-            }
+            thinking_level = content.as_str().to_string();
         }
     }
 
@@ -2679,10 +2672,10 @@ fn get_session_modified_date(
     stats: &std::fs::Metadata,
 ) -> DateTime<Utc> {
     let last_activity_time = get_last_activity_time(entries);
-    if let Some(t) = last_activity_time {
-        if t > 0 {
-            return DateTime::from_timestamp_millis(t).unwrap_or_else(Utc::now);
-        }
+    if let Some(t) = last_activity_time
+        && t > 0
+    {
+        return DateTime::from_timestamp_millis(t).unwrap_or_else(Utc::now);
     }
 
     let header_time = chrono::DateTime::parse_from_rfc3339(header_timestamp)
@@ -2710,13 +2703,13 @@ fn get_last_activity_time(entries: &[FileEntry]) -> Option<i64> {
             _ => continue,
         };
 
-        if let SessionEntryEnum::Message(m) = entry {
-            if m.message.is_user() || m.message.is_assistant() {
-                last_activity = Some(std::cmp::max(
-                    last_activity.unwrap_or(0),
-                    m.base.timestamp.parse().unwrap_or(0),
-                ));
-            }
+        if let SessionEntryEnum::Message(m) = entry
+            && (m.message.is_user() || m.message.is_assistant())
+        {
+            last_activity = Some(std::cmp::max(
+                last_activity.unwrap_or(0),
+                m.base.timestamp.parse().unwrap_or(0),
+            ));
         }
     }
 

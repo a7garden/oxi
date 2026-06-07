@@ -28,12 +28,12 @@ use crate::{state::SharedState, tools::ToolContext, tools::ToolRegistry};
 use anyhow::{Error, Result};
 pub use config::{AfterToolCallHook, AgentLoopConfig, BeforeToolCallHook, ToolExecutionMode};
 use oxi_ai::{
-    estimate_tokens, CompactionManager as OxCompactionManager, CompactionStrategy, ContentBlock,
-    LlmCompactor, Message, Provider, StopReason, TextContent, UserMessage,
+    CompactionManager as OxCompactionManager, CompactionStrategy, ContentBlock, LlmCompactor,
+    Message, Provider, StopReason, TextContent, UserMessage, estimate_tokens,
 };
 use parking_lot::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use self::helpers::should_stop_after_turn;

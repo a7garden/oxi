@@ -21,7 +21,7 @@ pub mod widgets;
 pub use cell::Color;
 
 /// Fuzzy matching utilities for search/filter.
-pub use fuzzy::{fuzzy_match, fuzzy_rank, FuzzyResult};
+pub use fuzzy::{FuzzyResult, fuzzy_match, fuzzy_rank};
 
 /// Truncate text to a terminal display width.
 pub use text::truncate_to_width;

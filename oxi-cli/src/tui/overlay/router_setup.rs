@@ -3,14 +3,14 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use oxi_tui::{Theme, ThemeStyles};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-    Frame,
 };
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 
 /// Router profile data captured from the setup form.
 #[derive(Debug, Clone, Default)]
@@ -318,14 +318,14 @@ impl OverlayComponent for RouterSetupOverlay {
                         let filtered = self.filtered_models();
                         filtered.get(self.model_selected).map(|(_, m)| (*m).clone())
                     };
-                    if let Some(field) = self.picking_for.take() {
-                        if let Some(model_str) = maybe_model {
-                            match field {
-                                FocusField::HighModel => self.high_model = model_str,
-                                FocusField::MediumModel => self.medium_model = model_str,
-                                FocusField::LowModel => self.low_model = model_str,
-                                _ => {}
-                            }
+                    if let Some(field) = self.picking_for.take()
+                        && let Some(model_str) = maybe_model
+                    {
+                        match field {
+                            FocusField::HighModel => self.high_model = model_str,
+                            FocusField::MediumModel => self.medium_model = model_str,
+                            FocusField::LowModel => self.low_model = model_str,
+                            _ => {}
                         }
                     }
                 }

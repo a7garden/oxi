@@ -12,8 +12,8 @@ use super::openai::split_complete_lines;
 use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
 use crate::{
-    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent, ToolCall, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
+    StreamOptions, TextContent, ThinkingContent, ToolCall, Usage, error::ProviderError,
 };
 
 /// Anthropic provider
@@ -176,10 +176,10 @@ impl Provider for AnthropicProvider {
         // budget-based). Only send when thinking is not active.
         // Matches pi: `if (options?.temperature !== undefined && !options?.thinkingEnabled)`
         let thinking_active = body.get("thinking").is_some();
-        if let Some(temp) = options.temperature {
-            if !thinking_active {
-                body["temperature"] = serde_json::json!(temp);
-            }
+        if let Some(temp) = options.temperature
+            && !thinking_active
+        {
+            body["temperature"] = serde_json::json!(temp);
         }
 
         if let Some(max) = options.max_tokens {
@@ -293,12 +293,11 @@ impl Provider for AnthropicProvider {
         // and then stop before generating tool calls because they calculate
         // they won't have enough room. Bumping to a minimum of 16_384 for
         // reasoning models ensures the model has space to think + call tools.
-        if model.reasoning {
-            if let Some(current) = body.get("max_tokens").and_then(|v| v.as_u64()) {
-                if current < 16_384 {
-                    body["max_tokens"] = serde_json::json!(model.max_tokens.min(32_768));
-                }
-            }
+        if model.reasoning
+            && let Some(current) = body.get("max_tokens").and_then(|v| v.as_u64())
+            && current < 16_384
+        {
+            body["max_tokens"] = serde_json::json!(model.max_tokens.min(32_768));
         }
         if body.get("max_tokens").is_none() {
             body["max_tokens"] = serde_json::json!(model.max_tokens.min(16384));
@@ -321,56 +320,52 @@ impl Provider for AnthropicProvider {
             let cache_marker = serde_json::json!({ "type": "ephemeral" });
 
             // 1. System prompt (highest priority)
-            if remaining > 0 {
-                if let Some(system) = body.get_mut("system") {
-                    if system.is_string() {
-                        *system = serde_json::json!([{
+            if remaining > 0
+                && let Some(system) = body.get_mut("system")
+                && system.is_string()
+            {
+                *system = serde_json::json!([{
+                    "type": "text",
+                    "text": system,
+                    "cache_control": cache_marker.clone(),
+                }]);
+                remaining -= 1;
+            }
+
+            // 2. Last message (high priority)
+            if remaining > 0
+                && let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut())
+            {
+                if let Some(last_msg) = messages.last_mut()
+                    && let Some(content) = last_msg.get_mut("content")
+                {
+                    if let Some(parts) = content.as_array_mut() {
+                        if let Some(last_part) = parts.last_mut() {
+                            last_part["cache_control"] = cache_marker.clone();
+                            remaining -= 1;
+                        }
+                    } else if content.is_string() {
+                        let text = content.take();
+                        *content = serde_json::json!([{
                             "type": "text",
-                            "text": system,
+                            "text": text,
                             "cache_control": cache_marker.clone(),
                         }]);
                         remaining -= 1;
                     }
                 }
-            }
 
-            // 2. Last message (high priority)
-            if remaining > 0 {
-                if let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) {
-                    if let Some(last_msg) = messages.last_mut() {
-                        if let Some(content) = last_msg.get_mut("content") {
-                            if let Some(parts) = content.as_array_mut() {
-                                if let Some(last_part) = parts.last_mut() {
-                                    last_part["cache_control"] = cache_marker.clone();
-                                    remaining -= 1;
-                                }
-                            } else if content.is_string() {
-                                let text = content.take();
-                                *content = serde_json::json!([{
-                                    "type": "text",
-                                    "text": text,
-                                    "cache_control": cache_marker.clone(),
-                                }]);
-                                remaining -= 1;
-                            }
-                        }
-                    }
-
-                    // 3. Second-to-last message (tool results)
-                    if remaining > 0 {
-                        let msg_count = messages.len();
-                        if msg_count >= 3 {
-                            if let Some(msg) = messages.get_mut(msg_count - 3) {
-                                if let Some(content) = msg.get_mut("content") {
-                                    if let Some(parts) = content.as_array_mut() {
-                                        if let Some(last_part) = parts.last_mut() {
-                                            last_part["cache_control"] = cache_marker;
-                                            remaining -= 1;
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                // 3. Second-to-last message (tool results)
+                if remaining > 0 {
+                    let msg_count = messages.len();
+                    if msg_count >= 3
+                        && let Some(msg) = messages.get_mut(msg_count - 3)
+                        && let Some(content) = msg.get_mut("content")
+                        && let Some(parts) = content.as_array_mut()
+                        && let Some(last_part) = parts.last_mut()
+                    {
+                        last_part["cache_control"] = cache_marker;
+                        remaining -= 1;
                     }
                 }
             }
@@ -733,15 +728,14 @@ fn parse_anthropic_events_stateful(
             accumulated_usage.cache_read = usage.cache_read.max(accumulated_usage.cache_read);
             accumulated_usage.cache_write = usage.cache_creation.max(accumulated_usage.cache_write);
             accumulated_usage.total_tokens = accumulated_usage.input + accumulated_usage.output;
-        } else if let Some(msg) = &event.message {
-            if let Some(usage) = &msg.usage {
-                accumulated_usage.input = usage.input_tokens.max(accumulated_usage.input);
-                accumulated_usage.output = usage.output_tokens.max(accumulated_usage.output);
-                accumulated_usage.cache_read = usage.cache_read.max(accumulated_usage.cache_read);
-                accumulated_usage.cache_write =
-                    usage.cache_creation.max(accumulated_usage.cache_write);
-                accumulated_usage.total_tokens = accumulated_usage.input + accumulated_usage.output;
-            }
+        } else if let Some(msg) = &event.message
+            && let Some(usage) = &msg.usage
+        {
+            accumulated_usage.input = usage.input_tokens.max(accumulated_usage.input);
+            accumulated_usage.output = usage.output_tokens.max(accumulated_usage.output);
+            accumulated_usage.cache_read = usage.cache_read.max(accumulated_usage.cache_read);
+            accumulated_usage.cache_write = usage.cache_creation.max(accumulated_usage.cache_write);
+            accumulated_usage.total_tokens = accumulated_usage.input + accumulated_usage.output;
         }
 
         match event_type {

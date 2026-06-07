@@ -119,17 +119,17 @@ impl StructuredOutput {
         }
 
         // Check "required" fields
-        if let Some(required) = schema.get("required").and_then(|r| r.as_array()) {
-            if let Some(obj) = json.as_object() {
-                for field in required {
-                    if let Some(name) = field.as_str() {
-                        if !obj.contains_key(name) {
-                            return Err(StructuredOutputError::ValidationError(format!(
-                                "Missing required field: '{}'",
-                                name
-                            )));
-                        }
-                    }
+        if let Some(required) = schema.get("required").and_then(|r| r.as_array())
+            && let Some(obj) = json.as_object()
+        {
+            for field in required {
+                if let Some(name) = field.as_str()
+                    && !obj.contains_key(name)
+                {
+                    return Err(StructuredOutputError::ValidationError(format!(
+                        "Missing required field: '{}'",
+                        name
+                    )));
                 }
             }
         }

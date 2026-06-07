@@ -5,8 +5,8 @@ use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::ports::CapabilityResolver;
 use crate::SdkError;
+use crate::ports::CapabilityResolver;
 
 /// Resolves visible tools per subject from a TOML file:
 ///
@@ -86,12 +86,11 @@ impl CapabilityResolver for TomlCapabilityResolver {
         // Order: most specific prefix wins.
         let mut best: Option<&Vec<String>> = None;
         for (key, list) in g.iter() {
-            if let Some(prefix) = key.strip_suffix('*') {
-                if subject.starts_with(prefix)
-                    && (best.is_none() || prefix.len() > key.trim_end_matches('*').len())
-                {
-                    best = Some(list);
-                }
+            if let Some(prefix) = key.strip_suffix('*')
+                && subject.starts_with(prefix)
+                && (best.is_none() || prefix.len() > key.trim_end_matches('*').len())
+            {
+                best = Some(list);
             }
         }
         Ok(best.cloned().unwrap_or_default())

@@ -12,14 +12,14 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use oxi_tui::Theme;
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
-    Frame,
 };
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 
 /// Inline model-selector overlay for the initial-setup flow.
 ///

@@ -4,8 +4,8 @@
 mod tests {
     use oxi_agent::CompactionStrategy;
     use oxi_ai::{
-        generate_branch_summary, Api, AssistantMessage, ContentBlock, Message, TextContent,
-        UserMessage,
+        Api, AssistantMessage, ContentBlock, Message, TextContent, UserMessage,
+        generate_branch_summary,
     };
 
     fn user_msg(text: &str) -> Message {

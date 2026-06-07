@@ -23,8 +23,8 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use std::path::PathBuf;
 
-use crate::ports::{AccessDecision, AccessGate, ToolCallRequest};
 use crate::SdkError;
+use crate::ports::{AccessDecision, AccessGate, ToolCallRequest};
 
 /// Rule-based gate. Pure sync, no I/O at request time.
 pub struct SimpleAccessGate {

@@ -6,7 +6,7 @@
 
 use crossterm::event::KeyEvent;
 use oxi_tui::Theme;
-use ratatui::{layout::Rect, Frame};
+use ratatui::{Frame, layout::Rect};
 
 pub mod anchor;
 pub mod extensions;
@@ -26,13 +26,13 @@ pub use extensions::extensions_overlay;
 pub use factories::{logout_select, model_select, resume_select, routing_status};
 #[allow(unused_imports)]
 pub use fork_select::ForkSelectOverlay;
-pub use router_setup::{router_setup, RouterSetupData};
+pub use router_setup::{RouterSetupData, router_setup};
 #[allow(unused_imports)]
 pub use settings::settings_overlay;
 #[allow(unused_imports)]
 pub use text_viewer::{changelog_overlay, help_overlay, hotkeys_overlay, tools_overlay};
 #[allow(unused_imports)]
-pub use tree_navigator::{tree_navigator, TreeNavigatorOverlay};
+pub use tree_navigator::{TreeNavigatorOverlay, tree_navigator};
 
 // ---------------------------------------------------------------------------
 // Overlay action
@@ -115,7 +115,7 @@ pub fn centered_popup(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
 /// Drop-in replacement for `centered_popup` that delegates to `resolve_overlay_layout`.
 pub fn centered_layout(area: Rect, width_pct: f32, height_pct: f32) -> Rect {
     use oxi_tui::overlay_anchor::{
-        resolve_overlay_layout, OverlayAnchor, OverlayLayout, SizeValue,
+        OverlayAnchor, OverlayLayout, SizeValue, resolve_overlay_layout,
     };
     let layout = OverlayLayout {
         anchor: OverlayAnchor::Center,

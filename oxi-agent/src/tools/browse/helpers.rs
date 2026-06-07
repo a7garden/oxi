@@ -4,8 +4,8 @@
 //! `BrowseTool`, `BrowseExtractTool`, and `BrowseScriptTool` share
 //! a single source of truth for DOM interaction logic.
 
-use crate::tools::browse::engine::BrowserTab;
 use crate::tools::ToolError;
+use crate::tools::browse::engine::BrowserTab;
 use serde_json::Value;
 
 // ── Link extraction ───────────────────────────────────────────────

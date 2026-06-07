@@ -25,13 +25,13 @@ pub mod override_;
 pub mod provider;
 pub mod runtime;
 
-pub use model::{builtin_model_count, load_builtin_models, BuiltinModelEntry};
+pub use model::{BuiltinModelEntry, builtin_model_count, load_builtin_models};
 pub use override_::{
-    apply_model_overrides, apply_provider_overrides, find_override_files, load_overrides,
-    OverrideFile,
+    OverrideFile, apply_model_overrides, apply_provider_overrides, find_override_files,
+    load_overrides,
 };
 pub use provider::{
-    builtin_providers_count, load_builtin_providers, AuthMethod, BuiltinProviderEntry,
+    AuthMethod, BuiltinProviderEntry, builtin_providers_count, load_builtin_providers,
 };
 pub use runtime::{discover_all, discover_all_authenticated, discover_all_local, discover_models};
 
@@ -178,7 +178,7 @@ mod tests {
         assert!(root.find_provider("anthropic").is_some());
         // Alias
         assert!(root.find_provider("kimi").is_some()); // alias for kimi-coding
-                                                       // Not found
+        // Not found
         assert!(root.find_provider("nonexistent").is_none());
     }
 }

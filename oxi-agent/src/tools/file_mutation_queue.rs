@@ -10,8 +10,8 @@
 /// evicted (oldest first via HashMap iteration order).
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::fs;
 use tokio::sync::Mutex;
 

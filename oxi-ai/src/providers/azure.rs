@@ -10,8 +10,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::{
-    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    ProviderEvent, StopReason, StreamOptions, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
+    StreamOptions, Usage, error::ProviderError,
 };
 
 use super::shared_client;
@@ -278,10 +278,10 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
 
 /// Convert content blocks to a string representation
 fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError> {
-    if blocks.len() == 1 {
-        if let Some(text) = blocks[0].as_text() {
-            return Ok(JsonValue::String(text.to_string()));
-        }
+    if blocks.len() == 1
+        && let Some(text) = blocks[0].as_text()
+    {
+        return Ok(JsonValue::String(text.to_string()));
     }
 
     let items: Result<Vec<_>, _> = blocks
@@ -610,7 +610,10 @@ mod tests {
         let model = make_test_model("default", "");
 
         let url = provider.build_url(&model).unwrap();
-        assert_eq!(url, "https://my-resource.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview");
+        assert_eq!(
+            url,
+            "https://my-resource.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-02-15-preview"
+        );
     }
 
     #[test]

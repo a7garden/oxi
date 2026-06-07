@@ -12,8 +12,8 @@ mod tests {
     use async_trait::async_trait;
     use futures::Stream;
     use oxi_agent::{
-        tools::{AgentTool, AgentToolResult, ToolRegistry},
         AgentEvent, AgentLoop, AgentLoopConfig, CompactionStrategy, SharedState, ToolExecutionMode,
+        tools::{AgentTool, AgentToolResult, ToolRegistry},
     };
     use oxi_ai::{
         AssistantMessage, ContentBlock, Message, Provider, ProviderEvent, StopReason, TextContent,
@@ -21,8 +21,8 @@ mod tests {
     };
     use std::pin::Pin;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     };
     use std::task::{Context as TaskContext, Poll};
 
@@ -334,12 +334,16 @@ mod tests {
         let events = events.lock().unwrap();
 
         // Verify AgentStart and AgentEnd events
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::AgentStart { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AgentStart { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AgentEnd { .. }))
+        );
 
         // Should have exactly 1 turn
         let turn_starts = events
@@ -349,12 +353,16 @@ mod tests {
         assert_eq!(turn_starts, 1);
 
         // No tool executions
-        assert!(!events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
-        assert!(!events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. }))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. }))
+        );
 
         // Provider was called exactly once
         assert_eq!(provider.call_count(), 1);
@@ -787,12 +795,16 @@ mod tests {
         let events = events.lock().unwrap();
 
         // Should have both steering and tool execution
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::SteeringMessage { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::SteeringMessage { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. }))
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -923,9 +935,11 @@ mod tests {
         assert_eq!(turn_starts, 2);
 
         // Should complete normally (AgentEnd)
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::AgentEnd { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::AgentEnd { .. }))
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -974,9 +988,11 @@ mod tests {
 
         // Verify events from continue
         let events2 = events2.lock().unwrap();
-        assert!(events2
-            .iter()
-            .any(|e| matches!(e, AgentEvent::TurnStart { .. })));
+        assert!(
+            events2
+                .iter()
+                .any(|e| matches!(e, AgentEvent::TurnStart { .. }))
+        );
     }
 
     #[tokio::test]
@@ -1090,11 +1106,13 @@ mod tests {
         assert!(result.is_ok());
 
         // Should have tool execution complete event
-        assert!(events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
+        assert!(
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. }))
+        );
     }
 
     #[tokio::test]
@@ -1275,11 +1293,15 @@ mod tests {
         let events = events.lock().unwrap();
 
         // Should NOT have ToolExecutionStart or ToolExecutionEnd
-        assert!(!events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
-        assert!(!events
-            .iter()
-            .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. }))
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, AgentEvent::ToolExecutionEnd { .. }))
+        );
     }
 }

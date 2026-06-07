@@ -471,10 +471,12 @@ mod tests {
     fn test_search_models() {
         let results = search_models("claude");
         assert!(!results.is_empty(), "Should find Claude models");
-        assert!(results
-            .iter()
-            .all(|m| m.name.to_lowercase().contains("claude")
-                || m.id.to_lowercase().contains("claude")));
+        assert!(
+            results
+                .iter()
+                .all(|m| m.name.to_lowercase().contains("claude")
+                    || m.id.to_lowercase().contains("claude"))
+        );
     }
 
     #[test]

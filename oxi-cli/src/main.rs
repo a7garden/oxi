@@ -400,12 +400,11 @@ fn config_list(resource_type: Option<&String>) -> Result<()> {
         for pkg in packages {
             if let Ok(resources) = mgr.discover_resources(&pkg.name) {
                 for r in &resources {
-                    if let Some(rt) = resource_type {
-                        if let Some(kind) = parse_resource_type(rt) {
-                            if r.kind != kind {
-                                continue;
-                            }
-                        }
+                    if let Some(rt) = resource_type
+                        && let Some(kind) = parse_resource_type(rt)
+                        && r.kind != kind
+                    {
+                        continue;
                     }
                     println!("  {} [{}] {}", pkg.name, r.kind, r.relative_path);
                 }
@@ -868,10 +867,10 @@ fn dir_size_bytes(path: &std::path::Path) -> u64 {
     if path.is_dir() {
         if let Ok(entries) = walkdir_recursive(path) {
             for entry in entries {
-                if let Ok(meta) = std::fs::metadata(&entry) {
-                    if meta.is_file() {
-                        total += meta.len();
-                    }
+                if let Ok(meta) = std::fs::metadata(&entry)
+                    && meta.is_file()
+                {
+                    total += meta.len();
                 }
             }
         }
@@ -940,11 +939,11 @@ fn handle_config_reset(all: bool) -> Result<()> {
 
     if all {
         // Also reset settings
-        if let Ok(settings_path) = oxi::store::settings::Settings::settings_path() {
-            if settings_path.exists() {
-                std::fs::remove_file(&settings_path)?;
-                println!("Removed settings: {}", settings_path.display());
-            }
+        if let Ok(settings_path) = oxi::store::settings::Settings::settings_path()
+            && settings_path.exists()
+        {
+            std::fs::remove_file(&settings_path)?;
+            println!("Removed settings: {}", settings_path.display());
         }
         println!("Full reset complete. Run 'oxi setup' to reconfigure.");
     } else {

@@ -94,12 +94,13 @@ mod tests {
     #[test]
     fn test_publish_with_no_subscribers() {
         let bus: EventBus<TestEvent> = EventBus::new(16);
-        assert!(bus
-            .publish(TestEvent {
+        assert!(
+            bus.publish(TestEvent {
                 name: "test".into(),
                 value: 1
             })
-            .is_ok());
+            .is_ok()
+        );
     }
 
     #[tokio::test]

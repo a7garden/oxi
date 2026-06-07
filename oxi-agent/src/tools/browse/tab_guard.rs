@@ -91,8 +91,8 @@ mod tests {
     use crate::tools::browse::engine::{BrowserError, PageContent};
     use async_trait::async_trait;
     use serde_json::Value;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     // ── Mock tab for unit tests ─────────────────────────────────
 

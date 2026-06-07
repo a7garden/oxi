@@ -183,27 +183,25 @@ pub fn load_router_config(global_dir: &Path, project_dir: &Path) -> Option<Route
     let mut profiles: HashMap<String, RouterProfile> = HashMap::new();
 
     // Merge global profiles.
-    if let Some(ref g) = global_cfg {
-        if let Some(ref tbl) = g.profiles {
-            if let Some(inner) = tbl.as_table() {
-                for (name, value) in inner {
-                    if let Some(profile) = parse_profile(value) {
-                        profiles.insert(name.clone(), profile);
-                    }
-                }
+    if let Some(ref g) = global_cfg
+        && let Some(ref tbl) = g.profiles
+        && let Some(inner) = tbl.as_table()
+    {
+        for (name, value) in inner {
+            if let Some(profile) = parse_profile(value) {
+                profiles.insert(name.clone(), profile);
             }
         }
     }
 
     // Merge/override project profiles.
-    if let Some(ref p) = project_cfg {
-        if let Some(ref tbl) = p.profiles {
-            if let Some(inner) = tbl.as_table() {
-                for (name, value) in inner {
-                    if let Some(profile) = parse_profile(value) {
-                        profiles.insert(name.clone(), profile);
-                    }
-                }
+    if let Some(ref p) = project_cfg
+        && let Some(ref tbl) = p.profiles
+        && let Some(inner) = tbl.as_table()
+    {
+        for (name, value) in inner {
+            if let Some(profile) = parse_profile(value) {
+                profiles.insert(name.clone(), profile);
             }
         }
     }

@@ -10,14 +10,14 @@ use crate::store::session::{AgentMessage, SessionEntry};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use oxi_tui::Theme;
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState},
-    Frame,
 };
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::app::agent_session::{AgentSession, AgentSessionHandle};
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -594,11 +594,7 @@ impl OverlayComponent for TreeNavigatorOverlay {
 
                 // Fold marker
                 let fold_marker = if node.has_children {
-                    if node.is_folded {
-                        "⊞ "
-                    } else {
-                        "⊟ "
-                    }
+                    if node.is_folded { "⊞ " } else { "⊟ " }
                 } else {
                     "  "
                 };

@@ -1,11 +1,11 @@
 //! `ResourceMonitor` backed by `sysinfo` (optional dependency-free stub here).
 
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::ports::{ResourceMonitor, ResourceUsage};
 use crate::SdkError;
+use crate::ports::{ResourceMonitor, ResourceUsage};
 
 /// Resource monitor that tracks counters set by the application.
 ///

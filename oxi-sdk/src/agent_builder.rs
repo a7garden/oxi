@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxi_agent::{
-    tools::browse::{BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine},
     Agent, AgentConfig, AgentTool, AgentToolResult, ProviderResolver, ToolContext, ToolRegistry,
+    tools::browse::{BrowseConfig, BrowseExtractTool, BrowseTool, BrowserEngine},
 };
 
 use crate::builder::Oxi;
@@ -147,10 +147,13 @@ impl<'a> AgentBuilder<'a> {
         name: impl Into<String>,
         description: impl Into<String>,
         schema: serde_json::Value,
-        handler: impl Fn(serde_json::Value, &ToolContext) -> Result<AgentToolResult, oxi_agent::ToolError>
-            + Send
-            + Sync
-            + 'static,
+        handler: impl Fn(
+            serde_json::Value,
+            &ToolContext,
+        ) -> Result<AgentToolResult, oxi_agent::ToolError>
+        + Send
+        + Sync
+        + 'static,
     ) -> Self {
         self.tool(crate::closure_tool::ClosureTool::new_sync(
             name,
@@ -380,10 +383,8 @@ impl<'a> AgentBuilder<'a> {
                         return Some(p);
                     }
                     // Built-in fallback
-                    if include_builtins {
-                        if let Some(p) = oxi_ai::create_builtin_provider(name) {
-                            return Some(Arc::from(p));
-                        }
+                    if include_builtins && let Some(p) = oxi_ai::create_builtin_provider(name) {
+                        return Some(Arc::from(p));
                     }
                     None
                 }),

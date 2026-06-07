@@ -4,8 +4,8 @@
 //!
 //! No API key required — this example demonstrates the coordination module only.
 
-use oxi_sdk::prelude::*;
 use oxi_sdk::WorkQueueConfig;
+use oxi_sdk::prelude::*;
 
 fn main() {
     // ── Work Queue ──

@@ -834,11 +834,7 @@ impl JsonlLineReader {
         }
         let line = self.buffer.trim_end_matches('\r').to_string();
         self.buffer.clear();
-        if line.is_empty() {
-            None
-        } else {
-            Some(line)
-        }
+        if line.is_empty() { None } else { Some(line) }
     }
 
     /// Check if there's buffered data.

@@ -12,9 +12,9 @@ use std::sync::Arc;
 use super::openai_responses_shared::parse_streaming_json;
 use super::shared_client;
 use crate::{
-    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Message, MessageContent,
-    Model, Provider, ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent,
-    ToolCall, ToolResultMessage, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Message, MessageContent, Model, Provider,
+    ProviderEvent, StopReason, StreamOptions, TextContent, ThinkingContent, ToolCall,
+    ToolResultMessage, Usage, error::ProviderError,
 };
 
 /// Detect whether a model targets the ZAI provider.
@@ -345,16 +345,16 @@ impl Provider for OpenAiProvider {
                                             pending_tc.entry(*content_index).or_insert_with(|| {
                                                 (String::new(), String::new(), String::new())
                                             });
-                                        if let Some(ref id) = tool_call_id {
-                                            if !id.is_empty() {
-                                                entry.0 = id.clone();
-                                                tc_id_to_index.insert(id.clone(), *content_index);
-                                            }
+                                        if let Some(id) = tool_call_id
+                                            && !id.is_empty()
+                                        {
+                                            entry.0 = id.clone();
+                                            tc_id_to_index.insert(id.clone(), *content_index);
                                         }
-                                        if let Some(ref name) = tool_name {
-                                            if !name.is_empty() {
-                                                entry.1 = name.clone();
-                                            }
+                                        if let Some(name) = tool_name
+                                            && !name.is_empty()
+                                        {
+                                            entry.1 = name.clone();
                                         }
                                         processed.push(event);
                                     }
@@ -477,7 +477,7 @@ fn build_messages_from_normalized(
     let mut result = Vec::new();
 
     // System prompt
-    if let Some(ref prompt) = system_prompt {
+    if let Some(prompt) = system_prompt {
         result.push(serde_json::json!({
             "role": "system",
             "content": prompt,
@@ -553,10 +553,10 @@ fn build_messages_from_normalized(
 
 /// Convert content blocks to a string representation
 fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError> {
-    if blocks.len() == 1 {
-        if let Some(text) = blocks[0].as_text() {
-            return Ok(JsonValue::String(text.to_string()));
-        }
+    if blocks.len() == 1
+        && let Some(text) = blocks[0].as_text()
+    {
+        return Ok(JsonValue::String(text.to_string()));
     }
 
     let items: Result<Vec<_>, _> = blocks
@@ -748,30 +748,30 @@ fn parse_sse_events(
                 }
 
                 // Handle GLM's reasoning_content field (thinking/thought chain)
-                if let Some(ref reasoning) = delta.reasoning_content {
-                    if !reasoning.is_empty() {
-                        // pi-mono: append to the output's thinking block
-                        let last_think_idx = output
-                            .content
-                            .iter()
-                            .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
-                        if let Some(idx) = last_think_idx {
-                            if let ContentBlock::Thinking(t) = &mut output.content[idx] {
-                                t.thinking.push_str(reasoning);
-                            }
-                        } else {
-                            output
-                                .content
-                                .push(ContentBlock::Thinking(ThinkingContent::new(
-                                    reasoning.clone(),
-                                )));
+                if let Some(ref reasoning) = delta.reasoning_content
+                    && !reasoning.is_empty()
+                {
+                    // pi-mono: append to the output's thinking block
+                    let last_think_idx = output
+                        .content
+                        .iter()
+                        .rposition(|b| matches!(b, ContentBlock::Thinking(_)));
+                    if let Some(idx) = last_think_idx {
+                        if let ContentBlock::Thinking(t) = &mut output.content[idx] {
+                            t.thinking.push_str(reasoning);
                         }
-                        events.push(ProviderEvent::ThinkingDelta {
-                            content_index: choice.index,
-                            delta: reasoning.clone(),
-                            partial: Arc::new(output.clone()),
-                        });
+                    } else {
+                        output
+                            .content
+                            .push(ContentBlock::Thinking(ThinkingContent::new(
+                                reasoning.clone(),
+                            )));
                     }
+                    events.push(ProviderEvent::ThinkingDelta {
+                        content_index: choice.index,
+                        delta: reasoning.clone(),
+                        partial: Arc::new(output.clone()),
+                    });
                 }
 
                 if let Some(tool_calls) = &delta.tool_calls {
@@ -1058,7 +1058,8 @@ pub fn normalize_messages(messages: &[Message], provider: &str, model_id: &str) 
     };
 
     // 4. Tool ID scrubbing (Mistral: 9 chars, Claude: alphanumeric + underscore)
-    let messages = if needs_tool_id_scrub {
+
+    if needs_tool_id_scrub {
         messages
             .iter()
             .map(|msg| match msg {
@@ -1093,9 +1094,7 @@ pub fn normalize_messages(messages: &[Message], provider: &str, model_id: &str) 
             .collect()
     } else {
         messages
-    };
-
-    messages
+    }
 }
 
 /// Check if a content block is effectively empty.

@@ -7,8 +7,8 @@
 //!
 //! Token persistence to `~/.oxi/auth.json` with secure file permissions.
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -676,9 +676,10 @@ mod tests {
     fn test_code_verifier_is_base64url() {
         let v = generate_code_verifier();
         // base64url chars: A-Z a-z 0-9 - _
-        assert!(v
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(
+            v.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
     }
 
     #[test]
@@ -707,9 +708,10 @@ mod tests {
     fn test_code_challenge_is_base64url() {
         let v = generate_code_verifier();
         let c = derive_code_challenge(&v);
-        assert!(c
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'));
+        assert!(
+            c.chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+        );
     }
 
     #[test]
@@ -830,9 +832,10 @@ mod tests {
         let pkce = build_authorization_url(&config);
 
         assert!(pkce.authorization_url.contains("code_challenge="));
-        assert!(pkce
-            .authorization_url
-            .contains("code_challenge_method=S256"));
+        assert!(
+            pkce.authorization_url
+                .contains("code_challenge_method=S256")
+        );
         assert!(pkce.authorization_url.contains("client_id=my-client"));
         assert!(pkce.authorization_url.contains("response_type=code"));
         assert!(pkce.authorization_url.contains("state="));

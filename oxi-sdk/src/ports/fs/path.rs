@@ -10,10 +10,10 @@ use std::path::PathBuf;
 ///
 /// Returns an error if neither is available.
 pub fn home_dir() -> std::io::Result<PathBuf> {
-    if let Ok(p) = std::env::var("OXI_HOME") {
-        if !p.is_empty() {
-            return Ok(PathBuf::from(p));
-        }
+    if let Ok(p) = std::env::var("OXI_HOME")
+        && !p.is_empty()
+    {
+        return Ok(PathBuf::from(p));
     }
     let home = dirs::home_dir()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "HOME not set"))?;

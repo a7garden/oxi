@@ -1,6 +1,6 @@
 //! Benchmarks for token estimation.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use oxi_ai::{context_usage, estimate, estimate_words};
 
 /// Generate a realistic English prose sample of approximately `n` bytes.

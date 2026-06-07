@@ -253,10 +253,10 @@ fn build_messages(context: &Context) -> Result<Vec<JsonValue>, ProviderError> {
 
 /// Convert content blocks to a string representation
 fn blocks_to_content(blocks: &[ContentBlock]) -> Result<JsonValue, ProviderError> {
-    if blocks.len() == 1 {
-        if let Some(text) = blocks[0].as_text() {
-            return Ok(JsonValue::String(text.to_string()));
-        }
+    if blocks.len() == 1
+        && let Some(text) = blocks[0].as_text()
+    {
+        return Ok(JsonValue::String(text.to_string()));
     }
 
     let items: Result<Vec<_>, _> = blocks

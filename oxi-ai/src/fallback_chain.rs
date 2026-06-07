@@ -26,7 +26,7 @@
 //! }
 //! ```
 
-use crate::model_db::{get_model_entry, ModelEntry};
+use crate::model_db::{ModelEntry, get_model_entry};
 
 /// An ordered chain of models for sequential fallback on failure.
 ///

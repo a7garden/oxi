@@ -31,8 +31,8 @@ use std::sync::Arc;
 use libloading::Library;
 use sha2::Digest;
 
-use crate::extensions::types::ExtensionError;
 use crate::extensions::Extension;
+use crate::extensions::types::ExtensionError;
 
 /// Entry point symbol that every extension must export.
 const ENTRY_SYMBOL: &[u8] = b"oxi_extension_create\0";

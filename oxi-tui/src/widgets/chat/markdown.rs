@@ -282,11 +282,11 @@ fn is_cjk_breakable(ch: char) -> bool {
 /// Append styled chars to spans, merging adjacent chars with the same style.
 fn append_chars_to_spans(chars: &[(char, Style)], spans: &mut Vec<Span<'static>>) {
     for (ch, style) in chars {
-        if let Some(last) = spans.last_mut() {
-            if last.style == *style {
-                last.content.to_mut().push(*ch);
-                continue;
-            }
+        if let Some(last) = spans.last_mut()
+            && last.style == *style
+        {
+            last.content.to_mut().push(*ch);
+            continue;
         }
         spans.push(Span::styled(ch.to_string(), *style));
     }

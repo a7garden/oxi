@@ -26,7 +26,7 @@ pub(crate) mod prompt;
 pub(crate) mod rpc_mode;
 pub(crate) mod skills;
 pub mod storage; // public for main.rs (packages)
-                 // Re-exports from storage for main.rs
+// Re-exports from storage for main.rs
 pub use storage::packages::PackageManager;
 pub use storage::packages::ResourceKind;
 pub mod tui; // public for main.rs

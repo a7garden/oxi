@@ -75,8 +75,8 @@ pub use lifecycle::{
 };
 pub use middleware::Middleware;
 pub use middleware::{
-    build_hooks, MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewarePipeline,
-    MiddlewareResult,
+    MiddlewareContext, MiddlewareData, MiddlewarePhase, MiddlewarePipeline, MiddlewareResult,
+    build_hooks,
 };
 pub use multi_provider::{MultiProviderBuilder, RoutingConfig};
 pub use observability::{
@@ -120,9 +120,9 @@ pub use oxi_ai::env_api_keys::{find_env_keys, get_all_env_keys, get_env_api_key,
 
 // Model database — provider catalog, model metadata
 pub use oxi_ai::model_db::{
-    builtin_model_count_sentinel, get_all_models, get_cheapest_models, get_model_entry,
+    ModelEntry, builtin_model_count_sentinel, get_all_models, get_cheapest_models, get_model_entry,
     get_provider_models, get_providers, get_reasoning_models, get_vision_models, model_count,
-    search_models, ModelEntry,
+    search_models,
 };
 
 // 3-tier hybrid catalog (Layer 1 built-in TOML, Layer 2 user override,
@@ -130,22 +130,22 @@ pub use oxi_ai::model_db::{
 // `model_db` (above) is the legacy compatibility shim that lazily
 // integrates all three layers and converts BuiltinModelEntry → ModelEntry.
 pub use oxi_ai::catalog::{
-    apply_model_overrides, apply_provider_overrides, builtin_model_count, builtin_providers_count,
-    discover_all, discover_all_authenticated, discover_all_local, discover_models,
-    find_override_files, load_builtin_models, load_builtin_providers, load_overrides, AuthMethod,
-    BuiltinModelEntry, BuiltinProviderEntry, OverrideFile,
+    AuthMethod, BuiltinModelEntry, BuiltinProviderEntry, OverrideFile, apply_model_overrides,
+    apply_provider_overrides, builtin_model_count, builtin_providers_count, discover_all,
+    discover_all_authenticated, discover_all_local, discover_models, find_override_files,
+    load_builtin_models, load_builtin_providers, load_overrides,
 };
 pub use oxi_ai::oauth::{
-    default_auth_path, load_auth_store, load_token, remove_token, save_auth_store, save_token,
-    AuthStore, OAuthError, TokenBundle,
+    AuthStore, OAuthError, TokenBundle, default_auth_path, load_auth_store, load_token,
+    remove_token, save_auth_store, save_token,
 };
 
 // Provider registry — built-in providers (Layer 1 of the catalog) and
 // the runtime functions that surface them to consumers.
 pub use oxi_ai::register_builtins::{
-    get_all_provider_aliases, get_all_provider_names, get_api_mappings, get_builtin_provider,
-    get_builtin_providers, get_provider_api, get_provider_base_url, get_provider_env_key,
-    get_provider_env_keys, is_builtin_provider, resolve_provider_name, BuiltinProvider,
+    BuiltinProvider, get_all_provider_aliases, get_all_provider_names, get_api_mappings,
+    get_builtin_provider, get_builtin_providers, get_provider_api, get_provider_base_url,
+    get_provider_env_key, get_provider_env_keys, is_builtin_provider, resolve_provider_name,
 };
 
 // Provider instance registry (custom + built-in at runtime)
@@ -160,7 +160,7 @@ pub use oxi_ai::router;
 
 // Tool-related types (oxi-cli's main.rs uses ToolCall, ToolResult, ToolCallType)
 pub use oxi_ai::{
-    validate_args, ProgressCallback, Tool, ToolCall, ToolCallType, ToolResult, ToolValidationError,
+    ProgressCallback, Tool, ToolCall, ToolCallType, ToolResult, ToolValidationError, validate_args,
 };
 
 // Thinking level (re-exported from oxi_ai::types, since oxi-ai's top-level
@@ -248,18 +248,20 @@ mod tests {
     fn test_oxi_builder_new() {
         let oxi = OxiBuilder::new().build();
         // Empty registry — no models
-        assert!(oxi
-            .resolve_model("anthropic/claude-sonnet-4-20250514")
-            .is_err());
+        assert!(
+            oxi.resolve_model("anthropic/claude-sonnet-4-20250514")
+                .is_err()
+        );
     }
 
     #[test]
     fn test_oxi_builder_with_builtins() {
         let oxi = OxiBuilder::new().with_builtins().build();
         // Should have built-in models
-        assert!(oxi
-            .resolve_model("anthropic/claude-sonnet-4-20250514")
-            .is_ok());
+        assert!(
+            oxi.resolve_model("anthropic/claude-sonnet-4-20250514")
+                .is_ok()
+        );
         assert!(oxi.resolve_model("openai/gpt-4o").is_ok());
     }
 
@@ -393,9 +395,11 @@ mod tests {
         let resolver: &dyn ProviderResolver = &oxi;
         assert!(resolver.resolve_provider("anthropic").is_some());
         assert!(resolver.resolve_provider("nonexistent").is_none());
-        assert!(resolver
-            .resolve_model("anthropic/claude-sonnet-4-20250514")
-            .is_some());
+        assert!(
+            resolver
+                .resolve_model("anthropic/claude-sonnet-4-20250514")
+                .is_some()
+        );
         assert!(resolver.resolve_model("nonexistent/model").is_none());
     }
 
@@ -423,9 +427,10 @@ mod tests {
     fn test_oxi_builder_without_builtins() {
         let oxi = OxiBuilder::new().build();
         // No models, no providers
-        assert!(oxi
-            .resolve_model("anthropic/claude-sonnet-4-20250514")
-            .is_err());
+        assert!(
+            oxi.resolve_model("anthropic/claude-sonnet-4-20250514")
+                .is_err()
+        );
         assert!(oxi.create_provider("anthropic").is_err());
         assert!(!oxi.has_builtins());
     }
@@ -518,9 +523,10 @@ mod tests {
 
         // Cross-contamination check
         assert!(oxi2.resolve_model("p1/unique-alpha").is_err());
-        assert!(oxi1
-            .resolve_model("anthropic/claude-sonnet-4-20250514")
-            .is_err());
+        assert!(
+            oxi1.resolve_model("anthropic/claude-sonnet-4-20250514")
+                .is_err()
+        );
 
         // Provider isolation: oxi1 can't create anthropic (no builtins)
         assert!(oxi1.create_provider("anthropic").is_err());

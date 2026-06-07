@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::RwLock;
 use tracing::Level;
@@ -199,13 +199,13 @@ impl Middleware for TokenBudgetMiddleware {
 
                 // Check cost budget if cost tracker is attached
                 if let Some(tracker) = &self.cost_tracker {
-                    if let Some(budget) = self.cost_budget {
-                        if tracker.agent_cost(&ctx.agent_id) > budget {
-                            return MiddlewareResult::terminate(format!(
-                                "Cost budget exceeded for {}",
-                                ctx.agent_id
-                            ));
-                        }
+                    if let Some(budget) = self.cost_budget
+                        && tracker.agent_cost(&ctx.agent_id) > budget
+                    {
+                        return MiddlewareResult::terminate(format!(
+                            "Cost budget exceeded for {}",
+                            ctx.agent_id
+                        ));
                     }
                     if tracker.is_over_budget(&ctx.agent_id) {
                         return MiddlewareResult::terminate(format!(

@@ -15,8 +15,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    error::ProviderError, Api, AssistantMessage, ContentBlock, Context, Model, Provider,
-    ProviderEvent, StopReason, StreamOptions, Usage,
+    Api, AssistantMessage, ContentBlock, Context, Model, Provider, ProviderEvent, StopReason,
+    StreamOptions, Usage, error::ProviderError,
 };
 
 use super::shared_client;
@@ -1033,18 +1033,26 @@ mod tests {
             j1, j2, j3, j4, j5
         );
         let events = parse_bedrock_events(&text, "bedrock", "model");
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::Start { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::TextStart { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::TextDelta { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::Done { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::Start { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::TextStart { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::TextDelta { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::Done { .. }))
+        );
     }
     #[test]
     fn test_parse_bedrock_events_thinking() {
@@ -1058,12 +1066,16 @@ mod tests {
             j1, j2, j3, j4, j5
         );
         let events = parse_bedrock_events(&text, "bedrock", "model");
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::ThinkingStart { .. })));
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::ThinkingDelta { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::ThinkingStart { .. }))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::ThinkingDelta { .. }))
+        );
     }
     #[test]
     fn test_parse_bedrock_events_tool_call() {
@@ -1077,9 +1089,11 @@ mod tests {
             j1, j2, j3, j4, j5
         );
         let events = parse_bedrock_events(&text, "bedrock", "model");
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, ProviderEvent::ToolCallStart { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, ProviderEvent::ToolCallStart { .. }))
+        );
         assert!(events.iter().any(|e| matches!(
             e,
             ProviderEvent::Done {

@@ -138,21 +138,20 @@ fn simple_file_search(query: &str, base_dir: &Path) -> Vec<CompletionItem> {
                 && !name.starts_with('.')
                 && name != "target"
                 && name != "node_modules"
+                && let Ok(sub_entries) = std::fs::read_dir(entry.path())
             {
-                if let Ok(sub_entries) = std::fs::read_dir(entry.path()) {
-                    for sub_entry in sub_entries.flatten() {
-                        let sub_name = sub_entry.file_name().to_string_lossy().to_string();
-                        let full_path = format!("{}/{}", name, sub_name);
-                        if full_path.to_lowercase().contains(&lower_query) {
-                            results.push(CompletionItem {
-                                text: full_path.clone(),
-                                label: full_path,
-                                description: Some("file".to_string()),
-                                kind: CompletionKind::FuzzyFile {
-                                    query: query.to_string(),
-                                },
-                            });
-                        }
+                for sub_entry in sub_entries.flatten() {
+                    let sub_name = sub_entry.file_name().to_string_lossy().to_string();
+                    let full_path = format!("{}/{}", name, sub_name);
+                    if full_path.to_lowercase().contains(&lower_query) {
+                        results.push(CompletionItem {
+                            text: full_path.clone(),
+                            label: full_path,
+                            description: Some("file".to_string()),
+                            kind: CompletionKind::FuzzyFile {
+                                query: query.to_string(),
+                            },
+                        });
                     }
                 }
             }

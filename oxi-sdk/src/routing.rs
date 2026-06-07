@@ -2,8 +2,8 @@
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Runtime routing configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]

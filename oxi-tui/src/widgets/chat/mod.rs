@@ -120,12 +120,12 @@ impl StatefulWidget for ChatView<'_> {
                     .thinking_regions
                     .push((area.y + rel_y, region_bottom, key.clone()));
             }
-            if let LayoutKind::ToolBox { key, result, .. } = &entry.kind {
-                if result.is_some() {
-                    state
-                        .tool_regions
-                        .push((area.y + rel_y, region_bottom, key.clone()));
-                }
+            if let LayoutKind::ToolBox { key, result, .. } = &entry.kind
+                && result.is_some()
+            {
+                state
+                    .tool_regions
+                    .push((area.y + rel_y, region_bottom, key.clone()));
             }
 
             // For entries fully within the viewport, render directly.
@@ -206,6 +206,53 @@ mod tests {
         s.finish_streaming();
         assert!(s.streaming.is_none());
         assert_eq!(s.messages.len(), 1);
+    }
+
+    #[test]
+    fn streaming_text_after_thinking() {
+        // Regression test: when a Thinking block is added before Text blocks,
+        // each text delta must append to the SAME Text block, not create
+        // a new one for every delta.
+        let mut s = ChatViewState::new();
+        s.start_streaming();
+
+        // Simulate provider sending Thinking first, then Text deltas
+        s.streaming
+            .as_mut()
+            .unwrap()
+            .message
+            .content_blocks
+            .push(ContentBlock::Thinking {
+                content: "Let me think...".into(),
+                collapsed: true,
+            });
+
+        // First text delta — creates a new Text block
+        s.stream_text_delta("안녕");
+        // Second text delta — must append, NOT create a new block
+        s.stream_text_delta("하세요");
+
+        // Verify only ONE Text block exists with accumulated content
+        let text_blocks: Vec<&ContentBlock> = s
+            .streaming
+            .as_ref()
+            .unwrap()
+            .message
+            .content_blocks
+            .iter()
+            .filter(|b| matches!(b, ContentBlock::Text { .. }))
+            .collect();
+        assert_eq!(
+            text_blocks.len(),
+            1,
+            "Expected 1 Text block, got {}",
+            text_blocks.len()
+        );
+        if let ContentBlock::Text { content } = text_blocks[0] {
+            assert_eq!(content, "안녕하세요");
+        } else {
+            panic!("Expected Text block");
+        }
     }
 
     #[test]
@@ -321,7 +368,7 @@ mod tests {
         let huge = "x".repeat(600_000);
         s.stream_text_delta(&huge);
         let content = match &s.streaming {
-            Some(ref st) => match &st.message.content_blocks[0] {
+            Some(st) => match &st.message.content_blocks[0] {
                 ContentBlock::Text { content } => content.clone(),
                 _ => panic!("expected Text"),
             },

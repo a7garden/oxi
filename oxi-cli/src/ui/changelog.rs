@@ -78,15 +78,15 @@ pub fn parse_changelog_content(content: &str) -> Vec<ChangelogEntry> {
         // Check if this is a version header
         if let Some(caps) = version_regex.captures(line) {
             // Save previous entry if exists
-            if let Some((major, minor, patch)) = current_version {
-                if !current_lines.is_empty() {
-                    entries.push(ChangelogEntry::new(
-                        major,
-                        minor,
-                        patch,
-                        current_lines.join("\n").trim().to_string(),
-                    ));
-                }
+            if let Some((major, minor, patch)) = current_version
+                && !current_lines.is_empty()
+            {
+                entries.push(ChangelogEntry::new(
+                    major,
+                    minor,
+                    patch,
+                    current_lines.join("\n").trim().to_string(),
+                ));
             }
 
             // Parse new version
@@ -110,15 +110,15 @@ pub fn parse_changelog_content(content: &str) -> Vec<ChangelogEntry> {
     }
 
     // Save last entry
-    if let Some((major, minor, patch)) = current_version {
-        if !current_lines.is_empty() {
-            entries.push(ChangelogEntry::new(
-                major,
-                minor,
-                patch,
-                current_lines.join("\n").trim().to_string(),
-            ));
-        }
+    if let Some((major, minor, patch)) = current_version
+        && !current_lines.is_empty()
+    {
+        entries.push(ChangelogEntry::new(
+            major,
+            minor,
+            patch,
+            current_lines.join("\n").trim().to_string(),
+        ));
     }
 
     entries

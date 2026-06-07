@@ -12,8 +12,8 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 
-use crate::ports::{MemoryEntry, MemoryStore};
 use crate::SdkError;
+use crate::ports::{MemoryEntry, MemoryStore};
 
 /// Thread-safe in-memory memory store.
 pub struct InMemoryMemoryStore {

@@ -72,8 +72,8 @@ use super::engine::{
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::Mutex;
+use tokio::sync::broadcast::error::RecvError;
 use tokio::task::JoinHandle;
 
 // ── OxiBrowserEngine ──────────────────────────────────────────────────────────
@@ -494,8 +494,8 @@ fn browse_result_to_page_content(page: oxibrowser_core::BrowseResult) -> PageCon
 mod tests {
     use super::*;
     use crate::tools::browse::engine::BrowserEngine;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex as StdMutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     /// End-to-end: the engine's background task should drain browser events

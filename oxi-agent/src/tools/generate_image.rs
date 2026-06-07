@@ -6,9 +6,9 @@
 use super::http_client::shared_http_client;
 use super::{AgentTool, AgentToolResult, ToolContext, ToolError};
 use async_trait::async_trait;
-use base64::{engine::general_purpose, Engine};
+use base64::{Engine, engine::general_purpose};
 use oxi_ai::types::{ImageGenerationRequest, ImageGenerationResponse};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::env;
 
 /// Default image generation model.

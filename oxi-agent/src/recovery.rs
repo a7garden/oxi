@@ -14,7 +14,7 @@ pub use oxi_ai::partial_response::PartialResponse;
 use oxi_ai::circuit_breaker::CircuitBreakerConfig as CircuitBreakerConfigLocal;
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::Instant;
 
 /// Error returned when the circuit is open and requests are not allowed.

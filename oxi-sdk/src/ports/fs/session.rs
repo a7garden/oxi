@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ports::{PortId, PortValue, StateStore};
 use crate::SdkError;
+use crate::ports::{PortId, PortValue, StateStore};
 
 use super::path::ensure_dir;
 
@@ -87,10 +87,10 @@ impl StateStore for FileStateStore {
         while let Some(entry) = rd.next_entry().await.map_err(io_to_sdk)? {
             let name = entry.file_name();
             let name = name.to_string_lossy();
-            if let Some(stem) = name.strip_suffix(".json") {
-                if prefix.is_empty() || stem.starts_with(prefix) {
-                    ids.push(stem.to_string());
-                }
+            if let Some(stem) = name.strip_suffix(".json")
+                && (prefix.is_empty() || stem.starts_with(prefix))
+            {
+                ids.push(stem.to_string());
             }
         }
         Ok(ids)
@@ -184,10 +184,12 @@ mod tests {
     async fn load_missing_returns_none() {
         let tmp = TempDir::new().unwrap();
         let store = FileStateStore::new(tmp.path());
-        assert!(store
-            .load(&"nonexistent".to_string())
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .load(&"nonexistent".to_string())
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

@@ -39,7 +39,7 @@
 //! An `oxi-lock.json` file records exact versions/refs for reproducibility.
 
 use crate::util::http_client::shared_http_client;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -454,7 +454,7 @@ fn parse_git_source(source: &str) -> ParsedSource {
         Err(_) => {
             return ParsedSource::Local {
                 path: source.to_string(),
-            }
+            };
         }
     };
 
@@ -540,13 +540,13 @@ impl NpmPackageInfo {
         if let Ok(req) = semver::VersionReq::parse(constraint) {
             let mut best: Option<semver::Version> = None;
             for ver_str in self.versions.keys() {
-                if let Ok(ver) = semver::Version::parse(ver_str) {
-                    if req.matches(&ver) {
-                        match &best {
-                            Some(b) if ver > *b => best = Some(ver),
-                            None => best = Some(ver),
-                            _ => {}
-                        }
+                if let Ok(ver) = semver::Version::parse(ver_str)
+                    && req.matches(&ver)
+                {
+                    match &best {
+                        Some(b) if ver > *b => best = Some(ver),
+                        None => best = Some(ver),
+                        _ => {}
                     }
                 }
             }
@@ -1677,15 +1677,15 @@ impl PackageManager {
                     // Check npm for newer version
                     match NpmPackageInfo::fetch(pkg_name).await {
                         Ok(info) => {
-                            if let Some(latest) = info.latest_version() {
-                                if latest != lock_entry.version {
-                                    updates.push(PackageUpdateInfo {
-                                        source: lock_entry.source.clone(),
-                                        display_name: pkg_name.clone(),
-                                        source_type: "npm".to_string(),
-                                        scope: lock_entry.scope,
-                                    });
-                                }
+                            if let Some(latest) = info.latest_version()
+                                && latest != lock_entry.version
+                            {
+                                updates.push(PackageUpdateInfo {
+                                    source: lock_entry.source.clone(),
+                                    display_name: pkg_name.clone(),
+                                    source_type: "npm".to_string(),
+                                    scope: lock_entry.scope,
+                                });
                             }
                         }
                         Err(_) => continue,
@@ -1747,11 +1747,7 @@ impl PackageManager {
     /// Get the install directory for a package (if it exists on disk)
     pub fn get_install_dir(&self, name: &str) -> Option<PathBuf> {
         let dir = self.pkg_install_dir(name);
-        if dir.exists() {
-            Some(dir)
-        } else {
-            None
-        }
+        if dir.exists() { Some(dir) } else { None }
     }
 
     /// Get the installed path for a source at a given scope
@@ -1764,27 +1760,15 @@ impl PackageManager {
         match &parsed {
             ParsedSource::Npm { name, .. } => {
                 let path = self.npm_install_path(name, scope);
-                if path.exists() {
-                    Some(path)
-                } else {
-                    None
-                }
+                if path.exists() { Some(path) } else { None }
             }
             ParsedSource::Git { host, path, .. } => {
                 let path = self.git_install_path(host, path, scope);
-                if path.exists() {
-                    Some(path)
-                } else {
-                    None
-                }
+                if path.exists() { Some(path) } else { None }
             }
             ParsedSource::Local { path } => {
                 let p = PathBuf::from(path);
-                if p.exists() {
-                    Some(p)
-                } else {
-                    None
-                }
+                if p.exists() { Some(p) } else { None }
             }
             ParsedSource::Url { .. } => None,
         }
@@ -2048,12 +2032,11 @@ impl PackageManager {
 
     /// Check if an installed version satisfies a semver requirement
     pub fn version_satisfies(&self, name: &str, requirement: &str) -> bool {
-        if let Some(version) = self.get_installed_version(name) {
-            if let Ok(v) = semver::Version::parse(version) {
-                if let Ok(req) = semver::VersionReq::parse(requirement) {
-                    return req.matches(&v);
-                }
-            }
+        if let Some(version) = self.get_installed_version(name)
+            && let Ok(v) = semver::Version::parse(version)
+            && let Ok(req) = semver::VersionReq::parse(requirement)
+        {
+            return req.matches(&v);
         }
         false
     }

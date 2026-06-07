@@ -3,8 +3,8 @@
 #[cfg(test)]
 mod tests {
     use oxi_agent::{
-        tools::{AgentTool, AgentToolResult, ToolContext, ToolRegistry},
         AgentLoopConfig, SharedState,
+        tools::{AgentTool, AgentToolResult, ToolContext, ToolRegistry},
     };
     use oxi_ai::CompactionStrategy;
     use std::path::PathBuf;

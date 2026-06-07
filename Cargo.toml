@@ -3,6 +3,17 @@ resolver = "2"
 members = ["oxi-ai", "oxi-agent", "oxi-tui", "oxi-cli", "oxi-sdk"]
 exclude = ["scripts"]
 
+# Shared defaults inherited by every workspace member. Members can override
+# individual fields (e.g. `description`) but should keep `edition` and
+# `rust-version` in sync — `rust-version` is the source of truth for the
+# Cargo 2024-edition resolver, the MSRV job in CI, and `cargo install`.
+[workspace.package]
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+authors = ["a7garden <a7garden@icloud.com>"]
+repository = "https://github.com/a7garden/oxi"
+
 # NOTE: [patch.crates-io] was removed. Workspace members are auto-resolved
 # by `members` above; explicit [patch] entries would block `cargo publish`.
 

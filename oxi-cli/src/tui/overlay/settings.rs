@@ -6,14 +6,14 @@ use std::sync::{Arc, Mutex};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::Span,
     widgets::{Block, Borders, Clear, ListItem, Paragraph},
-    Frame,
 };
 
-use super::{centered_layout, OverlayAction, OverlayComponent};
+use super::{OverlayAction, OverlayComponent, centered_layout};
 use crate::app::agent_session::AgentSessionHandle;
 
 type SharedAppState = Arc<Mutex<*mut crate::tui::app::AppState>>;

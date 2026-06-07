@@ -391,8 +391,9 @@ fn oxi_instance_isolation() {
     let oxi2 = OxiBuilder::new().with_builtins().build();
 
     assert!(oxi2.resolve_model("mock/model").is_err());
-    assert!(oxi1
-        .resolve_model("anthropic/claude-sonnet-4-20250514")
-        .is_err());
+    assert!(
+        oxi1.resolve_model("anthropic/claude-sonnet-4-20250514")
+            .is_err()
+    );
     assert!(oxi1.create_provider("anthropic").is_err());
 }

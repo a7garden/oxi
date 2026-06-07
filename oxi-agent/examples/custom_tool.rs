@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 use oxi_agent::{AgentTool, AgentToolResult, ToolContext};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 /// A simple custom tool that echoes back the input parameters.

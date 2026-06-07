@@ -3,12 +3,12 @@ use crate::events::{ToolCallContext, VisitReason};
 use crate::{AgentEvent, AgentToolResult};
 use anyhow::Result;
 use futures::{FutureExt, StreamExt};
-use oxi_ai::{progress_callback, AssistantMessage, Message, ToolCall, ToolResultMessage};
+use oxi_ai::{AssistantMessage, Message, ToolCall, ToolResultMessage, progress_callback};
 use std::pin::Pin;
 use std::sync::Arc;
 
 use super::config::{AfterToolCallHook, ToolExecutionMode};
-use super::helpers::{create_tool_result_message, should_terminate_batch, FinalizedToolCall};
+use super::helpers::{FinalizedToolCall, create_tool_result_message, should_terminate_batch};
 use crate::tools::ToolContext as ToolExecContext;
 
 // ── Context inference ─────────────────────────────────────────────────────
@@ -107,12 +107,12 @@ fn enrich_context_from_metadata(
     context_cell: &Arc<parking_lot::Mutex<Option<ToolCallContext>>>,
     result: &AgentToolResult,
 ) {
-    if let Some(ref meta) = result.metadata {
-        if let Some(count) = meta.get("result_count").and_then(|v| v.as_u64()) {
-            let mut guard = context_cell.lock();
-            if let Some(ToolCallContext::DataExtraction { result_count, .. }) = &mut *guard {
-                *result_count = Some(count as usize);
-            }
+    if let Some(ref meta) = result.metadata
+        && let Some(count) = meta.get("result_count").and_then(|v| v.as_u64())
+    {
+        let mut guard = context_cell.lock();
+        if let Some(ToolCallContext::DataExtraction { result_count, .. }) = &mut *guard {
+            *result_count = Some(count as usize);
         }
     }
 }
@@ -300,18 +300,18 @@ async fn execute_tool_calls_sequential(
             let mut result = executed.result;
             let mut is_error = executed.is_error;
 
-            if let Some(ref hook) = loop_ref.after_tool_call {
-                if let Some(modified) = hook(&tc_name, &result).await.ok().flatten() {
-                    if let Some(ref details) = modified.metadata {
-                        tracing::debug!(
-                            tool = %tc_name,
-                            details = %details,
-                            "after_tool_call hook returned details"
-                        );
-                    }
-                    result = modified;
-                    is_error = !result.success;
+            if let Some(ref hook) = loop_ref.after_tool_call
+                && let Some(modified) = hook(&tc_name, &result).await.ok().flatten()
+            {
+                if let Some(ref details) = modified.metadata {
+                    tracing::debug!(
+                        tool = %tc_name,
+                        details = %details,
+                        "after_tool_call hook returned details"
+                    );
                 }
+                result = modified;
+                is_error = !result.success;
             }
 
             FinalizedToolCall {
@@ -578,18 +578,18 @@ pub(crate) async fn execute_prepared_tool_call_static(
         enrich_context_from_metadata(&context_cell, &result);
     }
 
-    if let Some(ref hook) = after_hook {
-        if let Some(modified) = hook(&tool_call.name, &result).await.ok().flatten() {
-            if let Some(ref details) = modified.metadata {
-                tracing::debug!(
-                    tool = %tool_call.name,
-                    details = %details,
-                    "after_tool_call hook returned details"
-                );
-            }
-            result = modified;
-            is_error = !result.success;
+    if let Some(ref hook) = after_hook
+        && let Some(modified) = hook(&tool_call.name, &result).await.ok().flatten()
+    {
+        if let Some(ref details) = modified.metadata {
+            tracing::debug!(
+                tool = %tool_call.name,
+                details = %details,
+                "after_tool_call hook returned details"
+            );
         }
+        result = modified;
+        is_error = !result.success;
     }
 
     emit(AgentEvent::ToolExecutionEnd {
@@ -633,17 +633,17 @@ async fn prepare_tool_call(
 
     let validated_args = tool_call.arguments.clone();
 
-    if let Some(ref hook) = loop_ref.before_tool_call {
-        if let Some(blocked) = hook(&tool_call.name, &validated_args).await.ok().flatten() {
-            return PreparedToolCallOutcome {
-                _kind: PreparedToolCallKind::Immediate,
-                immediate_result: Some(blocked),
-                is_error: true,
-                tool: None,
-                tool_call: tool_call.clone(),
-                args: validated_args,
-            };
-        }
+    if let Some(ref hook) = loop_ref.before_tool_call
+        && let Some(blocked) = hook(&tool_call.name, &validated_args).await.ok().flatten()
+    {
+        return PreparedToolCallOutcome {
+            _kind: PreparedToolCallKind::Immediate,
+            immediate_result: Some(blocked),
+            is_error: true,
+            tool: None,
+            tool_call: tool_call.clone(),
+            args: validated_args,
+        };
     }
 
     PreparedToolCallOutcome {

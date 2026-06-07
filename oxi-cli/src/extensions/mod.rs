@@ -17,8 +17,8 @@ pub mod wasm_tool;
 // Re-export types from submodules
 pub use crate::extensions::context::{ExtensionContext, ExtensionContextBuilder};
 pub use crate::extensions::loading::{
-    discover_extensions, discover_extensions_in_dir, load_extension, load_extensions,
-    validate_extension, ValidatedExtension, SHARED_LIB_EXTENSION,
+    SHARED_LIB_EXTENSION, ValidatedExtension, discover_extensions, discover_extensions_in_dir,
+    load_extension, load_extensions, validate_extension,
 };
 pub use crate::extensions::registry::{ExtensionErrorHandle, ExtensionRegistry, ExtensionRunner};
 pub use crate::extensions::types::{

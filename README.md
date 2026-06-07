@@ -16,7 +16,7 @@ Multi-provider · Streaming-first · Extensible · Session persistence
 [![GitHub release](https://img.shields.io/github/v/release/a7garden/oxi?style=flat-square&include_prereleases&label=release)](https://github.com/a7garden/oxi/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE.md)
 [![GitHub stars](https://img.shields.io/github/stars/a7garden/oxi?style=flat-square)](https://github.com/a7garden/oxi/stargazers)
-[![Rust](https://img.shields.io/badge/Rust-1.82%2B-orange.svg?style=flat-square)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.96%2B-orange.svg?style=flat-square)](https://www.rust-lang.org/))
 [![SBOM](https://img.shields.io/badge/SBOM-CycloneDX-1.5-blue?style=flat-square)](docs/rfcs/RFC-005-CI-CD-INFRA.md)
 
 [Getting Started](#getting-started) · [Architecture](#architecture) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
@@ -47,7 +47,7 @@ It brings the power of LLM-based coding assistants directly to your terminal —
 
 ### Install
 
-**cargo install** (any Rust toolchain ≥ 1.82):
+**cargo install** (any Rust toolchain ≥ 1.96):
 ```bash
 cargo install oxi-cli
 ```

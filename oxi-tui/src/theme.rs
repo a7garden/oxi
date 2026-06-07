@@ -475,10 +475,10 @@ fn parse_color(s: &str) -> Option<Color> {
         return parse_hex(hex);
     }
     // Indexed
-    if let Some(idx_str) = s.strip_prefix('i') {
-        if let Ok(n) = idx_str.parse::<u8>() {
-            return Some(Color::Indexed(n));
-        }
+    if let Some(idx_str) = s.strip_prefix('i')
+        && let Ok(n) = idx_str.parse::<u8>()
+    {
+        return Some(Color::Indexed(n));
     }
     // Named
     match s.to_lowercase().as_str() {

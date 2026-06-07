@@ -10,7 +10,7 @@
 use super::{AgentTool, AgentToolResult, ProgressCallback, ToolContext, ToolError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -72,18 +72,18 @@ pub fn discover_agents(cwd: &Path, scope: AgentScope) -> Vec<AgentConfig> {
     let mut seen_names = std::collections::HashSet::new();
 
     // User-level agents
-    if scope == AgentScope::User || scope == AgentScope::Both {
-        if let Some(home) = dirs::home_dir() {
-            let user_dir = home.join(".oxi").join("agents");
-            load_agents_from_dir(&user_dir, "user", &mut agents, &mut seen_names);
-        }
+    if (scope == AgentScope::User || scope == AgentScope::Both)
+        && let Some(home) = dirs::home_dir()
+    {
+        let user_dir = home.join(".oxi").join("agents");
+        load_agents_from_dir(&user_dir, "user", &mut agents, &mut seen_names);
     }
 
     // Project-level agents (walk up to .git boundary)
-    if scope == AgentScope::Project || scope == AgentScope::Both {
-        if let Some(project_dir) = find_project_agents_dir(cwd) {
-            load_agents_from_dir(&project_dir, "project", &mut agents, &mut seen_names);
-        }
+    if (scope == AgentScope::Project || scope == AgentScope::Both)
+        && let Some(project_dir) = find_project_agents_dir(cwd)
+    {
+        load_agents_from_dir(&project_dir, "project", &mut agents, &mut seen_names);
     }
 
     agents
@@ -323,11 +323,11 @@ fn build_agent_args(agent: &AgentConfig, tmp_dir: &Path, task: &str) -> Vec<Stri
         args.push(model.clone());
     }
 
-    if let Some(ref agent_tools) = agent.tools {
-        if !agent_tools.is_empty() {
-            args.push("--tools".to_string());
-            args.push(agent_tools.join(","));
-        }
+    if let Some(ref agent_tools) = agent.tools
+        && !agent_tools.is_empty()
+    {
+        args.push("--tools".to_string());
+        args.push(agent_tools.join(","));
     }
 
     if !agent.system_prompt.is_empty()

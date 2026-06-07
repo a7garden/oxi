@@ -11,7 +11,7 @@ env:
   RUSTFLAGS: "-D warnings"
   # Default MSRV — overwritable per job via `dtolnay/rust-toolchain`.
   RUST_VERSION_STABLE: stable
-  RUST_VERSION_MSRV: "1.82"
+  RUST_VERSION_MSRV: "1.96"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
