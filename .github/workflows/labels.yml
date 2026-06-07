@@ -1,0 +1,32 @@
+name: Sync Labels
+
+# Keep .github/labels.yml as the single source of truth for the issue/PR
+# label set. Runs weekly to pick up manual edits, plus on demand.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Sunday 02:00 UTC — well before Monday's dependabot runs at 09:00 KST.
+    - cron: "0 2 * * 0"
+  push:
+    paths:
+      - ".github/labels.yml"
+
+permissions:
+  issues: write
+
+jobs:
+  sync:
+    name: Apply label set
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Apply labels
+        uses: github/issue-labeler@v2
+        with:
+          mode: update
+          # When `mode: update` and a `repo-name` is provided, the action
+          # creates/updates the labels in this repo directly.
+          repo-name: ${{ github.repository }}
+          # Path is relative to the repo root.
+          labels-path: .github/labels.yml

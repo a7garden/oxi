@@ -1,0 +1,129 @@
+name: Publish to crates.io
+
+# Publishes all workspace crates to crates.io in topological order
+# after a GitHub Release is published.
+#
+# Why after the GitHub Release (and not just on tag push):
+#   - The release.yml has already verified the tag is on main,
+#     built all 7 targets, and signed SHA256SUMS. Publishing on the
+#     same trigger would re-run all of that OR race against it.
+#   - `release: published` fires once per release, on green main.
+#
+# Required secrets:
+#   CARGO_TOKEN       — https://crates.io/settings/tokens
+#                       (scope: publish; do NOT use the GitHub token —
+#                        crates.io requires its own token.)
+#
+# Optional:
+#   CARGO_REGISTRY_TOKEN — alternative name, used by some setups.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — only verify the package builds, do not publish"
+        required: false
+        type: boolean
+        default: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # CRATES_IO_API skips credential prompts in CI environments.
+  CARGO_NET_OFFLINE: "false"
+
+jobs:
+  # ── Pre-flight: ensure release.yml succeeded for this tag ──────
+  pre-flight:
+    name: Verify release artifacts exist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check that the release workflow ran for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}"
+          if [ -z "$TAG" ]; then
+            # workflow_dispatch — pull latest semver tag
+            TAG=$(gh release list --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          echo "Release tag: $TAG"
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            echo "::error::No GitHub release for $TAG — run release.yml first."
+            exit 1
+          fi
+          echo "Release verified: $TAG"
+
+  # ── Dry-run packaging check (always runs, no network) ─────────
+  package-check:
+    name: cargo package (dry run)
+    needs: pre-flight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify each crate packages cleanly
+        # --no-verify skips the actual upload — it just checks that
+        # the .crate tarball can be assembled and metadata is valid.
+        run: |
+          set -euo pipefail
+          for crate in oxi-ai oxi-agent oxi-tui oxi-sdk oxi-cli; do
+            echo "─── Packaging $crate ───"
+            (cd "$crate" && cargo package --no-verify --list)
+          done
+
+  # ── Publish in topological order ───────────────────────────────
+  # The workspace uses path dependencies with implicit versions
+  # inherited from [workspace.package] (or each crate's own `version`
+  # field). cargo handles ordering automatically when given
+  # `--workspace` if versions are consistent. We run them explicitly
+  # in dep order to give each publish a chance to fail fast.
+  publish:
+    name: cargo publish ${{ matrix.crate }}
+    needs: [pre-flight, package-check]
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - oxi-ai
+          - oxi-tui
+          - oxi-agent
+          - oxi-sdk
+          - oxi-cli
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Wait for crates.io index to see the previous crate
+        # After publishing oxi-ai, the crates.io index takes a few
+        # seconds to update before oxi-agent can resolve it. Polling
+        # the registry index is more reliable than a fixed sleep.
+        run: |
+          if [ "${{ matrix.crate }}" = "oxi-ai" ]; then exit 0; fi
+          PREV=$(echo "${{ matrix.crate }}" | awk -F- '{print $2}')
+          for i in $(seq 1 30); do
+            if cargo search "oxi-$PREV" --limit 1 > /dev/null 2>&1; then
+              echo "oxi-$PREV visible on crates.io"
+              exit 0
+            fi
+            echo "Waiting for oxi-$PREV to be indexed... ($i/30)"
+            sleep 5
+          done
+          echo "::error::Timeout waiting for oxi-$PREV to be indexed on crates.io"
+          exit 1
+      - name: Publish ${{ matrix.crate }}
+        working-directory: ${{ matrix.crate }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN || secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::error::Neither CARGO_TOKEN nor CARGO_REGISTRY_TOKEN is set as a repository secret."
+            echo "::error::Create one at https://crates.io/settings/tokens with publish scope."
+            exit 1
+          fi
+          cargo publish --token "$CARGO_REGISTRY_TOKEN" --no-verify

@@ -1,0 +1,64 @@
+name: SBOM
+
+# Generate a CycloneDX SBOM on every push to main, plus on releases.
+# Uploads it as a workflow artifact (for the release job to attach) and
+# to the GitHub Dependency-Submission API so it shows up in the
+# repository's dependency graph UI.
+#
+# Why both?
+#   - Workflow artifact: included in the GitHub Release as oxi.cdx.json
+#   - Dependency Submission: enables Dependabot alerts for transitive deps
+#     (not just direct Cargo.toml entries) and shows up in the Insights
+#     dependency graph.
+#
+# See: https://docs.github.com/en/code-security/dependabot/ecosystems-support/dependency-submission
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  # Required for dependency submission API.
+  # https://docs.github.com/en/rest/dependency-graph/dependency-submission
+  pull-requests: read
+
+jobs:
+  sbom:
+    name: Generate & submit SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "sbom"
+      - name: Install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx --version "^0.5"
+
+      - name: Generate SBOM
+        run: |
+          cargo cyclonedx --format json --override-filename oxi --spec-version 1.5
+          # cargo-cyclonedx writes to target/ by default; move to a stable path.
+          find target -maxdepth 4 -name 'oxi.cdx.json' -exec cp {} ./oxi.cdx.json \;
+          ls -la oxi.cdx.json
+
+      - name: Upload to Dependency Graph
+        uses: anchore/sbom-action@v0
+        with:
+          file: oxi.cdx.json
+          # This pushes the SBOM to GitHub's dependency-submission API
+          # so Dependabot can see all transitive crates.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oxi-sbom
+          path: oxi.cdx.json
+          retention-days: 90

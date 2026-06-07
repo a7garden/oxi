@@ -9,6 +9,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
+  # Default MSRV — overwritable per job via `dtolnay/rust-toolchain`.
+  RUST_VERSION_STABLE: stable
+  RUST_VERSION_MSRV: "1.82"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -39,6 +42,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "clippy"
+      # NOTE: We intentionally stay on `cargo clippy --workspace` (no
+      # --all-targets) because test/bench code still uses a few `unwrap()`
+      # and other clippy::pedantic lints. Upgrading to --all-targets
+      # is tracked as a follow-up — see AGENTS.md "Pre-existing TODO".
       - run: cargo clippy --workspace -- -D warnings
 
   smoke-test:
@@ -46,6 +53,7 @@ jobs:
     # Lightweight subset of tests for PR feedback. Full matrix runs in
     # `test.yml` on push to main. Skips tests tagged `slow` or `net`.
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -77,3 +85,77 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-deny
       - run: cargo deny check
+
+  # ── MSRV verification (no -D warnings so transient toolchain
+  #    warnings don't block; we only check that it BUILDS at MSRV).
+  msrv:
+    name: MSRV (${{ env.RUST_VERSION_MSRV }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION_MSRV }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "msrv"
+      - name: Verify workspace builds at MSRV
+        # Override RUSTFLAGS so we don't treat legacy-toolchain warnings
+        # as build errors. This job's purpose is buildability, not lint.
+        env:
+          RUSTFLAGS: ""
+        run: |
+          cargo build --workspace --locked \
+            2>&1 | tee msrv-build.log
+          if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+            echo "::error::MSRV build failed on Rust ${{ env.RUST_VERSION_MSRV }}."
+            echo "::error::Bump MSRV in README.md and AGENTS.md, or remove the constraint that requires this version."
+            exit 1
+          fi
+
+  # ── Code coverage (informational — does not block merge) ────────
+  coverage:
+    name: Coverage (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Only run on main, not on every PR — coverage is for trend tracking.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "coverage"
+      - name: Install llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate coverage
+        run: |
+          cargo llvm-cov nextest --workspace \
+            --lcov --output-path lcov.info \
+            --exclude-files 'target/*' \
+            --exclude-files 'tests/*' \
+            --exclude-files '**/tests/*'
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          # Public repos don't need a token; private repos must set
+          # CODECOV_TOKEN as a repository secret.
+          fail_ci_if_error: false
+          verbose: false
+
+  # ── Documentation build (blocks doc-rot before it lands) ───────
+  doc:
+    name: cargo doc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "doc"
+      - name: Build docs (treat warnings as errors)
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps

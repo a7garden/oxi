@@ -1,0 +1,53 @@
+# Pre-commit hooks — runs locally before `git commit`.
+# Mirrors the ci.yml fast-feedback gate so contributors catch issues
+# before pushing, reducing PR round-trips.
+#
+# Install once per clone:
+#   pip install pre-commit
+#   pre-commit install
+# Or with Homebrew:
+#   brew install pre-commit && pre-commit install
+#
+# Run on demand (e.g. before opening a PR):
+#   pre-commit run --all-files
+
+repos:
+  # ── Generic file hygiene ───────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        # Markdown allows intentional double-space line breaks.
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: detect-private-key
+        # Block accidental .pem/.key commits.
+      - id: no-commit-to-branch
+        args: [--branch=main,develop]
+
+  # ── Rust formatting & linting ──────────────────────────────────
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        description: cargo fmt --all -- --check
+        entry: cargo fmt --all -- --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+
+      - id: cargo-clippy
+        name: cargo clippy
+        description: cargo clippy --workspace -- -D warnings
+        entry: cargo clippy --workspace -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        # clippy is heavy; skip the staged-files optimization.

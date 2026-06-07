@@ -1,0 +1,10 @@
+# Funding — surfaces a "Sponsor" button on the repo page.
+# Replace the placeholder user with the actual GitHub Sponsors username
+# once the maintainer's Sponsors profile is configured.
+
+github: [a7garden]
+# custom:
+#   - "https://opencollective.com/oxi"
+# patreon: oxiproject
+# ko_fi: oxi
+# tidelift: "package/ecosystem/oxi"

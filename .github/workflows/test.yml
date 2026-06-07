@@ -1,10 +1,13 @@
 name: Test
 
-# Run tests on main merge and release, not on every PR.
-# CI workflow handles fast feedback (fmt/clippy/smoke) for PRs.
+# Full test matrix — runs on every PR and on every push to main.
+# Replaces the old "smoke-on-PR, full-on-main" split. The original
+# `smoke-test` job in ci.yml remains for the very-fast feedback path.
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
   release:
     types: [published]
@@ -25,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
@@ -36,11 +39,16 @@ jobs:
           shared-key: test-${{ matrix.os }}
       - uses: taiki-e/install-action@nextest
       - name: Run tests
+        # Windows MSVC runners need an explicit linker setup for some
+        # crates that pull in native deps; the default works for the
+        # current workspace. If a new crate adds a native dep, document
+        # the extra `shell: pwsh` step in its README.
         run: cargo nextest run --workspace --profile ci
 
   test-doc:
     name: Doc Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable

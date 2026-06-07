@@ -1,19 +1,60 @@
 version: 2
+
+# Group all cargo patches into a single weekly PR to reduce noise.
+# Without groups, a single transitive bump can produce 3-5 separate PRs.
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Seoul
     open-pull-requests-limit: 5
     commit-message:
       prefix: "deps"
       include: scope
+    labels:
+      - "dependencies"
+      - "area: ci"
+    groups:
+      cargo-deps:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+      cargo-major-bumps:
+        patterns:
+          - "*"
+        update-types:
+          - major
+    # Bump MSRV-pinned deps only when they don't increase the floor.
+    ignore:
+      - dependency-name: "tokio"
+        versions: ["=1.43.0"]
+      - dependency-name: "extism"
+        # wasmtime advisories are managed in .cargo/audit.toml + deny.toml
+        # Track extism 1.22+ to drop RUSTSEC-2026-* ignore list.
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Seoul
     open-pull-requests-limit: 3
     commit-message:
       prefix: "ci"
       include: scope
+    labels:
+      - "dependencies"
+      - "area: ci"
+    groups:
+      actions-deps:
+        patterns:
+          - "*"
+
+  # Cargo.lock is tracked (oxi-cli is a binary distribution), so we want
+  # cargo updates to flow through the lockfile directly.
