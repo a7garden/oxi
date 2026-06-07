@@ -50,10 +50,10 @@ impl WebSearchTool {
     ) -> Result<Vec<SearchResult>, ToolError> {
         let output = oxibrowser::search::dispatch(
             query,
-            "web",       // source: web search
-            engines,     // "ddg,wiki,bing"
-            None,        // repo (not used for web)
-            None,        // token (not used for web)
+            "web",   // source: web search
+            engines, // "ddg,wiki,bing"
+            None,    // repo (not used for web)
+            None,    // token (not used for web)
             limit,
             SEARCH_TIMEOUT_SECS,
         )
@@ -81,13 +81,7 @@ fn format_results(results: &[SearchResult]) -> String {
             } else {
                 r.snippet.clone()
             };
-            format!(
-                "{}. **{}**\n   {}\n   {}",
-                i + 1,
-                r.title,
-                r.url,
-                snippet
-            )
+            format!("{}. **{}**\n   {}\n   {}", i + 1, r.title, r.url, snippet)
         })
         .collect::<Vec<_>>()
         .join("\n\n")
